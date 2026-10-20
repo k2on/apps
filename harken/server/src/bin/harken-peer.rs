@@ -8,7 +8,7 @@
 //!   [--device KIND,NAME,CAN_PLAY]
 //! ```
 //!
-//! It is an `ark5_client::Client` and its link, as the desktop is, minus the
+//! It is an `ark_client::Client` and its link, as the desktop is, minus the
 //! window: the replica in `DIR/replica` (the chain on disk), signed in the
 //! way the desktop signs in under dev auth (`ark_auth::client::login` with a
 //! name, which a dev server answers with a code and no browser), the login
@@ -99,18 +99,18 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use ark5::author::Id;
-use ark5::frames::Frame;
-use ark5::hash::hex;
-use ark5::ir::Node;
-use ark5::log::EntryId;
-use ark5::peer::{Ctx, Journal, Role, Who};
-use ark5::schema::Space;
-use ark5_client::link::{Backoff, Event as LinkEvent, Link, Socket};
-use ark5_client::{Client, Event, Files};
+use ark::author::Id;
+use ark::frames::Frame;
+use ark::hash::hex;
+use ark::ir::Node;
+use ark::log::EntryId;
+use ark::peer::{Ctx, Journal, Role, Who};
+use ark::schema::Space;
 use ark_auth::client::Patience;
 use ark_auth::Login;
-use harken_domain5::listening::read::Listening;
+use ark_client::link::{Backoff, Event as LinkEvent, Link, Socket};
+use ark_client::{Client, Event, Files};
+use harken_domain::listening::read::Listening;
 use harken_server::hosted::Hosted;
 use serde_json::{json, Map, Value};
 
@@ -393,7 +393,7 @@ fn id_bytes(v: &Value) -> Result<[u8; 16], String> {
         .and_then(Value::as_str)
         .ok_or_else(|| format!("not an id: {v}"))?;
     let h: String = t.chars().filter(|c| *c != '-').collect();
-    let b = ark5::hash::unhex(&h)
+    let b = ark::hash::unhex(&h)
         .filter(|b| b.len() == 16)
         .ok_or_else(|| format!("not an id: {t}"))?;
     Ok(b.try_into().expect("sixteen bytes"))
@@ -444,10 +444,10 @@ macro_rules! newtype {
 }
 
 mod types {
-    pub use harken_domain5::library::*;
-    pub use harken_domain5::listening::*;
-    pub use harken_domain5::playlists::*;
-    pub use harken_domain5::schema::*;
+    pub use harken_domain::library::*;
+    pub use harken_domain::listening::*;
+    pub use harken_domain::playlists::*;
+    pub use harken_domain::schema::*;
 }
 use types::*;
 
@@ -832,14 +832,14 @@ impl Headless {
             _ => None,
         };
         let mut who = match (&login, f.alone) {
-            (Some(l), _) => ark5_client::auth::who(l),
+            (Some(l), _) => ark_client::auth::who(l),
             (None, true) => nobody(f.user.as_deref().unwrap_or("me")),
             (None, false) => nobody(""),
         };
         who.roles.extend(f.roles.iter().cloned());
         who.roles.sort();
         who.roles.dedup();
-        let live = f.device.as_ref().map(|d| ark5_client::Live {
+        let live = f.device.as_ref().map(|d| ark_client::Live {
             module: hosted.module.clone(),
             device: Some(
                 Device {
@@ -854,7 +854,7 @@ impl Headless {
             ephemeral: hosted.get("listening.scrub").into_iter().collect(),
             every_ms: 250,
         });
-        let config = ark5_client::Config {
+        let config = ark_client::Config {
             log: hosted.module.clone(),
             live,
         };
@@ -977,8 +977,8 @@ impl Headless {
             }
         }
         match &self.link {
-            Some(link) => self.client.pump(link, ev, ark5_server::handle::now()),
-            None => self.client.tick(ark5_server::handle::now()),
+            Some(link) => self.client.pump(link, ev, ark_server::handle::now()),
+            None => self.client.tick(ark_server::handle::now()),
         }
         self.collect();
     }
@@ -1238,7 +1238,7 @@ impl Headless {
 
     /// Signs in as `login`: the client authors as it, the link dials with it.
     fn signed_in(&mut self, login: &Login) {
-        let mut who = ark5_client::auth::who(login);
+        let mut who = ark_client::auth::who(login);
         who.roles.extend(self.roles.iter().cloned());
         who.roles.sort();
         who.roles.dedup();
@@ -1263,7 +1263,7 @@ impl Headless {
                 };
                 let before = self.client.log.local;
                 self.client
-                    .mutate(self.hosted.func(&name), bytes, ark5_server::handle::now());
+                    .mutate(self.hosted.func(&name), bytes, ark_server::handle::now());
                 let mut refused = None;
                 for e in self.client.take_events() {
                     match e {
@@ -1327,7 +1327,7 @@ impl Headless {
                     actor: me.actor.clone(),
                     session: me.session.clone(),
                     roles: me.roles.clone(),
-                    now: ark5_server::handle::now(),
+                    now: ark_server::handle::now(),
                 };
                 let answer = input(&name, &args)
                     .and_then(|b| {
@@ -1478,7 +1478,7 @@ impl Headless {
                     .live
                     .as_ref()
                     .is_some_and(|l| l.ephemeral.contains(&func));
-                self.client.call(func, bytes, ark5_server::handle::now());
+                self.client.call(func, bytes, ark_server::handle::now());
                 let mut refused = None;
                 for e in self.client.take_events() {
                     if let Event::Refused { why, .. } = e {

@@ -1,38 +1,32 @@
-//! A [`Store`] that counts what a read costs: every row a scan hands back
-//! or a filter is asked about, and every `get`. Wrapped around a
-//! [`MemoryStore`], it passes the equalities and the spans through so the
-//! store's own indexes still serve — and counts each row the store
-//! *examines* (each
-//! call to `keep`), not only the rows it returns, because a read through
-//! the wrong index returns the right rows and examines the wrong number.
-//! A state hash over it costs nothing when the store keeps its digests,
-//! and every row when it does not.
+//! A [`Read`] that counts what a read costs, ported from v4's: every row a
+//! scan hands back and every `get`. v5's store examines only the rows it
+//! returns — a filter's equalities go down as a key or index prefix — so
+//! the rows returned are the rows examined.
 
 #![allow(dead_code)]
 
 use std::cell::Cell;
 
-use ark::schema::{Dir, Schema};
-use ark::store::{Change, MemoryStore, Row, Span, Store};
-use ark::value::Value;
+use ark::schema::Schema;
+use ark::store::{Read, Scan};
 
 /// What one stretch of reads cost.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Reads {
     /// Calls to `get`.
     pub gets: usize,
-    /// Rows a scan returned, plus rows a filtered scan examined.
+    /// Rows scans returned.
     pub rows: usize,
 }
 
 pub struct Counting<'a> {
-    pub inner: &'a MemoryStore,
+    pub inner: &'a dyn Read,
     gets: Cell<usize>,
     rows: Cell<usize>,
 }
 
 impl<'a> Counting<'a> {
-    pub fn new(inner: &'a MemoryStore) -> Counting<'a> {
+    pub fn new(inner: &'a dyn Read) -> Counting<'a> {
         Counting {
             inner,
             gets: Cell::new(0),
@@ -48,91 +42,19 @@ impl<'a> Counting<'a> {
     }
 }
 
-impl Store for Counting<'_> {
+impl Read for Counting<'_> {
     fn schema(&self) -> &Schema {
         self.inner.schema()
     }
 
-    fn get(&self, table: &str, key: &[Value]) -> Option<Row> {
+    fn get(&self, table: &str, key: &[u8]) -> Option<Vec<u8>> {
         self.gets.set(self.gets.get() + 1);
         self.inner.get(table, key)
     }
 
-    fn scan(&self, table: &str) -> Vec<Row> {
-        let rs = self.inner.scan(table);
+    fn scan(&self, table: &str, s: &Scan) -> Vec<Vec<u8>> {
+        let rs = self.inner.scan(table, s);
         self.rows.set(self.rows.get() + rs.len());
         rs
-    }
-
-    fn scan_where(&self, table: &str, keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
-        self.inner.scan_where(table, &|r| {
-            self.rows.set(self.rows.get() + 1);
-            keep(r)
-        })
-    }
-
-    fn scan_where_eq(&self, table: &str, eq: &[(&str, &Value)], spans: &[Span], keep: &dyn Fn(&Row) -> bool) -> Vec<Row> {
-        self.inner.scan_where_eq(table, eq, spans, &|r| {
-            self.rows.set(self.rows.get() + 1);
-            keep(r)
-        })
-    }
-
-    // `docs/plan-db.md` D4: the text hint passed through, so the store's
-    // text indexes still serve, and each row it asks `keep` about counted.
-    fn scan_where_text(
-        &self,
-        table: &str,
-        eq: &[(&str, &Value)],
-        spans: &[Span],
-        has: &[Vec<(&str, &str)>],
-        keep: &dyn Fn(&Row) -> bool,
-    ) -> Vec<Row> {
-        self.inner.scan_where_text(table, eq, spans, has, &|r| {
-            self.rows.set(self.rows.get() + 1);
-            keep(r)
-        })
-    }
-
-    // The store's own ordered walk, each row it asks `keep` about counted:
-    // what a bounded read through an index examines (`docs/plan-perf.md`
-    // R1). A store with no index that serves answers `None` here as it
-    // would unwrapped, and the read falls back to `scan_where_eq` above.
-    fn scan_ordered(
-        &self,
-        table: &str,
-        eq: &[(&str, &Value)],
-        spans: &[Span],
-        order: &[(&str, Dir)],
-        keep: &dyn Fn(&Row) -> bool,
-        limit: usize,
-    ) -> Option<Vec<Row>> {
-        self.inner.scan_ordered(
-            table,
-            eq,
-            spans,
-            order,
-            &|r| {
-                self.rows.set(self.rows.get() + 1);
-                keep(r)
-            },
-            limit,
-        )
-    }
-
-    fn apply_change(&mut self, _: &Change) {
-        unreachable!("a counting store is read, never written")
-    }
-
-    // The digests the store keeps (§8.1, `docs/plan-db.md` D3), passed
-    // through uncounted: they are read, not scanned. A store that keeps
-    // none answers `None`, and `state_hash` scans — through `scan` above,
-    // where every row is counted.
-    fn digest(&self, table: &str) -> Option<ark::hash::Digest> {
-        self.inner.digest(table)
-    }
-
-    fn as_store(&self) -> &dyn Store {
-        self
     }
 }

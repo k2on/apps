@@ -3,8 +3,8 @@
 //! by patch, and no others (`docs/plan-v5.md` §1.10).
 use std::collections::{BTreeSet, HashMap};
 
-use harken_domain5::library::{AlbumsEntry, ArtistsEntry, ComposersEntry, DescribePerson, LibraryEntry, RemoveMedia, Search};
-use harken_domain5::playlists::{AddToPlaylist, RemoveFromPlaylist};
+use harken_domain::library::{AlbumsEntry, ArtistsEntry, ComposersEntry, DescribePerson, LibraryEntry, RemoveMedia, Search};
+use harken_domain::playlists::{AddToPlaylist, RemoveFromPlaylist};
 
 use crate::peer::{key, Moved, Peer};
 use crate::places::Source;
@@ -15,7 +15,7 @@ fn check(peer: &Peer, what: &str) {
     assert_eq!(peer.items, peer.library_now(), "library, {what}");
     assert_eq!(
         peer.playlists(),
-        peer.ask::<harken_domain5::schema::Playlist, Playlist>("playlists", &()),
+        peer.ask::<harken_domain::schema::Playlist, Playlist>("playlists", &()),
         "playlists, {what}"
     );
     assert_eq!(peer.albums, peer.ask::<AlbumsEntry, Album>("albums", &()), "albums, {what}");

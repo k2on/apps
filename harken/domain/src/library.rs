@@ -1,236 +1,169 @@
-//! The library router: what the scanner authors, and what every peer reads.
+//! The library router: what the scanner authors, and what every peer reads
+//! (`harken/domain/src/library.rs`, function for function).
 //!
-//! harken's `functions.rs`, for the tables of the library: every playable
-//! thing (`media`), what only a song has (`song`), and the rows a track
-//! belongs to — `album`, `person`, `work`, `movement`, `recording`,
-//! `credit` — which are all keyed by something derived from what they *are*
-//! rather than by a minted id, because an entry is handed exactly one fresh
-//! id and two peers naming "BWV 988" offline must land on one row. The keys
-//! are the helpers below, and they are permanent the way `apply` is.
+//! Every playable thing (`media`), what only a song has (`song`), and the
+//! rows a track belongs to — `album`, `person`, `work`, `movement`,
+//! `recording`, `credit` — keyed by something derived from what they *are*
+//! rather than by a minted id, because two peers naming "BWV 988" offline
+//! must land on one row. The keys are the helpers below, permanent.
 //!
-//! Every mutation here is the library's to make: `is_library` runs before
-//! each and refuses an author without the `library` role
-//! (`docs/plan-guards.md` D1) — the scanner, by construction, and whoever
-//! the server's configuration grants it. The queries are everybody's.
-use ark::authoring::*;
+//! Every mutation here is the library's to make: `is_library` runs first
+//! and refuses an author without the `library` role. The queries are
+//! everybody's.
+//!
+//! Where v4 said `insert` it meant "unless a row has this key" and `upsert`
+//! "this row, whatever was there": v5's `Insert` refuses an existing key,
+//! so each is spelled with the lookup it is. v4's list `fold`s are
+//! `Std::Sum`, a sort, or a `split_once`; [`slug`] is the one that cannot
+//! be: it does not collapse a run of separators, since nothing in v5's
+//! language sees two neighbouring characters (a key with one is not v4's).
+
+use ark::author::{Id, Input, Int, Node, Text};
 
 use crate::schema::*;
 
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq, Default)]
 pub struct AddSong {
+    #[ark(trim, non_empty, why = "a song needs a title")]
     pub title: Text,
+    #[ark(trim)]
     pub artist: Text,
+    #[ark(trim)]
     pub album: Text,
     pub duration_ms: Int,
+    #[ark(trim)]
     pub file: Text,
     pub track: Int,
+    #[ark(trim)]
     pub part: Text,
+    #[ark(trim)]
     pub catalogue: Text,
+    #[ark(trim)]
     pub performer: Text,
     pub bpm: Int,
+    #[ark(trim)]
     pub album_art: Text,
+    #[ark(trim)]
     pub artist_art: Text,
     pub disc: Int,
+    #[ark(trim)]
     pub work_title: Text,
     pub movement_no: Int,
 }
-impl Input for AddSong {
-    fn schema() -> Object<Self> {
-        object()
-            .field("title", text().trim().min(1).why("a song needs a title"))
-            .field("artist", text().trim())
-            .field("album", text().trim())
-            .field("duration_ms", int())
-            .field("file", text().trim())
-            .field("track", int())
-            .field("part", text().trim())
-            .field("catalogue", text().trim())
-            .field("performer", text().trim())
-            .field("bpm", int())
-            .field("album_art", text().trim())
-            .field("artist_art", text().trim())
-            .field("disc", int())
-            .field("work_title", text().trim())
-            .field("movement_no", int())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq, Default)]
 pub struct DescribeWork {
     pub id: Text,
+    #[ark(trim)]
     pub opus: Text,
+    #[ark(trim)]
     pub key_sig: Text,
+    #[ark(trim)]
     pub form: Text,
+    #[ark(trim)]
     pub period: Text,
     pub composed: Int,
+    #[ark(trim)]
     pub art: Text,
 }
-impl Input for DescribeWork {
-    fn schema() -> Object<Self> {
-        object()
-            .field("id", text())
-            .field("opus", text().trim())
-            .field("key_sig", text().trim())
-            .field("form", text().trim())
-            .field("period", text().trim())
-            .field("composed", int())
-            .field("art", text().trim())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq, Default)]
 pub struct DescribeRecording {
     pub id: Text,
     pub recorded: Int,
+    #[ark(trim)]
     pub venue: Text,
+    #[ark(trim)]
     pub label: Text,
+    #[ark(trim)]
     pub licence: Text,
+    #[ark(trim)]
     pub art: Text,
 }
-impl Input for DescribeRecording {
-    fn schema() -> Object<Self> {
-        object()
-            .field("id", text())
-            .field("recorded", int())
-            .field("venue", text().trim())
-            .field("label", text().trim())
-            .field("licence", text().trim())
-            .field("art", text().trim())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq, Default)]
 pub struct DescribePerson {
+    #[ark(trim, non_empty, why = "a person needs a name")]
     pub name: Text,
+    #[ark(trim)]
     pub sort_name: Text,
     pub born: Int,
     pub died: Int,
+    #[ark(trim)]
     pub art: Text,
 }
-impl Input for DescribePerson {
-    fn schema() -> Object<Self> {
-        object()
-            .field("name", text().trim().min(1).why("a person needs a name"))
-            .field("sort_name", text().trim())
-            .field("born", int())
-            .field("died", int())
-            .field("art", text().trim())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq, Default)]
 pub struct CreditRecording {
     pub recording_id: Text,
+    #[ark(trim, non_empty, why = "a credit needs somebody to credit")]
     pub person_name: Text,
+    #[ark(trim)]
     pub role: Text,
+    #[ark(trim)]
     pub instrument: Text,
     pub pos: Int,
 }
-impl Input for CreditRecording {
-    fn schema() -> Object<Self> {
-        object()
-            .field("recording_id", text())
-            .field("person_name", text().trim().min(1).why("a credit needs somebody to credit"))
-            .field("role", text().trim())
-            .field("instrument", text().trim())
-            .field("pos", int())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct RemoveMedia {
     pub id: Id<Media>,
 }
-impl Input for RemoveMedia {
-    fn schema() -> Object<Self> {
-        object().field("id", id::<Media>())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct Library {
     pub playlist_id: Id<Playlist>,
 }
-impl Input for Library {
-    fn schema() -> Object<Self> {
-        object().field("playlist_id", id::<Playlist>())
-    }
-}
 
-/// `search`: the playlist each row's position is read against, as
-/// `library` has it, and what to look for.
+/// `search`: the playlist each row's position is read against, and what to
+/// look for.
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct Search {
     pub playlist_id: Id<Playlist>,
     pub needle: Text,
 }
-impl Input for Search {
-    fn schema() -> Object<Self> {
-        object().field("playlist_id", id::<Playlist>()).field("needle", text())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct AlbumInput {
     pub playlist_id: Id<Playlist>,
     pub name: Text,
 }
-impl Input for AlbumInput {
-    fn schema() -> Object<Self> {
-        object().field("playlist_id", id::<Playlist>()).field("name", text())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct Artist {
     pub playlist_id: Id<Playlist>,
     pub name: Text,
 }
-impl Input for Artist {
-    fn schema() -> Object<Self> {
-        object().field("playlist_id", id::<Playlist>()).field("name", text())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct Works {
     pub composer: Text,
 }
-impl Input for Works {
-    fn schema() -> Object<Self> {
-        object().field("composer", text())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct WorkInput {
     pub id: Text,
 }
-impl Input for WorkInput {
-    fn schema() -> Object<Self> {
-        object().field("id", text())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct Recordings {
     pub work_id: Text,
 }
-impl Input for Recordings {
-    fn schema() -> Object<Self> {
-        object().field("work_id", text())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct Credits {
     pub recording_id: Text,
 }
-impl Input for Credits {
-    fn schema() -> Object<Self> {
-        object().field("recording_id", text())
-    }
-}
 
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct RecordingInput {
     pub playlist_id: Id<Playlist>,
     pub id: Text,
 }
-impl Input for RecordingInput {
-    fn schema() -> Object<Self> {
-        object().field("playlist_id", id::<Playlist>()).field("id", text())
-    }
-}
 
-/// Something playable — a song today, an episode or a sermon later — as a
-/// list renders it, and where it sits on the playlist the list was read
-/// against, if it is on it (which playlist that is, is the client's choice).
+/// Something playable as a list renders it, and where it sits on the
+/// playlist the list was read against, if it is on it.
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct LibraryEntry {
     pub added_ms: Int,
     pub creator: Text,
@@ -238,61 +171,31 @@ pub struct LibraryEntry {
     pub file: Text,
     pub id: Id<Media>,
     pub kind: Text,
-    pub playlist_pos: Opt<Int>,
+    pub playlist_pos: Option<Int>,
     pub pos: Int,
     pub title: Text,
     pub user_id: Text,
 }
-impl Record for LibraryEntry {
-    fn fields() -> Fields<Self> {
-        fields()
-            .field("added_ms", int())
-            .field("creator", text())
-            .field("duration_ms", int())
-            .field("file", text())
-            .field("id", id::<Media>())
-            .field("kind", text())
-            .field("playlist_pos", opt(int()))
-            .field("pos", int())
-            .field("title", text())
-            .field("user_id", text())
-    }
-}
 
-/// A record, as the albums page lists it: the name, whoever made its first
-/// track, how many tracks are on it, and its cover (empty when nobody said,
-/// and a client draws the square derived from the name).
+/// A record, as the albums page lists it.
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct AlbumsEntry {
     pub art: Text,
     pub creator: Text,
     pub name: Text,
     pub tracks: Int,
 }
-impl Record for AlbumsEntry {
-    fn fields() -> Fields<Self> {
-        fields()
-            .field("art", text())
-            .field("creator", text())
-            .field("name", text())
-            .field("tracks", int())
-    }
-}
 
-/// Whoever made something, as the artists page lists them: `media.creator`,
-/// so kind-neutral, with the picture `person` has for the name.
+/// Whoever made something, as the artists page lists them.
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct ArtistsEntry {
     pub art: Text,
     pub name: Text,
     pub tracks: Int,
 }
-impl Record for ArtistsEntry {
-    fn fields() -> Fields<Self> {
-        fields().field("art", text()).field("name", text()).field("tracks", int())
-    }
-}
 
-/// What is true of a track as a *song*, for a table drawing those columns
-/// beside the kind-neutral library row: joined in memory by `media_id`.
+/// What is true of a track as a song.
+#[derive(Input, Node, Clone, Debug, PartialEq)]
 pub struct TrackDetailsEntry {
     pub album: Text,
     pub bpm: Int,
@@ -303,21 +206,9 @@ pub struct TrackDetailsEntry {
     pub performer: Text,
     pub track: Int,
 }
-impl Record for TrackDetailsEntry {
-    fn fields() -> Fields<Self> {
-        fields()
-            .field("album", text())
-            .field("bpm", int())
-            .field("catalogue", text())
-            .field("licence", text())
-            .field("media_id", id::<Media>())
-            .field("part", text())
-            .field("performer", text())
-            .field("track", int())
-    }
-}
 
 /// Somebody some work is by, as the composers index lists them.
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct ComposersEntry {
     pub art: Text,
     pub born: Int,
@@ -327,20 +218,9 @@ pub struct ComposersEntry {
     pub tracks: Int,
     pub works: Int,
 }
-impl Record for ComposersEntry {
-    fn fields() -> Fields<Self> {
-        fields()
-            .field("art", text())
-            .field("born", int())
-            .field("died", int())
-            .field("name", text())
-            .field("sort_name", text())
-            .field("tracks", int())
-            .field("works", int())
-    }
-}
 
 /// A composition, as a composer's page lists them and a work's page heads.
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct WorkSummary {
     pub art: Text,
     pub catalogue: Text,
@@ -352,22 +232,9 @@ pub struct WorkSummary {
     pub title: Text,
     pub tracks: Int,
 }
-impl Record for WorkSummary {
-    fn fields() -> Fields<Self> {
-        fields()
-            .field("art", text())
-            .field("catalogue", text())
-            .field("composer", text())
-            .field("form", text())
-            .field("id", text())
-            .field("period", text())
-            .field("recordings", int())
-            .field("title", text())
-            .field("tracks", int())
-    }
-}
 
-/// One performance, as a work's page lists them: told apart by who played it.
+/// One performance, as a work's page lists them.
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct RecordingsEntry {
     pub art: Text,
     pub id: Text,
@@ -377,799 +244,718 @@ pub struct RecordingsEntry {
     pub recorded: Int,
     pub tracks: Int,
 }
-impl Record for RecordingsEntry {
-    fn fields() -> Fields<Self> {
-        fields()
-            .field("art", text())
-            .field("id", text())
-            .field("label", text())
-            .field("licence", text())
-            .field("performers", text())
-            .field("recorded", int())
-            .field("tracks", int())
-    }
-}
 
 /// One person on a recording, and what they did on it.
+#[derive(Input, Node, Clone, Debug, PartialEq, Eq)]
 pub struct CreditsEntry {
     pub instrument: Text,
     pub name: Text,
     pub pos: Int,
     pub role: Text,
 }
-impl Record for CreditsEntry {
-    fn fields() -> Fields<Self> {
-        fields()
-            .field("instrument", text())
-            .field("name", text())
-            .field("pos", int())
-            .field("role", text())
+
+// * The keys
+
+/// The work an entry names: an entry without `work_title` names one anyway
+/// when it carries a catalogue number or a part, and then it is the album's.
+#[ark::helper("library.work_title")]
+pub fn work_title(work_title: Text, album: Text, catalogue: Text, part: Text) -> Text {
+    if work_title.is_empty() && (!catalogue.is_empty() || !part.is_empty()) {
+        album
+    } else {
+        work_title
     }
 }
 
-/// The work an entry names. An entry written before `work_title` existed
-/// says there is one anyway when it carries a catalogue number (nobody
-/// catalogues a track) or a part (a division *of a work*, by the column's
-/// definition), and then the work's name is the album's.
-pub fn work_title(work_title: Text, album: Text, catalogue: Text, part: Text) -> Text {
-    helper(
-        "work_title",
-        (("work_title", work_title), ("album", album), ("catalogue", catalogue), ("part", part)),
-        |work_title: Text, album: Text, catalogue: Text, part: Text| {
-            pick(
-                work_title.is_empty().and(catalogue.is_empty().not().or(part.is_empty().not())),
-                album,
-                work_title,
-            )
-        },
-    )
-}
-
 /// One name, reduced to something that can stand in a key: letters and
-/// digits survive lowercased, every run of anything else is one dash, and
-/// none leads or trails. Non-ASCII letters are kept rather than folded:
-/// "Dvořák" and "Dvorak" are two keys, as they are two `person` names.
-///
-/// One fold over the characters, last to first, and one pass to spell the
-/// separators (`docs/plan-perf.md` R1). Built backwards so that "a
-/// separator is already there" is `starts_with` on the text so far, where
-/// forwards it was the last of `acc.chars()` — a value per character of
-/// the text so far, at every character, which is what made the old body
-/// quadratic in allocations. What is left is one `concat` of a piece onto
-/// the text so far per character: its length in bytes copied, which this
-/// vocabulary cannot avoid (a run is only seen from the character beside
-/// it, and nothing but a fold sees two), and which for a name is a few
-/// hundred bytes. The answer is the old body's on every input
-/// (`keys::tests::slug_is_what_it_was`).
+/// digits lowercased, anything else a dash, none leading or trailing.
+/// Non-ASCII letters are kept. (v4 made a run of separators one dash.)
+#[ark::helper("library.slug")]
 pub fn slug(text: Text) -> Text {
-    helper("slug", ("text", text), |text: Text| {
-        concat(
-            text.chars()
-                .reverse()
-                .fold("", |acc: Text, x| {
-                    concat(list([
-                        pick(x.is_alnum(), x.lower(), pick::<Text>(acc.is_empty().or(acc.starts_with(" ")), "", " ")),
-                        acc,
-                    ]))
-                })
-                .trim()
-                .chars()
-                .map(|x| pick(x.eq(" "), "-", x)),
-        )
-    })
+    let spaced = concat(text.chars().map(|c| if c.is_alnum() { c.lower() } else { " " })).trim();
+    concat(spaced.chars().map(|c| if c == " " { "-" } else { c }))
 }
 
-/// …and the same for a name with no letters in it at all: "!!!" is a band,
-/// and every such name in one key would be one band. The slug is computed
-/// once and held in an option, where it was asked for twice (R1).
+/// …and for a name with no letters at all, `x` and its hash: "!!!" is a
+/// band, and every such name in one key would be one band.
+#[ark::helper("library.key_part")]
 pub fn key_part(text: Text) -> Text {
-    helper("key_part", ("text", text), |text: Text| {
-        some(slug(text))
-            .filter(|s: Text| s.is_empty().not())
-            .unwrap_or(concat(list(["x".into(), text.trim().fnv1a64().to_text()])))
-    })
+    let s = slug(text);
+    if s.is_empty() {
+        concat(vec!["x", text.trim().fnv1a64().to_text()])
+    } else {
+        s
+    }
 }
 
-/// The key of a work: its composer, and the name that survives translation
-/// — the catalogue number where there is one. The composer is in it because
-/// catalogue numbers are per composer: `Op. 23` belongs to everybody.
+/// The key of a work: its composer, and its catalogue number or its title.
+#[ark::helper("library.work_key")]
 pub fn work_key(composer: Text, catalogue: Text, title: Text) -> Text {
-    helper(
-        "work_key",
-        (("composer", composer), ("catalogue", catalogue), ("title", title)),
-        |composer: Text, catalogue: Text, title: Text| {
-            concat(list([
-                key_part(composer),
-                "/".into(),
-                key_part(pick(catalogue.is_empty(), title, catalogue)),
-            ]))
-        },
-    )
+    concat(vec![
+        key_part(composer),
+        "/",
+        key_part(if catalogue.is_empty() { title } else { catalogue }),
+    ])
 }
 
 /// The key of the work a track is of, or none: a work needs a title and a
-/// composer, and `media.creator` is the composer for this repertoire.
-pub fn work_id(artist: Text, catalogue: Text, work_title: Text) -> Opt<Text> {
-    helper(
-        "work_id",
-        (("artist", artist), ("catalogue", catalogue), ("work_title", work_title)),
-        |artist: Text, catalogue: Text, work_title: Text| {
-            pick(
-                work_title.is_empty().or(artist.is_empty()),
-                none::<Text>(),
-                some(work_key(artist, catalogue, work_title)),
-            )
-        },
-    )
+/// composer.
+#[ark::helper("library.work_id")]
+pub fn work_id(artist: Text, catalogue: Text, work_title: Text) -> Option<Text> {
+    if work_title.is_empty() || artist.is_empty() {
+        None
+    } else {
+        Some(work_key(artist, catalogue, work_title))
+    }
 }
 
 /// The key of a movement: its work, and where it sits in it.
+#[ark::helper("library.movement_key")]
 pub fn movement_key(work_id: Text, no: Int) -> Text {
-    helper("movement_key", (("work_id", work_id), ("no", no)), |work_id: Text, no: Int| {
-        concat(list([work_id, "#".into(), no.to_text()]))
-    })
+    concat(vec![work_id, "#", no.to_text()])
 }
 
-/// The key of a recording: what it is a recording *of*, and by whom.
+/// The key of a recording: what it is of, and by whom.
+#[ark::helper("library.recording_key")]
 pub fn recording_key(of: Text, who: Text) -> Text {
-    helper("recording_key", (("of", of), ("who", who)), |of: Text, who: Text| {
-        concat(list([of, "@".into(), key_part(who)]))
-    })
+    concat(vec![of, "@", key_part(who)])
 }
 
-/// The key of the recording a track is part of. Every track has one: where
-/// there is no work, the release and the title make a pop track its own
-/// performance, so `credit` is the one answer to "who played this".
-pub fn recording_id(work_id: Opt<Text>, album: Text, title: Text, artist: Text, performer: Text) -> Text {
-    helper(
-        "recording_id",
-        (
-            ("work_id", work_id),
-            ("album", album),
-            ("title", title),
-            ("artist", artist),
-            ("performer", performer),
-        ),
-        |work_id: Opt<Text>, album: Text, title: Text, artist: Text, performer: Text| {
-            recording_key(
-                work_id.unwrap_or(concat(list([key_part(album), "/".into(), key_part(title)]))),
-                pick(performer.is_empty(), artist, performer),
-            )
-        },
+/// The key of the recording a track is part of; where there is no work,
+/// the release and the title make a pop track its own performance.
+#[ark::helper("library.recording_id")]
+pub fn recording_id(work_id: Option<Text>, album: Text, title: Text, artist: Text, performer: Text) -> Text {
+    recording_key(
+        work_id.unwrap_or(concat(vec![key_part(album), "/", key_part(title)])),
+        if performer.is_empty() { artist } else { performer },
     )
 }
 
-/// Who the one credit a track carries names: the performer when it says
-/// one, the artist of a track of no work, and nobody for a classical track
-/// that names no performer — which is more honest than crediting the
-/// composer with the performance.
-pub fn credited_as(work_id: Opt<Text>, artist: Text, performer: Text) -> Text {
-    helper(
-        "credited_as",
-        (("work_id", work_id), ("artist", artist), ("performer", performer)),
-        |work_id: Opt<Text>, artist: Text, performer: Text| pick(performer.is_empty(), pick::<Text>(work_id.is_some(), "", artist), performer),
-    )
+/// Who the one credit a track carries names: the performer, the artist of
+/// a track of no work, and nobody for a classical track naming no performer.
+#[ark::helper("library.credited_as")]
+pub fn credited_as(work_id: Option<Text>, artist: Text, performer: Text) -> Text {
+    if performer.is_empty() {
+        if work_id.is_some() {
+            ""
+        } else {
+            artist
+        }
+    } else {
+        performer
+    }
 }
 
-/// The key of the movement a track is, or none when it is of no work. Where
-/// it sits in the work is the track number when the entry did not say.
-pub fn movement_id(work_id: Opt<Text>, movement_no: Int, track: Int) -> Opt<Text> {
-    helper(
-        "movement_id",
-        (("work_id", work_id), ("movement_no", movement_no), ("track", track)),
-        |work_id: Opt<Text>, movement_no: Int, track: Int| work_id.map(|x| movement_key(x, pick(movement_no.eq(0), track, movement_no))),
-    )
+/// The key of the movement a track is, or none when it is of no work.
+#[ark::helper("library.movement_id")]
+pub fn movement_id(work_id: Option<Text>, movement_no: Int, track: Int) -> Option<Text> {
+    work_id.map(|w| movement_key(w, if movement_no == 0 { track } else { movement_no }))
 }
 
-/// A media row as a list renders it, and where it sits on the playlist
-/// the list was read against, if it is on it.
-pub fn library_entry(media: Media, playlist_pos: Opt<Int>) -> LibraryEntry {
-    helper(
-        "library_entry",
-        (("media", media), ("playlist_pos", playlist_pos)),
-        |media: Media, playlist_pos: Opt<Int>| LibraryEntry {
-            added_ms: media.added_ms,
-            creator: media.creator,
-            duration_ms: media.duration_ms,
-            file: media.file,
-            id: media.id,
-            kind: media.kind,
-            playlist_pos,
-            pos: media.pos,
-            title: media.title,
-            user_id: media.user_id,
-        },
-    )
+// * Reading
+
+/// A media row as a list renders it.
+#[ark::helper("library.library_entry")]
+pub fn library_entry(media: Media, playlist_pos: Option<Int>) -> LibraryEntry {
+    LibraryEntry {
+        added_ms: media.added_ms,
+        creator: media.creator,
+        duration_ms: media.duration_ms,
+        file: media.file,
+        id: media.id,
+        kind: media.kind,
+        playlist_pos,
+        pos: media.pos,
+        title: media.title,
+        user_id: media.user_id,
+    }
 }
 
-/// The credits worth drawing: the real ones (`pos` from 1) where a recording
-/// has any, which displace the lumped string a track carried at `pos` 0.
-pub fn credited(credits: List<Credit>) -> List<Credit> {
-    helper("credited", ("credits", credits), |credits: List<Credit>| {
-        credits.filter(|row| row.pos.gt(0).or(credits.any(|row_2| row_2.pos.gt(0)).not()))
-    })
+/// The credits worth drawing: the real ones (`pos` from 1) where there are
+/// any, which displace the lumped string a track carried at `pos` 0.
+#[ark::helper("library.credited")]
+pub fn credited(credits: Vec<Credit>) -> Vec<Credit> {
+    credits.filter(|c| c.pos > 0 || credits.filter(|d| d.pos > 0).is_empty())
 }
 
 /// Names, as one line: "Hermann Scherchen, London Symphony Orchestra".
-pub fn joined(names: List<Text>) -> Text {
-    helper("joined", ("names", names), |names: List<Text>| {
-        names.fold("", |acc: Text, x| pick(acc.is_empty(), x, concat(list([acc, ", ".into(), x]))))
-    })
+#[ark::helper("library.joined")]
+pub fn joined(names: Vec<Text>) -> Text {
+    concat(names.map(|n| concat(vec![", ", n]))).split_once(", ").map_or("", |p| p.1)
 }
 
-/// Who played one recording, as the one string a column draws: its credits
-/// in billing order, the composer (who is on the work) left out.
-pub fn performers(credits: List<Credit>, recording_id: Text) -> Text {
-    helper(
-        "performers",
-        (("credits", credits), ("recording_id", recording_id)),
-        |credits: List<Credit>, recording_id: Text| {
-            joined(
-                credited(credits.filter(|row| row.recording_id.eq(recording_id).and(row.role.ne("composer"))))
-                    .sort_by(|row| row.person_name)
-                    .sort_by(|row| row.pos)
-                    .map(|row| row.person_name),
-            )
-        },
+/// Who played one recording: its credits in billing order, the composer
+/// left out.
+#[ark::helper("library.performers")]
+pub fn performers(credits: Vec<Credit>, recording_id: Text) -> Text {
+    joined(
+        credited(credits.filter(|c| c.recording_id == recording_id && c.role != "composer"))
+            .sort(|c| (c.pos, c.person_name))
+            .map(|c| c.person_name),
     )
 }
 
-/// A work, with how much of it the library holds: its recordings, and the
-/// tracks that are movements of it.
+/// A work, with how much of it the library holds.
+#[ark::helper("library.work_summary")]
 pub fn work_summary(work: Work, recordings: Int, tracks: Int) -> WorkSummary {
-    helper(
-        "work_summary",
-        (("work", work), ("recordings", recordings), ("tracks", tracks)),
-        |work: Work, recordings: Int, tracks: Int| WorkSummary {
-            art: work.art,
-            catalogue: work.catalogue,
-            composer: work.composer,
-            form: work.form,
-            id: work.id,
-            period: work.period,
-            recordings,
-            title: work.title,
-            tracks,
-        },
-    )
+    WorkSummary {
+        art: work.art,
+        catalogue: work.catalogue,
+        composer: work.composer,
+        form: work.form,
+        id: work.id,
+        period: work.period,
+        recordings,
+        title: work.title,
+        tracks,
+    }
 }
 
 /// The sum of some counts.
-pub fn total(counts: List<Int>) -> Int {
-    helper("total", ("counts", counts), |counts: List<Int>| counts.fold(0, |acc: Int, x| acc.add(x)))
+#[ark::helper("library.total")]
+pub fn total(counts: Vec<Int>) -> Int {
+    counts.sum()
+}
+
+/// How many songs are movements of a work.
+#[ark::helper("library.work_tracks")]
+pub fn work_tracks(db: Harken, work_id: Text) -> Int {
+    total(
+        db.movement
+            .filter(|m| m.work_id == work_id)
+            .map(|m| db.song.filter(|s| s.movement_id == Some(m.id)).len()),
+    )
 }
 
 /// Works, each with how many recordings of it there are and how many
-/// tracks are movements of it: what `works` and `work` both answer.
-fn summaries(db: &Harken, works: Query<Work>) -> Query<Work, (List<Recording>, List<Int>), WorkSummary> {
-    works
-        .each(|work, ()| db.recording.rows().on(Recording::work_id.eq(some(work.id))))
-        .each(|work, _| {
-            db.movement
-                .each(|movement, ()| db.song.rows().on(Song::movement_id.eq(some(movement.id))))
-                .on(Movement::work_id.eq(work.id))
-                .map(|_movement, (songs,)| songs.len())
-        })
-        .map(|work, (recordings, movements)| work_summary(work, recordings.len(), total(movements)))
+/// tracks are movements of it.
+#[ark::helper("library.summaries")]
+pub fn summaries(db: Harken, works: Vec<Work>) -> Vec<WorkSummary> {
+    works.map(|w| work_summary(w, db.recording.filter(|r| r.work_id == Some(w.id)).len(), work_tracks(db, w.id)))
 }
 
-pub fn library() -> Router<Harken> {
-    let library = router::<Harken>("library");
-    // Who writes the library (`docs/plan-guards.md` D1): every mutation
-    // here runs `is_library` first, and every query reads without it. The
-    // role is asked of the entry, so a login without it is refused on its
-    // own device, and a device that believes it wrongly is refused by the
-    // server, which judges the entry under the roles it stamped.
-    let is_library = library.guard("is_library", |ctx, _db| {
-        unless(ctx.has_role(LIBRARY), || refuse("only the library writes the library"))
-    });
-    library.routes((
-        // Put a song in the library, and everything it belongs to as rows:
-        // the album, the artist, the work and movement it is of, the
-        // recording it is part of and the one credit its lumped performer
-        // string can honestly give.
-        //
-        // An upsert by `file`: a file the library already has is the song it
-        // already is, said again — retagged, or with a cover it did not have —
-        // so the media row keeps its id, its place, when it was added and who
-        // added it (every playlist holding it still holds it), and the rest
-        // is what this entry says. The same file with nothing new writes no
-        // row at all, so a rescan is free. An empty file is no path and never
-        // collides: a song typed in by hand is a new song every time.
-        //
-        // What the song was part of and no longer is — a recording, a
-        // movement, a work — goes when nothing else is part of it, in this
-        // entry: `works`, `recordings` and `composers` list those tables, and
-        // a recording with nothing in it would be a row of a work's page that
-        // plays nothing. An album or a person is left where it is, because
-        // `albums` and `artists` are what the songs name, and an album row a
-        // song moved off shows nowhere.
-        //
-        // Both reads go through an index (`media (file)`, `media (pos)`;
-        // docs/plan-perf.md R1): into a library of 8,000 a new file
-        // examines one row, where it was every row twice — 16,000.
-        is_library.input::<AddSong>().mutation("add_song", |ctx, db, input| {
-            let was = db
-                .media
-                .filter(Media::file.eq(input.file))
-                .first()
-                .filter(|row| row.file.is_empty().not());
-            let id = was.map_or(ctx.new_id("id"), |row| row.id);
-            let media_2 = db.media.order_by(Media::pos.desc()).first();
-            db.media.upsert(Media {
-                id,
-                kind: was.map_or("song", |row| row.kind),
-                title: input.title,
-                creator: input.artist,
-                duration_ms: input.duration_ms,
-                file: input.file,
-                pos: was.map_or(media_2.map_or(0, |row| row.pos).add(1), |row| row.pos),
-                added_ms: was.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                user_id: was.map_or(ctx.user, |row| row.user_id),
-            });
-            // art_to_write: no row yet makes one; a picture replaces a
-            // picture; nothing (or the same picture) replaces nothing.
-            when(input.album.is_empty().not(), || {
-                let album = db.album.get((input.album,));
-                when(
-                    album.map_or(true, |row| input.album_art.is_empty().not().and(row.art.ne(input.album_art))),
-                    || {
-                        db.album.upsert(Album {
-                            name: input.album,
-                            label: album.map_or("", |row| row.label),
-                            released: album.map_or(0, |row| row.released),
-                            art: input.album_art,
-                            added_ms: ctx.now("added_ms"),
-                            user_id: ctx.user,
-                        })
-                    },
-                )
-            });
-            when(input.artist.is_empty().not(), || {
-                let person = db.person.get((input.artist,));
-                when(
-                    person.map_or(true, |row| input.artist_art.is_empty().not().and(row.art.ne(input.artist_art))),
-                    || {
-                        db.person.upsert(Person {
-                            name: input.artist,
-                            sort_name: person.map_or("", |row| row.sort_name),
-                            born: person.map_or(0, |row| row.born),
-                            died: person.map_or(0, |row| row.died),
-                            art: input.artist_art,
-                            added_ms: person.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                            user_id: person.map_or(ctx.user, |row| row.user_id),
-                        })
-                    },
-                )
-            });
-            // What the track is of — the work's name, its key if it has
-            // one, the recording, the lumped credit — once each. Natively a
-            // helper runs where it is called, and these were called about
-            // fifteen times apiece; emitted, a `let` of a pure expression
-            // is inlined where it is used (§6), so the module is the bytes
-            // it was (`docs/plan-perf.md` R6).
-            let work_named = work_title(input.work_title, input.album, input.catalogue, input.part);
-            let work_of = work_id(input.artist, input.catalogue, work_named);
-            when(work_of.is_some(), || {
-                // The work's key, and the movement's number and key,
-                // once each where they are needed.
-                let key = work_key(input.artist, input.catalogue, work_named);
-                let no = pick(input.movement_no.eq(0), input.track, input.movement_no);
-                let movement_ref = movement_key(key, no);
-                let work = db.work.get((key,));
-                db.work.upsert(Work {
-                    id: key,
-                    composer: input.artist,
-                    title: work_named,
-                    catalogue: input.catalogue,
-                    opus: work.map_or("", |row| row.opus),
-                    key_sig: work.map_or("", |row| row.key_sig),
-                    form: work.map_or("", |row| row.form),
-                    period: work.map_or("", |row| row.period),
-                    composed: work.map_or(0, |row| row.composed),
-                    art: work.map_or("", |row| row.art),
-                    added_ms: work.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                    user_id: work.map_or(ctx.user, |row| row.user_id),
-                });
-                let movement = db.movement.get((movement_ref,));
-                db.movement.upsert(Movement {
-                    id: movement_ref,
-                    work_id: key,
-                    no,
-                    title: input.title,
-                    part: input.part,
-                    added_ms: movement.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                    user_id: movement.map_or(ctx.user, |row| row.user_id),
-                })
-            });
-            // After the work, not before: a helper is emitted where it is
-            // first called, and the module keeps its order.
-            let recording = recording_id(work_of, input.album, input.title, input.artist, input.performer);
-            let credited = credited_as(work_of, input.artist, input.performer);
-            db.recording.insert(Recording {
-                id: recording,
-                work_id: work_of,
-                recorded: 0.into(),
-                venue: "".into(),
-                label: "".into(),
-                licence: "".into(),
-                art: "".into(),
-                added_ms: ctx.now("added_ms"),
+/// The library's role, or a refusal: what every library mutation runs first.
+#[ark::guard("library.is_library")]
+pub fn is_library(ctx: Ctx) {
+    if !ctx.has_role("library") {
+        refuse!("only the library writes the library");
+    }
+}
+
+/// A playlist's entry for a media row, if it is on it.
+#[ark::helper("library.playlist_pos")]
+pub fn playlist_pos(db: Harken, playlist_id: Id<Playlist>, media_id: Id<Media>) -> Option<Int> {
+    db.playlist_item.get((playlist_id, media_id)).map(|i| i.pos)
+}
+
+/// The movement a song is, if it is one.
+#[ark::helper("library.movement_of")]
+pub fn movement_of(db: Harken, song: Song) -> Option<Movement> {
+    match song.movement_id {
+        Some(m) => db.movement.get(m),
+        None => None,
+    }
+}
+
+/// Whether a text holds the needle, both folded by the pinned `lower`.
+#[ark::helper("library.has")]
+pub fn has(text: Text, needle: Text) -> bool {
+    needle.is_empty() || text.lower().split_once(needle.lower()).is_some()
+}
+
+// * The mutations
+
+/// Put a song in the library, and everything it belongs to as rows. An
+/// upsert by `file`: a file the library has is the song it is, said again,
+/// so the media row keeps its id, place, when and by whom it was added;
+/// the same file with nothing new writes no row. What the song was part of
+/// and no longer is — a recording, a movement, a work — goes when nothing
+/// else is part of it.
+#[ark::mutator("library.add_song")]
+pub fn add_song(ctx: Ctx, db: Harken, input: AddSong) {
+    is_library(ctx);
+    let was = db.media.filter(|m| m.file == input.file).first().filter(|m| !m.file.is_empty());
+    let id = was.map_or(ctx.new_id::<Media>(), |m| m.id);
+    let newest = db.media.sort(|m| Desc(m.pos)).first();
+    let media = Media {
+        id,
+        kind: was.map_or("song", |m| m.kind),
+        title: input.title,
+        creator: input.artist,
+        duration_ms: input.duration_ms,
+        file: input.file,
+        pos: was.map_or(newest.map_or(0, |m| m.pos) + 1, |m| m.pos),
+        added_ms: was.map_or(ctx.now, |m| m.added_ms),
+        user_id: was.map_or(ctx.user, |m| m.user_id),
+    };
+    if db.media.get(id).is_some() {
+        db.media.update(id, |_| media);
+    } else {
+        db.media.insert(media);
+    }
+    // No row yet makes one; a picture replaces a picture; nothing (or the
+    // same picture) replaces nothing.
+    if !input.album.is_empty() {
+        let album = db.album.get(input.album);
+        if album.map_or(true, |a| !input.album_art.is_empty() && a.art != input.album_art) {
+            let row = Album {
+                name: input.album,
+                label: album.map_or("", |a| a.label),
+                released: album.map_or(0, |a| a.released),
+                art: input.album_art,
+                added_ms: ctx.now,
                 user_id: ctx.user,
-            });
-            // The fallback credit: `pos` 0 is what marks it as the lumped
-            // string standing in until `credit_recording` says who is who.
-            when(credited.is_empty().not(), || {
-                db.person.insert(Person {
-                    name: credited,
-                    sort_name: "".into(),
-                    born: 0.into(),
-                    died: 0.into(),
-                    art: "".into(),
-                    added_ms: ctx.now("added_ms"),
-                    user_id: ctx.user,
-                });
-                db.credit.insert(Credit {
-                    recording_id: recording,
-                    person_name: credited,
-                    role: pick(work_of.is_some(), "performer", "artist"),
-                    instrument: "".into(),
-                    pos: 0.into(),
-                    added_ms: ctx.now("added_ms"),
-                    user_id: ctx.user,
-                })
-            });
-            let movement = movement_id(work_of, input.movement_no, input.track);
-            let song = db.song.get((id,));
-            db.song.upsert(Song {
-                media_id: id,
-                album_name: pick(input.album.is_empty(), none::<Text>(), some(input.album)),
-                disc: pick(input.disc.gt(0), input.disc.min(99), 1),
-                track: input.track.clamp(0, 999),
-                recording_id: recording,
-                movement_id: movement,
-                bpm: pick(input.bpm.ge(20).and(input.bpm.le(300)), input.bpm, 0),
-            });
-            // The recording the song has left, with its credits, when no
-            // song is part of it any more. Before the movement, since a
-            // recording names the work the movement's emptying may take.
-            let left = song.map(|row| row.recording_id).filter(|row| row.ne(recording));
-            when(left.is_some(), || {
-                let others = db.song.filter(Song::recording_id.eq(left.unwrap())).first();
-                when(others.is_none(), || {
-                    let credits = db.credit.filter(Credit::recording_id.eq(left.unwrap())).all();
-                    for_each(credits, |row| db.credit.delete((row.recording_id, row.person_name, row.role)));
-                    db.recording.delete((left.unwrap(),))
-                })
-            });
-            // The movement it has left, when no song is it; and that
-            // movement's work, when no movement and no recording is of it.
-            let moved = song.map_or(none::<Text>(), |row| row.movement_id).filter(|row| some(row).ne(movement));
-            when(moved.is_some(), || {
-                let others = db.song.filter(Song::movement_id.eq(moved)).first();
-                when(others.is_none(), || {
-                    let of = db.movement.get((moved.unwrap(),)).map_or("", |row| row.work_id);
-                    db.movement.delete((moved.unwrap(),));
-                    let movements = db.movement.filter(Movement::work_id.eq(of)).first();
-                    let recordings = db.recording.filter(Recording::work_id.eq(some(of))).first();
-                    when(movements.is_none().and(recordings.is_none()), || db.work.delete((of,)))
-                })
-            })
-        }),
-        // Say more about a work than the track that created it could. A work
-        // exists because a song named it, so an unknown one is refused; every
-        // field is fill-if-given, so an empty one leaves what is there.
-        is_library.input::<DescribeWork>().mutation("describe_work", |ctx, db, input| {
-            let work = db.work.exists((input.id,));
-            unless(work, || {
-                refuse(concat(list([
-                    "no work ".into(),
-                    input.id,
-                    "; a work exists because a song named it".into(),
-                ])))
-            });
-            db.work.update((input.id,), |row| Work {
-                id: row.id,
-                composer: row.composer,
-                title: row.title,
-                catalogue: row.catalogue,
-                opus: pick(input.opus.is_empty(), row.opus, input.opus),
-                key_sig: pick(input.key_sig.is_empty(), row.key_sig, input.key_sig),
-                form: pick(input.form.is_empty(), row.form, input.form),
-                period: pick(input.period.is_empty(), row.period, input.period),
-                composed: pick(input.composed.eq(0), row.composed, input.composed),
-                art: pick(input.art.is_empty(), row.art, input.art),
-                added_ms: ctx.now("added_ms"),
-                user_id: row.user_id,
-            })
-        }),
-        // Say more about a performance; refuses an unknown one, as above.
-        is_library.input::<DescribeRecording>().mutation("describe_recording", |ctx, db, input| {
-            let recording = db.recording.exists((input.id,));
-            unless(recording, || {
-                refuse(concat(list([
-                    "no recording ".into(),
-                    input.id,
-                    "; one exists because a song is part of it".into(),
-                ])))
-            });
-            db.recording.update((input.id,), |row| Recording {
-                id: row.id,
-                work_id: row.work_id,
-                recorded: pick(input.recorded.eq(0), row.recorded, input.recorded),
-                venue: pick(input.venue.is_empty(), row.venue, input.venue),
-                label: pick(input.label.is_empty(), row.label, input.label),
-                licence: pick(input.licence.is_empty(), row.licence, input.licence),
-                art: pick(input.art.is_empty(), row.art, input.art),
-                added_ms: ctx.now("added_ms"),
-                user_id: row.user_id,
-            })
-        }),
-        // Say more about somebody. This one makes the row when it is not
-        // there: a person needs nothing but a name.
-        is_library.input::<DescribePerson>().mutation("describe_person", |ctx, db, input| {
-            let person = db.person.get((input.name,));
-            db.person.upsert(Person {
-                name: input.name,
-                sort_name: pick(input.sort_name.is_empty(), person.map_or("", |row| row.sort_name), input.sort_name),
-                born: pick(input.born.eq(0), person.map_or(0, |row| row.born), input.born),
-                died: pick(input.died.eq(0), person.map_or(0, |row| row.died), input.died),
-                art: pick(input.art.is_empty(), person.map_or("", |row| row.art), input.art),
-                added_ms: person.map_or(ctx.now("added_ms"), |row| row.added_ms),
-                user_id: person.map_or(ctx.user, |row| row.user_id),
-            })
-        }),
-        // Credit somebody on a recording, properly: keyed by the three, so a
-        // person may hold two roles and a second entry is a correction. A
-        // real credit is at least 1; 0 is the lumped fallback's.
-        is_library.input::<CreditRecording>().mutation("credit_recording", |ctx, db, input| {
-            let recording = db.recording.exists((input.recording_id,));
-            unless(recording, || {
-                refuse(concat(list(["no recording ".into(), input.recording_id, " to credit anybody on".into()])))
-            });
+            };
+            if album.is_some() {
+                db.album.update(input.album, |_| row);
+            } else {
+                db.album.insert(row);
+            }
+        }
+    }
+    if !input.artist.is_empty() {
+        let person = db.person.get(input.artist);
+        if person.map_or(true, |p| !input.artist_art.is_empty() && p.art != input.artist_art) {
+            let row = Person {
+                name: input.artist,
+                sort_name: person.map_or("", |p| p.sort_name),
+                born: person.map_or(0, |p| p.born),
+                died: person.map_or(0, |p| p.died),
+                art: input.artist_art,
+                added_ms: person.map_or(ctx.now, |p| p.added_ms),
+                user_id: person.map_or(ctx.user, |p| p.user_id),
+            };
+            if person.is_some() {
+                db.person.update(input.artist, |_| row);
+            } else {
+                db.person.insert(row);
+            }
+        }
+    }
+    let work_named = work_title(input.work_title, input.album, input.catalogue, input.part);
+    let work_of = work_id(input.artist, input.catalogue, work_named);
+    if work_of.is_some() {
+        let key = work_key(input.artist, input.catalogue, work_named);
+        let no = if input.movement_no == 0 { input.track } else { input.movement_no };
+        let movement_ref = movement_key(key, no);
+        let work = db.work.get(key);
+        let row = Work {
+            id: key,
+            composer: input.artist,
+            title: work_named,
+            catalogue: input.catalogue,
+            opus: work.map_or("", |w| w.opus),
+            key_sig: work.map_or("", |w| w.key_sig),
+            form: work.map_or("", |w| w.form),
+            period: work.map_or("", |w| w.period),
+            composed: work.map_or(0, |w| w.composed),
+            art: work.map_or("", |w| w.art),
+            added_ms: work.map_or(ctx.now, |w| w.added_ms),
+            user_id: work.map_or(ctx.user, |w| w.user_id),
+        };
+        if work.is_some() {
+            db.work.update(key, |_| row);
+        } else {
+            db.work.insert(row);
+        }
+        let movement = db.movement.get(movement_ref);
+        let row = Movement {
+            id: movement_ref,
+            work_id: key,
+            no,
+            title: input.title,
+            part: input.part,
+            added_ms: movement.map_or(ctx.now, |m| m.added_ms),
+            user_id: movement.map_or(ctx.user, |m| m.user_id),
+        };
+        if movement.is_some() {
+            db.movement.update(movement_ref, |_| row);
+        } else {
+            db.movement.insert(row);
+        }
+    }
+    let recording = recording_id(work_of, input.album, input.title, input.artist, input.performer);
+    let credited = credited_as(work_of, input.artist, input.performer);
+    if db.recording.get(recording).is_none() {
+        db.recording.insert(Recording {
+            id: recording,
+            work_id: work_of,
+            recorded: 0,
+            venue: "",
+            label: "",
+            licence: "",
+            art: "",
+            added_ms: ctx.now,
+            user_id: ctx.user,
+        });
+    }
+    // The fallback credit: `pos` 0 marks the lumped string standing in
+    // until `credit_recording` says who is who.
+    if !credited.is_empty() {
+        if db.person.get(credited).is_none() {
             db.person.insert(Person {
-                name: input.person_name,
-                sort_name: "".into(),
-                born: 0.into(),
-                died: 0.into(),
-                art: "".into(),
-                added_ms: ctx.now("added_ms"),
+                name: credited,
+                sort_name: "",
+                born: 0,
+                died: 0,
+                art: "",
+                added_ms: ctx.now,
                 user_id: ctx.user,
             });
-            let credit = db
-                .credit
-                .get((input.recording_id, input.person_name, pick(input.role.is_empty(), "artist", input.role)));
-            db.credit.upsert(Credit {
-                recording_id: input.recording_id,
-                person_name: input.person_name,
-                role: pick(input.role.is_empty(), "artist", input.role),
-                instrument: pick(input.instrument.is_empty(), credit.map_or("", |row| row.instrument), input.instrument),
-                pos: pick(input.pos.eq(0), credit.map_or(0, |row| row.pos).max(1), input.pos.max(1)),
-                added_ms: ctx.now("added_ms"),
+        }
+        let role = if work_of.is_some() { "performer" } else { "artist" };
+        if db.credit.get((recording, credited, role)).is_none() {
+            db.credit.insert(Credit {
+                recording_id: recording,
+                person_name: credited,
+                role,
+                instrument: "",
+                pos: 0,
+                added_ms: ctx.now,
                 user_id: ctx.user,
-            })
-        }),
-        // Take something out of the library, and off every playlist holding it.
-        //
-        // No private block (`docs/plan-guards.md` D3): every row this writes
-        // is one every client holds and replays. A server half would go here
-        // as `ctx.private(move |db: &Harken| ..)` — say, a removal recorded in
-        // a table no client holds — written after the body's deletes or
-        // before them alike, since it runs last; `harken.ark` would carry
-        // `remove_media` with `private: true` and its hash would not move.
-        is_library.input::<RemoveMedia>().mutation("remove_media", |_ctx, db, input| {
-            let playlist_item = db.playlist_item.filter(PlaylistItem::media_id.eq(input.id)).all();
-            for_each(playlist_item, |row| db.playlist_item.delete((row.playlist_id, row.media_id)));
-            db.song.delete((input.id,));
-            db.media.delete((input.id,))
-        }),
-        // The whole library, in the order things were added — every kind, one
-        // list — each with where it sits on one playlist: the playlist's
-        // entry for that media, beneath it.
-        library.input::<Library>().query("library", |_ctx, db, input| {
-            db.media
-                .order_by(Media::pos.asc())
-                .each(|media, ()| {
-                    db.playlist_item
-                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
-                        .on(PlaylistItem::media_id.eq(media.id))
-                })
-                .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
-        }),
-        // The library's rows whose title or creator holds the needle, case
-        // folded by the pinned `lower`, in library order and each as
-        // `library` has it — what the search box shows. Read through the
-        // text indexes on `media.title` and `media.creator`: the rows
-        // holding every trigram of the needle, not the library
-        // (`docs/plan-db.md` D4); a needle of one or two characters is the
-        // scan the client used to do.
-        library.input::<Search>().query("search", |_ctx, db, input| {
-            db.media
-                .filter(Media::title.has(input.needle).or(Media::creator.has(input.needle)))
-                .order_by(Media::pos.asc())
-                .each(|media, ()| {
-                    db.playlist_item
-                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
-                        .on(PlaylistItem::media_id.eq(media.id))
-                })
-                .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
-        }),
-        // Every album some song is on, by name, with whoever made its first
-        // track (in the song table's order) and how many tracks it has.
-        library.query("albums", |_ctx, db, _input: ()| {
-            db.album
-                .each(|album, ()| {
-                    db.song
-                        .rows()
-                        .get(|song, ()| db.media.by((song.media_id,)))
-                        .on(Song::album_name.eq(some(album.name)))
-                        .map(|_song, (media,)| media.map_or("", |row| row.creator))
-                })
-                .having(|_album, (creators,)| creators.len().gt(0))
-                .map(|album, (creators,)| AlbumsEntry {
-                    art: album.art,
-                    creator: creators.first().unwrap_or(""),
-                    name: album.name,
-                    tracks: creators.len(),
-                })
-        }),
-        // Everyone who made something in the library, by name: the media
-        // grouped by creator, with the picture `person` has for the name.
-        library.query("artists", |_ctx, db, _input: ()| {
-            db.media
-                .group_by(Media::creator)
-                .get(|creator, (_media,)| db.person.by((creator,)))
-                .map(|creator, (media, person)| ArtistsEntry {
-                    art: person.map_or("", |row| row.art),
-                    name: creator,
-                    tracks: media.len(),
-                })
-        }),
-        // Every song, with the columns only a song has: its movement and
-        // that movement's work, its recording, and the recording's credits.
-        library.query("track_details", |_ctx, db, _input: ()| {
-            db.song
-                .rows()
-                .get(|song, ()| db.movement.by_opt(song.movement_id))
-                .get(|_song, (movement,)| db.work.by_opt(movement.map(|row| row.work_id)))
-                .get(|song, _| db.recording.by((song.recording_id,)))
-                .each(|song, _| db.credit.on(Credit::recording_id.eq(song.recording_id)))
-                .map(|song, (movement, work, recording, credits)| TrackDetailsEntry {
-                    album: song.album_name.unwrap_or(""),
-                    bpm: song.bpm,
-                    catalogue: work.map_or("", |row| row.catalogue),
-                    licence: recording.map_or("", |row| row.licence),
-                    media_id: song.media_id,
-                    part: movement.map_or("", |row| row.part),
-                    performer: performers(credits, song.recording_id),
-                    track: song.track,
-                })
-        }),
-        // One album's tracks in the order the work goes: part, then track
-        // (an untagged one, 0, last in its part), then title, then the key.
-        library.input::<AlbumInput>().query("album", |_ctx, db, input| {
-            db.song
-                .filter(Song::album_name.eq(some(input.name)))
-                .get(|song, ()| db.media.by((song.media_id,)))
-                .get(|song, _| db.movement.by_opt(song.movement_id))
-                .each(|song, _| {
-                    db.playlist_item
-                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
-                        .on(PlaylistItem::media_id.eq(song.media_id))
-                })
-                .having(|_song, (media, _, _)| media.is_some())
-                .sort_by(|_song, (_, movement, _)| movement.map_or("", |row| row.part))
-                .sort_by(|song, _| song.track.eq(0))
-                .sort_by(|song, _| song.track)
-                .sort_by(|_song, (media, _, _)| media.map_or("", |row| row.title))
-                .map(|_song, (media, _, items)| library_entry(media.unwrap(), items.first().map(|row| row.pos)))
-        }),
-        // One artist's tracks, in library order.
-        library.input::<Artist>().query("artist", |_ctx, db, input| {
-            db.media
-                .filter(Media::creator.eq(input.name))
-                .order_by(Media::pos.asc())
-                .each(|media, ()| {
-                    db.playlist_item
-                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
-                        .on(PlaylistItem::media_id.eq(media.id))
-                })
-                .map(|media, (items,)| library_entry(media, items.first().map(|row| row.pos)))
-        }),
-        // Everyone some work here is by: the composers index. A composer's
-        // tracks are the songs that are movements of their works, counted
-        // down the tree person → work → movement → song.
-        library.query("composers", |_ctx, db, _input: ()| {
-            db.person
-                .each(|person, ()| {
-                    db.work
-                        .each(|work, ()| {
-                            db.movement
-                                .each(|movement, ()| db.song.rows().on(Song::movement_id.eq(some(movement.id))))
-                                .on(Movement::work_id.eq(work.id))
-                                .map(|_movement, (songs,)| songs.len())
-                        })
-                        .on(Work::composer.eq(person.name))
-                        .map(|_work, (movements,)| total(movements))
-                })
-                .having(|_person, (works,)| works.len().gt(0))
-                .map(|person, (works,)| ComposersEntry {
-                    art: person.art,
-                    born: person.born,
-                    died: person.died,
-                    name: person.name,
-                    sort_name: pick(person.sort_name.is_empty(), person.name, person.sort_name),
-                    tracks: total(works),
-                    works: works.len(),
-                })
-        }),
-        // One composer's works, by catalogue and then title.
-        library.input::<Works>().query("works", |_ctx, db, input| {
-            summaries(
-                db,
-                db.work
-                    .filter(Work::composer.eq(input.composer))
-                    .order_by((Work::catalogue.asc(), Work::title.asc())),
+            });
+        }
+    }
+    let movement = movement_id(work_of, input.movement_no, input.track);
+    let song = db.song.get(id);
+    let row = Song {
+        media_id: id,
+        album_name: if input.album.is_empty() { None } else { Some(input.album) },
+        disc: if input.disc > 0 { input.disc.min(99) } else { 1 },
+        track: input.track.clamp(0, 999),
+        recording_id: recording,
+        movement_id: movement,
+        bpm: if input.bpm >= 20 && input.bpm <= 300 { input.bpm } else { 0 },
+    };
+    if song.is_some() {
+        db.song.update(id, |_| row);
+    } else {
+        db.song.insert(row);
+    }
+    // The recording the song has left, with its credits, when no song is
+    // part of it any more; before the movement, since a recording names the
+    // work the movement's emptying may take.
+    let left = song.map(|s| s.recording_id).filter(|r| r != recording);
+    if left.is_some() && db.song.filter(|s| s.recording_id == left.unwrap()).is_empty() {
+        db.credit
+            .filter(|c| c.recording_id == left.unwrap())
+            .map(|c| db.credit.delete((c.recording_id, c.person_name, c.role)));
+        db.recording.delete(left.unwrap());
+    }
+    // The movement it has left, when no song is it; and that movement's
+    // work, when no movement and no recording is of it.
+    let moved = song.map_or(None, |s| s.movement_id).filter(|m| Some(m) != movement);
+    if moved.is_some() && db.song.filter(|s| s.movement_id == moved).is_empty() {
+        let of = db.movement.get(moved.unwrap()).map_or("", |m| m.work_id);
+        db.movement.delete(moved.unwrap());
+        if db.movement.filter(|m| m.work_id == of).is_empty() && db.recording.filter(|r| r.work_id == Some(of)).is_empty() {
+            db.work.delete(of);
+        }
+    }
+}
+
+/// Say more about a work. A work exists because a song named it, so an
+/// unknown one is refused; every field is fill-if-given.
+#[ark::mutator("library.describe_work")]
+pub fn describe_work(ctx: Ctx, db: Harken, input: DescribeWork) {
+    is_library(ctx);
+    if db.work.get(input.id).is_none() {
+        refuse!(concat(vec!["no work ", input.id, "; a work exists because a song named it"]));
+    }
+    db.work.update(input.id, |w| Work {
+        opus: if input.opus.is_empty() { w.opus } else { input.opus },
+        key_sig: if input.key_sig.is_empty() { w.key_sig } else { input.key_sig },
+        form: if input.form.is_empty() { w.form } else { input.form },
+        period: if input.period.is_empty() { w.period } else { input.period },
+        composed: if input.composed == 0 { w.composed } else { input.composed },
+        art: if input.art.is_empty() { w.art } else { input.art },
+        added_ms: ctx.now,
+        ..w
+    });
+}
+
+/// Say more about a performance; refuses an unknown one.
+#[ark::mutator("library.describe_recording")]
+pub fn describe_recording(ctx: Ctx, db: Harken, input: DescribeRecording) {
+    is_library(ctx);
+    if db.recording.get(input.id).is_none() {
+        refuse!(concat(vec!["no recording ", input.id, "; one exists because a song is part of it"]));
+    }
+    db.recording.update(input.id, |r| Recording {
+        recorded: if input.recorded == 0 { r.recorded } else { input.recorded },
+        venue: if input.venue.is_empty() { r.venue } else { input.venue },
+        label: if input.label.is_empty() { r.label } else { input.label },
+        licence: if input.licence.is_empty() { r.licence } else { input.licence },
+        art: if input.art.is_empty() { r.art } else { input.art },
+        added_ms: ctx.now,
+        ..r
+    });
+}
+
+/// Say more about somebody, making the row when it is not there.
+#[ark::mutator("library.describe_person")]
+pub fn describe_person(ctx: Ctx, db: Harken, input: DescribePerson) {
+    is_library(ctx);
+    let person = db.person.get(input.name);
+    let row = Person {
+        name: input.name,
+        sort_name: if input.sort_name.is_empty() {
+            person.map_or("", |p| p.sort_name)
+        } else {
+            input.sort_name
+        },
+        born: if input.born == 0 { person.map_or(0, |p| p.born) } else { input.born },
+        died: if input.died == 0 { person.map_or(0, |p| p.died) } else { input.died },
+        art: if input.art.is_empty() { person.map_or("", |p| p.art) } else { input.art },
+        added_ms: person.map_or(ctx.now, |p| p.added_ms),
+        user_id: person.map_or(ctx.user, |p| p.user_id),
+    };
+    if person.is_some() {
+        db.person.update(input.name, |_| row);
+    } else {
+        db.person.insert(row);
+    }
+}
+
+/// Credit somebody on a recording, properly: keyed by the three, so a
+/// person may hold two roles and a second entry is a correction. A real
+/// credit is at least 1; 0 is the lumped fallback's.
+#[ark::mutator("library.credit_recording")]
+pub fn credit_recording(ctx: Ctx, db: Harken, input: CreditRecording) {
+    is_library(ctx);
+    if db.recording.get(input.recording_id).is_none() {
+        refuse!(concat(vec!["no recording ", input.recording_id, " to credit anybody on"]));
+    }
+    if db.person.get(input.person_name).is_none() {
+        db.person.insert(Person {
+            name: input.person_name,
+            sort_name: "",
+            born: 0,
+            died: 0,
+            art: "",
+            added_ms: ctx.now,
+            user_id: ctx.user,
+        });
+    }
+    let role = if input.role.is_empty() { "artist" } else { input.role };
+    let credit = db.credit.get((input.recording_id, input.person_name, role));
+    let row = Credit {
+        recording_id: input.recording_id,
+        person_name: input.person_name,
+        role,
+        instrument: if input.instrument.is_empty() {
+            credit.map_or("", |c| c.instrument)
+        } else {
+            input.instrument
+        },
+        pos: if input.pos == 0 {
+            credit.map_or(0, |c| c.pos).max(1)
+        } else {
+            input.pos.max(1)
+        },
+        added_ms: ctx.now,
+        user_id: ctx.user,
+    };
+    if credit.is_some() {
+        db.credit.update((input.recording_id, input.person_name, role), |_| row);
+    } else {
+        db.credit.insert(row);
+    }
+}
+
+/// Take something out of the library, and off every playlist holding it.
+#[ark::mutator("library.remove_media")]
+pub fn remove_media(ctx: Ctx, db: Harken, input: RemoveMedia) {
+    is_library(ctx);
+    db.playlist_item
+        .filter(|i| i.media_id == input.id)
+        .map(|i| db.playlist_item.delete((i.playlist_id, i.media_id)));
+    db.song.delete(input.id);
+    db.media.delete(input.id);
+}
+
+// * The queries
+
+/// The whole library in the order things were added, each with where it
+/// sits on one playlist.
+#[ark::query("library.library")]
+pub fn library(db: Harken, input: Library) -> Vec<LibraryEntry> {
+    db.media
+        .sort(|m| m.pos)
+        .map(|m| library_entry(m, playlist_pos(db, input.playlist_id, m.id)))
+}
+
+/// The library's rows whose title or creator holds the needle, case folded,
+/// in library order.
+#[ark::query("library.search")]
+pub fn search(db: Harken, input: Search) -> Vec<LibraryEntry> {
+    db.media
+        .filter(|m| has(m.title, input.needle) || has(m.creator, input.needle))
+        .sort(|m| m.pos)
+        .map(|m| library_entry(m, playlist_pos(db, input.playlist_id, m.id)))
+}
+
+/// Every album some song is on, by name, with whoever made its first track
+/// (in the song table's order) and how many tracks it has.
+#[ark::query("library.albums")]
+pub fn albums(db: Harken) -> Vec<AlbumsEntry> {
+    db.album
+        .map(|a| {
+            (
+                a,
+                db.song
+                    .filter(|s| s.album_name == Some(a.name))
+                    .map(|s| db.media.get(s.media_id).map_or("", |m| m.creator)),
             )
-        }),
-        // One work by its key: none or one, for a page opened from a link.
-        library
-            .input::<WorkInput>()
-            .query("work", |_ctx, db, input| summaries(db, db.work.filter(Work::id.eq(input.id)))),
-        // Every performance of one work: the most complete first, then the
-        // oldest, then the key.
-        library.input::<Recordings>().query("recordings", |_ctx, db, input| {
-            db.recording
-                .filter(Recording::work_id.eq(some(input.work_id)))
-                .each(|recording, ()| db.song.rows().on(Song::recording_id.eq(recording.id)))
-                .each(|recording, _| db.credit.on(Credit::recording_id.eq(recording.id)))
-                .sort_by(|_recording, (songs, _)| songs.len().neg())
-                .sort_by(|recording, _| recording.recorded)
-                .map(|recording, (songs, credits)| RecordingsEntry {
-                    art: recording.art,
-                    id: recording.id,
-                    label: recording.label,
-                    licence: recording.licence,
-                    performers: performers(credits, recording.id),
-                    recorded: recording.recorded,
-                    tracks: songs.len(),
-                })
-        }),
-        // Who is on one recording, with the roles kept, in billing order:
-        // the real credits (`pos` from 1) where there are any, which
-        // displace the lumped string a track carried at `pos` 0 — each
-        // credit asks its siblings whether there is a real one.
-        library.input::<Credits>().query("credits", |_ctx, db, input| {
-            db.credit
-                .filter(Credit::recording_id.eq(input.recording_id))
-                .order_by((Credit::pos.asc(), Credit::person_name.asc()))
-                .each(|credit, ()| db.credit.filter(Credit::pos.gt(0)).on(Credit::recording_id.eq(credit.recording_id)))
-                .having(|credit, (real,)| credit.pos.gt(0).or(real.is_empty()))
-                .map(|credit, _| CreditsEntry {
-                    instrument: credit.instrument,
-                    name: credit.person_name,
-                    pos: credit.pos,
-                    role: credit.role,
-                })
-        }),
-        // One performance's tracks in the order the work goes: by movement
-        // number, not by track number (a compilation's track 9 may be a
-        // sonata's first movement); a track of no movement after the rest.
-        library.input::<RecordingInput>().query("recording", |_ctx, db, input| {
-            db.song
-                .filter(Song::recording_id.eq(input.id))
-                .get(|song, ()| db.media.by((song.media_id,)))
-                .get(|song, _| db.movement.by_opt(song.movement_id))
-                .each(|song, _| {
-                    db.playlist_item
-                        .filter(PlaylistItem::playlist_id.eq(input.playlist_id))
-                        .on(PlaylistItem::media_id.eq(song.media_id))
-                })
-                .having(|_song, (media, _, _)| media.is_some())
-                .sort_by(|song, _| song.movement_id.is_none())
-                .sort_by(|_song, (_, movement, _)| movement.map_or(0, |row| row.no))
-                .sort_by(|_song, (media, _, _)| media.map_or("", |row| row.title))
-                .map(|_song, (media, _, items)| library_entry(media.unwrap(), items.first().map(|row| row.pos)))
-        }),
-    ))
+        })
+        .filter(|g| g.1.len() > 0)
+        .map(|g| AlbumsEntry {
+            art: g.0.art,
+            creator: g.1.first().unwrap_or(""),
+            name: g.0.name,
+            tracks: g.1.len(),
+        })
+}
+
+/// Everyone who made something in the library, by name, with the picture
+/// `person` has for the name.
+#[ark::query("library.artists")]
+pub fn artists(db: Harken) -> Vec<ArtistsEntry> {
+    db.media
+        .group(
+            |m| m.creator,
+            |c, ms| ArtistsEntry {
+                art: db.person.get(c).map_or("", |p| p.art),
+                name: c,
+                tracks: ms.len(),
+            },
+        )
+        .map(|g| g.1)
+}
+
+/// Every song, with the columns only a song has.
+#[ark::query("library.track_details")]
+pub fn track_details(db: Harken) -> Vec<TrackDetailsEntry> {
+    db.song.map(|s| {
+        let movement = movement_of(db, s);
+        let work = match movement {
+            Some(m) => db.work.get(m.work_id),
+            None => None,
+        };
+        let recording = db.recording.get(s.recording_id);
+        TrackDetailsEntry {
+            album: s.album_name.unwrap_or(""),
+            bpm: s.bpm,
+            catalogue: work.map_or("", |w| w.catalogue),
+            licence: recording.map_or("", |r| r.licence),
+            media_id: s.media_id,
+            part: movement.map_or("", |m| m.part),
+            performer: performers(db.credit.filter(|c| c.recording_id == s.recording_id), s.recording_id),
+            track: s.track,
+        }
+    })
+}
+
+/// One album's tracks in the order the work goes: part, then track (an
+/// untagged one, 0, last in its part), then title, then the key.
+#[ark::query("library.album")]
+pub fn album(db: Harken, input: AlbumInput) -> Vec<LibraryEntry> {
+    db.song
+        .filter(|s| s.album_name == Some(input.name) && db.media.get(s.media_id).is_some())
+        .sort(|s| {
+            (
+                movement_of(db, s).map_or("", |m| m.part),
+                s.track == 0,
+                s.track,
+                db.media.get(s.media_id).map_or("", |m| m.title),
+            )
+        })
+        .map(|s| library_entry(db.media.get(s.media_id).unwrap(), playlist_pos(db, input.playlist_id, s.media_id)))
+}
+
+/// One artist's tracks, in library order.
+#[ark::query("library.artist")]
+pub fn artist(db: Harken, input: Artist) -> Vec<LibraryEntry> {
+    db.media
+        .filter(|m| m.creator == input.name)
+        .sort(|m| m.pos)
+        .map(|m| library_entry(m, playlist_pos(db, input.playlist_id, m.id)))
+}
+
+/// Everyone some work here is by, with how many tracks are movements of
+/// their works and how many works.
+#[ark::query("library.composers")]
+pub fn composers(db: Harken) -> Vec<ComposersEntry> {
+    db.person
+        .map(|p| (p, db.work.filter(|w| w.composer == p.name).map(|w| work_tracks(db, w.id))))
+        .filter(|g| g.1.len() > 0)
+        .map(|g| ComposersEntry {
+            art: g.0.art,
+            born: g.0.born,
+            died: g.0.died,
+            name: g.0.name,
+            sort_name: if g.0.sort_name.is_empty() { g.0.name } else { g.0.sort_name },
+            tracks: total(g.1),
+            works: g.1.len(),
+        })
+}
+
+/// One composer's works, by catalogue and then title.
+#[ark::query("library.works")]
+pub fn works(db: Harken, input: Works) -> Vec<WorkSummary> {
+    summaries(db, db.work.filter(|w| w.composer == input.composer).sort(|w| (w.catalogue, w.title)))
+}
+
+/// One work by its key: none or one.
+#[ark::query("library.work")]
+pub fn work(db: Harken, input: WorkInput) -> Vec<WorkSummary> {
+    summaries(db, db.work.filter(|w| w.id == input.id))
+}
+
+/// Every performance of one work: the most complete first, then the
+/// oldest, then the key.
+#[ark::query("library.recordings")]
+pub fn recordings(db: Harken, input: Recordings) -> Vec<RecordingsEntry> {
+    db.recording
+        .filter(|r| r.work_id == Some(input.work_id))
+        .map(|r| (r, db.song.filter(|s| s.recording_id == r.id).len()))
+        .sort(|g| (-g.1, g.0.recorded))
+        .map(|g| RecordingsEntry {
+            art: g.0.art,
+            id: g.0.id,
+            label: g.0.label,
+            licence: g.0.licence,
+            performers: performers(db.credit.filter(|c| c.recording_id == g.0.id), g.0.id),
+            recorded: g.0.recorded,
+            tracks: g.1,
+        })
+}
+
+/// Who is on one recording, the roles kept, in billing order: the real
+/// credits where there are any.
+#[ark::query("library.credits")]
+pub fn credits(db: Harken, input: Credits) -> Vec<CreditsEntry> {
+    let all = db.credit.filter(|c| c.recording_id == input.recording_id);
+    credited(all).sort(|c| (c.pos, c.person_name)).map(|c| CreditsEntry {
+        instrument: c.instrument,
+        name: c.person_name,
+        pos: c.pos,
+        role: c.role,
+    })
+}
+
+/// One performance's tracks in the order the work goes: by movement number,
+/// a track of no movement after the rest.
+#[ark::query("library.recording")]
+pub fn recording(db: Harken, input: RecordingInput) -> Vec<LibraryEntry> {
+    db.song
+        .filter(|s| s.recording_id == input.id && db.media.get(s.media_id).is_some())
+        .sort(|s| {
+            (
+                s.movement_id.is_none(),
+                movement_of(db, s).map_or(0, |m| m.no),
+                db.media.get(s.media_id).map_or("", |m| m.title),
+            )
+        })
+        .map(|s| library_entry(db.media.get(s.media_id).unwrap(), playlist_pos(db, input.playlist_id, s.media_id)))
 }

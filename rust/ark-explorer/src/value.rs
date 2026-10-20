@@ -16,13 +16,13 @@
 //! written back by [`encode`]: the codec's own encoding, so what a form
 //! sends is what `parse` (the module's form validator) reads.
 
-use ark5::check::Types;
-use ark5::codec::{put_bytes, put_int, put_variant, Reader};
-use ark5::ir::Rule;
-use ark5::module::Module;
-use ark5::schema::Table;
-use ark5::ty::Ty as Structure;
-use ark5::Refusal;
+use ark::check::Types;
+use ark::codec::{put_bytes, put_int, put_variant, Reader};
+use ark::ir::Rule;
+use ark::module::Module;
+use ark::schema::Table;
+use ark::ty::Ty as Structure;
+use ark::Refusal;
 
 /// A type as the explorer draws it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,7 +174,7 @@ pub fn row_ty(cx: &Types, t: &Table) -> Ty {
 }
 
 /// A column's type: its declaration, else its structure.
-pub fn column_ty(cx: &Types, c: &ark5::schema::Column) -> Ty {
+pub fn column_ty(cx: &Types, c: &ark::schema::Column) -> Ty {
     match c.decl.as_str() {
         "Int" => Ty::Int,
         "Bool" => Ty::Bool,
@@ -185,7 +185,7 @@ pub fn column_ty(cx: &Types, c: &ark5::schema::Column) -> Ty {
 
 /// When the elements of a list are some table's rows — their fields'
 /// declarations the table's columns', in order — the table's column names.
-pub fn row_labels(schema: &ark5::schema::Schema, element: &Structure, cx: &Types) -> Option<Vec<String>> {
+pub fn row_labels(schema: &ark::schema::Schema, element: &Structure, cx: &Types) -> Option<Vec<String>> {
     let (fields, true) = fields_of(cx, std::slice::from_ref(element)) else {
         return None;
     };
@@ -194,7 +194,7 @@ pub fn row_labels(schema: &ark5::schema::Schema, element: &Structure, cx: &Types
 
 /// When these fields' declarations are some table's columns', in order,
 /// the table's column names.
-pub fn columns_of(schema: &ark5::schema::Schema, fields: &[Structure]) -> Option<Vec<String>> {
+pub fn columns_of(schema: &ark::schema::Schema, fields: &[Structure]) -> Option<Vec<String>> {
     let said: Vec<String> = fields.iter().map(decl_name).collect();
     schema
         .tables
@@ -317,7 +317,7 @@ pub fn ty_name(t: &Ty) -> String {
 
 /// A refinement as it is said beside a field: `trimmed`, `1 to 120 chars`,
 /// `non-empty`, and a predicate by its message.
-pub fn rule_said(r: &ark5::ir::Refine) -> Option<String> {
+pub fn rule_said(r: &ark::ir::Refine) -> Option<String> {
     let why = r.why.as_ref().map_or(String::new(), |w| format!(" (\u{201c}{w}\u{201d})"));
     let chars = |n: i64| if n == 1 { "char" } else { "chars" };
     Some(match &r.rule {
@@ -356,9 +356,9 @@ pub fn text_of(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
         Value::Text(t) => t.clone(),
-        Value::Bytes(b) => ark5::hash::hex(b),
+        Value::Bytes(b) => ark::hash::hex(b),
         Value::Id(id) => {
-            let h = ark5::hash::hex(id);
+            let h = ark::hash::hex(id);
             format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
         }
         Value::List(xs) => format!("[{}]", all(xs)),

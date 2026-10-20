@@ -3,24 +3,20 @@ name = "ark-server"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "An ArkDB sync server for any app's module, on axum: the authority with its procedures native and its log on disk, the sync socket with keepalive, live rooms with hooks an app registers, sign-in routes, /healthz, /media, and a static web build served with the build as its validator."
+description = "The ArkDB v5 hub (docs/plan-v5.md §1.7, §1.9, §1.11): one authority per space, connections routed, the log on disk, live devices, the sync socket on axum, sign-in and a web build."
 
 [dependencies]
 ark = { path = "../ark" }
-ark-client = { path = "../ark-client", default-features = false }
+ark-client = { path = "../ark-client" }
 ark-auth = { path = "../ark-auth", features = ["server"] }
-# The admin page's wire and what it reads (`docs/plan-guards.md` D4): the
-# explorer without its window, so the server links no iced.
+# The admin page's wire (`admin`): the explorer without its window.
 ark-explorer = { path = "../ark-explorer", default-features = false }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 tower-http = { version = "0.5", features = ["fs"] }
 
 [dev-dependencies]
-ark-auth = { path = "../ark-auth", features = ["server", "client"] }
 tempfile = "3"
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-tokio-tungstenite = "0.24"
-ureq = { version = "2", default-features = false }
+ark-dev = { path = "../ark-dev" }
+ark-auth = { path = "../ark-auth", features = ["server", "client"] }

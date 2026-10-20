@@ -1,0 +1,5 @@
+error: a closure outside a combinator is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/loose_closure.rs:7:13
+  |
+7 |     let g = |x: Int| x;
+  |             ^^^^^^^^^^

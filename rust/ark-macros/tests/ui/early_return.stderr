@@ -1,0 +1,5 @@
+error: `return` is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/early_return.rs:7:5
+  |
+7 |     return a;
+  |     ^^^^^^^^

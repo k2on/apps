@@ -1,10 +1,10 @@
-//! harken's server, on `ark5-server`.
+//! harken's server, on `ark-server`.
 //!
 //! Almost nothing here is about sync, and that is the point: the log and
 //! the listening session's volatile space on the hub, the socket at
 //! `/sync`, `/healthz`, the sign-in routes and the web build's validator
-//! are `ark5_server`'s and `ark_auth`'s, generic over any app; the domain
-//! is `harken_domain5`'s. What is harken's is the things only harken has,
+//! are `ark_server`'s and `ark_auth`'s, generic over any app; the domain
+//! is `harken_domain`'s. What is harken's is the things only harken has,
 //! each a module a test can reach:
 //!
 //! - [`library`]: the media directory as a peer — walked, watched, and
@@ -12,7 +12,7 @@
 //! - [`covers`]: where a track's cover comes from, and `/media`;
 //! - [`assistant`]: the house's speakers, as devices in each account's
 //!   listening session — which is the domain's live state
-//!   (`harken_domain5::listening`), sequenced by the hub's volatile
+//!   (`harken_domain::listening`), sequenced by the hub's volatile
 //!   authority, and needs nothing of this crate;
 //! - [`hosted`]: the module the hub runs, harken's own or one from a file;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
@@ -25,7 +25,7 @@
 //! the phone all sign in the same way. Without a provider it refuses to
 //! start, unless told it is on a laptop (`HARKEN_DEV_AUTH=1`).
 //!
-//! A device is a session (`harken_domain5::listening`): a connection's
+//! A device is a session (`harken_domain::listening`): a connection's
 //! volatile `Hello` says what the device is, and the hub authors `on_join`
 //! with it, its user and id the verified login's ([`device`]).
 
@@ -39,15 +39,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use ark5::ir::Node;
-use ark5::peer::Who;
-use ark5_server::hub::{Config as HubConfig, Live};
-use ark5_server::Running;
+use ark::ir::Node;
+use ark::peer::Who;
 use ark_auth::oidc::Provider;
 use ark_auth::server::{Auth, Mode};
 use ark_auth::session::SessionStore;
 use ark_auth::Account;
-use harken_domain5::listening::Device;
+use ark_server::hub::{Config as HubConfig, Live};
+use ark_server::Running;
+use harken_domain::listening::Device;
 
 use assistant::ha;
 use hosted::Hosted;
@@ -73,7 +73,7 @@ pub enum SignIn {
 }
 
 /// How often the sync socket pings, and how many may go unanswered before
-/// a connection is closed. `ark5-server` closes after three unanswered, so
+/// a connection is closed. `ark-server` closes after three unanswered, so
 /// `missed` is read and held to that ([`Config::from_vars`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Keepalive {
@@ -91,7 +91,7 @@ impl Default for Keepalive {
 }
 
 /// How much of the log the server keeps: `entries` above the snapshot the
-/// log stands on (`ark5_server::Config::keep`); a device further behind is
+/// log stands on (`ark_server::Config::keep`); a device further behind is
 /// sent the snapshot and rebases onto it. `days` is read and checked, and
 /// kept nothing by: v5's horizon is a count of entries, not a device's
 /// place.
@@ -161,7 +161,7 @@ pub struct Config {
     /// `docs/plan-guards.md` D4 Where the admin page listens
     /// (`HARKEN_ADMIN_BIND`, what `services.harken.admin.bind` sets; none
     /// without it): nothing asked on loopback and a login holding `admin`
-    /// anywhere wider (`ark5_server::admin`).
+    /// anywhere wider (`ark_server::admin`).
     pub admin_bind: Option<String>,
     /// The admin page's static build (`HARKEN_ADMIN_WEB`): `ark-admin`
     /// compiled to wasm. Without it the admin listener serves its API alone.
@@ -454,9 +454,9 @@ pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
 /// log's head and its horizon (the snapshot it stands on); the module it
 /// runs, `current`, and each it holds as run before (`HARKEN_OLD_MODULES`),
 /// by hash; and every account with a connection open, with how many — what
-/// the fleet and the VM test read. Answered in front of `ark5-server`'s own
+/// the fleet and the VM test read. Answered in front of `ark-server`'s own
 /// `/healthz`, which says `ok` alone.
-pub async fn health(hub: &ark5_server::Handle, hosted: &Hosted) -> Option<String> {
+pub async fn health(hub: &ark_server::Handle, hosted: &Hosted) -> Option<String> {
     let hub = hub.clone();
     let mut modules = format!("module {} current\n", hosted.domain.module.hash());
     for m in &hosted.held {
@@ -487,7 +487,7 @@ pub async fn health(hub: &ark5_server::Handle, hosted: &Hosted) -> Option<String
 }
 
 async fn healthz(
-    axum::extract::State((hub, hosted)): axum::extract::State<(ark5_server::Handle, Hosted)>,
+    axum::extract::State((hub, hosted)): axum::extract::State<(ark_server::Handle, Hosted)>,
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -599,7 +599,7 @@ pub async fn start(config: Config) -> Result<Server> {
         .iter()
         .map(|(r, a)| (r.clone(), a.clone()))
         .chain([(
-            harken_domain5::schema::LIBRARY.to_string(),
+            harken_domain::schema::LIBRARY.to_string(),
             vec![library::ACCOUNT.to_string()],
         )]);
     let mut auth = Auth::new(sessions, mode(&config.sign_in).await?, &public_url)
@@ -613,7 +613,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // sent one when it names a host. A wildcard bind names none, and the
     // address the page is reached at goes in `HARKEN_REDIRECTS`.
     if let Some(bind) = &config.admin_bind {
-        if !ark5_server::admin::is_loopback(bind)
+        if !ark_server::admin::is_loopback(bind)
             && !bind.starts_with("0.0.0.0:")
             && !bind.starts_with("[::]:")
         {
@@ -622,7 +622,7 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let auth = Arc::new(auth);
 
-    let mut builder = ark5_server::builder(hub_config(&hosted, config.retain.entries))
+    let mut builder = ark_server::builder(hub_config(&hosted, config.retain.entries))
         .data(&config.data)
         .auth(auth.clone())
         .keepalive(config.keepalive.every);
@@ -654,7 +654,7 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     // `docs/plan-guards.md` D4 The admin page, where one is asked for.
     if let Some(bind) = &config.admin_bind {
-        builder = builder.admin(ark5_server::admin::Admin {
+        builder = builder.admin(ark_server::admin::Admin {
             bind: bind.clone(),
             page: config.admin_web.clone(),
             server: Some(public_url.clone()),
@@ -695,7 +695,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 .issue(&Account {
                     id: library::ACCOUNT.into(),
                     name: "Library".into(),
-                    roles: vec![harken_domain5::schema::LIBRARY.into()],
+                    roles: vec![harken_domain::schema::LIBRARY.into()],
                     ..Account::default()
                 })
                 .map_err(|e| anyhow!("signing the scanner in: {e}"))?;

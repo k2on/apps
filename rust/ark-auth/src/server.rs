@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-use ark5::peer::Who;
+use ark::peer::Who;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -265,7 +265,7 @@ impl Auth {
 }
 
 /// What the sync server asks of a connection's token: who it proves, or
-/// nobody (`ark5-server`'s `Authenticate`).
+/// nobody (`ark-server`'s `Authenticate`).
 pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
 
 impl Auth {
@@ -542,7 +542,10 @@ mod tests {
         let login = a.redeem(&code).expect("redeemed");
         assert_eq!(login.user.roles, ["library", "scanner"]);
         let who = a.authenticator()(&login.token).expect("signed in");
-        assert_eq!((who.actor.as_str(), &who.session, who.roles), ("alice", &login.session, vec!["library".to_string(), "scanner".into()]));
+        assert_eq!(
+            (who.actor.as_str(), &who.session, who.roles),
+            ("alice", &login.session, vec!["library".to_string(), "scanner".into()])
+        );
         assert!(a.announce().contains("role library: alice"), "{}", a.announce());
         // The same session store, the configuration moved: the role goes.
         let store = std::mem::replace(&mut *a.sessions(), sessions());

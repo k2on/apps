@@ -1,0 +1,5 @@
+error: a turbofish is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/turbofish.rs:7:11
+  |
+7 |     xs.map::<Int>(|x| x)
+  |           ^^^^^^^

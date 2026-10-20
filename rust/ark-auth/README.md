@@ -3,8 +3,8 @@
 Who an ArkDB peer is. `petros-auth`, on ArkDB.
 
 The engine asks one question about identity, once per connection: at
-`Hello`, what does this token prove (`server::Authenticate`, the `ark5::peer::Who`
-it proves, as `ark5-server` asks it)? This
+`Hello`, what does this token prove (`server::Authenticate`, the `ark::peer::Who`
+it proves, as `ark-server` asks it)? This
 crate answers it for a server that signs people in with OpenID Connect, and
 gives the clients the other half — how to get a token to send.
 
@@ -37,7 +37,7 @@ gives the clients the other half — how to get a token to send.
   for every login at once. `Account.roles` carries them to the client in
   the exchange's and `/auth/me`'s answers (absent when none, so a login
   remembered before roles reads as one holding none); a client hands them
-  to its client as the `Who` it authors as (`ark5_client::auth::who`),
+  to its client as the `Who` it authors as (`ark_client::auth::who`),
   and the server takes a connection's roles from what it asks here
   whatever the client says.
   `auth.authenticator()` answers `Who { actor, session, roles }`. A
@@ -120,7 +120,7 @@ if let Some(code) = ark_auth::web::take_code() {
 | iced's hand-written `remembered::{recall, remember, forget}` | `remember::Logins::new(app).{recall, remember, forget}` |
 | `session::SessionStore::open(petros::open_path(..))` (SQLite, Diesel) | `SessionStore::open(path)` (a JSON file) / `SessionStore::memory()` |
 | `SessionStore::issue(&account)` before `Auth::new` | `Auth::issue(&account)` after it, or the store's `issue` |
-| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `auth.authenticator()` → `server::Authenticate` (a token to an `ark5::peer::Who`); `auth.owns(user, session)` |
+| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `auth.authenticator()` → `server::Authenticate` (a token to an `ark::peer::Who`); `auth.owns(user, session)` |
 | `Mode::{Oidc, Dev}`, `Auth::new(..).allow_redirect(..)`, `server::router` | the same (axum 0.7) |
 | a secret passed in | `oidc::read_secret(path)`, `Provider::discover_with_secret_file` |
 

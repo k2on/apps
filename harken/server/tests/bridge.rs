@@ -4,7 +4,7 @@
 //! Assistant bridge stands in for, and a Home Assistant that answers over
 //! HTTP.
 //!
-//! The session's rules are transition tests in `harken/domain5/tests/
+//! The session's rules are transition tests in `harken/domain/tests/
 //! listening.rs`, and the bridge's are unit tests beside it. This is the
 //! plumbing above both, which neither can see and which is where a device
 //! goes missing without any rule being wrong — a speaker that never stood,
@@ -30,16 +30,16 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ark5::ir::Node;
-use ark5_server::handle::now;
+use ark::ir::Node;
 use ark_auth::Account;
+use ark_server::handle::now;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use common::*;
-use harken_domain5::listening::read::{Kind, Listening};
-use harken_domain5::listening::{
+use harken_domain::listening::read::{Kind, Listening};
+use harken_domain::listening::{
     Clock, Member, NudgeVolume, Output, SetMute, SetVolume, Track, Transfer,
 };
 use harken_server::assistant::{ha, input};
@@ -701,7 +701,7 @@ fn track(t: &str, n: u8) -> Track {
     let mut id = [0u8; 16];
     id[15] = n;
     Track {
-        id: ark5::author::Id::new(id),
+        id: ark::author::Id::new(id),
         title: t.into(),
         creator: "Bach".into(),
         album: String::new(),
@@ -735,8 +735,8 @@ fn held(server: &Server, user: &str) -> Option<Listening> {
     (s.session.is_some() || !s.devices.is_empty()).then_some(s)
 }
 
-/// More songs than one page of the log (`ark5::peer::PAGE`).
-const SONGS: usize = ark5::peer::PAGE + 44;
+/// More songs than one page of the log (`ark::peer::PAGE`).
+const SONGS: usize = ark::peer::PAGE + 44;
 
 /// How far into the session's volatile log a client has heard.
 fn live_head(p: &Peer) -> i64 {
@@ -988,17 +988,17 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
         .auth
         .issue(&Account {
             id: "library".into(),
-            roles: vec![harken_domain5::schema::LIBRARY.into()],
+            roles: vec![harken_domain::schema::LIBRARY.into()],
             ..Account::default()
         })
         .unwrap();
-    let mut library = open(ark5_client::auth::who(&login), None);
+    let mut library = open(ark_client::auth::who(&login), None);
     library.connect(&server.url(), &login.token);
     for i in 0..SONGS {
         let t = format!("song-{i:03}");
         library.mutate(
             "library.add_song",
-            &harken_domain5::library::AddSong {
+            &harken_domain::library::AddSong {
                 title: t.clone(),
                 artist: "The Fleet".into(),
                 album: "Loopback".into(),
@@ -1531,7 +1531,7 @@ fn a_speaker_plays_through(spell: fn(&str) -> String) {
     }
     let files: Vec<String> = queue(&names)
         .iter()
-        .map(|t| harken_domain5::listening::url(MEDIA, &t.file))
+        .map(|t| harken_domain::listening::url(MEDIA, &t.file))
         .collect();
     assert_eq!(fake.queued(KITCHEN), files, "the speaker's queue is ours");
     let calls = fake.take();
@@ -1755,7 +1755,7 @@ fn a_cast_is_where_the_speaker_is_and_never_the_beginning() {
             ..house(url)
         })
     });
-    let bound = harken_domain5::listening::read::SYNC_MS;
+    let bound = harken_domain::listening::read::SYNC_MS;
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
@@ -2125,7 +2125,7 @@ fn the_queue_edited_reaches_the_speaker_without_a_gap() {
     told(&mut browser, "the kitchen playing", |s| {
         s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
     });
-    let url_of = |t: &str| harken_domain5::listening::url(MEDIA, &format!("music/{t}.mp3"));
+    let url_of = |t: &str| harken_domain::listening::url(MEDIA, &format!("music/{t}.mp3"));
     call(
         &mut browser,
         "enqueue",

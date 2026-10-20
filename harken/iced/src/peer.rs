@@ -18,12 +18,12 @@
 //! to keep the sidebar cheap: the albums view is not touched by a toggle.
 use std::collections::HashMap;
 
-use ark5::author::{Id as Key, Node};
-use ark5::view::Patch;
+use ark::author::{Id as Key, Node};
+use ark::view::Patch;
 #[cfg(test)]
-use harken_domain5::library::LibraryEntry;
-use harken_domain5::library::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, WorkSummary, Works};
-use harken_domain5::playlists::{CreatePlaylist, PlaylistInput, PlaylistsOf};
+use harken_domain::library::LibraryEntry;
+use harken_domain::library::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, WorkSummary, Works};
+use harken_domain::playlists::{CreatePlaylist, PlaylistInput, PlaylistsOf};
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
@@ -153,7 +153,7 @@ pub enum Moved {
     Reset,
 }
 
-/// The patches, in order, onto the decoded list: `ark5::view::splice` with
+/// The patches, in order, onto the decoded list: `ark::view::splice` with
 /// the decoding said, because a row here is a type of this crate's.
 fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&[u8]) -> T) {
     for p in patches {
@@ -282,7 +282,7 @@ pub struct Peer {
     /// the last refresh saw. The explorer diffs what it shows against what
     /// it last drew when this moves, and not on an update where nothing did.
     pub store_gen: u64,
-    seen: ark5::hash::StateHash,
+    seen: ark::hash::StateHash,
 }
 
 /// `()`'s bytes: a query with no input.
@@ -537,12 +537,12 @@ impl Peer {
 
     #[cfg(test)]
     pub fn recordings_of(&self, work: &str) -> Vec<Recording> {
-        self.ask::<harken_domain5::library::RecordingsEntry, _>("recordings", &Recordings { work_id: work.into() })
+        self.ask::<harken_domain::library::RecordingsEntry, _>("recordings", &Recordings { work_id: work.into() })
     }
 
     #[cfg(test)]
-    pub fn credits(&self, recording: &str) -> Vec<harken_domain5::library::CreditsEntry> {
-        let input = harken_domain5::library::Credits {
+    pub fn credits(&self, recording: &str) -> Vec<harken_domain::library::CreditsEntry> {
+        let input = harken_domain::library::Credits {
             recording_id: recording.into(),
         };
         self.client.query("credits", &input).unwrap_or_default()
@@ -559,7 +559,7 @@ impl Peer {
 
     #[cfg(test)]
     pub fn track_details(&self) -> Vec<TrackDetail> {
-        self.ask::<harken_domain5::library::TrackDetailsEntry, _>("track_details", &())
+        self.ask::<harken_domain::library::TrackDetailsEntry, _>("track_details", &())
     }
 
     /// The library as its query answers it now, against the playlist it is
@@ -793,10 +793,10 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
 mod tests {
     use super::*;
     use crate::tests::{alone, signed_in, song};
-    use ark5::frames::Frame;
-    use ark5::peer::Who;
-    use ark5::schema::Space;
-    use harken_domain5::playlists::AddToPlaylist;
+    use ark::frames::Frame;
+    use ark::peer::Who;
+    use ark::schema::Space;
+    use harken_domain::playlists::AddToPlaylist;
 
     fn on(playlist: Id, media: Id) -> AddToPlaylist {
         AddToPlaylist {
@@ -856,15 +856,15 @@ mod tests {
     ///
     /// Falsified by `Peer::join` opening every view afresh after the join (a
     /// new `who_epoch`): every list was `Reset` and "nothing moved" failed;
-    /// and by `ark5_client::Client::sign_in` authoring the pending intents
+    /// and by `ark_client::Client::sign_in` authoring the pending intents
     /// again from a new origin: the log held 4, the add refused "not your
     /// playlist".
     #[test]
     fn a_window_alone_joins_a_server_in_place() {
-        use ark5_server::hub::{Config, Hub};
+        use ark_server::hub::{Config, Hub};
         let mut client = Replica::memory(crate::client::nobody(), None);
         client.alone();
-        client.set_roles([harken_domain5::schema::LIBRARY]);
+        client.set_roles([harken_domain::schema::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.ensure_playlist();
         for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
@@ -884,18 +884,18 @@ mod tests {
         assert_eq!(peer.client.pending_len(), 5);
 
         let d = crate::client::domain();
-        let module = ark5_client::Module {
+        let module = ark_client::Module {
             schema: d.schema.clone(),
             cas: d.cas(),
             lib: d.lib.clone(),
         };
-        let mut hub = Hub::open(Config::new(module), Box::new(ark5_client::Memory::default()), 0);
+        let mut hub = Hub::open(Config::new(module), Box::new(ark_client::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles of the login.
         let alice = Who {
             actor: "alice".into(),
             session: "alice@desktop".into(),
-            roles: vec![harken_domain5::schema::LIBRARY.into()],
+            roles: vec![harken_domain::schema::LIBRARY.into()],
         };
         peer.client.sign_in(alice.clone(), "alice@desktop:library".into());
         peer.refresh();

@@ -1,8 +1,0 @@
-{
-  "cases": [{"function":"6f40906208b9f0950d702513b87bcf615b5775a4c03d0d07f00102df1fe15ac7","input_bytes":"200000","messages":[{"at":[],"message":"a playlist needs a name"}],"name":"empty-name","normalised":null}
-,{"function":"6f40906208b9f0950d702513b87bcf615b5775a4c03d0d07f00102df1fe15ac7","input_bytes":"204d6978200000","messages":[],"name":"trimmed","normalised":"Mix"}
-,{"function":"5a8e578b8b9ce4f42d31bba37bcef62207de024d03f777ea816fe50935f36ea1","input_bytes":"07070700000000","messages":[{"at":[{"$int":"0"}],"message":"exactly 16 bytes"},{"at":[{"$int":"1"}],"message":"at least 1 character"}],"name":"two-fields","normalised":null}
-,{"function":"5a8e578b8b9ce4f42d31bba37bcef62207de024d03f777ea816fe50935f36ea1","input_bytes":"00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff020000740000","messages":[],"name":"unknown-playlist-passes","normalised":[{"$id":"00000000-0000-0000-0000-000000000002"},"t"]}
-,{"function":"6f40906208b9f0950d702513b87bcf615b5775a4c03d0d07f00102df1fe15ac7","input_bytes":"ff0000","messages":[{"at":[],"message":"not UTF-8 text"}],"name":"not-utf8","normalised":null}
-,{"function":"6f40906208b9f0950d702513b87bcf615b5775a4c03d0d07f00102df1fe15ac7","input_bytes":"4d697800","messages":[{"at":[],"message":"bytes without their 00 00 terminator at byte 0"}],"name":"not-canonical","normalised":null}]
-}

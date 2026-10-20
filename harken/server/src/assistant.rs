@@ -1,6 +1,6 @@
 //! Home Assistant's media players, as devices in the listening session.
 //!
-//! A Sonos is a *device*, not a client. The session (`harken_domain5::
+//! A Sonos is a *device*, not a client. The session (`harken_domain::
 //! listening`, live state over volatile tables) already describes one — it
 //! stands in an account's session, is handed the sound, and says what
 //! happens to it — and nothing in that says the far end has to be
@@ -48,8 +48,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use harken_domain5::listening::read::{Kind, Listening};
-use harken_domain5::listening::{url, Active, Clock, Output};
+use harken_domain::listening::read::{Kind, Listening};
+use harken_domain::listening::{url, Active, Clock, Output};
 
 /// A transition's input, as its bytes ([`input`]).
 pub type Args = Vec<u8>;
@@ -57,8 +57,8 @@ pub type Args = Vec<u8>;
 /// The inputs of the session's transitions, as the bridge and its tests
 /// say them: each the domain's input type, encoded.
 pub mod input {
-    use ark5::ir::Node;
-    use harken_domain5::listening::*;
+    use ark::ir::Node;
+    use harken_domain::listening::*;
 
     pub fn none() -> Vec<u8> {
         ().to_bytes()
@@ -284,7 +284,7 @@ pub const SEEKS: u8 = 3;
 /// told (`report_position`, said as the speaker, and nothing told to any
 /// player); and the session is right about where somebody asked it to be,
 /// so the speaker is told (`media_seek`) when it is the session that moved.
-pub use harken_domain5::listening::read::SYNC_MS;
+pub use harken_domain::listening::read::SYNC_MS;
 
 /// How far a playing speaker may be from the session before what moved it
 /// was somebody's hand on the speaker — a seek in the Sonos app — said as
@@ -1386,7 +1386,7 @@ impl Bridge {
             if seen.equipped.as_ref() != Some(&caps) {
                 let volume = reading
                     .volume
-                    .unwrap_or(harken_domain5::listening::UNSAID_VOLUME);
+                    .unwrap_or(harken_domain::listening::UNSAID_VOLUME);
                 seen.equipped = Some(caps.clone());
                 seen.volume = Some((volume, reading.muted));
                 acts.push(call(
@@ -1736,9 +1736,9 @@ pub fn playing<'a>(state: &Listening, entities: impl IntoIterator<Item = &'a str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark5::author::Id;
-    use harken_domain5::listening::read::Kind;
-    use harken_domain5::listening::{Present as Device, Track};
+    use ark::author::Id;
+    use harken_domain::listening::read::Kind;
+    use harken_domain::listening::{Present as Device, Track};
 
     /// A device as it declared itself, with nothing said of its volume or
     /// its group: what `on_join` writes.
@@ -1753,7 +1753,7 @@ mod tests {
             muted: false,
             name: name.into(),
             user: String::new(),
-            volume: harken_domain5::listening::UNSAID_VOLUME,
+            volume: harken_domain::listening::UNSAID_VOLUME,
         }
     }
 
@@ -2574,7 +2574,7 @@ mod tests {
     /// re-spelling was a different address.
     #[test]
     fn an_address_is_the_same_however_it_is_spelt() {
-        let ours = harken_domain5::listening::url(
+        let ours = harken_domain::listening::url(
             "http://10.0.0.2:8787",
             "music/Bach/Air (BWV 1068) & Café d'Été.mp3",
         );
@@ -3127,7 +3127,7 @@ mod tests {
 /// not a problem worth a runtime.
 ///
 /// **Each speaker is a device**, one connection to the hub per session it
-/// stands in ([`ark5_server::Handle::connect`]): a volatile machine of its
+/// stands in ([`ark_server::Handle::connect`]): a volatile machine of its
 /// own, signed in as the session's account on a session of its own
 /// ([`speaker`]), which says in its `Hello` that it is a speaker — so the
 /// hub authors its `on_join`, and its `on_leave` when the connection
@@ -3135,7 +3135,7 @@ mod tests {
 /// machine current and wake the thread, which reads the sessions whole
 /// from the hub, which is in this process.
 ///
-/// A device is a session (`harken_domain5::listening`), so a speaker's id
+/// A device is a session (`harken_domain::listening`), so a speaker's id
 /// in the session is its connection's session, `user@entity`, which two
 /// accounts' kitchens do not share; the bridge reads and says it as the
 /// entity ([`as_entities`]). A speaker's machine is kept for the life of
@@ -3159,15 +3159,15 @@ pub mod ha {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
-    use ark5::ir::Node;
-    use ark5::peer::{Input, Output, Peer, Role, Who};
-    use ark5::schema::Space;
-    use ark5::store::{Read, Scan};
-    use ark5_server::hub::ConnId;
-    use ark5_server::Handle;
-    use harken_domain5::listening::read::{Kind, Listening};
-    use harken_domain5::listening::{Device, Output as Sound};
-    use harken_domain5::schema::{Listening as Row, ListeningDevice};
+    use ark::ir::Node;
+    use ark::peer::{Input, Output, Peer, Role, Who};
+    use ark::schema::Space;
+    use ark::store::{Read, Scan};
+    use ark_server::hub::ConnId;
+    use ark_server::Handle;
+    use harken_domain::listening::read::{Kind, Listening};
+    use harken_domain::listening::{Device, Output as Sound};
+    use harken_domain::schema::{Listening as Row, ListeningDevice};
 
     use super::{input, listening, playing, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
     use crate::hosted::Hosted;
@@ -3750,7 +3750,7 @@ pub mod ha {
                 // The members a speaker reports are speakers: by their ids in
                 // this session.
                 if transition == "report_group" {
-                    if let Ok(mut g) = harken_domain5::listening::ReportGroup::from_bytes(&input) {
+                    if let Ok(mut g) = harken_domain::listening::ReportGroup::from_bytes(&input) {
                         for m in &mut g.members {
                             if wires.entities.contains(m) {
                                 *m = speaker(&key, m);

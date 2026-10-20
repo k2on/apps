@@ -1,41 +1,41 @@
-//! Every harken query, maintained (`docs/plan-v4.md` §1.5): the contract
-//! held under a seeded generator of change sequences, one test per query.
+//! Every harken query, maintained (§1.10): `harken/domain/tests/views.rs`,
+//! one test per query, held to V1's contract — after every change the
+//! view's answer is a fresh evaluation's (`ark::view::query`) and its
+//! patches splice the list a screen holds into the new one.
 //!
-//! The library is seeded through the domain's own mutations (`common`), so
-//! the rows are the rows harken writes — albums, people, works, movements,
-//! recordings, credits, playlists — and then churned as raw rows by
-//! `rust/ark/tests/support/churn.rs`: adds, edits and removes across every
-//! table the query's plan reads, rows that join and rows that do not,
-//! group-key moves, having flips, and batches of several changes at once.
-//! After every batch the view is a fresh hydrate, its answer is what the
-//! plan reads now, and the patches splice the old answer into the new; a
-//! failure names the query, the seed, the step and the batch.
+//! The library is seeded through the domain's own functions, as v4's was,
+//! and then churned — where v4 churned raw rows (`ark/tests/support/
+//! churn.rs`, not ported), here by the domain's own mutations drawn by a
+//! seeded generator: songs added, retagged onto other albums and works and
+//! removed, playlists made, toggled and filled, people and works and
+//! recordings described and credited — so every change is one harken
+//! writes. v4's tallies of what a churn hit (joins, having flips, group
+//! moves) are its generator's; here each query is held to have been
+//! patched, by inserts, removes or updates, over its seeds.
 //!
-//! The middleware is the client's business (§1.7), so here it runs once at
-//! seed time and the plan is maintained in the scope it gave. The library
-//! is also followed through the domain's own mutations — the playlist's
-//! toggles among them — and through a rollback, which is what the view it
-//! replaces (`tests/view.rs`, the plan hack) held.
+//! Every test was falsified at once by a `View::push` that changed nothing
+//! (`rust/ark/src/view.rs`, broken in the working tree and restored): each
+//! failed at the first change its view should have moved by.
 
 mod common;
 
-#[path = "../../../rust/ark/tests/support/churn.rs"]
-mod churn;
+use ark::author::{Id, Node};
+use ark::interp::V;
+use ark::log::EntryId;
+use ark::peer::Ctx;
+use ark::store::Store;
+use ark::view::{query, splice, Patch, View};
+use common::{domain, full, song, track, with, Lib};
+use harken_domain::library::*;
+use harken_domain::playlists::*;
+use harken_domain::schema::*;
 
-use ark::eval::{self, Args, Ctx};
-use ark::store::MemoryStore;
-use ark::value::{Id, Value};
-use ark::view::{self, Env};
-use churn::{drive, Tally};
-use common::{args, track, Lib, Song};
-
-/// A seeded library and the arguments each query is asked with.
 struct Seeded {
     lib: Lib,
-    favs: Id,
-    work: Value,
-    recording: Value,
-    media: Value,
+    favs: Id<Playlist>,
+    work: String,
+    recording: String,
+    media: Id<Media>,
 }
 
 fn seeded() -> Seeded {
@@ -43,7 +43,7 @@ fn seeded() -> Seeded {
     let favs = c.playlist("alice", "Favorites");
     c.playlist("alice", "Other");
     c.playlist("bob", "Favorites");
-    let classical = [
+    for s in [
         track(
             "Aria",
             "Johann Sebastian Bach",
@@ -110,8 +110,7 @@ fn seeded() -> Seeded {
             "Messiah",
             44,
         ),
-    ];
-    for s in classical {
+    ] {
         c.add(s);
     }
     for (t, a, al, f) in [
@@ -120,48 +119,43 @@ fn seeded() -> Seeded {
         ("Gosh", "Jamie xx", "In Colour", "p3"),
         ("Loose", "Jamie xx", "", "p4"),
     ] {
-        c.add(Song {
-            file: f.into(),
-            ..Song::new(t, a, al)
-        });
+        c.add(with(f, song(t, a, al)));
     }
-    let works = c.list("works", args([("composer", Value::text("Johann Sebastian Bach"))]));
-    let work = works
-        .iter()
-        .find(|w| w.field("catalogue") == Value::text("BWV 988"))
-        .expect("the Goldberg")
-        .field("id");
-    let recording = c.list("recordings", args([("work_id", work.clone())]))[0].field("id");
-    c.mutate(
-        "alice",
-        "credit_recording",
-        args([
-            ("recording_id", recording.clone()),
-            ("person_name", Value::text("Glenn Gould")),
-            ("role", Value::text("piano")),
-            ("instrument", Value::text("piano")),
-            ("pos", Value::int(1)),
-        ]),
-    )
-    .unwrap();
-    c.mutate(
-        "alice",
-        "describe_person",
-        args([
-            ("name", Value::text("Johann Sebastian Bach")),
-            ("sort_name", Value::text("Bach, Johann Sebastian")),
-            ("born", Value::int(1685)),
-            ("died", Value::int(1750)),
-            ("art", Value::text("bach.jpg")),
-        ]),
-    )
-    .unwrap();
-    let ids: Vec<Value> = c.library(favs).iter().map(|r| r.field("id")).collect();
+    let works: Vec<WorkSummary> = c.list(
+        "works",
+        &Works {
+            composer: "Johann Sebastian Bach".into(),
+        },
+    );
+    let work = works.iter().find(|w| w.catalogue == "BWV 988").expect("the Goldberg").id.clone();
+    let recording = c.list::<RecordingsEntry>("recordings", &Recordings { work_id: work.clone() })[0]
+        .id
+        .clone();
+    let credit = CreditRecording {
+        recording_id: recording.clone(),
+        person_name: "Glenn Gould".into(),
+        role: "piano".into(),
+        instrument: "piano".into(),
+        pos: 1,
+    };
+    c.mutate("alice", "credit_recording", &credit).unwrap();
+    let bach = DescribePerson {
+        name: "Johann Sebastian Bach".into(),
+        sort_name: "Bach, Johann Sebastian".into(),
+        born: 1685,
+        died: 1750,
+        art: "bach.jpg".into(),
+    };
+    c.mutate("alice", "describe_person", &bach).unwrap();
+    let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id.clone()).collect();
     for i in [0, 3, 6] {
         c.mutate(
             "alice",
             "add_to_playlist",
-            args([("playlist_id", Value::Id(favs)), ("media_id", ids[i].clone())]),
+            &AddToPlaylist {
+                playlist_id: favs.clone(),
+                media_id: ids[i].clone(),
+            },
         )
         .unwrap();
     }
@@ -174,287 +168,395 @@ fn seeded() -> Seeded {
     }
 }
 
+/// Knuth's MMIX generator, as the simulator's.
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((self.0 >> 33) % n as u64) as usize
+    }
+
+    fn pick<'a>(&mut self, xs: &[&'a str]) -> &'a str {
+        xs[self.below(xs.len())]
+    }
+}
+
+/// One of the domain's mutations, drawn: refused or not, what it changed
+/// is in `c.last`.
+fn churn(c: &mut Lib, r: &mut Rng) {
+    let files = ["g1", "g2", "g3", "b1", "w1", "m1", "p1", "p2", "p3", "p4", "n1", "n2"];
+    let titles = ["Aria", "Variation 9", "Glue", "Air", "Gigue", "Largo"];
+    let artists = ["Johann Sebastian Bach", "George Frideric Handel", "Bicep", "Jamie xx", ""];
+    let albums = ["Goldberg Variations", "Isles", "Water Music", "In Colour", "Messiah", ""];
+    let catalogues = ["BWV 988", "BWV 1046", "HWV 348", "", ""];
+    let people = ["Glenn Gould", "Kimiko Ishizaka", "Johann Sebastian Bach", "Somebody"];
+    let media: Vec<Id<Media>> = c.rows::<Media>("media").into_iter().map(|m| m.id).collect();
+    let recordings: Vec<String> = c.rows::<Recording>("recording").into_iter().map(|r| r.id).collect();
+    let mine: Vec<Id<Playlist>> = c
+        .rows::<Playlist>("playlist")
+        .into_iter()
+        .filter(|p| p.user_id == "alice")
+        .map(|p| p.id)
+        .collect();
+    let some_media = |r: &mut Rng| media.get(r.below(media.len().max(1))).cloned();
+    c.last.clear();
+    let out = match r.below(9) {
+        0 | 1 => {
+            let s = AddSong {
+                file: r.pick(&files).into(),
+                track: r.below(4) as i64,
+                movement_no: r.below(3) as i64,
+                catalogue: r.pick(&catalogues).into(),
+                performer: r.pick(&people).into(),
+                album_art: r.pick(&["", "a.jpg", "b.jpg"]).into(),
+                ..song(r.pick(&titles), r.pick(&artists), r.pick(&albums))
+            };
+            c.mutate("alice", "add_song", &s)
+        }
+        2 => c.mutate(
+            "alice",
+            "create_playlist",
+            &CreatePlaylist {
+                name: r.pick(&["Favorites", "Late", "Mix"]).into(),
+            },
+        ),
+        3 | 4 => match (some_media(r), mine.get(r.below(mine.len().max(1)))) {
+            (Some(m), Some(p)) => c.mutate(
+                "alice",
+                "add_to_playlist",
+                &AddToPlaylist {
+                    playlist_id: p.clone(),
+                    media_id: m,
+                },
+            ),
+            _ => Ok(0),
+        },
+        5 => match (some_media(r), mine.get(r.below(mine.len().max(1)))) {
+            (Some(m), Some(p)) => c.mutate(
+                "alice",
+                "remove_from_playlist",
+                &RemoveFromPlaylist {
+                    playlist_id: p.clone(),
+                    media_id: m,
+                },
+            ),
+            _ => Ok(0),
+        },
+        6 => match some_media(r) {
+            Some(id) if r.below(2) == 0 => c.mutate("alice", "remove_media", &RemoveMedia { id }),
+            _ => {
+                let p = DescribePerson {
+                    name: r.pick(&people).into(),
+                    art: r.pick(&["", "x.jpg", "y.jpg"]).into(),
+                    ..DescribePerson::default()
+                };
+                c.mutate("alice", "describe_person", &p)
+            }
+        },
+        7 => match recordings.get(r.below(recordings.len().max(1))) {
+            Some(id) => {
+                let pos = r.below(3) as i64;
+                let cr = CreditRecording {
+                    recording_id: id.clone(),
+                    person_name: r.pick(&people).into(),
+                    role: r.pick(&["piano", "", "conductor"]).into(),
+                    instrument: String::new(),
+                    pos,
+                };
+                c.mutate("alice", "credit_recording", &cr)
+            }
+            None => Ok(0),
+        },
+        _ => match recordings.get(r.below(recordings.len().max(1))) {
+            Some(id) => c.mutate(
+                "alice",
+                "describe_recording",
+                &DescribeRecording {
+                    id: id.clone(),
+                    recorded: r.below(3) as i64 * 1000,
+                    licence: r.pick(&["", "CC0"]).into(),
+                    ..DescribeRecording::default()
+                },
+            ),
+            None => Ok(0),
+        },
+    };
+    if out.is_err() {
+        c.last.clear();
+    }
+}
+
 const SEEDS: u64 = 6;
 const STEPS: usize = 40;
 
-// Every seed of one query, asked as alice, summed.
-fn hold(name: &str, a: Args) -> Tally {
-    let s = seeded();
-    let m = harken_domain::module();
-    let built = m.build();
-    let f = built.lookup_function(name).unwrap_or_else(|| panic!("no query {name}"));
-    let c = ark::hash::closure(built, f);
-    let ctx = Ctx::new("alice", "s");
-    let (args, provided) = eval::middleware(&built.schema, &c, &ctx, &a, &s.lib.store).unwrap_or_else(|e| panic!("{name}: {e:?}"));
-    let env = Env {
-        helpers: c.helpers.clone(),
-        ctx,
-        args,
-        provided,
+/// How a view was patched, over every seed.
+#[derive(Debug, Default)]
+struct Tally {
+    pushes: usize,
+    inserts: usize,
+    removes: usize,
+    updates: usize,
+}
+
+/// The query `name` on `input` as alice, maintained over every seed's
+/// churn: after every push the view is the query, and the patches splice.
+fn hold(name: &str, input: &impl Node) -> Tally {
+    let d = domain();
+    let (f, input) = (d.get(&full(name)), input.to_bytes());
+    let ctx = Ctx {
+        id: EntryId::of("q", 0),
+        actor: "alice".into(),
+        session: "q".into(),
+        roles: vec![],
+        now: 0,
     };
-    let plan = f.plan.clone().expect("a query is a plan");
-    let first = view::read(&built.schema, &plan, &env.scope(&built.schema), &s.lib.store).unwrap();
-    assert!(!first.is_empty(), "{name}: the seed answers something to maintain");
     let mut sum = Tally::default();
     for seed in 0..SEEDS {
-        let t = drive(name, &built.schema, &plan, &env, s.lib.store.clone(), seed, STEPS);
-        sum.steps += t.steps;
-        sum.batches += t.batches;
-        sum.inserts += t.inserts;
-        sum.removes += t.removes;
-        sum.updates += t.updates;
-        sum.joined += t.joined;
-        sum.unjoined += t.unjoined;
-        sum.flips += t.flips;
-        sum.moves += t.moves;
-        sum.window += t.window;
+        let mut c = seeded().lib;
+        let mut v = View::new(&d.lib, &f, &input, ctx.clone(), &c.store).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut shown = v.rows();
+        assert!(seed > 0 || !shown.is_empty(), "{name}: the seed answers something to maintain");
+        let mut r = Rng(seed);
+        for step in 0..STEPS {
+            churn(&mut c, &mut r);
+            let ps = v
+                .push(&c.last, &c.store)
+                .unwrap_or_else(|e| panic!("{name} seed {seed} step {step}: {e}"));
+            sum.pushes += 1;
+            for p in &ps {
+                match p {
+                    Patch::Insert { .. } => sum.inserts += 1,
+                    Patch::Remove { .. } => sum.removes += 1,
+                    Patch::Update { .. } => sum.updates += 1,
+                }
+            }
+            shown = splice(&ps, &shown);
+            let fresh = query(&d.lib, &f, &input, &ctx, &c.store).unwrap();
+            assert_eq!(v.rows(), fresh, "{name} seed {seed} step {step}: the view is the query");
+            assert_eq!(shown, fresh, "{name} seed {seed} step {step}: the patches splice");
+        }
     }
     eprintln!("{name}: {sum:?}");
-    assert!(sum.batches > 0 && sum.inserts + sum.removes + sum.updates > 0, "{name}: {sum:?}");
     sum
 }
 
-fn with_favs(s: &Seeded, more: &[(&str, Value)]) -> Args {
-    let mut a = args([("playlist_id", Value::Id(s.favs))]);
-    for (k, v) in more {
-        a.insert(k.to_string(), v.clone());
-    }
-    a
+fn moved(t: &Tally) -> bool {
+    t.inserts > 0 && t.removes > 0 && t.updates > 0
 }
 
-/// `docs/plan-db.md` D4 The search box's query: a `Has` on the title or the
-/// creator, read through the text indexes on both and maintained as any
-/// filter is — a row whose title or creator is edited is re-admitted by the
-/// predicate — for a needle the indexes serve, one folded from capitals, and
-/// one too short to have a trigram. Falsified by reading an `or` of `Has`es
-/// through its first branch alone (`ark::view::needles`): "BACH", which
-/// only creators hold, answers nothing at all.
+/// v4's search box, for a needle in titles, one folded from capitals, and
+/// one of one character. Also falsified by `has` folding the text and not
+/// the needle: "BACH" answered nothing.
 #[test]
 fn search() {
     let s = seeded();
     for needle in ["ari", "BACH", "a"] {
-        let t = hold("search", with_favs(&s, &[("needle", Value::text(needle))]));
-        assert!(t.joined > 0 && t.updates + t.inserts + t.removes > 0, "{needle}: {t:?}");
+        let t = hold(
+            "search",
+            &Search {
+                playlist_id: s.favs.clone(),
+                needle: needle.into(),
+            },
+        );
+        assert!(t.inserts + t.removes + t.updates > 0, "{needle}: {t:?}");
     }
+    let hits: Vec<LibraryEntry> = s.lib.list(
+        "search",
+        &Search {
+            playlist_id: s.favs.clone(),
+            needle: "BACH".into(),
+        },
+    );
+    assert_eq!(hits.len(), 4, "every track whose creator holds it");
 }
 
-/// Falsified by recording no dependency for a `Related` node in
-/// `ark::view::entry` (a playlist entry added leaves `playlist_pos` stale).
 #[test]
 fn library() {
     let s = seeded();
-    let t = hold("library", with_favs(&s, &[]));
-    assert!(t.joined > 0 && t.unjoined > 0 && t.updates > 0, "{t:?}");
+    assert!(moved(&hold("library", &Library { playlist_id: s.favs })));
 }
 
-/// A having over a related list whose entries each look up their media:
-/// an album gaining its first song, or losing its last. Falsified by
-/// recording no dependency for a `Lookup` node (a media's creator edited
-/// leaves the album's `creator` stale).
 #[test]
 fn albums() {
-    let t = hold("albums", args([]));
-    assert!(t.joined > 0 && t.flips > 0 && t.updates > 0, "{t:?}");
+    assert!(moved(&hold("albums", &())));
 }
 
-/// A group source: a media's creator edited moves it between groups.
-/// Falsified by not removing the old row from its group's members.
 #[test]
 fn artists() {
-    let t = hold("artists", args([]));
-    assert!(t.moves > 0 && t.joined > 0, "{t:?}");
+    assert!(moved(&hold("artists", &())));
 }
 
-/// Three lookups, one through another, and a related list. Falsified as
-/// `albums` is.
 #[test]
 fn track_details() {
-    let t = hold("track_details", args([]));
-    assert!(t.joined > 0 && t.unjoined > 0 && t.updates > 0, "{t:?}");
+    assert!(moved(&hold("track_details", &())));
 }
 
-/// Expression order keys over lookups, a having on one. Falsified by
-/// comparing entries by key alone in `View::position`.
 #[test]
 fn album() {
     let s = seeded();
-    let t = hold("album", with_favs(&s, &[("name", Value::text("Goldberg Variations"))]));
-    assert!(t.joined > 0 && t.flips > 0, "{t:?}");
+    let t = hold(
+        "album",
+        &AlbumInput {
+            playlist_id: s.favs,
+            name: "Goldberg Variations".into(),
+        },
+    );
+    assert!(t.inserts + t.removes > 0 && t.updates > 0, "{t:?}");
 }
 
-/// Falsified as `library` is.
 #[test]
 fn artist() {
     let s = seeded();
-    let t = hold("artist", with_favs(&s, &[("name", Value::text("Bicep"))]));
-    assert!(t.joined > 0 && t.updates > 0, "{t:?}");
+    let t = hold(
+        "artist",
+        &Artist {
+            playlist_id: s.favs,
+            name: "Bicep".into(),
+        },
+    );
+    assert!(t.inserts + t.removes + t.updates > 0, "{t:?}");
 }
 
-/// Related three deep under a having: a composer losing their last work.
-/// Falsified by carrying no child entry's dependencies up to its parent.
 #[test]
 fn composers() {
-    let t = hold("composers", args([]));
-    assert!(t.joined > 0 && t.flips > 0 && t.updates > 0, "{t:?}");
+    let t = hold("composers", &());
+    assert!(t.updates > 0, "{t:?}");
 }
 
-/// Falsified as `composers` is.
 #[test]
 fn works() {
-    let t = hold("works", args([("composer", Value::text("Johann Sebastian Bach"))]));
-    assert!(t.joined > 0 && t.updates > 0, "{t:?}");
+    let t = hold(
+        "works",
+        &Works {
+            composer: "Johann Sebastian Bach".into(),
+        },
+    );
+    assert!(t.inserts + t.removes > 0 && t.updates > 0, "{t:?}");
 }
 
-/// One row by key, and what hangs beneath it. Falsified as `composers` is.
 #[test]
 fn work() {
     let s = seeded();
-    let t = hold("work", args([("id", s.work)]));
-    assert!(t.joined > 0 && t.updates > 0, "{t:?}");
+    let t = hold("work", &WorkInput { id: s.work });
+    assert!(t.updates > 0, "{t:?}");
 }
 
-/// An expression order over a related list's length. Falsified by
-/// recording no dependency for a `Related` node (a song added to the
-/// recording leaves its `tracks` short).
 #[test]
 fn recordings() {
     let s = seeded();
-    let t = hold("recordings", args([("work_id", s.work)]));
-    assert!(t.joined > 0 && t.updates > 0, "{t:?}");
+    let t = hold("recordings", &Recordings { work_id: s.work });
+    assert!(t.inserts + t.removes + t.updates > 0, "{t:?}");
 }
 
-/// A sibling related on the source table itself, and a having over it:
-/// the first real credit displaces the lumped one. Falsified by keying
-/// dependency hits on the new row alone (a credit's `pos` lowered to 0
-/// leaves the lumped credit refused).
 #[test]
 fn credits() {
     let s = seeded();
-    let t = hold("credits", args([("recording_id", s.recording)]));
-    assert!(t.joined > 0 && t.flips > 0, "{t:?}");
+    let t = hold("credits", &Credits { recording_id: s.recording });
+    assert!(t.inserts + t.removes > 0, "{t:?}");
 }
 
-/// Falsified as `album` is.
 #[test]
 fn recording() {
     let s = seeded();
-    let t = hold("recording", with_favs(&s, &[("id", s.recording.clone())]));
-    assert!(t.joined > 0 && t.updates > 0, "{t:?}");
+    let t = hold(
+        "recording",
+        &RecordingInput {
+            playlist_id: s.favs,
+            id: s.recording,
+        },
+    );
+    assert!(t.inserts + t.removes + t.updates > 0, "{t:?}");
 }
 
-/// A bare plan filtered by the user. Falsified by admitting every source
-/// row in `touched` (bob's playlists appear).
 #[test]
 fn playlists() {
-    let t = hold("playlists", args([]));
-    assert!(t.inserts > 0 && t.removes > 0 && t.updates > 0, "{t:?}");
+    let t = hold("playlists", &());
+    assert!(t.inserts > 0, "{t:?}");
 }
 
-/// A having over a related list filtered by the input. Falsified by
-/// settling a refused entry as admitted.
 #[test]
 fn playlists_of() {
     let s = seeded();
-    let t = hold("playlists_of", args([("media_id", s.media)]));
-    assert!(t.joined > 0 && t.flips > 0, "{t:?}");
+    let t = hold("playlists_of", &PlaylistsOf { media_id: s.media });
+    assert!(t.inserts > 0 && t.removes > 0, "{t:?}");
 }
 
-/// Under `owned`: the plan filtered by what the middleware provided, a
-/// lookup and a having on it. Falsified as `albums` is.
 #[test]
 fn playlist() {
     let s = seeded();
-    let t = hold("playlist", with_favs(&s, &[]));
-    assert!(t.joined > 0 && t.flips > 0, "{t:?}");
+    assert!(moved(&hold("playlist", &PlaylistInput { playlist_id: s.favs })));
 }
 
-/// What `tests/view.rs` held, through the domain's own mutations: the
-/// library read against a playlist, pushed each mutation's changes as one
-/// batch — songs added, the playlist's own toggles, another playlist's
-/// entries (nothing to this view), everything onto the playlist at once, a
-/// song removed from the library and its entries with it — equal to the
-/// query and to its own splice after every step; then a rollback (what a
-/// rebase is), after which a rebuild is the query again. Falsified by
-/// recording no dependency for a `Related` node (the first toggle leaves
-/// `playlist_pos` stale).
+/// v4's `tests/view.rs` through the domain's own mutations: the library
+/// read against a playlist, each mutation's changes pushed as one batch,
+/// equal to the query and to its own splice after every step; then a
+/// rollback (what a rebase is), after which a view made again is the query.
 #[test]
 fn the_library_follows_the_mutations_and_a_rollback() {
     let mut c = Lib::new();
     let favs = c.playlist("alice", "Favorites");
     let other = c.playlist("alice", "Other");
-    let m = harken_domain::module();
-    let built = m.build();
-    let f = built.lookup_function("library").unwrap();
-    let cl = ark::hash::closure(built, f);
-    let sch = &built.schema;
-    let env = Env {
-        helpers: cl.helpers.clone(),
-        args: args([("playlist_id", Value::Id(favs))]),
-        ..Env::default()
+    let d = domain();
+    let (f, input) = (d.get(&full("library")), Library { playlist_id: favs.clone() }.to_bytes());
+    let ctx = Ctx {
+        id: EntryId::of("q", 0),
+        actor: "alice".into(),
+        session: "q".into(),
+        roles: vec![],
+        now: 0,
     };
-    let plan = f.plan.clone().unwrap();
-    let mut v = view::hydrate(sch, &plan, env, &c.store).unwrap();
+    let mut v = View::new(&d.lib, &f, &input, ctx.clone(), &c.store).unwrap();
     let mut shown = v.rows();
     let mut patched = 0;
-    let mut kept: Option<MemoryStore> = None;
-
-    let mut step = |c: &mut Lib, name: &str, a: Args| {
-        c.mutate("alice", name, a).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let ps = view::push_all(sch, &c.store, &c.last, &mut v).unwrap();
+    let mut kept: Option<Store> = None;
+    let mut step = |c: &mut Lib, name: &str, bytes: Vec<u8>| {
+        let author = c.ctx("alice", &[LIBRARY]);
+        c.mutate_bytes(&author, name, &bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let ps = v.push(&c.last, &c.store).unwrap();
         patched += ps.len();
-        shown = view::splice(&ps, &shown);
-        assert!(view::contract(sch, &c.store, &v), "{name}: the view is a fresh hydrate");
-        assert_eq!(shown, c.library(favs), "{name}: the spliced list is the query");
+        shown = splice(&ps, &shown);
+        let fresh: Vec<V> = query(&d.lib, &f, &input, &ctx, &c.store).unwrap();
+        assert_eq!(v.rows(), fresh, "{name}: the view is the query");
+        assert_eq!(shown, fresh, "{name}: the spliced list is the query");
         if kept.is_none() && name == "add_to_playlist" {
             kept = Some(c.store.clone());
         }
     };
-    for (t, f) in [("Glue", "a"), ("Opal", "b"), ("Gosh", "c"), ("Air", "d")] {
-        step(
-            &mut c,
-            "add_song",
-            Song {
-                file: f.into(),
-                ..Song::new(t, "X", "Y")
-            }
-            .args(),
-        );
+    for (t, file) in [("Glue", "a"), ("Opal", "b"), ("Gosh", "c"), ("Air", "d")] {
+        step(&mut c, "add_song", with(file, song(t, "X", "Y")).to_bytes());
     }
-    let ids: Vec<Value> = c.library(favs).iter().map(|r| r.field("id")).collect();
-    let on = |p, m: &Value| args([("playlist_id", Value::Id(p)), ("media_id", m.clone())]);
-    step(&mut c, "add_to_playlist", on(favs, &ids[2]));
-    step(&mut c, "add_to_playlist", on(favs, &ids[0]));
-    step(&mut c, "add_to_playlist", on(other, &ids[1]));
-    step(&mut c, "remove_from_playlist", on(favs, &ids[2]));
-    step(&mut c, "add_all_to_playlist", args([("playlist_id", Value::Id(favs))]));
-    step(&mut c, "remove_media", args([("id", ids[0].clone())]));
-    step(
-        &mut c,
-        "add_song",
-        Song {
-            file: "e".into(),
-            ..Song::new("Late", "Z", "")
+    let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id.clone()).collect();
+    let on = |p: &Id<Playlist>, m: &Id<Media>| {
+        AddToPlaylist {
+            playlist_id: p.clone(),
+            media_id: m.clone(),
         }
-        .args(),
-    );
+        .to_bytes()
+    };
+    step(&mut c, "add_to_playlist", on(&favs, &ids[2]));
+    step(&mut c, "add_to_playlist", on(&favs, &ids[0]));
+    step(&mut c, "add_to_playlist", on(&other, &ids[1]));
+    step(&mut c, "remove_from_playlist", on(&favs, &ids[2]));
+    step(&mut c, "add_all_to_playlist", AddAllToPlaylist { playlist_id: favs.clone() }.to_bytes());
+    step(&mut c, "remove_media", RemoveMedia { id: ids[0].clone() }.to_bytes());
+    step(&mut c, "add_song", with("e", song("Late", "Z", "")).to_bytes());
     assert!(patched > 0);
-    let titles: Vec<(String, Value)> = shown
-        .iter()
-        .map(|r| (r.field("title").as_text().to_string(), r.field("playlist_pos")))
-        .collect();
+    let entries: Vec<LibraryEntry> = shown.iter().map(|r| LibraryEntry::from_bytes(&r.to_bytes()).unwrap()).collect();
+    let got: Vec<(String, Option<i64>)> = entries.iter().map(|e| (e.title.clone(), e.playlist_pos)).collect();
     assert_eq!(
-        titles,
+        got,
         [
-            ("Opal".into(), Value::int(3)),
-            ("Gosh".into(), Value::int(4)),
-            ("Air".into(), Value::int(5)),
-            ("Late".into(), Value::Null)
+            ("Opal".into(), Some(3)),
+            ("Gosh".into(), Some(4)),
+            ("Air".into(), Some(5)),
+            ("Late".into(), None)
         ]
     );
 
-    // A rollback reports no changes: the view is rebuilt, and is the query.
+    // A rollback: the view made again over the store as it was is the query.
     c.store = kept.expect("a store to roll back to");
-    let v = view::rebuild(sch, &c.store, &v).unwrap();
-    assert_eq!(v.rows(), c.library(favs));
-    assert!(view::contract(sch, &c.store, &v));
+    let v = View::new(&d.lib, &f, &input, ctx.clone(), &c.store).unwrap();
+    assert_eq!(v.rows(), query(&d.lib, &f, &input, &ctx, &c.store).unwrap());
+    assert_eq!(v.rows().len(), c.library(&favs).len());
 }

@@ -125,7 +125,7 @@ dependencies = [
 name = "ark"
 version = "0.1.0"
 dependencies = [
- "serde_json",
+ "ark-macros",
  "sha2",
 ]
 
@@ -133,8 +133,8 @@ dependencies = [
 name = "ark-auth"
 version = "0.1.0"
 dependencies = [
+ "ark",
  "ark-auth",
- "ark5",
  "axum",
  "getrandom 0.2.17",
  "js-sys",
@@ -154,21 +154,27 @@ name = "ark-client"
 version = "0.1.0"
 dependencies = [
  "ark",
- "getrandom 0.2.17",
- "js-sys",
- "rustls",
+ "ark-auth",
  "tempfile",
- "tungstenite 0.26.2",
- "wasm-bindgen",
- "web-sys",
+ "tungstenite",
+]
+
+[[package]]
+name = "ark-dev"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-client",
+ "ark-server",
+ "serde_json",
 ]
 
 [[package]]
 name = "ark-explorer"
 version = "0.1.0"
 dependencies = [
+ "ark",
  "ark-auth",
- "ark5",
  "arkui",
  "iced",
  "js-sys",
@@ -179,56 +185,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-server"
+name = "ark-macros"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "ark",
- "ark-auth",
- "ark-client",
- "ark-explorer",
- "axum",
- "futures-util",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
- "tower-http",
- "ureq",
-]
-
-[[package]]
-name = "ark5"
-version = "0.1.0"
-dependencies = [
- "ark5-macros",
- "sha2",
-]
-
-[[package]]
-name = "ark5-client"
-version = "0.1.0"
-dependencies = [
- "ark-auth",
- "ark5",
- "tempfile",
- "tungstenite 0.24.0",
-]
-
-[[package]]
-name = "ark5-dev"
-version = "0.1.0"
-dependencies = [
- "ark5",
- "ark5-client",
- "ark5-server",
- "serde_json",
-]
-
-[[package]]
-name = "ark5-macros"
-version = "0.1.0"
-dependencies = [
- "ark5",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -236,15 +196,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark5-server"
+name = "ark-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark",
  "ark-auth",
+ "ark-client",
+ "ark-dev",
  "ark-explorer",
- "ark5",
- "ark5-client",
- "ark5-dev",
  "axum",
  "tempfile",
  "tokio",
@@ -1527,10 +1487,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "wasi",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1711,32 +1669,25 @@ name = "harken-domain"
 version = "0.1.0"
 dependencies = [
  "ark",
-]
-
-[[package]]
-name = "harken-domain5"
-version = "0.1.0"
-dependencies = [
- "ark5",
- "ark5-client",
- "ark5-dev",
- "ark5-server",
+ "ark-client",
+ "ark-dev",
+ "ark-server",
 ]
 
 [[package]]
 name = "harken-iced"
 version = "0.1.0"
 dependencies = [
+ "ark",
  "ark-auth",
+ "ark-client",
  "ark-explorer",
- "ark5",
- "ark5-client",
- "ark5-server",
+ "ark-server",
  "arkui",
- "harken-domain5",
+ "harken-domain",
  "iced",
  "js-sys",
- "tungstenite 0.24.0",
+ "tungstenite",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -1746,13 +1697,13 @@ name = "harken-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark",
  "ark-auth",
+ "ark-client",
  "ark-explorer",
- "ark5",
- "ark5-client",
- "ark5-server",
+ "ark-server",
  "axum",
- "harken-domain5",
+ "harken-domain",
  "libc",
  "lofty",
  "notify",
@@ -4684,7 +4635,7 @@ dependencies = [
  "futures-util",
  "log",
  "tokio",
- "tungstenite 0.24.0",
+ "tungstenite",
 ]
 
 [[package]]
@@ -4876,26 +4827,6 @@ dependencies = [
  "sha1",
  "thiserror 1.0.69",
  "utf-8",
-]
-
-[[package]]
-name = "tungstenite"
-version = "0.26.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
-dependencies = [
- "bytes",
- "data-encoding",
- "http",
- "httparse",
- "log",
- "rand 0.9.5",
- "rustls",
- "rustls-pki-types",
- "sha1",
- "thiserror 2.0.21",
- "utf-8",
- "webpki-roots 0.26.11",
 ]
 
 [[package]]

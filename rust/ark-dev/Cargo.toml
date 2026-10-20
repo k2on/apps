@@ -1,0 +1,12 @@
+[package]
+name = "ark-dev"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ArkDB v5's development tools (docs/plan-v5.md D1): the simulator over the real hub and client, the trace recorder and player, the fuzzer and the vector writer."
+
+[dependencies]
+ark = { path = "../ark" }
+ark-client = { path = "../ark-client" }
+ark-server = { path = "../ark-server" }
+serde_json = { workspace = true }

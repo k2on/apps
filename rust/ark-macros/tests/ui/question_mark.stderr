@@ -1,0 +1,5 @@
+error: the `?` operator is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/question_mark.rs:7:5
+  |
+7 |     o?
+  |     ^^

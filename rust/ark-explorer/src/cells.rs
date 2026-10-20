@@ -43,7 +43,7 @@ pub use crate::form::ID_DIGITS;
 /// editor would start it ([`cell_text`]), with its line breaks laid flat.
 pub fn shown(v: &Value) -> String {
     match v {
-        Value::Id(id) => ark5::hash::hex(id)[..ID_DIGITS].to_string(),
+        Value::Id(id) => ark::hash::hex(id)[..ID_DIGITS].to_string(),
         other => cell_text(other).chars().map(|c| if c.is_control() { ' ' } else { c }).collect(),
     }
 }

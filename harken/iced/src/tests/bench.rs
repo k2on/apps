@@ -1,5 +1,5 @@
 //! How long the demo's reads take, printed rather than asserted: the numbers
-//! behind the choices in `harken_domain5`'s queries and the client's views.
+//! behind the choices in `harken_domain`'s queries and the client's views.
 //! Ignored by default; run with
 //! `cargo test -p harken-iced --features demo --release -- --ignored --nocapture --test-threads=1 bench`,
 //! and with `BENCH_16=1` in the environment for the views at sixteen times
@@ -7,11 +7,11 @@
 
 use std::time::{Duration, Instant};
 
-use ark5::author::Node;
-use harken_domain5::library::{
+use ark::author::Node;
+use harken_domain::library::{
     AlbumInput, Artist, Credits, DescribePerson, Library, LibraryEntry, RecordingInput, Recordings, WorkInput, WorkSummary, Works,
 };
-use harken_domain5::playlists::{AddToPlaylist, PlaylistInput, PlaylistsOf, RemoveFromPlaylist};
+use harken_domain::playlists::{AddToPlaylist, PlaylistInput, PlaylistsOf, RemoveFromPlaylist};
 
 use crate::peer::key;
 use crate::rows::Id;
@@ -74,7 +74,7 @@ fn views_at(copies: usize) {
     let mut client = crate::seed::seeded_times(copies);
     eprintln!("\n{copies}x the demo, seeded in {:.1?}", t0.elapsed());
 
-    let favorites: Id = client.query::<Vec<harken_domain5::schema::Playlist>>("playlists", &()).unwrap()[0].id.0;
+    let favorites: Id = client.query::<Vec<harken_domain::schema::Playlist>>("playlists", &()).unwrap()[0].id.0;
     let handel = "George Frideric Handel";
     let album = AlbumInput {
         playlist_id: key(favorites),
@@ -101,7 +101,7 @@ fn views_at(copies: usize) {
     let (water, messiah) = (work("HWV 348"), work("HWV 56"));
     let first_take = |w: &str| {
         client
-            .query::<Vec<harken_domain5::library::RecordingsEntry>>("recordings", &Recordings { work_id: w.into() })
+            .query::<Vec<harken_domain::library::RecordingsEntry>>("recordings", &Recordings { work_id: w.into() })
             .unwrap()[0]
             .id
             .clone()

@@ -881,7 +881,7 @@ impl Explorer {
         let c = tbl.column(&e.column).ok_or_else(|| format!("{} has no column {}", e.table, e.column))?;
         let ty = value::column_ty(&value::types(src.module), &tbl.columns[c]);
         let value = edit::parse_cell(&e.column, &ty, &e.text)?;
-        let old = ark5::store::Read::get(src.store, &e.table, &e.key).ok_or_else(|| format!("the row of {} is gone", e.table))?;
+        let old = ark::store::Read::get(src.store, &e.table, &e.key).ok_or_else(|| format!("the row of {} is gone", e.table))?;
         let same = Explorer::values(src, &e.table, &old).get(c) == Some(&value);
         Ok((old, value, same))
     }

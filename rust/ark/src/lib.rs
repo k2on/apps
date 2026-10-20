@@ -1,68 +1,60 @@
-#![deny(unsafe_code)]
-//! The ArkDB runtime, held to the specification in `spec/` (a Haskell
-//! program; `spec/README.md` is the index). Each module here mirrors the
-//! spec module it names and says, briefly, what the Haskell says.
+//! ArkDB v5's kernel, as `docs/plan-v5.md` Part 1 defines it: a value is
+//! bytes and a type says how to read them (§1.1, [`ty`], [`codec`]); hash
+//! spaces are distinct types ([`hash`]); the schema is data and the only
+//! place that knows what a row is (§1.2, [`schema`]); one ordered store
+//! whose every write is a [`store::Change`] that inverts exactly (§1.3,
+//! [`store`]); the log, a chain of entries each carrying its facts and the
+//! state after it (§1.6, [`log`]); one sans-io peer machine whose role is
+//! replica or authority (§1.7, [`peer`]); and the frames (§1.11,
+//! [`frames`]).
 //!
-//! | module | spec |
-//! |---|---|
-//! | [`value`] | `Ark.Value`: the eight values and the one total order |
-//! | [`canon`] | `Ark.Canon`: deterministic CBOR, strict decoder |
-//! | [`schema`] | `Ark.Schema`: tables, relations, well-formedness |
-//! | [`ir`] | `Ark.IR`, `Ark.Encode`, `Ark.Decode`: the IR, as a value and back |
-//! | [`store`] | `Ark.Store`: get, scan, put, delete; constraints as refusals |
-//! | [`stdlib`] | `Ark.Std`: the standard library over pinned Unicode tables |
-//! | [`eval`] | `Ark.Eval`: the interpreter every native mutator must agree with |
-//! | [`verify`] | `Ark.Verify`: what a module must satisfy before anything runs it |
-//! | [`hash`] | `Ark.Hash`: the state hash, closures, the function hash |
-//! | [`log`] | `Ark.Log`: entries, facts, snapshots, the horizon |
-//! | [`journal`] | a log on a key/value storage: a snapshot and pages of records, the server's and a peer alone's (`docs/plan-alone.md` §2) |
-//! | [`peer`] | `Ark.Peer`: the replica and the authority |
-//! | [`protocol`] | `Ark.Protocol`: the frames, the client and server machines |
-//! | [`raw`] | the authority's raw writes, `ark.put_row` and `ark.delete_row`: in every module by construction, named by fixed hashes (`docs/plan-guards.md` D4) |
-//! | [`view`] | `Ark.View`: [`view::pull`], the one evaluator of plans (spec v4), and incremental views with their contract |
-//! | [`live`] | `Ark.Live`: live state — a typed state machine per scope, sequenced per instance beside the log — and the rooms over opaque frames it supersedes |
-//! | [`types`] | the type section, a value held to a type, and the ephemeral part of a live state |
-//! | [`sim`] | `Ark.Sim`: the seeded fleet |
-//! | [`json`] | the vectors' JSON dialect (`spec/README.md`), printed and read back |
-//! | [`authoring`] | `spec/AUTHORING.md`: the vocabulary a domain is written in; a mutator run `Emit` or `Native`, a query described under `Emit` as its plan |
-//!
-//! A domain is written once, in Rust, in the vocabulary of
-//! `spec/AUTHORING.md` — the contract, read it first — through
-//! [`authoring`]: run under `Emit` it is the module (the `.ark` every
-//! runtime verifies and hashes), run under `Native` its mutators apply
-//! entries directly, and [`eval`] is what both mean. A query is a plan
-//! (`docs/plan-v4.md`), and [`view::pull`] is what one means. Nothing is
-//! generated into this crate's private shape any more: `GENERATED.md`,
-//! `GENERATED-RUST.md` and the prelude they named are retired, and so is
-//! `ark-builder`.
-//!
-//! No async, no sockets: every machine here is sans-io, and a transport is
-//! a loop around one. The one `unsafe` is in [`authoring`], and says why.
+//! The kernel runs a function as a [`peer::Procedure`], found by its
+//! [`hash::FnHash`] in a [`peer::Cas`]. The language is the rest (§1.4,
+//! §1.5): the IR and every type as a value ([`ir`], `#[derive(Node)]`),
+//! one checker ([`check`]), one interpreter, which is a `Procedure`, and
+//! the boundary's `parse` ([`interp`]), the standard library ([`std`]) and
+//! modules as binding maps over the content store ([`module`]).
 
-pub mod authoring;
-pub mod canon;
-pub mod compat;
-pub mod eval;
+use ::std::fmt;
+
+extern crate self as ark;
+
+/// The attribute macros and what a module is assembled into, at the
+/// crate's root, so a domain writes `#[ark::mutator]` and `ark::module!`
+/// (§1.12).
+pub use author::{guard, helper, live, module, mutator, query, scope, Domain};
+
+pub mod author;
+pub mod check;
+pub mod codec;
+pub mod frames;
 pub mod hash;
+pub mod interp;
 pub mod ir;
-pub mod journal;
-pub mod json;
-pub mod live;
 pub mod log;
+pub mod module;
 pub mod peer;
-pub mod plan;
-pub mod protocol;
-pub mod raw;
-pub mod retention;
 pub mod schema;
-pub mod scope;
-pub mod sha256;
-pub mod sim;
-pub mod stdlib;
+pub mod std;
 pub mod store;
-pub mod trace;
-pub mod types;
+pub mod ty;
 pub mod unicode_tables;
-pub mod value;
-pub mod verify;
 pub mod view;
+
+/// Why something was not done, as a sentence: a parse that failed, a write
+/// a constraint refused, an intent its function refused. What a form shows
+/// and what a `Reject` frame carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refusal(pub String);
+
+impl Refusal {
+    pub fn new(why: impl Into<String>) -> Refusal {
+        Refusal(why.into())
+    }
+}
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}

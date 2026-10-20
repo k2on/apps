@@ -17,9 +17,9 @@
 //! is shown is the authority's own state, a snapshot per request, and what
 //! it writes the server authors as itself.
 
-use ark5::author::Node;
-use ark5::log::Seq;
-use ark5::store::Change;
+use ark::author::Node;
+use ark::log::Seq;
+use ark::store::Change;
 
 use crate::data::{Connection, CrudVerbs, Line};
 
@@ -52,12 +52,12 @@ pub struct State {
 
 /// A value as a body: its bytes, in hex.
 pub fn body<T: Node>(v: &T) -> String {
-    ark5::hash::hex(&v.to_bytes())
+    ark::hash::hex(&v.to_bytes())
 }
 
 /// A body read back.
 pub fn read<T: Node>(text: &str) -> Result<T, String> {
-    let b = ark5::hash::unhex(text.trim()).ok_or("the body is not hex")?;
+    let b = ark::hash::unhex(text.trim()).ok_or("the body is not hex")?;
     T::from_bytes(&b).map_err(|e| e.0)
 }
 

@@ -1,0 +1,5 @@
+error: a key column after a column that is not one is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/key_after_column.rs:8:11
+  |
+8 |     #[ark(key)]
+  |           ^^^

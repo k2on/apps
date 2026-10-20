@@ -617,9 +617,9 @@ impl Explorer {
                 Some(f) => f
                     .iter()
                     .map(|c| match c {
-                        ark5::store::Change::Add { table, .. } => format!("+{table}"),
-                        ark5::store::Change::Remove { table, .. } => format!("\u{2212}{table}"),
-                        ark5::store::Change::Edit { table, .. } => format!("~{table}"),
+                        ark::store::Change::Add { table, .. } => format!("+{table}"),
+                        ark::store::Change::Remove { table, .. } => format!("\u{2212}{table}"),
+                        ark::store::Change::Edit { table, .. } => format!("~{table}"),
                     })
                     .collect::<Vec<_>>()
                     .join(" "),

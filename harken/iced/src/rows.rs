@@ -1,14 +1,14 @@
 //! What the domain's queries answer, as plain Rust a screen can hold.
 //!
-//! A query answers a list of the domain's own records (`harken_domain5`'s
+//! A query answers a list of the domain's own records (`harken_domain`'s
 //! `…Entry` types, derived `Node`s), each row its bytes; a view function
 //! wants plain fields it can borrow and copy, and an id it can compare. Each
 //! type here is one query's row, read leniently: bytes that do not read as
 //! the record — a module this build was not made with — read as empty rather
 //! than as a panic in the middle of a frame.
 
-use ark5::author::Node;
-use harken_domain5::library::{AlbumsEntry, ArtistsEntry, ComposersEntry, LibraryEntry, RecordingsEntry, TrackDetailsEntry, WorkSummary};
+use ark::author::Node;
+use harken_domain::library::{AlbumsEntry, ArtistsEntry, ComposersEntry, LibraryEntry, RecordingsEntry, TrackDetailsEntry, WorkSummary};
 
 /// A row's id: its sixteen bytes, whatever table it names.
 pub type Id = [u8; 16];
@@ -69,15 +69,15 @@ pub struct Playlist {
     pub name: String,
 }
 
-impl From<harken_domain5::schema::Playlist> for Playlist {
-    fn from(p: harken_domain5::schema::Playlist) -> Playlist {
+impl From<harken_domain::schema::Playlist> for Playlist {
+    fn from(p: harken_domain::schema::Playlist) -> Playlist {
         Playlist { id: p.id.0, name: p.name }
     }
 }
 
 impl Playlist {
     pub fn from_bytes(b: &[u8]) -> Playlist {
-        harken_domain5::schema::Playlist::from_bytes(b).map_or_else(|_| Playlist::default(), Playlist::from)
+        harken_domain::schema::Playlist::from_bytes(b).map_or_else(|_| Playlist::default(), Playlist::from)
     }
 }
 

@@ -5,7 +5,7 @@
 //! confirmed state hashes as the server's log does, and every accepted
 //! intent is in that log exactly once.
 //!
-//! `ark5-dev`'s simulator already holds the machines to this in one
+//! `ark-dev`'s simulator already holds the machines to this in one
 //! process. What only processes can reach is everything outside it: the
 //! WebSocket and its keepalive, a server killed and restarted from its data
 //! directory, a peer killed between writing its intent and pumping, a
@@ -15,7 +15,7 @@
 //! Each scenario was falsified once by breaking what it holds; its doc
 //! comment says how. On v5 every scenario was run again and those whose
 //! means of falsifying moved say how they were falsified here. A scenario
-//! that finds a bug in `rust/ark5*` is not fixed there: it stays, failing,
+//! that finds a bug in `rust/ark*` is not fixed there: it stays, failing,
 //! `#[ignore = "witness: …"]`, and the finding goes to the coordinator.
 //!
 //! `cargo test -p harken-server --test fleet -- --nocapture` prints the
@@ -31,13 +31,13 @@ mod support {
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use ark5::frames::Frame;
-use ark5::ir::Node;
-use ark5::log::Logged;
-use harken_domain5::playlists::{
+use ark::frames::Frame;
+use ark::ir::Node;
+use ark::log::Logged;
+use harken_domain::playlists::{
     AddAllToPlaylist, AddToPlaylist, CreatePlaylist, RemoveFromPlaylist,
 };
-use harken_domain5::schema::{Media, Playlist, PlaylistItem};
+use harken_domain::schema::{Media, Playlist, PlaylistItem};
 use serde_json::{json, Value};
 use support::fleet::*;
 
@@ -359,7 +359,7 @@ fn lose_the_log(f: &Fleet) {
 /// Falsified on v5 by keeping the log (no `lose_the_log`): the head is
 /// sixteen and more, not nine.
 #[test]
-#[ignore = "witness: a server whose log was lost serves its empty log at seq 0, which every replica holds as its own base and ignores as a late copy; their pushes past the server`s `last` for their session are held as a gap, and nothing converges (ark5 `Peer::reset`, `push`)"]
+#[ignore = "witness: a server whose log was lost serves its empty log at seq 0, which every replica holds as its own base and ignores as a late copy; their pushes past the server`s `last` for their session are held as a gap, and nothing converges (ark `Peer::reset`, `push`)"]
 fn a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has() {
     let mut f = Fleet::new("log-lost");
     let mut a = f.peer("a", Some("alice"));
@@ -465,7 +465,7 @@ fn a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has() {
 ///
 /// What it holds is that a delivery follows the write: the hub writes what
 /// a step made durable before it delivers anything the step said
-/// (`ark5_server::hub`, "Persist to the disk first").
+/// (`ark_server::hub`, "Persist to the disk first").
 ///
 /// Falsified on v5 by asserting the log on disk holds less than every
 /// cursor (`st.cursor < on_disk`): round 0 fails, every peer at the head.
@@ -628,8 +628,8 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
                 "alice",
                 "playlists.add_to_playlist",
                 &AddToPlaylist {
-                    playlist_id: ark5::author::Id::new(lists[i % 10]),
-                    media_id: ark5::author::Id::new(media[i % 500]),
+                    playlist_id: ark::author::Id::new(lists[i % 10]),
+                    media_id: ark::author::Id::new(media[i % 500]),
                 },
             );
         }
@@ -703,9 +703,9 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
 }
 
 /// The id of a media row a change adds.
-fn media_of(c: &ark5::store::Change) -> Option<[u8; 16]> {
+fn media_of(c: &ark::store::Change) -> Option<[u8; 16]> {
     match c {
-        ark5::store::Change::Add { table, row } if table == "media" => {
+        ark::store::Change::Add { table, row } if table == "media" => {
             Some(Media::from_bytes(row).unwrap().id.0)
         }
         _ => None,
@@ -713,9 +713,9 @@ fn media_of(c: &ark5::store::Change) -> Option<[u8; 16]> {
 }
 
 /// The id of a playlist row a change adds.
-fn playlist_of(c: &ark5::store::Change) -> Option<[u8; 16]> {
+fn playlist_of(c: &ark::store::Change) -> Option<[u8; 16]> {
     match c {
-        ark5::store::Change::Add { table, row } if table == "playlist" => {
+        ark::store::Change::Add { table, row } if table == "playlist" => {
             Some(Playlist::from_bytes(row).unwrap().id.0)
         }
         _ => None,
@@ -1705,7 +1705,7 @@ fn a_join_killed_with_kill9_finishes_on_restart() {
 ///
 /// Falsified on v5 by the peer alone keeping its replica in memory rather
 /// than on disk: it came back at 0, short of what it had answered. A torn
-/// last record is `ark5-client`'s storage tests' to hold; no kill here was
+/// last record is `ark-client`'s storage tests' to hold; no kill here was
 /// seen to land inside one.
 #[test]
 fn a_peer_alone_killed_mid_append_reopens_whole() {
@@ -1867,7 +1867,7 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
 /// peers — two of alice's devices and bob's — and alice's playlist; one of
 /// her devices goes behind a black hole and makes a playlist there. The
 /// server's admin page renames hers raw (a function of the change, authored
-/// by the authority as itself, `ark5_server::admin::raw`) and is refused
+/// by the authority as itself, `ark_server::admin::raw`) and is refused
 /// one the store refuses — a playlist entry naming no playlist — which is
 /// logged nowhere. The device comes back: every peer converges on the log,
 /// the rename in each one's own `playlists`, the black-holed playlist after
@@ -1878,7 +1878,7 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
 /// "Mix", not "Mix (fixed)".
 #[test]
 fn the_authority_edits_a_cell_raw_and_every_peer_converges() {
-    use ark5::store::Change;
+    use ark::store::Change;
     let f = Fleet::with_env("raw", vec![("HARKEN_ADMIN_BIND", "127.0.0.1:0")]);
     let mut p = f.peer("p", Some("alice"));
     let mut q = f.peer("q", Some("alice"));
@@ -1910,8 +1910,8 @@ fn the_authority_edits_a_cell_raw_and_every_peer_converges() {
     };
     let at = f.edit_raw(&edit).expect("the authority's rename is logged");
     let orphan = PlaylistItem {
-        playlist_id: ark5::author::Id::new([9; 16]),
-        media_id: ark5::author::Id::new(track),
+        playlist_id: ark::author::Id::new([9; 16]),
+        media_id: ark::author::Id::new(track),
         pos: 1,
         added_ms: 0,
         user_id: "alice".into(),

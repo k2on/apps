@@ -18,8 +18,8 @@ mod demo;
 #[cfg(feature = "demo")]
 mod views;
 
-use ark5::peer::Who;
-use harken_domain5::library::AddSong;
+use ark::peer::Who;
+use harken_domain::library::AddSong;
 
 use crate::client::Replica;
 use crate::listening::{Device, Kind};
@@ -37,7 +37,7 @@ fn who(me: &str) -> Who {
 /// `add_song`, which `is_library` gives that role alone, as a server's
 /// scanner holds it.
 fn lists(mut client: Replica) -> crate::peer::Peer {
-    client.set_roles([harken_domain5::schema::LIBRARY]);
+    client.set_roles([harken_domain::schema::LIBRARY]);
     crate::peer::Peer::open(client)
 }
 
@@ -83,7 +83,7 @@ pub fn device(id: &str, name: &str, kind: Kind, can_play: bool) -> Device {
         muted: false,
         name: name.into(),
         user: "me".into(),
-        volume: harken_domain5::listening::UNSAID_VOLUME,
+        volume: harken_domain::listening::UNSAID_VOLUME,
     }
 }
 
@@ -138,7 +138,7 @@ impl crate::client::Wire for Queues {
 pub fn demo_app() -> crate::App {
     use std::sync::OnceLock;
 
-    static TEMPLATE: OnceLock<ark5_client::Memory> = OnceLock::new();
+    static TEMPLATE: OnceLock<ark_client::Memory> = OnceLock::new();
     let disk = TEMPLATE.get_or_init(|| crate::seed::seeded_disk(1)).clone();
     crate::App::with_peer(crate::peer::Peer::open(crate::seed::open(disk)), String::new(), None)
 }

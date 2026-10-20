@@ -1,4 +1,0 @@
-{
-  "frame": {"hash":{"$bytes":"abababababababababababababababababababababababababababababababab"},"seq":{"$int":"4"},"t":"verify"},
-  "bytes": "a3617466766572696679637365710464686173685820abababababababababababababababababababababababababababababababab"
-}

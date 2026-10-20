@@ -12,12 +12,12 @@
 //!
 //! [`Writer`]: crate::data::Writer
 
-use ark5::check::Types;
-use ark5::interp::{check_form, Interp};
-use ark5::ir::Effect;
-use ark5::module::{Lib, Module};
-use ark5::store::Store;
-use ark5::ty::Ty as Structure;
+use ark::check::Types;
+use ark::interp::{check_form, Interp};
+use ark::ir::Effect;
+use ark::module::{Lib, Module};
+use ark::store::Store;
+use ark::ty::Ty as Structure;
 
 use crate::data::{Source, Ticket};
 use crate::value::{self, decode, encode, Ty, Value};
@@ -252,7 +252,7 @@ impl Input {
 /// An id as text — 32 hex digits, dashes anywhere, as a cell shows one and a
 /// person pastes one.
 pub fn parse_id(text: &str) -> Option<[u8; 16]> {
-    ark5::hash::unhex(&text.trim().replace('-', "")).and_then(|b| <[u8; 16]>::try_from(b).ok())
+    ark::hash::unhex(&text.trim().replace('-', "")).and_then(|b| <[u8; 16]>::try_from(b).ok())
 }
 
 /// An id as a cell shows it whole: `8-4-4-4-12`.
@@ -483,7 +483,7 @@ pub fn is_value(ty: &Ty) -> bool {
 pub fn query(src: &Source, c: &Callable, input: &Value) -> Result<Value, String> {
     let h = src.module.get(&c.name).ok_or_else(|| format!("no function {}", c.name))?;
     let bytes = c.input_bytes(input)?;
-    let rows = ark5::view::query(src.lib, &h, &bytes, &src.ctx, src.store).map_err(|r| format!("refused: {}", r.0))?;
+    let rows = ark::view::query(src.lib, &h, &bytes, &src.ctx, src.store).map_err(|r| format!("refused: {}", r.0))?;
     rows.iter()
         .map(|v| decode(&c.returns, &v.to_bytes()).map_err(|e| format!("a bug: {e}")))
         .collect::<Result<Vec<_>, _>>()
@@ -533,7 +533,7 @@ pub struct Pickable {
 impl Pickable {
     /// The id as a cell draws it: its first eight hex digits.
     pub fn short(&self) -> String {
-        ark5::hash::hex(&self.id)[..ID_DIGITS].to_string()
+        ark::hash::hex(&self.id)[..ID_DIGITS].to_string()
     }
 
     /// Everything the line says, which is what a filter matches.
@@ -611,7 +611,7 @@ pub fn pickables(store: &Store, module: &Module, table: &str) -> Vec<Pickable> {
         .iter()
         .filter_map(|r| {
             let Some(Value::Id(id)) = r.first() else { return None };
-            let short = ark5::hash::hex(id)[..ID_DIGITS].to_string();
+            let short = ark::hash::hex(id)[..ID_DIGITS].to_string();
             Some(Pickable {
                 id: *id,
                 label: text(r, first).unwrap_or(short),

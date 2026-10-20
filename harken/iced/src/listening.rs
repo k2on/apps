@@ -1,6 +1,6 @@
 //! This device's end of the account's listening session: a reconciler.
 //!
-//! The session is the domain's live state (`harken_domain5::listening`):
+//! The session is the domain's live state (`harken_domain::listening`):
 //! three volatile tables the server's second machine holds (§1.9), one
 //! session per account, on the sync socket — what [`crate::client::Replica::listening`]
 //! reads is the server's confirmed state with this device's own calls
@@ -59,10 +59,10 @@
 
 use crate::client::Replica as Peer;
 use crate::rows::Id;
-use harken_domain5::listening::read;
+use harken_domain::listening::read;
 // What the rest of this program asks *this* module about.
-pub use harken_domain5::listening::read::{Kind, Listening};
-pub use harken_domain5::listening::{Active, Clock, Output, Present as Device, Track};
+pub use harken_domain::listening::read::{Kind, Listening};
+pub use harken_domain::listening::{Active, Clock, Output, Present as Device, Track};
 
 /// How far the player may be from where the session counts it before one
 /// is put right — the bound every output is held to, the bridge's speakers
@@ -454,8 +454,8 @@ fn device_name() -> String {
 
 /// Each transition's input, as its bytes: the domain's own input types.
 pub mod input {
-    use ark5::author::{Id, Node};
-    use harken_domain5::listening::*;
+    use ark::author::{Id, Node};
+    use harken_domain::listening::*;
 
     /// A transition that takes nothing.
     pub fn none() -> Vec<u8> {
@@ -597,10 +597,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use ark5::author::{Id as Key, Node};
-    use ark5::peer::Who;
-    use ark5_server::hub::{Config, ConnId, Hub, Live};
-    use harken_domain5::listening::Device as Said;
+    use ark::author::{Id as Key, Node};
+    use ark::peer::Who;
+    use ark_server::hub::{Config, ConnId, Hub, Live};
+    use harken_domain::listening::Device as Said;
 
     /// A player that does what it is told, and a clock it is told about.
     #[derive(Default)]
@@ -671,7 +671,7 @@ mod tests {
         vec![track("a", 1), track("b", 2)]
     }
 
-    /// A server in this test — the hub (`ark5-server`), sans-io, holding
+    /// A server in this test — the hub (`ark-server`), sans-io, holding
     /// the session in its volatile machine — and the devices on it: each a
     /// real replica, its frames carried by hand.
     struct Net {
@@ -682,7 +682,7 @@ mod tests {
     impl Net {
         fn new() -> Net {
             let d = crate::client::domain();
-            let m = ark5_client::Module {
+            let m = ark_client::Module {
                 schema: d.schema.clone(),
                 cas: d.cas(),
                 lib: d.lib.clone(),
@@ -703,7 +703,7 @@ mod tests {
                 keep: 64,
             });
             Net {
-                hub: Hub::open(c, Box::new(ark5_client::Memory::default()), crate::client::now_ms()),
+                hub: Hub::open(c, Box::new(ark_client::Memory::default()), crate::client::now_ms()),
                 peers: vec![],
             }
         }
@@ -1030,7 +1030,7 @@ mod tests {
         assert_eq!(rd.stats().plays, 0, "a remote control records nothing");
         // Unlinked, the play is an intent like any other: pending, said
         // when the device next reaches the server.
-        let recent: Vec<harken_domain5::schema::Play> = net.peer(b).query("recently_played", &()).unwrap();
+        let recent: Vec<harken_domain::schema::Play> = net.peer(b).query("recently_played", &()).unwrap();
         assert_eq!(recent.len(), 1, "the play is in this device's view of the log at once");
         assert_eq!(recent[0].from, "album/Water Music");
     }

@@ -4,9 +4,9 @@
 //! to the authority's raw write (`docs/plan-guards.md` D4), and a query run
 //! by name, read-only.
 
-use ark5::module::Module;
-use ark5::schema::Table;
-use ark5::store::Change;
+use ark::module::Module;
+use ark::schema::Table;
+use ark::store::Change;
 
 use crate::data::{CrudVerbs, Source, Writer};
 use crate::value::{self, decode, encode, Ty, Value};
@@ -38,7 +38,7 @@ pub fn parse_cell(name: &str, ty: &Ty, text: &str) -> Result<Value, String> {
             Some(id) => Ok(Value::Id(id)),
             None => bad("an id, 32 hex digits"),
         },
-        Ty::Bytes => match ark5::hash::unhex(t) {
+        Ty::Bytes => match ark::hash::unhex(t) {
             Some(b) => Ok(Value::Bytes(b)),
             None => bad("hex digits"),
         },

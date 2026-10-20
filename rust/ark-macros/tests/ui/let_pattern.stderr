@@ -1,0 +1,5 @@
+error: a `let` pattern other than a name is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/let_pattern.rs:7:9
+  |
+7 |     let (x, y) = (a, a);
+  |         ^^^^^^

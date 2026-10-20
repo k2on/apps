@@ -7,7 +7,7 @@
 //! what "add a song" means, and the first time it disagreed with the domain's
 //! procedure the replicas would diverge with nothing to say so.
 //!
-//! So the scanner is an ordinary [`ark5_client::Client`], with its own
+//! So the scanner is an ordinary [`ark_client::Client`], with its own
 //! replica and its own pending intents on disk, its link dialling the hub
 //! in this process (`Handle::dial`) instead of a socket. It gets its
 //! confirmations, it gets the rebase, and a file it adds fans out to every
@@ -42,15 +42,15 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use ark5::ir::Node;
-use ark5::peer::{Ctx, Who};
-use ark5::store::{Dir, Read, Scan as Range, Store};
-use ark5_client::link::{Backoff, Link};
-use ark5_client::{Client, Event, Files};
-use ark5_server::handle::now;
-use ark5_server::Handle;
+use ark::ir::Node;
+use ark::peer::{Ctx, Who};
+use ark::store::{Dir, Read, Scan as Range, Store};
 use ark_auth::Login;
-use harken_domain5::library::AddSong;
+use ark_client::link::{Backoff, Link};
+use ark_client::{Client, Event, Files};
+use ark_server::handle::now;
+use ark_server::Handle;
+use harken_domain::library::AddSong;
 use notify::{RecursiveMode, Watcher};
 
 use crate::covers::{self, Covers};
@@ -177,7 +177,7 @@ impl Scanner {
         // what `is_library` asks, on the device and, of the roles the hub
         // stamps, at the authority.
         let mut roles = login.user.roles.clone();
-        roles.push(harken_domain5::schema::LIBRARY.to_string());
+        roles.push(harken_domain::schema::LIBRARY.to_string());
         roles.sort();
         roles.dedup();
         let who = Who {
@@ -188,7 +188,7 @@ impl Scanner {
         let dir = replica_dir(&data);
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
-        let config = ark5_client::Config {
+        let config = ark_client::Config {
             log: hosted.module.clone(),
             live: None,
         };

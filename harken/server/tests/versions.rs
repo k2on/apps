@@ -34,11 +34,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use ark5::author::Domain;
-use ark5::ir::{Expr, Function, Node, Op};
-use ark5::module::{verify, Module};
-use ark5::schema::{Column, Ref, Schema, Space, Table};
-use ark5::ty::Ty;
+use ark::author::Domain;
+use ark::ir::{Expr, Function, Node, Op};
+use ark::module::{verify, Module};
+use ark::schema::{Column, Ref, Schema, Space, Table};
+use ark::ty::Ty;
 use harken_server::hosted::{compat, write, Hosted};
 use serde_json::json;
 use support::fleet::*;
@@ -47,7 +47,7 @@ use support::fleet::*;
 
 /// harken's domain, its module changed by `f` over a schema `g` made.
 fn release(g: impl FnOnce(&mut Schema), f: impl FnOnce(&mut Domain)) -> Domain {
-    let mut d = harken_domain5::domain();
+    let mut d = harken_domain::domain();
     let mut schema = (*d.schema).clone();
     g(&mut schema);
     d.module.schema = schema.clone();
@@ -136,7 +136,7 @@ fn grown() -> Domain {
                     Ty::Named("Text".into()),
                 ])],
                 ret: Ty::unit(),
-                effect: ark5::ir::Effect::Write,
+                effect: ark::ir::Effect::Write,
                 body: Expr::Insert("tag".into(), Box::new(Expr::Var(0))),
             };
             bind(d, "grown.tag_playlist", f)
@@ -159,7 +159,7 @@ fn with_note(s: &mut Schema) {
     });
 }
 
-fn refused(r: Result<usize, ark5::Refusal>) -> String {
+fn refused(r: Result<usize, ark::Refusal>) -> String {
     r.expect_err("refused").0
 }
 
@@ -171,7 +171,7 @@ fn refused(r: Result<usize, ark5::Refusal>) -> String {
 /// grown one.
 #[test]
 fn a_module_follows_another_by_its_schema_and_a_verify_per_new_hash() {
-    let h = harken_domain5::domain();
+    let h = harken_domain::domain();
     assert_eq!(compat(&h.module, &h.module, &h.lib).map_err(|e| e.0), Ok(0));
     let m = moved();
     verify(&m.module, &m.lib).unwrap();
@@ -198,7 +198,7 @@ fn a_module_follows_another_by_its_schema_and_a_verify_per_new_hash() {
 /// no new hash: the moved `add_to_playlist` followed.
 #[test]
 fn what_is_not_additive_is_refused() {
-    let h = harken_domain5::domain();
+    let h = harken_domain::domain();
     let with = |g: &dyn Fn(&mut Table)| {
         let mut s = h.module.schema.clone();
         g(s.tables.iter_mut().find(|t| t.name == "playlist").unwrap());
@@ -264,14 +264,14 @@ fn a_server_holds_an_old_module_it_follows() {
         dir.path().join("harken.module"),
         dir.path().join("grown.module"),
     );
-    write(harken_domain5::domain(), &old).unwrap();
+    write(harken_domain::domain(), &old).unwrap();
     write(grown(), &new).unwrap();
     let (held, n) = Hosted::read(&new).unwrap().hold(&old).unwrap();
-    assert_eq!(n, harken_domain5::domain().bodies.len());
+    assert_eq!(n, harken_domain::domain().bodies.len());
     assert!(held
         .module
         .cas
-        .get(&harken_domain5::domain().get("playlists.create_playlist"))
+        .get(&harken_domain::domain().get("playlists.create_playlist"))
         .is_some());
     let e = Hosted::read(&old)
         .unwrap()
@@ -343,7 +343,7 @@ fn head(f: &Fleet) -> i64 {
 }
 
 /// The function each entry of the log names, by hash.
-fn hashes(f: &Fleet) -> Vec<ark5::hash::FnHash> {
+fn hashes(f: &Fleet) -> Vec<ark::hash::FnHash> {
     f.server
         .log_on_disk()
         .unwrap()
@@ -368,7 +368,7 @@ fn hashes(f: &Fleet) -> Vec<ark5::hash::FnHash> {
 #[test]
 fn version_3_a_peer_authors_at_a_hash_the_server_never_had() {
     let mut f = Fleet::new("v3-held");
-    let old = module_file(f.root.path(), "harken", harken_domain5::domain());
+    let old = module_file(f.root.path(), "harken", harken_domain::domain());
     let next = module_file(f.root.path(), "moved", moved());
     let mut a = f.peer("a", Some("alice"));
     let mut n = peer_on(&f, &next, "next", "alice");
@@ -395,7 +395,7 @@ fn version_3_a_peer_authors_at_a_hash_the_server_never_had() {
     playlist(&mut a, "Ahead");
     let hs = hashes(&f);
     assert!(hs.contains(&moved_hash), "the moved hash is in the log");
-    assert!(hs.contains(&harken_domain5::domain().get("playlists.create_playlist")));
+    assert!(hs.contains(&harken_domain::domain().get("playlists.create_playlist")));
     measured(
         "v3 a moved hash, held, the server restarted, to converged",
         t.elapsed(),
@@ -425,7 +425,7 @@ fn version_3b_what_a_peer_authors_behind_a_held_intent_lands() {
     let moved_hash = moved().get("playlists.create_playlist");
     assert!(!hashes(&f).contains(&moved_hash), "held, not run");
     let port = f.server.admin_port.expect("the admin page listens");
-    let file = ark5::hash::hex(&std::fs::read(&next).unwrap());
+    let file = ark::hash::hex(&std::fs::read(&next).unwrap());
     let loaded = ureq::post(&format!("http://127.0.0.1:{port}/admin/api/load"))
         .send_string(&file)
         .expect("the module loads")
@@ -448,7 +448,7 @@ fn version_3b_what_a_peer_authors_behind_a_held_intent_lands() {
 #[test]
 fn version_7_a_module_update_over_a_retained_log() {
     let mut f = Fleet::new("v7-retained");
-    let old = module_file(f.root.path(), "harken", harken_domain5::domain());
+    let old = module_file(f.root.path(), "harken", harken_domain::domain());
     let next = module_file(f.root.path(), "moved", moved());
     let mut a = f.peer("a", Some("alice"));
     let mut c = f.peer("c", Some("alice"));
@@ -473,7 +473,7 @@ fn version_7_a_module_update_over_a_retained_log() {
     assert!(
         h.contains(&format!(
             "module {}\n",
-            harken_domain5::domain().module.hash()
+            harken_domain::domain().module.hash()
         )),
         "it holds harken's: {h}"
     );
@@ -497,7 +497,7 @@ fn version_7_a_module_update_over_a_retained_log() {
 /// its head: the hub opens its chain under the new schema checking each
 /// entry by its hash over its own bytes, never deriving its state again,
 /// the rows widened and the store's digests the new schema's
-/// (`ark5::peer::Peer::open`). A peer of the grown release syncs it, sees
+/// (`ark::peer::Peer::open`). A peer of the grown release syncs it, sees
 /// the playlist made before, authors under it and settles at the head, its
 /// store hashing as the head says. Falsified by
 /// `open` deriving each entry's state again and cutting the chain where it

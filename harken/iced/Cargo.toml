@@ -14,9 +14,9 @@ description = "harken's desktop and browser client: the library, the table, the 
 demo = []
 
 [dependencies]
-harken-domain5 = { path = "../domain5" }
-ark5 = { path = "../../rust/ark5" }
-ark5-client = { path = "../../rust/ark5-client" }
+harken-domain = { path = "../domain" }
+ark = { path = "../../rust/ark" }
+ark-client = { path = "../../rust/ark-client" }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
 ark-auth = { path = "../../rust/ark-auth", features = ["client"] }
@@ -49,4 +49,4 @@ js-sys = "0.3"
 
 [dev-dependencies]
 # The tests' server: the hub, sans-io, the frames carried by hand.
-ark5-server = { path = "../../rust/ark5-server" }
+ark-server = { path = "../../rust/ark-server" }

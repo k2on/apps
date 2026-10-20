@@ -1,7 +1,7 @@
 //! Who an ArkDB peer is.
 //!
 //! The engine asks one question about identity: at every `Hello`, what does
-//! this token prove? (`server::Authenticate`, as `ark5-server` asks it.) This crate is the
+//! this token prove? (`server::Authenticate`, as `ark-server` asks it.) This crate is the
 //! answer for a server that signs people in with OpenID Connect, and the
 //! other half — how a client gets a token to send — for a desktop program
 //! and a page. It is `petros-auth` on ArkDB, with the session store in a

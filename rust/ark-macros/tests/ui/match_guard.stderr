@@ -1,0 +1,5 @@
+error: a match guard is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/match_guard.rs:8:20
+  |
+8 |         Some(x) if x > 0 => x,
+  |                    ^^^^^

@@ -1,5 +1,0 @@
-error: an item inside a body is not in the subset ark lowers (spec5/AUTHORING.md)
- --> tests/ui/item_in_body.rs:7:5
-  |
-7 |     fn g() {}
-  |     ^^^^^^^^^

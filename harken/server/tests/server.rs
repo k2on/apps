@@ -6,11 +6,11 @@
 
 mod common;
 
-use ark5::ir::Node;
-use ark5::store::Change;
+use ark::ir::Node;
+use ark::store::Change;
 use common::*;
-use harken_domain5::playlists::CreatePlaylist;
-use harken_domain5::schema::Playlist;
+use harken_domain::playlists::CreatePlaylist;
+use harken_domain::schema::Playlist;
 use harken_server::{start, Config, SignIn};
 
 fn playlists(server: &harken_server::Server) -> Vec<(String, String)> {
@@ -42,7 +42,7 @@ fn a_login_from_the_routes_is_who_the_socket_says_you_are() {
         panic!("dev auth opens no browser: {u}")
     })
     .unwrap();
-    let mut laptop = open(ark5_client::auth::who(&login), None);
+    let mut laptop = open(ark_client::auth::who(&login), None);
     laptop.connect(&url, &login.token);
     laptop.mutate("playlists.create_playlist", &named("Road trip"));
     pump_until(&mut [&mut laptop], 10, |ps| ps[0].pending() == 0);
@@ -61,7 +61,7 @@ fn a_login_from_the_routes_is_who_the_socket_says_you_are() {
 
     // A token nobody issued is turned away, and keeps what it authored.
     let mut mallory = open(
-        ark5::peer::Who {
+        ark::peer::Who {
             actor: "mallory".into(),
             session: "nope".into(),
             roles: vec![],
@@ -133,7 +133,7 @@ fn the_log_and_the_logins_survive_a_restart() {
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |_| {});
     let login = ark_auth::client::login(&server.url(), Some("erin"), |_| {}).unwrap();
-    let mut p = open(ark5_client::auth::who(&login), None);
+    let mut p = open(ark_client::auth::who(&login), None);
     p.connect(&server.url(), &login.token);
     p.mutate("playlists.create_playlist", &named("Kept"));
     pump_until(&mut [&mut p], 10, |ps| ps[0].pending() == 0);
@@ -145,7 +145,7 @@ fn the_log_and_the_logins_survive_a_restart() {
         playlists(&server),
         [("Kept".to_string(), "erin".to_string())]
     );
-    let mut again = open(ark5_client::auth::who(&login), None);
+    let mut again = open(ark_client::auth::who(&login), None);
     again.connect(&server.url(), &login.token);
     pump_until(&mut [&mut again], 10, |ps| ps[0].cursor() == 1);
     rt.block_on(server.stop());
@@ -279,16 +279,16 @@ fn the_admin_page_is_the_authoritys() {
     let state =
         State::from_body(&admin("GET", &format!("{at}/admin/api/state"), None, None).unwrap())
             .unwrap();
-    let module = ark5::module::Module::from_bytes(&state.module).unwrap();
+    let module = ark::module::Module::from_bytes(&state.module).unwrap();
     assert_eq!(module, hosted().domain.module);
-    let lib = ark5::module::Lib::default();
+    let lib = ark::module::Lib::default();
     let mut left = state.bodies.clone();
     while !left.is_empty() {
         let before = left.len();
         left.retain(|b| lib.load(&module.schema, b).is_err());
         assert!(left.len() < before, "{} bodies do not check", left.len());
     }
-    ark5::module::verify(&module, &lib).unwrap();
+    ark::module::verify(&module, &lib).unwrap();
     let rows = &state.rows.iter().find(|(t, _)| t == "playlist").unwrap().1;
     let mine = Playlist::from_bytes(&rows[0]).unwrap();
     assert_eq!((mine.name.as_str(), state.head), ("Mine", 1));
@@ -404,7 +404,7 @@ fn a_wider_admin_page_asks_for_the_admin_role() {
 /// answers `Held`, and no frame carries a body to it: the intent stays
 /// pending on bob's device and alice's playlist keeps its name. Falsified
 /// by putting back the `Push` with a body the client answered `Held` with
-/// and the authority's loading of it (`ark5::peer::Peer::push`): the
+/// and the authority's loading of it (`ark::peer::Peer::push`): the
 /// playlist was renamed `Hijacked`.
 #[test]
 fn a_clients_raw_write_is_refused() {
@@ -424,11 +424,11 @@ fn a_clients_raw_write_is_refused() {
         old: mine.to_bytes(),
         new: hijacked.to_bytes(),
     };
-    let raw = ark5_server::admin::raw(&hosted().domain.module, &edit).unwrap();
+    let raw = ark_server::admin::raw(&hosted().domain.module, &edit).unwrap();
     let mut bob = signed_in(&server, "bob");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == 1);
     let h = bob.client.log.cas.add_body(raw.to_bytes());
-    bob.client.mutate(h, vec![], ark5_server::handle::now());
+    bob.client.mutate(h, vec![], ark_server::handle::now());
     for _ in 0..100 {
         bob.pump();
         std::thread::sleep(std::time::Duration::from_millis(10));

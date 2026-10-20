@@ -6,14 +6,14 @@
 
 use std::collections::BTreeMap;
 
-use ark5::author::Node;
-use ark5::hash::FnHash;
-use ark5::ir::{Effect, Expr};
-use ark5::log::{Entry, Seq};
-use ark5::module::{Lib, Module};
-use ark5::peer::Ctx;
-use ark5::schema::{Schema, Space};
-use ark5::store::{Change, Store};
+use ark::author::Node;
+use ark::hash::FnHash;
+use ark::ir::{Effect, Expr};
+use ark::log::{Entry, Seq};
+use ark::module::{Lib, Module};
+use ark::peer::Ctx;
+use ark::schema::{Schema, Space};
+use ark::store::{Change, Store};
 
 /// `docs/plan-guards.md` D4 Which of a table's four CRUD mutations a module
 /// exposes — `insert_<t>`, `update_<t>`, `delete_<t>`, `put_<t>`, bound
@@ -179,7 +179,7 @@ pub fn crud_of(module: &Module, lib: &Lib) -> Vec<(String, CrudVerbs)> {
     let cx = crate::value::types(module);
     let mut out = Vec::new();
     for t in &module.schema.tables {
-        let said = |cs: &[ark5::schema::Column]| cs.iter().map(|c| c.decl.clone()).collect::<Vec<_>>();
+        let said = |cs: &[ark::schema::Column]| cs.iter().map(|c| c.decl.clone()).collect::<Vec<_>>();
         let takes = |verb: &str, want: Vec<String>| {
             module
                 .bindings
@@ -222,7 +222,7 @@ pub fn is_live(module: &Module, lib: &Lib, h: &FnHash) -> bool {
         }
         let Some(f) = lib.get(&h) else { continue };
         let mut hit = false;
-        ark5::interp::walk(&f.f.body, None, &mut |e, _| match e {
+        ark::interp::walk(&f.f.body, None, &mut |e, _| match e {
             Expr::Scan(t) | Expr::Lookup(t, _) | Expr::Insert(t, _) | Expr::Update(t, ..) | Expr::Delete(t, _) => hit |= volatile(t),
             Expr::Call(c, _) => todo.push(*c),
             _ => {}

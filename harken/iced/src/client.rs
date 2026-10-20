@@ -1,5 +1,5 @@
 //! This device's replica (`docs/plan-v5.md` §1.7, §1.9, §1.11): an
-//! `ark5_client::Client` — the log's machine and the listening session's,
+//! `ark_client::Client` — the log's machine and the listening session's,
 //! over one connection — and what a window asks of it, by name.
 //!
 //! The client is sans-io; a [`Replica`] drives it. It authors and asks by a
@@ -15,7 +15,7 @@
 //! **Nobody has to be signed in.** A replica opened with no login authors
 //! as whoever last signed in on it — nobody, on a device where nobody ever
 //! did — and dials nothing; signing in makes its pending intents the
-//! signer's, as `ark5_client::Client::sign_in` re-authors them, and dials.
+//! signer's, as `ark_client::Client::sign_in` re-authors them, and dials.
 //! A replica that joined a server while alone hands its history over as
 //! intents pending under the login that signs in there (§1.7's join hands a
 //! chain, which the server adopts only from the session that made it — a
@@ -28,15 +28,15 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use ark5::author::{Domain, Node};
-use ark5::hash::StateHash;
-use ark5::log::EntryId;
-use ark5::peer::{Ctx, Who};
-use ark5::schema::Space;
-use ark5::view::Patch;
-pub use ark5_client::link::Event;
-use ark5_client::{Client, Config, Disk, Live, Memory, Module};
-use harken_domain5::listening::Device;
+use ark::author::{Domain, Node};
+use ark::hash::StateHash;
+use ark::log::EntryId;
+use ark::peer::{Ctx, Who};
+use ark::schema::Space;
+use ark::view::Patch;
+pub use ark_client::link::Event;
+use ark_client::{Client, Config, Disk, Live, Memory, Module};
+use harken_domain::listening::Device;
 
 /// The milliseconds between two ephemeral calls the relay sends — a
 /// scrubber dragged — twenty a second; the last always goes.
@@ -51,7 +51,7 @@ const MOST_MS: u64 = 30_000;
 /// harken's module, assembled once.
 pub fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(harken_domain5::domain)
+    D.get_or_init(harken_domain::domain)
 }
 
 /// The binding a name means: itself, or the one whose last part it is.
@@ -98,7 +98,7 @@ pub fn device(can_play: bool, name: &str) -> Vec<u8> {
     Device {
         can_play,
         id: String::new(),
-        kind: harken_domain5::listening::read::Kind::Computer.name().into(),
+        kind: harken_domain::listening::read::Kind::Computer.name().into(),
         name: name.into(),
         user: String::new(),
     }
@@ -219,7 +219,7 @@ pub struct Replica {
 pub fn nobody() -> Who {
     let here = 0u8;
     let seed = format!("{}:{}:{:p}", now_ms(), monotonic_ms(), &here);
-    let id = ark5::hash::hex(&ark5::hash::sha256(&[seed.as_bytes()])[..8]);
+    let id = ark::hash::hex(&ark::hash::sha256(&[seed.as_bytes()])[..8]);
     Who {
         actor: String::new(),
         session: format!("device-{id}"),
@@ -325,7 +325,7 @@ impl Replica {
         self.who_epoch += 1;
     }
 
-    fn func(name: &str) -> Result<ark5::hash::FnHash, String> {
+    fn func(name: &str) -> Result<ark::hash::FnHash, String> {
         let b = binding(name).ok_or_else(|| format!("no function {name}"))?;
         Ok(domain().get(&b))
     }
@@ -401,7 +401,7 @@ impl Replica {
     fn absorb(&mut self) {
         for e in self.client.take_events() {
             match e {
-                ark5_client::Event::Refused {
+                ark_client::Event::Refused {
                     space: Space::Durable,
                     id,
                     why,
@@ -409,18 +409,18 @@ impl Replica {
                     self.standing.insert(id, Standing::Rejected(why.clone()));
                     self.rejections.push((id, why));
                 }
-                ark5_client::Event::Refused { id, why, .. } => self.live_refused.push((id, why)),
-                ark5_client::Event::Confirmed { space: Space::Durable, id } => {
+                ark_client::Event::Refused { id, why, .. } => self.live_refused.push((id, why)),
+                ark_client::Event::Confirmed { space: Space::Durable, id } => {
                     self.standing.insert(id, Standing::Confirmed);
                 }
-                ark5_client::Event::Confirmed { .. } => {}
-                ark5_client::Event::Patches { patches, .. } if patches.is_empty() => {}
-                ark5_client::Event::Patches { view, patches } => match self.updates.entry(view).or_insert(Update::Unchanged) {
+                ark_client::Event::Confirmed { .. } => {}
+                ark_client::Event::Patches { patches, .. } if patches.is_empty() => {}
+                ark_client::Event::Patches { view, patches } => match self.updates.entry(view).or_insert(Update::Unchanged) {
                     u @ Update::Unchanged => *u = Update::Patched(patches),
                     Update::Patched(ps) => ps.extend(patches),
                     Update::Reset => {}
                 },
-                ark5_client::Event::Dropped { view, .. } => {
+                ark_client::Event::Dropped { view, .. } => {
                     self.updates.insert(view, Update::Reset);
                 }
             }
@@ -640,9 +640,9 @@ impl Replica {
 
     /// The account's listening session as this device holds it: the
     /// server's, with its own calls previewed on top.
-    pub fn listening(&self) -> harken_domain5::listening::read::Listening {
+    pub fn listening(&self) -> harken_domain::listening::read::Listening {
         match &self.client.live {
-            Some(l) => harken_domain5::listening::read::Listening::of(&l.store, &self.me().actor),
+            Some(l) => harken_domain::listening::read::Listening::of(&l.store, &self.me().actor),
             None => Default::default(),
         }
     }
@@ -885,7 +885,7 @@ mod web {
 }
 
 /// The records of a replica in the page's `localStorage`, under one key's
-/// prefix: an `ark5_client::Memory` read once and written through, each
+/// prefix: an `ark_client::Memory` read once and written through, each
 /// part as hex. Not compiled here (no wasm32 target).
 #[cfg(target_arch = "wasm32")]
 pub struct Stored {
@@ -897,7 +897,7 @@ pub struct Stored {
 impl Stored {
     pub fn open(key: &str) -> Result<Stored, String> {
         let s = ark_auth::web::storage().ok_or("this page has no localStorage")?;
-        let get = |k: &str| s.get_item(&format!("{key}:{k}")).ok().flatten().and_then(|h| ark5::hash::unhex(&h));
+        let get = |k: &str| s.get_item(&format!("{key}:{k}")).ok().flatten().and_then(|h| ark::hash::unhex(&h));
         let mut mem = Memory::default();
         mem.snapshot = get("snapshot");
         if let Some(b) = get("chain") {
@@ -912,7 +912,7 @@ impl Stored {
     fn save(&self) -> std::io::Result<()> {
         let s = ark_auth::web::storage().ok_or_else(|| std::io::Error::other("no localStorage"))?;
         let put = |k: &str, b: &[u8]| {
-            s.set_item(&format!("{}:{k}", self.key), &ark5::hash::hex(b))
+            s.set_item(&format!("{}:{k}", self.key), &ark::hash::hex(b))
                 .map_err(|e| std::io::Error::other(format!("{e:?}")))
         };
         if let Some(b) = &self.mem.snapshot {
@@ -926,7 +926,7 @@ impl Stored {
 
 #[cfg(target_arch = "wasm32")]
 impl Disk for Stored {
-    fn load(&mut self) -> std::io::Result<ark5_client::storage::Stored> {
+    fn load(&mut self) -> std::io::Result<ark_client::storage::Stored> {
         self.mem.load()
     }
     fn record(&mut self, bytes: &[u8]) -> std::io::Result<()> {

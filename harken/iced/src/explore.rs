@@ -15,9 +15,9 @@
 
 use std::collections::BTreeMap;
 
-use ark5::hash::FnHash;
-use ark5::log::EntryId;
-use ark5::store::{Change, Store};
+use ark::hash::FnHash;
+use ark::log::EntryId;
+use ark::store::{Change, Store};
 use ark_explorer::{Connection, CrudVerbs, Explorer, Line, LogView, Source, Ticket, Verdict, Writer};
 
 use iced::{Point, Size};
@@ -63,7 +63,7 @@ fn who(client: &Replica) -> String {
 /// the authority answers, then in the log or refused with the reason every
 /// replica reaches.
 fn verdict(client: &Replica, ticket: &Ticket) -> Verdict {
-    let Some(id) = ark5::hash::unhex(&ticket.0).and_then(|b| <[u8; 16]>::try_from(b).ok()) else {
+    let Some(id) = ark::hash::unhex(&ticket.0).and_then(|b| <[u8; 16]>::try_from(b).ok()) else {
         return Verdict::Unknown;
     };
     match client.standing(&EntryId(id)) {
@@ -93,7 +93,7 @@ impl Writer for Writes<'_> {
             id,
             what: format!("{function}, from the explorer"),
         });
-        Ok(Ticket(ark5::hash::hex(&id.0)))
+        Ok(Ticket(ark::hash::hex(&id.0)))
     }
     fn verdict(&self, ticket: &Ticket) -> Verdict {
         verdict(self.client, ticket)

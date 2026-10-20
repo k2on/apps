@@ -1,0 +1,5 @@
+error: a match on an option without `None`, `Some` or `_` is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/option_without_none.rs:7:11
+  |
+7 |     match o {
+  |           ^

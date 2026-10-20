@@ -1,0 +1,5 @@
+error: `let … else` is not in the subset ark lowers (spec/AUTHORING.md)
+ --> tests/ui/let_else.rs:7:20
+  |
+7 |     let x = a else { return 0 };
+  |                    ^^^^^^^^^^^^

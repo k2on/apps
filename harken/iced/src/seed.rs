@@ -27,14 +27,14 @@
 
 use std::collections::BTreeMap;
 
-use ark5::author::Node;
-use ark5::log::{EntryId, Record, Snapshot};
-use ark5::peer::Ctx;
-use ark5::store::Store;
-use ark5_client::{Disk, Memory};
-use harken_domain5::keys;
-use harken_domain5::library::{AddSong, CreditRecording, DescribePerson, DescribeRecording, DescribeWork, Library, LibraryEntry};
-use harken_domain5::playlists::{AddToPlaylist, CreatePlaylist};
+use ark::author::Node;
+use ark::log::{EntryId, Record, Snapshot};
+use ark::peer::Ctx;
+use ark::store::Store;
+use ark_client::{Disk, Memory};
+use harken_domain::keys;
+use harken_domain::library::{AddSong, CreditRecording, DescribePerson, DescribeRecording, DescribeWork, Library, LibraryEntry};
+use harken_domain::playlists::{AddToPlaylist, CreatePlaylist};
 
 use crate::client::{domain, Replica};
 use crate::peer::key;
@@ -4276,7 +4276,7 @@ impl Seeder {
                 id: EntryId::of(LOCAL, 0),
                 actor: DEMO.into(),
                 session: LOCAL.into(),
-                roles: vec![harken_domain5::schema::LIBRARY.into()],
+                roles: vec![harken_domain::schema::LIBRARY.into()],
                 now: 1_700_000_000_000,
             },
             local: 0,
@@ -4308,7 +4308,7 @@ impl Seeder {
 
     /// Which playlist is called `name`.
     fn playlist(&self, name: &str) -> Option<Id> {
-        self.query::<Vec<harken_domain5::schema::Playlist>>("playlists", &())
+        self.query::<Vec<harken_domain::schema::Playlist>>("playlists", &())
             .into_iter()
             .find(|p| p.name == name)
             .map(|p| p.id.0)
@@ -4341,7 +4341,7 @@ pub fn open(disk: Memory) -> Replica {
     let mut peer = Replica::open(Box::new(disk), None, crate::listening::device());
     // The demo's identity is the library's, as its seed was
     // (`docs/plan-guards.md` D1).
-    peer.set_roles([harken_domain5::schema::LIBRARY]);
+    peer.set_roles([harken_domain::schema::LIBRARY]);
     peer.alone();
     peer
 }
@@ -4385,7 +4385,7 @@ pub fn seeded_disk(copies: usize) -> Memory {
     // Which recordings exist falls out of the tracks rather than being a table
     // of its own: a recording is one work as played by one set of people, so
     // collecting the pairs while authoring is the same answer `add_song`
-    // reaches, computed from the same helpers (`harken_domain5::keys`).
+    // reaches, computed from the same helpers (`harken_domain::keys`).
     let mut takes: BTreeMap<String, (&'static str, &'static str)> = BTreeMap::new();
     let mut work_ids: BTreeMap<(usize, &'static str), String> = BTreeMap::new();
     for k in 0..copies {

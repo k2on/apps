@@ -1,22 +1,13 @@
-//! harken's domain, written once in the vocabulary of `spec/AUTHORING.md`.
+//! harken's domain on ArkDB v5 (`docs/plan-v5.md` §1.12): the same domain
+//! as `harken/domain`, function for function, written as `#[ark::*]`
+//! functions over derived rows, records and sums, and assembled into one
+//! module by [`module::domain`].
 //!
-//! Four files are the domain: `schema` (the tables), `library` (what the
-//! scanner authors and every peer reads, and the helpers that derive the
-//! keys), `playlists` (what people do), and `module` (the routers, in
-//! order). The same text is the module and the code that applies it:
-//! `module().emit()` is `harken.ark`, which every runtime verifies and
-//! hashes, and `module().procedures()` are the procedures a Rust peer — the
-//! server, the desktop — applies entries with natively, held to the
-//! interpreter over their own emit by this crate's tests.
-//!
-//! Beside them, and not the domain: [`listening`] is the realtime protocol
-//! of one account's audio session (never the log), [`view`] is what a
-//! client maintains, and [`keys`] computes the derived keys on the host
-//! with the helpers' own definitions.
-
-// A row's columns are `pub const id: Col<..>` beside its fields, named as
-// the fields are: the canonical spelling, not a Rust constant's.
-#![allow(non_upper_case_globals)]
+//! [`schema`] is the tables; [`library`] what the scanner authors and every
+//! peer reads, and the helpers that derive the keys; [`playlists`] what
+//! people do; [`listening`] the listening session, live state over
+//! volatile tables, and the plays; [`keys`] the derived keys on the host;
+//! [`view`] what a screen holds of a library list.
 
 pub mod keys;
 pub mod library;
@@ -26,4 +17,4 @@ pub mod playlists;
 pub mod schema;
 pub mod view;
 
-pub use module::module;
+pub use module::domain;

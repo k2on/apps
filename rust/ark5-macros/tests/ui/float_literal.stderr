@@ -1,5 +1,0 @@
-error: a float literal is not in the subset ark lowers (spec5/AUTHORING.md)
- --> tests/ui/float_literal.rs:7:5
-  |
-7 |     1.5
-  |     ^^^

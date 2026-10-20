@@ -1,6 +1,0 @@
-{
-  "schema": [{"columns":[{"decl":"Id<playlist>","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"user_id","ty":{"t":"bytes"}}],"indexes":[{"columns":["user_id","name"],"unique":true}],"key":{"$int":"1"},"name":"playlist","refs":[],"space":"durable"},{"columns":[{"decl":"Id<playlist>","default":null,"name":"playlist_id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"track_id","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["playlist_id","pos"],"unique":true}],"key":{"$int":"2"},"name":"item","refs":[{"column":"playlist_id","table":"playlist"}],"space":"durable"}],
-  "schema_hash": "31ebe717b274e80c0baa628a596579c9e3e79436cd41337682848a9166d6c5b7",
-  "store": {"item":[[{"$id":"00000000-0000-0000-0000-000000000001"},"t11",{"$int":"3"}],[{"$id":"00000000-0000-0000-0000-000000000001"},"t7",{"$int":"1"}],[{"$id":"00000000-0000-0000-0000-000000000001"},"t9",{"$int":"2"}]],"playlist":[[{"$id":"00000000-0000-0000-0000-000000000001"},"Favorites","alice"]]},
-  "hash": "df19d8cf24db5ca6ca760feda4b7d7036ec6b32be88adf47109a5f1db2cecb25"
-}

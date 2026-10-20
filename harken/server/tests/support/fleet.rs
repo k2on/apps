@@ -4,7 +4,7 @@
 //! every scenario ends on.
 //!
 //! The server's log is read where it lies (`HARKEN_DATA/log`, the chain on
-//! disk, `ark5_client::Files`), from a copy, so a read never cuts a tail the
+//! disk, `ark_client::Files`), from a copy, so a read never cuts a tail the
 //! server is writing: its snapshot's rows, each entry's facts applied on
 //! top, is the state at its head.
 //!
@@ -22,12 +22,12 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ark5::hash::hex;
-use ark5::ir::Node;
-use ark5::log::{Logged, Snapshot};
-use ark5::peer::Who;
-use ark5::store::{Change, Store};
-use ark5_client::{Client, Disk, Files, Memory};
+use ark::hash::hex;
+use ark::ir::Node;
+use ark::log::{Logged, Snapshot};
+use ark::peer::Who;
+use ark::store::{Change, Store};
+use ark_client::{Client, Disk, Files, Memory};
 use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
 
@@ -97,7 +97,7 @@ pub fn id_of(v: &Value) -> Id {
         .as_str()
         .unwrap_or_else(|| panic!("not an id: {v}"));
     let h: String = t.chars().filter(|c| *c != '-').collect();
-    ark5::hash::unhex(&h)
+    ark::hash::unhex(&h)
         .and_then(|b| b.try_into().ok())
         .unwrap_or_else(|| panic!("not an id: {t}"))
 }
@@ -890,8 +890,8 @@ impl Drop for PeerProc {
 /// directory, with a client of it in this process authoring as the user
 /// asked for, holding the library's role.
 pub struct Seeder {
-    hub: ark5_server::Hub,
-    conn: ark5_server::hub::ConnId,
+    hub: ark_server::Hub,
+    conn: ark_server::hub::ConnId,
     clients: BTreeMap<String, Client>,
     pub ids: BTreeSet<Id>,
 }
@@ -899,7 +899,7 @@ pub struct Seeder {
 impl Seeder {
     fn new(dir: &Path) -> Seeder {
         let disk: Box<dyn Disk> = Box::new(Files::new(dir.join("log")).unwrap());
-        let hub = ark5_server::Hub::open(harken_server::hub_config(hosted(), 10_000), disk, 0);
+        let hub = ark_server::Hub::open(harken_server::hub_config(hosted(), 10_000), disk, 0);
         Seeder {
             hub,
             conn: 0,
@@ -918,7 +918,7 @@ impl Seeder {
                 roles: vec!["library".into()],
             };
             let mut c = Client::open(
-                ark5_client::Config {
+                ark_client::Config {
                     log: hosted().module.clone(),
                     live: None,
                 },
@@ -1296,8 +1296,8 @@ pub fn song(title: &str) -> Vec<(&'static str, Value)> {
 }
 
 /// [`song`], as the domain's input.
-pub fn song_input(title: &str) -> harken_domain5::library::AddSong {
-    harken_domain5::library::AddSong {
+pub fn song_input(title: &str) -> harken_domain::library::AddSong {
+    harken_domain::library::AddSong {
         title: title.into(),
         artist: "The Fleet".into(),
         album: "Loopback".into(),
@@ -1314,7 +1314,7 @@ pub fn ids_of(rows: &[Value], key: &str) -> Vec<Id> {
 
 /// Every playlist item, as each playlist's media in `pos` order.
 pub fn playlists_in_pos_order(
-    rows: &[harken_domain5::schema::PlaylistItem],
+    rows: &[harken_domain::schema::PlaylistItem],
 ) -> BTreeMap<Id, Vec<Id>> {
     let mut by: BTreeMap<Id, Vec<(i64, Id)>> = BTreeMap::new();
     for r in rows {

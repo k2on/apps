@@ -1,7 +1,7 @@
 //! Nobody has to sign in, and signing in later keeps everything; and every
 //! change this window makes can say what became of it.
-use ark5::frames::Frame;
-use ark5::schema::Space;
+use ark::frames::Frame;
+use ark::schema::Space;
 use ark_auth::{Account, Login};
 
 use super::{signed_in, signed_out, song};
@@ -17,7 +17,7 @@ fn login(who: &str) -> Login {
         session: format!("session-{who}"),
         user: Account {
             id: who.into(),
-            roles: vec![harken_domain5::schema::LIBRARY.into()],
+            roles: vec![harken_domain::schema::LIBRARY.into()],
             ..Account::default()
         },
         expires_ms: 0,
@@ -31,7 +31,7 @@ fn login(who: &str) -> Login {
 /// Falsified by making `signed_in` open a fresh replica rather than call
 /// `sign_in` on this one: the item is gone and the pending count is 0. An
 /// intent's id is its replica's origin's (§1.6), so the pending one keeps
-/// its id through the sign-in; falsified by `ark5_client::Client::sign_in`
+/// its id through the sign-in; falsified by `ark_client::Client::sign_in`
 /// authoring it again from a new origin: the id moved.
 #[test]
 fn signing_in_moves_the_same_replica_on() {

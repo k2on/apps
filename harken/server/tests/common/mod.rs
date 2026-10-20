@@ -1,22 +1,22 @@
 //! harken's server in this process on a real port, and peers that pump
-//! against it: an `ark5_client::Client` and its link over the server's
+//! against it: an `ark_client::Client` and its link over the server's
 //! WebSocket, as a desktop or a phone is.
 #![allow(dead_code)]
 
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use ark5::frames::Frame;
-use ark5::ir::Node;
-use ark5::log::EntryId;
-use ark5::peer::{Ctx, Who};
-use ark5::schema::Space;
-use ark5_client::link::{Backoff, Event as LinkEvent, Link, Socket};
-use ark5_client::{Client, Event, Memory};
-use ark5_server::handle::now;
+use ark::frames::Frame;
+use ark::ir::Node;
+use ark::log::EntryId;
+use ark::peer::{Ctx, Who};
+use ark::schema::Space;
 use ark_auth::{Account, Login};
-use harken_domain5::listening::read::{Kind, Listening};
-use harken_domain5::listening::Device;
+use ark_client::link::{Backoff, Event as LinkEvent, Link, Socket};
+use ark_client::{Client, Event, Memory};
+use ark_server::handle::now;
+use harken_domain::listening::read::{Kind, Listening};
+use harken_domain::listening::Device;
 use harken_server::hosted::Hosted;
 use harken_server::{start, Config, Server};
 
@@ -82,7 +82,7 @@ pub struct Peer {
 
 /// A client as `who`, in memory, linked to nothing.
 pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
-    let live = device.map(|(kind, name, can_play)| ark5_client::Live {
+    let live = device.map(|(kind, name, can_play)| ark_client::Live {
         module: hosted().module.clone(),
         device: Some(
             Device {
@@ -97,7 +97,7 @@ pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
         ephemeral: [hosted().func("listening.scrub")].into(),
         every_ms: RELAY_MS,
     });
-    let config = ark5_client::Config {
+    let config = ark_client::Config {
         log: hosted().module.clone(),
         live,
     };
@@ -123,7 +123,7 @@ pub fn nobody() -> Who {
 /// login, dialling the socket.
 pub fn signed_in(server: &Server, user: &str) -> Peer {
     let l = login(server, user);
-    let mut p = open(ark5_client::auth::who(&l), None);
+    let mut p = open(ark_client::auth::who(&l), None);
     p.connect(&server.url(), &l.token);
     p
 }
@@ -131,7 +131,7 @@ pub fn signed_in(server: &Server, user: &str) -> Peer {
 /// [`signed_in`], as a device of the listening session.
 pub fn device(server: &Server, user: &str, kind: Kind, name: &str, can_play: bool) -> Peer {
     let l = login(server, user);
-    let mut p = open(ark5_client::auth::who(&l), Some((kind, name, can_play)));
+    let mut p = open(ark_client::auth::who(&l), Some((kind, name, can_play)));
     p.connect(&server.url(), &l.token);
     p
 }
@@ -160,7 +160,7 @@ impl Peer {
     /// socket dialled with its token.
     pub fn sign_in(&mut self, server: &str, l: &Login) {
         self.disconnect();
-        self.client.sign_in(ark5_client::auth::who(l));
+        self.client.sign_in(ark_client::auth::who(l));
         self.connect(server, &l.token);
     }
 

@@ -1,7 +1,7 @@
 # harken-server
 
-harken's server, on `ark5-server` and `ark-auth`, hosting
-`harken-domain5`. The log and the listening session's volatile space on
+harken's server, on `ark-server` and `ark-auth`, hosting
+`harken-domain`. The log and the listening session's volatile space on
 the hub, the sync socket at `/sync`, the sign-in routes under `/auth`, the
 browser client's validator and the admin page's listener are the shared
 crates'; what is here is what only harken has:
@@ -9,7 +9,7 @@ crates'; what is here is what only harken has:
 - **`library.rs`** — the media directory as a peer. `music/` under the root
   is walked at start and the whole root is watched after; each audio file
   is read with lofty and authored as `library.add_song` by an
-  `ark5_client::Client` in this process, dialling the hub (no socket),
+  `ark_client::Client` in this process, dialling the hub (no socket),
   signed in as the account
   `library`. `add_song` is an upsert by `file`: a file the library already
   has is that song said again — retagged, or with a cover it lacked — and
@@ -48,7 +48,7 @@ crates'; what is here is what only harken has:
   so no client changed; `/media/.art` and `/media/.cover` are reserved, and
   `ServeDir` refuses a `..` in either, written or encoded.
 - **The listening session is not here.** It is the domain's live state
-  (`harken_domain5::listening`, `docs/plan-v5.md` §1.9): volatile tables
+  (`harken_domain::listening`, `docs/plan-v5.md` §1.9): volatile tables
   on `/sync`, sequenced by the hub's volatile authority, a connection's
   device said in its volatile `Hello` (`device`), `on_join`, `on_leave`
   and `on_restore` the domain's; kept in `log/live` when the hub closes
@@ -142,7 +142,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
 | `HARKEN_BRIDGE_TRACE=1` | a line per poll per speaker: what the house said of it and what the bridge did (below) |
 | `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice` |
-| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark5_server::admin`, its raw writes and mutations authored by the authority as itself |
+| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark_server::admin`, its raw writes and mutations authored by the authority as itself |
 | `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
 
 What is in `HARKEN_DATA` (`/var/lib/harken` under the NixOS module), and
@@ -241,7 +241,7 @@ position, then a position, an early seek dropped — never drawn at the
 beginning on any device and within the bound of the speaker from the
 moment it starts, a drift followed without a command, and the trace
 (`tests/bridge.rs`); the session's own rules are the
-domain's transition tests (`harken/domain5/tests/listening.rs`); the scanner
+domain's transition tests (`harken/domain/tests/listening.rs`); the scanner
 over real WAV files, tags written and read by lofty, covers beside a
 record and inside its tracks fetched where the log says, a retagged file
 the same song, a rescan of nothing new reading nothing, and `/media` range

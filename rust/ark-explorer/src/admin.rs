@@ -20,11 +20,11 @@ use std::time::Duration;
 
 use std::sync::Arc;
 
-use ark5::author::Node;
-use ark5::log::{EntryId, Seq};
-use ark5::module::{Lib, Module};
-use ark5::peer::Ctx;
-use ark5::store::{Change, Store};
+use ark::author::Node;
+use ark::log::{EntryId, Seq};
+use ark::module::{Lib, Module};
+use ark::peer::Ctx;
+use ark::store::{Change, Store};
 use iced::widget::{column, container, text};
 use iced::{Element, Length, Subscription, Task};
 
@@ -56,7 +56,7 @@ impl Loaded {
                 return Err(format!("{} function bodies do not check", left.len()));
             }
         }
-        ark5::module::verify(&module, &lib).map_err(|e| format!("the module: {e}"))?;
+        ark::module::verify(&module, &lib).map_err(|e| format!("the module: {e}"))?;
         let store = Store::from_rows(Arc::new(module.schema.clone()), &state.rows).map_err(|e| format!("the store: {e}"))?;
         Ok(Loaded { module, lib, store, state })
     }

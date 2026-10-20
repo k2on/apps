@@ -17,9 +17,9 @@
 mod common;
 
 use common::*;
-use harken_domain5::library::LibraryEntry;
-use harken_domain5::playlists::{AddToPlaylist, CreatePlaylist, PlaylistInput};
-use harken_domain5::schema::{Album, Media, Person, Playlist};
+use harken_domain::library::LibraryEntry;
+use harken_domain::playlists::{AddToPlaylist, CreatePlaylist, PlaylistInput};
+use harken_domain::schema::{Album, Media, Person, Playlist};
 use harken_server::Server;
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -229,7 +229,7 @@ fn a_songs_file_is_served_at_the_path_the_log_carries() {
         c.media = Some(media.clone())
     });
     let found = settle(&server, 1);
-    let url = harken_domain5::listening::url(&server.url(), &found[0].1);
+    let url = harken_domain::listening::url(&server.url(), &found[0].1);
     let whole = ureq::get(&url).call().unwrap();
     assert_eq!(whole.status(), 200);
     let res = ureq::get(&url).set("Range", "bytes=0-3").call().unwrap();
@@ -323,7 +323,7 @@ fn raw_status(server: &Server, path: &str) -> u16 {
 }
 
 fn fetch(server: &Server, art: &str) -> (String, Vec<u8>) {
-    let url = harken_domain5::listening::url(&server.url(), art);
+    let url = harken_domain::listening::url(&server.url(), art);
     let res = ureq::get(&url)
         .call()
         .unwrap_or_else(|e| panic!("{url}: {e}"));

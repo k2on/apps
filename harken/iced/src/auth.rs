@@ -23,7 +23,7 @@
 //! one URL, get one code back — and differs between the targets only in where
 //! the code comes back to: a loopback port the desktop listens on, or this
 //! page's own address.
-use ark5::peer::Who;
+use ark::peer::Who;
 use ark_auth::remember::Logins;
 use ark_auth::Login;
 
@@ -202,7 +202,7 @@ pub fn open_alone() -> Result<Replica, String> {
 
 /// Who a login is, as the server verifies it and an entry carries it.
 pub fn who_of(l: &Login) -> Who {
-    ark5_client::auth::who(l)
+    ark_client::auth::who(l)
 }
 
 /// This server's replica on this device: a directory natively, the page's
@@ -223,17 +223,17 @@ pub fn open(server: &str, login: Option<&Login>) -> Result<Replica, String> {
 
 /// Where a place's replica is kept.
 #[cfg_attr(feature = "demo", allow(dead_code))]
-fn disk(place: &str) -> Result<Box<dyn ark5_client::Disk>, String> {
+fn disk(place: &str) -> Result<Box<dyn ark_client::Disk>, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let dir = data_dir(place);
-        ark5_client::Files::new(&dir)
-            .map(|f| Box::new(f) as Box<dyn ark5_client::Disk>)
+        ark_client::Files::new(&dir)
+            .map(|f| Box::new(f) as Box<dyn ark_client::Disk>)
             .map_err(|e| format!("{}: {e}", dir.display()))
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::client::Stored::open(&format!("harken:{place}")).map(|d| Box::new(d) as Box<dyn ark5_client::Disk>)
+        crate::client::Stored::open(&format!("harken:{place}")).map(|d| Box::new(d) as Box<dyn ark_client::Disk>)
     }
 }
 

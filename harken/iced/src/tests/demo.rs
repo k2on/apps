@@ -306,7 +306,7 @@ fn the_whole_path_from_a_composer_to_a_movement() {
 #[test]
 fn a_work_link_resolves_by_its_key() {
     let peer = fresh();
-    let id = harken_domain5::keys::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
+    let id = harken_domain::keys::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
     assert!(id.contains('/'), "{id}");
     assert_eq!(peer.source_of(&Place::Work(id.clone())), Source::Work(id, "Goldberg Variations".into()));
     assert_eq!(peer.source_of(&Place::Work("nobody/nothing".into())), Source::Library);

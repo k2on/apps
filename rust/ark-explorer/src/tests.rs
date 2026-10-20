@@ -5,10 +5,10 @@
 
 use std::sync::OnceLock;
 
-use ark5::author::{self as ark, Domain, Id, Input, Int, Node, Row, Schema, Sum, Table, Text};
-use ark5::log::EntryId;
-use ark5::peer::Ctx;
-use ark5::store::{Change, Store};
+use ark::author::{Domain, Id, Input, Int, Node, Row, Schema, Sum, Table, Text};
+use ark::log::EntryId;
+use ark::peer::Ctx;
+use ark::store::{Change, Store};
 use iced::keyboard::{key::Named, Key, Modifiers};
 
 use crate::data::{crud_of, CrudVerbs, NoLog, Source, Ticket, Writer};
@@ -561,7 +561,7 @@ fn the_admin_wire_reads_back() {
     use crate::data::{Connection, Line};
     use crate::wire::{author_body, author_from, raw_body, raw_from, State};
     let st = store();
-    let entry = ark5::log::Entry {
+    let entry = ark::log::Entry {
         id: EntryId([7; 16]),
         actor: "authority".into(),
         session: "server-1".into(),

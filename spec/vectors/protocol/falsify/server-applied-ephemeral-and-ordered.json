@@ -1,5 +1,0 @@
-{
-  "frame": {"counter":{"$int":"41"},"device":"phone-login","input":{"at":{"$int":"3"}},"key":"alice","live":"room","t":"applied","transition":"point"},
-  "bytes": "a86174676170706c696564636b657965616c6963656373657105646c69766564726f6f6d65696e707574a162617403666465766963656b70686f6e652d6c6f67696e67636f756e74657218296a7472616e736974696f6e65706f696e74",
-  "expect": "fail"
-}

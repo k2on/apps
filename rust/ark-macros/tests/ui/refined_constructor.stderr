@@ -1,0 +1,5 @@
+error: a refined type's constructor (a refinement holds where bytes enter, at parse) is not in the subset ark lowers (spec/AUTHORING.md)
+  --> tests/ui/refined_constructor.rs:11:5
+   |
+11 |     Name(t)
+   |     ^^^^^^^

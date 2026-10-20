@@ -1,4 +1,4 @@
-//! The module the hub runs (§1.5): harken's own (`harken_domain5::domain`),
+//! The module the hub runs (§1.5): harken's own (`harken_domain::domain`),
 //! or one read from a file — what `HARKEN_MODULE` names and `harken-peer
 //! --module` runs, so a fleet can run "the next release"
 //! (`tests/versions.rs`).
@@ -6,7 +6,7 @@
 //! A module file is `(Module, [body])` under §1.1's codec: the binding map
 //! and every function's bytes, since a module binds hashes and a runtime
 //! needs the bodies. Reading one installs each body once every function it
-//! calls is installed, and holds the module to [`ark5::module::verify`].
+//! calls is installed, and holds the module to [`ark::module::verify`].
 //! An old module's file (`HARKEN_OLD_MODULES`) only adds its bodies to the
 //! library: "did this authority run this function" is "is it in the store".
 //! It must be one this module may follow ([`compat`]): §1.2's prefix check
@@ -16,19 +16,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use ark5::author::Domain;
-use ark5::hash::{FnHash, ModuleHash};
-use ark5::ir::{Function, Node};
-use ark5::module::{verify, Lib, Module};
-use ark5::peer::Ctx;
-use ark5::store::{Change, Read};
-use ark5::Refusal;
+use ark::author::Domain;
+use ark::hash::{FnHash, ModuleHash};
+use ark::ir::{Function, Node};
+use ark::module::{verify, Lib, Module};
+use ark::peer::Ctx;
+use ark::store::{Change, Read};
+use ark::Refusal;
 
-/// A module assembled, and the same as `ark5_client`'s per-space module.
+/// A module assembled, and the same as `ark_client`'s per-space module.
 #[derive(Clone)]
 pub struct Hosted {
     pub domain: Arc<Domain>,
-    pub module: ark5_client::Module,
+    pub module: ark_client::Module,
     /// The modules held as run before ([`Hosted::hold`]), by hash.
     pub held: Vec<ModuleHash>,
 }
@@ -36,11 +36,11 @@ pub struct Hosted {
 impl Hosted {
     /// harken's own domain.
     pub fn harken() -> Hosted {
-        Hosted::of(harken_domain5::domain())
+        Hosted::of(harken_domain::domain())
     }
 
     pub fn of(domain: Domain) -> Hosted {
-        let module = ark5_client::Module {
+        let module = ark_client::Module {
             schema: domain.schema.clone(),
             cas: domain.cas(),
             lib: domain.lib.clone(),
@@ -147,7 +147,7 @@ impl Hosted {
 /// of old's, and every hash `new` binds that `old` did not checked over the
 /// new schema, its callees from `lib`. How many hashes are new.
 pub fn compat(old: &Module, new: &Module, lib: &Lib) -> Result<usize, Refusal> {
-    ark5::schema::compat(&old.schema, &new.schema)?;
+    ark::schema::compat(&old.schema, &new.schema)?;
     let mut n = 0;
     for (name, h) in new
         .bindings

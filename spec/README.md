@@ -1,234 +1,108 @@
-# The ArkDB specification
+# The ArkDB specification, version 5
 
-Spec version 4. `rust/ark` is the specification: its modules are
-normative, and a runtime in any language is conformant when it agrees
-with them on the vectors under `vectors/`, which `rust/ark` writes and
-`rust/ark/tests/vectors.rs` reads — two programs against one set of
-files. This file is the index: which module is normative for which
-section, the few requirements that cannot be a function, and the
-vectors. The prose that would otherwise be a specification document is
-in the doc comments beside the definitions it explains. `RUNNERS.md` is
-what a runtime does with each vector — what it reads, does and compares,
-and whether a client runs it — and `vectors/MANIFEST.json` lists every
-vector with its kind and who runs it. `AUTHORING.md`
-is the contract a domain is written against; `docs/arkdb.md` is the
-architecture, and `docs/plan-v4.md` the design of this version.
+`rust/ark` is the specification: its modules are normative, their doc
+comments are the prose, and a runtime in another language is conformant
+when it agrees with them on the vectors under `vectors/`, which
+`rust/ark/tests` write (`ARK_WRITE_VECTORS=1`) and otherwise hold to what
+is on disk. This file is the index. `docs/plan-v5.md` is the design;
+where a module and this file disagree, the module is right.
 
-Until spec v3 the specification was a Haskell program here, and every
-rule was written twice. Swift is frozen at v3 (`swift/FROZEN.md`); Kotlin
-is coming back against the vectors (`kotlin/README.md`,
-`docs/plan-phones.md`), and Swift will after it.
-
-## Reading order
+## §1 Types and bytes
 
 | § | `rust/ark/src/` | what it defines |
 |---|---|---|
-| 1 | `value.rs` | the eight run-time values and the one total order over them |
-| 1.3 | `canon.rs` | the canonical encoding: RFC 8949 §4.2.1 deterministic CBOR plus the mapping; the decoder that refuses anything else |
-| 2 | `schema.rs` | tables, columns, indexes, references; the derived relationships; well-formedness |
-| 2.2 | `types.rs` | the type section (`docs/plan-live.md`): records and sums a module declares by name, and the types a live state is made of beside the column types — `Option`, `List`, `NonEmpty`, `Sum`, `PerDevice`, `Ephemeral`, `Named`. What a named type stands for (`resolve`), whether a value is one (`conforms`, asked wherever a value crosses a boundary: an input, a snapshot, a transition's result), and which of a state's fields are ephemeral (`ephemeral_fields`, `ordered_part`). A sum's value is a struct of its variant's fields with the variant's name under `t`, as the IR's own nodes are; a `PerDevice` is a struct keyed by device id, a slot read as an option and emptied by writing none; a `NonEmpty` is a list to the checker and held to having one at every boundary |
-| 3 | `ir/mod.rs` | the function language: mutators, queries, helpers, guards, providers and scopes — middleware that runs nothing and says, as a function of `ctx` alone, what rows (a filter, with `When` and one `Exists` through a reference) and columns (`pick`, `exclude`) of each table a person holds, `holds` on the wire only for a scope, so no module without one moves (`docs/plan-guards.md` D2); routers (§3.10); input fields and their checks (§3.11); statements — the three table writes among them, and a mutator's private block, its server half: run by the authority alone and after the body, stripped from a client's module, `private: true` and the hash of the stripped function naming it in both (`docs/plan-guards.md` D3) — and expressions, `HasRole` among them: whether the entry's author holds a role, read off the roles frozen in it (`docs/plan-guards.md` D1); the standard library's names; and live states (§14.1): a name, a type, an initial value, a scope — the instance keys a person holds, a function of `ctx` alone — and transitions, each an input, guards and a body over `live_state`, `ctx` and the input that returns the state or refuses, with the hooks `on_join`, `on_leave` (given the device) and `on_restore`; the expressions only a transition reads (`variant`, `case`, `live_state`, `ctx_now`, `ctx_device`, `slot`, `set_slot`, `slots`) |
-| 3.12 | `ir/ordering.rs` | a transition classified from its body alone: **ephemeral** when it reads nothing of the state, only its input and `ctx.device`, and returns every field passed through but ephemeral ones written at the caller's own slot; **ordered** otherwise. `ordered_reads_ephemeral`: the first ephemeral field an ordered transition reads, which the verifier refuses (an ordered one may still write its caller's own slot) |
-| 3.3 | `ir/mod.rs` (`Plan`) | a query is a plan and nothing else: source (a table or a group), filter, lookups, related plans, having, projection, order, limit (`docs/plan-v4.md` §1.3) |
-| 4 | `store.rs` | the store as a value: `get`, `scan`, `put`, `delete`, and the three writes a body makes of them — insert (§4.3a), upsert (§4.3b), update (§4.3c); constraints as refusals; what a write reports. Its indexes, each a hint a read is served by and none a fact about the rows: per declared index and reference column, the rows under each value, read by equalities, a range and an order (`scan_where_eq`, `scan_ordered`; `docs/plan-perf.md` R1, R6); and per text index, the rows under each trigram of a column's value folded by the pinned `lower`, which serves `Pred::Has` as the intersection of the needle's trigrams' postings (`scan_where_text`, `docs/plan-db.md` D4). A posting names a row by the ordinal its table numbered it with, and a read through an index is put in key order (`docs/plan-db.md` D7.2); each table is shared between a store and its clone until one of them writes it (D7.3) |
-| 5 | `stdlib.rs`, `unicode_tables.rs` | the standard library's semantics; the three pinned Unicode tables, generated from UCD 16.0.0 by `bin/gen-unicode.rs`. §5.1 the list editors — `ListConcat`, `Insert`, `RemoveAt`, `Move`, `Slice` — each a new list; an index out of range a refusal in exact words, never clamped (`stdlib::place`); a `NonEmpty` a list to them as to the checker, held at the boundary it crosses. New names, so a module that calls none is the bytes it was |
-| 6 | `eval.rs` | what a mutator means, which every runtime's native procedures are held to: `apply`, evaluation order (checks, middleware, body), checked arithmetic (§6.5) — with one exception, a sum in a plan's node: a `fold` whose step is `acc + f(x)` with `f` free of the accumulator, there or in a helper a node calls, adds `init` and every term in an `i128` and checks the total once, so an overflow on the way, which depends on the members' order, is not a refusal; each term is still checked. The reason is §13: a view keeps that sum as a number moved by its members in no particular order, and the two evaluation orders must agree. A procedure's body keeps step-by-step checking, since its natives run a fold as a closure no recogniser can see into (`docs/plan-db.md` D4); the form validator (§6.7) and the default messages (§6.8) |
-| 7 | `ir/encode.rs`, `ir/normalize.rs` | the module as a value (its wire and storage form); alpha-normalisation (§7.1), a plan's binders with the function's. `types` and `states` are written only when a module declares one, so a module without live state is the bytes it was |
-| 7.2 | `ir/decode.rs` | a module, a closure, a schema or a type from its value: the inverse of §7, strict about shape |
-| 8 | `hash.rs`, `sha256.rs` | the state hash (§8.1, below): a sum of row leaves per table, so that a store keeps it as it writes; closures and the function hash, which covers the helpers a function calls and the middleware it runs, and is taken of the function with its private blocks stripped (`docs/plan-guards.md` D3); a live state's closure — the state with the type declarations it names and the helpers its transitions call — and its hash, which every `applied` and snapshot of it is checked under, and the hash of its type alone, which names what a server keeps of it (`live_closure`, `LiveClosure::type_hash`); an instance's hash, `sha256(enc(ordered part))`, ephemeral fields left out (`LiveClosure::value_hash`) |
-| 9 | `verify.rs` | what a module must satisfy before anything runs or hashes it, a plan's typing and scope included (`docs/plan-v4.md` §1.10); a scope's shape, and its holds held to their table and to the context (`docs/plan-guards.md` D2); a private block in a mutator's body, one deep, with no `return`, its function saying `private`, and what it names held to no union (D3); the type section — every name declared once, every name used declared, no cycle — and a live state: its initial value of its type, its scope a list of texts of `ctx` alone, each transition's guards booleans and body returning the state's type or refusing, its hooks named and shaped as above, and no ordered transition reading an ephemeral field (§3.12) |
-| 10 | `log.rs` | an entry, with the roles its author held frozen in it as the actor and the session are — `roles`, texts in ascending order, present only when not empty, so an entry holding none is the bytes it was (`docs/plan-guards.md` D1); the module's one log with the facts kept beside each entry; snapshots, the horizon, the state at any retained sequence from facts alone; the log's identity, on its snapshot |
-| 11 | `peer.rs` | the replica: pending intents, the optimistic view, the rebase — once per settle, after every frame a pump received was placed in the inbox, not once per frame (`receive` places, `settle` applies; `docs/plan-perf.md` R8) — work authored before anyone signed in made the signer's, applying by intent or by facts, divergence detection; the fork a replica remembers, the log and cursor it last shared with a server, and the local history since it taken back out of the confirmed store and re-queued as pending (`fork_back`, `docs/plan-alone.md` §1); the authority: sequencing, dedupe, verdicts, compaction, retirement of closures no retained entry names, adoption of a log; `local_commit`, the serverless peer, whose log keeps a head and ids and whose entries are kept on its storage (`journal.rs`); a replica that holds a union of the module's scopes (`partial`, with the tables held in part and their columns, durable beside the cursor) applies confirmed entries by their facts alone, every sequence up to the last a page covered, its own intents previewed over what it holds and confirmed by the authority's facts, a difference from the record the authority's answer and never a divergence (`docs/plan-guards.md` D2); an entry of a function with a server half is taken by the authority's facts on every replica, its author's own run of the public body a preview, and the authority that runs private blocks is a server's (`Authority::private`), never a peer alone (`docs/plan-guards.md` D3); the authority's raw writes (`raw.rs`) are applied by every replica as any entry is, by intent on a whole one and by facts on a partial one, authored by `Authority::edit` and nothing else — a replica refuses to author one and an authority refuses to sequence one as an intent, both as `Forbidden` (`docs/plan-guards.md` D4) |
-| 12 | `protocol.rs` | the frames as values and their encodings; the client machine and the server machine (authenticate once, hold every entry to its identity, give every refusal a reason, sequence, fan out a page at a time); the authority **stamps** a pushed entry with its connection's roles before it runs it, whatever the device believed, so the log holds the roles it was judged under and never a device's claim — and where the two differ, acknowledges it with its facts — an `ack`'s `facts`, a list of `{seq, facts}` present only then, so every other `ack` is the bytes it was — so the device holds its own record to them, and they arrive with the log they are of (`docs/plan-guards.md` D1); the log's identity as `log`, an id, in `hello`, `batch` and `snapshot` — absent where no log is named, which is the one encoding of that (a null is refused), so a frame naming none is the bytes it was and a v4 runtime that never names a log is conformant as it was, while one that names it emits the field; a `hello` naming another log than the authority's is answered with its snapshot at the head, as one past the head is, and one naming none is served as before (`docs/plan-perf.md` Round 4); across versions (`docs/plan-db.md` D1), three decisions about meaning: **closure provenance** — an authority keeps the closures of every module it has run (`Authority::ran`, kept by `retire`), so an intent at a hash it once ran is sequenced whatever module is current; **an unknown function is a hold**, not a verdict — `held` (id, reason) beside `reject`, whose bytes are unchanged, and the client keeps the intent pending and pushes it again on its next connection (a `reject` saying `unknown function <the intent's hash>`, from a server before holding, is read the same way); **an older schema applies facts projected** — `batch` and `snapshot` carry the server's module hash as `module`, bytes, absent where none is said (as `log`), a server that says one answers a `hello` at its head with an empty page carrying it, and a client whose own module differs is `behind`: facts are projected to its schema before they are compared or applied (`store::project`: a column or table it lacks dropped, a nullable column it has and they lack `Null`, a required one missing still `MalformedRow`), and it says no `verify`; a fact row that only lacks a nullable column is widened whether or not the client is behind; a `verify` names the log its sequence is of as `log`, absent where the client knows none (as `hello`'s), and an `agree` carries `unknown: true`, present only when true, where the authority cannot say — the sequence below its horizon or past its head, or a `verify` naming another log than the authority's, which is never compared (`docs/plan-db.md` D3, D2) — so a `verify` naming none is answered as it always was and a client older than the field is conformant as it was; **the authority serves each connection its union** (`docs/plan-guards.md` D2): at `hello` the module's scopes are evaluated for the identity (`ark::scope`), and one that holds everything is served by intents, byte for byte as before; any other is started from a `snapshot` with `partial: true` and `held` — the tables held in part with their columns — carrying the held rows projected, its hash the union's digest, and paged with `after` and `upto`, every sequence between passed whether or not an item names it: an entry with a fact it holds, or its own, carries those facts filtered and projected (an edit across the line as the add or the remove it is, a row the `exists` form makes held or not held as an add or a remove), another's as its envelope; a `hello` with `partial: true`, a `verify` with `partial: true` answered from the union's digest (`unknown` from a connection served the other kind), and an acknowledgement's facts filtered as the page's; every field absent for a whole peer; an entry of a function with a server half is acknowledged with its facts — the whole run's — and paged to a peer that replays with its facts and no other entry's, and a closure asked for is sent stripped (`docs/plan-guards.md` D3) |
-| 12.1 | `raw.rs` | the authority's raw writes, in every module by construction as the standard library is: `ark.put_row(table, row)` and `ark.delete_row(table, key)`, judged by the table's constraints exactly as a mutator's `put` and `delete` are; named by fixed hashes, `sha256(enc(Text name))`, which no closure's hash can be; carried by no `.ark`, run natively by every peer; authored by a server's authority alone (`Authority::edit`, its actor the server's own identity, `authority`), and a pushed one refused as `Forbidden` whoever it claims to be by, before anything else is asked of it (`docs/plan-guards.md` D4) |
-| 13 | `view.rs` | what a plan means (`pull`, the one evaluator of plans: a query, a mutator's `select`, a hydrating view) and a plan kept up to date: entries, dependencies by plan node, patches, the window under a limit, the correctness contract (`docs/plan-v4.md` §1.5); and the aggregates a view keeps as numbers rather than lists, recognised from the plan and never sent — four of them: a count and a sum (`docs/plan-perf.md` R9), a least and a greatest value (`docs/plan-db.md` D4), the last two only where an index serves the column, a departure of the extreme being one indexed read. A recognised aggregate is arithmetic over the integers and only its result must fit an `i64`: a kept count or sum is moved in an `i128` by each member that arrives or leaves and judged only when a node reads it — an overflow there is the refusal a fresh `fold` gives, and one on the way is none, matching the fold's own rule (§6.5's exception). `views/a-maintained-sum-*` are D2's finding of the two disagreeing, both ways |
-| 13.7 | `ir/reads.rs` | what a query's middleware reads, by static inspection: the tables whose change re-runs it before a view is pushed (`docs/plan-v4.md` §1.7) |
-| 14 | `live/mod.rs`, `protocol.rs` | superseded by §14.1, and gone since harken moved off it (`docs/plan-live.md` phase 2): rooms per account over opaque frames. What is left is on the wire alone, so that a peer of either side of the change is not cut off by the other: `say` (a client's frame, `{t: "say", say: bytes}`) is read by a server and dropped, and `heard` (a server's, `{t: "heard", hear: bytes}`) is read by a client and dropped; neither is sent. `protocol/client-say` and `protocol/server-heard` pin how they decode |
-| 14.1 | `live/state.rs` | live state (`docs/plan-live.md`): a typed state machine per scope, beside the log, on the one socket. A `hello` may declare the connection a **device** (`device`: id, kind, name, can_play; absent, the frame is the bytes it was), which subscribes it to the instances every state's scope gives its identity and stands it in each, the server running `on_join` and, when its last connection goes, `on_leave` as ordered calls of its own and emptying the leaver's ephemeral slots. `call` (an instance, a transition, an input, an id, and an ephemeral call's counter); `applied` to every subscriber — ordered with the instance's `seq`, the call's id (none for a hook), who made it, the server's time `at` and the hash of the state it produced, or ephemeral with the device's counter and nothing else, to every subscriber but its author; `refused` to its author alone; `live_snapshot`, an instance whole, ephemeral slots included, with the counters taken so far; and `resync`, a client's ask for one. The server's `Desk` sequences each instance on its own sequence, answers an ordered call pushed again with the `applied` it was (the last `REMEMBERED` ids), drops an ephemeral call whose counter is not above the device's last, holds an ephemeral slot to `SLOT_CAP` bytes, relays a connection's ephemeral calls on an instance at most every `RELAY_EVERY` ms, coalesced to the newest per transition, and sends what waits before the next ordered call on that instance is told; it keeps each instance's ordered part at its sequence, under the hash of the state's type, and restores it with `on_restore` run. The client's `Watch` holds what was confirmed and its own ordered calls replayed on top, takes an ephemeral frame above the device's counter and applies its own ephemeral calls at once, never pending, asks one `resync` on a gap or a hash that is not the server's, and says its pending calls again on every connection |
+| 1.1 | `ty.rs` | the five constructors — `Int`, `Bytes`, `List`, `Tuple`, `Sum` — and `Named`, a declaration's name, through which a type recurs |
+| 1.1 | `codec.rs` | the encoding: canonical, prefix-free, order-preserving; `skip` and the structural `parse` |
+| 1.1 | `ir.rs` (`Decl`, `Refine`, `Rule`) | a declaration: a structure and its refinements — `utf8`, `len n`, `len lo..=hi`, `trim`, `non-empty`, and a `Pure` predicate — each with the words a form shows |
+| 1.1 | `interp.rs` (`parse`, `check_form`) | the boundary: canonical bytes of the type, every refinement held in order, `trim` normalising before the rules after it, a value refused underneath not held to more; the refusal is the rule's words or the default (`at least 1 character`, `exactly 16 bytes`, `not UTF-8 text`, `must not be empty`, `is not valid`); `check_form` reports every failing field by its path of positions |
+| 1.1 | `hash.rs` | the hash spaces, each its own type |
+| 1.2 | `schema.rs` (`compat`, `Table::fit`), `peer.rs` (`open`) | a schema grows by appending: a row of a table as another schema of it wrote it reads under this one completed (an older one's) or cut to its prefix (a newer one's). A log opened under a prefix-extension of the schema it was written under is checked entry against entry by each hash over its own bytes, never derived again; its rows are widened and the store's digests are the new schema's; what it logs then carries new-schema hashes. A replica whose authority runs another schema takes a confirmed entry's state as it says; one that diverges twice at one entry asks for the snapshot (`Hello` at cursor `-1`) |
+| 1.6 | `log.rs` (`Origin`, `EntryId`) | an entry's id is `sha256(enc(Bytes origin) ‖ enc(Int local))[..16]`, `origin` sixteen bytes a replica draws once at its first open and keeps, `local` its count of intents from 1; the `n`-th row id an entry draws is `sha256(id ‖ enc(Int n))[..16]`. Neither depends on who is signed in. An authority dedupes and orders by `(origin, local)`, binds an origin to the actor whose intents first came from it, and stamps each entry with the actor, session and roles of the connection it judged it on |
 
-| 15 | `sim.rs` | the seeded fleet: a server, clients, a network that reorders, duplicates and drops; partition, heal, step, settle. Live state too: clients that are devices of one account (`Sim::live_account`), calling transitions ordered and ephemeral (`Sim::call`), held after a settle to the server's sequence, state and slots on every instance, with nothing pending |
-| 15.1 | `sim.rs` (`Op`, `run_script`), `bin/fuzz/` | the fleet over a deployment's life — a restart from the journal or over an emptied one, a moved horizon, a client re-opened from what it made durable, late joiners by facts or without closures, a sign-in — as ops of a script; and `arkc fuzz` (`docs/plan-db.md` D2), which runs random modules (held to §9) through random scripts and checks convergence, replay from facts and from intents, every frame's bytes, every maintained view against a fresh hydrate, the demo's natives against `eval`, and every logged entry's roles against what its login held — stamped, never a device's belief — and its middleware against them, so a write a generated role guard refuses is in no log (`docs/plan-guards.md` D1); the authority writes rows raw now and then and a client pushes a raw write by hand, and every raw write in the log is the authority's and none a client pushed is there (`Sim::raw_held`; ops `edit`, `push_raw`; `docs/plan-guards.md` D4). One generated module in two is given scopes (an own column that is the person's name, a role, the `exists` form, a projection; `docs/plan-guards.md` D2), and every partial client is held after every op to exactly its union of the state at its cursor — no row and no column outside it, nothing in it missing — every frame to a whole client to carry nothing of a union, and every client at the end to its union's digest. A finding is written under `--out` as a vector in this suite's format with a line in its `README`: a session as `rebase/fleet-fuzz-*` (`module`, `clients`, `seed`, `script`, `fuzz`), held to convergence and replay rather than to a hash; a view as a `views/` case whose steps carry the fresh answer and no patches; a frame as a `protocol/` frame; a verdict as an `eval/` case. A plain bug is fixed with its file copied, unchanged but for its name, into `vectors/<directory>/`; a finding that would change what this specification says stays under `rust/ark/tests/fuzz-findings/`, where `tests/fuzz.rs` holds it to still failing until it is decided |
-| 15.2 | `trace.rs` | `docs/plan-phones.md` S2 a client's life as a function: its inputs (open, reopen, connected, disconnected, mutate with its frozen autos, sign_in, token, a frame received as bytes, settle, verify, alone, join, views hydrated, a live `call`, and the device an `open` declares) and its outputs after each (the frames it queued as canonical bytes, a local refusal, what each view reports, its state — cursor, log, pending, verdicts, divergences, verify answers, denial, union, the hash of its confirmed store and of its view; for a client holding live state, each instance's sequence, hash, view and pending calls, and the server's verdicts on its calls — absent for one that holds none, so no trace before live state moves); `Sim::recorded` writes one per client and `arkc fuzz --traces DIR` every client of every session that found nothing; `Player` replays one into a fresh client. What going alone and joining again are (`alone`, `join`; ops `leave`, `rejoin` of a script), what is made durable (`keep`) and what a restart opens from (`reopen`), for the sim and a replay alike. The format a runner reads is `RUNNERS.md` § trace |
-| 17 | `compat.rs` | `arkc check`: the additive-only rule between two modules, and re-verifying retained closures against a new schema |
-| — | `authoring/` | the vocabulary of `AUTHORING.md`: a mutator run `Emit` (the module) or `Native`, a query described under `Emit` as its plan; a table's CRUD in one line on a router (`crud::<T>()`), four ordinary mutations byte for byte what the same lines written by hand emit (`docs/plan-guards.md` D4) |
-| — | `bin/vectors/demo.rs` | the two-table domain every vector is over: `AUTHORING.md` Appendix B |
-| — | `bin/vectors/demo_live.rs` | the demo's live state, `room`, on a router of its own after the demo's, so that no vector of the demo moves: what every live vector is over (`AUTHORING.md` Appendix B.2) |
+`Text = Bytes where utf8` is every function's without being declared.
+Everything else — `Id<t>`, `Name`, `NonEmpty<T>` — is a declaration a
+function carries, so a function's hash covers what its types mean.
 
-§16 (the printable form) and §18 (`arkc gen`, `arkc roundtrip`) left
-with the Haskell and are not in version 4.
+## §2 The IR is a value
 
-### §8.1 The state hash, exactly
+| § | where | what it defines |
+|---|---|---|
+| 2.1 | `ir.rs` (`Node`), `rust/ark-macros` (`#[derive(Node)]`) | a Rust type as a value: a struct is the `Tuple` of its fields in order, an enum the `Sum` of its variants' tuples, `Vec<u8>` and `String` are `Bytes`, a `Vec<T>` a `List`, an `Option<T>` `Sum [(), (T)]`, a hash `Bytes`; a type is `Named` by its identifier where it recurs. `Ty`, the schema, the log's records, every frame and the IR are encoded so, and nothing else encodes them |
+| 2.2 | `ir.rs` (`Expr`) | the one expression language and its effects, `Pure < Read < Write`; variables are De Bruijn indices, `Var(0)` the innermost binder, so a function's bytes do not depend on the names it was written with |
+| 2.3 | `ir.rs` (`Function`) | a function: its declarations sorted by name, its parameters (the last is `Var(0)`), what it returns, the most it may do, its body; `FnHash = sha256(enc(function))` |
 
-What a `Verify` compares, what a snapshot carries and what the `hash/`,
-`eval/` and `rebase/` vectors pin. With `enc` the canonical encoding
-(§1.3) and `‖` concatenation:
+## §3 The checker
 
-    leaf(t, row)  = sha256(enc(Text t) ‖ enc(Struct row))
-    digest(t)     = Σ leaf(t, row) over the rows of t, mod 2^256
-    state_hash(s) = sha256(enc(List [List [Text t, Bytes digest(t)]
-                                     for every table t of the schema,
-                                     in schema order]))
+`check.rs`: one checker of types, effects and refinements. A declared type
+is a subtype of what it refines (`Name ≤ Text ≤ Bytes`); one without
+refinements is its structure, both ways. A refined value is made inside
+the language only by a literal — parsed under its type once, here, and in
+normal form — or by a standard function whose signature says so (§5).
+Comparison is of one structure, refinements aside. `Refuse` has the empty
+sum's type, which every type admits. A call is by hash, to a function
+checked before, whose declarations the caller has as they are, so the call
+graph is a DAG and every function ends. A lambda stands only as an
+operator's argument. A refinement's predicate is `Pure` and reads no
+context and calls nothing. A declaration may contain itself only inside a
+list or a sum. A column's type is its declaration when the function
+declares that name with the column's structure.
 
-`Struct row` is the row as §4 has it, every column by name, whatever
-order a runtime holds the values in. A leaf is read as a 256-bit
-big-endian unsigned integer and a digest is written back as 32
-big-endian bytes; a table with no rows has the digest of 32 zero bytes,
-and contributes its name and that. The sum is order-independent and
-subtraction undoes it, so a store moves a table's digest by one leaf in
-and one out per row written, and a `Verify` hashes as many pairs as
-there are tables rather than every row (`docs/plan-db.md` D3; the
-reasoning, and what a 256-bit sum does not defend against, is in
-`hash.rs`). Until D3 the state hash was SHA-256 over every table's rows
-in key order; the vectors carrying one were regenerated once, and only
-their hashes moved.
+## §4 The interpreter
 
-**A stored snapshot names its construction.** The server's `log.ark-log`,
-a peer alone's `log` and a client's `replica` record carry `hashing: 2`
-beside the snapshot; absent means 1, the construction before D3. A
-snapshot of construction 1 is checked by that construction when it is
-opened and held hashed by this one from then on, never refused; a
-construction a runtime does not know is refused (`ark::hash::HASH_VERSION`,
-`ark::journal::hashing_of`). `SPEC_VERSION` stays 4: the vectors are the
-spec, and they moved once.
+`interp.rs`: one interpreter, a kernel `Procedure`. The input is parsed
+under the function's parameters (one, or the tuple of several); the body
+evaluates to the list of changes it makes, and the store is not written.
+A body reads through its own list so far. `Insert` refuses a key that has
+a row (`<t>: a row with this key exists`), `Update` a key that has none
+(`<t>: no row has this key`) and reports nothing when the row is
+unchanged, `Delete` of a key with no row is nothing; every other
+constraint is the store's, when the list is applied. Arithmetic is
+checked: `integer overflow`, `division by zero`. `NewId` is the entry's
+`n`-th draw, `n` from 0 in evaluation order. A value is the tree the codec
+reads under the type the checker gave it; two are compared by their
+bytes. `Sort` is stable, by its key's fields each in its direction;
+`Group` is in key order; `Join` in the order of its first list.
 
-**Not a commitment — a stated non-goal.** The state hash is for replicas
-of one log to tell whether they hold the same rows, which nobody is
-choosing adversarially. It is not a commitment to a set of rows against
-somebody who chooses them: for a sum of 256-bit leaves, Wagner's
-generalised birthday attack finds a different multiset with the same
-digest far below 2^128 work. So a snapshot from a source not trusted is
-verified by replaying the log to it (`docs/arkdb.md` §3.9), never by its
-hash alone. Should a hash alone ever have to carry that weight, the digest
-wants a much wider group — a lattice hash of a couple of kilobytes, as
-LtHash does — and that would be a construction 3.
+## §5 The standard library
 
-## The toolchain
+`std.rs`, `unicode_tables.rs`: v4's names (`spec/README.md` §5), each with
+a signature that says which refinements it keeps — a text function returns
+`Text`; `Reverse` and `Move` keep a list's length refinements; `Insert`
+and `ListConcat` keep `NonEmpty` of their first argument; every other list
+function returns the bare list. An index out of range is a refusal in
+exact words, never clamped. `Trim`, `Lower` and `IsAlnum` consult the
+pinned tables (UCD 16.0.0) and nothing of the platform; text is compared
+by its bytes, which is by code point.
 
-`rust/ark` has three binaries:
+**For views (V1).** v4's §6.5 makes one exception to step-by-step
+checking: a sum in a plan's node, `fold` with step `acc + f(x)`, adds in
+an `i128` and checks the total once, because a maintained view moves that
+sum by its members in no particular order and the two evaluations must
+agree. v5's interpreter checks every step; a `Group` aggregate that a view
+maintains as a number will need the same rule, stated where V1 recognises
+it.
 
-- `ark-vectors OUTDIR` writes every vector (`bin/vectors.rs`, a module per
-  directory under `bin/vectors/`), asserting each claim as it goes, so a
-  change that breaks one fails the generator rather than emitting a wrong
-  vector.
-- `arkc` is everything about a module rather than about running one. A
-  `.ark` file is a module's canonical CBOR, and `arkc` verifies it before
-  anything else:
+## §6 Modules
 
-      arkc verify  M          the module hash
-      arkc hash    M          the module hash and every function's
-      arkc check   OLD NEW    every break of §17, exit 1; or nothing
-      arkc vectors OUTDIR     as ark-vectors
-
-- `gen-unicode UCD-DIR OUT` writes `unicode_tables.rs` from the three UCD
-  files it names; run by hand when the pinned Unicode version moves.
-
-## Building
-
-    nix run ..#vectors -- vectors/       # regenerate the vectors, from this directory
-    nix run ..#arkc -- check old.ark new.ark
-    nix develop ..#rust -c bash -c 'cd ../rust && cargo test -p ark'
-    nix flake check ..                   # the vectors are what rust/ark writes, and
-                                         # rust/ark passes them
+`module.rs`: `Module { spec, schema, types, bindings }`, `ModuleHash =
+sha256(enc(Module))`; a `Lib` keeps checked functions by hash, and its
+loader is how a content store runs the bodies of the modules it was given:
+an authority's holds exactly the functions bound in the modules its
+operator loaded, the current one and those held from before, and never a
+body a client sends (no frame carries one). A module verifies
+when its bindings and types are sorted by name, each once, every bound
+function checks over its schema, and every declaration a function makes is
+the module's own.
 
 ## The vectors
 
-`ark-vectors` writes one JSON file per case under `vectors/<directory>/`.
-JSON cannot say bytes, ids or 64-bit integers, so values are written with
-wrappers: `{"$bytes": "<hex>"}`, `{"$id": "<8-4-4-4-12>"}`,
-`{"$int": "<decimal>"}` — an integer is always wrapped, and an object with
-exactly one of those keys is a wrapper, so no field name begins with `$`.
-Text, booleans and `null` are themselves; a list is an array; a struct is
-an object, keys in code-point order. Only `"`, `\` and the C0 controls are
-escaped in a string. A file is an object of named parts, one per line,
-which is what makes a regeneration that changes nothing show nothing in a
-diff (`bin/vectors/json.rs`).
-
-Every vector also carries the expected canonical bytes of the values it
-names, so a runtime is tested on encoding as well as on meaning. Every
-directory carries at least one deliberately wrong vector under
-`falsify/`, marked `"expect": "fail"`, which a conformant runner must
-*fail* — a runner that passes by not reading the expected value is caught
-by it.
+The JSON dialect of `rust/ark/src/json.rs`; a row is a tuple, printed as an
+array in schema order; a value of the language prints under its type.
+Every directory has a `falsify/` vector a conformant runner must fail.
 
 | directory | one vector is | holds |
 |---|---|---|
-| `codec/` | a value and its canonical bytes | §1.3 |
-| `order/` | values and their sorted order | §1.2 |
-| `verify/` | a module and whether it verifies | §9 |
-| `eval/` | a module, a store, a mutator applied step by step — the changes, the rows, the hash; the input checks as verdicts; the form validator; `raw-*`: a raw write (`raw`, its name, and `function_hash`, its fixed hash) applied step by step, each step's changes or the constraint that refuses it (`refused`); `list-ops` and `list-ops-live`: the list editors over a module of their own, every edge an index has and its refusal's words, as mutators and as a live state whose `NonEmpty` an insert keeps and a removal that empties it is refused at, each with a `falsify/` that clamps; `verify/list-ops` beside them, and two `verify/falsify/` modules the editors' typing refuses | §5.1, §6, §8, `raw.rs` |
-| `hash/` | a store and its hash, with the module it belongs to; `leaves-and-digests` also every row's leaf and every table's digest, so the construction is checked step by step | §8 |
-| `rebase/` | `three-peers`: a scripted session of replicas and an authority, asserted step by step; `fleet-seed-N`: a seeded simulation's script and the hash every replica must reach after settle | §10, §11, §15 |
-| `module/` | a module as a value, its canonical bytes, its hash; decode of encode is the identity; `crud` and `crud-by-hand` are one module twice — a table's CRUD in one line, and the same four mutations written by hand | §7 |
-| `protocol/` | every frame as a value and its bytes; decode of encode is the identity; `*-raw`: a raw write pushed by a client, served in a batch as the authority's entry, and the `Reject` a pushed one is answered with (`raw.rs`) | §12 |
-| `trace/` | one client's life in a session: the module, then a step per line, its input and its outputs (`RUNNERS.md` § trace); chosen by `bin/vectors/trace.rs` from a fixed run of `arkc fuzz --traces`, one per feature of a client, and three of harken's sessions with its library and playlist views kept. `packages.trace-corpus` is thousands more in the same format, not checked in | §11, §12, §13, `trace.rs` |
-| live (`*live*` in `verify/`, `module/`, `eval/` and `protocol/`; `trace/live/`) | the demo's module with its `room` (`verify/live-room`, `module/live`); `eval/live-room`: every transition's classification, the initial value and its hash, and the room through every transition and hook under a ctx with a device and a time, each step's state and hash or its verdict; the live frames (`client-hello-device`, `client-call`, `client-call-ephemeral`, `client-resync`, `server-applied`, `server-applied-hook`, `server-applied-ephemeral`, `server-refused`, `server-live-snapshot`); and two traces of a device's life in a live fleet, under `trace/live/`; a falsify beside each but the module. Every runtime's (`docs/plan-live.md` phase 1b). Beside them, not vectors and not in the manifest, `gen/Room.kt` and `gen/Room.swift`: the room as `arkc gen` prints it, which Kotlin and Swift compile and read every state of `eval/live-room` through | §2.2, §3.12, §14.1 |
-| `views/` | a query of the vector's own module (`query`, and its `plan` as the module writes it), the context and arguments it is read with, `store_before` and the answer at hydrate (`rows_before`); then `batches` of changes, and after each batch the `patches` and the answer (`rows`). One file per plan feature: a projection, a having that admits a node when a child arrives, a group source, a lookup chain, a related plan on a non-key column, an expression order key under a limit, a related tree three deep, and the two v3 plans (`top-two-by-pos`, `playlist-with-items`) | §13 |
-
-A change in a batch is the protocol's fact form (§12): `{"t": "add",
-"table", "row"}`, `{"t": "remove", "table", "row"}`, `{"t": "edit",
-"table", "old", "new"}`. A batch is applied to the store whole and then
-pushed as one, so the patches are §1.5's: touched keys settle in
-ascending key order, each against the list as it stands; an entry that
-stays in place is an `update` only if its node changed; a move is a
-`remove` at the old place then an `insert` at the new; under a limit an
-entry leaving the window is a `remove` then an `insert` of the next at
-the last place, one entering an `insert` then a `remove` past the limit;
-a key added, edited and removed in one batch gives nothing. A patch is
-`{"t": "insert", "at", "node"}`, `{"t": "remove", "at"}` or `{"t":
-"update", "at", "node"}`, positions into the list as it stands when the
-patch is applied.
-
-## Requirements that are not functions
-
-These bind a runtime and cannot be a vector. Each names the design note
-that argues it.
-
-- **Durability of a local write.** A pending intent is committed before
-  the peer reports the mutation as made, in one atomic commit with nothing
-  else; the optimistic state it produced is never committed. One fsync per
-  tap is the floor and the design does not go below it. (`docs/arkdb.md`
-  §3.6.)
-- **A rebase reports the transitions it made.** A replica keeps, beside
-  each pending intent, the changes its run made to the optimistic store.
-  A rebase undoes them newest first — each inverts exactly: an `add` by
-  deleting its key, a `remove` by putting the row back, an `edit` by
-  putting the old row — applies what landed, and runs the surviving
-  intents again; every view is told the inverse of what it undid, what
-  landed and what it re-applied, in that order. Each is a transition the
-  store made, never one invented for it. `Rebuilt` is reserved for a store
-  replaced whole: a replica opened, a snapshot adopted. (§3.6, §3.13;
-  `docs/plan-perf.md` R2.)
-- **A live frame never touches the optimistic view.** `Heard` is taken
-  before any rebase logic runs. (§3.14.)
-- **An ephemeral frame may be dropped, and never overtakes.** Between a
-  server and one receiver, every log frame and every ordered live frame is
-  delivered, in order; an ephemeral `applied` waiting behind a slow socket
-  may be replaced by a newer one from the same device for the same
-  instance and transition, which goes to the back of what waits, and
-  nothing reaches a receiver ahead of something queued before it. A
-  receiver needs nothing more to converge — it takes a device's newest by
-  its counter, and no ordered transition reads an ephemeral field — and
-  one that relies on seeing every pointer is wrong. (`docs/plan-live.md`,
-  "Ordered and ephemeral fields"; `ark-server`'s `Outbox`.)
-- **The transport pings, the engine does not.** An authority's transport
-  sends a keepalive on a quiet connection and closes after three
-  unanswered; no client is required to. The engine has no clock. (§3.8.)
-- **Nothing consults the platform for Unicode.** `trim`, `lower` and
-  `is_alnum` use the tables in `unicode_tables.rs` and nothing else. (§5.)
-- **A verified module only.** A runtime executes generated code only for a
-  module that passed `verify`, and the hash it records for a function is
-  of the form `verify` returned. (§9.)
-- **Text is compared by code point.** Never by locale, never by canonical
-  equivalence, whatever the host's string type does by default. (§1.2.)
-
-## Changing the spec
-
-A change to a module of `rust/ark/src` named above is a change to what
-every runtime must do. It is made by editing the module, running
-`ark-vectors` and reading the diff of `spec/vectors` — every file that
-moved is named in the commit, with why — and moving `ir::SPEC_VERSION`
-when a conformant runtime would now be non-conformant. A change that
-moves a mutator's hash, or that `arkc check` reports against the module
-it replaces, is a break of the log, and is recorded as one. A new rule
-gets a vector, and a directory that gains a vector keeps its `falsify/`
-case failing.
+| `hash/` | a store and its hash under its schema | K1 |
+| `eval/` | a function's bytes, a store, inputs applied in turn: the changes, the rows, the hash, or the refusal; `checks` and `form-check`, the boundary's verdicts and words; `has-role`; `raw-*`, the authority's writes as functions; `list-ops`, the list editors' edges | §1.1, §4, §5 |
+| `verify/` | a module's functions and whether they check; `refused/` one per refusal, with its words | §3, §6 |
+| `module/` | the demo module's bytes and hash; `de-bruijn`, two spellings and one hash | §2, §6 |

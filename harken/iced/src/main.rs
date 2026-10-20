@@ -1,7 +1,7 @@
 //! The harken library, in iced — on the desktop and in a browser.
 //!
 //! One client among several: the phones are the others. They all run the
-//! same domain — `harken_domain5`'s module, its functions run by ArkDB v5's
+//! same domain — `harken_domain`'s module, its functions run by ArkDB v5's
 //! interpreter (`docs/plan-v5.md` §1.4) — and none of them contains a line
 //! of domain logic.
 //!
@@ -46,7 +46,7 @@ mod tests;
 
 use std::time::Duration;
 
-use ark5::log::EntryId;
+use ark::log::EntryId;
 use ark_auth::Login;
 use arkui::cards::Shelf;
 use arkui::context::{Context, Layer};
@@ -60,7 +60,7 @@ use iced::{Point, Size, Subscription, Task};
 
 #[cfg(not(feature = "demo"))]
 use client::Replica;
-use harken_domain5::playlists::{AddToPlaylist, CreatePlaylist, RemoveFromPlaylist};
+use harken_domain::playlists::{AddToPlaylist, CreatePlaylist, RemoveFromPlaylist};
 use peer::{key, Peer};
 use places::{Focus, Pane, Place, Source};
 use player::{Player, Track};
@@ -79,10 +79,10 @@ use player::Remote;
 /// what this exists to stop: the browser resolves it against the page, drops
 /// the `/media/` prefix, and a server with a single-page fallback answers
 /// `index.html` and a 200 — "the media resource was not suitable". The rule is
-/// the domain's (`harken_domain5::listening::url`), because three things join
+/// the domain's (`harken_domain::listening::url`), because three things join
 /// it: this, the phone, and a speaker with no client at all.
 fn media_url(server: &str, file: &str) -> String {
-    harken_domain5::listening::url(server, file)
+    harken_domain::listening::url(server, file)
 }
 
 /// Who played it and on what terms, as one line. Two facts on two rows —
@@ -844,7 +844,7 @@ impl App {
     /// Author a change, and remember what it was. A refusal here is the
     /// domain's own verdict — a guard, a check — and is said at once; one the
     /// server reaches later is matched back to this by its id.
-    pub fn author(&mut self, what: String, name: &str, input: &impl ark5::author::Node) -> bool {
+    pub fn author(&mut self, what: String, name: &str, input: &impl ark::author::Node) -> bool {
         match self.peer.client.mutate(name, input) {
             Ok(id) => {
                 self.edits.push(Edit { id, what });
