@@ -1957,6 +1957,7 @@ dependencies = [
  "anyhow",
  "ark",
  "ark-auth",
+ "ark-dev",
  "ark-explorer",
  "ark-peer",
  "axum",

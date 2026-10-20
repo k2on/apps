@@ -2,7 +2,7 @@
 //! and the fleet run across two of them.
 //!
 //! **The compat check** is `docs/plan-v5.md` §1.5's: §1.2's prefix check on
-//! the schema plus one verify per new hash (`harken_server::hosted::compat`,
+//! the schema plus one verify per new hash (`ark::module::compat`,
 //! which `HARKEN_OLD_MODULES` is held to at start). Held here over harken's
 //! module and three next releases written in this file: one whose
 //! `create_playlist` moved (another hash, the same behaviour, the same
@@ -36,11 +36,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use ark::ir::{Expr, Function, Node, Op};
+use ark::module::compat;
 use ark::module::{verify, Module};
 use ark::schema::{Column, Ref, Schema, Space, Table};
 use ark::ty::Ty;
 use ark::Domain;
-use harken_server::hosted::{compat, write, Hosted};
+use harken_server::hosted::{write, Hosted};
 use serde_json::json;
 use support::fleet::*;
 

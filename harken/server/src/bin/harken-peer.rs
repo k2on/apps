@@ -1226,6 +1226,7 @@ impl Headless {
                 let answer = input(&name, &args)
                     .and_then(|b| {
                         self.hosted
+                            .domain
                             .ask(&self.client.log.store, &ctx, &name, &b)
                             .map_err(|r| r.0)
                     })

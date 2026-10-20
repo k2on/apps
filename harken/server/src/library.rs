@@ -564,7 +564,7 @@ fn would_change(peer: &Peer, name: &str, input: &[u8]) -> bool {
         roles: me.roles.clone(),
         now: ark_peer::now_ms(),
     };
-    !matches!(peer.hosted.run(&peer.client.log.store, &ctx, name, input), Ok(changes) if changes.is_empty())
+    !matches!(peer.hosted.domain.run(&peer.client.log.store, &ctx, name, input), Ok(changes) if changes.is_empty())
 }
 
 /// Every file under `dir`. A directory that cannot be read is skipped rather

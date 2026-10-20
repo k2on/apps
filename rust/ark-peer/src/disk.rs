@@ -16,7 +16,7 @@
 //!   log's table, one logged entry with its facts — appended, each as a
 //!   four-byte big-endian length and the record's bytes. On open they are
 //!   read up to the first record that does not read, and the blob is cut
-//!   there: a crash mid-write leaves a torn tail, never a wrong entry. The
+//!   there (made, empty, when there is none): a crash mid-write leaves a torn tail, never a wrong entry. The
 //!   rows of the schema's tables are not journaled: the peer writes them
 //!   again as it opens, from each entry's facts, each entry linking onto
 //!   the one before it, and writes `kv` whole when one does not.
@@ -67,7 +67,7 @@ pub trait Disk: Send {
             let why = "a log of the format that journaled every write (writes), not the log's rows alone: not read";
             return Err(io::Error::other(why));
         }
-        let log = self.get("log")?.unwrap_or_default();
+        let (log, had) = self.get("log")?.map_or((vec![], false), |l| (l, true));
         let rows = kv.and_then(|b| match Record::dec(&b) {
             Ok(Record::Rows(r)) => Some(r),
             _ => None,
@@ -81,7 +81,7 @@ pub trait Disk: Send {
             rows,
             logged: logged.collect(),
         };
-        if at < log.len() {
+        if at < log.len() || !had {
             self.put("log", &log[..at])?;
         }
         Ok(s)

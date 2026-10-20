@@ -6,38 +6,46 @@
 //! interpreter; converging is one chain and one state on every peer.
 
 mod common;
-mod support {
-    pub mod fleet;
-}
 
 use std::collections::BTreeMap;
 
 use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
+use ark_dev::sim::{Net, Op};
+use ark_peer::{Config, Module};
 use common::{domain, full, song};
 use harken_domain::domain::host::LIBRARY;
 use harken_domain::domain::Id;
 use harken_domain::domain::*;
-use support::fleet::{who, Net};
 
 struct Fleet {
     net: Net,
-    now: i64,
+}
+
+fn who(actor: &str, session: &str, roles: &[&str]) -> Who {
+    let roles = roles.iter().map(|r| r.to_string()).collect();
+    Who {
+        actor: actor.into(),
+        session: session.into(),
+        roles,
+    }
 }
 
 impl Fleet {
+    /// `ark-dev`'s simulator: a device per login, each its connection's
+    /// verified identity.
     fn new(seed: u64, logins: Vec<Who>) -> Fleet {
+        let config = Config::new(Module::of(domain()));
+        let devices = logins.into_iter().map(|w| (w, config.clone())).collect();
         Fleet {
-            net: Net::new(domain().schema.clone(), domain().cas(), logins, seed),
-            now: 1_000,
+            net: Net::of(config.clone(), devices, seed),
         }
     }
 
     /// Author on client `i` as whoever it believes it is.
     fn mutate(&mut self, i: i64, name: &str, input: &impl Node) {
-        self.now += 1;
-        self.net.mutate(i, domain().get(&full(name)), input.to_bytes(), self.now);
+        self.net.run(&Op::Mutate(i, domain().get(&full(name)), input.to_bytes()));
     }
 
     /// What client `i` shows, as `user`: its optimistic view.
@@ -50,7 +58,7 @@ impl Fleet {
             now: 0,
         };
         let b = domain()
-            .ask(&self.net.clients[&i].store, &ctx, &full(name), &input.to_bytes())
+            .ask(&self.net.clients[&i].log.store, &ctx, &full(name), &input.to_bytes())
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         T::from_bytes(&b).unwrap()
     }
@@ -91,7 +99,7 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
         f.net.step();
     }
     f.mutate(0, "create_playlist", &CreatePlaylist { name: "Favorites".into() });
-    f.net.settle();
+    f.net.settle().unwrap();
 
     let favs = f.query::<Vec<Playlist>>(0, "peer-0", "playlists", &())[0].id;
     f.net.partition(2);
@@ -112,9 +120,9 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
     // Somebody else's playlist is refused by their own view, and never sent.
     f.mutate(1, "add_all_to_playlist", &AddAllToPlaylist { playlist_id: favs });
     assert_eq!(f.net.refused, [(1, "not your playlist".to_string())]);
-    assert!(f.net.clients[&1].pending.is_empty());
+    assert!(f.net.clients[&1].log.pending.is_empty());
     f.net.refused.clear();
-    f.net.settle();
+    f.net.settle().unwrap();
 
     f.converged();
     assert!(f.net.refused.is_empty(), "{:?}", f.net.refused);
@@ -151,7 +159,7 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
     for k in 0..6 {
         f.mutate(0, "add_song", &track(&format!("t{k}")));
     }
-    f.net.settle();
+    f.net.settle().unwrap();
     let none = Id::new([0; 16]);
     let ids: Vec<Id<Media>> = f
         .query::<Vec<LibraryEntry>>(1, "", "library", &Library { playlist_id: none })
@@ -165,7 +173,7 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
     }
     let mut made = BTreeMap::new();
     for i in 0..3 {
-        let me = f.net.clients[&i].me.actor.clone();
+        let me = f.net.clients[&i].log.me.actor.clone();
         f.mutate(i, "create_playlist", &CreatePlaylist { name: "Favorites".into() });
         let on: Vec<Playlist> = f.query(i, &me, "playlists", &());
         assert_eq!(on.len(), 1, "apart, each device sees only its own");
@@ -186,9 +194,9 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
     f.mutate(3, "create_playlist", &CreatePlaylist { name: "Favorites".into() });
     // The peer nobody had signed in on: its connection is peer-0's now.
     let signed = who("peer-0", "dev-1", &[]);
-    f.net.logins.insert(1, signed.clone());
-    f.net.clients.get_mut(&1).unwrap().me = signed;
-    f.net.settle();
+    f.net.logins.insert(signed.session.clone(), signed.clone());
+    f.net.clients.get_mut(&1).unwrap().log.me = signed;
+    f.net.settle().unwrap();
 
     f.converged();
     assert!(f.net.refused.is_empty(), "{:?}", f.net.refused);
@@ -234,7 +242,7 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     for t in ["removed", "attempted", "kept"] {
         f.mutate(0, "add_song", &track(t));
     }
-    f.net.settle();
+    f.net.settle().unwrap();
     let none = Id::new([0; 16]);
     let ids: Vec<Id<Media>> = f
         .query::<Vec<LibraryEntry>>(0, "peer-0", "library", &Library { playlist_id: none })
@@ -256,10 +264,11 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
             );
         }
     }
-    f.net.settle();
+    f.net.settle().unwrap();
     let items = |f: &Fleet| -> Vec<PlaylistItem> {
         f.net
-            .server
+            .hub
+            .log
             .store
             .rows("playlist_item")
             .map(|r| PlaylistItem::from_bytes(r).unwrap())
@@ -268,7 +277,7 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     assert_eq!(items(&f).len(), 6, "three tracks on each of two people's playlists");
 
     f.mutate(0, "remove_media", &RemoveMedia { id: removed });
-    f.net.settle();
+    f.net.settle().unwrap();
     let left = items(&f);
     assert_eq!(left.len(), 4, "{left:?}");
     assert!(left.iter().all(|i| i.media_id != removed), "no item names the removed track");
@@ -279,15 +288,15 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     // Somebody without the role: refused on the device, never sent…
     f.mutate(1, "remove_media", &RemoveMedia { id: attempted });
     assert_eq!(f.net.refused, [(1, "only the library writes the library".to_string())]);
-    assert!(f.net.clients[&1].pending.is_empty(), "nothing pending");
+    assert!(f.net.clients[&1].log.pending.is_empty(), "nothing pending");
     f.net.refused.clear();
     // …and by the server, from a device that believes a role it was never given.
-    f.net.clients.get_mut(&1).unwrap().me.roles = vec![LIBRARY.into()];
+    f.net.clients.get_mut(&1).unwrap().log.me.roles = vec![LIBRARY.into()];
     f.mutate(1, "remove_media", &RemoveMedia { id: attempted });
-    f.net.settle();
+    f.net.settle().unwrap();
     assert_eq!(f.net.refused, [(1, "only the library writes the library".to_string())]);
     assert_eq!(items(&f).len(), 4, "nothing moved");
-    for l in &f.net.server.log().entries() {
+    for l in &f.net.hub.log.log().entries() {
         let want: Vec<String> = if l.entry.actor == "peer-0" { vec![LIBRARY.into()] } else { vec![] };
         assert_eq!(l.entry.roles, want, "entry {} by {}", l.seq, l.entry.actor);
     }

@@ -24,11 +24,11 @@ use std::time::{Duration, Instant};
 
 use ark::hash::hex;
 use ark::ir::Node;
-use ark::log::{Logged, Snapshot};
+use ark::log::Logged;
 use ark::peer::Who;
-use ark::schema::Space;
-use ark::store::{Change, Store, LOG};
-use ark_peer::{Config, ConnId, Disk, Files, Memory, Peer};
+use ark::store::{Change, Store};
+use ark_dev::sim::{Net, Op};
+use ark_peer::{Config, Files, Peer};
 use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
 
@@ -126,35 +126,9 @@ impl Log {
                 let _ = std::fs::copy(e.path(), copy.path().join(e.file_name()));
             }
         }
-        let stored = Files::new(copy.path())
-            .unwrap()
-            .load()
-            .unwrap_or_else(|e| panic!("the log on disk is not a log: {e}"));
-        let schema = hosted().module.schema.clone();
-        let (log, rows): (Vec<_>, Vec<_>) = stored
-            .rows
-            .unwrap_or_default()
-            .into_iter()
-            .partition(|(t, _)| t == LOG);
-        let mut state = Store::from_rows(schema, &rows).expect("the store's rows");
-        let base = Snapshot {
-            seq: 0,
-            hash: Default::default(),
-            state: state.state_hash(),
-            rows: vec![],
-        };
-        let log: Vec<Vec<u8>> = log.into_iter().flat_map(|(_, rs)| rs).collect();
-        let log = if log.is_empty() {
-            vec![base.base().to_bytes()]
-        } else {
-            log
-        };
-        state.start_log(log).expect("the log's rows are a chain");
-        for l in &stored.logged {
-            state
-                .append(l, &l.facts)
-                .unwrap_or_else(|e| panic!("entry {} does not apply: {}", l.seq, e.0));
-        }
+        let disk = Box::new(Files::new(copy.path()).unwrap());
+        let mut p = Peer::serve(harken_server::hub_config(hosted(), 10_000), disk, 0);
+        let state = std::mem::replace(&mut p.log.store, Store::new(hosted().module.schema.clone()));
         Some(Log {
             base: state.log().base_seq(),
             entries: state.log().entries(),
@@ -899,24 +873,23 @@ impl Drop for PeerProc {
 
 /// A log made in this process and written where the server will read it,
 /// for a scenario that needs a long log and not the minute it takes to
-/// push one through a peer: the hub itself, over the server's own
-/// directory, with a client of it in this process authoring as the user
-/// asked for, holding the library's role.
+/// push one through a peer: `ark-dev`'s simulator, its server over the
+/// server's own directory, with a device of it authoring as each user asked
+/// for, holding the library's role.
 pub struct Seeder {
-    hub: Peer,
-    conn: ConnId,
-    clients: BTreeMap<String, Peer>,
+    net: Net,
+    users: BTreeMap<String, i64>,
     pub ids: BTreeSet<Id>,
 }
 
 impl Seeder {
     fn new(dir: &Path) -> Seeder {
-        let disk: Box<dyn Disk> = Box::new(Files::new(dir.join("log")).unwrap());
-        let hub = Peer::serve(harken_server::hub_config(hosted(), 10_000), disk, 0);
+        let config = harken_server::hub_config(hosted(), 10_000);
+        let mut net = Net::of(config.clone(), vec![], 0);
+        net.hub = Peer::serve(config, Box::new(Files::new(dir.join("log")).unwrap()), 0);
         Seeder {
-            hub,
-            conn: 0,
-            clients: BTreeMap::new(),
+            net,
+            users: BTreeMap::new(),
             ids: BTreeSet::new(),
         }
     }
@@ -924,51 +897,30 @@ impl Seeder {
     /// Sequence one intent as `user`; the facts it was sequenced with, so a
     /// scenario can name the rows it made.
     pub fn author(&mut self, user: &str, name: &str, input: &impl Node) -> Vec<Change> {
-        if !self.clients.contains_key(user) {
-            let who = Who {
-                actor: user.into(),
-                session: format!("seeded-{user}"),
-                roles: vec!["library".into()],
-            };
-            let mut c = Peer::open(
-                Config::new(hosted().module.clone()),
-                who.clone(),
-                Box::new(Memory::default()),
-                false,
-            );
-            self.conn = self.hub.accept(who);
-            c.connected();
-            self.clients.insert(user.into(), c);
-            self.exchange(user);
-        }
-        let c = self.clients.get_mut(user).unwrap();
-        let _ = c.author(Space::Durable, hosted().func(name), input.to_bytes(), 1_000);
-        self.exchange(user);
-        let c = &self.clients[user];
+        let i = match self.users.get(user) {
+            Some(i) => *i,
+            None => {
+                let who = Who {
+                    actor: user.into(),
+                    session: format!("seeded-{user}"),
+                    roles: vec!["library".into()],
+                };
+                let i = self.net.add(who, Config::new(hosted().module.clone()));
+                *self.users.entry(user.into()).or_insert(i)
+            }
+        };
+        self.net
+            .run(&Op::Mutate(i, hosted().func(name), input.to_bytes()));
+        self.net.deliver();
+        let c = &self.net.clients[&i];
         assert!(c.log.pending.is_empty(), "seeding {name}: still pending");
         let last = c.log.log().entries().pop().expect("sequenced");
         self.ids.insert(last.entry.id.0);
         last.facts
     }
 
-    /// Frames both ways until neither side has anything to say.
-    fn exchange(&mut self, user: &str) {
-        let c = self.clients.get_mut(user).unwrap();
-        loop {
-            let frames = c.take_frames();
-            if frames.is_empty() {
-                break;
-            }
-            for f in frames {
-                for (_, b) in self.hub.frame(self.conn, f, 1_000) {
-                    c.receive(b);
-                }
-            }
-        }
-    }
-
     pub fn head(&self) -> i64 {
-        self.hub.log.log().head().0
+        self.net.hub.log.log().head().0
     }
 }
 
@@ -1039,7 +991,7 @@ impl Fleet {
         let ids = {
             let mut seeder = Seeder::new(&root.path().join("server-data"));
             seed(&mut seeder);
-            seeder.hub.close();
+            seeder.net.hub.close();
             seeder.ids
         };
         let upstream: Upstream = Arc::new(Mutex::new("127.0.0.1:1".parse().unwrap()));

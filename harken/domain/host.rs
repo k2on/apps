@@ -32,6 +32,15 @@ pub fn load() -> Domain {
     Domain::from_file(MODULE).unwrap_or_else(|r| panic!("harken's module: {r}"))
 }
 
+/// What a server authors `on_join` and `on_leave` with: what the device
+/// said it is, its user and its id the verified login's — a device is a
+/// session. What a device says that does not read as a device is no device.
+pub fn arrive(who: &ark::peer::Who, said: &[u8]) -> Option<Vec<u8>> {
+    let d = Device::from_bytes(said).ok()?;
+    let (user, id) = (who.actor.clone(), who.session.clone());
+    Some(Device { user, id, ..d }.to_bytes())
+}
+
 /// [`load`], once.
 pub fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();

@@ -248,7 +248,10 @@ impl Net {
         if self.conns.contains_key(&i) || self.alone.contains(&i) {
             return;
         }
-        let who = self.clients[&i].log.me.clone();
+        // The connection is who the client last signed in as, whatever it
+        // believes since.
+        let me = &self.clients[&i].log.me;
+        let who = self.logins.get(&me.session).unwrap_or(me).clone();
         let c = self.hub.accept(who);
         self.conns.insert(i, c);
         self.client(i).connected();

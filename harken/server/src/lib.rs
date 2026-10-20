@@ -41,10 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::domain::Device;
 use anyhow::{anyhow, bail, Context, Result};
-use ark::ir::Node;
-use ark::peer::Who;
 use ark_auth::oidc::Provider;
 use ark_auth::server::{Auth, Mode};
 use ark_auth::session::SessionStore;
@@ -425,18 +422,9 @@ pub fn pretty(entity: &str) -> String {
     }
 }
 
-/// What the hub authors `on_join` and `on_leave` with: what the device said
-/// it is, its user and its id the verified login's — a device is a session.
-/// What a device says that does not read as a device is no device.
-pub fn device(who: &Who, said: &[u8]) -> Option<Vec<u8>> {
-    let d = Device::from_bytes(said).ok()?;
-    let (user, id) = (who.actor.clone(), who.session.clone());
-    Some(Device { user, id, ..d }.to_bytes())
-}
-
 /// The hub's configuration for `hosted`: the log and the listening
 /// session's volatile space over the one module, `on_join`, `on_leave` and
-/// `on_restore` the domain's, [`device`] reading a device, and `keep`
+/// `on_restore` the domain's, `host::arrive` reading a device, and `keep`
 /// entries above the log's snapshot.
 pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
     let mut c = HubConfig::new(hosted.module.clone());
@@ -445,7 +433,7 @@ pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
         on_join: get("on_join"),
         on_leave: get("on_leave"),
         on_restore: get("on_restore"),
-        arrive: Arc::new(device),
+        arrive: Arc::new(crate::domain::host::arrive),
         keep: Some(256),
         ..Live::new(hosted.module.clone())
     });

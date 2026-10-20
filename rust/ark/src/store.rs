@@ -369,19 +369,6 @@ impl Store {
         Ok(())
     }
 
-    /// Writes in order, all or none, the log's table's included.
-    pub fn apply_kv_all(&mut self, cs: &[Change]) -> Result<(), Refusal> {
-        for (i, c) in cs.iter().enumerate() {
-            if let Err(e) = self.apply_kv(c) {
-                for d in cs[..i].iter().rev() {
-                    self.apply_kv(&d.inverse()).expect("an inverse applies");
-                }
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
     /// The log's table emptied and these rows, in order, written to it.
     pub fn start_log(&mut self, rows: impl IntoIterator<Item = Vec<u8>>) -> Result<(), Refusal> {
         self.log.clear();

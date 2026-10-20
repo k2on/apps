@@ -15,10 +15,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use ark::hash::{FnHash, ModuleHash};
-use ark::module::{Lib, Module};
-use ark::peer::Ctx;
-use ark::store::{Change, Read};
-use ark::{Domain, Refusal};
+use ark::Domain;
 
 /// A module assembled, and the same as a peer's per-space module.
 #[derive(Clone)]
@@ -71,7 +68,7 @@ impl Hosted {
             lib: d.lib.clone(),
             bodies: d.bodies.clone(),
         });
-        compat(&old.module, &d.module, &d.lib).map_err(|e| {
+        ark::module::compat(&old.module, &d.module, &d.lib).map_err(|e| {
             anyhow!(
                 "this module may not follow the old module {}: {}",
                 path.display(),
@@ -102,37 +99,10 @@ impl Hosted {
         self.domain.get(name)
     }
 
-    /// A mutator's changes over `store`, as the kernel runs it.
-    pub fn run(
-        &self,
-        store: &dyn Read,
-        ctx: &Ctx,
-        name: &str,
-        input: &[u8],
-    ) -> Result<Vec<Change>, Refusal> {
-        self.domain.run(store, ctx, name, input)
-    }
-
-    /// A query's answer over `store`.
-    pub fn ask(
-        &self,
-        store: &dyn Read,
-        ctx: &Ctx,
-        name: &str,
-        input: &[u8],
-    ) -> Result<Vec<u8>, Refusal> {
-        self.domain.ask(store, ctx, name, input)
-    }
-
     /// The module file: the binding map and every body.
     pub fn to_bytes(&self) -> Vec<u8> {
         self.domain.to_file()
     }
-}
-
-/// §1.2, §1.5 Whether `new` may follow `old` ([`ark::module::compat`]).
-pub fn compat(old: &Module, new: &Module, lib: &Lib) -> Result<usize, Refusal> {
-    ark::module::compat(old, new, lib)
 }
 
 /// A module file of `domain`, at `path`.

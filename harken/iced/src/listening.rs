@@ -598,9 +598,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::domain::Device as Said;
     use crate::domain::Id as Key;
-    use ark::ir::Node;
     use ark::peer::Who;
     use ark_peer::{Config, ConnId, Live, Peer as Hub};
 
@@ -691,12 +689,7 @@ mod tests {
                 on_join: get("on_join"),
                 on_leave: get("on_leave"),
                 on_restore: get("on_restore"),
-                // What the device says it is, its user and its id the login's.
-                arrive: Arc::new(|who: &Who, said: &[u8]| {
-                    let d = Said::from_bytes(said).ok()?;
-                    let (user, id) = (who.actor.clone(), who.session.clone());
-                    Some(Said { user, id, ..d }.to_bytes())
-                }),
+                arrive: Arc::new(crate::domain::host::arrive),
                 keep: Some(64),
                 ..Live::new(m)
             });

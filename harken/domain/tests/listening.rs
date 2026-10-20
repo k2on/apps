@@ -1139,14 +1139,6 @@ fn module() -> Module {
     Module::of(domain())
 }
 
-/// What the hub authors `on_join` and `on_leave` with: what the device
-/// says it is, its user and its id the login's.
-fn device(who: &Who, said: &[u8]) -> Option<Vec<u8>> {
-    let d = Device::from_bytes(said).ok()?;
-    let (user, id) = (who.actor.clone(), who.session.clone());
-    Some(Device { user, id, ..d }.to_bytes())
-}
-
 /// The house over the wire: the hub, the session in its volatile machine,
 /// and each device a client of it signed in as alice on a session named
 /// for the device.
@@ -1163,7 +1155,7 @@ impl Wire {
             on_join: get("on_join"),
             on_leave: get("on_leave"),
             on_restore: get("on_restore"),
-            arrive: Arc::new(device),
+            arrive: Arc::new(harken_domain::domain::host::arrive),
             keep: Some(64),
             ..Live::new(module())
         });

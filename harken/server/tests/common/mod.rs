@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 
 use ark::ir::Node;
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::Who;
 use ark::schema::Space;
 use ark_auth::{Account, Login};
-use ark_peer::{now_ms as now, Live, Memory};
+use ark_peer::{Live, Memory};
 use harken_server::domain::host::{Kind, Listening};
 use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
@@ -224,18 +224,7 @@ impl Peer {
 
     /// A query over what the client holds.
     pub fn query<T: Node>(&self, name: &str, input: &impl Node) -> Result<T, String> {
-        let me = &self.client.log.me;
-        let ctx = Ctx {
-            id: EntryId::of("q", 0),
-            actor: me.actor.clone(),
-            session: me.session.clone(),
-            roles: me.roles.clone(),
-            now: now(),
-        };
-        let b = hosted()
-            .ask(&self.client.log.store, &ctx, name, &input.to_bytes())
-            .map_err(|r| r.0)?;
-        Ok(T::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))
+        self.client.query(name, input)
     }
 
     /// A table's rows, as the client holds them.
