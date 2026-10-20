@@ -32,9 +32,13 @@
 //! rebases included, as `Output::Changes`.
 //!
 //! **The authority** judges each pushed intent once — dedupe by `(session,
-//! local)`, a gap in a session's pushes waits for them in order, an unknown
-//! function is `Held` until its body comes — stamps it with the actor and
-//! roles it judged it under, runs it, and logs it with its facts.
+//! local)`, a gap in a session's pushes waits for them in order — stamps it
+//! with the actor and roles it judged it under, runs it, and logs it with
+//! its facts. It runs exactly the functions in its content store, which
+//! are the ones bound in the modules its operator loaded: it never loads a
+//! body it is sent. An intent naming any other is `Held` — the device keeps
+//! it pending and pushes it again on its next connection — and a chain
+//! handed over with one is refused.
 //!
 //! **Partial sync is a view** (§1.8). A connection the driver says is fed
 //! by a scope (`Input::Feed`) is served its union: the rows a `Pure`
@@ -170,6 +174,11 @@ impl Cas {
         }
         self.bodies.insert(h, bytes);
         h
+    }
+
+    /// A function runnable no more; its bytes are kept.
+    pub fn forget(&mut self, h: &FnHash) {
+        self.procs.remove(h);
     }
 
     pub fn body(&self, h: &FnHash) -> Option<&Vec<u8>> {
@@ -493,7 +502,6 @@ impl Peer {
                 o.send(Frame::Push {
                     space: self.space,
                     entry: entry.clone(),
-                    body: None,
                 });
                 self.pending.push(Pending { entry, changes });
             }
@@ -547,28 +555,15 @@ impl Peer {
     // * Frames
 
     fn frame(&mut self, from: Option<Who>, f: Frame, o: &mut Out) {
-        let space = match &f {
-            Frame::Hello { space, .. } | Frame::Push { space, .. } | Frame::Batch { space, .. } => Some(*space),
-            Frame::Snapshot { space, .. } | Frame::Join { space, .. } => Some(*space),
-            Frame::Ack { space, .. } | Frame::Reject { space, .. } | Frame::Held { space, .. } => Some(*space),
-            _ => None,
-        };
-        if space.is_some_and(|s| s != self.space) {
+        if f.space() != self.space {
             return;
         }
         let scoped = from.as_ref().filter(|w| self.served.contains_key(&w.session)).map(|w| w.session.clone());
         match (f, self.is_authority(), from) {
             (Frame::Hello { cursor, hash, .. }, true, _) if scoped.is_some() => self.serve_scoped(&scoped.unwrap(), cursor, hash, o),
             (Frame::Hello { cursor, hash, .. }, true, _) => self.serve(cursor, hash, o),
-            (Frame::Push { entry, body, .. }, true, Some(who)) => self.push(&who, entry, body, o),
+            (Frame::Push { entry, .. }, true, Some(who)) => self.push(&who, entry, o),
             (Frame::Join { from, hash, logged, .. }, true, Some(who)) => self.adopt(&who, (from, hash), logged, o),
-            (Frame::Fetch { hashes }, true, _) => {
-                let bodies = hashes.iter().filter_map(|h| Some((*h, self.cas.body(h)?.clone()))).collect();
-                o.send(Frame::Bodies { bodies });
-            }
-            (Frame::Bodies { bodies }, _, _) => bodies.into_iter().for_each(|(_, b)| {
-                self.cas.add_body(b);
-            }),
             (Frame::Batch { logged, .. }, false, _) => self.confirm(logged, o),
             (Frame::Snapshot { snapshot, .. }, false, _) => self.reset(snapshot, o),
             (Frame::Ack { id, seq, .. }, false, _) => {
@@ -581,15 +576,6 @@ impl Peer {
             (Frame::Reject { id, why, .. }, false, _) => {
                 if self.settle(&id, o) {
                     o.out.push(Output::Refused { id, why });
-                }
-            }
-            (Frame::Held { id, func, .. }, false, _) => {
-                if let (Some(p), Some(b)) = (self.pending.iter().find(|p| p.entry.id == id), self.cas.body(&func)) {
-                    o.send(Frame::Push {
-                        space: self.space,
-                        entry: p.entry.clone(),
-                        body: Some(b.clone()),
-                    });
                 }
             }
             _ => {}
@@ -715,12 +701,8 @@ impl Peer {
         }
     }
 
-    fn push(&mut self, who: &Who, mut entry: Entry, body: Option<Vec<u8>>, o: &mut Out) {
+    fn push(&mut self, who: &Who, mut entry: Entry, o: &mut Out) {
         let (id, space) = (entry.id, self.space);
-        let asked = body.is_some();
-        if let Some(b) = body {
-            self.cas.add_body(b);
-        }
         let j = self.journal();
         match j.verdicts.get(&id) {
             Some(Verdict::Seq(seq)) => {
@@ -762,14 +744,7 @@ impl Peer {
             return;
         }
         if self.cas.get(&entry.func).is_none() {
-            return o.send(match asked {
-                false => Frame::Held { space, id, func: entry.func },
-                true => Frame::Reject {
-                    space,
-                    id,
-                    why: format!("no function {}", entry.func),
-                },
-            });
+            return o.send(Frame::Held { space, id, func: entry.func });
         }
         entry.actor = who.actor.clone();
         entry.roles = who.roles.clone();
@@ -785,12 +760,21 @@ impl Peer {
         if !fresh || self.log.head() != at {
             // A chain is its session's whole history above the fork: a gap
             // in it is an intent the device refused itself, never to come.
+            // One naming a function this authority does not run is refused,
+            // not held: a chain is handed over once.
             for l in chain {
                 let last = self.journal().last.entry(l.entry.session.clone()).or_insert(0);
                 if l.entry.session == who.session && l.entry.local > *last + 1 {
                     *last = l.entry.local - 1;
                 }
-                self.push(who, l.entry, None, o);
+                let judged = self.journal().verdicts.contains_key(&l.entry.id);
+                match self.cas.get(&l.entry.func) {
+                    None if !judged && l.entry.session == who.session && l.entry.id_checks() => {
+                        let why = format!("no function {}", l.entry.func);
+                        self.refuse(&l.entry, why, o)
+                    }
+                    _ => self.push(who, l.entry, o),
+                }
             }
             return;
         }
@@ -802,17 +786,12 @@ impl Peer {
             let owned = e.id_checks() && e.session == who.session;
             if !owned || self.sequence(e, Some(&l.facts), &mut done).is_err() {
                 (self.store, self.log, self.role) = (store, log, role);
-                let why = format!("the chain's facts at {} are not what this authority's run gives", l.seq);
+                let why = match self.cas.get(&l.entry.func) {
+                    None => format!("the chain's function at {} is not one this authority runs", l.seq),
+                    Some(_) => format!("the chain's facts at {} are not what this authority's run gives", l.seq),
+                };
                 for l in &chain {
-                    let (id, s, n) = (l.entry.id, l.entry.session.clone(), l.entry.local);
-                    let last = self.journal().last.entry(s).or_insert(0);
-                    *last = (*last).max(n);
-                    self.journal().verdicts.insert(id, Verdict::Refused(why.clone()));
-                    o.send(Frame::Reject {
-                        space: self.space,
-                        id,
-                        why: why.clone(),
-                    });
+                    self.refuse(&l.entry, why.clone(), o);
                 }
                 return;
             }
@@ -828,6 +807,19 @@ impl Peer {
                 facts: None,
             });
         }
+    }
+
+    /// An intent refused without being run: its verdict kept, its `local`
+    /// passed.
+    fn refuse(&mut self, e: &Entry, why: String, o: &mut Out) {
+        let last = self.journal().last.entry(e.session.clone()).or_insert(0);
+        *last = (*last).max(e.local);
+        self.journal().verdicts.insert(e.id, Verdict::Refused(why.clone()));
+        o.send(Frame::Reject {
+            space: self.space,
+            id: e.id,
+            why,
+        });
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.
@@ -943,7 +935,6 @@ impl Peer {
             o.send(Frame::Push {
                 space: self.space,
                 entry: p.entry.clone(),
-                body: None,
             });
         }
     }

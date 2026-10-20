@@ -84,7 +84,10 @@ it.
 
 `module.rs`: `Module { spec, schema, types, bindings }`, `ModuleHash =
 sha256(enc(Module))`; a `Lib` keeps checked functions by hash, and its
-loader is how a content store runs a body it is sent. A module verifies
+loader is how a content store runs the bodies of the modules it was given:
+an authority's holds exactly the functions bound in the modules its
+operator loaded, the current one and those held from before, and never a
+body a client sends (no frame carries one). A module verifies
 when its bindings and types are sorted by name, each once, every bound
 function checks over its schema, and every declaration a function makes is
 the module's own.

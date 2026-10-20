@@ -166,7 +166,6 @@ fn step_1_an_authority_sequences_the_transcript() {
                 Frame::Push {
                     space: ark5::schema::Space::Durable,
                     entry: l.entry.clone(),
-                    body: None,
                 }
                 .enc(),
             )],
@@ -306,26 +305,30 @@ fn edits_and_removes_rebase_too() {
     assert_eq!(pos_of(&alice.store, &pid(), "t4"), Some(4));
 }
 
-/// A function the authority lacks is held until its body comes, then run.
-/// Falsified by the client answering `Held` without the body: the
-/// authority held it again and nothing was sequenced.
+/// A function the authority does not run is `Held`, and no body a client
+/// has is ever loaded: the intent stays pending on the device, which sends
+/// nothing back for a `Held` and pushes it again on its next connection;
+/// held again until the operator loads the function, then sequenced.
+/// Falsified by `push` answering an unknown function with a `Reject`
+/// instead of `Held`: the first push came back refused.
 #[test]
-fn held_until_the_body_comes() {
+fn held_until_the_operator_loads_it() {
     let mut lacking = Cas::default().with_loader(demo::loader());
     lacking.add_body(demo::body(CREATE));
     let mut server = authority(lacking);
-    let mut knows = Cas::default().with_loader(demo::loader());
-    knows.add_body(demo::body(CREATE));
-    knows.add_body(demo::body(ADD));
-    let mut alice = replica("alice", knows);
+    let mut alice = replica("alice", demo::cas());
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));
     deliver_up(&mut server, &who("alice"), &o);
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
-    let (s, _) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(s[..], [Frame::Held { .. }]));
-    let o = alice.step(down(&s[0]));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(s[..], [Frame::Ack { seq: 2, .. }]), "{s:?}");
+    assert!(matches!(s[..], [Frame::Held { .. }]) && f.is_empty(), "{s:?}");
+    assert!(sends(&alice.step(down(&s[0]))).is_empty(), "a held intent sends nothing");
+    assert_eq!(alice.pending.len(), 2, "…and stays pending");
+    let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
+    assert!(matches!(s[..], [.., Frame::Ack { seq: 1, .. }, Frame::Held { .. }]), "held again: {s:?}");
+    server.cas.add_body(demo::body(ADD));
+    let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
+    assert!(matches!(s[..], [.., Frame::Ack { seq: 1, .. }, Frame::Ack { seq: 2, .. }]), "{s:?}");
     assert_eq!(f.len(), 1);
 }
 

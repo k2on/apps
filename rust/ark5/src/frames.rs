@@ -2,15 +2,18 @@
 //!
 //! ```text
 //! Client: Hello { space, cursor, hash: Option<EntryHash>, device: Option<Bytes> }
-//!         Push  { space, entry, body: Option<Bytes> }   -- the body when the authority asked
-//!         Fetch { hashes }
+//!         Push  { space, entry }
 //! Server: Ack   { space, id, seq, facts: Option<[Change]> }
-//!         Reject{ space, id, why } | Held { space, id, fn }  -- Held: send the body
+//!         Reject{ space, id, why } | Held { space, id, fn }  -- Held: a function it does not run
 //!         Batch { space, from, logged: [Logged] }
 //!         Snapshot { space, seq, hash, state, rows }
-//!         Bodies { [(FnHash, Bytes)] }
 //! Client: Join  { space, from, hash, logged: [Logged] } -- a chain made alone, handed over
 //! ```
+//!
+//! **No body crosses the wire.** An authority runs exactly the functions
+//! bound in the modules its operator loaded; `Held` says an intent names
+//! one it does not run, and the intent stays pending on the device, pushed
+//! again on its next connection. Nothing a client sends is ever loaded.
 //!
 //! The variants are numbered in that order, `Join` last. Every frame about
 //! one space's log names it, so two machines share a connection (§1.9): a
@@ -41,10 +44,6 @@ pub enum Frame {
     Push {
         space: Space,
         entry: Entry,
-        body: Option<Vec<u8>>,
-    },
-    Fetch {
-        hashes: Vec<FnHash>,
     },
     Ack {
         space: Space,
@@ -70,9 +69,6 @@ pub enum Frame {
     Snapshot {
         space: Space,
         snapshot: Snapshot,
-    },
-    Bodies {
-        bodies: Vec<(FnHash, Vec<u8>)>,
     },
     Join {
         space: Space,
@@ -101,6 +97,14 @@ pub fn frame_ty() -> Ty {
 }
 
 impl Frame {
+    /// The space whose log the frame is about.
+    pub fn space(&self) -> Space {
+        match self {
+            Frame::Hello { space, .. } | Frame::Push { space, .. } | Frame::Ack { space, .. } | Frame::Reject { space, .. } => *space,
+            Frame::Held { space, .. } | Frame::Batch { space, .. } | Frame::Snapshot { space, .. } | Frame::Join { space, .. } => *space,
+        }
+    }
+
     pub fn enc(&self) -> Vec<u8> {
         self.to_bytes()
     }

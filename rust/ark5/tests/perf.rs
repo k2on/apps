@@ -160,11 +160,13 @@ impl Author {
     /// this author delivers it.
     fn push(&mut self, name: &str, input: Vec<u8>) -> Input {
         let entry = self.entry(name, input);
-        up(&self.who, Frame::Push {
-            space: Space::Durable,
-            entry,
-            body: None,
-        })
+        up(
+            &self.who,
+            Frame::Push {
+                space: Space::Durable,
+                entry,
+            },
+        )
     }
 
     /// The playlist its `local`-th entry created.
@@ -416,7 +418,9 @@ fn perf_a_mutate_alone() {
 #[ignore]
 fn perf_d_initial_sync() {
     header("(d) initial sync: Replica::receive_batch, pages of BATCH_LIMIT");
-    note(&format!("Replica.step(Batch frame of {PAGE}): decode, apply facts, check each entry's state hash, link the chain"));
+    note(&format!(
+        "Replica.step(Batch frame of {PAGE}): decode, apply facts, check each entry's state hash, link the chain"
+    ));
     for &n in &SIZES {
         let b = log(10, n);
         let logged = b.logged();
@@ -569,15 +573,7 @@ fn perf_e_rebase() {
             r.step(down(page.clone()));
             let paged = t.elapsed();
             assert_eq!((r.pending.len() as u64, r.log.head()), (k, landed.log.head()));
-            let row = |label: String, d: Duration| {
-                eprintln!(
-                    "{:<44} {:>7} {:>8.1}µs {:>8.1}ms",
-                    label,
-                    s,
-                    us(d) / m as f64,
-                    d.as_secs_f64() * 1e3
-                )
-            };
+            let row = |label: String, d: Duration| eprintln!("{:<44} {:>7} {:>8.1}µs {:>8.1}ms", label, s, us(d) / m as f64, d.as_secs_f64() * 1e3);
             row(format!("K={k} M={m}: one entry at a time, a pump each"), each);
             na(
                 &format!("K={k} M={m}: one entry at a time, one pump"),
@@ -934,7 +930,6 @@ fn perf_h_frames() {
     let p = Frame::Push {
         space: Space::Durable,
         entry: page[0].entry.clone(),
-        body: None,
     };
     let reps = 2000;
     let t = Instant::now();
@@ -1184,7 +1179,11 @@ fn time_view(f: Function, input: &[u8], mut store: Store, ops: &[Change], rounds
             spent += t.elapsed();
         }
     }
-    assert_eq!(v.rows(), ark5::view::query(&lib, &h, input, &vctx(), &store).unwrap(), "the view is a fresh evaluation");
+    assert_eq!(
+        v.rows(),
+        ark5::view::query(&lib, &h, input, &vctx(), &store).unwrap(),
+        "the view is a fresh evaluation"
+    );
     (hydrate, us(spent) / (rounds * ops.len()) as f64, reads)
 }
 
@@ -1264,4 +1263,3 @@ fn perf_views() {
         );
     }
 }
-

@@ -65,17 +65,12 @@ fn every_frame() -> Vec<Frame> {
             device: Some(b"phone\0".to_vec()),
         },
         Frame::Push {
-            space: Space::Durable,
+            space: Space::Volatile,
             entry: entry.clone(),
-            body: None,
         },
         Frame::Push {
             space: Space::Durable,
             entry,
-            body: Some(b"demo".to_vec()),
-        },
-        Frame::Fetch {
-            hashes: vec![FnHash([2; 32]), FnHash::default()],
         },
         Frame::Ack {
             space: Space::Durable,
@@ -113,9 +108,6 @@ fn every_frame() -> Vec<Frame> {
             space: Space::Durable,
             snapshot,
         },
-        Frame::Bodies {
-            bodies: vec![(FnHash([4; 32]), vec![0, 0])],
-        },
         Frame::Join {
             space: Space::Durable,
             from: 0,
@@ -141,12 +133,12 @@ fn every_frame_is_its_type() {
         assert!(Frame::dec(&longer).is_err() && parse(&t, &longer).is_err());
         assert!(Frame::dec(&b[..b.len() - 1]).is_err());
     }
-    let r = Record::Logged(match &every_frame()[9] {
+    let r = Record::Logged(match &every_frame()[8] {
         Frame::Batch { logged, .. } => logged[0].clone(),
         _ => unreachable!(),
     });
     parse(&ty("Record"), &r.enc()).unwrap();
     assert_eq!(Record::dec(&r.enc()), Ok(r));
-    let mut rd = Reader::new(&[10]);
-    assert!(rd.variant(10).is_err(), "there are ten frames");
+    let mut rd = Reader::new(&[8]);
+    assert!(rd.variant(8).is_err(), "there are eight frames");
 }

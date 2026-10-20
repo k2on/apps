@@ -3,8 +3,7 @@
 //! same hub a socket does.
 //!
 //! **Routing.** A frame from a connection goes to the machine of its space
-//! (`Fetch` and `Bodies` to the log's) with the connection's verified
-//! identity. What the machine says goes: `Send` back to that connection;
+//! with the connection's verified identity. What the machine says goes: `Send` back to that connection;
 //! `Fanout` to every connection fed the log whole, or, for the volatile
 //! space, every connection that said `Hello` in it; `To` to the connections of that session; and
 //! `Persist` to the disk **first** — nothing a step says is delivered until

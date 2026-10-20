@@ -486,7 +486,6 @@ fn push(hub: &mut Hub, conn: u64, w: &Who, local: &mut i64, func: FnHash, input:
     let f = Frame::Push {
         space: Space::Durable,
         entry,
-        body: None,
     };
     hub.frame(conn, f.enc(), 0)
 }
@@ -742,7 +741,9 @@ fn perf_d_open_child() {
     let rows = match kind {
         "store" => {
             let b = std::fs::read(dir.join("snapshot")).unwrap();
-            let Record::Snapshot(s) = Record::dec(&b).unwrap() else { panic!("a snapshot") };
+            let Record::Snapshot(s) = Record::dec(&b).unwrap() else {
+                panic!("a snapshot")
+            };
             let st = Store::from_rows(Arc::new(media_schema(true)), &s.rows).unwrap();
             let r = st.rows("media").count();
             std::mem::forget(st);
@@ -780,7 +781,11 @@ fn perf_d_open_child() {
         t.elapsed()
     };
     let mut split = String::new();
-    let snap = if kind == "server" { dir.join("log/snapshot") } else { dir.join("snapshot") };
+    let snap = if kind == "server" {
+        dir.join("log/snapshot")
+    } else {
+        dir.join("snapshot")
+    };
     if snap.exists() {
         let read = time(&mut || {
             let b = std::fs::read(&snap).unwrap();
@@ -799,13 +804,7 @@ fn perf_d_open_child() {
         }
         split.push_str(&format!("chain {records} records read {:.0}", ms(read)));
     }
-    println!(
-        "OPEN {:.0} {} {} {:.1} {split}",
-        ms(whole),
-        mb(rss),
-        mb(base),
-        live as f64 / 1048576.0
-    );
+    println!("OPEN {:.0} {} {} {:.1} {split}", ms(whole), mb(rss), mb(base), live as f64 / 1048576.0);
 }
 
 const BYTES_SIZES: [u64; 2] = [10_000, 100_000];
@@ -1008,4 +1007,3 @@ fn perf_d_frame_child() {
     assert_eq!(c.log.store.rows("media").count() as u64, n, "every row adopted");
     println!("FRAME {} {high} {held} {rss}", ms(took));
 }
-

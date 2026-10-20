@@ -13,8 +13,9 @@
 //! which is what a router is. Two modules binding the same names to the
 //! same hashes over the same schema and types are one module.
 //!
-//! [`Lib::loader`] is how the kernel's content store runs a body it is sent
-//! (§1.7): decode, check, keep, and hand back an [`Interp`].
+//! [`Lib::loader`] is how the kernel's content store runs the bodies of the
+//! modules it was given (§1.7): decode, check, keep, and hand back an
+//! [`Interp`]. No body comes over the wire.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};

@@ -396,18 +396,17 @@ fn a_wider_admin_page_asks_for_the_admin_role() {
     rt.block_on(server.stop());
 }
 
-/// `docs/plan-guards.md` D4 Only the authority writes raw — a witness. A
-/// client builds the function the admin page's raw write is (bob renaming
-/// alice's playlist: a `Write` past every guard the domain has), loads its
-/// body and authors it. It previews and is pushed; the authority, which
-/// never had that hash, answers `Held`, the client sends the body, and the
-/// authority checks it, loads it and sequences it as bob's: alice's
-/// playlist is `Hijacked`. v4 refused a client's raw write and any
-/// function it had not run; v5's authority takes any body that checks
-/// (`ark5::peer::Peer::push`), so a body is a door past every guard and
-/// role. Run with `--ignored`: the playlist is renamed.
+/// `docs/plan-guards.md` D4 Only the authority writes raw. A client builds
+/// the function the admin page's raw write is (bob renaming alice's
+/// playlist: a `Write` past every guard the domain has), loads its body
+/// and authors it. It previews and is pushed; the authority, whose content
+/// store holds only the functions of the modules its operator loaded,
+/// answers `Held`, and no frame carries a body to it: the intent stays
+/// pending on bob's device and alice's playlist keeps its name. Falsified
+/// by putting back the `Push` with a body the client answered `Held` with
+/// and the authority's loading of it (`ark5::peer::Peer::push`): the
+/// playlist was renamed `Hijacked`.
 #[test]
-#[ignore = "witness: an authority sequences any function body a client sends that checks, so a client can write past every guard (ark5 Peer::push, Held then Push with a body)"]
 fn a_clients_raw_write_is_refused() {
     let rt = runtime();
     let data = tempfile::tempdir().unwrap();
@@ -430,10 +429,14 @@ fn a_clients_raw_write_is_refused() {
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == 1);
     let h = bob.client.log.cas.add_body(raw.to_bytes());
     bob.client.mutate(h, vec![], ark5_server::handle::now());
-    pump_until(&mut [&mut bob], 10, |ps| ps[0].pending() == 0);
+    for _ in 0..100 {
+        bob.pump();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert_eq!(
         playlists(&server),
         [("Mine".to_string(), "alice".to_string())]
     );
+    assert_eq!((bob.pending(), bob.refused.len()), (1, 0), "held, not refused");
     rt.block_on(server.stop());
 }

@@ -38,8 +38,11 @@ and, for a frame of a space's log, its space (`client-hello-volatile`).
 **Do and compare**: `frame` written under the frame type is `bytes`;
 `bytes` decodes to a frame that encodes to `bytes`; `bytes` read under the
 frame type is `frame`. Every kind is here, each in each space a session
-sent it in; `Fetch`, `Bodies`, `Held` and a `Reject` are built by hand
-from an entry, since no session sends them.
+sent it in; `Held` and a `Reject` are built by hand from an entry, since
+no session sends them. No frame carries a function's body: an authority
+runs only the functions its operator loaded, and `Held` tells a device
+its intent names another, to keep pending and push again on its next
+connection.
 
 ## trace — client
 

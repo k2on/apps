@@ -232,17 +232,13 @@ async fn raw_write(With(ctx): With<Ctx>, body: String) -> Response {
     if let Err(e) = ctx.admin.lib.install(&ctx.admin.module.schema, f.clone()) {
         return text(StatusCode::CONFLICT, e.0);
     }
-    let bytes = f.to_bytes();
-    match on_hub(&ctx.hub, move |h| h.log.cas.add_body(bytes)).await {
-        Ok(func) => answer(&ctx.hub, func, vec![]).await,
-        Err(r) => r,
-    }
+    answer(&ctx.hub, f.hash(), vec![], Some(f.to_bytes())).await
 }
 
 async fn author(With(ctx): With<Ctx>, body: String) -> Response {
     match wire::author_from(&body) {
         Ok((name, input)) => match ctx.admin.module.get(&name) {
-            Some(func) => answer(&ctx.hub, func, input).await,
+            Some(func) => answer(&ctx.hub, func, input, None).await,
             None => text(StatusCode::BAD_REQUEST, format!("no function {name}")),
         },
         Err(why) => text(StatusCode::BAD_REQUEST, why),
@@ -250,10 +246,10 @@ async fn author(With(ctx): With<Ctx>, body: String) -> Response {
 }
 
 // Authored as the authority, its deliveries delivered: the sequence once
-// written, or the refusal.
-async fn answer(hub: &Handle, func: ark5::hash::FnHash, input: Vec<u8>) -> Response {
+// written, or the refusal. A raw write's body is runnable for its entry only.
+async fn answer(hub: &Handle, func: ark5::hash::FnHash, input: Vec<u8>, once: Option<Vec<u8>>) -> Response {
     let hub = hub.clone();
-    match tokio::task::spawn_blocking(move || hub.author(Space::Durable, func, input))
+    match tokio::task::spawn_blocking(move || hub.author(Space::Durable, func, input, once))
         .await
         .ok()
         .flatten()

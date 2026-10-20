@@ -133,7 +133,10 @@ fn a_linked_round_trip_waits_on_nothing() {
         })
         .collect();
     let (linked, direct) = (median(linked), median(direct));
-    assert!(linked <= direct + Duration::from_micros(500), "linked {linked:?}, no link thread {direct:?}");
+    assert!(
+        linked <= direct + Duration::from_micros(500),
+        "linked {linked:?}, no link thread {direct:?}"
+    );
 }
 
 /// The same over WebSockets, the token the first message; and an empty
@@ -240,7 +243,6 @@ fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
     Frame::Push {
         space: Space::Durable,
         entry,
-        body: None,
     }
     .enc()
 }

@@ -302,7 +302,11 @@ impl Client {
                 (storage::pending_record(now.0, 0, all), true)
             }
         };
-        let wrote = if whole { self.disk.put("pending", &record) } else { self.disk.append("pending", &record) };
+        let wrote = if whole {
+            self.disk.put("pending", &record)
+        } else {
+            self.disk.append("pending", &record)
+        };
         if let Err(e) = wrote {
             self.disk_error = Some(e.to_string());
             self.journal = None;
@@ -368,12 +372,7 @@ impl Client {
 
     /// A frame from the hub, to the machine of its space.
     pub fn receive(&mut self, bytes: Vec<u8>) {
-        let space = match Frame::dec(&bytes) {
-            Ok(Frame::Hello { space, .. } | Frame::Push { space, .. } | Frame::Join { space, .. }) => space,
-            Ok(Frame::Ack { space, .. } | Frame::Reject { space, .. } | Frame::Held { space, .. }) => space,
-            Ok(Frame::Batch { space, .. } | Frame::Snapshot { space, .. }) => space,
-            _ => Space::Durable,
-        };
+        let space = Frame::dec(&bytes).map_or(Space::Durable, |f| f.space());
         self.step(space, Input::Frame { from: None, bytes });
     }
 

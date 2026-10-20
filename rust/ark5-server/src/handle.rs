@@ -133,10 +133,16 @@ impl Handle {
 
     /// An entry the authority of `space` authors itself ([`Hub::author`]),
     /// what it says delivered: the head it was sequenced at, or the refusal.
-    pub fn author(&self, space: Space, func: FnHash, input: Vec<u8>) -> Option<Result<Seq, String>> {
+    /// With `once`, the function is that body (a raw write), runnable for
+    /// this entry only: never one a client's intent may name.
+    pub fn author(&self, space: Space, func: FnHash, input: Vec<u8>, once: Option<Vec<u8>>) -> Option<Result<Seq, String>> {
         let (tx, rx) = channel();
         let job: Job = Box::new(move |h| {
-            let (r, out) = h.author(space, func, input, now());
+            let raw = once.map(|b| h.log.cas.add_body(b));
+            let (r, out) = h.author(space, raw.unwrap_or(func), input, now());
+            if let Some(f) = raw.filter(|f| h.config.log.cas.get(f).is_none()) {
+                h.log.cas.forget(&f);
+            }
             let peer = if space == Space::Durable { Some(&h.log) } else { h.live.as_ref() };
             let _ = tx.send(r.map(|_| peer.map_or(0, |p| p.log.head().0)));
             out

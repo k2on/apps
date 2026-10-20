@@ -31,16 +31,7 @@ fn space(s: Space) -> &'static str {
 fn name(f: &Frame, client: bool) -> String {
     let d = format!("{f:?}");
     let kind = d.split([' ', '{', '(']).next().unwrap().to_lowercase();
-    let sp = match f {
-        Frame::Hello { space, .. } | Frame::Push { space, .. } | Frame::Join { space, .. } | Frame::Batch { space, .. } => {
-            format!("-{}", self::space(*space))
-        }
-        Frame::Snapshot { space, .. } | Frame::Ack { space, .. } | Frame::Reject { space, .. } | Frame::Held { space, .. } => {
-            format!("-{}", self::space(*space))
-        }
-        _ => String::new(),
-    };
-    format!("{}-{kind}{sp}", if client { "client" } else { "server" })
+    format!("{}-{kind}-{}", if client { "client" } else { "server" }, space(f.space()))
 }
 
 /// The protocol runner: the JSON written under the frame type is the
@@ -87,23 +78,11 @@ fn protocol() {
     let id = EntryId::of("s", 1);
     for (n, f) in [
         (
-            "client-fetch",
-            Frame::Fetch {
-                hashes: vec![FnHash([2; 32])],
-            },
-        ),
-        (
             "server-held-durable",
             Frame::Held {
                 space: Space::Durable,
                 id,
                 func: FnHash([3; 32]),
-            },
-        ),
-        (
-            "server-bodies",
-            Frame::Bodies {
-                bodies: vec![(FnHash([4; 32]), vec![0, 1])],
             },
         ),
         (

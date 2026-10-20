@@ -98,6 +98,32 @@ fn a_chain_whose_facts_differ_is_refused() {
     assert!(eve.pending.is_empty() && eve.store == server.store);
 }
 
+/// A chain naming a function the server does not run is refused whole,
+/// never held and never run from a body: the server's content store is
+/// what its operator loaded. Falsified by `adopt` pushing an entry whose
+/// function it lacks as an intent: the server sent `Held` and nothing was
+/// refused.
+#[test]
+fn a_chain_naming_a_function_the_server_lacks_is_refused() {
+    let mut eve = eve_alone();
+    let mut lacking = ark5::peer::Cas::default().with_loader(demo::loader());
+    lacking.add_body(demo::body(CREATE));
+    let mut server = authority(lacking);
+    let back = join(&mut eve, &mut server, |_| {});
+    let rejects: Vec<&String> = back
+        .iter()
+        .filter_map(|f| match f {
+            Frame::Reject { why, .. } => Some(why),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rejects.len(), 2, "{back:?}");
+    assert!(rejects[0].contains("not one this authority runs"), "{rejects:?}");
+    assert!(!back.iter().any(|f| matches!(f, Frame::Held { .. })));
+    assert_eq!(server.log.head(), (0, EntryHash::default()));
+    assert!(eve.pending.is_empty() && eve.store == server.store);
+}
+
 /// A server that moved on since the fork sequences the chain anew after
 /// what it has, and eve rebases onto it: bob's playlist, which both had,
 /// took a track on the server while eve, alone, put one on it too — so her
