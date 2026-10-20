@@ -1,4 +1,7 @@
-//! §1.15 Ark text: the demo as text.
+//! §1.15 Ark text. `demo.ark` is the demo (`tests/demo.rs`) as text, the
+//! printer's output: built, it is the demo's module byte for byte, and
+//! printed again, it is itself. harken's module file, printed and built,
+//! is itself too.
 
 #[path = "demo.rs"]
 mod demo;
@@ -13,6 +16,20 @@ fn demo_text() -> (ark::module::Module, Vec<Function>) {
     (m, fns)
 }
 
+/// Falsified by stepping `pos` by 2 in `demo.ark`: the built
+/// `add_to_playlist` was another function and the test failed.
+#[test]
+fn the_demo_text_is_the_demo() {
+    let text = include_str!("demo.ark");
+    let d = ark::text::build(text).unwrap_or_else(|e| panic!("{e}"));
+    let (m, fns) = demo_text();
+    assert_eq!(d.module, m);
+    assert_eq!(d.module.hash(), m.hash());
+    assert_eq!(ark::text::print(&m, &fns).unwrap(), text);
+}
+
+/// Falsified by printing a `Lookup`'s key with its arguments reversed:
+/// the rebuilt module differed.
 #[test]
 fn the_demo_printed_builds_to_itself() {
     let (m, fns) = demo_text();
@@ -35,6 +52,10 @@ fn the_demo_printed_builds_to_itself() {
     );
 }
 
+/// Falsified by printing every key of a sort on several keys `desc`: the
+/// rebuilt functions differed and the test failed. (A name resolved one
+/// column off in both directions held — printer and parser agree on it —
+/// which `the_demo_text_is_the_demo`, a text written with names, catches.)
 #[test]
 fn harken_printed_builds_to_itself() {
     let file = include_bytes!("../../../harken/domain/harken.ark");

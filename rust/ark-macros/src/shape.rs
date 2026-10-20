@@ -148,7 +148,23 @@ fn record(input: &DeriveInput, fields: &[(Ident, Type, Vec<Ark>)]) -> TokenStrea
     let idx: Vec<u32> = (0..fields.len() as u32).collect();
     let n = fields.len() as u32;
     let set = ids.iter().map(|f| format_ident!("__ark_set_{}", f));
+    let ex = format_ident!("{}Ex", name);
+    let doc = format!("A `{name}` expression's fields, each an expression: what reads one (`x.f()`) and makes one (`{name}Ex {{ .. }}.into()`).");
     quote! {
+        #[doc = #doc]
+        #[derive(Clone)]
+        #vis struct #ex { #(pub #ids: ::ark::build::Ex<<#tys as ::ark::author::Shape>::Base>),* }
+        impl ::ark::build::Fields for #name {
+            type View = #ex;
+            fn view(e: ::ark::ir::Expr) -> #ex {
+                #ex { #(#ids: ::ark::build::field(&e, #idx)),* }
+            }
+        }
+        impl ::std::convert::From<#ex> for ::ark::build::Ex<#name> {
+            fn from(x: #ex) -> Self {
+                ::ark::build::Ex::of(::ark::ir::Expr::Tuple(vec![#(x.#ids.e),*]))
+            }
+        }
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         #vis struct #view { #(pub #ids: ::ark::author::Ex<<#tys as ::ark::author::Shape>::Base>),* }
@@ -360,7 +376,40 @@ fn sum_(input: &DeriveInput) -> syn::Result<TokenStream> {
         #(#decls)*
     };
     let shape = shape(name, quote!(#name), quote!(::ark::ty::Ty::Named(#label.into())), decls, label);
+    let ex = format_ident!("{}Ex", name);
+    let (mut makes, mut ons, mut arms) = (vec![], vec![], vec![]);
+    for (i, v) in e.variants.iter().enumerate() {
+        let (i, n) = (i as u8, v.fields.len() as u32);
+        let snake = format_ident!("{}", snake(&v.ident.to_string()));
+        let on = format_ident!("on_{}", snake);
+        let tys: Vec<_> = v
+            .fields
+            .iter()
+            .map(|f| {
+                let t = &f.ty;
+                quote!(::ark::build::Ex<<#t as ::ark::author::Shape>::Base>)
+            })
+            .collect();
+        let args: Vec<_> = (0..v.fields.len()).map(|k| format_ident!("a{k}")).collect();
+        let ks: Vec<_> = (0..v.fields.len()).collect();
+        makes.push(quote! {
+            pub fn #snake(#(#args: impl ::std::convert::Into<#tys>),*) -> ::ark::build::Ex<#name> {
+                ::ark::build::variant::<#name>(#i, vec![#(#args.into().e),*])
+            }
+        });
+        ons.push(quote!(#on: impl FnOnce(#(#tys),*) -> ::ark::build::Ex<R>));
+        arms.push(quote!(::ark::build::arm(#n, |v| #on(#(::ark::build::Ex::of(v[#ks].clone())),*))));
+    }
+    let doc = format!("`{name}` expressions: each variant made, by its name in snake case, and a match of every variant in order.");
     Ok(quote! {
+        #[doc = #doc]
+        #vis struct #ex;
+        impl #ex {
+            #(#makes)*
+            pub fn match_<R>(s: &::ark::build::Ex<#name>, #(#ons),*) -> ::ark::build::Ex<R> {
+                ::ark::build::match_(s, vec![#(#arms),*])
+            }
+        }
         #shape
         #(#defs)*
         #[allow(non_upper_case_globals, non_snake_case)]
@@ -393,6 +442,8 @@ pub fn schema(input: DeriveInput) -> TokenStream {
         }
     }
     let ids = fields.iter().map(|f| &f.0);
+    let (ids2, ids3, rows2) = (fields.iter().map(|f| &f.0), fields.iter().map(|f| &f.0), rows.clone());
+    let db = format_ident!("{}Db", name);
     let (vis, sum) = (&input.vis, format_ident!("{}Row", name));
     let variants = rows.iter().map(|r| match r {
         syn::GenericArgument::Type(Type::Path(p)) => p.path.segments.last().unwrap().ident.clone(),
@@ -403,7 +454,11 @@ pub fn schema(input: DeriveInput) -> TokenStream {
         /// order: what a scope is a function of (§1.8).
         #[derive(::ark::author::Sum)]
         #vis enum #sum { #(#variants(#rows)),* }
+        #[doc = "The tables, as expressions are built over them."]
+        #vis struct #db { #(pub #ids2: ::ark::build::Table<#rows2>),* }
         impl #name {
+            /// The tables, to build expressions over.
+            pub fn db() -> #db { #db { #(#ids3: ::std::default::Default::default()),* } }
             #[doc(hidden)]
             pub fn __ark_open() -> #name { #name { #(#ids: ::std::default::Default::default()),* } }
             /// The schema: these tables, in this order.

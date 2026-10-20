@@ -25,6 +25,7 @@ extern crate self as ark;
 pub use author::{guard, helper, live, module, mutator, query, scope, Domain};
 
 pub mod author;
+pub mod build;
 pub mod check;
 pub mod codec;
 pub mod frames;

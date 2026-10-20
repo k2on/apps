@@ -1504,7 +1504,7 @@ pub fn build(src: &str) -> R<Domain> {
 /// `vars` its free names, by level, with their types; the levels after
 /// them its own binders, which begin at `depth`. What it stores is
 /// declared through `declare`.
-pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&str, Expr, Ty)], depth: u32) -> R<(Expr, Ty, Vec<Ty>)> {
+pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&str, Expr, Ty)], depth: u32) -> R<(Expr, Ty, Vec<(String, Decl)>)> {
     let mut m = M {
         toks: lex(src)?,
         schema: schema.clone(),
@@ -1531,7 +1531,11 @@ pub fn fragment(src: &str, schema: &Schema, decls: &[(String, Decl)], vars: &[(&
             Expr::Var(MARK + depth + l - k)
         }
     });
-    Ok((e, t, p.stored.clone()))
+    let mut d = BTreeMap::new();
+    for t in &p.stored {
+        p.m.declare(t, &mut d);
+    }
+    Ok((e, t, d.into_iter().collect()))
 }
 
 // * Printing
