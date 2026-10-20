@@ -445,9 +445,9 @@ the explorer and the docs show it, anyone may write it. One printer, so
 canonical text. **Builders** are typed, per language, and construct the
 IR; `text(src, vars)` embeds a fragment, so they cover the idiomatic
 90% and need not grow. Rust is the one required authoring language; a
-phone loads the module and calls functions by name, with no bindings
-generated and no authoring vocabulary. Another language's builders are
-held by one rule: its demo emits the module hash Rust's does.
+phone loads the module and calls functions by name, no bindings
+generated. Another language's builders are held to one rule: its demo
+emits the module hash Rust's does.
 
 The text (`spec/AUTHORING.md` is the grammar): a `schema { table … }`
 block, `type N = T where rule "words", …` declarations, and functions
@@ -465,15 +465,17 @@ names. So the printer names a binder from its type (`playlist_id`,
 `n`, a row by its table's initials), a row's fields by the schema's
 columns, a refined field by its declaration (`AddSong.title`), and
 anything else by position (`x.2`, `#1(a, b)`); hand-written text may
-use those spellings only. Names in the module itself — as declarations
-— would move harken's and the room's function bytes, and are left for a
-decision. Where one IR node could be spelled two ways the printer picks
-one: the kind by effect (`query` for Read, `live` for a Write over
-volatile tables only), `not x.is_some()`, `e.unwrap_or(d)`.
+use those spellings only. Names in the module itself, as declarations,
+would move harken's and the room's bytes: left for a decision. Where two
+spellings would read alike the printer picks one: the kind by effect,
+`not x.is_some()`, `e.unwrap_or(d)`.
 
-Builders reproduce the IR the attribute macros built, byte for byte;
-binders are closures, and variables are levels closed to De Bruijn once
-a function is built. The derives (`Row`, `Input`, `Sum`, `Schema`) stay.
+Rust's builders (`ark::author`) reproduce the IR the deleted attribute
+macros built, byte for byte: a function is a `static` `DefN { name, kind,
+body }`, binders are closures (`block`'s `let_` for a body's lets), and
+variables are levels closed to De Bruijn once a function is built; the
+derives (`Row`, `Input`, `Sum`, `Schema`) stay; `text()` is checked where
+it is built.
 
 ---
 
