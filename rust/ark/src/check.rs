@@ -489,6 +489,20 @@ impl Cx<'_> {
     }
 }
 
+/// The type and effect of `e` under `decls` with `stack`'s types bound,
+/// the last `Var(0)`: what the text form resolves its names by (§1.15).
+pub fn type_of(env: &Env, decls: &[(String, Decl)], stack: &[Ty], e: &Expr) -> Result<(Ty, Effect), Refusal> {
+    let types = Types::new(decls);
+    let mut cx = Cx {
+        env,
+        types: &types,
+        decls,
+        stack: stack.to_vec(),
+        bare: false,
+    };
+    cx.infer(e).map_err(Refusal)
+}
+
 /// §1.4 Whether `f` is well-typed over `env`: its declarations sorted,
 /// each once, `Text` as it is; its body of a type `ret` admits, at an
 /// effect `effect` admits.

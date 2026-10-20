@@ -37,6 +37,7 @@ pub mod peer;
 pub mod schema;
 pub mod std;
 pub mod store;
+pub mod text;
 pub mod ty;
 pub mod unicode_tables;
 pub mod view;
