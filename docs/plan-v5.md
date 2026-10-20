@@ -667,35 +667,55 @@ diff. Where v5 has no counterpart to a v4 shape (the inbox, the
 
 ### The report
 
-A table in this section, filled by M1:
+Numbers are from the same-hour runs under `docs/perf/` (order and
+commands in `runs-v5.txt`). Notes under the table say what each row
+counts.
 
-| | v4 | v5 | ratio |
-|---|---|---|---|
-| library source lines | 25,537 (`ark` src 27,880 less 2,343 Unicode tables) | 6,417 (`ark5` 7,522 less 2,343, + `ark5-macros` 1,238) | 0.25 |
-| all-in source lines | 37,501 (+ client 4,033, server 2,810, auth 1,410, domain 3,711) | 11,798 (+ client 680, server 708, auth 1,410, domain5 2,583); 13,239 with dev-only `ark5-dev` 1,441 | 0.31 (0.35) |
-| test lines | 18,916 | 11,012 | 0.58 |
-| concepts a port carries | 5 sub-languages, 2 execution paths, lifecycle ×5 | 1 language, 1 path, 1 machine | — |
-| a: local mutation µs (8,000, playlists of 10) | 28.2 (mutate + local_commit) | 37.6 (replica + authority, frames as bytes); 16.2 alone | 1.33; 0.57 alone |
-| d: initial sync µs/entry, bytes/entry (8,010) | 26.4 by intent, 161.7 B (5.6 by facts, 234.3 B) | 9.6 by facts, 250.0 B | 0.36, 1.55 |
-| e: rebase µs/entry at depth 400 (S 8,000, one page) | 62.0 (a pump each: 8,498.6) | 3,974.9 (a pump each: 3,779.5) | 64; 0.44 |
-| g: fan-out µs/conn (160 conns, log 8,000) | 4.62 | 0.41 through `Hub::frame` (0.14 the machine) | 0.09 |
-| h: frame decode allocations (Batch of 256 with facts) | 12,559 | 2,567 | 0.20 |
-| harken `add_song` µs (8,000) | 326.7 | 31,440 (15,765 alone) | 96 |
-| views: change on `playlist-with-items` at 16k | 11.06 µs, 1 get 5 rows | 16.10 µs, 0 gets 3 rows | 1.46 |
+**Size** (`loc-v5.txt`; non-blank, non-comment; Unicode tables excluded)
 
-Sources, all under `docs/perf/`, run 23:34–23:59 UTC in the order
-`runs-v5.txt` records: sizes `loc-v5.txt` (v4's `ark` tests there include
-M1's 475-line `perf_views.rs`; v5's tests include the three M1 harnesses,
-2,421 lines; `ark5-dev` is dev-only, while v4's simulator, trace player,
-fuzzer and vector writer — `sim.rs` 1,272, `trace.rs` 739, `bin/` 9,758 —
-sit in `ark`'s src and bins; `ark-auth` is reused unchanged); a, d, e
-(depths 10, 100), g, h from `v4-ark-rerun.txt` and `v5-ark.txt`; e at 400
-and views from `v4-views.txt` and `v5-views.txt`; the hub fan-out from
-`v5-ark-server.txt`; `add_song` from `v4-harken-domain-rerun.txt` and
-`v5-harken-domain.txt`. Not measured: harken's views, scanner and search
-shapes (not ported); the media storage shapes use the `media` table alone,
-not harken's whole schema; v4's inbox, `Verify` and native-path lines are
-`n/a` in the v5 outputs, with why.
+| | v4 | v5 | v5 / v4 |
+|---|---:|---:|---:|
+| library source | 25,537 | 6,417 | 0.25 |
+| client + server source | 6,843 | 1,388 | 0.20 |
+| harken's domain | 3,711 | 2,583 | 0.70 |
+| all-in source (library, client, server, auth, domain) | 37,501 | 11,798 | 0.31 |
+| dev tooling (sim, trace, fuzz, vectors) | in `ark` | 1,441 | — |
+| tests | 18,916 | 11,012 | 0.58 |
+| concepts a port carries | 5 sub-languages, 2 execution paths, the lifecycle in 5 places | 1 language, 1 path, 1 machine | — |
+
+**Speed** (release, `--test-threads=1`, v4 and v5 alternating)
+
+| shape | v4 | v5 | v5 / v4 |
+|---|---:|---:|---:|
+| a: local mutation, linked (µs, 8,000 entries, playlists of 10) | 28.2 | 37.6 | 1.33 |
+| a: local mutation, alone (µs) | 28.2 | 16.2 | 0.57 |
+| d: initial sync, time (µs / entry, 8,010 entries) | 26.4 | 9.6 | 0.36 |
+| d: initial sync, size (bytes / entry) | 161.7 | 250.0 | 1.55 |
+| e: rebase, one page under 400 pending (µs / entry) | 62.0 | 3,974.9 | 64 |
+| e: rebase, a pump per entry under 400 pending (µs / entry) | 8,498.6 | 3,779.5 | 0.44 |
+| g: fan-out (µs / connection, 160 connections, log of 8,000) | 4.62 | 0.41 | 0.09 |
+| h: decoding a `Batch` of 256 with facts (allocations) | 12,559 | 2,567 | 0.20 |
+| h: decoding a `Batch` of 256 with facts (µs) | 1,091 | 381 | 0.35 |
+| harken `add_song` (µs, library of 8,000) | 326.7 | 31,440 | 96 |
+| harken `add_song`, rows read | 1 | 8,000 | — |
+| views: a change on `playlist-with-items` at 16k (µs) | 11.06 | 16.10 | 1.46 |
+| views: a change on `top-two-by-pos` at 16k (µs) | 77 | 5.6 | 0.07 |
+| storage: live bytes per media row | 726 | 426 | 0.59 |
+
+Notes. *Library source* is `ark` (27,880 less 2,343 Unicode) against
+`ark5` (7,522 less 2,343) plus `ark5-macros` (1,238). *All-in* adds
+client, server, `ark-auth` (1,410, reused unchanged) and harken's domain.
+v4's simulator, trace player, fuzzer and vector writer sit inside `ark`
+(`sim.rs` 1,272, `trace.rs` 739, `bin/` 9,758); v5's are `ark5-dev`.
+*Tests* include M1's harnesses on both sides (475 lines added to v4,
+2,421 to v5). *a, linked* in v5 includes encoding and decoding the
+frames; *alone* is one machine in the authority's role. *d* in v4 is its
+default, by intent; by facts v4 is 5.6 µs and 234 B. *e* at depth 400
+is from `v4-views.txt` and `v5-views.txt`; v4's own harness stops at
+100. *g* in v5 is through `Hub::frame`; the machine alone is 0.14. v4's
+inbox, `Verify` and native-path lines print `n/a` in the v5 outputs,
+with why. Not measured: harken's views, scanner and search shapes; the
+storage shapes run over the `media` table alone.
 
 **Measured.** Faster in v5: a peer alone mutates in 0.57× v4's time; the
 authority sequences at par (16–17 µs); fan-out costs 0.09× per connection
