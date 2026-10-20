@@ -133,8 +133,8 @@ dependencies = [
 name = "ark-auth"
 version = "0.1.0"
 dependencies = [
- "ark",
  "ark-auth",
+ "ark5",
  "axum",
  "getrandom 0.2.17",
  "js-sys",
@@ -167,8 +167,8 @@ dependencies = [
 name = "ark-explorer"
 version = "0.1.0"
 dependencies = [
- "ark",
  "ark-auth",
+ "ark5",
  "arkui",
  "iced",
  "js-sys",
@@ -241,6 +241,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-auth",
+ "ark-explorer",
  "ark5",
  "ark5-client",
  "ark5-dev",
@@ -1727,12 +1728,15 @@ name = "harken-iced"
 version = "0.1.0"
 dependencies = [
  "ark-auth",
- "ark-client",
  "ark-explorer",
+ "ark5",
+ "ark5-client",
+ "ark5-server",
  "arkui",
- "harken-domain",
+ "harken-domain5",
  "iced",
  "js-sys",
+ "tungstenite 0.24.0",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -1742,13 +1746,13 @@ name = "harken-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark",
  "ark-auth",
- "ark-client",
  "ark-explorer",
- "ark-server",
+ "ark5",
+ "ark5-client",
+ "ark5-server",
  "axum",
- "harken-domain",
+ "harken-domain5",
  "libc",
  "lofty",
  "notify",

@@ -174,16 +174,17 @@ in
     oldModules = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       default = [ ];
-      example = lib.literalExpression ''[ "''${harken-v4}/harken/domain/harken.ark" ]'';
+      example = lib.literalExpression ''[ "''${harken-previous}/harken.module" ]'';
       description = ''
-        `.ark` modules this server is to hold as ones it has run before:
-        each one's closures kept, so an intent a client built with it
-        authors is sequenced through them though this server never started
-        with it. What a server deployed fresh needs for clients older than
-        it — harken's library mutators moved when they gained their guard
-        (`docs/plan-guards.md` D1), and a client built before still authors
-        at the old hashes, whose closures run unguarded. A server upgraded
-        in place already holds every module it ran (`modules.cbor`).
+        Module files this server is to hold as ones it has run before
+        (`harken_server::hosted::write`): each one's function bodies kept, so
+        an intent a client built with it authors is sequenced at once
+        though this server never started with it. Without it such an intent
+        is still sequenced — the server asks the client for the body — but
+        only after a round trip. The server refuses to start holding a
+        module it may not follow: one whose schema this one's does not
+        extend by appending (`docs/plan-v5.md` §1.2). Nothing is remembered
+        across restarts: name every module still wanted here.
       '';
     };
 
@@ -191,12 +192,10 @@ in
       type = lib.types.ints.unsigned;
       default = 30;
       description = ''
-        How long a device's place in the log holds the log for it: every entry
-        above the lowest cursor of a device heard from within this many days
-        is kept, so a laptop closed for a fortnight catches up by paging. A
-        device away longer is sent a snapshot when it returns and rebases what
-        it did offline onto it — nothing is lost either way; this only decides
-        which of the two it costs.
+        Read and checked, and keeps nothing: on ArkDB v5 the log keeps
+        `retainEntries` above its snapshot whoever has been heard from. A
+        device further behind is sent the snapshot when it returns and
+        rebases what it did offline onto it — nothing is lost either way.
       '';
     };
 
@@ -204,10 +203,9 @@ in
       type = lib.types.ints.unsigned;
       default = 10000;
       description = ''
-        Entries of the log kept below its head whoever has been heard from:
-        what bounds the server's memory and its log on disk once every device
-        is caught up. The log is compacted when it holds half as much again as
-        it has to keep.
+        Entries of the log kept above its snapshot: what bounds the server's
+        memory and its log on disk. The log is compacted when it holds twice
+        as many as it has to keep.
       '';
     };
 
