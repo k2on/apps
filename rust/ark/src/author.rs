@@ -119,16 +119,6 @@ impl<R> Node for Id<R> {
     }
 }
 
-impl Node for () {
-    fn ty() -> Ty {
-        Ty::unit()
-    }
-    fn put(&self, _: &mut Vec<u8>) {}
-    fn take(_: &mut Reader) -> Result<(), Refusal> {
-        Ok(())
-    }
-}
-
 /// Plain `Bytes`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bytes(pub Vec<u8>);

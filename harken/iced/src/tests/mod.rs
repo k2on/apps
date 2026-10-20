@@ -18,8 +18,8 @@ mod demo;
 #[cfg(feature = "demo")]
 mod views;
 
+use crate::domain::AddSong;
 use ark::peer::Who;
-use harken_domain::library::AddSong;
 
 use crate::client::Replica;
 use crate::listening::{Device, Kind};
@@ -37,7 +37,7 @@ fn who(me: &str) -> Who {
 /// `add_song`, which `is_library` gives that role alone, as a server's
 /// scanner holds it.
 fn lists(mut client: Replica) -> crate::peer::Peer {
-    client.set_roles([harken_domain::schema::LIBRARY]);
+    client.set_roles([crate::domain::host::LIBRARY]);
     crate::peer::Peer::open(client)
 }
 
@@ -83,7 +83,7 @@ pub fn device(id: &str, name: &str, kind: Kind, can_play: bool) -> Device {
         muted: false,
         name: name.into(),
         user: "me".into(),
-        volume: harken_domain::listening::UNSAID_VOLUME,
+        volume: crate::domain::host::UNSAID_VOLUME,
     }
 }
 

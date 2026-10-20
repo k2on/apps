@@ -18,12 +18,11 @@
 //! to keep the sidebar cheap: the albums view is not touched by a toggle.
 use std::collections::HashMap;
 
-use ark::author::{Id as Key, Node};
+use crate::domain::Id as Key;
+use crate::domain::{library, playlists, CreatePlaylist, PlaylistInput, PlaylistsOf};
+use crate::domain::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, Works};
+use ark::ir::Node;
 use ark::view::Patch;
-#[cfg(test)]
-use harken_domain::library::LibraryEntry;
-use harken_domain::library::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, WorkSummary, Works};
-use harken_domain::playlists::{CreatePlaylist, PlaylistInput, PlaylistsOf};
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
@@ -373,7 +372,7 @@ impl Peer {
     /// no playlist yet.
     pub fn ensure_playlist(&mut self) {
         let made = CreatePlaylist { name: "Favorites".into() };
-        if self.playlists.is_empty() && self.client.mutate("create_playlist", &made).is_ok() {
+        if self.playlists.is_empty() && playlists::create_playlist(&mut self.client, &made).is_ok() {
             self.refresh();
         }
     }
@@ -514,38 +513,36 @@ impl Peer {
         self.on.clone()
     }
 
-    /// Run a query once and read its rows; a refusal (a guard, nobody signed
-    /// in) is no rows. For what is not a list on screen: resolving a link,
-    /// and the tests, which hold the maintained lists to what the query
-    /// answers.
-    pub(crate) fn ask<E: Node, T: From<E>>(&self, name: &str, input: &impl Node) -> Vec<T> {
-        self.client
-            .query::<Vec<E>>(name, input)
-            .map_or_else(|_| vec![], |es| es.into_iter().map(T::from).collect())
+    /// A query's rows, asked once through its stub; a refusal (a guard,
+    /// nobody signed in) is no rows. For what is not a list on screen:
+    /// resolving a link, and the tests, which hold the maintained lists to
+    /// what the query answers.
+    pub(crate) fn rows_of<E, T: From<E>>(answer: Result<Vec<E>, String>) -> Vec<T> {
+        answer.map_or_else(|_| vec![], |es| es.into_iter().map(T::from).collect())
     }
 
     pub fn work(&self, id: &str) -> Vec<Work> {
-        self.ask::<WorkSummary, _>("work", &WorkInput { id: id.into() })
+        Peer::rows_of(library::work(&self.client, &WorkInput { id: id.into() }))
     }
 
     /// What a page's query answers, read once. The page holds views; these
     /// are what the tests compare them with.
     #[cfg(test)]
     pub fn works_of(&self, composer: &str) -> Vec<Work> {
-        self.ask::<WorkSummary, _>("works", &Works { composer: composer.into() })
+        Peer::rows_of(library::works(&self.client, &Works { composer: composer.into() }))
     }
 
     #[cfg(test)]
     pub fn recordings_of(&self, work: &str) -> Vec<Recording> {
-        self.ask::<harken_domain::library::RecordingsEntry, _>("recordings", &Recordings { work_id: work.into() })
+        Peer::rows_of(library::recordings(&self.client, &Recordings { work_id: work.into() }))
     }
 
     #[cfg(test)]
-    pub fn credits(&self, recording: &str) -> Vec<harken_domain::library::CreditsEntry> {
-        let input = harken_domain::library::Credits {
+    pub fn credits(&self, recording: &str) -> Vec<crate::domain::CreditsEntry> {
+        let input = crate::domain::Credits {
             recording_id: recording.into(),
         };
-        self.client.query("credits", &input).unwrap_or_default()
+        library::credits(&self.client, &input).unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -554,24 +551,24 @@ impl Peer {
             playlist_id: key(self.playlist),
             name: name.into(),
         };
-        self.ask::<LibraryEntry, _>("album", &input)
+        Peer::rows_of(library::album(&self.client, &input))
     }
 
     #[cfg(test)]
     pub fn track_details(&self) -> Vec<TrackDetail> {
-        self.ask::<harken_domain::library::TrackDetailsEntry, _>("track_details", &())
+        Peer::rows_of(library::track_details(&self.client))
     }
 
     /// The library as its query answers it now, against the playlist it is
     /// read against.
     #[cfg(test)]
     pub fn library_now(&self) -> Vec<Item> {
-        self.ask::<LibraryEntry, _>(
-            "library",
+        Peer::rows_of(library::library(
+            &self.client,
             &Library {
                 playlist_id: key(self.playlist),
             },
-        )
+        ))
     }
 
     /// What is true of a track as a song, or nothing if its kind has none.
@@ -792,11 +789,11 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::AddToPlaylist;
     use crate::tests::{alone, signed_in, song};
     use ark::frames::{Frame, Verdict};
     use ark::peer::Who;
     use ark::schema::Space;
-    use harken_domain::playlists::AddToPlaylist;
 
     fn on(playlist: Id, media: Id) -> AddToPlaylist {
         AddToPlaylist {
@@ -864,7 +861,7 @@ mod tests {
         use ark_server::hub::{Config, Hub};
         let mut client = Replica::memory(crate::client::nobody(), None);
         client.alone();
-        client.set_roles([harken_domain::schema::LIBRARY]);
+        client.set_roles([crate::domain::host::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.ensure_playlist();
         for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
@@ -895,7 +892,7 @@ mod tests {
         let alice = Who {
             actor: "alice".into(),
             session: "alice@desktop".into(),
-            roles: vec![harken_domain::schema::LIBRARY.into()],
+            roles: vec![crate::domain::host::LIBRARY.into()],
         };
         peer.client.sign_in(alice.clone(), "alice@desktop:library".into());
         peer.refresh();

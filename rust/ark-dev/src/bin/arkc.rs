@@ -67,7 +67,7 @@ fn run(args: &[&str]) -> Result<String, String> {
             }
             Ok(format!("{dir}: {} files\n", files.len()))
         }
-        ["compat", old, new] => match ark::module::compat(&load(old)?.module, &load(new)?) {
+        ["compat", old, new] => match load(new).and_then(|n| Ok(ark::module::compat(&load(old)?.module, &n.module, &n.lib)))? {
             Ok(fresh) => Ok(format!("{new} may follow {old}: {fresh} functions new\n")),
             Err(r) => Err(format!("{new} may not follow {old}: {}", r.0)),
         },

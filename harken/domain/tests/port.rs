@@ -11,8 +11,8 @@
 
 use std::collections::BTreeMap;
 
-use ark::author::Node;
 use ark::codec::bytes_enc;
+use ark::gen::Node;
 use ark::hash::FnHash;
 use ark::ir::{Effect, Expr, Function, Refine};
 use ark::ty::Ty;

@@ -17,9 +17,9 @@
 mod common;
 
 use common::*;
-use harken_domain::library::LibraryEntry;
-use harken_domain::playlists::{AddToPlaylist, CreatePlaylist, PlaylistInput};
-use harken_domain::schema::{Album, Media, Person, Playlist};
+use harken_server::domain::LibraryEntry;
+use harken_server::domain::{AddToPlaylist, CreatePlaylist, PlaylistInput};
+use harken_server::domain::{Album, Media, Person, Playlist};
 use harken_server::Server;
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -229,7 +229,7 @@ fn a_songs_file_is_served_at_the_path_the_log_carries() {
         c.media = Some(media.clone())
     });
     let found = settle(&server, 1);
-    let url = harken_domain::listening::url(&server.url(), &found[0].1);
+    let url = harken_server::domain::host::url(&server.url(), &found[0].1);
     let whole = ureq::get(&url).call().unwrap();
     assert_eq!(whole.status(), 200);
     let res = ureq::get(&url).set("Range", "bytes=0-3").call().unwrap();
@@ -323,7 +323,7 @@ fn raw_status(server: &Server, path: &str) -> u16 {
 }
 
 fn fetch(server: &Server, art: &str) -> (String, Vec<u8>) {
-    let url = harken_domain::listening::url(&server.url(), art);
+    let url = harken_server::domain::host::url(&server.url(), art);
     let res = ureq::get(&url)
         .call()
         .unwrap_or_else(|e| panic!("{url}: {e}"));
@@ -508,22 +508,17 @@ fn a_retagged_file_or_a_new_cover_is_the_same_song_said_again() {
         },
     );
     let list: Vec<Playlist> = alice.query("playlists.playlists", &()).unwrap();
-    let mine = list[0].id.clone();
+    let mine = list[0].id;
     alice.mutate(
         "playlists.add_to_playlist",
         &AddToPlaylist {
-            playlist_id: mine.clone(),
-            media_id: glue.clone(),
+            playlist_id: mine,
+            media_id: glue,
         },
     );
     let titles = |p: &Peer| {
         let rows: Vec<LibraryEntry> = p
-            .query(
-                "playlists.playlist",
-                &PlaylistInput {
-                    playlist_id: mine.clone(),
-                },
-            )
+            .query("playlists.playlist", &PlaylistInput { playlist_id: mine })
             .unwrap();
         rows.into_iter().map(|r| r.title).collect::<Vec<_>>()
     };
@@ -539,7 +534,7 @@ fn a_retagged_file_or_a_new_cover_is_the_same_song_said_again() {
     );
     assert_eq!(
         eventually(10, || id_of("Glue (Remastered)")),
-        Some(glue.clone()),
+        Some(glue),
         "retagged, and the same song"
     );
     assert_eq!(songs(&server).len(), 2, "and not a second one");

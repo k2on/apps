@@ -10,11 +10,11 @@
 
 mod common;
 
-use ark::author::Id;
 use ark::ir::Node;
 use common::*;
-use harken_domain::listening::{RecordPlay, Track};
-use harken_domain::schema::Play;
+use harken_server::domain::Id;
+use harken_server::domain::Play;
+use harken_server::domain::{RecordPlay, Track};
 
 fn track(title: &str, n: u8) -> Track {
     let mut id = [0u8; 16];

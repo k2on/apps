@@ -1,7 +1,7 @@
 //! Home Assistant's media players, as devices in the listening session.
 //!
-//! A Sonos is a *device*, not a client. The session (`harken_domain::
-//! listening`, live state over volatile tables) already describes one — it
+//! A Sonos is a *device*, not a client. The session (`harken/domain`'s
+//! `listening.*`, live state over volatile tables) already describes one — it
 //! stands in an account's session, is handed the sound, and says what
 //! happens to it — and nothing in that says the far end has to be
 //! somebody's screen. So nothing here extends the session; what is here is
@@ -48,8 +48,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use harken_domain::listening::read::{Kind, Listening};
-use harken_domain::listening::{url, Active, Clock, Output};
+use crate::domain::host::url;
+use crate::domain::host::{Kind, Listening};
+use crate::domain::{Active, Clock, Output};
 
 /// A transition's input, as its bytes ([`input`]).
 pub type Args = Vec<u8>;
@@ -57,8 +58,8 @@ pub type Args = Vec<u8>;
 /// The inputs of the session's transitions, as the bridge and its tests
 /// say them: each the domain's input type, encoded.
 pub mod input {
+    use crate::domain::*;
     use ark::ir::Node;
-    use harken_domain::listening::*;
 
     pub fn none() -> Vec<u8> {
         ().to_bytes()
@@ -69,7 +70,7 @@ pub mod input {
             at: at as i64,
             from: from.into(),
             position: position_ms,
-            queue: Queue(queue.to_vec()),
+            queue: queue.to_vec(),
         }
         .to_bytes()
     }
@@ -111,7 +112,7 @@ pub mod input {
     pub fn enqueue(tracks: &[Track], next: bool) -> Vec<u8> {
         Enqueue {
             next,
-            tracks: Queue(tracks.to_vec()),
+            tracks: tracks.to_vec(),
         }
         .to_bytes()
     }
@@ -132,16 +133,13 @@ pub mod input {
     }
 
     pub fn scrub(at_ms: Option<i64>) -> Vec<u8> {
-        Scrub {
-            at_ms: at_ms.map(Ms),
-        }
-        .to_bytes()
+        Scrub { at_ms }.to_bytes()
     }
 
     pub fn equip(can_volume: bool, family: Option<&str>, volume: i64, muted: bool) -> Vec<u8> {
         Equip {
             can_volume,
-            family: family.map(|f| Family(f.into())),
+            family: family.map(|f| f.into()),
             muted,
             volume,
         }
@@ -204,7 +202,7 @@ pub mod input {
 
     pub fn record_play(track: &Track, from: &str) -> Vec<u8> {
         RecordPlay {
-            track: track.id.clone(),
+            track: track.id,
             title: track.title.clone(),
             creator: track.creator.clone(),
             album: track.album.clone(),
@@ -284,7 +282,7 @@ pub const SEEKS: u8 = 3;
 /// told (`report_position`, said as the speaker, and nothing told to any
 /// player); and the session is right about where somebody asked it to be,
 /// so the speaker is told (`media_seek`) when it is the session that moved.
-pub use harken_domain::listening::read::SYNC_MS;
+pub use crate::domain::host::SYNC_MS;
 
 /// How far a playing speaker may be from the session before what moved it
 /// was somebody's hand on the speaker — a seek in the Sonos app — said as
@@ -1384,9 +1382,7 @@ impl Bridge {
         let caps = reading.caps();
         if (me.can_volume, me.family.clone()) != caps {
             if seen.equipped.as_ref() != Some(&caps) {
-                let volume = reading
-                    .volume
-                    .unwrap_or(harken_domain::listening::UNSAID_VOLUME);
+                let volume = reading.volume.unwrap_or(crate::domain::host::UNSAID_VOLUME);
                 seen.equipped = Some(caps.clone());
                 seen.volume = Some((volume, reading.muted));
                 acts.push(call(
@@ -1736,9 +1732,9 @@ pub fn playing<'a>(state: &Listening, entities: impl IntoIterator<Item = &'a str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark::author::Id;
-    use harken_domain::listening::read::Kind;
-    use harken_domain::listening::{Present as Device, Track};
+    use crate::domain::host::Kind;
+    use crate::domain::Id;
+    use crate::domain::{Present as Device, Track};
 
     /// A device as it declared itself, with nothing said of its volume or
     /// its group: what `on_join` writes.
@@ -1753,7 +1749,7 @@ mod tests {
             muted: false,
             name: name.into(),
             user: String::new(),
-            volume: harken_domain::listening::UNSAID_VOLUME,
+            volume: crate::domain::host::UNSAID_VOLUME,
         }
     }
 
@@ -2574,7 +2570,7 @@ mod tests {
     /// re-spelling was a different address.
     #[test]
     fn an_address_is_the_same_however_it_is_spelt() {
-        let ours = harken_domain::listening::url(
+        let ours = crate::domain::host::url(
             "http://10.0.0.2:8787",
             "music/Bach/Air (BWV 1068) & Café d'Été.mp3",
         );
@@ -3135,7 +3131,7 @@ mod tests {
 /// machine current and wake the thread, which reads the sessions whole
 /// from the hub, which is in this process.
 ///
-/// A device is a session (`harken_domain::listening`), so a speaker's id
+/// A device is a session (`harken/domain/devices.ark`), so a speaker's id
 /// in the session is its connection's session, `user@entity`, which two
 /// accounts' kitchens do not share; the bridge reads and says it as the
 /// entity ([`as_entities`]). A speaker's machine is kept for the life of
@@ -3159,15 +3155,15 @@ pub mod ha {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
+    use crate::domain::host::{Kind, Listening};
+    use crate::domain::{Device, Output as Sound};
+    use crate::domain::{Listening as Row, ListeningDevice};
     use ark::ir::Node;
     use ark::peer::{Input, Output, Peer, Role, Who};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
     use ark_server::hub::ConnId;
     use ark_server::Handle;
-    use harken_domain::listening::read::{Kind, Listening};
-    use harken_domain::listening::{Device, Output as Sound};
-    use harken_domain::schema::{Listening as Row, ListeningDevice};
 
     use super::{input, listening, playing, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
     use crate::hosted::Hosted;
@@ -3750,7 +3746,7 @@ pub mod ha {
                 // The members a speaker reports are speakers: by their ids in
                 // this session.
                 if transition == "report_group" {
-                    if let Ok(mut g) = harken_domain::listening::ReportGroup::from_bytes(&input) {
+                    if let Ok(mut g) = crate::domain::ReportGroup::from_bytes(&input) {
                         for m in &mut g.members {
                             if wires.entities.contains(m) {
                                 *m = speaker(&key, m);

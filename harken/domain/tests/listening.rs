@@ -20,8 +20,8 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ark::author::{Id, Node};
 use ark::ir::Expr;
+use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::store::Store;
@@ -29,8 +29,9 @@ use ark_client::{Config, Live, Module};
 use ark_dev::sim::{Net, Op};
 use ark_server::hub::{Config as HubConfig, Live as HubLive};
 use common::domain;
-use harken_domain::listening::read::Listening;
-use harken_domain::listening::*;
+use harken_domain::domain::host::Listening;
+use harken_domain::domain::Id;
+use harken_domain::domain::*;
 
 /// The server's clock at the start of every test.
 const T0: i64 = 1_700_000_000_000;
@@ -125,7 +126,7 @@ impl House {
             "equip",
             &Equip {
                 can_volume: true,
-                family: Some(Family(family.into())),
+                family: Some(family.into()),
                 muted: false,
                 volume,
             },
@@ -178,7 +179,7 @@ fn start(queue: &[Track], at: i64, position: i64, from: &str) -> Start {
         at,
         from: from.into(),
         position,
-        queue: Queue(queue.to_vec()),
+        queue: queue.to_vec(),
     }
 }
 
@@ -559,20 +560,13 @@ fn the_queue_is_edited_and_the_track_playing_plays_on() {
     h.playing_on("phone", 12_000);
     let playing = clock(&h.state());
     let (c, d) = (track("c", 3), track("d", 4));
-    h.ok(
-        "desktop",
-        "enqueue",
-        &Enqueue {
-            next: true,
-            tracks: Queue(vec![c]),
-        },
-    );
+    h.ok("desktop", "enqueue", &Enqueue { next: true, tracks: vec![c] });
     h.ok(
         "desktop",
         "enqueue",
         &Enqueue {
             next: false,
-            tracks: Queue(vec![d]),
+            tracks: vec![d],
         },
     );
     let s = h.state();
@@ -608,7 +602,7 @@ fn taking_the_track_playing_out_moves_on_or_stops_at_the_end() {
         "enqueue",
         &Enqueue {
             next: false,
-            tracks: Queue(vec![track("c", 3)]),
+            tracks: vec![track("c", 3)],
         },
     );
     h.wait(1_000);
@@ -639,19 +633,12 @@ fn enqueueing_into_nothing_starts_it_and_a_place_not_in_the_queue_is_refused() {
             "enqueue",
             &Enqueue {
                 next: false,
-                tracks: Queue(queue())
+                tracks: queue()
             }
         ),
         Err("nothing here can play it".to_string())
     );
-    h.ok(
-        "phone",
-        "enqueue",
-        &Enqueue {
-            next: true,
-            tracks: Queue(queue()),
-        },
-    );
+    h.ok("phone", "enqueue", &Enqueue { next: true, tracks: queue() });
     let s = h.state();
     assert_eq!((titles(&s), at(&s)), (vec!["a".into(), "b".into()], 0));
     assert!(s.outputs("phone") && s.sounding());
@@ -780,7 +767,7 @@ fn a_restart_restores_the_session_paused_with_no_output_and_nobody_here() {
     h.arrive("laptop", true);
     h.arrive("phone", true);
     h.playing_on("laptop", 33_000);
-    h.ok("phone", "scrub", &Scrub { at_ms: Some(Ms(50_000)) });
+    h.ok("phone", "scrub", &Scrub { at_ms: Some(50_000) });
     assert_eq!(h.state().scrub.get("phone"), Some(&50_000));
     h.wait(4_000);
     let back = restart(&h, h.now + 60_000);
@@ -934,11 +921,11 @@ fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
     h.arrive("laptop", true);
     h.arrive("phone", true);
     h.playing_on("laptop", 0);
-    h.ok("phone", "scrub", &Scrub { at_ms: Some(Ms(120_000)) });
+    h.ok("phone", "scrub", &Scrub { at_ms: Some(120_000) });
     assert_eq!(h.state().scrub.get("phone"), Some(&120_000));
     h.ok("phone", "scrub", &Scrub { at_ms: None });
     assert!(h.state().scrub.is_empty(), "let go");
-    h.ok("phone", "scrub", &Scrub { at_ms: Some(Ms(1)) });
+    h.ok("phone", "scrub", &Scrub { at_ms: Some(1) });
     h.leave("phone");
     assert!(h.state().scrub.is_empty(), "emptied when the phone left");
 }
@@ -957,7 +944,7 @@ fn a_scrub_is_relayed_and_never_sequenced() {
     w.call("laptop", "start", &start(&queue(), 0, 0, "album/Brandenburg"));
     let (head, hash) = (w.net.hub.log.log().head(), w.net.hub.log.store.state_hash());
     for ms in [120_000, 130_000, 140_000] {
-        w.call("phone", "scrub", &Scrub { at_ms: Some(Ms(ms)) });
+        w.call("phone", "scrub", &Scrub { at_ms: Some(ms) });
     }
     w.net.run(&Op::Wait(RELAY_MS));
     w.net.deliver();
@@ -1129,7 +1116,7 @@ fn a_report_of_a_volume_is_heard_in_order() {
     let kitchen = w.arrive("media_player.kitchen", true);
     let equip = Equip {
         can_volume: true,
-        family: Some(Family("sonos".into())),
+        family: Some("sonos".into()),
         muted: false,
         volume: 35,
     };
@@ -1333,7 +1320,7 @@ fn a_group_is_never_in_a_state_sonos_cannot_be_in() {
         "equip",
         &Equip {
             can_volume: true,
-            family: Some(Family("heos".into())),
+            family: Some("heos".into()),
             muted: false,
             volume: 40,
         },

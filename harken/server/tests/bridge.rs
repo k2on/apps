@@ -38,11 +38,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use common::*;
-use harken_domain::listening::read::{Kind, Listening};
-use harken_domain::listening::{
+use harken_server::assistant::{ha, input};
+use harken_server::domain::host::{Kind, Listening};
+use harken_server::domain::{
     Clock, Member, NudgeVolume, Output, SetMute, SetVolume, Track, Transfer,
 };
-use harken_server::assistant::{ha, input};
 use harken_server::Server;
 use serde_json::{json, Value as Json_};
 
@@ -701,7 +701,7 @@ fn track(t: &str, n: u8) -> Track {
     let mut id = [0u8; 16];
     id[15] = n;
     Track {
-        id: ark::author::Id::new(id),
+        id: harken_server::domain::Id::new(id),
         title: t.into(),
         creator: "Bach".into(),
         album: String::new(),
@@ -988,7 +988,7 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
         .auth
         .issue(&Account {
             id: "library".into(),
-            roles: vec![harken_domain::schema::LIBRARY.into()],
+            roles: vec![harken_server::domain::host::LIBRARY.into()],
             ..Account::default()
         })
         .unwrap();
@@ -998,7 +998,7 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
         let t = format!("song-{i:03}");
         library.mutate(
             "library.add_song",
-            &harken_domain::library::AddSong {
+            &harken_server::domain::AddSong {
                 title: t.clone(),
                 artist: "The Fleet".into(),
                 album: "Loopback".into(),
@@ -1531,7 +1531,7 @@ fn a_speaker_plays_through(spell: fn(&str) -> String) {
     }
     let files: Vec<String> = queue(&names)
         .iter()
-        .map(|t| harken_domain::listening::url(MEDIA, &t.file))
+        .map(|t| harken_server::domain::host::url(MEDIA, &t.file))
         .collect();
     assert_eq!(fake.queued(KITCHEN), files, "the speaker's queue is ours");
     let calls = fake.take();
@@ -1755,7 +1755,7 @@ fn a_cast_is_where_the_speaker_is_and_never_the_beginning() {
             ..house(url)
         })
     });
-    let bound = harken_domain::listening::read::SYNC_MS;
+    let bound = harken_server::domain::host::SYNC_MS;
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
@@ -2125,7 +2125,7 @@ fn the_queue_edited_reaches_the_speaker_without_a_gap() {
     told(&mut browser, "the kitchen playing", |s| {
         s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
     });
-    let url_of = |t: &str| harken_domain::listening::url(MEDIA, &format!("music/{t}.mp3"));
+    let url_of = |t: &str| harken_server::domain::host::url(MEDIA, &format!("music/{t}.mp3"));
     call(
         &mut browser,
         "enqueue",

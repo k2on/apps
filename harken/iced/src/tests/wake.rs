@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use harken_domain::playlists::CreatePlaylist;
+use crate::domain::CreatePlaylist;
 use iced::advanced::subscription::{into_recipes, EventStream};
 use iced::futures::executor::block_on;
 use iced::futures::future::{self, Either};

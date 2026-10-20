@@ -41,6 +41,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::domain::AddSong;
 use anyhow::{Context, Result};
 use ark::ir::Node;
 use ark::peer::{Ctx, Who};
@@ -50,7 +51,6 @@ use ark_client::link::{Backoff, Link};
 use ark_client::{Client, Event, Files};
 use ark_server::handle::now;
 use ark_server::Handle;
-use harken_domain::library::AddSong;
 use notify::{RecursiveMode, Watcher};
 
 use crate::covers::{self, Covers};
@@ -177,7 +177,7 @@ impl Scanner {
         // what `is_library` asks, on the device and, of the roles the hub
         // stamps, at the authority.
         let mut roles = login.user.roles.clone();
-        roles.push(harken_domain::schema::LIBRARY.to_string());
+        roles.push(crate::domain::host::LIBRARY.to_string());
         roles.sort();
         roles.dedup();
         let who = Who {

@@ -1308,8 +1308,8 @@ pub fn song(title: &str) -> Vec<(&'static str, Value)> {
 }
 
 /// [`song`], as the domain's input.
-pub fn song_input(title: &str) -> harken_domain::library::AddSong {
-    harken_domain::library::AddSong {
+pub fn song_input(title: &str) -> harken_server::domain::AddSong {
+    harken_server::domain::AddSong {
         title: title.into(),
         artist: "The Fleet".into(),
         album: "Loopback".into(),
@@ -1326,7 +1326,7 @@ pub fn ids_of(rows: &[Value], key: &str) -> Vec<Id> {
 
 /// Every playlist item, as each playlist's media in `pos` order.
 pub fn playlists_in_pos_order(
-    rows: &[harken_domain::schema::PlaylistItem],
+    rows: &[harken_server::domain::PlaylistItem],
 ) -> BTreeMap<Id, Vec<Id>> {
     let mut by: BTreeMap<Id, Vec<(i64, Id)>> = BTreeMap::new();
     for r in rows {

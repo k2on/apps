@@ -22,15 +22,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use ark::author::{Domain, Id, Node};
 use ark::hash::{EntryHash, FnHash};
+use ark::ir::Node;
 use ark::log::{Durable, EntryId, Snapshot};
 use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, Who};
 use ark::store::{Read, Scan, Store};
+use ark::Domain;
 use counting::Counting;
-use harken_domain::library::{AddSong, Library};
-use harken_domain::playlists::{AddToPlaylist, CreatePlaylist};
-use harken_domain::schema::{Media, Playlist, PlaylistItem, LIBRARY};
+use harken_domain::domain::host::LIBRARY;
+use harken_domain::domain::Id;
+use harken_domain::domain::{AddSong, Library};
+use harken_domain::domain::{AddToPlaylist, CreatePlaylist};
+use harken_domain::domain::{Media, Playlist, PlaylistItem};
 
 // Counting allocations ---------------------------------------------------------
 
@@ -63,7 +66,7 @@ fn allocs() -> usize {
 
 fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(harken_domain::domain)
+    D.get_or_init(harken_domain::text)
 }
 
 /// A function's hash by its binding, looked up once.
@@ -532,7 +535,7 @@ fn perf_row_keys() {
         let t = Instant::now();
         let v = domain().ask(&st, &ctx, "library.library", &input).unwrap();
         let (dt, al) = (t.elapsed(), allocs() - a0);
-        assert_eq!(harken_domain::view::Item::list(&v).unwrap().len(), n as usize);
+        assert_eq!(harken_domain::domain::LibraryEntry::list(&v).unwrap().len(), n as usize);
         eprintln!(
             "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>14}",
             "library (read whole, as hydrate)",

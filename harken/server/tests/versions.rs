@@ -35,11 +35,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use ark::author::Domain;
 use ark::ir::{Expr, Function, Node, Op};
 use ark::module::{verify, Module};
 use ark::schema::{Column, Ref, Schema, Space, Table};
 use ark::ty::Ty;
+use ark::Domain;
 use harken_server::hosted::{compat, write, Hosted};
 use serde_json::json;
 use support::fleet::*;
@@ -48,7 +48,7 @@ use support::fleet::*;
 
 /// harken's domain, its module changed by `f` over a schema `g` made.
 fn release(g: impl FnOnce(&mut Schema), f: impl FnOnce(&mut Domain)) -> Domain {
-    let mut d = harken_domain::domain();
+    let mut d = harken_server::domain::host::load();
     let mut schema = (*d.schema).clone();
     g(&mut schema);
     d.module.schema = schema.clone();
@@ -173,7 +173,7 @@ fn refused(r: Result<usize, ark::Refusal>) -> String {
 /// grown one.
 #[test]
 fn a_module_follows_another_by_its_schema_and_a_verify_per_new_hash() {
-    let h = harken_domain::domain();
+    let h = harken_server::domain::host::load();
     assert_eq!(compat(&h.module, &h.module, &h.lib).map_err(|e| e.0), Ok(0));
     let m = moved();
     verify(&m.module, &m.lib).unwrap();
@@ -200,7 +200,7 @@ fn a_module_follows_another_by_its_schema_and_a_verify_per_new_hash() {
 /// no new hash: the moved `add_to_playlist` followed.
 #[test]
 fn what_is_not_additive_is_refused() {
-    let h = harken_domain::domain();
+    let h = harken_server::domain::host::load();
     let with = |g: &dyn Fn(&mut Table)| {
         let mut s = h.module.schema.clone();
         g(s.tables.iter_mut().find(|t| t.name == "playlist").unwrap());
@@ -266,14 +266,14 @@ fn a_server_holds_an_old_module_it_follows() {
         dir.path().join("harken.module"),
         dir.path().join("grown.module"),
     );
-    write(harken_domain::domain(), &old).unwrap();
+    write(harken_server::domain::host::load(), &old).unwrap();
     write(grown(), &new).unwrap();
     let (held, n) = Hosted::read(&new).unwrap().hold(&old).unwrap();
-    assert_eq!(n, harken_domain::domain().bodies.len());
+    assert_eq!(n, harken_server::domain::host::load().bodies.len());
     assert!(held
         .module
         .cas
-        .get(&harken_domain::domain().get("playlists.create_playlist"))
+        .get(&harken_server::domain::host::load().get("playlists.create_playlist"))
         .is_some());
     let e = Hosted::read(&old)
         .unwrap()
@@ -370,7 +370,7 @@ fn hashes(f: &Fleet) -> Vec<ark::hash::FnHash> {
 #[test]
 fn version_3_a_peer_authors_at_a_hash_the_server_never_had() {
     let mut f = Fleet::new("v3-held");
-    let old = module_file(f.root.path(), "harken", harken_domain::domain());
+    let old = module_file(f.root.path(), "harken", harken_server::domain::host::load());
     let next = module_file(f.root.path(), "moved", moved());
     let mut a = f.peer("a", Some("alice"));
     let mut n = peer_on(&f, &next, "next", "alice");
@@ -397,7 +397,7 @@ fn version_3_a_peer_authors_at_a_hash_the_server_never_had() {
     playlist(&mut a, "Ahead");
     let hs = hashes(&f);
     assert!(hs.contains(&moved_hash), "the moved hash is in the log");
-    assert!(hs.contains(&harken_domain::domain().get("playlists.create_playlist")));
+    assert!(hs.contains(&harken_server::domain::host::load().get("playlists.create_playlist")));
     measured(
         "v3 a moved hash, held, the server restarted, to converged",
         t.elapsed(),
@@ -450,7 +450,7 @@ fn version_3b_what_a_peer_authors_behind_a_held_intent_lands() {
 #[test]
 fn version_7_a_module_update_over_a_retained_log() {
     let mut f = Fleet::new("v7-retained");
-    let old = module_file(f.root.path(), "harken", harken_domain::domain());
+    let old = module_file(f.root.path(), "harken", harken_server::domain::host::load());
     let next = module_file(f.root.path(), "moved", moved());
     let mut a = f.peer("a", Some("alice"));
     let mut c = f.peer("c", Some("alice"));
@@ -475,7 +475,7 @@ fn version_7_a_module_update_over_a_retained_log() {
     assert!(
         h.contains(&format!(
             "module {}\n",
-            harken_domain::domain().module.hash()
+            harken_server::domain::host::load().module.hash()
         )),
         "it holds harken's: {h}"
     );

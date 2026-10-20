@@ -4,7 +4,7 @@
 //! hand — what the reconciler would have read — because these are the
 //! window's rules over a session, not the session's (those are the domain's
 //! tests, and the reconciler's are `listening`'s).
-use ark::author::Id;
+use crate::domain::Id;
 
 use super::device;
 use crate::listening::{Active, Clock, Device, Kind, Listening, Output, Track};

@@ -3,7 +3,7 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's server on ark-server: the log and the listening session (harken-domain) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
+description = "harken's server on ark-server: the log and the listening session (harken/domain, through its generated bindings) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
 workspace = "../../rust"
 
 [[bin]]
@@ -26,7 +26,6 @@ ark-client = { path = "../../rust/ark-client" }
 ark-server = { path = "../../rust/ark-server" }
 # `client` for harken-peer, which signs in the way the desktop does.
 ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }
-harken-domain = { path = "../domain" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
@@ -45,6 +44,9 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 # same ureq ark-auth talks to an identity provider with.
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 serde_json = { workspace = true }
+
+[build-dependencies]
+ark = { path = "../../rust/ark" }
 
 [dev-dependencies]
 ark-auth = { path = "../../rust/ark-auth", features = ["server", "client"] }

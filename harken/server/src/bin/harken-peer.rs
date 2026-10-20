@@ -99,7 +99,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use ark::author::Id;
 use ark::frames::Frame;
 use ark::hash::hex;
 use ark::ir::Node;
@@ -110,7 +109,8 @@ use ark_auth::client::Patience;
 use ark_auth::Login;
 use ark_client::link::{Backoff, Event as LinkEvent, Link, Socket};
 use ark_client::{Client, Event, Files};
-use harken_domain::listening::read::Listening;
+use harken_server::domain::host::Listening;
+use harken_server::domain::Id;
 use harken_server::hosted::Hosted;
 use serde_json::{json, Map, Value};
 
@@ -429,27 +429,7 @@ macro_rules! record {
     )*};
 }
 
-/// A one-field refinement, as its field.
-macro_rules! newtype {
-    ($($t:path),*) => {$(
-        impl Json for $t {
-            fn from_json(v: &Value) -> Result<Self, String> {
-                Json::from_json(v).map(Self)
-            }
-            fn to_json(&self) -> Value {
-                self.0.to_json()
-            }
-        }
-    )*};
-}
-
-mod types {
-    pub use harken_domain::library::*;
-    pub use harken_domain::listening::*;
-    pub use harken_domain::playlists::*;
-    pub use harken_domain::schema::*;
-}
-use types::*;
+use harken_server::domain::*;
 
 record! {
     CreatePlaylist { name }
@@ -491,7 +471,6 @@ record! {
     Present { can_play, can_volume, family, follows, id, kind, muted, name, user, volume }
     Active { at, clock, from, output, queue }
 }
-newtype!(Queue, Ms, Family);
 
 impl Json for Clock {
     fn from_json(v: &Value) -> Result<Self, String> {

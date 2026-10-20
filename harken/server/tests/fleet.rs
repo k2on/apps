@@ -34,10 +34,8 @@ use std::time::{Duration, Instant};
 use ark::frames::Frame;
 use ark::ir::Node;
 use ark::log::Logged;
-use harken_domain::playlists::{
-    AddAllToPlaylist, AddToPlaylist, CreatePlaylist, RemoveFromPlaylist,
-};
-use harken_domain::schema::{Media, Playlist, PlaylistItem};
+use harken_server::domain::{AddAllToPlaylist, AddToPlaylist, CreatePlaylist, RemoveFromPlaylist};
+use harken_server::domain::{Media, Playlist, PlaylistItem};
 use serde_json::{json, Value};
 use support::fleet::*;
 
@@ -628,8 +626,8 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
                 "alice",
                 "playlists.add_to_playlist",
                 &AddToPlaylist {
-                    playlist_id: ark::author::Id::new(lists[i % 10]),
-                    media_id: ark::author::Id::new(media[i % 500]),
+                    playlist_id: harken_server::domain::Id::new(lists[i % 10]),
+                    media_id: harken_server::domain::Id::new(media[i % 500]),
                 },
             );
         }
@@ -1910,8 +1908,8 @@ fn the_authority_edits_a_cell_raw_and_every_peer_converges() {
     };
     let at = f.edit_raw(&edit).expect("the authority's rename is logged");
     let orphan = PlaylistItem {
-        playlist_id: ark::author::Id::new([9; 16]),
-        media_id: ark::author::Id::new(track),
+        playlist_id: harken_server::domain::Id::new([9; 16]),
+        media_id: harken_server::domain::Id::new(track),
         pos: 1,
         added_ms: 0,
         user_id: "alice".into(),

@@ -1,28 +1,24 @@
-//! The module the hub runs (§1.5): harken's own (`harken_domain::domain`),
-//! or one read from a file — what `HARKEN_MODULE` names and `harken-peer
-//! --module` runs, so a fleet can run "the next release"
-//! (`tests/versions.rs`).
-//!
-//! A module file is `(Module, [body])` under §1.1's codec: the binding map
-//! and every function's bytes, since a module binds hashes and a runtime
-//! needs the bodies. Reading one installs each body once every function it
-//! calls is installed, and holds the module to [`ark::module::verify`].
-//! An old module's file (`HARKEN_OLD_MODULES`) only adds its bodies to the
-//! library: "did this authority run this function" is "is it in the store".
-//! It must be one this module may follow ([`compat`]): §1.2's prefix check
-//! on the schema, plus one verify per new hash.
+//! The module the hub runs (§1.5): harken's own — the domain's directory as
+//! this build compiled it (`crate::domain::MODULE`) — or one `HARKEN_MODULE`
+//! names: a domain's directory of ArkLang, a file of it, or a module file
+//! (`(Module, [body])` under §1.1's codec), read by `ark::sexp::load` — what
+//! `harken-peer --module` runs, so a fleet can run "the next release"
+//! (`tests/versions.rs`). A module loaded must be one this build's bindings
+//! may call ([`crate::domain::fits`]: its schema grown only by appending).
+//! An old module (`HARKEN_OLD_MODULES`, read the same ways) only adds its
+//! bodies to the library: "did this authority run this function" is "is it
+//! in the store". It must be one this module may follow ([`compat`]):
+//! §1.2's prefix check on the schema, plus one verify per new hash.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use ark::author::Domain;
 use ark::hash::{FnHash, ModuleHash};
-use ark::ir::{Function, Node};
-use ark::module::{verify, Lib, Module};
+use ark::module::{Lib, Module};
 use ark::peer::Ctx;
 use ark::store::{Change, Read};
-use ark::Refusal;
+use ark::{Domain, Refusal};
 
 /// A module assembled, and the same as `ark_client`'s per-space module.
 #[derive(Clone)]
@@ -33,10 +29,15 @@ pub struct Hosted {
     pub held: Vec<ModuleHash>,
 }
 
+/// A module read from a path, as [`ark::sexp::load`] reads one.
+fn load(path: &Path, what: &str) -> Result<Domain> {
+    ark::sexp::load(path).map_err(|e| anyhow!("{what} {}: {}", path.display(), e.0))
+}
+
 impl Hosted {
-    /// harken's own domain.
+    /// harken's own domain, as this build compiled it.
     pub fn harken() -> Hosted {
-        Hosted::of(harken_domain::domain())
+        Hosted::of(crate::domain::host::load())
     }
 
     pub fn of(domain: Domain) -> Hosted {
@@ -52,46 +53,41 @@ impl Hosted {
         }
     }
 
-    /// A module file read, every body installed and the module verified.
+    /// A module read — every body installed and the module verified — that
+    /// this build's bindings may call.
     pub fn read(path: &Path) -> Result<Hosted> {
-        let bytes = std::fs::read(path)
-            .with_context(|| format!("reading the module {}", path.display()))?;
-        let (module, bodies) = <(Module, Vec<Vec<u8>>)>::from_bytes(&bytes)
-            .map_err(|e| anyhow!("the module {}: {}", path.display(), e.0))?;
-        let mut d = Domain {
-            schema: Arc::new(module.schema.clone()),
-            module,
-            lib: Lib::default(),
-            bodies: Default::default(),
-        };
-        install(&mut d, bodies).map_err(|e| anyhow!("the module {}: {}", path.display(), e.0))?;
-        verify(&d.module, &d.lib).map_err(|e| anyhow!("the module {}: {}", path.display(), e.0))?;
+        let d = load(path, "the module")?;
+        crate::domain::fits(&d).map_err(|e| {
+            anyhow!(
+                "the module {} is not one this build calls: {}",
+                path.display(),
+                e.0
+            )
+        })?;
         Ok(Hosted::of(d))
     }
 
-    /// Another module file's bodies, held beside these: how many.
+    /// Another module's bodies, held beside these: how many.
     pub fn hold(self, path: &Path) -> Result<(Hosted, usize)> {
-        let bytes = std::fs::read(path)
-            .with_context(|| format!("reading the old module {}", path.display()))?;
-        let (old, bodies) = <(Module, Vec<Vec<u8>>)>::from_bytes(&bytes)
-            .map_err(|e| anyhow!("the old module {}: {}", path.display(), e.0))?;
-        let mut d = Arc::try_unwrap(self.domain).unwrap_or_else(|d| Domain {
+        let old = load(path, "the old module")?;
+        let d = Arc::try_unwrap(self.domain).unwrap_or_else(|d| Domain {
             schema: d.schema.clone(),
             module: d.module.clone(),
             lib: d.lib.clone(),
             bodies: d.bodies.clone(),
         });
-        let n = bodies.len();
-        compat(&old, &d.module, &d.lib).map_err(|e| {
+        compat(&old.module, &d.module, &d.lib).map_err(|e| {
             anyhow!(
                 "this module may not follow the old module {}: {}",
                 path.display(),
                 e.0
             )
         })?;
-        install(&mut d, bodies)
+        let n = old.bodies.len();
+        let d = d
+            .with(old.bodies.values().cloned().collect())
             .map_err(|e| anyhow!("the old module {}: {}", path.display(), e.0))?;
-        let held = self.held.into_iter().chain([old.hash()]).collect();
+        let held = self.held.into_iter().chain([old.module.hash()]).collect();
         Ok((
             Hosted {
                 held,
@@ -135,69 +131,16 @@ impl Hosted {
 
     /// The module file: the binding map and every body.
     pub fn to_bytes(&self) -> Vec<u8> {
-        (
-            self.domain.module.clone(),
-            self.domain.bodies.values().cloned().collect::<Vec<_>>(),
-        )
-            .to_bytes()
+        self.domain.to_file()
     }
 }
 
-/// §1.2, §1.5 Whether `new` may follow `old`: its schema a prefix-extension
-/// of old's, and every hash `new` binds that `old` did not checked over the
-/// new schema, its callees from `lib`. How many hashes are new.
+/// §1.2, §1.5 Whether `new` may follow `old` ([`ark::module::compat`]).
 pub fn compat(old: &Module, new: &Module, lib: &Lib) -> Result<usize, Refusal> {
-    ark::schema::compat(&old.schema, &new.schema)?;
-    let mut n = 0;
-    for (name, h) in new
-        .bindings
-        .iter()
-        .filter(|b| !old.bindings.iter().any(|o| o.1 == b.1))
-    {
-        let f = lib
-            .get(h)
-            .ok_or_else(|| Refusal(format!("{name}: no function {h}")))?;
-        lib.install(&new.schema, f.f.clone())
-            .map_err(|e| Refusal(format!("{name}: {}", e.0)))?;
-        n += 1;
-    }
-    Ok(n)
-}
-
-/// `bodies` checked into `d`'s library, each once what it calls is there.
-fn install(d: &mut Domain, bodies: Vec<Vec<u8>>) -> Result<(), Refusal> {
-    let mut todo: Vec<(Function, Vec<u8>)> = bodies
-        .into_iter()
-        .map(|b| Ok((Function::from_bytes(&b)?, b)))
-        .collect::<Result<_, Refusal>>()?;
-    while !todo.is_empty() {
-        let before = todo.len();
-        let mut last = None;
-        for (f, b) in std::mem::take(&mut todo) {
-            if d.lib.get(&f.hash()).is_some() {
-                continue;
-            }
-            match d.lib.install(&d.schema, f.clone()) {
-                Ok(h) => {
-                    d.bodies.insert(h, b);
-                }
-                Err(e) => {
-                    last = Some(e);
-                    todo.push((f, b));
-                }
-            }
-        }
-        if todo.len() == before {
-            return Err(
-                last.unwrap_or_else(|| Refusal::new("a function no other can be installed before"))
-            );
-        }
-    }
-    Ok(())
+    ark::module::compat(old, new, lib)
 }
 
 /// A module file of `domain`, at `path`.
 pub fn write(domain: Domain, path: &Path) -> Result<()> {
-    std::fs::write(path, Hosted::of(domain).to_bytes())
-        .with_context(|| format!("writing {}", path.display()))
+    std::fs::write(path, domain.to_file()).with_context(|| format!("writing {}", path.display()))
 }

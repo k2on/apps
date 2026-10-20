@@ -1,6 +1,6 @@
 //! This device's end of the account's listening session: a reconciler.
 //!
-//! The session is the domain's live state (`harken_domain::listening`):
+//! The session is the domain's live state (`harken/domain/listening.ark`):
 //! three volatile tables the server's second machine holds (§1.9), one
 //! session per account, on the sync socket — what [`crate::client::Replica::listening`]
 //! reads is the server's confirmed state with this device's own calls
@@ -58,11 +58,11 @@
 //! any intent and reaches the server with the device.
 
 use crate::client::Replica as Peer;
+use crate::domain::host as read;
 use crate::rows::Id;
-use harken_domain::listening::read;
 // What the rest of this program asks *this* module about.
-pub use harken_domain::listening::read::{Kind, Listening};
-pub use harken_domain::listening::{Active, Clock, Output, Present as Device, Track};
+pub use crate::domain::host::{Kind, Listening};
+pub use crate::domain::{Active, Clock, Output, Present as Device, Track};
 
 /// How far the player may be from where the session counts it before one
 /// is put right — the bound every output is held to, the bridge's speakers
@@ -454,8 +454,9 @@ fn device_name() -> String {
 
 /// Each transition's input, as its bytes: the domain's own input types.
 pub mod input {
-    use ark::author::{Id, Node};
-    use harken_domain::listening::*;
+    use crate::domain::Id;
+    use crate::domain::*;
+    use ark::ir::Node;
 
     /// A transition that takes nothing.
     pub fn none() -> Vec<u8> {
@@ -467,7 +468,7 @@ pub mod input {
             at: at as i64,
             from: from.into(),
             position,
-            queue: Queue(queue.to_vec()),
+            queue: queue.to_vec(),
         }
         .to_bytes()
     }
@@ -499,7 +500,7 @@ pub mod input {
     pub fn enqueue(tracks: &[Track], next: bool) -> Vec<u8> {
         Enqueue {
             next,
-            tracks: Queue(tracks.to_vec()),
+            tracks: tracks.to_vec(),
         }
         .to_bytes()
     }
@@ -523,7 +524,7 @@ pub mod input {
     pub fn equip(can_volume: bool, family: Option<&str>, volume: i64, muted: bool) -> Vec<u8> {
         Equip {
             can_volume,
-            family: family.map(|f| Family(f.into())),
+            family: family.map(|f| f.into()),
             muted,
             volume,
         }
@@ -575,7 +576,7 @@ pub mod input {
     }
 
     pub fn scrub(at_ms: Option<i64>) -> Vec<u8> {
-        Scrub { at_ms: at_ms.map(Ms) }.to_bytes()
+        Scrub { at_ms }.to_bytes()
     }
 
     /// `record_play`'s input: the track as the session carried it.
@@ -597,10 +598,11 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use ark::author::{Id as Key, Node};
+    use crate::domain::Device as Said;
+    use crate::domain::Id as Key;
+    use ark::ir::Node;
     use ark::peer::Who;
     use ark_server::hub::{Config, ConnId, Hub, Live};
-    use harken_domain::listening::Device as Said;
 
     /// A player that does what it is told, and a clock it is told about.
     #[derive(Default)]
@@ -1030,7 +1032,7 @@ mod tests {
         assert_eq!(rd.stats().plays, 0, "a remote control records nothing");
         // Unlinked, the play is an intent like any other: pending, said
         // when the device next reaches the server.
-        let recent: Vec<harken_domain::schema::Play> = net.peer(b).query("recently_played", &()).unwrap();
+        let recent: Vec<crate::domain::Play> = net.peer(b).query("recently_played", &()).unwrap();
         assert_eq!(recent.len(), 1, "the play is in this device's view of the log at once");
         assert_eq!(recent[0].from, "album/Water Music");
     }

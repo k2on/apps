@@ -3,9 +3,9 @@
 //! drawn over what the replica holds — and read-only here, since harken
 //! exposes no CRUD and a client has no raw write.
 
-use ark::author::Node;
+use crate::domain::CreatePlaylist;
+use ark::ir::Node;
 use ark_explorer::value::Value;
-use harken_domain::playlists::CreatePlaylist;
 use iced::keyboard::{key::Named, Key, Modifiers};
 
 use super::alone;
@@ -98,7 +98,7 @@ fn a_function_from_the_explorer_is_authored_as_the_signed_in_person() {
         .log
         .store
         .rows("playlist")
-        .map(|r| harken_domain::schema::Playlist::from_bytes(r).unwrap())
+        .map(|r| crate::domain::Playlist::from_bytes(r).unwrap())
         .find(|p| p.name == "From the explorer")
         .expect("the playlist was authored");
     assert_eq!(made.user_id, "alice");

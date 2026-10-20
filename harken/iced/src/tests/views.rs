@@ -3,8 +3,8 @@
 //! by patch, and no others (`docs/plan-v5.md` §1.10).
 use std::collections::{BTreeSet, HashMap};
 
-use harken_domain::library::{AlbumsEntry, ArtistsEntry, ComposersEntry, DescribePerson, LibraryEntry, RemoveMedia, Search};
-use harken_domain::playlists::{AddToPlaylist, RemoveFromPlaylist};
+use crate::domain::{AddToPlaylist, RemoveFromPlaylist};
+use crate::domain::{DescribePerson, RemoveMedia, Search};
 
 use crate::peer::{key, Moved, Peer};
 use crate::places::Source;
@@ -15,14 +15,22 @@ fn check(peer: &Peer, what: &str) {
     assert_eq!(peer.items, peer.library_now(), "library, {what}");
     assert_eq!(
         peer.playlists(),
-        peer.ask::<harken_domain::schema::Playlist, Playlist>("playlists", &()),
+        Peer::rows_of::<_, Playlist>(crate::domain::playlists::playlists(&peer.client)),
         "playlists, {what}"
     );
-    assert_eq!(peer.albums, peer.ask::<AlbumsEntry, Album>("albums", &()), "albums, {what}");
-    assert_eq!(peer.artists, peer.ask::<ArtistsEntry, Artist>("artists", &()), "artists, {what}");
+    assert_eq!(
+        peer.albums,
+        Peer::rows_of::<_, Album>(crate::domain::library::albums(&peer.client)),
+        "albums, {what}"
+    );
+    assert_eq!(
+        peer.artists,
+        Peer::rows_of::<_, Artist>(crate::domain::library::artists(&peer.client)),
+        "artists, {what}"
+    );
     assert_eq!(
         peer.composers,
-        peer.ask::<ComposersEntry, Composer>("composers", &()),
+        Peer::rows_of::<_, Composer>(crate::domain::library::composers(&peer.client)),
         "composers, {what}"
     );
     let details: HashMap<_, _> = peer.track_details().into_iter().map(|t| (t.media_id, t)).collect();
@@ -134,7 +142,7 @@ fn the_search_box_drives_a_view() {
             playlist_id: key(app.peer.playlist),
             needle: needle.into(),
         };
-        app.peer.ask::<LibraryEntry, Item>("search", &input)
+        Peer::rows_of::<_, Item>(crate::domain::library::search(&app.peer.client, &input))
     };
     let all = app.peer.rows().len();
     press(&mut app, Key::Character("/".into()));

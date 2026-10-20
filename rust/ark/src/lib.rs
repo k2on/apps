@@ -26,6 +26,7 @@ pub mod author;
 pub mod check;
 pub mod codec;
 pub mod frames;
+pub mod gen;
 pub mod hash;
 pub mod interp;
 pub mod ir;

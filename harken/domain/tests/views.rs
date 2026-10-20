@@ -19,16 +19,16 @@
 
 mod common;
 
-use ark::author::{Id, Node};
 use ark::interp::V;
+use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::Store;
 use ark::view::{query, splice, Patch, View};
 use common::{domain, full, song, track, with, Lib};
-use harken_domain::library::*;
-use harken_domain::playlists::*;
-use harken_domain::schema::*;
+use harken_domain::domain::host::LIBRARY;
+use harken_domain::domain::Id;
+use harken_domain::domain::*;
 
 struct Seeded {
     lib: Lib,
@@ -147,20 +147,20 @@ fn seeded() -> Seeded {
         art: "bach.jpg".into(),
     };
     c.mutate("alice", "describe_person", &bach).unwrap();
-    let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id.clone()).collect();
+    let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id).collect();
     for i in [0, 3, 6] {
         c.mutate(
             "alice",
             "add_to_playlist",
             &AddToPlaylist {
-                playlist_id: favs.clone(),
-                media_id: ids[i].clone(),
+                playlist_id: favs,
+                media_id: ids[i],
             },
         )
         .unwrap();
     }
     Seeded {
-        media: ids[0].clone(),
+        media: ids[0],
         lib: c,
         favs,
         work,
@@ -226,7 +226,7 @@ fn churn(c: &mut Lib, r: &mut Rng) {
                 "alice",
                 "add_to_playlist",
                 &AddToPlaylist {
-                    playlist_id: p.clone(),
+                    playlist_id: *p,
                     media_id: m,
                 },
             ),
@@ -237,7 +237,7 @@ fn churn(c: &mut Lib, r: &mut Rng) {
                 "alice",
                 "remove_from_playlist",
                 &RemoveFromPlaylist {
-                    playlist_id: p.clone(),
+                    playlist_id: *p,
                     media_id: m,
                 },
             ),
@@ -355,7 +355,7 @@ fn search() {
         let t = hold(
             "search",
             &Search {
-                playlist_id: s.favs.clone(),
+                playlist_id: s.favs,
                 needle: needle.into(),
             },
         );
@@ -364,7 +364,7 @@ fn search() {
     let hits: Vec<LibraryEntry> = s.lib.list(
         "search",
         &Search {
-            playlist_id: s.favs.clone(),
+            playlist_id: s.favs,
             needle: "BACH".into(),
         },
     );
@@ -498,7 +498,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     let favs = c.playlist("alice", "Favorites");
     let other = c.playlist("alice", "Other");
     let d = domain();
-    let (f, input) = (d.get(&full("library")), Library { playlist_id: favs.clone() }.to_bytes());
+    let (f, input) = (d.get(&full("library")), Library { playlist_id: favs }.to_bytes());
     let ctx = Ctx {
         id: EntryId::of("q", 0),
         actor: "alice".into(),
@@ -526,11 +526,11 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     for (t, file) in [("Glue", "a"), ("Opal", "b"), ("Gosh", "c"), ("Air", "d")] {
         step(&mut c, "add_song", with(file, song(t, "X", "Y")).to_bytes());
     }
-    let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id.clone()).collect();
+    let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id).collect();
     let on = |p: &Id<Playlist>, m: &Id<Media>| {
         AddToPlaylist {
-            playlist_id: p.clone(),
-            media_id: m.clone(),
+            playlist_id: *p,
+            media_id: *m,
         }
         .to_bytes()
     };
@@ -538,8 +538,8 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     step(&mut c, "add_to_playlist", on(&favs, &ids[0]));
     step(&mut c, "add_to_playlist", on(&other, &ids[1]));
     step(&mut c, "remove_from_playlist", on(&favs, &ids[2]));
-    step(&mut c, "add_all_to_playlist", AddAllToPlaylist { playlist_id: favs.clone() }.to_bytes());
-    step(&mut c, "remove_media", RemoveMedia { id: ids[0].clone() }.to_bytes());
+    step(&mut c, "add_all_to_playlist", AddAllToPlaylist { playlist_id: favs }.to_bytes());
+    step(&mut c, "remove_media", RemoveMedia { id: ids[0] }.to_bytes());
     step(&mut c, "add_song", with("e", song("Late", "Z", "")).to_bytes());
     assert!(patched > 0);
     let entries: Vec<LibraryEntry> = shown.iter().map(|r| LibraryEntry::from_bytes(&r.to_bytes()).unwrap()).collect();

@@ -152,6 +152,16 @@ impl Node for String {
     }
 }
 
+impl Node for () {
+    fn ty() -> Ty {
+        Ty::unit()
+    }
+    fn put(&self, _: &mut Vec<u8>) {}
+    fn take(_: &mut Reader) -> Result<(), Refusal> {
+        Ok(())
+    }
+}
+
 impl<T: Node> Node for Vec<T> {
     fn ty() -> Ty {
         T::list_ty()

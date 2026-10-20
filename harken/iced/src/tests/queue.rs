@@ -6,7 +6,7 @@
 //! domain's tests.
 use arkui::vim;
 
-use ark::author::Id;
+use crate::domain::Id;
 
 use super::{alone, device, song};
 use crate::listening::{input, Active, Clock, Kind, Listening, Output, Track};

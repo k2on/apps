@@ -28,15 +28,16 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use ark::author::{Domain, Node};
+use crate::domain::Device;
 use ark::hash::StateHash;
+use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
 use ark::view::Patch;
+use ark::Domain;
 pub use ark_client::link::Event;
 use ark_client::{Client, Config, Disk, Live, Memory, Module};
-use harken_domain::listening::Device;
 
 /// The milliseconds between two ephemeral calls the relay sends — a
 /// scrubber dragged — twenty a second; the last always goes.
@@ -51,7 +52,7 @@ const MOST_MS: u64 = 30_000;
 /// harken's module, assembled once.
 pub fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(harken_domain::domain)
+    D.get_or_init(crate::domain::host::load)
 }
 
 /// The binding a name means: itself, or the one whose last part it is.
@@ -98,7 +99,7 @@ pub fn device(can_play: bool, name: &str) -> Vec<u8> {
     Device {
         can_play,
         id: String::new(),
-        kind: harken_domain::listening::read::Kind::Computer.name().into(),
+        kind: crate::domain::host::Kind::Computer.name().into(),
         name: name.into(),
         user: String::new(),
     }
@@ -374,6 +375,14 @@ impl Replica {
         T::from_bytes(&bytes).map_err(|r| format!("{name}: {r}"))
     }
 
+    /// A function's answer over the optimistic state, as this login reads
+    /// it: its bytes, as the bindings' `want` reads them.
+    fn answer(&self, name: &str, input: &[u8], want: &ark::ty::Ty) -> Result<Vec<u8>, String> {
+        let b = binding(name).ok_or_else(|| format!("no function {name}"))?;
+        let bytes = domain().ask(&self.client.log.store, &self.ctx(), &b, input).map_err(|r| r.0)?;
+        ark::gen::answer(domain(), &b, &bytes, want).map_err(|r| r.0)
+    }
+
     /// A maintained view of a query (§1.10) over the optimistic state, as
     /// this login reads it: its number, or the query's refusal.
     pub fn watch(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
@@ -640,9 +649,9 @@ impl Replica {
 
     /// The account's listening session as this device holds it: the
     /// server's, with its own calls previewed on top.
-    pub fn listening(&self) -> harken_domain::listening::read::Listening {
+    pub fn listening(&self) -> crate::domain::host::Listening {
         match &self.client.live {
-            Some(l) => harken_domain::listening::read::Listening::of(&l.store, &self.me().actor),
+            Some(l) => crate::domain::host::Listening::of(&l.store, &self.me().actor),
             None => Default::default(),
         }
     }
@@ -943,5 +952,20 @@ impl Disk for Stored {
     }
     fn get(&mut self, name: &str) -> std::io::Result<Option<Vec<u8>>> {
         self.mem.get(name)
+    }
+}
+
+/// The bindings' stubs (`crate::domain`) call the domain through a
+/// replica: a mutator authored as an intent, a query asked of the
+/// optimistic state.
+impl crate::domain::Call for Replica {
+    type Authored = Result<EntryId, String>;
+
+    fn author(&mut self, name: &str, input: Vec<u8>) -> Result<EntryId, String> {
+        self.mutate_bytes(name, input)
+    }
+
+    fn ask(&self, name: &str, input: Vec<u8>, want: &ark::ty::Ty) -> Result<Vec<u8>, String> {
+        self.answer(name, &input, want)
     }
 }

@@ -1,30 +1,19 @@
-//! harken's domain on ArkDB v5 (`docs/plan-v5.md` §1.15): v4's domain,
-//! function for function, written with the Rust builders (`ark::author`)
-//! over derived rows, records and sums — each function a `static`, two of
-//! them with a line of Ark text (`listening::SCALED`, `MOVED_PLACE`) — and
-//! assembled into one module by [`module::domain`].
-//!
-//! [`schema`] is the tables; [`library`] what the scanner authors and every
-//! peer reads, and the helpers that derive the keys; [`playlists`] what
-//! people do; [`listening`] the listening session, live state over
-//! volatile tables, and the plays; [`keys`] the derived keys on the host;
-//! [`view`] what a screen holds of a library list.
+//! harken's domain (`docs/plan-v5.md` §1.15) is the `.ark` files beside
+//! this crate — the schema, the types, the library, the playlists and the
+//! listening session, in ArkLang — and nothing here is a second copy of
+//! it. The crate is where its tests live: [`DIR`], the module [`text`]
+//! builds from it, and the bindings an app's `build.rs` writes for it
+//! ([`domain`], with the host's Rust beside them, `host.rs`).
 
-pub mod keys;
-pub mod library;
-pub mod listening;
-pub mod module;
-pub mod playlists;
-pub mod schema;
-pub mod view;
-
-pub use module::domain;
-
-/// The domain's directory: every `.ark` file under it is the module
-/// (§1.15).
+/// The domain's directory: every `.ark` file under it is the module.
 pub const DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 /// The module, built from [`DIR`].
 pub fn text() -> ark::Domain {
     ark::sexp::build_dir(std::path::Path::new(DIR)).unwrap_or_else(|r| panic!("harken's domain: {r}"))
 }
+
+/// The domain's bindings (`ark::gen`), as `harken-server` and
+/// `harken-iced` generate them, and `host.rs` beside them.
+#[allow(clippy::all)]
+pub mod domain;

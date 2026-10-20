@@ -7,18 +7,21 @@
 
 use std::sync::OnceLock;
 
-use ark::author::{Domain, Id, Node};
+use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
-use harken_domain::library::{AddSong, LibraryEntry};
-use harken_domain::playlists::CreatePlaylist;
-use harken_domain::schema::{Playlist, LIBRARY};
+use ark::Domain;
+use harken_domain::domain::host::LIBRARY;
+use harken_domain::domain::CreatePlaylist;
+use harken_domain::domain::Id;
+use harken_domain::domain::Playlist;
+use harken_domain::domain::{AddSong, LibraryEntry};
 
 /// The module, assembled once.
 pub fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(harken_domain::domain)
+    D.get_or_init(harken_domain::text)
 }
 
 /// A function's binding by its last name: `create_playlist` is
@@ -119,12 +122,7 @@ impl Lib {
 
     /// The library read against a playlist.
     pub fn library(&self, playlist: &Id<Playlist>) -> Vec<LibraryEntry> {
-        self.list(
-            "library",
-            &harken_domain::library::Library {
-                playlist_id: playlist.clone(),
-            },
-        )
+        self.list("library", &harken_domain::domain::Library { playlist_id: *playlist })
     }
 
     /// Add a song as the scanner would: a refusal here is a bug.

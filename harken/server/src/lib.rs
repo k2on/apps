@@ -4,7 +4,8 @@
 //! the listening session's volatile space on the hub, the socket at
 //! `/sync`, `/healthz`, the sign-in routes and the web build's validator
 //! are `ark_server`'s and `ark_auth`'s, generic over any app; the domain
-//! is `harken_domain`'s. What is harken's is the things only harken has,
+//! is `harken/domain`'s ArkLang, called through the bindings `build.rs`
+//! generates ([`domain`]). What is harken's is the things only harken has,
 //! each a module a test can reach:
 //!
 //! - [`library`]: the media directory as a peer — walked, watched, and
@@ -12,9 +13,10 @@
 //! - [`covers`]: where a track's cover comes from, and `/media`;
 //! - [`assistant`]: the house's speakers, as devices in each account's
 //!   listening session — which is the domain's live state
-//!   (`harken_domain::listening`), sequenced by the hub's volatile
+//!   (`harken/domain/listening.ark`), sequenced by the hub's volatile
 //!   authority, and needs nothing of this crate;
-//! - [`hosted`]: the module the hub runs, harken's own or one from a file;
+//! - [`domain`]: the domain's bindings and the host's Rust beside them;
+//! - [`hosted`]: the module the hub runs, harken's own or one from a path;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
 //!   environment (what the NixOS module sets) and the server built from it.
 //!
@@ -25,12 +27,13 @@
 //! the phone all sign in the same way. Without a provider it refuses to
 //! start, unless told it is on a laptop (`HARKEN_DEV_AUTH=1`).
 //!
-//! A device is a session (`harken_domain::listening`): a connection's
+//! A device is a session (`harken/domain/devices.ark`): a connection's
 //! volatile `Hello` says what the device is, and the hub authors `on_join`
 //! with it, its user and id the verified login's ([`device`]).
 
 pub mod assistant;
 pub mod covers;
+pub mod domain;
 pub mod hosted;
 pub mod library;
 
@@ -38,6 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::domain::Device;
 use anyhow::{anyhow, bail, Context, Result};
 use ark::ir::Node;
 use ark::peer::Who;
@@ -47,7 +51,6 @@ use ark_auth::session::SessionStore;
 use ark_auth::Account;
 use ark_server::hub::{Config as HubConfig, Live};
 use ark_server::Running;
-use harken_domain::listening::Device;
 
 use assistant::ha;
 use hosted::Hosted;
@@ -599,7 +602,7 @@ pub async fn start(config: Config) -> Result<Server> {
         .iter()
         .map(|(r, a)| (r.clone(), a.clone()))
         .chain([(
-            harken_domain::schema::LIBRARY.to_string(),
+            crate::domain::host::LIBRARY.to_string(),
             vec![library::ACCOUNT.to_string()],
         )]);
     let mut auth = Auth::new(sessions, mode(&config.sign_in).await?, &public_url)
@@ -695,7 +698,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 .issue(&Account {
                     id: library::ACCOUNT.into(),
                     name: "Library".into(),
-                    roles: vec![harken_domain::schema::LIBRARY.into()],
+                    roles: vec![crate::domain::host::LIBRARY.into()],
                     ..Account::default()
                 })
                 .map_err(|e| anyhow!("signing the scanner in: {e}"))?;

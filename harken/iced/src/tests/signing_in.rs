@@ -17,7 +17,7 @@ fn login(who: &str) -> Login {
         session: format!("session-{who}"),
         user: Account {
             id: who.into(),
-            roles: vec![harken_domain::schema::LIBRARY.into()],
+            roles: vec![crate::domain::host::LIBRARY.into()],
             ..Account::default()
         },
         expires_ms: 0,

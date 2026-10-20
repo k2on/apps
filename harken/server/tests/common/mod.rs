@@ -15,8 +15,8 @@ use ark_auth::{Account, Login};
 use ark_client::link::{Backoff, Event as LinkEvent, Link, Socket};
 use ark_client::{Client, Event, Memory};
 use ark_server::handle::now;
-use harken_domain::listening::read::{Kind, Listening};
-use harken_domain::listening::Device;
+use harken_server::domain::host::{Kind, Listening};
+use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
 use harken_server::{start, Config, Server};
 

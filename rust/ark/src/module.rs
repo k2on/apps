@@ -209,16 +209,14 @@ impl Domain {
 }
 
 /// §1.2, §1.5 Whether `new` may follow `old`: its schema a prefix-extension
-/// of old's, and every function it binds that `old` did not, checked over
-/// the new schema. How many are new.
-pub fn compat(old: &Module, new: &Domain) -> Result<usize, Refusal> {
-    crate::schema::compat(&old.schema, &new.module.schema)?;
+/// of old's, and every function it binds that `old` did not, from `lib`,
+/// checked over the new schema. How many are new.
+pub fn compat(old: &Module, new: &Module, lib: &Lib) -> Result<usize, Refusal> {
+    crate::schema::compat(&old.schema, &new.schema)?;
     let mut n = 0;
-    for (name, h) in new.module.bindings.iter().filter(|b| !old.bindings.iter().any(|o| o.1 == b.1)) {
-        let f = new.lib.get(h).ok_or_else(|| Refusal(format!("{name}: no function {h}")))?;
-        new.lib
-            .install(&new.module.schema, f.f.clone())
-            .map_err(|e| Refusal(format!("{name}: {}", e.0)))?;
+    for (name, h) in new.bindings.iter().filter(|b| !old.bindings.iter().any(|o| o.1 == b.1)) {
+        let f = lib.get(h).ok_or_else(|| Refusal(format!("{name}: no function {h}")))?;
+        lib.install(&new.schema, f.f.clone()).map_err(|e| Refusal(format!("{name}: {}", e.0)))?;
         n += 1;
     }
     Ok(n)

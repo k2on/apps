@@ -12,6 +12,9 @@ path = "src/lib.rs"
 [dependencies]
 ark = { path = "../../rust/ark" }
 
+[build-dependencies]
+ark = { path = "../../rust/ark" }
+
 [dev-dependencies]
 ark-client = { path = "../../rust/ark-client" }
 ark-server = { path = "../../rust/ark-server" }

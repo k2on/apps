@@ -9,8 +9,8 @@ mod common;
 use ark::ir::Node;
 use ark::store::Change;
 use common::*;
-use harken_domain::playlists::CreatePlaylist;
-use harken_domain::schema::Playlist;
+use harken_server::domain::CreatePlaylist;
+use harken_server::domain::Playlist;
 use harken_server::{start, Config, SignIn};
 
 fn playlists(server: &harken_server::Server) -> Vec<(String, String)> {

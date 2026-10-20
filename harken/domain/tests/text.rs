@@ -1,12 +1,9 @@
 //! harken's domain is its directory of ArkLang (§1.15): every file, its
 //! comments set aside, is what the printer writes of the forms it holds —
-//! so `print(build(t)) == t` file by file — and the module it builds is
-//! the builders' (`harken_domain::domain`) with its binders' names set
-//! aside and its callees named by the builders' hashes for them.
+//! so `print(build(t)) == t` file by file.
 
 use std::collections::BTreeMap;
 
-use ark::ir::Node;
 use ark::sexp::{forms, layout, read, Sx, K};
 
 /// `text` without its comments: each `;` to the end of its line (outside a
@@ -83,32 +80,4 @@ fn every_file_is_its_forms_printed() {
             at.and_then(|i| got.lines().nth(i))
         );
     }
-}
-
-/// The text's module is the builders', function for function, names and
-/// callees aside. Falsified by changing `"a song needs a title"` in
-/// `types.ark`: `library.add_song` was another function.
-#[test]
-fn the_text_is_the_builders_module() {
-    let (text, built) = (harken_domain::text(), harken_domain::domain());
-    let to: Vec<(Vec<u8>, Vec<u8>)> = text
-        .module
-        .bindings
-        .iter()
-        .map(|(n, h)| (ark::codec::bytes_enc(&h.0), ark::codec::bytes_enc(&built.get(n).0)))
-        .filter(|(a, b)| a != b)
-        .collect();
-    for (n, h) in &text.module.bindings {
-        let mut bytes = text.lib.get(h).unwrap().f.unnamed().to_bytes();
-        for (from, to) in &to {
-            while let Some(i) = bytes.windows(from.len()).position(|w| w == from) {
-                bytes.splice(i..i + from.len(), to.iter().copied());
-            }
-        }
-        assert!(
-            bytes == built.lib.get(&built.get(n)).unwrap().f.to_bytes(),
-            "the text's {n} is not the builders'"
-        );
-    }
-    assert_eq!(text.module.bindings.len(), built.module.bindings.len());
 }
