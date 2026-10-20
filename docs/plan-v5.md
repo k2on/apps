@@ -947,3 +947,16 @@ persisted (`Open` takes them); the volatile space is excluded from hash
 and snapshot but has no second machine yet; no performance measured.
 `Ty` is recursive and hand-encoded; L1's derive must handle recursion
 through `Named`.
+
+**T1** (`189ea8f`…`702215e`): over budget, both. `ark-auth` on
+`openidconnect` 4.0.1 over its `ureq` agent, 1,422 → 1,000 source: OIDC
+264 → 128, the rest the sessions, routes and two clients `ark-server` and
+harken use unchanged; the ID token's signature is now checked (keys fetched
+per exchange), its issuer exactly, extra audiences refused, the secret sent
+as Basic (README). `tests/oidc.rs` signs in through a provider in the test;
+the JWT/base64 tests went with the parsing. `ark-explorer` 3,361 → 2,268
+(the browser 2,722 → 1,630; `data`, `wire`, `admin` kept as the hosts'
+wire): sortable grids, a call screen of typed text fields (`[a, b]`,
+`(a, b)`), the log; dropped the console, recent calls, nested inputs, the
+picker's labels, gone rows and lit answers (3 tests). harken's pass
+unchanged; `ark-admin` builds for wasm32. Not verified: a real provider.
