@@ -437,6 +437,9 @@ impl M {
         let &(kind, start) = self.fns.get(name).ok_or_else(|| self.err(at, format!("no function {name}")))?;
         self.built.insert(name.into(), None);
         let f = P::new(self, start).function(kind)?;
+        if kind == Kind::Live && volatile(&self.schema, &self.lib, &f.body) == Some(false) {
+            return Err(self.err(at, format!("{name}: a live function touches a durable table")));
+        }
         self.lib.install(&self.schema, f.clone()).map_err(|r| Refusal(format!("{name}: {r}")))?;
         self.built.insert(name.into(), Some(f.clone()));
         Ok(f)
@@ -1967,7 +1970,7 @@ fn function(m: &Module, lib: &Lib, names: &BTreeMap<FnHash, String>, rows: &[(St
         ind: 0,
     };
     let kind = match f.effect {
-        Effect::Write if volatile(m, lib, &f.body) == Some(true) => "live",
+        Effect::Write if volatile(&m.schema, lib, &f.body) == Some(true) => "live",
         Effect::Write => "mutator",
         Effect::Read => "query",
         Effect::Pure => "helper",
@@ -1989,7 +1992,7 @@ fn function(m: &Module, lib: &Lib, names: &BTreeMap<FnHash, String>, rows: &[(St
 
 /// Whether every table `e` and its callees touch is volatile; `None` when
 /// it touches none.
-fn volatile(m: &Module, lib: &Lib, e: &Expr) -> Option<bool> {
+fn volatile(schema: &Schema, lib: &Lib, e: &Expr) -> Option<bool> {
     let mut seen = None;
     crate::interp::walk(e, None, &mut |x, _| {
         let t = match x {
@@ -1997,11 +2000,11 @@ fn volatile(m: &Module, lib: &Lib, e: &Expr) -> Option<bool> {
             _ => None,
         };
         if let Some(t) = t {
-            let v = m.schema.table(t).is_some_and(|(_, t)| t.space == Space::Volatile);
+            let v = schema.table(t).is_some_and(|(_, t)| t.space == Space::Volatile);
             seen = Some(seen.unwrap_or(true) && v);
         }
         if let Expr::Call(h, _) = x {
-            if let Some(c) = lib.get(h).and_then(|c| volatile(m, lib, &c.f.body)) {
+            if let Some(c) = lib.get(h).and_then(|c| volatile(schema, lib, &c.f.body)) {
                 seen = Some(seen.unwrap_or(true) && c);
             }
         }

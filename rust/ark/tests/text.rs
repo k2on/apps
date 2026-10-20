@@ -78,3 +78,16 @@ fn harken_printed_builds_to_itself() {
     }
     assert_eq!(ark::text::print(&d.module, &again).unwrap(), text);
 }
+
+/// `live` is a mutator over volatile tables only: one writing a durable
+/// table is refused where it is built, and the same body as a `mutator`
+/// builds. Falsified by dropping the check: the live one built.
+#[test]
+fn a_live_function_over_a_durable_table_is_refused() {
+    let schema = "schema {\n  table note {\n    id: Text key\n  }\n  volatile table here {\n    id: Text key\n  }\n}\n";
+    let body = |kind: &str, t: &str| format!("{schema}\n{kind} room.put(id: Text) = {t}.insert({{ id: id }})\n");
+    assert!(ark::text::build(&body("live", "here")).is_ok());
+    assert!(ark::text::build(&body("mutator", "note")).is_ok());
+    let r = ark::text::build(&body("live", "note")).err().expect("refused");
+    assert!(r.0.contains("a live function touches a durable table"), "{r}");
+}

@@ -1,124 +1,200 @@
-# Authoring: restricted Rust, lowered to the one language
+# Authoring: Ark text, and builders that write it
 
-`docs/plan-v5.md` §1.12. A domain is written as Rust functions under
-`#[ark::*]` attributes over types the derives describe; the macros
-(`rust/ark-macros`) lower each body to §1.4's `Expr` through
-`ark::author`, and `module!` assembles a schema and the functions into a
-`Module` and a checked `Lib`. There is one execution path, the
-interpreter: the Rust a macro writes builds the function's IR and never
-runs the body. `harken/domain` is a whole domain written this way.
+`docs/plan-v5.md` §1.15. Three layers, as SQL has them:
 
-**What is accepted is the table below**, and nothing else: any other
-construct is a compile error naming it (`… is not in the subset ark
-lowers`). Every row has a test that it lowers to the `Expr` it says
-(`rust/ark-macros/tests/lower.rs`, and `tests/demo.rs`, the demo of
-`rust/ark/tests/demo.rs` byte for byte) and a compile-fail test of the
-nearest thing outside it (`rust/ark-macros/tests/ui/`, its words in the
-`.stderr` beside it).
+1. **The module** (§1.5): what runtimes load, check and hash. Nothing below
+   changes it; a phone loads it and calls functions by name.
+2. **Ark text**: one canonical, language-neutral spelling of a module
+   (§1 below). `arkc print module.ark` writes it, `arkc build FILE… -o
+   module.ark` compiles it, and anyone may write it. One printer, so
+   `build(print(m)) == m` for every module and `print(build(t)) == t` for
+   canonical text — text as the printer writes it.
+3. **Builders**, per language, typed, constructing the IR (§2). They cover
+   what a domain says most; `text("…")` embeds Ark text for the rest, so
+   they need not grow. Rust's are `ark::author`; another language's are
+   held by one rule — its demo emits the module hash Rust's does.
 
-**Names are rustc's.** A field is read by name (`x.f`), a struct literal
-names its fields, a match arm names its variant and the variant's fields:
-the derives write, for each type, the view, setters and constants these
-lower to, and a misspelled or missing name is rustc's error, which names
-it. No field is ever bound by its position in a declaration. Every
-expression is built as the Rust type it is, refinements dropped (`Name`
-and `Text` are one `String`); the checker (`ark::check`) judges the rest
-when the module is assembled.
+The reference: `rust/ark/src/text.rs` (the compiler and the printer),
+`rust/ark/src/author.rs` (the Rust builders), `rust/ark/tests/demo.ark`
+(the demo as text). `harken/domain` is a whole domain written with the
+builders.
 
-## The functions
+## 1. The text
 
-| attribute | the function | effect |
+### Items
+
+A file is items, each beginning at the start of a line: one `schema`
+block, `type` declarations, and functions, in any order. `//` comments.
+
+```
+schema {
+  table playlist {
+    id: Id<playlist> key
+    name: Text
+    user_id: Text
+    index unique (user_id, name)
+  }
+  table item {
+    playlist_id: Id<playlist> key refs playlist
+    track_id: Text key
+    pos: Int
+    index unique (playlist_id, pos)
+  }
+}
+
+type Name = Text where trim, non_empty "a playlist needs a name"
+type TrackId = Text where len 1..
+
+mutator demo.rename_playlist(playlist_id: Id<playlist>, name: Name) = if playlist.get(playlist_id).is_some() {
+  playlist.update(playlist_id, p => { name: name, ..p })
+} else {
+  refuse "no such playlist"
+}
+```
+
+```
+schema   = "schema" "{" table* "}"
+table    = ["volatile"] "table" name "{" (column | index)* "}"
+column   = name ":" type ["key"] ["refs" table-name] ["default" x"hex"]
+index    = "index" ["unique"] "(" name ("," name)* ")"
+type     = "type" type-name "=" type ["where" rule ("," rule)*]
+rule     = ("utf8" | "trim" | "non_empty" | "len" n | "len" n ".." | "len" n "..=" m | name "=>" expr) [string]
+function = kind path "(" [name ":" type ("," name ":" type)*] ")" ["->" type] ("=" expr | block)
+kind     = "mutator" | "live" | "query" | "scope" | "helper" | "guard"
+```
+
+A table's key is its leading `key` columns (the first when none is
+marked); a column's type is written as its declaration's name, which the
+schema keeps. A rule's words are what a form shows when a value breaks it;
+`x => e` is a `Pure` predicate of the value.
+
+**The kind is the effect bound**: `mutator` and `live` (a mutator over
+volatile tables only, refused at build otherwise) are `Write`, `query`
+`Read`, `scope` `Pure`; `helper` and `guard` are the least their body has,
+callees included. A function's name is its binding's path — the prefix is
+its router. Every function is bound by its name, except one whose name
+starts with `_`. A function's declarations are the types its parameters,
+result, literals, variants, lists and fresh ids name, closed over their
+structures, and its callees'; the module's are its functions'.
+
+### Types
+
+| type | is |
+|---|---|
+| `Int`, `Bytes`, `Text`, `Bool`, `Never`, `()` | the leaves; `Text = Bytes where utf8`; `Bool = Sum<(), ()>`; `Never` the empty sum |
+| `(A, B)`, `(A,)` | a tuple |
+| `List<T>` | a list |
+| `Sum<(A,), (), (B, C)>` | a sum, its variants each a tuple of fields |
+| `Id<t>` | `Bytes where len 16`, declared by that name |
+| `Option<T>` | `Sum<(), (T,)>`, declared by that name |
+| a declared name | `Name`, `AddSong.title` |
+| a table's name in camel case | its row: the tuple of its columns' types (`PlaylistItem`) |
+
+### Expressions
+
+Everything is an expression; `let` is the only statement. There are no
+semicolons, `return`, loops or mutation.
+
+| construct | text | IR |
 |---|---|---|
-| `#[ark::mutator("path.name")]` | `(Input) → ()` | `Write` |
-| `#[ark::query("path.name")]` | `(Input) → List<T>`, the relational subset; what a view maintains | `Read` |
-| `#[ark::scope("path.name")]` | `(Ctx, <Schema>Row) → Bool` (§1.8): the derive's sum of the tables' rows | `Pure` |
-| `#[ark::live("path.name")]` | a mutator over volatile tables keyed by instance (§1.9); one touching a durable table, itself or through a callee, is refused when its module is assembled | `Write` |
-| `#[ark::helper]`, `#[ark::guard]` | a function others call; a guard is a helper that refuses | the least its body has, callees included |
+| literal | `5`, `-5`, `"x"` (escapes `\n \t \r \0 \\ \" \u{…}`), `true`, `false`, `x"00ff"` (bytes), `lit<T>(x"…")` (any type, encoded bytes) | `Lit` |
+| unit | `()` | `Seq([])` |
+| block | `{` a statement a line `}`; `let x = e` binds the rest; the value is the last; a block of one is that one | `Seq`, `Let` |
+| tuple | `(a, b)`, `(a,)` | `Tuple` |
+| list | `[a, b]` (the type of `a`, its refinements dropped), `List<T>[…]` | `List` |
+| option | `some(x)` (as a list's), `some<T>(x)`, `none<T>` | `Variant(Option<T>, …)` |
+| variant | `T#i`, `T#i(a, b)` | `Variant(T, i, …)` |
+| if | `if c { … } else { … }`, `else if`, no `else` is `()` | `If` |
+| match | `match e {` an arm a line `}`: `none`, `some(x)`, `false`, `true`, `#i`, `#i(a, b)` — every variant in order, each binding all its fields | `Match` |
+| field | `x.name` (a row's column, a refined field's declaration `R.name`), `x.2` | `Field(x, i)` |
+| operators | `or` < `and` < `not` < `== != < <= > >=` (one) < `+ -` < `* / %` < `-x`, `refuse e` < postfix | `Op`, `Un`, `Refuse` |
+| standard library | a method of its first argument: `x.trim()`, `xs.len()`, `o.unwrap_or(d)`, `xs.concat()` (texts), `xs.concat(ys)`, `nil_id()` — `Std`'s names | `Std` |
+| relational | `xs.filter(x => p)`, `.map(x => e)`, `.join(ys, (x, y) => c)`, `.group(x => k, (k, ms) => a)`, `.sort(x => k)` with `desc k`, `asc k`, `(k1, desc k2)`, `.take(n)` | `Filter Map Join Group Sort Take` |
+| tables | `t` (its rows), `t.get(k1, k2)`, `t.get(..key)`, `t.insert({ col: e, …, ..base })`, `t.update(k, r => { col: e, ..r })`, `t.delete(k)` | `Scan Lookup Insert Update Delete` |
+| context | `ctx.user`, `ctx.session`, `ctx.roles`, `ctx.now`, `ctx.new_id(t)` | `Ctx` |
+| call | `path.name(a, b)` | `Call(hash, …)` |
 
-The name is the binding's path (`library.add_song`); without one it is the
-function's. Parameters are bound in order, the last innermost. A parameter
-of type `Ctx` is the context and one named `db` the table set; neither is
-a parameter of the function — both are ambient — and a call passes them
-along as written. A return type `Result<(), Refuse>`, or none, is `()`.
+A variable shadows a table; a dotted path followed by `(` is a call when
+a function has that name. A line beginning with an operator begins a new
+statement inside a block; inside brackets newlines are nothing.
 
-## The accepted subset
+### What the bytes do not hold
 
-| construct | Rust | lowers to | lowering test | refused nearest |
-|---|---|---|---|---|
-| parameter | `a: T` | a parameter of `T`'s type | `parameters` | `(a, b): (T, U)` — `param_pattern` |
-| let | `let x = e; rest` (`let x: T = e;` too) | `Let(e, rest)` | `let_binds_the_rest` | `let mut x` — `mutable_binding`; `let (x, y)` — `let_pattern`; `let x = e else {..}` — `let_else` |
-| statements | `s1; s2; e` | `Seq([s1, s2, e])`; one alone is itself; a last `s;` of no `()` value is `Seq([s, ()])` | `statements_are_a_seq` | an item in a body — `item_in_body`; a loop — `a_loop` |
-| if | `if c { a } else { b }`, `if c { a }` | `If(c, a, b)`, `If(c, a, ())` | `if_and_else` | — |
-| if let | `if let P = e { a } else { b }` | `Match(e, …)`, the else the other arms | `if_let_is_a_match` | — |
-| match | on an option (`None`, `Some(x)`) or a declared sum (`E::V`, `E::V(a, _)`, `E::V { f, g: h, .. }`), `_` for the rest | `Match(e, arms)`: one per variant in declaration order, each binding all its fields, the last innermost | `match_on_a_sum` | a guard — `match_guard`; a nested pattern — `nested_pattern`; an option without both arms — `option_without_none`; a variant missing — `sum_not_exhaustive` (rustc's) |
-| literals | `5`, `-5`, `"x"`, `true` | `Lit(Int)`, `Lit(Text)`, `Lit(Bool)` | `literals_and_tuples` | `1.5` — `float_literal` |
-| operators | `+ - * / %`, `== != < <= > >=`, `&& \|\|`, `!`, `-` | `Op`, `Un`: checked arithmetic, comparison by bytes, short-circuit | `operators_lower_to_ops` | `+=` — `assignment`; `&` — `bitwise`; `as` — `cast`; `&x` — `reference` |
-| field | `x.f`, `x.0` | `Field(x, i)`, `i` the field's declared position | `fields_by_name` | `x.misspelt` — `no_such_field` (rustc's); `xs[i]` — `indexing` |
-| struct literal | `S { f: e, g, ..base }` | `Tuple` of the fields in declaration order, the rest `Field(base, i)` | `struct_literals_by_name` | a field left out — `missing_field` (rustc's) |
-| tuple | `(a, b)` … four | `Tuple` | `literals_and_tuples` | five — `tuple_of_five` |
-| variant | `E::V { f: e }`, `E::V(e)`, `E::V`, `Some(e)`, `None` | `Variant(E, i, fields in declaration order)` | `variants_and_lists` | a refinement's constructor `Name(t)` — `refined_constructor` |
-| list | `vec![a, b]`, `[a, b]` | `List(T, …)` | `variants_and_lists` | another macro — `other_macro` |
-| call | `f(a, b)` of an `#[ark::*]` function | `Call(f's hash, [a, b])`, `f`'s declarations the caller's | `calls_by_hash` | `f` calling `f` — `calls_itself` |
-| standard library | text: `trim is_empty lower is_alnum chars len starts_with split_once fnv1a64 utf8`; int: `to_text min max clamp abs`; bytes and ids: `hex sha256 text_of_id`; list: `first last len is_empty contains reverse concat insert remove_at move_at slice sum`; option: `is_some is_none unwrap unwrap_or`; `concat(texts)`, `nil_id()` | `Std(f, …)` (a list's `is_empty` is `len == 0`, an option's `is_none` `!is_some`) | `the_standard_library` | `xs.push(x)` — `other_method` |
-| relational | on a list or `db.t`: `filter map join group sort take`, closures as lambdas; `sort(\|r\| (k1, Desc(k2)))` gives each key its direction; `db.t` alone is `Scan`, `db.t.get(k)` `Lookup` | `Filter Map Join Group Sort Take Scan Lookup` | `the_relational_combinators` | a closure anywhere else — `loose_closure`; `move \|x\|` — `move_closure`; `.map::<T>` — `turbofish` |
-| option | `map filter map_or` with closures | `Match` | `options_methods` | — |
-| writes | `db.t.insert(row)`, `db.t.update(k, \|r\| row)`, `db.t.delete(k)`; a key is `k` or `(k1, k2)` | `Insert Update Delete`, the key a `Tuple` | `the_writes` | — |
-| refuse | `refuse!(message)` | `Refuse(message)` | `refuse_is_refuse` | `return` — `early_return`; `?` — `question_mark` |
-| context | `ctx.user`, `.session`, `.roles`, `.now` (or as methods), `ctx.new_id()` in an `Id<T>` field or `ctx.new_id::<T>()`, `ctx.has_role(r)` | `Ctx(…)`, `NewId(t)`, `Std(Contains, [Ctx(Roles), r])` | `the_context`, `tests/demo.rs` | `ctx.device` — `context_field` |
-| the end | a body's last `Ok(())` | nothing | `ok_is_nothing` | `Ok(..)` anywhere else |
-| a name | a parameter, a `let`, a closure's, an arm's | `Var(i)`, De Bruijn | every test | anything else — `unbound` |
+A module keeps no binder names (variables are De Bruijn indices), no
+record field names and no variant names. The printer names a binder from
+its type (`playlist_id`, `n`, `xs`, a row by its table's initials, never a
+table's or a router's name), a row's field by its table's column when one
+table's rows are of its type, a refined record field by its declaration
+(`AddSong.title`), and anything else by position (`x.2`, `#1(a, b)`).
+Hand-written text uses those spellings. Where one IR node has one
+spelling the printer writes it; where two IR nodes could read alike the
+printer picks: the kind by effect (`mutator`, `live`, `query`, `helper`),
+`not x.is_some()` for an option's emptiness, `x.unwrap_or(d)`, `T#i` with
+its type where `some(x)` or `[x]` would infer another.
 
-A helper's effect is the least its body has (`a_helper_is_at_its_least_effect`);
-every function above checks (`every_lowering_checks`).
+## 2. The builder vocabulary
 
-## The types: derives
+What every language's builders offer, and Rust's spelling of it
+(`ark::author`). An expression is an `Ex<T>`, `T` the type it is, its
+refinements dropped; its methods take `&self`, so a value is used as often
+as it is named. A binder is a closure.
+
+| construct | Rust |
+|---|---|
+| a function | `pub static F: Def2<A, B, R> = Def2 { name: "router.f", kind: Kind::Mutator, body: \|a, b\| … };` — parameters typed by their declared types (`Name`, not `Text`); `Def0`…`Def5` |
+| a call | `F.call(a, b)` |
+| a module | `assemble(Schema::schema(), &[&F, &G])` — callees come with, all bound |
+| block, let | `block(\|b\| { let x = b.let_(v); b.s(stmt); last })`, `let_(v, \|x\| body)`, `seq([s1, s2], last)`, `x.s()` (a statement) |
+| literals | `int(5)`, `txt("x")`, `bool(true)`, `unit()`; `5`, `"x"`, `true` where an `Ex` is taken |
+| if | `if_(c, a, b)`, `if_(c, a, unit())` |
+| option | `some(x)`, `none::<T>()`, `o.map_or(d, \|x\| …)`, `o.map(\|x\| …)`, `o.filter(\|x\| …)`, `o.is_none()` |
+| sum | `ClockEx::paused(at)`, `ClockEx::match_(&c, \|at\| …, \|at, since\| …)` — the derive's |
+| record | `x.f().name`, `PlaylistEx { name, ..p.f() }.into()` — the derive's; `tup((a, b))`, `pair.f().0` |
+| list | `list(vec![a, b])` |
+| operators | `a + b`, `a - 1`, `-a`, `!a`, `a.eq(b)`, `ne lt le gt ge`, `a.and(b)`, `a.or(b)` |
+| standard library | the text's method names on `Ex`; `concat(vec![…])`, `concat_of(&xs)`, `nil_id()` |
+| relational | `xs.filter(\|x\| …)`, `.map`, `.join(&ys, \|x, y\| …)`, `.group(\|x\| k, \|k, ms\| a)`, `.sort(\|x\| (desc(a), b))`, `.take(n)` |
+| tables | `let db = Harken::db();` then `db.t.all()`, `db.t.get(k)`, `db.t.get((k1, k2))`, `db.t.insert(row)`, `db.t.update(k, \|r\| row)`, `db.t.delete(k)` |
+| refuse | `refuse(msg)` (any type), `refuse_(msg)` (a statement) |
+| context | `Ctx.user()`, `.session()`, `.roles()`, `.now()`, `Ctx.new_id::<Row>()`, `Ctx.has_role(r)` |
+| text | `text::<T>("if a < b { a } else { b }", &[("a", &a), ("b", &b)])`: checked where it is built; its tables are the module's being assembled |
+
+A body written as one would write the Rust it means is the IR the
+attribute macros (deleted) built from that Rust, byte for byte:
+`harken/domain/tests/port.rs` holds every one of harken's 127 functions
+to the hash the macros built.
+
+### The types, in Rust: derives
 
 | derive | on | says |
 |---|---|---|
-| `Row` | a struct with named fields | a table: its name (`#[ark(table = "t")]`, else the struct's in snake case), its columns in order, each its type's name and structure, its key (`#[ark(key)]` on the leading columns, else the first), `#[ark(index(a, b))]`, `#[ark(unique(a, b))]`, `#[ark(refs = Row)]` on a column, `#[ark(volatile)]` |
-| `Input` | a struct with named fields | a record named by the struct: the `Tuple` of its fields; a field with refinements is a declaration `S.f` of them |
+| `Row` | a struct with named fields | a table: its name (`#[ark(table = "t")]`, else the struct's in snake case), its columns in order, each its type's name and structure, its key (`#[ark(key)]` on the leading columns, else the first), `#[ark(index(a, b))]`, `#[ark(unique(a, b))]`, `#[ark(refs = Row)]` on a column, `#[ark(volatile)]`; and `RowEx` |
+| `Input` | a struct with named fields | a record named by the struct: the `Tuple` of its fields, a field with refinements a declaration `S.f` of them; and `SEx` |
 | `Input` | a tuple struct of one field | a refinement of that field's type, named by the struct |
-| `Sum` | an enum | a sum named by the enum, its variants records or tuples |
-| `Schema` | a struct of `Table<Row>`s | the schema, tables in order, and `<Name>Row`, the sum of their rows |
+| `Sum` | an enum | a sum named by the enum, its variants records or tuples; and `SEx`, its makers and its match |
+| `Schema` | a struct of `Table<Row>`s | the schema (`S::schema()`), the tables to build over (`S::db()`), and `SRow`, the sum of the rows a scope takes |
 
-A refinement, in order, each followed by `why = "…"` for its words: `trim`,
-`utf8`, `non_empty`, `len = 16`, `len = "1..=80"` (`"1.."`, `"..=80"`); of
-an `Int`, `min = n`, `max = n`, `ne = n`, `range = "lo..=hi"` (a `Pure`
-predicate of the value). The Rust types are `Int` (`i64`), `Text`
-(`String`), `bool`, `Bytes`, `Id<Row>` (`Bytes where len 16`, declared as
-`Id<t>`), `Option<T>` (declared by its name, a name for its structure, so
-a column of it reads as one), `Vec<T>`, tuples, and the derived types;
-derived types are plain Rust data, so `#[derive(Node)]` beside them
-encodes an input and decodes a row.
-
-A refused derive: a row of an enum — `row_of_an_enum`; a key after a
-column that is not one — `key_after_column`; an attribute that is none —
-`unknown_attribute`.
-
-## A module
-
-```rust
-let domain = ark::module! { schema: Harken, functions: [create_playlist, add_song, …] }?;
-```
-
-`ark::author::assemble(schema, &[f::built(), …])`: each function checked
-over the schema, its callees first, bound by its name in sorted order; the
-module's types every function's declarations. `Domain::cas` is a content
-store holding every body; `Domain::run` a mutator's changes over a store,
-`Domain::ask` any function's answer.
+A refinement, in order, each followed by `why = "…"` for its words:
+`trim`, `utf8`, `non_empty`, `len = 16`, `len = "1..=80"` (`"1.."`,
+`"..=80"`); of an `Int`, `min = n`, `max = n`, `ne = n`, `range =
+"lo..=hi"`. The Rust types are `Int` (`i64`), `Text` (`String`), `bool`,
+`Bytes`, `Id<Row>`, `Option<T>`, `Vec<T>`, tuples, and the derived types,
+which are plain Rust data: `#[derive(Node)]` beside them encodes an input
+and decodes a row.
 
 ## Live state
 
-A transition is a `#[ark::live]` mutator over volatile tables keyed by the
+A transition is a `live` function over volatile tables keyed by the
 instance (§1.9): v4's ordered fields are tables written by ordered
 transitions, its ephemeral fields a table of their own — a row per
-`(instance, device)` — which only its ephemeral transitions write and no
-ordered one reads. `on_join` and `on_leave` are live mutators the
-authority authors as devices come and go, their input the device's
-record. The calling device is `ctx.session` until the context carries one.
-`harken/domain/src/listening.rs` is v4's session as three tables.
+`(instance, device)` — which only ephemeral transitions write and no
+ordered one reads; which functions are ephemeral is the client's
+configuration, not the module's. `on_join` and `on_leave` are live
+functions the authority authors as devices come and go. The calling
+device is `ctx.session`. `harken/domain/src/listening.rs` is v4's session
+as three tables.
 
-## Not in the subset, by design
+## Not in the language, by design
 
 There is no fold and no recursion: a function's call graph is a DAG, and
 a list's elements are seen one at a time (`map`, `filter`), together
