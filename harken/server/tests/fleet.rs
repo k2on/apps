@@ -756,7 +756,7 @@ fn work_done_signed_out_is_the_signers_everywhere() {
     let theirs: Vec<&Logged> = done
         .entries
         .iter()
-        .filter(|(n, e)| *n > head && !is_sign_in(e))
+        .filter(|(n, e)| *n > head && !is_sign_in(e) && !is_look(e))
         .map(|(_, e)| e)
         .collect();
     assert_eq!(theirs.len(), 3);
@@ -1581,7 +1581,7 @@ fn alone_beside_two_server_users_lands_after_theirs() {
     assert!(
         done.entries
             .iter()
-            .filter(|(n, e)| *n > head_before && !is_sign_in(e))
+            .filter(|(n, e)| *n > head_before && !is_sign_in(e) && !is_look(e))
             .all(|(_, e)| e.entry.actor == "alice"),
         "the thirty after theirs"
     );
@@ -1752,7 +1752,7 @@ fn a_peer_alone_killed_mid_append_reopens_whole() {
     assert!(p.settle(PATIENCE));
     let log = f.server.log_on_disk().expect("a log");
     assert_eq!(log.work(), cursor, "the server has what it kept");
-    for l in log.entries.iter().filter(|l| !is_sign_in(l)) {
+    for l in log.entries.iter().filter(|l| !is_sign_in(l) && !is_look(l)) {
         p.owe(l.entry.id.0, "add_song, kept past the kill");
     }
     f.converged(&mut [&mut p]);

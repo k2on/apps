@@ -43,9 +43,15 @@
 //! every token by the row it names and closes what is revoked or expired,
 //! as `ark_auth::server::Auth` says (`serve`).
 //!
-//! **What a peer keeps beside its log** is rows of its local instance
-//! (`local`: a schema of its own, on the same disk): a server's journal
-//! and volatile space, a device's replica and pending intents.
+//! **A peer is three instances** (`instance`: a machine and what keeps
+//! it) wired together: the log's, the live space's, and the local one
+//! beside them on the same disk, whose rows (`local`) are what a peer keeps
+//! beside its log — a server's journal and volatile space, a device's
+//! replica and pending intents.
+//!
+//! **Handlers and reconcilers** (`jobs`) act on the world outside: a
+//! handler claims, runs and finishes the jobs of a kind (`ark::effect`) on
+//! the peer that registered it; a reconciler is told a view's rows.
 //!
 //! Every input either machine of a device is given is recorded, when asked
 //! (`record`), as an [`Act`]: a device is a pure function of these, which

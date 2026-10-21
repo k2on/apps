@@ -988,6 +988,82 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**S3a** (`dd26e71`…): **a peer is three instances wired; an effect is a
+row.** *Instances.* `ark_peer::Instance` (`instance.rs`) is one machine and
+what keeps it — a disk or none, the open from it (`stored`), every
+`Persist` written in order, a failed write kept with its failure
+(`flush`), and one fold rule, `Fold { keep, slack, rows }`: once the
+entries above the snapshot outnumber `keep + slack` (+ the rows held, when
+`rows`), all but `keep` are folded — a server `Fold::keep(k)` (keep `k`,
+fold at `2k`), a local instance `{0, 64, rows}`. It is over the machine,
+not a schema; typed access is layered on (`read::<S>`, `write::<S, P>`),
+so a `Peer` is three of one type — `log`, `live`, `local` — and the
+wiring: the link, the hub, frames, what it was told, and the routing of
+`Send`/`Fanout`/`To`/`Changes`/`Refused`/`Confirmed`, matched on which
+instance spoke. A closure's write is the kernel's `Input::Write { facts,
+now }` (an authority's only): an entry naming no function, whose facts a
+replay applies and nothing runs again — the fake `write` procedure,
+`admin::Raw` and `Handle::author`'s one-entry function go, and the admin
+page's raw write and `ark_auth::server::Hub::write` are the same input
+(`Peer::write`, `Handle::write`). `Local`'s columns are typed (`Origin`
+and `EntryId` describe as `Id`s, `Entry`, `Logged`, `(Seq, EntryHash)`):
+`ark_peer::Bytes` and its `read()?` chains go, `ark::row::Bytes` being a
+row's encoding as a column (the volatile space's); the volatile space and
+what waits are written whole. *Effects* (`ark::effect`, §1.16): a
+mutation may only record facts; acting on the world outside is a **job**,
+a row whose `state` is
+
+```
+Job<T> = Pending { due_ms } | Claimed { by, at_ms } | Done(T) | Failed { why, retry_ms } | Cancelled
+
+Pending ──claim, now ≥ due──► Claimed ──finish Ok──► Done(T)
+   │                           │  ▲  └──finish Err──► Failed ──claim, now ≥ retry──► Claimed
+   └──cancel──► Cancelled      └──┘ claim, now ≥ at + lease (another's claim)
+```
+
+`#[derive(Effect)]` (`#[effect(lease_ms, retry_ms, role, owner = field)]`,
+a minute each by default; one key column) registers, through
+`Effect::register::<S>`, `<table>.claim {id, by}` (refused unless due, and
+without the role), `<table>.finish {id, by, outcome}` (refused unless
+claimed by `by`), `<table>.cancel {id}` (refused unless pending, and but
+by the owner — or, with no owner, the role) and the query `<table>.due`;
+the authority's log order decides a claim against a cancel. A done job
+carries its outcome; a variant carrying one value is a record of it
+(`{"Done":{"value":…}}`), so the phones' generated types read it. Two
+registrations on a peer: **a handler**, `peer.handle::<R>(|peer, row|
+-> Result<R::Outcome, String>)`, a plain function on the driver's thread
+(ark-peer is pumped, not async: `Peer::jobs` runs at each `pump`, and
+`deadline` wakes for the nearest due): it keeps `R`'s rows not over from
+every durable change, claims each due one by a name drawn at
+registration, runs once the claim is confirmed with the row (its key the
+idempotency key) and the peer, and finishes with its answer — never in a
+replay, never on a peer that did not register it, and a claim from before
+a restart is due again only when its lease runs out; **a reconciler**,
+`peer.reconcile::<T>(space, view, input, |rows: Vec<T>|)`, told a view's
+typed rows at the start and on every change, no claim. Through the bridge
+a kind's due rows are `Peer::due(kind)` (rows as JSON, and when the next
+falls due), a view's rows stream through `view` as before, and the claim
+and the finish go through `mutate`. **The reference job** is the
+scanner's look: harken's `look` table (`Look { id, paths, state:
+Job<Looked> }`, `library.look`), asked at boot, on a rescan and per
+settled watch, done by the scanner's own handler with what it read and
+authored — no feature added (harken's schema `748e53c5…`, its pins
+re-derived in both formats; the phones' types regenerated). Not added: a
+simulator scenario (the simulator's domain is the demo, which the vectors
+pin). Source: `ark` 5,175 → 5,232 (Part A: `Input::Write`, the log's
+values as columns) → 5,458 (`domain/effect.rs`, 216), `ark-macros` 503 →
+570, `ark-peer` 2,518 → 2,414 (Part A) → 2,550 (`jobs.rs`, 121),
+`ark-ffi` 473 → 487, harken's domain 2,399 → 2,429, server 4,767 →
+4,787; the default `tools/loc.sh` set 19,013 → 18,966 (Part A) → 19,439.
+Part A came in at 2,414, not the ≈2,250 asked: the instance is one now,
+but the rows, `Shared`, `Logins` and `preset` stay. Tests 431 passed (10
+new, each falsified once). Not verified: a handler's lease against a
+look longer than ten minutes (another process's claim could take it,
+and the first's finish is then refused); a Kotlin or Swift handler (the
+bridge's `due` is tested from Rust; the phones' types regenerated, not
+compiled here); the browser's `localStorage` local instance (built for
+wasm32, not run).
+
 **S2** (`338333a`…`d9ec095`): **what a peer keeps beside its log is rows,
 by two concepts.** A table is `Durable` or `Volatile` (§1.3), nothing new; an
 instance is wired — a `Peer`, linked or serving — or not: an
