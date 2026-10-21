@@ -994,6 +994,45 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
+views vector is a named view.** `dynamic.rs`'s expression language — `Expr`,
+`Lam`, `Cmp`, `parse`, `evaluate`, `plan`, `make`, `ordered` — goes (705 →
+183 lines), and with it `Db::get_raw`, `scan_raw` and `schema`, which only
+it read. What stays is the JSON-of-rows path a vector, a host speaking JSON
+and the explorer need (`row`, `row_bytes`, `key_bytes`, `Dynamic`) and
+`Browse`: a table's rows whose columns equal given values, within a key
+range, sorted by a column (ties in key order), the first `n` — values
+compared and sorted as their columns' key bytes — built as a plan of the
+same operators (`scan_raw`, `filter`, `sort`, `take`), so a view of it is
+kept by patches, incrementally, for free; the explorer's grid reads through
+it, afresh on each call as before. Anything more than a browse is a view
+the domain names, which the explorer lists and calls already. The `views/`
+vectors are `{batches, ctx, domain, input, rows_before, schema, steps,
+store_before, view}`: a view of a reference domain in `ark-dev`
+(`library.rs`: `library` — the demo's tables, people, works, movements,
+songs, tracks, a view per v4 scenario — and `colors`, `pairs`, a fuzz
+finding each), written by `ark-dev/tests/views.rs` and run from the file
+alone (`vectors::run_view`, `spec/RUNNERS.md` § views); the falsified one
+now fails a real runner. Fourteen vectors and one falsified, as before;
+every step of every vector is the one the JSON plans gave. The work
+contract moved with them (0 gets and 5 rows, 0, 0 at 1k, 4k, 16k); the
+kernel keeps the rebase and scoped-feed view tests, over typed plans, and
+a browse test. *harken-peer*: little was the kit's twice — the binding of a
+bare name, a query's context and answer, an intent's standing, the cursor,
+pending count, alone and linked accessors, the login wrappers — and those
+now read through `Peer`; pumping, reconnect and backoff (`link.backoff`)
+were the kit's already, `--ping-ms` stays a no-op, nothing retries a login,
+and its sign-in path stays (it keeps a joined chain for the same session,
+which `Peer::login` does not), so no knob was added. A bare name now means
+the first binding ending so (`Domain::binding`), not a refusal when two do.
+Source: `ark` 5,458 → 4,956, `ark-dev` 1,705 → 2,142 (the reference domains
+and the runner, 400 lines, are now source), `ark-explorer` 2,254 → 2,251,
+`harken-server` 4,517 and bins 1,352 → 1,304; the default `tools/loc.sh`
+set 19,439 → 19,371; tests 444 passed (`ark` views 4 → 3, `ark-dev` +2;
+each new one falsified once). Not verified: the explorer's grid by a
+browse with a filter or a range (it sorts only; `Browse` is tested in the
+kernel); a second implementation running the vectors.
+
 **S3b** (`93d03a5`…): **one reconciler, two adapters.** What a phone did
 in `Remote.kt` and the server did for a Home Assistant speaker in
 `assistant.rs`'s `Bridge` — make a player agree with the listening session
