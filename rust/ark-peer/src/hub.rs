@@ -41,8 +41,8 @@ use ark::peer::{Feed, Input, Journal, Peer as Machine, Role, Who};
 use ark::row::Bytes;
 use ark::schema::Space;
 
-use crate::local::{Fold, Last, LiveRow, Refused, Waits};
-use crate::{machine, Config, Disk, Peer};
+use crate::local::{Last, LiveRow, Refused, Waits};
+use crate::{machine, Config, Disk, Fold, Instance, Peer};
 
 pub type ConnId = u64;
 
@@ -112,7 +112,7 @@ impl Peer {
         let me = authority();
         let auth = || Role::Authority { journal: Journal::default() };
         let mut log = machine(&config.log, auth(), &me, None, Space::Durable);
-        (log.disk, log.fold) = (Some(disk), config.keep.map(Fold::keep));
+        (log.disk, log.fold) = (Some(disk), Fold::keep(config.keep));
         let stored = log.stored();
         if let Some(e) = &log.failure {
             panic!("the log on disk does not read: {e}");
@@ -131,21 +131,18 @@ impl Peer {
             j.waiting.entry(w.origin).or_default().push((Who { actor, session, roles }, w.entry));
         }
         log.local = log.local.max(journal(&mut log).last_of(&origin));
-        let live = config.live.as_ref().map(|l| {
-            let mut i = machine(&l.module, auth(), &me, None, Space::Volatile);
-            i.fold = l.keep.map(Fold::keep);
-            i
+        let live = config.live.as_ref().map(|l| Instance {
+            fold: Fold::keep(l.keep),
+            ..machine(&l.module, auth(), &me, None, Space::Volatile)
         });
         let mut p = Peer::with(config, log, live, local);
         (p.hub.serving, p.hub.next) = (true, 1);
         if let (false, Some(live)) = (kept.is_empty(), &mut p.live) {
-            let schema = live.store.schema_arc().clone();
-            let volatile = schema.tables.iter().filter(|t| t.space == Space::Volatile);
-            let mut rows: Vec<(String, Vec<Vec<u8>>)> = volatile.map(|t| (t.name.clone(), vec![])).collect();
-            rows.push((ark::store::LOG.into(), vec![]));
-            for k in kept {
-                if let Some(t) = rows.iter_mut().find(|(t, _)| *t == k.table) {
-                    t.1.push(k.row.0);
+            let mut rows: Vec<(String, Vec<Vec<u8>>)> = vec![];
+            for LiveRow { table, row } in kept {
+                match rows.last_mut() {
+                    Some((t, rs)) if *t == table => rs.push(row.0),
+                    _ => rows.push((table, vec![row.0])),
                 }
             }
             live.step(Input::Open(Durable { rows, ..Durable::default() }));

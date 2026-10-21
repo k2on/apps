@@ -54,6 +54,7 @@
 pub mod app;
 pub mod disk;
 mod hub;
+pub mod instance;
 pub mod link;
 pub mod local;
 pub mod signed;
@@ -80,8 +81,9 @@ use ark::{Domain, Refusal};
 pub use app::{nobody, Standing, Status, Update};
 pub use disk::{Disk, Files, Memory};
 pub use hub::{ConnId, Deliver};
+pub use instance::{Fold, Instance};
 pub use link::{Event, Pumped, Wake};
-pub use local::{Fold, Instance, Local, Logins, Shared};
+pub use local::{Local, Logins, Shared};
 #[cfg(not(target_arch = "wasm32"))]
 pub use serve::{dev, Authenticate, Handle, Running, Server};
 
