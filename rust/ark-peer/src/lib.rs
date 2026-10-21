@@ -55,6 +55,7 @@ pub mod app;
 pub mod disk;
 mod hub;
 pub mod instance;
+mod jobs;
 pub mod link;
 pub mod local;
 pub mod signed;
@@ -245,6 +246,11 @@ pub struct Peer {
     /// local instance holds, and whether it holds a chain to hand over.
     saved: (i64, Vec<(i64, EntryId)>),
     joined: bool,
+    /// The handlers registered here, and what changed while they ran.
+    runners: Vec<Box<dyn jobs::Runner>>,
+    missed: Option<Vec<Change>>,
+    /// The reconcilers, by their view.
+    reconcilers: BTreeMap<usize, jobs::Reconciler>,
 }
 
 /// The role of a device alone since `fork`.
@@ -336,6 +342,9 @@ impl Peer {
             local,
             saved: (0, vec![]),
             joined: false,
+            runners: vec![],
+            missed: None,
+            reconcilers: BTreeMap::new(),
         }
     }
 
@@ -437,6 +446,8 @@ impl Peer {
                 Output::Changes(cs) => {
                     self.changed(space, cs);
                     if space == Space::Durable {
+                        self.runners.iter_mut().for_each(|r| r.changed(cs));
+                        self.missed.iter_mut().for_each(|m| m.extend(cs.iter().cloned()));
                         self.signs(cs);
                         if self.hub.watched {
                             self.hub.seen.extend(cs.iter().cloned());
@@ -521,7 +532,12 @@ impl Peer {
         for (i, (_, w)) in self.views.iter_mut().enumerate().filter(|(_, (s, _))| *s == space) {
             let Some(v) = w else { continue };
             match v.push(cs, store) {
-                Ok(patches) => self.told.patched(i, patches),
+                Ok(patches) => {
+                    if let (false, Some(f)) = (patches.is_empty(), self.reconcilers.get_mut(&i)) {
+                        f(&v.rows());
+                    }
+                    self.told.patched(i, patches)
+                }
                 Err(_) => {
                     *w = None;
                     self.told.reset(i);

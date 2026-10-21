@@ -30,7 +30,7 @@ use crate::row::{Describe, Input, Row, Type, Value};
 use crate::Refusal;
 
 /// Where a job stands.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Job<T> {
     Pending { due_ms: i64 },
     Claimed { by: String, at_ms: i64 },
