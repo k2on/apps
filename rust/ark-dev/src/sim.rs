@@ -16,8 +16,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ark::format::Encode;
 use ark::frames::Frame;
-use ark::json::Json;
 use ark::peer::{Ctx, Who};
 use ark::plan::splice;
 use ark::schema::Space;

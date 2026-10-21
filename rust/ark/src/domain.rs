@@ -87,9 +87,12 @@ fn check_of<I: Input>() -> Check {
     Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e.0)])?.check().map(|_| ()))
 }
 
-/// An input from its JSON (no bytes are `null`), refined.
+/// An input from its encoding (no bytes are `()`'s), refined.
 fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
-    I::decode(if b.is_empty() { b"null" } else { b })?.refine()
+    match b.is_empty() {
+        true => I::decode(&crate::format::encode(&())?)?.refine(),
+        false => I::decode(b)?.refine(),
+    }
 }
 
 struct Mutate<S: Tables, I> {
@@ -292,6 +295,36 @@ impl Domain {
         let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
         let ask = f.ask.as_ref().ok_or_else(|| Refusal(format!("{name} answers nothing")))?;
         ask(store, ctx, input)
+    }
+
+    fn func(&self, name: &str) -> Result<&Function, Refusal> {
+        self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))
+    }
+
+    /// A function's input from its JSON text (none is `()`'s), in the value
+    /// format: what a host that speaks JSON calls it with.
+    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, Refusal> {
+        crate::json::from_text(&self.func(name)?.input, text)
+    }
+
+    /// What [`Domain::ask`] answered, as JSON: a query's value, a view's
+    /// list.
+    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, Refusal> {
+        let f = self.func(name)?;
+        let t = f.output.clone().unwrap_or(Type::Unit);
+        let t = if f.kind == Kind::View { Type::List(Box::new(t)) } else { t };
+        crate::json::to_text(&t, bytes)
+    }
+
+    /// One element of a view of a function, as JSON.
+    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, Refusal> {
+        crate::json::to_text(self.func(name)?.output.as_ref().unwrap_or(&Type::Unit), bytes)
+    }
+
+    /// A row of a table of the schema, as JSON.
+    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, Refusal> {
+        let (_, t) = self.schema.table(table).ok_or_else(|| Refusal(format!("no table {table}")))?;
+        crate::json::to_text(&t.row_type(), bytes)
     }
 
     /// A view of a function, kept over `store`.

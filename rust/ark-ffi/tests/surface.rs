@@ -134,8 +134,10 @@ fn the_bridge_does_what_the_kit_does() {
     until("bob sees the pointer", || {
         bob.live_rows("pointer".into()).iter().any(|r| r.contains(r#""x":3"#))
     });
-    alice.call("point".into(), r#"{"x":"three"}"#.into()).unwrap();
-    until("an ephemeral call refused as it is relayed", || !alice.take_live_refusals().is_empty());
+    assert!(
+        alice.call("point".into(), r#"{"x":"three"}"#.into()).is_err(),
+        "an input not of its type refused at once"
+    );
     assert!(alice.call("rename".into(), r#"{"name":7}"#.into()).is_err(), "any other refused at once");
 
     // A device alone keeps a history of its own, and hands it over joining.

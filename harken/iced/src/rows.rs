@@ -8,7 +8,7 @@
 //! than as a panic in the middle of a frame.
 
 use crate::domain::{AlbumsEntry, ArtistsEntry, ComposersEntry, LibraryEntry, RecordingsEntry, TrackDetailsEntry, WorkSummary};
-use ark::json::Json;
+use ark::format::Encode;
 
 /// A row's id: its sixteen bytes, whatever table it names.
 pub type Id = [u8; 16];

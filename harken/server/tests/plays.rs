@@ -10,7 +10,7 @@
 
 mod common;
 
-use ark::json::Json;
+use ark::format::Encode;
 use common::*;
 use harken_server::domain::Id;
 use harken_server::domain::Play;

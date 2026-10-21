@@ -9,7 +9,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark_dev::sim::{Net, Op};
@@ -44,12 +44,12 @@ impl Fleet {
     }
 
     /// Author on client `i` as whoever it believes it is.
-    fn mutate(&mut self, i: i64, name: &str, input: &impl Json) {
+    fn mutate(&mut self, i: i64, name: &str, input: &impl Encode) {
         self.net.run(&Op::Mutate(i, full(name), input.to_bytes()));
     }
 
     /// What client `i` shows, as `user`: its optimistic view.
-    fn query<T: Json>(&self, i: i64, user: &str, name: &str, input: &impl Json) -> T {
+    fn query<T: Encode>(&self, i: i64, user: &str, name: &str, input: &impl Encode) -> T {
         let ctx = Ctx {
             draws: Default::default(),
             id: EntryId::of("q", 0),

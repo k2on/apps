@@ -22,8 +22,8 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ark::format::Encode;
 use ark::hash::hex;
-use ark::json::Json;
 use ark::log::Logged;
 use ark::peer::Who;
 use ark::store::{Change, Store};
@@ -153,7 +153,7 @@ impl Log {
     }
 
     /// A table's rows at the head.
-    pub fn rows<T: Json>(&self, table: &str) -> Vec<T> {
+    pub fn rows<T: Encode>(&self, table: &str) -> Vec<T> {
         self.state
             .rows(table)
             .map(|r| T::from_bytes(r).unwrap())
@@ -171,7 +171,7 @@ pub fn function(e: &Logged) -> String {
 }
 
 /// The rows an entry added to `table`.
-pub fn added<T: Json>(e: &Logged, table: &str) -> Vec<T> {
+pub fn added<T: Encode>(e: &Logged, table: &str) -> Vec<T> {
     e.facts
         .iter()
         .filter_map(|c| match c {
@@ -887,7 +887,7 @@ impl Seeder {
 
     /// Sequence one intent as `user`; the facts it was sequenced with, so a
     /// scenario can name the rows it made.
-    pub fn author(&mut self, user: &str, name: &str, input: &impl Json) -> Vec<Change> {
+    pub fn author(&mut self, user: &str, name: &str, input: &impl Encode) -> Vec<Change> {
         let i = match self.users.get(user) {
             Some(i) => *i,
             None => {
@@ -1221,7 +1221,7 @@ impl Fleet {
     }
 
     /// The rows of `table` in the log's state at its head.
-    pub fn rows<T: Json>(&self, table: &str) -> Vec<T> {
+    pub fn rows<T: Encode>(&self, table: &str) -> Vec<T> {
         self.server.log_on_disk().expect("a log").rows(table)
     }
 }

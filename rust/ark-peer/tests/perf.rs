@@ -25,9 +25,9 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ark::format::Encode;
 use ark::frames::Frame;
 use ark::hash::EntryHash;
-use ark::json::Json;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Seq, Snapshot};
 use ark::peer::{Functions, Who};
 use ark::row::{Id, Type};

@@ -97,9 +97,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
-use crate::json::Json;
 use crate::log::{Durable, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Snapshot};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Log, Store, Undo, LOG};
@@ -522,35 +522,13 @@ impl Peer {
         Store::from_rows_in(self.store.schema_arc().clone(), self.space, rows)
     }
 
-    /// The store a log standing on `base` has with these rows.
-    fn on(&self, rows: &[(String, Vec<Vec<u8>>)], log: impl IntoIterator<Item = Vec<u8>>) -> Result<Store, Refusal> {
-        let mut s = self.of_rows(rows)?;
-        s.start_log(log)?;
-        Ok(s)
-    }
-
     /// A snapshot's rows as some schema wrote them, read under this
-    /// peer's (§1.2): each row completed or cut to its prefix, a table this
-    /// schema lacks dropped; and whether they were another schema's (a
-    /// table of this space missing counts).
-    fn fit_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Rows, bool), Refusal> {
-        let schema = self.store.schema_arc().clone();
-        let mut other = schema.tables.iter().filter(|t| t.space == self.space).count() != rows.len();
-        let mut out = vec![];
-        for (name, rs) in rows {
-            let Some((_, t)) = schema.table(name) else {
-                other = true;
-                continue;
-            };
-            let mut fitted = vec![];
-            for r in rs {
-                let (r, o) = t.fit(r)?;
-                other |= o;
-                fitted.push(r);
-            }
-            out.push((name.clone(), fitted));
-        }
-        Ok((out, other))
+    /// peer's (§1.2), and a log standing on `log`; and whether the rows were
+    /// another schema's ([`Store::from_rows_fit`]).
+    fn on_fit(&self, rows: &[(String, Vec<Vec<u8>>)], log: impl IntoIterator<Item = Vec<u8>>) -> Result<(Store, bool), Refusal> {
+        let (mut s, other) = Store::from_rows_fit(self.store.schema_arc().clone(), self.space, rows)?;
+        s.start_log(log)?;
+        Ok((s, other))
     }
 
     /// The id this peer's next intent will have (§1.6).
@@ -679,8 +657,8 @@ impl Peer {
             local,
             roles: self.me.roles.clone(),
             func,
-            // An input is its JSON; no bytes are `null`.
-            input: if input.is_empty() { b"null".to_vec() } else { input },
+            // An input is its encoding; no bytes are `()`'s.
+            input: if input.is_empty() { ().to_bytes() } else { input },
             now,
         };
         let id = entry.id;
@@ -1102,11 +1080,24 @@ impl Peer {
                 return self.ask(o);
             }
             // Facts of another schema are read under this one, and the
-            // state the entry says is taken as it says (§1.2).
-            let (facts, other) = fit(&self.store.schema_arc().clone(), &l.facts);
-            let trust = self.faith || other;
+            // state the entry says is taken as it says (§1.2). Facts are
+            // fitted only when they are not this schema's as they are,
+            // which comparing them to the preview or applying them says: a
+            // row is read once.
+            let schema = self.store.schema_arc().clone();
             let own = self.pending.first().is_some_and(|p| p.entry.id == l.entry.id);
-            if !undone && own && self.pending[0].changes == facts {
+            let mut fitted = None;
+            let previewed = !undone
+                && own
+                && (self.pending[0].changes == l.facts || {
+                    let f = fit(&schema, &l.facts);
+                    let same = self.pending[0].changes == f.0;
+                    fitted = Some(f);
+                    same
+                });
+            if previewed {
+                let other = fitted.is_some_and(|f| f.1);
+                let trust = self.faith || other;
                 let store = &self.store;
                 let undone = self.pending[1..].iter().map(|p| p.undo.0.get_or_init(|| store.undo_of(&p.changes)));
                 let same = store.hash_beside(undone) == l.state;
@@ -1120,7 +1111,16 @@ impl Peer {
                     self.undo_pending(o);
                     undone = true;
                 }
-                let applied = self.store.apply_all(&facts).is_ok();
+                let apply = |store: &mut Store, (f, o): (Vec<Change>, bool)| {
+                    let a = store.apply_all(&f).is_ok();
+                    (f, o, a)
+                };
+                let (facts, other, applied) = match fitted {
+                    Some(f) => apply(&mut self.store, f),
+                    None if self.store.apply_all(&l.facts).is_ok() => (l.facts.clone(), false, true),
+                    None => apply(&mut self.store, fit(&schema, &l.facts)),
+                };
+                let trust = self.faith || other;
                 let same = applied && self.store.state_hash() == l.state;
                 if !applied || !same && !trust {
                     self.redo_pending(o);
@@ -1190,9 +1190,7 @@ impl Peer {
         if (s.seq == n || s.seq < n && self.space == Space::Durable) && self.log().has(s.seq, &s.hash) {
             return;
         }
-        let new = self
-            .fit_rows(&s.rows)
-            .and_then(|(rows, other)| Ok((self.on(&rows, [s.base().to_bytes()])?, other)));
+        let new = self.on_fit(&s.rows, [s.base().to_bytes()]);
         let Ok(new) = new else {
             return;
         };
@@ -1315,24 +1313,28 @@ impl Peer {
         self.pending.clear();
         let (log, rows): (Rows, Rows) = d.rows.into_iter().partition(|(t, _)| t == LOG);
         let log = log.into_iter().flat_map(|(_, rs)| rs);
-        if let Ok(mut store) = self.fit_rows(&rows).and_then(|(rows, _)| self.on(&rows, log)) {
+        if let Ok((mut store, _)) = self.on_fit(&rows, log) {
+            // Every entry read once: those the rows hold, from their rows,
+            // and those appended, as their records were read; facts fitted
+            // only when they are not this schema's as they are.
             let schema = store.schema_arc().clone();
-            let n = d.logged.len();
-            let whole = d
-                .logged
-                .into_iter()
-                .take_while(|l| store.append(l, &fit(&schema, &l.facts).0).is_ok())
-                .count()
-                == n;
-            if !whole {
+            let mut entries = store.log().entries();
+            let (n, held) = (d.logged.len(), entries.len());
+            for l in d.logged {
+                if store.append(&l, &l.facts).is_err() && store.append(&l, &fit(&schema, &l.facts).0).is_err() {
+                    break;
+                }
+                entries.push(l);
+            }
+            if entries.len() - held < n {
                 o.persist(Record::Rows(store.kv_rows()));
             }
-            let foreign = foreign(&store);
+            let foreign = foreign(&store, &entries);
             (self.foreign, self.faith) = (foreign, foreign.is_some_and(|f| f == store.log().head().0));
             o.told.extend(self.store.diff(&store));
             self.store = store;
             if let Role::Authority { journal } = &mut self.role {
-                for l in self.store.log().entries() {
+                for l in &entries {
                     journal.verdicts.insert(l.entry.id, Verdict::Ok { seq: l.seq });
                     journal.pass(l.entry.origin, &l.entry.actor, l.entry.local);
                 }
@@ -1346,22 +1348,19 @@ impl Peer {
 
 /// The last entry of a store's log whose state is not what its rows give
 /// under this schema, read from the head down by undoing each entry's
-/// facts: one logged under another schema (§1.2); the row the log stands
-/// on when only it is.
-fn foreign(store: &Store) -> Option<Seq> {
-    let (schema, log) = (store.schema_arc().clone(), store.log());
-    let mut s = store.clone();
-    for l in log.entries().iter().rev() {
-        if s.state_hash() != l.state {
+/// facts from the tables' digests (§1.3's arithmetic, no row read): one
+/// logged under another schema (§1.2); the row the log stands on when only
+/// it is. `entries` are the log's, read.
+fn foreign(store: &Store, entries: &[Logged]) -> Option<Seq> {
+    let mut ds = store.digests();
+    for l in entries.iter().rev() {
+        if store.hash_with(&ds) != l.state {
             return Some(l.seq);
         }
-        let undo: Vec<Change> = fit(&schema, &l.facts).0.iter().rev().map(Change::inverse).collect();
-        if s.apply_all(&undo).is_err() {
-            return Some(l.seq);
-        }
+        store.undo_of(&l.facts).apply(&mut ds);
     }
-    let base = log.base();
-    (s.state_hash() != base.state).then_some(base.seq)
+    let base = store.log().base();
+    (store.hash_with(&ds) != base.state).then_some(base.seq)
 }
 
 /// A scope's verdict on a row of a table.

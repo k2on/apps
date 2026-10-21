@@ -12,9 +12,9 @@ mod support {
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
-use ark::json::Json;
 use ark::log::{Durable, EntryId, Logged, Origin, Record};
 use ark::peer::{Ctx, Functions, Input, Output, Peer, Procedure};
 use ark::store::{Change, LOG};
@@ -24,8 +24,12 @@ use support::wire::*;
 /// The state after the scenario's four entries, on every peer: alice's
 /// playlist "Favorites" with t1, t2 and t9 at 1, 2 and 3. N1 moved it
 /// (`bb0abc1a…` before): rows are their JSON, and an id is drawn from
-/// `(origin, local)` without the codec; the scenario is as it was.
-const FINAL: &str = "dbd4f870f936b8fc142002dc4c605e8e81b9d59c64a95cccfd22b99637188c4e";
+/// `(origin, local)` without the codec; the scenario is as it was. N4
+/// made the value format postcard (`dbd4f870…` under `values-json`).
+const FINAL: &str = match ark::format::NAME.as_bytes() {
+    b"json" => "dbd4f870f936b8fc142002dc4c605e8e81b9d59c64a95cccfd22b99637188c4e",
+    _ => "bde6d903ffaacfaf561e66bd8cfd41a15b3efa5c56a55f80c749eac0bc78a87e",
+};
 
 /// The playlist alice's first intent creates: its first draw.
 fn pid() -> [u8; 16] {
@@ -122,7 +126,7 @@ impl Row for ark::store::Store {
     fn get_row(&self, table: &str, id: &[u8]) -> Option<Vec<u8>> {
         use ark::store::Read;
         let mut k = vec![];
-        ark::json::put_key(&ark::row::Id::<()>::new(id.try_into().unwrap()), &mut k);
+        ark::format::put_key(&ark::row::Id::<()>::new(id.try_into().unwrap()), &mut k);
         self.get(table, &k)
     }
 }

@@ -1,6 +1,6 @@
 //! §1.1 Hash spaces, each its own type: [`StateHash`] (a store's rows
 //! under its schema), [`EntryHash`] (the chain to a logged entry, §1.6)
-//! and [`SchemaHash`] (a schema's JSON, which every state hash starts
+//! and [`SchemaHash`] (a schema's bytes, which every state hash starts
 //! from, §1.3). In JSON each is its hex. Each is SHA-256, thirty-two bytes, and
 //! comparing two of different spaces does not compile.
 //!
@@ -74,12 +74,12 @@ macro_rules! spaces {
         }
         impl serde::Serialize for $n {
             fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                crate::json::hex_bytes::serialize(&self.0, s)
+                crate::format::hex_bytes::serialize(&self.0, s)
             }
         }
         impl<'de> serde::Deserialize<'de> for $n {
             fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<$n, D::Error> {
-                crate::json::hex_bytes::deserialize(d).map($n)
+                crate::format::hex_bytes::deserialize(d).map($n)
             }
         }
     )*};
@@ -88,10 +88,10 @@ macro_rules! spaces {
 spaces! {
     /// `sha256(schema_hash ‖ the space's tables' digests in schema order)` (§1.3).
     StateHash,
-    /// `sha256(prev ‖ json([seq, entry, facts, state]))` (§1.6); the
+    /// `sha256(prev ‖ enc([seq, entry, facts, state]))` (§1.6); the
     /// chain's start is thirty-two zero bytes.
     EntryHash,
-    /// `sha256(json(schema))` (§1.2).
+    /// `sha256(enc(schema))` (§1.2).
     SchemaHash,
 }
 

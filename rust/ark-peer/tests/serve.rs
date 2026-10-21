@@ -11,8 +11,8 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::json::Json;
 use ark::log::{Entry, EntryId, Origin};
 use ark::peer::Who;
 use ark::schema::Space;

@@ -1,55 +1,26 @@
-//! §1.1 Values and keys. A value is JSON: `serde_json`, compact, a
-//! struct's fields in declaration order, a map's keys in order (`BTreeMap`)
-//! and no floats, so one value has one encoding, which is what a row's leaf
-//! of the state hash (§1.3) and an entry's link in the chain (§1.6) are
-//! taken over. A key is the same value in the `memcomparable` encoding:
-//! bytes whose `memcmp` order is the values' order, no encoding a proper
-//! prefix of another's, so a prefix of a key's columns is a prefix of its
-//! bytes and the store is ordered by `memcmp`.
+//! §1.1, §1.16 A value without a Rust type: JSON under a [`Type`].
 //!
-//! A value without a Rust type — a row as the store and a replica see it,
-//! a row the explorer edits — is a [`serde_json::Value`] read under the
-//! schema's [`Type`]: [`Typed`] serializes it exactly as the Rust type it
-//! describes would be serialized, so its JSON is that type's bytes and its
-//! key that type's key, whichever side made it.
-//!
-//! Bytes that are already JSON — a row, an input — travel inside a frame
-//! or a record as the JSON they are ([`raw`]); hashes and ids are hex.
+//! A row as the store and a replica see it, a row the explorer edits, an
+//! input a phone sends as JSON, is a [`serde_json::Value`] read under the
+//! schema's or the function's [`Type`]. [`Typed`] serializes it exactly as
+//! the Rust type it describes would be serialized, so its bytes in the
+//! value format ([`crate::format`]) are that type's bytes and its key that
+//! type's key, whichever side made it; [`Seed`] reads it back from those
+//! bytes, as the JSON the Rust type would be written as.
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
-use serde::de::{DeserializeOwned, Error as _};
+use serde::de::{DeserializeSeed, EnumAccess, Error as _, MapAccess, SeqAccess, VariantAccess, Visitor};
 use serde::ser::{
     Error as _, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::value::RawValue;
 use serde_json::Value as J;
 
 use crate::hash::{hex, unhex};
 use crate::row::Type;
 use crate::Refusal;
-
-/// A value with its one JSON encoding, read back from it alone.
-pub trait Json: Serialize + DeserializeOwned {
-    fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("a value serializes")
-    }
-
-    fn from_bytes(b: &[u8]) -> Result<Self, Refusal> {
-        serde_json::from_slice(b).map_err(|e| Refusal(e.to_string()))
-    }
-}
-
-impl<T: Serialize + DeserializeOwned> Json for T {}
-
-/// `v`'s key bytes appended to `out`.
-pub fn put_key<T: Serialize + ?Sized>(v: &T, out: &mut Vec<u8>) {
-    let mut s = memcomparable::Serializer::new(std::mem::take(out));
-    v.serialize(&mut s).expect("a key serializes");
-    *out = s.into_inner();
-}
 
 /// A name kept for the life of the process: what serde's `&'static str`
 /// names a schema's field or variant by. One per distinct name.
@@ -66,106 +37,19 @@ pub fn intern(name: &str) -> &'static str {
     }
 }
 
-// * Fixed bytes as hex
-
-/// Bytes as lowercase hex in JSON, as bytes in a key.
-pub mod hex_bytes {
-    use super::*;
-
-    pub fn serialize<S: Serializer, B: AsRef<[u8]>>(b: &B, s: S) -> Result<S::Ok, S::Error> {
-        match s.is_human_readable() {
-            true => s.serialize_str(&hex(b.as_ref())),
-            false => s.serialize_bytes(b.as_ref()),
+/// Names kept for the life of the process, as a list: a struct's fields or
+/// a sum's variants, as serde's deserializers are told them.
+fn interned(names: Vec<&str>) -> &'static [&'static str] {
+    static LISTS: Mutex<BTreeSet<&'static [&'static str]>> = Mutex::new(BTreeSet::new());
+    let names: Vec<&'static str> = names.into_iter().map(intern).collect();
+    let mut lists = LISTS.lock().unwrap_or_else(|e| e.into_inner());
+    match lists.get(&names[..]) {
+        Some(l) => l,
+        None => {
+            let l: &'static [&'static str] = Box::leak(names.into_boxed_slice());
+            lists.insert(l);
+            l
         }
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>, B: TryFrom<Vec<u8>>>(d: D) -> Result<B, D::Error> {
-        let s = <std::borrow::Cow<str>>::deserialize(d)?;
-        let b = unhex(&s).ok_or_else(|| D::Error::custom("not lowercase hex"))?;
-        B::try_from(b).map_err(|_| D::Error::custom("not as many bytes as it is"))
-    }
-}
-
-// * Bytes that are JSON
-
-/// Bytes that are JSON, written as they are: the shape serde_json's own
-/// `RawValue` serializes as, which its serializer writes without reading (a
-/// row or an input is read once, where it enters).
-struct AsRaw<'a>(&'a str);
-
-const RAW_TOKEN: &str = "$serde_json::private::RawValue";
-
-impl Serialize for AsRaw<'_> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let mut st = s.serialize_struct(RAW_TOKEN, 1)?;
-        st.serialize_field(RAW_TOKEN, self.0)?;
-        st.end()
-    }
-}
-
-fn as_raw<E: serde::ser::Error>(b: &[u8]) -> Result<AsRaw<'_>, E> {
-    if b.is_empty() {
-        return Err(E::custom("no bytes are no JSON value"));
-    }
-    std::str::from_utf8(b).map(AsRaw).map_err(E::custom)
-}
-
-/// Bytes that are a JSON value, written as that value.
-pub mod raw {
-    use super::*;
-
-    pub fn serialize<S: Serializer>(b: &[u8], s: S) -> Result<S::Ok, S::Error> {
-        as_raw::<S::Error>(b)?.serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        Ok(<Box<RawValue>>::deserialize(d)?.get().as_bytes().to_vec())
-    }
-}
-
-/// A list of JSON values' bytes.
-pub mod raw_list {
-    use super::*;
-
-    pub fn serialize<S: Serializer>(rows: &[Vec<u8>], s: S) -> Result<S::Ok, S::Error> {
-        let mut seq = s.serialize_seq(Some(rows.len()))?;
-        for r in rows {
-            seq.serialize_element(&as_raw::<S::Error>(r)?)?;
-        }
-        seq.end()
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Vec<u8>>, D::Error> {
-        Ok(<Vec<Box<RawValue>>>::deserialize(d)?
-            .iter()
-            .map(|r| r.get().as_bytes().to_vec())
-            .collect())
-    }
-}
-
-/// Rows by table, each row's bytes JSON.
-pub mod raw_tables {
-    use super::*;
-
-    #[derive(Serialize)]
-    struct Out<'a>(&'a str, #[serde(with = "raw_list")] &'a Vec<Vec<u8>>);
-
-    #[derive(Deserialize)]
-    struct In(String, #[serde(with = "raw_list")] Vec<Vec<u8>>);
-
-    /// Rows by table, as a store's snapshot holds them.
-    pub type Tables = Vec<(String, Vec<Vec<u8>>)>;
-
-    pub fn serialize<S: Serializer>(rows: &[(String, Vec<Vec<u8>>)], s: S) -> Result<S::Ok, S::Error> {
-        let mut seq = s.serialize_seq(Some(rows.len()))?;
-        for (t, rs) in rows {
-            seq.serialize_element(&Out(t, rs))?;
-        }
-        seq.end()
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Tables, D::Error> {
-        Ok(<Vec<In>>::deserialize(d)?.into_iter().map(|In(t, rs)| (t, rs)).collect())
     }
 }
 
@@ -315,9 +199,19 @@ impl Serialize for Obj<'_> {
     }
 }
 
-/// A value's JSON under its type, or why it is not one of it.
-pub fn typed_json(t: &Type, v: &J) -> Result<Vec<u8>, Refusal> {
-    serde_json::to_vec(&Typed(t, v)).map_err(|e| Refusal(e.to_string()))
+/// A value's bytes in the value format under its type, or why it is not
+/// one of it.
+pub fn typed_bytes(t: &Type, v: &J) -> Result<Vec<u8>, Refusal> {
+    crate::format::encode(&Typed(t, v))
+}
+
+/// A value of a type from its bytes in the value format, whole: the JSON
+/// its Rust type is written as.
+pub fn typed_value(t: &Type, b: &[u8]) -> Result<J, Refusal> {
+    #[cfg(not(feature = "values-json"))]
+    return crate::format::decode_seed(Seed(t), b);
+    #[cfg(feature = "values-json")]
+    return serde_json::from_slice(b).map_err(|e| Refusal(format!("a {}: {e}", t.decl())));
 }
 
 /// A value's key under its type, appended to `out`, or why it is not one.
@@ -326,4 +220,172 @@ pub fn typed_key(t: &Type, v: &J, out: &mut Vec<u8>) -> Result<(), Refusal> {
     let r = Typed(t, v).serialize(&mut s).map_err(|e| Refusal(e.to_string()));
     *out = s.into_inner();
     r
+}
+
+/// A value's bytes in the value format from its JSON text under its type:
+/// how a value crosses from a host that speaks JSON (a phone, a command
+/// line). No text is `null`.
+pub fn from_text(t: &Type, text: &str) -> Result<Vec<u8>, Refusal> {
+    let v: J = match text.trim() {
+        "" => J::Null,
+        t => serde_json::from_str(t).map_err(|e| Refusal(e.to_string()))?,
+    };
+    typed_bytes(t, &v)
+}
+
+/// A value's JSON text under its type, from its bytes in the value format.
+pub fn to_text(t: &Type, b: &[u8]) -> Result<String, Refusal> {
+    let v = typed_value(t, b)?;
+    serde_json::to_string(&Typed(t, &v)).map_err(|e| Refusal(e.to_string()))
+}
+
+// * A value of a type, read
+
+/// Reads a value of a type as the JSON its Rust type is written as:
+/// [`Typed`]'s inverse, for a format that does not say what it holds.
+#[derive(Clone, Copy)]
+pub struct Seed<'a>(pub &'a Type);
+
+impl<'de> DeserializeSeed<'de> for Seed<'_> {
+    type Value = J;
+
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<J, D::Error> {
+        match self.0 {
+            Type::Int => i64::deserialize(d).map(J::from),
+            Type::Text => String::deserialize(d).map(J::String),
+            Type::Bool => bool::deserialize(d).map(J::Bool),
+            Type::Bytes => Vec::<u8>::deserialize(d).map(|b| J::Array(b.into_iter().map(J::from).collect())),
+            Type::Unit => <()>::deserialize(d).map(|_| J::Null),
+            Type::Id(_) => match crate::format::bytes(d)? {
+                b if b.len() == 16 => Ok(J::String(hex(&b))),
+                _ => Err(D::Error::custom("an id is 16 bytes")),
+            },
+            Type::Option(t) => d.deserialize_option(Of(t)),
+            Type::List(t) => d.deserialize_seq(Of(t)),
+            Type::Tuple(ts) => d.deserialize_tuple(ts.len(), Fields(ts.iter().map(|t| ("", t)).collect(), false)),
+            Type::Record(n, fs) if fs.len() == 1 && positional(fs) => d.deserialize_newtype_struct(intern(n), Of(&fs[0].1)),
+            Type::Record(n, fs) if positional(fs) => d.deserialize_tuple_struct(intern(n), fs.len(), fields(fs, false)),
+            Type::Record(n, fs) => d.deserialize_struct(intern(n), interned(fs.iter().map(|f| &f.0[..]).collect()), fields(fs, true)),
+            Type::Sum(n, vs) => d.deserialize_enum(intern(n), interned(vs.iter().map(|v| &v.0[..]).collect()), Variants(vs)),
+        }
+    }
+}
+
+fn fields(fs: &[(String, Type)], named: bool) -> Fields<'_> {
+    Fields(fs.iter().map(|(n, t)| (&n[..], t)).collect(), named)
+}
+
+/// An option's, a list's or a newtype's one type.
+struct Of<'a>(&'a Type);
+
+impl<'de> Visitor<'de> for Of<'_> {
+    type Value = J;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "a {}", self.0.decl())
+    }
+    fn visit_none<E: serde::de::Error>(self) -> Result<J, E> {
+        Ok(J::Null)
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> Result<J, E> {
+        Ok(J::Null)
+    }
+    fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<J, D::Error> {
+        Seed(self.0).deserialize(d)
+    }
+    fn visit_newtype_struct<D: Deserializer<'de>>(self, d: D) -> Result<J, D::Error> {
+        Seed(self.0).deserialize(d)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<J, A::Error> {
+        let mut out = vec![];
+        while let Some(x) = a.next_element_seed(Seed(self.0))? {
+            out.push(x);
+        }
+        Ok(J::Array(out))
+    }
+}
+
+/// A tuple's or a record's fields, in order: an array, or an object of
+/// them by name.
+struct Fields<'a>(Vec<(&'a str, &'a Type)>, bool);
+
+impl<'de> Visitor<'de> for Fields<'_> {
+    type Value = J;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{} fields", self.0.len())
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<J, A::Error> {
+        let mut xs = Vec::with_capacity(self.0.len());
+        for (_, t) in &self.0 {
+            xs.push(a.next_element_seed(Seed(t))?.ok_or_else(|| A::Error::custom("a field missing"))?);
+        }
+        Ok(match self.1 {
+            true => J::Object(self.0.iter().map(|(n, _)| n.to_string()).zip(xs).collect()),
+            false => J::Array(xs),
+        })
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<J, A::Error> {
+        let mut m = serde_json::Map::new();
+        while let Some(k) = a.next_key::<String>()? {
+            let (_, t) = self
+                .0
+                .iter()
+                .find(|(n, _)| *n == k)
+                .ok_or_else(|| A::Error::custom(format!("no field {k}")))?;
+            m.insert(k, a.next_value_seed(Seed(t))?);
+        }
+        Ok(J::Object(m))
+    }
+}
+
+/// A sum's variants: the one read, by its index, as serde's JSON writes
+/// it — its name, or an object of one entry, its name to its payload.
+struct Variants<'a>(&'a [(String, Vec<(String, Type)>)]);
+
+/// A variant's index, as a binary format writes it, or its name.
+struct Which<'a>(&'a [(String, Vec<(String, Type)>)]);
+
+impl<'de> DeserializeSeed<'de> for Which<'_> {
+    type Value = usize;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<usize, D::Error> {
+        d.deserialize_identifier(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Which<'_> {
+    type Value = usize;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("a variant")
+    }
+    fn visit_u64<E: serde::de::Error>(self, i: u64) -> Result<usize, E> {
+        (i as usize)
+            .lt(&self.0.len())
+            .then_some(i as usize)
+            .ok_or_else(|| E::custom("no such variant"))
+    }
+    fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<usize, E> {
+        self.0
+            .iter()
+            .position(|(n, _)| n == s)
+            .ok_or_else(|| E::custom(format!("no variant {s}")))
+    }
+}
+
+impl<'de> Visitor<'de> for Variants<'_> {
+    type Value = J;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("a variant")
+    }
+    fn visit_enum<A: EnumAccess<'de>>(self, a: A) -> Result<J, A::Error> {
+        let (i, v) = a.variant_seed(Which(self.0))?;
+        let (name, fs) = &self.0[i];
+        let one = |p: J| J::Object([(name.clone(), p)].into_iter().collect());
+        match fs.len() {
+            0 => v.unit_variant().map(|_| J::String(name.clone())),
+            1 if positional(fs) => v.newtype_variant_seed(Seed(&fs[0].1)).map(one),
+            k if positional(fs) => v.tuple_variant(k, fields(fs, false)).map(one),
+            _ => v
+                .struct_variant(interned(fs.iter().map(|f| &f.0[..]).collect()), fields(fs, true))
+                .map(one),
+        }
+    }
 }

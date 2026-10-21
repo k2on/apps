@@ -1,5 +1,5 @@
 //! The `hash/` vectors of v4 re-derived: the same demo rows under the same
-//! schema, each its JSON, hashed by §1.3 — a leaf per row, `sha256(table ‖
+//! schema, each its bytes in the value format, hashed by §1.3 — a leaf per row, `sha256(table ‖
 //! row)`; a digest per table, the leaves' sum modulo 2^256; the
 //! state hash, `sha256(schema_hash ‖ durable digests in schema order)`.
 //! Written to `spec/vectors/hash/` when `ARK_WRITE_VECTORS` is set, and
@@ -49,6 +49,9 @@ fn dir() -> PathBuf {
 }
 
 fn vector(name: &str, text: String) {
+    if ark::format::NAME != "postcard" {
+        return eprintln!("spec/vectors are postcard's; this build writes {}: not held", ark::format::NAME);
+    }
     let path = dir().join(name);
     if std::env::var_os("ARK_WRITE_VECTORS").is_some() {
         std::fs::create_dir_all(dir()).unwrap();

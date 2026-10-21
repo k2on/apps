@@ -57,9 +57,9 @@ pub mod web;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use ark::format::Encode;
 use ark::frames::Frame;
 use ark::hash::EntryHash;
-use ark::json::Json;
 use ark::log::{Durable, Entry, EntryId, Logged, Origin, Seq};
 use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Who};
 use ark::plan::Maintained;

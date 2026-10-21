@@ -26,12 +26,12 @@ use std::marker::PhantomData;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::json::Json;
+use crate::format::Encode;
 use crate::schema::{Column, Table};
 use crate::Refusal;
 
-/// A value a domain stores, takes or answers: its JSON ([`crate::json`]),
-/// read back from it alone.
+/// A value a domain stores, takes or answers: its bytes in the value
+/// format ([`crate::format`]), read back from them alone.
 pub trait Value: Serialize + DeserializeOwned + Clone + fmt::Debug + PartialEq + Send + Sync + 'static {
     fn encode(&self) -> Vec<u8> {
         self.to_bytes()
@@ -55,7 +55,7 @@ pub trait Key {
 
 impl<T: Serialize + ?Sized> Key for T {
     fn put_key(&self, out: &mut Vec<u8>) {
-        crate::json::put_key(self, out)
+        crate::format::put_key(self, out)
     }
 }
 
@@ -209,12 +209,12 @@ impl<R> fmt::Debug for Id<R> {
 }
 impl<R> Serialize for Id<R> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        crate::json::hex_bytes::serialize(&self.0, s)
+        crate::format::hex_bytes::serialize(&self.0, s)
     }
 }
 impl<'de, R> Deserialize<'de> for Id<R> {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Id<R>, D::Error> {
-        crate::json::hex_bytes::deserialize(d).map(Id::new)
+        crate::format::hex_bytes::deserialize(d).map(Id::new)
     }
 }
 impl<R: Row> Describe for Id<R> {
@@ -238,7 +238,7 @@ pub trait Row: Value + Describe {
     /// The key, as the store holds it.
     fn key_bytes(&self) -> Vec<u8> {
         let mut out = vec![];
-        crate::json::put_key(&self.key(), &mut out);
+        crate::format::put_key(&self.key(), &mut out);
         out
     }
 }

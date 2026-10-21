@@ -4,12 +4,12 @@
 //! ```text
 //! Entry  { id, actor, session, origin, local, roles, func, input, now }
 //! Logged { seq, entry, facts, state, hash }
-//! hash = sha256(prev.hash ‖ json([seq, entry, facts, state]))
+//! hash = sha256(prev.hash ‖ enc([seq, entry, facts, state]))
 //! ```
 //!
 //! **The log is a table.** Its entries are the rows of the store's `_log`
 //! table ([`crate::store::LOG`]), keyed by sequence, each row a
-//! [`Logged`]'s JSON; the chain is that table's invariant, judged at
+//! [`Logged`]'s encoding; the chain is that table's invariant, judged at
 //! every write to it ([`Logged::links`]), and its first row is the one the
 //! log stands on (the horizon, or a snapshot's head), not checked. What a
 //! peer makes durable is the store's rows whole, the log's table's among
@@ -41,8 +41,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::format::Encode;
 use crate::hash::{sha256, EntryHash, StateHash};
-use crate::json::Json;
 use crate::store::Change;
 use crate::Refusal;
 
@@ -50,7 +50,7 @@ use crate::Refusal;
 pub type Seq = i64;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct EntryId(#[serde(with = "crate::json::hex_bytes")] pub [u8; 16]);
+pub struct EntryId(#[serde(with = "crate::format::hex_bytes")] pub [u8; 16]);
 
 impl std::fmt::Debug for EntryId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -64,7 +64,7 @@ fn first16(h: [u8; 32]) -> [u8; 16] {
 
 /// Where a replica's intents come from: drawn once, kept (§1.6).
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct Origin(#[serde(with = "crate::json::hex_bytes")] pub [u8; 16]);
+pub struct Origin(#[serde(with = "crate::format::hex_bytes")] pub [u8; 16]);
 
 impl std::fmt::Debug for Origin {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -114,8 +114,8 @@ pub struct Entry {
     pub local: i64,
     pub roles: Vec<String>,
     pub func: String,
-    /// The input's JSON, carried as that JSON.
-    #[serde(with = "crate::json::raw")]
+    /// The input's encoding, carried as it is.
+    #[serde(with = "crate::format::raw")]
     pub input: Vec<u8>,
     pub now: i64,
 }
@@ -130,7 +130,7 @@ impl Default for Entry {
             local: 0,
             roles: vec![],
             func: String::new(),
-            input: b"null".to_vec(),
+            input: ().to_bytes(),
             now: 0,
         }
     }
@@ -156,7 +156,7 @@ pub struct Logged {
 impl Logged {
     /// The hash of the chain to an entry, from the one before it.
     pub fn chain(prev: &EntryHash, seq: Seq, entry: &Entry, facts: &[Change], state: &StateHash) -> EntryHash {
-        let b = serde_json::to_vec(&(seq, entry, facts, state)).expect("an entry serializes");
+        let b = crate::format::encode(&(seq, entry, facts, state)).expect("an entry serializes");
         EntryHash(sha256(&[&prev.0, &b]))
     }
 
@@ -186,7 +186,7 @@ pub struct Snapshot {
     pub seq: Seq,
     pub hash: EntryHash,
     pub state: StateHash,
-    #[serde(with = "crate::json::raw_tables")]
+    #[serde(with = "crate::format::raw_tables")]
     pub rows: Vec<(String, Vec<Vec<u8>>)>,
 }
 
@@ -219,18 +219,31 @@ pub type Rows = Vec<(String, Vec<Vec<u8>>)>;
 #[allow(clippy::large_enum_variant)]
 pub enum Record {
     Logged(Logged),
-    Rows(#[serde(with = "crate::json::raw_tables")] Rows),
+    Rows(#[serde(with = "crate::format::raw_tables")] Rows),
 }
 
 impl Record {
     /// A logged entry's record from its row of the log's table, which is
-    /// the entry's JSON: the variant's object around the row as it is.
+    /// the entry's encoding: the variant around the row as it is (its
+    /// object in JSON, its index, 0, before it in postcard).
     pub fn logged(row: &[u8]) -> Vec<u8> {
-        [&b"{\"Logged\":"[..], row, b"}"].concat()
+        #[cfg(not(feature = "values-json"))]
+        return [&[0u8][..], row].concat();
+        #[cfg(feature = "values-json")]
+        return [&b"{\"Logged\":"[..], row, b"}"].concat();
     }
 
     pub fn enc(&self) -> Vec<u8> {
         self.to_bytes()
+    }
+
+    /// Whether these bytes are a record of the store's rows whole, told by
+    /// their variant alone.
+    pub fn is_rows(b: &[u8]) -> bool {
+        #[cfg(not(feature = "values-json"))]
+        return b.first() == Some(&1);
+        #[cfg(feature = "values-json")]
+        return b.starts_with(br#"{"Rows""#);
     }
 
     pub fn dec(b: &[u8]) -> Result<Record, Refusal> {
@@ -244,7 +257,7 @@ impl Record {
 /// intents still pending; and the last `local` it drew.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Durable {
-    #[serde(with = "crate::json::raw_tables")]
+    #[serde(with = "crate::format::raw_tables")]
     pub rows: Rows,
     pub logged: Vec<Logged>,
     pub pending: Vec<Entry>,

@@ -99,8 +99,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
+use ark::format::Encode as Bytes;
 use ark::hash::hex;
-use ark::json::Json as Bytes;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Journal, Role, Who};
 use ark_auth::client::Patience;
@@ -300,10 +300,11 @@ fn input(hosted: &Hosted, name: &str, v: &Value) -> Result<Vec<u8>, String> {
         .domain
         .get(name)
         .ok_or_else(|| format!("harken-peer knows no function {name}"))?;
-    let b = match f.input {
-        ark::row::Type::Unit => b"null".to_vec(),
-        _ => serde_json::to_vec(v).map_err(|e| e.to_string())?,
+    let v = match f.input {
+        ark::row::Type::Unit => &Value::Null,
+        _ => v,
     };
+    let b = ark::json::typed_bytes(&f.input, v).map_err(|r| format!("`args`: {r}"))?;
     (f.check)(&b).map_err(|fs| {
         fs.into_iter()
             .map(|(f, why)| format!("`{f}`: {why}"))
@@ -963,7 +964,8 @@ impl Headless {
                             .ask(&self.client.log.store, &ctx, &name, &b)
                             .map_err(|r| r.0)
                     })
-                    .and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()));
+                    .and_then(|b| self.hosted.domain.answer_json(&name, &b).map_err(|r| r.0))
+                    .and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string()));
                 match answer {
                     Ok(v) => Answer::default().set("rows", v),
                     Err(e) => Answer::refused(e),
@@ -1409,7 +1411,7 @@ mod tests {
         assert_eq!(back.media_id.0[15], 42);
         assert_eq!(
             input(&h, "playlists.playlists", &json!({})).unwrap(),
-            b"null"
+            ().to_bytes()
         );
         let start = json!({"at": 0, "from": "", "position": 0, "queue": [{"album": "", "creator": "", "duration_ms": 1, "file": "a", "id": id, "title": "A"}]});
         assert!(input(&h, "listening.start", &start).is_ok());

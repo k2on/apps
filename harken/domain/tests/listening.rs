@@ -20,7 +20,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::store::Store;
@@ -57,7 +57,7 @@ impl House {
     }
 
     /// An entry of `name`, authored as `user` on `session`.
-    fn author(&mut self, user: &str, session: &str, name: &str, input: &impl Json) -> Result<(), String> {
+    fn author(&mut self, user: &str, session: &str, name: &str, input: &impl Encode) -> Result<(), String> {
         self.local += 1;
         let ctx = Ctx {
             draws: Default::default(),
@@ -118,12 +118,12 @@ impl House {
     }
 
     /// Call as `device`: nothing, or the refusal.
-    fn call(&mut self, device: &str, transition: &str, input: &impl Json) -> Result<(), String> {
+    fn call(&mut self, device: &str, transition: &str, input: &impl Encode) -> Result<(), String> {
         let user = self.devices.get(device).map_or("alice".to_string(), |d| d.user.clone());
         self.author(&user, device, transition, input)
     }
 
-    fn ok(&mut self, device: &str, transition: &str, input: &impl Json) {
+    fn ok(&mut self, device: &str, transition: &str, input: &impl Encode) {
         self.call(device, transition, input)
             .unwrap_or_else(|why| panic!("{device} {transition}: refused: {why}"))
     }
@@ -1272,7 +1272,7 @@ impl Wire {
     }
 
     /// A call from the device's newest connection, and everything delivered.
-    fn call(&mut self, id: &str, transition: &str, input: &impl Json) {
+    fn call(&mut self, id: &str, transition: &str, input: &impl Encode) {
         let f = format!("listening.{transition}");
         self.net.run(&Op::Call(self.devices[id], f, input.to_bytes()));
         self.net.deliver();

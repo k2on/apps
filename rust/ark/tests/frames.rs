@@ -3,9 +3,9 @@
 #[path = "demo.rs"]
 mod demo;
 
+use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::{EntryHash, SchemaHash, StateHash};
-use ark::json::Json;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
 use ark::schema::Space;
 use ark::store::Change;

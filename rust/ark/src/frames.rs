@@ -27,13 +27,14 @@
 //! `device` is what a device says it is, the bytes the authority authors
 //! its `on_join` from (the driver's to read); `schema` and `version` are the
 //! domain the peer runs, its schema's hash and its version string. A frame
-//! is JSON, serde's derived form (`tests/frames.rs` holds every frame to
+//! is its bytes in the value format, serde's derived form (`crate::format`;
+//! `tests/frames.rs` holds every frame to
 //! reading back as itself).
 
 use serde::{Deserialize, Serialize};
 
+use crate::format::Encode;
 use crate::hash::{EntryHash, SchemaHash};
-use crate::json::Json;
 use crate::log::{Entry, EntryId, Logged, Seq, Snapshot};
 use crate::schema::Space;
 use crate::Refusal;

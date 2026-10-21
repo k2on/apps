@@ -1,6 +1,6 @@
 {
   "schema": {"tables":[{"name":"playlist","columns":[{"name":"id","ty":{"Id":"playlist"},"default":null},{"name":"name","ty":"Text","default":null},{"name":"user_id","ty":"Text","default":null}],"key":1,"indexes":[{"columns":[2,1],"unique":true}],"refs":[],"space":"durable"},{"name":"item","columns":[{"name":"playlist_id","ty":{"Id":"playlist"},"default":null},{"name":"track_id","ty":"Text","default":null},{"name":"pos","ty":"Int","default":null}],"key":2,"indexes":[{"columns":[0,2],"unique":true}],"refs":[{"column":0,"table":"playlist"}],"space":"durable"}]},
-  "schema_hash": "66c044a990fb9c97f15ed8aae9bdcd45be333210bad00a2864297b919ced3ab0",
+  "schema_hash": "fd91553364b25101dd884525e26f74366c541b2f9c05a22f110d734602a51045",
   "store": {"item":[{"playlist_id":"00000000000000000000000000000001","track_id":"t11","pos":3},{"playlist_id":"00000000000000000000000000000001","track_id":"t7","pos":1},{"playlist_id":"00000000000000000000000000000001","track_id":"t9","pos":2}],"playlist":[{"id":"00000000000000000000000000000001","name":"Favorites","user_id":"alice"}]},
-  "hash": "b06bbfa61c6b6d777f28de33b0aaac231f98bf18489e8ea1c66f422dabd0fc9c"
+  "hash": "e639ac5c366552ebe898bf8a1831572b26d55e4ce8dd150e4c7004bd8b3a1379"
 }

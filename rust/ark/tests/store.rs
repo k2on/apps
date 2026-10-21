@@ -7,7 +7,8 @@ mod demo;
 
 use std::sync::Arc;
 
-use ark::json::put_key;
+use ark::format::put_key;
+use ark::hash::hex;
 use ark::row::{Id, Type};
 use ark::schema::{compat, Schema, Table};
 use ark::store::{Change, Dir, Read, Scan, Store};
@@ -41,7 +42,12 @@ fn pid(n: u8) -> Id<()> {
 
 /// A row of `presence(who)`.
 fn presence(who: &str) -> Vec<u8> {
-    format!(r#"{{"who":"{who}"}}"#).into_bytes()
+    row_of(&Table::new("presence").col("who", Type::Text), serde_json::json!({ "who": who }))
+}
+
+/// A row of `t` from its columns' JSON.
+fn row_of(t: &Table, v: serde_json::Value) -> Vec<u8> {
+    ark::dynamic::row_bytes(t, &v).unwrap()
 }
 
 fn whys(s: &mut Store, c: Change) -> String {
@@ -69,14 +75,25 @@ fn constraints_refuse() {
     s.apply(&item(1, "t1", 1)).unwrap();
     assert!(whys(&mut s, item(1, "t2", 1)).contains("(playlist_id, pos)"));
     assert!(whys(&mut s, item(1, "t1", 2)).contains("a row with this key exists"));
+    let first = Table::new("item").col("playlist_id", Type::Id("playlist".into()));
     let short = Change::Add {
         table: "item".into(),
-        row: br#"{"playlist_id":"00000000000000000000000000000001"}"#.to_vec(),
+        row: row_of(&first, serde_json::json!({"playlist_id": hex(&id(1))})),
     };
     assert!(whys(&mut s, short).contains("item"));
+    // The row's bytes but not its one encoding: its columns out of order
+    // in JSON, its last varint (`pos`, 5) not the shortest in postcard.
+    let mut other = item_row(&id(1), "t5", 5);
+    match ark::format::NAME {
+        "json" => other = br#"{"track_id":"t5","playlist_id":"00000000000000000000000000000001","pos":5}"#.to_vec(),
+        _ => {
+            assert_eq!(other.pop(), Some(10));
+            other.extend([0x8a, 0x00]);
+        }
+    }
     let unordered = Change::Add {
         table: "item".into(),
-        row: br#"{"track_id":"t5","playlist_id":"00000000000000000000000000000001","pos":5}"#.to_vec(),
+        row: other,
     };
     assert!(whys(&mut s, unordered).contains("one encoding"));
     let rekey = Change::Edit {
@@ -226,7 +243,8 @@ fn a_row_still_named_is_not_removed() {
     s.put("playlist", playlist_row(&id(1), "x", "alice")).unwrap();
     s.put("playlist", playlist_row(&id(2), "y", "alice")).unwrap();
     s.put("item", item_row(&id(1), "t", 1)).unwrap();
-    s.put("pin", br#"{"n":1,"of":"00000000000000000000000000000002"}"#.to_vec()).unwrap();
+    let pin = row_of(&s.schema().tables[2].clone(), serde_json::json!({"n": 1, "of": hex(&id(2))}));
+    s.put("pin", pin).unwrap();
     let before = s.clone();
     assert!(s.delete("playlist", &key(pid(1))).unwrap_err().0.contains("named by item.playlist_id"));
     assert!(s.delete("playlist", &key(pid(2))).unwrap_err().0.contains("named by pin.of"));
@@ -270,8 +288,8 @@ fn compat_is_a_prefix_extension() {
     let (full, other) = new.tables[1].fit(&row).unwrap();
     assert!(other);
     assert_eq!(
-        String::from_utf8(full.clone()).unwrap(),
-        r#"{"playlist_id":"00000000000000000000000000000001","track_id":"t1","pos":4,"note":null,"plays":0}"#
+        ark::dynamic::row(&new.tables[1], &full).unwrap(),
+        serde_json::json!({"playlist_id": hex(&id(1)), "track_id": "t1", "pos": 4, "note": null, "plays": 0})
     );
     assert_eq!(old.tables[1].fit(&full).unwrap(), (row.clone(), true));
     assert_eq!(old.tables[1].fit(&row).unwrap(), (row, false));
@@ -285,8 +303,8 @@ fn compat_is_a_prefix_extension() {
 /// middle entry came out.
 #[test]
 fn the_log_is_a_table_whose_rows_are_a_chain() {
+    use ark::format::Encode;
     use ark::hash::{EntryHash, StateHash};
-    use ark::json::Json;
     use ark::log::{Entry, Logged};
     use ark::store::LOG;
     let mut s = Store::new(demo::shared());

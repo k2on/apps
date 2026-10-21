@@ -8,13 +8,13 @@
 //! a table's columns is labelled by the table's column names
 //! ([`columns_of`]).
 //!
-//! [`Value`] is a value of a [`Ty`], read from its JSON by [`decode`] and
-//! written back by [`encode`] — the store's own encoding (`ark::json`), so
+//! [`Value`] is a value of a [`Ty`], read from its bytes by [`decode`] and
+//! written back by [`encode`] — the store's own encoding (`ark::format`), so
 //! what a form sends is what a function reads — and said as one line of
 //! text by [`text_of`], which [`parse_cell`] reads back: what a cell shows,
 //! its editor starts with, and a form's field is typed as.
 
-use ark::json::typed_json;
+use ark::json::{typed_bytes, typed_value};
 use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
 use ark::Refusal;
@@ -118,9 +118,9 @@ pub fn columns_of(schema: &Schema, fields: &[(String, Type)]) -> Option<Vec<Stri
     Some(t.columns.iter().map(|c| c.name.clone()).collect())
 }
 
-/// A value of `ty` from its JSON.
+/// A value of `ty` from its bytes in the value format.
 pub fn decode(ty: &Ty, bytes: &[u8]) -> Result<Value, Refusal> {
-    let j: J = serde_json::from_slice(bytes).map_err(|e| Refusal(e.to_string()))?;
+    let j: J = typed_value(&to_type(ty), bytes)?;
     from_json(ty, &j).ok_or_else(|| Refusal(format!("{j} is not a value of {}", ty_name(ty))))
 }
 
@@ -224,7 +224,7 @@ fn to_json(ty: &Ty, v: &Value) -> Option<J> {
 /// A value's JSON under `ty`, or why it is not one.
 pub fn encode(ty: &Ty, v: &Value) -> Result<Vec<u8>, String> {
     let j = to_json(ty, v).ok_or_else(|| format!("{} is not a value of {}", text_of(v), ty_name(ty)))?;
-    typed_json(&to_type(ty), &j).map_err(|e| e.0)
+    typed_bytes(&to_type(ty), &j).map_err(|e| e.0)
 }
 
 /// A type as a person reads it: `text`, `id(playlist)`, `option(int)`,

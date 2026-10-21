@@ -95,7 +95,11 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
     let rows = |p: &Peer, t: &str| p.store.rows(t).map(<[u8]>::to_vec).collect::<Vec<_>>();
     let widened: Vec<Vec<u8>> = rows(&server, "playlist")
         .into_iter()
-        .map(|r| [&r[..r.len() - 1], &br#","note":null}"#[..]].concat())
+        .map(|r| {
+            let mut v = ark::dynamic::row(&demo::schema().tables[0], &r).unwrap();
+            v["note"] = serde_json::Value::Null;
+            ark::dynamic::row_bytes(&wider().tables[0], &v).unwrap()
+        })
         .collect();
     assert_eq!(rows(&wide, "playlist"), widened, "a row widened with None");
     assert_eq!(rows(&wide, "item"), rows(&server, "item"));
@@ -105,7 +109,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
 
     let o = wide.step(Input::Mutate {
         func: TAG.into(),
-        input: br#"{"name":"loud"}"#.to_vec(),
+        input: ark::dynamic::row_bytes(&wider().tables[2], &serde_json::json!({"name": "loud"})).unwrap(),
         now: 3,
     });
     let fan = fanouts(&o);
@@ -172,4 +176,38 @@ fn a_replica_behind_an_appended_table_asks_for_the_snapshot() {
     assert!(alice.faith && alice.pending.is_empty());
     assert_eq!(alice.log().head(), server.log().head());
     assert_eq!(alice.store.rows("playlist").count(), 1);
+}
+
+/// A log reopened under the schema it was written under is wholly its
+/// own: nothing foreign, nothing on faith, each entry's state its rows'
+/// with the facts after it undone (§1.3's arithmetic); and reopened from
+/// its entries appended, the same. Falsified by `foreign` comparing each
+/// entry's state with the head's digests, never undoing: entry 1 was
+/// foreign.
+#[test]
+fn a_log_reopened_under_its_own_schema_is_its_own() {
+    let mut server = authority(demo::cas());
+    let mut alice = replica("alice", demo::cas());
+    for (f, input) in [
+        (CREATE, create_input("Road")),
+        (ADD, pair_input(&EntryId::of(Origin::named("alice-session"), 1).draw(0), "t1")),
+    ] {
+        let o = alice.step(mutate(f, input, 1));
+        let (_, fan) = deliver_up(&mut server, &who("alice"), &o);
+        alice.step(down(&fan[0]));
+    }
+    let mut whole = authority(demo::cas());
+    whole.step(Input::Open(durable(&server)));
+    let base = Durable {
+        rows: authority(demo::cas()).confirmed_rows(),
+        logged: server.log().entries(),
+        ..Durable::default()
+    };
+    let mut appended = authority(demo::cas());
+    appended.step(Input::Open(base));
+    for p in [&whole, &appended] {
+        assert_eq!(p.log(), server.log());
+        assert_eq!((p.foreign, p.faith), (None, false));
+        assert_eq!(p.store.state_hash(), server.store.state_hash());
+    }
 }

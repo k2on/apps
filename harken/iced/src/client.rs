@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::domain::Device;
 use ark::domain::Domain;
-use ark::json::Json;
+use ark::format::Encode;
 use ark::peer::Who;
 pub use ark_peer::link::Wake;
 #[cfg_attr(all(feature = "demo", not(test)), allow(unused_imports))]

@@ -6,7 +6,8 @@
 //! use); keys order as the values do and none is a prefix of another; and
 //! a `Desc` key orders last first.
 
-use ark::json::{put_key, typed_json, typed_key, Json};
+use ark::format::{put_key, Encode};
+use ark::json::{typed_bytes, typed_key};
 use ark::plan::Desc;
 use ark::prelude::*;
 
@@ -102,7 +103,7 @@ fn a_value_and_its_json_under_its_type_are_one() {
     for _ in 0..2000 {
         let v = r.every();
         let json = serde_json::to_value(&v).unwrap();
-        assert_eq!(typed_json(&ty, &json).unwrap(), v.to_bytes(), "{v:?}");
+        assert_eq!(typed_bytes(&ty, &json).unwrap(), v.to_bytes(), "{v:?}");
         let mut k = vec![];
         typed_key(&ty, &json, &mut k).unwrap();
         assert_eq!(k, key(&v), "{v:?}");

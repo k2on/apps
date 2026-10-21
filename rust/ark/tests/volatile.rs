@@ -59,7 +59,7 @@ pub fn wave(ctx: &Ctx, db: &mut Db<Waves>, input: Wave) -> Result<(), Refusal> {
 
 fn here_key(session: &str) -> Vec<u8> {
     let mut k = vec![];
-    ark::json::put_key(&(session,), &mut k);
+    ark::format::put_key(&(session,), &mut k);
     k
 }
 

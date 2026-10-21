@@ -17,7 +17,6 @@
 //! is shown is the authority's own state, a snapshot per request, and what
 //! it writes the server authors as itself.
 
-use ark::json::Json;
 use ark::log::Seq;
 use ark::store::Change;
 use serde::{Deserialize, Serialize};
@@ -37,7 +36,7 @@ pub struct State {
     /// The server's domain: its schema and its functions described.
     pub catalog: Catalog,
     /// Every durable table's rows, as a snapshot carries them.
-    #[serde(with = "ark::json::raw_tables")]
+    #[serde(with = "ark::format::raw_tables")]
     pub rows: Vec<(String, Vec<Vec<u8>>)>,
     pub head: Seq,
     pub lines: Vec<Line>,
@@ -49,19 +48,20 @@ pub struct State {
     pub who: String,
 }
 
-/// A value as a body: its JSON.
-pub fn body<T: Json>(v: &T) -> String {
-    String::from_utf8(v.to_bytes()).expect("JSON is text")
+/// A value as a body: its JSON, whatever the value format (a row or an
+/// input inside it is its JSON or its hex, `ark::format`).
+pub fn body<T: Serialize>(v: &T) -> String {
+    serde_json::to_string(v).expect("a value is JSON")
 }
 
 /// A body read back.
-pub fn read<T: Json>(text: &str) -> Result<T, String> {
-    T::from_bytes(text.trim().as_bytes()).map_err(|e| e.0)
+pub fn read<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, String> {
+    serde_json::from_str(text.trim()).map_err(|e| e.to_string())
 }
 
 /// An authored input: the binding and its input's JSON.
 #[derive(Serialize, Deserialize)]
-struct Authored(String, #[serde(with = "ark::json::raw")] Vec<u8>);
+struct Authored(String, #[serde(with = "ark::format::raw")] Vec<u8>);
 
 impl State {
     pub fn to_body(&self) -> String {

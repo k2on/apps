@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Feed, Who};
 use ark::prelude::Id;

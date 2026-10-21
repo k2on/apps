@@ -59,7 +59,7 @@ pub type Args = Vec<u8>;
 /// say them: each the domain's input type, encoded.
 pub mod input {
     use crate::domain::*;
-    use ark::json::Json;
+    use ark::format::Encode;
 
     pub fn none() -> Vec<u8> {
         ().to_bytes()
@@ -3158,7 +3158,7 @@ pub mod ha {
     use crate::domain::host::{Kind, Listening};
     use crate::domain::{Device, Output as Sound};
     use crate::domain::{Listening as Row, ListeningDevice};
-    use ark::json::Json;
+    use ark::format::Encode;
     use ark::peer::{Input, Output, Peer, Role, Who};
     use ark::schema::Space;
     use ark::store::{Read, Scan};

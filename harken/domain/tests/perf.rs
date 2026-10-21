@@ -21,8 +21,8 @@ use std::time::{Duration, Instant};
 
 use ark::db::{count, Reads};
 use ark::domain::Domain;
+use ark::format::Encode;
 use ark::hash::EntryHash;
-use ark::json::Json;
 use ark::log::{Durable, EntryId, Snapshot};
 use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, Who};
 use ark::store::{Read, Scan, Store};
@@ -576,7 +576,7 @@ fn perf_row_keys() {
 
 /// A row's costs: its bytes copied (what a read hands out) and the struct
 /// it is built into, in allocations and time.
-fn row_cost<T: Json>(table: &str, columns: usize, row: &[u8]) {
+fn row_cost<T: Encode>(table: &str, columns: usize, row: &[u8]) {
     let reps = 100_000usize;
     let a0 = allocs();
     let t = Instant::now();

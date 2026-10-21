@@ -11,6 +11,7 @@ sha2 = { version = "0.10", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 memcomparable = "0.2"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
 
 # Test binaries with full debug info are over 100 MB each, and the disk a
 # session builds on is a fixed allowance. Line tables keep file and line in

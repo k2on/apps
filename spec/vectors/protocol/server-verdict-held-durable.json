@@ -1,4 +1,5 @@
 {
-  "frame": {"Verdict":{"space":"durable","id":"aa238dc8c0dea3c9309bb0c381b94568","verdict":{"Held":{"func":"demo.gone"}}}},
+  "bytes": "030010aa238dc8c0dea3c9309bb0c381b94568020964656d6f2e676f6e65",
+  "frame": {"Verdict":{"id":"aa238dc8c0dea3c9309bb0c381b94568","space":"durable","verdict":{"Held":{"func":"demo.gone"}}}},
   "name": "server-verdict-held-durable"
 }

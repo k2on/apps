@@ -39,11 +39,17 @@ pub fn config(device: Vec<u8>) -> Config {
     }
 }
 
+/// What a device says it is, from its JSON: a `Device` in the value format.
+fn said(device: &str) -> Result<Vec<u8>, Refusal> {
+    let d: harken_domain::types::Device = serde_json::from_str(device).map_err(|e| Refusal::from(format!("a device: {e}")))?;
+    Ok(ark::format::Encode::to_bytes(&d))
+}
+
 /// harken's peer on the disk at `dir`, as whoever last signed in there or
 /// as `login`, saying `device` (a `Device`'s JSON) in the listening session.
 #[uniffi::export]
 pub fn harken_open(dir: String, login: Option<Login>, device: String) -> Result<Arc<Peer>, Refusal> {
-    Peer::open(config(device.into_bytes()), &dir, login)
+    Peer::open(config(said(&device)?), &dir, login)
 }
 
 /// The account's listening session as this device holds it, as JSON:
@@ -132,7 +138,7 @@ impl Hall {
             roles: vec![],
             expires_ms: 0,
         };
-        let p = Peer::open(config(device.into_bytes()), &dir, Some(login))?;
+        let p = Peer::open(config(said(&device)?), &dir, Some(login))?;
         p.by_hand();
         p.connect_with("hall", self.hub.dialer(Arc::new(token)));
         self.devices.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&p));

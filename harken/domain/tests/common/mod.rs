@@ -7,7 +7,7 @@
 use std::sync::OnceLock;
 
 use ark::domain::Domain;
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
@@ -75,13 +75,13 @@ impl Lib {
 
     /// Author as `user` holding the library's role, as the scanner does:
     /// the number of changes, or the refusal's text.
-    pub fn mutate(&mut self, user: &str, name: &str, input: &impl Json) -> Result<usize, String> {
+    pub fn mutate(&mut self, user: &str, name: &str, input: &impl Encode) -> Result<usize, String> {
         let ctx = self.ctx(user, &[LIBRARY]);
         self.mutate_as(&ctx, name, input)
     }
 
     /// Author the entry `ctx`.
-    pub fn mutate_as(&mut self, ctx: &Ctx, name: &str, input: &impl Json) -> Result<usize, String> {
+    pub fn mutate_as(&mut self, ctx: &Ctx, name: &str, input: &impl Encode) -> Result<usize, String> {
         self.mutate_bytes(ctx, name, &input.to_bytes())
     }
 
@@ -96,7 +96,7 @@ impl Lib {
     }
 
     /// Ask as `user`: the answer, or the refusal's text.
-    pub fn query<T: Json>(&self, user: &str, name: &str, input: &impl Json) -> Result<T, String> {
+    pub fn query<T: Encode>(&self, user: &str, name: &str, input: &impl Encode) -> Result<T, String> {
         let ctx = Ctx {
             draws: Default::default(),
             id: EntryId::of("q", 0),
@@ -110,7 +110,7 @@ impl Lib {
     }
 
     /// A query that must answer, as alice.
-    pub fn list<T: Json>(&self, name: &str, input: &impl Json) -> Vec<T> {
+    pub fn list<T: Encode>(&self, name: &str, input: &impl Encode) -> Vec<T> {
         self.query("alice", name, input).unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 
@@ -133,7 +133,7 @@ impl Lib {
     }
 
     /// A table's rows, decoded.
-    pub fn rows<T: Json>(&self, table: &str) -> Vec<T> {
+    pub fn rows<T: Encode>(&self, table: &str) -> Vec<T> {
         self.store.rows(table).map(|r| T::from_bytes(r).unwrap()).collect()
     }
 }

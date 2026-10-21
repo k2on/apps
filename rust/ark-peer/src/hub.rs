@@ -33,8 +33,8 @@
 
 use std::collections::BTreeMap;
 
+use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::json::Json;
 use ark::log::{Durable, EntryId, Origin, Snapshot};
 use ark::peer::{Feed, Input, Journal, Output, Peer as Machine, Role, Who};
 use ark::schema::Space;

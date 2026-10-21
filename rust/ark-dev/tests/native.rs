@@ -3,7 +3,7 @@
 //! and a scope by table.
 
 use ark::domain::Kind;
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::row::Input;

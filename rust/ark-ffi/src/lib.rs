@@ -294,20 +294,22 @@ fn drive(shared: Weak<Shared>, rx: Receiver<()>) {
     }
 }
 
-fn text(b: Vec<u8>) -> String {
-    String::from_utf8(b).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+/// A value's JSON, or what went wrong reading it (which a test sees).
+fn text(json: Result<String, String>) -> String {
+    json.unwrap_or_else(|why| format!("{{\"error\":{}}}", serde_json::Value::String(why)))
 }
 
-fn patch(p: ark_peer::Patch) -> Patch {
+/// A view's patch, each row its JSON as `elem` writes it.
+fn patch(p: ark_peer::Patch, elem: &dyn Fn(&[u8]) -> String) -> Patch {
     match p {
         ark::plan::Patch::Insert { at, node } => Patch::Insert {
             at: at as u64,
-            row: text(node),
+            row: elem(&node),
         },
         ark::plan::Patch::Remove { at } => Patch::Remove { at: at as u64 },
         ark::plan::Patch::Update { at, node } => Patch::Update {
             at: at as u64,
-            row: text(node),
+            row: elem(&node),
         },
     }
 }
@@ -393,7 +395,10 @@ impl Peer {
     /// An intent of the function `name` on its input's JSON: its id, or why
     /// its preview — or, alone, its sequencing — refused it.
     pub fn mutate(&self, name: String, input: String) -> Result<String, Refusal> {
-        let id = self.shared.act(|s| s.peer.mutate_bytes(&name, input.into_bytes()))?;
+        let id = self.shared.act(|s| {
+            let input = s.peer.input_json(&name, &input)?;
+            s.peer.mutate_bytes(&name, input)
+        })?;
         Ok(ark::hash::hex(&id.0))
     }
 
@@ -402,7 +407,10 @@ impl Peer {
         let s = self.shared.lock();
         let f = s.peer.binding(&name).and_then(|b| s.peer.domain().get(&b).cloned());
         match f {
-            Some(f) => (f.check)(input.as_bytes()).err().and_then(|mut e| e.drain(..).next()).map(|(_, w)| w),
+            Some(f) => match s.peer.input_json(&name, &input) {
+                Ok(b) => (f.check)(&b).err().and_then(|mut e| e.drain(..).next()).map(|(_, w)| w),
+                Err(why) => Some(why),
+            },
             None => Some(format!("no function {name}")),
         }
     }
@@ -410,13 +418,15 @@ impl Peer {
     /// A query's or a view's answer on its input's JSON, as JSON, over the
     /// optimistic state.
     pub fn query(&self, name: String, input: String) -> Result<String, Refusal> {
-        Ok(text(self.shared.lock().peer.ask(&name, input.as_bytes())?))
+        let s = self.shared.lock();
+        let answer = s.peer.ask(&name, &s.peer.input_json(&name, &input)?)?;
+        Ok(s.peer.answer_json(&name, &answer)?)
     }
 
     /// A maintained view of the function `name` on its input's JSON.
     pub fn view(&self, name: String, input: String) -> Result<Arc<ViewHandle>, Refusal> {
         let id = self.shared.act(|s| -> Result<u64, String> {
-            let at = s.peer.view(&name, input.as_bytes())?;
+            let at = s.peer.view(&name, &s.peer.input_json(&name, &input)?)?;
             let (id, kept) = (
                 s.next,
                 Kept {
@@ -441,7 +451,8 @@ impl Peer {
     pub fn call(&self, name: String, input: String) -> Result<(), Refusal> {
         Ok(self.shared.act(|s| {
             s.hurry = monotonic_ms() + 1000;
-            s.peer.call(&name, input.into_bytes())
+            let input = s.peer.input_json(&name, &input)?;
+            s.peer.call(&name, input)
         })?)
     }
 
@@ -449,7 +460,7 @@ impl Peer {
     pub fn live_rows(&self, table: String) -> Vec<String> {
         let s = self.shared.lock();
         let Some(live) = &s.peer.live else { return vec![] };
-        live.store.rows(&table).map(|r| text(r.to_vec())).collect()
+        live.store.rows(&table).map(|r| text(s.peer.row_json(&table, r))).collect()
     }
 
     pub fn status(&self) -> Status {
@@ -542,23 +553,30 @@ impl ViewHandle {
     /// Its rows as they stand, each its JSON.
     pub fn rows(&self) -> Vec<String> {
         let s = self.shared.lock();
-        let at = s.views.get(&self.id).and_then(|k| k.at);
-        at.map(|at| s.peer.rows(at).into_iter().map(text).collect()).unwrap_or_default()
+        let Some((at, name)) = s.views.get(&self.id).and_then(|k| Some((k.at?, k.name.clone()))) else {
+            return vec![];
+        };
+        s.peer.rows(at).iter().map(|r| text(s.peer.element_json(&name, r))).collect()
     }
 
     /// What it did since last taken.
     pub fn take(&self) -> ViewUpdate {
-        let update = {
-            let mut s = self.shared.lock();
-            s.settle();
-            s.views.get_mut(&self.id).map(|k| std::mem::replace(&mut k.update, Update::Unchanged))
+        let mut s = self.shared.lock();
+        s.settle();
+        let Some(k) = s.views.get_mut(&self.id) else {
+            return ViewUpdate::Unchanged;
         };
-        match update.unwrap_or(Update::Unchanged) {
+        let (update, name) = (std::mem::replace(&mut k.update, Update::Unchanged), k.name.clone());
+        let elem = |b: &[u8]| text(s.peer.element_json(&name, b));
+        match update {
             Update::Unchanged => ViewUpdate::Unchanged,
             Update::Patched(ps) => ViewUpdate::Patched {
-                patches: ps.into_iter().map(patch).collect(),
+                patches: ps.into_iter().map(|p| patch(p, &elem)).collect(),
             },
-            Update::Reset => ViewUpdate::Reset { rows: self.rows() },
+            Update::Reset => {
+                drop(s);
+                ViewUpdate::Reset { rows: self.rows() }
+            }
         }
     }
 }

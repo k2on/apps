@@ -1,5 +1,5 @@
 //! The vectors D1 writes under `spec/vectors/` (`spec/RUNNERS.md` says
-//! how each is run): `protocol/`, every frame as its JSON;
+//! how each is run): `protocol/`, every frame as its bytes and its JSON;
 //! `trace/`, every client of the scripted sessions;
 //! `rebase/`, `fleet-seed-7` and the sessions the fuzzer found a bug with.
 //! `ARK_WRITE_VECTORS` set writes them; otherwise each must be what is on
@@ -8,8 +8,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ark::format::Encode;
 use ark::hash::hex;
-use ark::json::Json;
 use ark::log::{EntryId, Origin};
 use ark::peer::Who;
 use ark::row::Id;
@@ -21,6 +21,17 @@ use crate::sim::{who, Net, Op};
 
 fn dir(d: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors").join(d)
+}
+
+/// Whether this build's value format is the vectors': postcard, the
+/// default. A build of `values-json` runs everything but what holds bytes
+/// to them, and says so.
+pub fn held() -> bool {
+    let held = ark::format::NAME == "postcard";
+    if !held {
+        eprintln!("spec/vectors are postcard's; this build writes {}: not held", ark::format::NAME);
+    }
+    held
 }
 
 /// A vector written, or held to what is on disk.

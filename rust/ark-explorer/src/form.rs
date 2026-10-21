@@ -62,7 +62,7 @@ impl Callable {
         let fs: Vec<(String, Ty)> = self.input.iter().map(|(n, f)| (n.clone(), f.ty.clone())).collect();
         match (self.record, v) {
             (true, v) => encode(&Ty::Struct(fs), v),
-            (false, Value::Struct(vs)) if vs.is_empty() => Ok(b"null".to_vec()),
+            (false, Value::Struct(vs)) if vs.is_empty() => ark::format::encode(&()).map_err(|e| e.0),
             (false, Value::Struct(vs)) => encode(&fs[0].1, &vs[0]),
             (false, other) => Err(format!("not an input: {}", value::text_of(other))),
         }

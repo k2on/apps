@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Who;
 use ark::schema::Space;
@@ -203,7 +203,7 @@ impl Peer {
     }
 
     /// An intent on the log: its id.
-    pub fn mutate(&mut self, name: &str, input: &impl Json) -> EntryId {
+    pub fn mutate(&mut self, name: &str, input: &impl Encode) -> EntryId {
         let id = self.client.mutate(name, input).unwrap_or_else(|why| {
             self.refused.push((Space::Durable, why));
             EntryId::default()
@@ -223,12 +223,12 @@ impl Peer {
     }
 
     /// A query over what the client holds.
-    pub fn query<T: Json>(&self, name: &str, input: &impl Json) -> Result<T, String> {
+    pub fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> Result<T, String> {
         self.client.query(name, input)
     }
 
     /// A table's rows, as the client holds them.
-    pub fn rows<T: Json>(&self, table: &str) -> Vec<T> {
+    pub fn rows<T: Encode>(&self, table: &str) -> Vec<T> {
         self.client
             .log
             .store
@@ -261,7 +261,7 @@ impl Peer {
 }
 
 /// A table's rows as the hub's log holds them.
-pub fn hub_rows<T: Json + Send + 'static>(server: &Server, table: &'static str) -> Vec<T> {
+pub fn hub_rows<T: Encode + Send + 'static>(server: &Server, table: &'static str) -> Vec<T> {
     server
         .running
         .hub

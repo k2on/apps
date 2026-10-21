@@ -193,7 +193,7 @@ pub fn item_of(row: &[u8]) -> (Vec<u8>, String, i64) {
 /// The `pos` of a track on a playlist, as a store holds it.
 pub fn pos_of(store: &dyn Read, pid: &[u8], track: &str) -> Option<i64> {
     let mut key = vec![];
-    ark::json::put_key(&(id::<Playlist>(pid), track), &mut key);
+    ark::format::put_key(&(id::<Playlist>(pid), track), &mut key);
     store.get("item", &key).map(|r| item_of(&r).2)
 }
 

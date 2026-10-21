@@ -19,7 +19,7 @@
 
 mod common;
 
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::plan::{splice, Patch};
@@ -300,7 +300,7 @@ struct Tally {
 
 /// The query `name` on `input` as alice, maintained over every seed's
 /// churn: after every push the view is the query, and the patches splice.
-fn hold(name: &str, input: &impl Json) -> Tally {
+fn hold(name: &str, input: &impl Encode) -> Tally {
     let d = domain();
     let (f, input) = (full(name), input.to_bytes());
     let fresh = |store: &Store, ctx: &Ctx| d.watch(store, ctx, &f, &input).unwrap().rows();

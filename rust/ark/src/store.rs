@@ -12,9 +12,9 @@
 //! one with the pending change lists applied, undone newest-first.
 //!
 //! The state hash is kept as the rows are written: per table, the sum
-//! modulo 2^256 of `sha256(table ‖ row)` over its rows (a row is its JSON,
-//! which starts `{`, so the two parts are told apart), moved by
-//! one leaf out and one in per write; the state hash is
+//! modulo 2^256 of `sha256(table ‖ row)` over its rows (each table's
+//! digest is its own, so a leaf is never added to another table's), moved
+//! by one leaf out and one in per write; the state hash is
 //! `sha256(schema_hash ‖ digests of the durable tables in schema order)`.
 //! The schema hash is in it, so two stores are equal only when their bytes
 //! mean the same. A store is of a [`Space`]: its hash and its snapshot are
@@ -25,7 +25,7 @@
 //! the reference is judged at both ends (v4's `StillReferenced`).
 //!
 //! **The log is a table** (§1.6): `_log` ([`LOG`]) beside the schema's,
-//! keyed by sequence, each row a [`Logged`]'s JSON. It is not the
+//! keyed by sequence, each row a [`Logged`]'s encoding. It is not the
 //! schema's — not in its hash or the state hash, not in a snapshot sent,
 //! not a table a function names, not in a store's equality — and its
 //! invariant is the chain: a row is added at either end only when it
@@ -33,14 +33,15 @@
 //! ([`Store::apply_kv`]). The store's rows with the log's are what a peer
 //! makes durable ([`Store::kv_rows`]).
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::format::{put_key, Encode};
 use crate::hash::{add256, sha256, sub256, EntryHash, SchemaHash, StateHash};
-use crate::json::{put_key, Json};
 use crate::log::{Logged, Rows as KvRows, Seq};
 use crate::schema::{Parsed, Schema, Space, Table};
 use crate::Refusal;
@@ -49,25 +50,25 @@ use crate::Refusal;
 pub const LOG: &str = "_log";
 
 /// One write, as the store reports it and the log keeps it (a fact): its
-/// rows each the row's JSON, carried as that JSON.
+/// rows each the row's encoding, carried as it is.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Change {
     Add {
         table: String,
-        #[serde(with = "crate::json::raw")]
+        #[serde(with = "crate::format::raw")]
         row: Vec<u8>,
     },
     Remove {
         table: String,
-        #[serde(with = "crate::json::raw")]
+        #[serde(with = "crate::format::raw")]
         row: Vec<u8>,
     },
     Edit {
         table: String,
-        #[serde(with = "crate::json::raw")]
+        #[serde(with = "crate::format::raw")]
         old: Vec<u8>,
-        #[serde(with = "crate::json::raw")]
+        #[serde(with = "crate::format::raw")]
         new: Vec<u8>,
     },
 }
@@ -182,6 +183,16 @@ impl Eq for Store {}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Undo(Vec<(usize, [u8; 32], [u8; 32])>);
 
+impl Undo {
+    /// Digests, in schema order, with the changes undone.
+    pub fn apply(&self, digests: &mut [[u8; 32]]) {
+        for (t, plus, minus) in &self.0 {
+            add256(&mut digests[*t], plus);
+            sub256(&mut digests[*t], minus);
+        }
+    }
+}
+
 /// The log as its table holds it, read (§1.6). Every peer's log stands on
 /// a first row; the entries are the rows after it.
 #[derive(Clone, Copy)]
@@ -218,13 +229,30 @@ fn read(b: &LogRow) -> Logged {
 
 /// A row's sequence, state and hash, read past its entry and facts.
 fn ends(b: &[u8]) -> (Seq, StateHash, EntryHash) {
-    #[derive(Deserialize)]
+    #[cfg_attr(feature = "values-json", derive(Deserialize))]
     struct Ends {
         seq: Seq,
         state: StateHash,
         hash: EntryHash,
     }
+    #[cfg(feature = "values-json")]
     let e: Ends = serde_json::from_slice(b).expect("a row of the log reads");
+    // A row ends with its state and hash, each 32 bytes after their length.
+    #[cfg(not(feature = "values-json"))]
+    let e = {
+        let (seq, _) = postcard::take_from_bytes::<Seq>(b).expect("a row of the log reads");
+        let n = b.len();
+        assert!(
+            n >= 66 && b[n - 66] == 32 && b[n - 33] == 32,
+            "a row of the log ends with its state and hash"
+        );
+        let state = StateHash(b[n - 65..n - 33].try_into().unwrap());
+        Ends {
+            seq,
+            state,
+            hash: EntryHash(b[n - 32..].try_into().unwrap()),
+        }
+    };
     (e.seq, e.state, e.hash)
 }
 
@@ -501,14 +529,19 @@ impl Store {
     /// digests' arithmetic alone: what a replica checks a confirmed state
     /// by while its pending changes stay applied.
     pub fn hash_beside<'a>(&self, undone: impl IntoIterator<Item = &'a Undo>) -> StateHash {
-        let mut ds: Vec<[u8; 32]> = self.tables.iter().map(|r| r.digest).collect();
-        for Undo(u) in undone {
-            for (t, plus, minus) in u {
-                add256(&mut ds[*t], plus);
-                sub256(&mut ds[*t], minus);
-            }
-        }
-        self.hash_of(ds.into_iter())
+        let mut ds = self.digests();
+        undone.into_iter().for_each(|u| u.apply(&mut ds));
+        self.hash_with(&ds)
+    }
+
+    /// The tables' digests, in schema order.
+    pub fn digests(&self) -> Vec<[u8; 32]> {
+        self.tables.iter().map(|r| r.digest).collect()
+    }
+
+    /// The state hash these digests, in schema order, give.
+    pub fn hash_with(&self, digests: &[[u8; 32]]) -> StateHash {
+        self.hash_of(digests.iter().copied())
     }
 
     /// A row's key, and its entry in each of its table's indexes: what a
@@ -705,25 +738,57 @@ impl Store {
 
     /// [`Store::from_rows`], a store of `space`.
     pub fn from_rows_in(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
+        Store::rows_in(schema, space, rows, false).map(|(s, _)| s)
+    }
+
+    /// [`Store::from_rows_in`] of rows as some schema of this one wrote
+    /// them (§1.2): each read as it is, and only when it is not this
+    /// schema's completed or cut to its prefix ([`Table::fit`]); a table
+    /// this schema lacks dropped. And whether any was another schema's (a
+    /// table of this space missing counts).
+    pub fn from_rows_fit(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Store, bool), Refusal> {
+        Store::rows_in(schema, space, rows, true)
+    }
+
+    // Each row parsed once, unless it is fitted.
+    fn rows_in(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)], fit: bool) -> Result<(Store, bool), Refusal> {
         let mut s = Store::new_in(schema.clone(), space);
+        let mut other = fit && schema.tables.iter().filter(|t| t.space == space).count() != rows.len();
+        let mut parsed: Vec<Vec<Parsed>> = schema.tables.iter().map(|_| vec![]).collect();
         for (table, rs) in rows {
-            let t = s.find(table)?;
+            let t = match s.find(table) {
+                Err(_) if fit => {
+                    other = true;
+                    continue;
+                }
+                t => t?,
+            };
             let tab = &schema.tables[t];
             for row in rs {
-                let p = tab.parse(row)?;
+                let (row, p) = match tab.parse(row) {
+                    Ok(p) => (Cow::Borrowed(&row[..]), p),
+                    Err(e) if !fit => return Err(e),
+                    Err(e) => {
+                        let (r, o) = tab.fit(row).map_err(|_| e)?;
+                        other |= o;
+                        let p = tab.parse(&r)?;
+                        (Cow::Owned(r), p)
+                    }
+                };
                 if s.tables[t].rows.contains_key(&p.key) {
                     return Err(Refusal(format!("{table}: two rows have one key")));
                 }
                 let key = p.key.clone();
-                s.write(t, &key, None, Some((row, &p)));
+                s.write(t, &key, None, Some((&row, &p)));
+                parsed[t].push(p);
             }
         }
         for (t, tab) in schema.tables.iter().enumerate() {
-            for row in s.tables[t].rows.values() {
-                s.judge(tab, &tab.parse(row)?)?;
+            for p in &parsed[t] {
+                s.judge(tab, p)?;
             }
         }
-        Ok(s)
+        Ok((s, other))
     }
 
     /// The changes that take this store to `new`, table by table in schema

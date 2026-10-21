@@ -6,7 +6,7 @@
 
 mod common;
 
-use ark::json::Json;
+use ark::format::Encode;
 use ark::store::Change;
 use common::*;
 use harken_server::domain::CreatePlaylist;

@@ -1,4 +1,5 @@
 {
-  "frame": {"Verdict":{"space":"durable","id":"851234151743d65409f72ea19e17578f","verdict":{"Ok":{"seq":1}}}},
+  "bytes": "030010851234151743d65409f72ea19e17578f0002",
+  "frame": {"Verdict":{"id":"851234151743d65409f72ea19e17578f","space":"durable","verdict":{"Ok":{"seq":1}}}},
   "name": "server-verdict-ok-durable"
 }

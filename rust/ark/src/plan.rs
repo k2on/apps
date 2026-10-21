@@ -701,7 +701,7 @@ pub struct Desc<K>(pub K);
 impl<K: serde::Serialize> serde::Serialize for Desc<K> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut b = vec![];
-        crate::json::put_key(&self.0, &mut b);
+        crate::format::put_key(&self.0, &mut b);
         b.iter_mut().for_each(|x| *x = !*x);
         s.serialize_bytes(&b)
     }

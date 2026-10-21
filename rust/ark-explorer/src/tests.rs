@@ -242,7 +242,7 @@ fn named(n: Named) -> Msg {
 }
 
 /// What a mutation was authored with, read as its input.
-fn input<T: ark::json::Json>(w: &Recorder) -> (String, T) {
+fn input<T: ark::format::Encode>(w: &Recorder) -> (String, T) {
     let (f, b) = w.authored.last().expect("authored");
     (f.clone(), T::from_bytes(b).unwrap_or_else(|e| panic!("{f}: {e}")))
 }
@@ -1277,6 +1277,6 @@ fn a_click_outside_the_table_ends_the_edit() {
 /// A one-column key's bytes.
 fn key_of<T: serde::Serialize>(k: T) -> Vec<u8> {
     let mut out = vec![];
-    ark::json::put_key(&(k,), &mut out);
+    ark::format::put_key(&(k,), &mut out);
     out
 }

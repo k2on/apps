@@ -2,8 +2,8 @@
 //! declared indexes and references — the only place that knows what a
 //! row is.
 //!
-//! A row is a JSON object of its table's columns in schema order
-//! ([`crate::json`]); its key is its leading columns' key bytes, and an
+//! A row is its table's row type in the value format ([`crate::format`]):
+//! its columns in schema order; its key is its leading columns' key bytes, and an
 //! index entry the indexed columns' key bytes, then the row's key
 //! ([`Table::parse`]).
 //!
@@ -17,14 +17,21 @@
 //! A table is [`Space::Durable`] or [`Space::Volatile`] (§1.3, §1.9): a
 //! volatile table is not in snapshots and not in the state hash.
 
+#[cfg(feature = "values-json")]
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "values-json")]
 use serde_json::value::RawValue;
 use serde_json::{Map, Value as J};
 
+use crate::format::Encode;
+#[cfg(not(feature = "values-json"))]
+use crate::format::{encode, take_seed};
 use crate::hash::SchemaHash;
-use crate::json::{typed_json, typed_key, Json};
+use crate::json::{typed_bytes, typed_key};
+#[cfg(not(feature = "values-json"))]
+use crate::json::{Seed, Typed};
 use crate::row::Type;
 use crate::Refusal;
 
@@ -41,6 +48,7 @@ pub enum Space {
 pub struct Column {
     pub name: String,
     pub ty: Type,
+    #[serde(with = "crate::format::json_text")]
     pub default: Option<J>,
 }
 
@@ -82,7 +90,7 @@ impl Schema {
         self.tables.iter().enumerate().find(|(_, t)| t.name == name)
     }
 
-    /// `sha256(json(schema))`.
+    /// `sha256(enc(schema))`, the schema in the value format.
     pub fn hash(&self) -> SchemaHash {
         SchemaHash::of(&self.to_bytes())
     }
@@ -180,38 +188,7 @@ impl Table {
     }
 
     fn read(&self, row: &[u8], check: bool) -> Result<Parsed, Refusal> {
-        let at = |e: String| Refusal(format!("{}: {e}", self.name));
-        let raw: BTreeMap<&str, &RawValue> = serde_json::from_slice(row).map_err(|e| at(e.to_string()))?;
-        let mut cols: Vec<Option<J>> = vec![None; self.columns.len()];
-        let value = |c: &Column| -> Result<J, Refusal> {
-            let r = raw.get(c.name.as_str()).ok_or_else(|| at(format!("a row without {}", c.name)))?;
-            serde_json::from_str(r.get()).map_err(|e| at(e.to_string()))
-        };
-        if check {
-            // The row's one encoding: its columns in order, each its own.
-            let mut want = Vec::with_capacity(row.len());
-            for (i, c) in self.columns.iter().enumerate() {
-                want.push(if i == 0 { b'{' } else { b',' });
-                serde_json::to_writer(&mut want, &c.name).map_err(|e| at(e.to_string()))?;
-                want.push(b':');
-                let v = value(c)?;
-                want.extend(typed_json(&c.ty, &v).map_err(|e| at(e.0))?);
-                cols[i] = Some(v);
-            }
-            want.push(b'}');
-            if want != row {
-                return Err(at("not a row's one encoding".into()));
-            }
-        } else {
-            let read = (0..self.key)
-                .chain(self.indexes.iter().flat_map(|ix| ix.columns.iter().copied()))
-                .chain(self.refs.iter().map(|r| r.column));
-            for c in read {
-                if cols[c].is_none() {
-                    cols[c] = Some(value(&self.columns[c])?);
-                }
-            }
-        }
+        let cols = self.columns_of(row, check).map_err(|e| Refusal(format!("{}: {e}", self.name)))?;
         let col = |c: usize| cols[c].as_ref().expect("a key's or an index's column is read");
         let mut key = vec![];
         for c in 0..self.key {
@@ -229,6 +206,89 @@ impl Table {
         Ok(Parsed { cols, key, entries })
     }
 
+    /// The columns a row's key, indexes and references read: every one
+    /// when `check`, which also holds the bytes to the row's one encoding.
+    fn needed(&self, check: bool) -> Vec<bool> {
+        let mut need = vec![check; self.columns.len()];
+        let read = (0..self.key)
+            .chain(self.indexes.iter().flat_map(|ix| ix.columns.iter().copied()))
+            .chain(self.refs.iter().map(|r| r.column));
+        read.for_each(|c| need[c] = true);
+        need
+    }
+
+    #[cfg(feature = "values-json")]
+    fn columns_of(&self, row: &[u8], check: bool) -> Result<Vec<Option<J>>, String> {
+        let raw: BTreeMap<&str, &RawValue> = serde_json::from_slice(row).map_err(|e| e.to_string())?;
+        let value = |c: &Column| -> Result<J, String> {
+            let r = raw.get(c.name.as_str()).ok_or_else(|| format!("a row without {}", c.name))?;
+            serde_json::from_str(r.get()).map_err(|e| e.to_string())
+        };
+        let need = self.needed(check);
+        let mut cols: Vec<Option<J>> = vec![None; self.columns.len()];
+        let mut want = Vec::with_capacity(if check { row.len() } else { 0 });
+        for (i, c) in self.columns.iter().enumerate().filter(|(i, _)| need[*i]) {
+            let v = value(c)?;
+            if check {
+                // The row's one encoding: its columns in order, each its own.
+                want.push(if i == 0 { b'{' } else { b',' });
+                serde_json::to_writer(&mut want, &c.name).map_err(|e| e.to_string())?;
+                want.push(b':');
+                want.extend(typed_bytes(&c.ty, &v).map_err(|e| e.0)?);
+            }
+            cols[i] = Some(v);
+        }
+        want.push(b'}');
+        if check && want != row {
+            return Err("not a row's one encoding".into());
+        }
+        Ok(cols)
+    }
+
+    #[cfg(not(feature = "values-json"))]
+    fn columns_of(&self, row: &[u8], check: bool) -> Result<Vec<Option<J>>, String> {
+        let need = self.needed(check);
+        let upto = need.iter().rposition(|n| *n).map_or(0, |i| i + 1);
+        let mut cols: Vec<Option<J>> = vec![None; self.columns.len()];
+        let mut rest = row;
+        for (i, c) in self.columns[..upto].iter().enumerate() {
+            let (v, r) = take_seed(Seed(&c.ty), rest).map_err(|e| format!("{}: {e}", c.name))?;
+            if check && encode(&Typed(&c.ty, &v)).map_err(|e| e.0)? != rest[..rest.len() - r.len()] {
+                return Err("not a row's one encoding".into());
+            }
+            (cols[i], rest) = (Some(v), r);
+        }
+        if check && !rest.is_empty() {
+            return Err("not a row's one encoding".into());
+        }
+        Ok(cols)
+    }
+
+    /// A row's columns as some schema of this table wrote them, by name
+    /// (JSON) or in order up to where its bytes end (postcard): a column
+    /// beyond them is missing, one beyond this table's dropped.
+    #[cfg(feature = "values-json")]
+    fn columns_as_written(&self, row: &[u8]) -> Result<Vec<Option<J>>, String> {
+        let mut v: Map<String, J> = serde_json::from_slice(row).map_err(|e| e.to_string())?;
+        Ok(self.columns.iter().map(|c| v.remove(&c.name)).collect())
+    }
+
+    #[cfg(not(feature = "values-json"))]
+    fn columns_as_written(&self, row: &[u8]) -> Result<Vec<Option<J>>, String> {
+        let mut rest = row;
+        let mut out = vec![];
+        for c in &self.columns {
+            if rest.is_empty() {
+                out.push(None);
+                continue;
+            }
+            let (v, r) = take_seed(Seed(&c.ty), rest).map_err(|e| format!("{}: {e}", c.name))?;
+            out.push(Some(v));
+            rest = r;
+        }
+        Ok(out)
+    }
+
     /// A row of this table as some schema of it wrote it, read under this
     /// one: as it is; completed with the defaults of the columns appended
     /// since (an older schema's); or without the columns this one lacks (a
@@ -238,18 +298,18 @@ impl Table {
             return Ok((row.to_vec(), false));
         }
         let at = |e: String| Refusal(format!("{}: {e}", self.name));
-        let v: Map<String, J> = serde_json::from_slice(row).map_err(|e| at(e.to_string()))?;
+        let written = self.columns_as_written(row).map_err(at)?;
         let mut out = Map::new();
-        for c in &self.columns {
-            let x = match (v.get(&c.name), &c.default) {
-                (Some(x), _) => x.clone(),
+        for (c, v) in self.columns.iter().zip(written) {
+            let x = match (v, &c.default) {
+                (Some(x), _) => x,
                 (None, Some(d)) => d.clone(),
                 (None, None) if c.ty.is_option() => J::Null,
                 (None, None) => return Err(at(format!("a row without {}", c.name))),
             };
             out.insert(c.name.clone(), x);
         }
-        Ok((typed_json(&self.row_type(), &J::Object(out))?, true))
+        Ok((typed_bytes(&self.row_type(), &J::Object(out))?, true))
     }
 }
 

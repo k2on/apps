@@ -7,10 +7,10 @@
 //! same store, so a view's patches are the typed engine's. One plan form
 //! serves a runner in any language.
 //!
-//! **Values** are the store's own JSON (`crate::json`): a row is the
-//! object of its columns, written back in the schema's column order
-//! ([`row_bytes`]), its key and a related read's prefix the schema's types'
-//! key bytes.
+//! **Values** are the store's rows read as JSON under the schema
+//! (`crate::json`): a row is the object of its columns, written back as
+//! its row type's bytes in the value format ([`row_bytes`]), its key and a
+//! related read's prefix the schema's types' key bytes.
 //!
 //! **Order.** Sort, group and join keys are a value's [`ordered`] bytes:
 //! null, then booleans, numbers, strings, arrays and objects, each kind in
@@ -49,7 +49,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value as Json};
 
 use crate::db::{Db, Tables};
-use crate::json::{typed_json, typed_key};
+use crate::json::{typed_bytes, typed_key, typed_value};
 use crate::plan::{scan_raw, Make, Plan};
 use crate::row::Key;
 use crate::schema::{Schema, Table};
@@ -75,13 +75,13 @@ fn no(why: impl Into<String>) -> Refusal {
 
 /// A table's row as JSON: an object of its columns.
 pub fn row(table: &Table, bytes: &[u8]) -> Result<Json, Refusal> {
-    serde_json::from_slice(bytes).map_err(|e| no(format!("a row of {}: {e}", table.name)))
+    typed_value(&table.row_type(), bytes).map_err(|e| no(format!("a row of {}: {e}", table.name)))
 }
 
 /// A row's bytes from its JSON object, a column missing read as null: the
 /// row's one encoding, as its Rust type's would be.
 pub fn row_bytes(table: &Table, v: &Json) -> Result<Vec<u8>, Refusal> {
-    typed_json(&table.row_type(), v)
+    typed_bytes(&table.row_type(), v)
 }
 
 /// The bytes of a key, given as its one column's value or, keyed by more,

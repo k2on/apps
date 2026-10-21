@@ -1,5 +1,6 @@
 //! ArkDB v5's kernel, as `docs/plan-v5.md` Part 1 defines it: a value is
-//! its JSON and a key its `memcomparable` bytes (§1.1, [`json`]); hash
+//! its bytes in the value format and a key its `memcomparable` bytes
+//! (§1.1, [`format`]), JSON its human form ([`json`]); hash
 //! spaces are distinct types ([`hash`]); the schema is data and the only
 //! place that knows what a row is (§1.2, [`schema`]); one ordered store
 //! whose every write is a [`store::Change`] that inverts exactly (§1.3,
@@ -24,6 +25,7 @@ pub use domain::Domain;
 pub mod db;
 pub mod domain;
 pub mod dynamic;
+pub mod format;
 pub mod frames;
 pub mod hash;
 pub mod json;
@@ -58,7 +60,7 @@ impl fmt::Display for Refusal {
 pub mod prelude {
     pub use crate::db::{Db, Tables};
     pub use crate::domain::{Domain, Scope};
-    pub use crate::json::Json;
+    pub use crate::format::Encode;
     pub use crate::peer::Ctx;
     pub use crate::plan::{scan, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};

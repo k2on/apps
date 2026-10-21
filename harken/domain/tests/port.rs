@@ -12,8 +12,8 @@
 //! Falsified by numbering a playlist "Favorites [1]"
 //! (`playlists::numbered`): seed 1's pins moved.
 
+use ark::format::Encode;
 use ark::hash::sha256;
-use ark::json::Json;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::Store;
@@ -334,11 +334,83 @@ fn step(r: &mut Rng, s: &Store) -> Step {
     }
 }
 
-/// The schema's hash (its JSON's).
-const SCHEMA: &str = "fbdcea7645d34b98244421fa578679a5cbeda8a634b8c7603758526ee1f588f5";
+/// The schema's hash (its bytes', postcard; `fbdcea76…` its JSON's).
+const SCHEMA: &str = match ark::format::NAME.as_bytes() {
+    b"json" => "fbdcea7645d34b98244421fa578679a5cbeda8a634b8c7603758526ee1f588f5",
+    _ => "02372c9ba4fec0f3fa09f7286faf2554b621131e5f96b54002b5a11c758555ee",
+};
 
-/// Per seed, the state after 400 steps and the transcript's hash.
-const PINS: [(u64, &str, &str); 12] = [
+/// Per seed, the state after 400 steps and the transcript's hash, as the
+/// value format writes them: postcard (N4), and JSON as N1 pinned them.
+const PINS: [(u64, &str, &str); 12] = match ark::format::NAME.as_bytes() {
+    b"json" => PINS_JSON,
+    _ => PINS_POSTCARD,
+};
+
+const PINS_POSTCARD: [(u64, &str, &str); 12] = [
+    (
+        1,
+        "6a78ad65343d77ef87090cff81837d593c478ec0c016421061e23f97b97188b7",
+        "d0e4aa95b9c7b4d60c6e96fa3e260486ee6f118bc64a779ce1373c91d0f29224",
+    ),
+    (
+        2,
+        "87de740757ec79192d8026afdd15d5d29ec55f910502fe2a79611ea202068277",
+        "5cd0d4af93a6e2d640b26a58fe2dc24d08200a85b55ade470c5a7c70f2f604fc",
+    ),
+    (
+        3,
+        "403c2579488e551a2100cfe9d48ba6f1b48db5300eab56527d089272444cf17f",
+        "b8f45da88732e05b4faf5548fd500406e483e9e2c3804b736f131ec40de34432",
+    ),
+    (
+        4,
+        "76817aa170db128b229a7714cebc769c6d3366624fd55f7658a9d525d1bae8fb",
+        "3f0e5170f18b23b066d4c443d8f44aa4503ff590eb68cd7c2328a705cd00449f",
+    ),
+    (
+        5,
+        "b3ef9ee9cef44a732959b98f609b90b5f3cb04921005dbe83049f6cf31122de2",
+        "94e28042bee029ead9e27b7e5b2c25087fd48469fa78e8f2f902f8bb16b7ced3",
+    ),
+    (
+        6,
+        "5134850741bfa7c7554aee9d16b767b5b7b3e9549fb8e39444297e73cf96eaa1",
+        "d6811632982817fc002c78963cc0e453625950a983bb17493a1280773abb9800",
+    ),
+    (
+        7,
+        "94cf8e7ee3a2faa3912e0a90e66624e4edfc40ab758cbb96ddd765fe1ba228c8",
+        "0f120c99cd069bc70c5ddee81a3dd4ab41bb46c2388b017fd879b02ccc051463",
+    ),
+    (
+        8,
+        "a0ef585c6ea68d6c937e714025c3df3575c55216c805644aaa8f34493a21c5f5",
+        "5bea03fb1ea84d492128e8840ec90ccc3931f8f3e5e4f1c6063ffc88880cb4da",
+    ),
+    (
+        9,
+        "a16f7de47e57bbe4cd4a01d731a286bbf34eb5bc80a8297ca059de52ef326807",
+        "68fa2c3f43911f6cc3a55fc91d898f6fb049051dd8e8cefb27a072b07a30fd13",
+    ),
+    (
+        10,
+        "6d694d4baa477488c15dd04091b16ed8f920d45029b1e2a412dd13569822fb8d",
+        "201fd63938e7209b250dbba99e33e0ef33a4ff94d5472522279649bc911ac17c",
+    ),
+    (
+        11,
+        "552e0ed74c9590678cf7759092e7686aba85642b2e1a094f7a26e49cce75950d",
+        "00f15b5d7b3f793959f6b17927d373f58a3f3c72cf24791e0400964c0588ef4e",
+    ),
+    (
+        12,
+        "c763c9e52532fba1169723994b557a99081fee24e093b8ea16de8d52e6a5d6ca",
+        "37a92f1c173ff09259a058223249473f0a720fe095a67a1fbe4846ea392a3475",
+    ),
+];
+
+const PINS_JSON: [(u64, &str, &str); 12] = [
     (
         1,
         "c6aa0ef46756ee5bbdbae3a64b3b59d6c6c67941af54b5da8ab0f6153942fac3",

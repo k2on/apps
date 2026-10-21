@@ -20,8 +20,8 @@
 
 use std::collections::BTreeMap;
 
+use ark::format::Encode;
 use ark::hash::StateHash;
-use ark::json::Json;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
@@ -211,7 +211,7 @@ impl Peer {
 
     /// An intent: its id, or the refusal its preview — or, alone, its
     /// sequencing — gave it here and now.
-    pub fn mutate(&mut self, name: &str, input: &impl Json) -> Result<EntryId, String> {
+    pub fn mutate(&mut self, name: &str, input: &impl Encode) -> Result<EntryId, String> {
         self.mutate_bytes(name, input.to_bytes())
     }
 
@@ -243,8 +243,51 @@ impl Peer {
         Ok(())
     }
 
+    /// The domain a name of a function or a table is in, and the name
+    /// there: the log's, else the live space's.
+    fn named(&self, name: &str, table: bool) -> Result<(&Domain, String), String> {
+        let live = self.config.live.as_ref().and_then(|l| l.module.domain.as_deref());
+        for d in self.config.domain.as_deref().into_iter().chain(live) {
+            match table {
+                true if d.schema.table(name).is_some() => return Ok((d, name.into())),
+                false => match d.binding(name) {
+                    Some(b) => return Ok((d, b.into())),
+                    None => continue,
+                },
+                true => continue,
+            }
+        }
+        Err(format!("no {} {name}", if table { "table" } else { "function" }))
+    }
+
+    /// A function's input — of the log's domain or the live one's — from its
+    /// JSON (§1.1's human form), as the value format writes it: what a host
+    /// that speaks JSON authors and asks with.
+    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, String> {
+        let (d, b) = self.named(name, false)?;
+        d.input_json(&b, text).map_err(|r| r.0)
+    }
+
+    /// What [`Peer::ask`] answered, as JSON.
+    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
+        let (d, b) = self.named(name, false)?;
+        d.answer_json(&b, bytes).map_err(|r| r.0)
+    }
+
+    /// One row of a view of `name`, as JSON.
+    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
+        let (d, b) = self.named(name, false)?;
+        d.element_json(&b, bytes).map_err(|r| r.0)
+    }
+
+    /// A row of a table of either space, as JSON.
+    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
+        let (d, t) = self.named(table, true)?;
+        d.row_json(&t, bytes).map_err(|r| r.0)
+    }
+
     /// A query's answer over the optimistic state, as this login reads it.
-    pub fn query<T: Json>(&self, name: &str, input: &impl Json) -> Result<T, String> {
+    pub fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> Result<T, String> {
         let bytes = self.ask(name, &input.to_bytes())?;
         T::from_bytes(&bytes).map_err(|r| format!("{name}: {r}"))
     }

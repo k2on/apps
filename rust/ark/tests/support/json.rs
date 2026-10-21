@@ -1,5 +1,5 @@
-//! The vectors' JSON: a value is its own JSON (`ark::json`), a row its
-//! object of columns as the store holds it, an object's keys in code-point
+//! The vectors' JSON: a value is its human form (`ark::format`), a row its
+//! object of columns in schema order, an object's keys in code-point
 //! order where the vector writer builds it, a vector file one named part
 //! per line.
 
@@ -46,12 +46,15 @@ pub fn int(n: i64) -> String {
     n.to_string()
 }
 
-/// A row: its JSON, as it is.
-pub fn row(_: &Table, b: &[u8]) -> String {
-    String::from_utf8(b.to_vec()).expect("a row is JSON")
+/// A row: its JSON under its table, columns in schema order (under
+/// `values-json`, its bytes as they are).
+pub fn row(t: &Table, b: &[u8]) -> String {
+    let v = ark::dynamic::row(t, b).expect("a row reads");
+    serde_json::to_string(&ark::json::Typed(&t.row_type(), &v)).unwrap()
 }
 
-/// The schema: its JSON, as its hash is taken over.
+/// The schema: its JSON (its hash is taken over its bytes in the value
+/// format, which under `values-json` are this).
 pub fn schema(s: &Schema) -> String {
     serde_json::to_string(s).unwrap()
 }

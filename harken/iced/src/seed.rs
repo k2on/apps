@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use crate::domain::host as keys;
 use crate::domain::{AddSong, CreditRecording, DescribePerson, DescribeRecording, DescribeWork, Library, LibraryEntry};
 use crate::domain::{AddToPlaylist, CreatePlaylist};
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::{EntryId, Record, Snapshot};
 use ark::peer::Ctx;
 use ark::store::Store;
@@ -4288,7 +4288,7 @@ impl Seeder {
     /// repository — an argument that moved, a key computed two different ways
     /// — and every one of those presents on the page as something silently
     /// absent, so it is an assertion rather than a `let _`.
-    fn mutate(&mut self, what: &str, name: &str, input: &impl Json) {
+    fn mutate(&mut self, what: &str, name: &str, input: &impl Encode) {
         self.local += 1;
         self.ctx.id = EntryId::of(LOCAL, self.local);
         self.ctx.now += 1;
@@ -4301,7 +4301,7 @@ impl Seeder {
             .unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
     }
 
-    fn query<T: Json>(&self, name: &str, input: &impl Json) -> T {
+    fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> T {
         let b = domain().binding(name).unwrap_or_else(|| panic!("the demo reads {name}"));
         let bytes = domain()
             .ask(&self.store, &self.ctx, b, &input.to_bytes())

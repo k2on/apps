@@ -1,4 +1,5 @@
 {
-  "frame": {"Verdict":{"space":"durable","id":"aa238dc8c0dea3c9309bb0c381b94568","verdict":{"Refused":{"why":"a playlist needs a name"}}}},
+  "bytes": "030010aa238dc8c0dea3c9309bb0c381b9456801176120706c61796c697374206e656564732061206e616d65",
+  "frame": {"Verdict":{"id":"aa238dc8c0dea3c9309bb0c381b94568","space":"durable","verdict":{"Refused":{"why":"a playlist needs a name"}}}},
   "name": "server-verdict-refused-durable"
 }

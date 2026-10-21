@@ -9,7 +9,7 @@ use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use ark::json::Json;
+use ark::format::Encode;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
 use ark::row::Id;
