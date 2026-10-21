@@ -186,6 +186,12 @@ impl<'t, S: Tables, P: Writes> Db<'t, S, P> {
         }
     }
 
+    /// `R`'s table, whichever of `S`'s fields it is: what code written once
+    /// over every schema holding `R` reads and writes through.
+    pub fn tab<R: Row>(&self) -> Tab<'t, R, P> {
+        Tab::new(self.txn)
+    }
+
     /// How many changes this run has made.
     pub fn changed(&self) -> usize {
         self.txn.borrow().changes.len()
@@ -368,6 +374,13 @@ impl<'t, R: Row, P> Tab<'t, R, P> {
     {
         let mut k = vec![];
         <R::Key as Whole<Q, M>>::put(&key, &mut k);
+        self.get_bytes(k).map(|b| decode(&b))
+    }
+
+    /// The row with this key, as the key's tuple.
+    pub fn at(&self, key: &R::Key) -> Option<R> {
+        let mut k = vec![];
+        crate::format::put_key(key, &mut k);
         self.get_bytes(k).map(|b| decode(&b))
     }
 

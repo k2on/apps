@@ -67,8 +67,12 @@ impl Parse for Item {
 }
 
 fn items(attrs: &[syn::Attribute]) -> syn::Result<Vec<Vec<Item>>> {
+    items_of(attrs, "ark")
+}
+
+fn items_of(attrs: &[syn::Attribute], name: &str) -> syn::Result<Vec<Vec<Item>>> {
     let mut out = vec![];
-    for a in attrs.iter().filter(|a| a.path().is_ident("ark")) {
+    for a in attrs.iter().filter(|a| a.path().is_ident(name)) {
         let list = a.meta.require_list()?;
         out.push(
             Punctuated::<Item, Token![,]>::parse_terminated
@@ -123,6 +127,57 @@ fn describe(input: &DeriveInput) -> TokenStream {
             fn describe() -> ::ark::row::Type {
                 #body
             }
+        }
+    }
+}
+
+/// `Effect` for a row: its `state: Job<T>` field, and what `#[effect(..)]`
+/// says — the lease and the retry (a minute each by default), the role a
+/// claim needs, the field naming its owner.
+pub fn effect(input: DeriveInput) -> TokenStream {
+    let name = &input.ident;
+    let fields = match fields_of(&input) {
+        Ok(f) => f,
+        Err(e) => return e,
+    };
+    let state = fields.named.iter().find(|f| f.ident.as_ref().is_some_and(|i| i == "state"));
+    let outcome = state.and_then(|f| match &f.ty {
+        Type::Path(p) => match &p.path.segments.last()?.arguments {
+            syn::PathArguments::AngleBracketed(a) if p.path.segments.last()?.ident == "Job" => a.args.first().cloned(),
+            _ => None,
+        },
+        _ => None,
+    });
+    let Some(outcome) = outcome else {
+        return err(name.span(), "a job is a row with a `state: Job<T>` field");
+    };
+    let (mut lease, mut retry, mut role, mut owner) = (quote!(60_000), quote!(60_000), quote!(None), quote!());
+    let its = match items_of(&input.attrs, "effect") {
+        Ok(i) => i,
+        Err(e) => return e.to_compile_error(),
+    };
+    for it in its.into_iter().flatten() {
+        match it {
+            Item::Is(n, e) if n == "lease_ms" => lease = e.to_token_stream(),
+            Item::Is(n, e) if n == "retry_ms" => retry = e.to_token_stream(),
+            Item::Is(n, e) if n == "role" => role = quote!(Some(#e)),
+            Item::Is(n, Expr::Path(f)) if n == "owner" => owner = quote!(fn owner(&self) -> Option<&str> { Some(&self.#f) }),
+            _ => return err(name.span(), "#[effect(..)]: lease_ms = .., retry_ms = .., role = \"..\", owner = field"),
+        }
+    }
+    quote! {
+        impl ::ark::effect::Effect for #name {
+            type Outcome = #outcome;
+            const LEASE_MS: i64 = #lease;
+            const RETRY_MS: i64 = #retry;
+            const ROLE: Option<&'static str> = #role;
+            fn job(&self) -> &::ark::effect::Job<#outcome> {
+                &self.state
+            }
+            fn job_mut(&mut self) -> &mut ::ark::effect::Job<#outcome> {
+                &mut self.state
+            }
+            #owner
         }
     }
 }
