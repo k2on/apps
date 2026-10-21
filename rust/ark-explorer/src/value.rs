@@ -276,7 +276,7 @@ pub fn text_of(v: &Value) -> String {
 /// An id as text — 32 hex digits, dashes anywhere, as a cell shows one and a
 /// person pastes one.
 pub fn parse_id(text: &str) -> Option<[u8; 16]> {
-    ark::hash::unhex(&text.trim().replace('-', "")).and_then(|b| <[u8; 16]>::try_from(b).ok())
+    ark::hash::unhex(&text.trim().replace('-', "").to_ascii_lowercase()).and_then(|b| <[u8; 16]>::try_from(b).ok())
 }
 
 /// The parts of `[a, b]` or `(a, b)` — what is inside the brackets, split
@@ -328,7 +328,7 @@ pub fn parse_cell(name: &str, ty: &Ty, text: &str) -> Result<Value, String> {
         Ty::Bool if matches!(t, "" | "true" | "false") => Ok(Value::Bool(t == "true")),
         Ty::Bool => Err(bad("true or false")),
         Ty::Id(_) => parse_id(t).map(Value::Id).ok_or_else(|| bad("an id, 32 hex digits")),
-        Ty::Bytes => ark::hash::unhex(t).map(Value::Bytes).ok_or_else(|| bad("hex digits")),
+        Ty::Bytes => ark::hash::unhex(&t.to_ascii_lowercase()).map(Value::Bytes).ok_or_else(|| bad("hex digits")),
         Ty::Enum(vs) => match (vs.iter().position(|v| v == t), t.trim_start_matches('#').parse::<u8>()) {
             (Some(i), _) => Ok(Value::Variant(i as u8, vec![])),
             (None, Ok(i)) if (i as usize) < vs.len() => Ok(Value::Variant(i, vec![])),

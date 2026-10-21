@@ -167,7 +167,7 @@ pub struct Store {
     tables: Vec<Rows>,
     space: Space,
     /// The log's table: sequence's bytes to the row.
-    log: BTreeMap<Vec<u8>, Vec<u8>>,
+    log: BTreeMap<Vec<u8>, LogRow>,
 }
 
 impl PartialEq for Store {
@@ -180,7 +180,20 @@ impl Eq for Store {}
 /// The log as its table holds it, read (§1.6). Every peer's log stands on
 /// a first row; the entries are the rows after it.
 #[derive(Clone, Copy)]
-pub struct Log<'a>(&'a BTreeMap<Vec<u8>, Vec<u8>>);
+pub struct Log<'a>(&'a BTreeMap<Vec<u8>, LogRow>);
+
+/// A row of the log's table, and its sequence, state and hash read once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LogRow {
+    bytes: Vec<u8>,
+    ends: (Seq, StateHash, EntryHash),
+}
+
+impl LogRow {
+    fn of(bytes: Vec<u8>) -> LogRow {
+        LogRow { ends: ends(&bytes), bytes }
+    }
+}
 
 impl PartialEq for Log<'_> {
     fn eq(&self, other: &Log) -> bool {
@@ -194,8 +207,8 @@ impl std::fmt::Debug for Log<'_> {
     }
 }
 
-fn read(b: &[u8]) -> Logged {
-    Logged::from_bytes(b).expect("a row of the log reads")
+fn read(b: &LogRow) -> Logged {
+    Logged::from_bytes(&b.bytes).expect("a row of the log reads")
 }
 
 /// A row's sequence, state and hash, read past its entry and facts.
@@ -224,11 +237,11 @@ impl<'a> Log<'a> {
     }
 
     pub fn base_seq(&self) -> Seq {
-        ends(self.0.values().next().expect("a log stands on a row")).0
+        self.0.values().next().expect("a log stands on a row").ends.0
     }
 
     fn last(&self) -> (Seq, StateHash, EntryHash) {
-        ends(self.0.values().next_back().expect("a log stands on a row"))
+        self.0.values().next_back().expect("a log stands on a row").ends
     }
 
     /// The last sequence and the chain's hash there.
@@ -248,7 +261,7 @@ impl<'a> Log<'a> {
 
     /// Whether this log has `hash` at `seq`: one history up to there.
     pub fn has(&self, seq: Seq, hash: &EntryHash) -> bool {
-        self.0.get(&seq_key(seq)).is_some_and(|b| ends(b).2 == *hash)
+        self.0.get(&seq_key(seq)).is_some_and(|b| b.ends.2 == *hash)
     }
 
     /// The entries after `seq`, in order.
@@ -345,20 +358,24 @@ impl Store {
         let ok = match c {
             Change::Add { .. } => match (first, last) {
                 (Some((_, f)), Some((_, b))) => {
-                    let (n, _, h) = ends(b);
+                    let (n, _, h) = b.ends;
                     l.seq == n + 1 && l.links(&h) || read(f).seq == l.seq + 1 && read(f).links(&l.hash)
                 }
                 _ => true,
             },
-            _ => self.log.get(&key) == Some(row) && (first.map(|f| f.0) == Some(&key) || last.map(|b| b.0) == Some(&key)),
+            _ => self.log.get(&key).map(|r| &r.bytes) == Some(row) && (first.map(|f| f.0) == Some(&key) || last.map(|b| b.0) == Some(&key)),
         };
         if !ok {
             return Err(Refusal(format!("{LOG}: entry {} is not an end of the chain", l.seq)));
         }
         match c {
-            Change::Add { .. } => self.log.insert(key, row.clone()),
-            _ => self.log.remove(&key),
-        };
+            Change::Add { .. } => {
+                self.log.insert(key, LogRow::of(row.clone()));
+            }
+            _ => {
+                self.log.remove(&key);
+            }
+        }
         Ok(())
     }
 
@@ -386,7 +403,7 @@ impl Store {
     /// A row added at the head of the log by a peer that chained it onto
     /// the head, or checked that it links there.
     pub(crate) fn log_push(&mut self, seq: Seq, row: Vec<u8>) {
-        self.log.insert(seq_key(seq), row);
+        self.log.insert(seq_key(seq), LogRow::of(row));
     }
 
     /// The log's rows above `seq` deleted, newest first.
@@ -652,7 +669,7 @@ impl Store {
     /// last: what a peer makes durable whole.
     pub fn kv_rows(&self) -> KvRows {
         let mut rows = self.snapshot_rows();
-        rows.push((LOG.into(), self.log.values().cloned().collect()));
+        rows.push((LOG.into(), self.log.values().map(|r| r.bytes.clone()).collect()));
         rows
     }
 

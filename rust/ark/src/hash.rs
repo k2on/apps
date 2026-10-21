@@ -24,14 +24,28 @@ pub fn sha256(parts: &[&[u8]]) -> [u8; 32] {
 }
 
 pub fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(b.len() * 2);
+    for &x in b {
+        s.push(DIGITS[usize::from(x >> 4)] as char);
+        s.push(DIGITS[usize::from(x & 15)] as char);
+    }
+    s
 }
 
+/// Lowercase hex's bytes; none for anything else.
 pub fn unhex(s: &str) -> Option<Vec<u8>> {
+    fn digit(c: u8) -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            _ => None,
+        }
+    }
     if !s.len().is_multiple_of(2) {
         return None;
     }
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+    s.as_bytes().chunks(2).map(|p| Some(digit(p[0])? << 4 | digit(p[1])?)).collect()
 }
 
 macro_rules! spaces {

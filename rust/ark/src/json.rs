@@ -79,16 +79,30 @@ pub mod hex_bytes {
 
     pub fn deserialize<'de, D: Deserializer<'de>, B: TryFrom<Vec<u8>>>(d: D) -> Result<B, D::Error> {
         let s = <std::borrow::Cow<str>>::deserialize(d)?;
-        let b = unhex(&s).filter(|b| hex(b) == s).ok_or_else(|| D::Error::custom("not lowercase hex"))?;
+        let b = unhex(&s).ok_or_else(|| D::Error::custom("not lowercase hex"))?;
         B::try_from(b).map_err(|_| D::Error::custom("not as many bytes as it is"))
     }
 }
 
 // * Bytes that are JSON
 
-fn as_raw<E: serde::ser::Error>(b: &[u8]) -> Result<Box<RawValue>, E> {
-    let s = std::str::from_utf8(b).map_err(E::custom)?;
-    RawValue::from_string(s.to_owned()).map_err(E::custom)
+/// Bytes that are JSON, written as they are: the shape serde_json's own
+/// `RawValue` serializes as, which its serializer writes without reading (a
+/// row or an input is read once, where it enters).
+struct AsRaw<'a>(&'a str);
+
+const RAW_TOKEN: &str = "$serde_json::private::RawValue";
+
+impl Serialize for AsRaw<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut st = s.serialize_struct(RAW_TOKEN, 1)?;
+        st.serialize_field(RAW_TOKEN, self.0)?;
+        st.end()
+    }
+}
+
+fn as_raw<E: serde::ser::Error>(b: &[u8]) -> Result<AsRaw<'_>, E> {
+    std::str::from_utf8(b).map(AsRaw).map_err(E::custom)
 }
 
 /// Bytes that are a JSON value, written as that value.
@@ -179,7 +193,7 @@ impl Serialize for Typed<'_> {
             }
             (Type::Unit, J::Null) => s.serialize_unit(),
             (Type::Id(_), J::String(h)) => {
-                let b = unhex(h).filter(|b| b.len() == 16 && hex(b) == *h).ok_or_else(bad)?;
+                let b = unhex(h).filter(|b| b.len() == 16).ok_or_else(bad)?;
                 match s.is_human_readable() {
                     true => s.serialize_str(h),
                     false => s.serialize_bytes(&b),
