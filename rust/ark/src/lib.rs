@@ -1,5 +1,5 @@
 //! ArkDB v5's kernel, as `docs/plan-v5.md` Part 1 defines it: a value is
-//! bytes and a type says how to read them (§1.1, [`ty`], [`codec`]); hash
+//! its JSON and a key its `memcomparable` bytes (§1.1, [`json`]); hash
 //! spaces are distinct types ([`hash`]); the schema is data and the only
 //! place that knows what a row is (§1.2, [`schema`]); one ordered store
 //! whose every write is a [`store::Change`] that inverts exactly (§1.3,
@@ -21,19 +21,18 @@ extern crate self as ark;
 
 pub use domain::Domain;
 
-pub mod codec;
 pub mod db;
 pub mod domain;
 pub mod dynamic;
 pub mod frames;
 pub mod hash;
+pub mod json;
 pub mod log;
 pub mod peer;
 pub mod plan;
 pub mod row;
 pub mod schema;
 pub mod store;
-pub mod ty;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
 /// a constraint refused, an intent its function refused. What a form shows
@@ -57,12 +56,13 @@ impl fmt::Display for Refusal {
 /// attributes that register a function by name, the context, the typed
 /// store, plans, ids and indexes.
 pub mod prelude {
-    pub use crate::codec::Node;
     pub use crate::db::{Db, Tables};
     pub use crate::domain::{Domain, Scope};
+    pub use crate::json::Json;
     pub use crate::peer::Ctx;
     pub use crate::plan::{scan, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};
     pub use crate::Refusal;
-    pub use ark_macros::{live, mutator, query, scope, view, Describe, Input, Node, Row, Schema};
+    pub use ark_macros::{live, mutator, query, scope, view, Describe, Input, Row, Schema};
+    pub use serde::{Deserialize, Serialize};
 }

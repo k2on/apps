@@ -1,13 +1,11 @@
-//! §1.11 held: every frame's bytes are canonical bytes of the frame type
-//! the table in `frames.rs` writes, and read back as the frame.
+//! §1.11 held: every frame is its JSON and reads back as the frame.
 
 #[path = "demo.rs"]
 mod demo;
 
-use ark::codec::Node;
-use ark::codec::{parse, Reader};
-use ark::frames::{frame_ty, ty, Frame, Verdict};
+use ark::frames::{Frame, Verdict};
 use ark::hash::{EntryHash, SchemaHash, StateHash};
+use ark::json::Json;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
 use ark::schema::Space;
 use ark::store::Change;
@@ -21,22 +19,22 @@ fn every_frame() -> Vec<Frame> {
         local: 1,
         roles: vec!["r0".into(), "r1".into()],
         func: demo::h(demo::ADD),
-        input: vec![0, 0xFF, 1],
+        input: br#"{"name":"a\u0000b","n":-1}"#.to_vec(),
         now: -5,
     };
     let facts = vec![
         Change::Add {
             table: "item".into(),
-            row: vec![0],
+            row: br#"{"k":0}"#.to_vec(),
         },
         Change::Remove {
             table: "item".into(),
-            row: vec![],
+            row: b"{}".to_vec(),
         },
         Change::Edit {
             table: "p".into(),
-            old: vec![1],
-            new: vec![2, 0],
+            old: br#"{"k":1}"#.to_vec(),
+            new: br#"{"k":[2,null]}"#.to_vec(),
         },
     ];
     let l = Logged {
@@ -50,7 +48,7 @@ fn every_frame() -> Vec<Frame> {
         seq: 9,
         hash: EntryHash([1; 32]),
         state: StateHash([0; 32]),
-        rows: vec![("item".into(), vec![vec![0, 1], vec![]]), ("p".into(), vec![])],
+        rows: vec![("item".into(), vec![br#"{"k":0}"#.to_vec(), b"{}".to_vec()]), ("p".into(), vec![])],
     };
     let id = entry.id;
     vec![
@@ -106,20 +104,19 @@ fn every_frame() -> Vec<Frame> {
     ]
 }
 
-/// Each frame parses under `frame_ty()` whole, decodes to itself, and a
-/// byte added or cut is refused or read as other canonical bytes. Falsified
-/// by giving `Hello`'s row of the table `Bytes` for its cursor instead of
-/// `Int`: the hello frames no longer parsed.
+/// Each frame is its JSON and reads back as itself, whole: a byte added or
+/// cut is refused; a logged record is the variant's object around the
+/// entry's row as it is. Falsified by carrying a change's row as a JSON
+/// string instead of the JSON it is: the logged record was not its row
+/// wrapped.
 #[test]
-fn every_frame_is_its_type() {
-    let t = frame_ty();
+fn every_frame_reads_back() {
     for f in every_frame() {
         let b = f.enc();
-        parse(&t, &b).unwrap_or_else(|e| panic!("{f:?}: {e}"));
-        assert_eq!(Frame::dec(&b), Ok(f.clone()));
+        assert_eq!(Frame::dec(&b), Ok(f.clone()), "{}", String::from_utf8_lossy(&b));
         let mut longer = b.clone();
-        longer.push(0);
-        assert!(Frame::dec(&longer).is_err() && parse(&t, &longer).is_err());
+        longer.push(b'x');
+        assert!(Frame::dec(&longer).is_err());
         assert!(Frame::dec(&b[..b.len() - 1]).is_err());
     }
     let l = match &every_frame()[7] {
@@ -128,10 +125,7 @@ fn every_frame_is_its_type() {
     };
     let r = Record::Logged(l.clone());
     assert_eq!(Record::logged(&l.to_bytes()), r.enc(), "a logged record is the variant, then the row");
-    parse(&ty("Record"), &r.enc()).unwrap();
     assert_eq!(Record::dec(&r.enc()), Ok(r));
-    let mut rd = Reader::new(&[4]);
-    assert!(rd.variant(4).is_err(), "there are four frames");
 }
 
 /// A push is a page of intents: each at sequence 0 with no facts and zero

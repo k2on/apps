@@ -7,10 +7,10 @@
 //! same store, so a view's patches are the typed engine's. One plan form
 //! serves a runner in any language.
 //!
-//! **Values.** `Int` is a number; `Text` a string; `Bool` a boolean;
-//! `Bytes` an array of numbers; `()` null; an `Id` its hex; an `Option` null
-//! or its value; a list or a tuple an array; a record an object; a sum
-//! variant its name, or `{name: payload}` — serde's forms.
+//! **Values** are the store's own JSON (`crate::json`): a row is the
+//! object of its columns, written back in the schema's column order
+//! ([`row_bytes`]), its key and a related read's prefix the schema's types'
+//! key bytes.
 //!
 //! **Order.** Sort, group and join keys are a value's [`ordered`] bytes:
 //! null, then booleans, numbers, strings, arrays and objects, each kind in
@@ -48,13 +48,12 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value as Json};
 
-use crate::codec::{put_bytes, put_int, Reader};
 use crate::db::{Db, Tables};
+use crate::json::{typed_json, typed_key};
 use crate::plan::{scan_raw, Make, Plan};
-use crate::row::{Key, Type};
-use crate::schema::{Column, Schema, Table};
+use crate::row::Key;
+use crate::schema::{Schema, Table};
 use crate::store::Store;
-use crate::ty::Ty;
 use crate::Refusal;
 
 /// A schema known only at run time: the store's.
@@ -72,175 +71,17 @@ fn no(why: impl Into<String>) -> Refusal {
     Refusal(why.into())
 }
 
-// * Types
-
-/// What a column is: its declaration read over its structure.
-pub fn column_type(c: &Column) -> Type {
-    type_of(&c.decl, &c.ty)
-}
-
-fn inner<'a>(decl: &'a str, head: &str) -> Option<&'a str> {
-    decl.strip_prefix(head)?.strip_prefix('<')?.strip_suffix('>')
-}
-
-/// A declaration over its structure: the names a column declares
-/// (`Text`, `Id<t>`, `Option<..>`, `List<..>`, `Bool`) and, for the rest,
-/// the structure, a sum's variants named by their place.
-pub fn type_of(decl: &str, ty: &Ty) -> Type {
-    match (decl, ty) {
-        ("Int", _) => Type::Int,
-        ("Text", _) => Type::Text,
-        ("Bytes", _) => Type::Bytes,
-        ("Bool", _) => Type::Bool,
-        ("()", _) => Type::Unit,
-        (d, _) if inner(d, "Id").is_some() => Type::Id(inner(d, "Id").unwrap().into()),
-        (d, Ty::Sum(vs)) if ty.is_option() && inner(d, "Option").is_some() => Type::Option(Box::new(type_of(inner(d, "Option").unwrap(), &vs[1][0]))),
-        (d, Ty::List(t)) if inner(d, "List").is_some() => Type::List(Box::new(type_of(inner(d, "List").unwrap(), t))),
-        (_, t) => structural(t),
-    }
-}
-
-fn structural(ty: &Ty) -> Type {
-    match ty {
-        Ty::Int => Type::Int,
-        Ty::Bytes => Type::Bytes,
-        Ty::List(t) => Type::List(Box::new(structural(t))),
-        Ty::Tuple(ts) if ts.is_empty() => Type::Unit,
-        Ty::Tuple(ts) => Type::Tuple(ts.iter().map(structural).collect()),
-        Ty::Sum(_) if ty.is_option() => match ty {
-            Ty::Sum(vs) => Type::Option(Box::new(structural(&vs[1][0]))),
-            _ => unreachable!(),
-        },
-        Ty::Sum(vs) => Type::Sum(
-            String::new(),
-            vs.iter()
-                .enumerate()
-                .map(|(i, fs)| {
-                    (
-                        format!("{i}"),
-                        fs.iter().enumerate().map(|(j, t)| (format!("{j}"), structural(t))).collect(),
-                    )
-                })
-                .collect(),
-        ),
-        Ty::Named(n) => Type::Record(n.clone(), vec![]),
-    }
-}
-
-// * Values
-
-/// A value's bytes under `t`, as JSON.
-pub fn decode(t: &Type, r: &mut Reader) -> Result<Json, Refusal> {
-    Ok(match t {
-        Type::Int => Json::from(r.int()?),
-        Type::Text => Json::from(r.text()?),
-        Type::Bool => Json::from(r.variant(2)? == 1),
-        Type::Bytes => Json::from(r.bytes()?),
-        Type::Unit => Json::Null,
-        Type::Id(_) => Json::from(crate::hash::hex(&r.bytes()?)),
-        Type::Option(t) => match r.variant(2)? {
-            0 => Json::Null,
-            _ => decode(t, r)?,
-        },
-        Type::List(t) => Json::Array(r.list(|r| decode(t, r))?),
-        Type::Tuple(ts) => Json::Array(ts.iter().map(|t| decode(t, r)).collect::<Result<_, _>>()?),
-        Type::Record(_, fs) => Json::Object(fields(fs, r)?),
-        Type::Sum(_, vs) => {
-            let (name, fs) = &vs[r.variant(vs.len())? as usize];
-            match &fs[..] {
-                [] => Json::from(name.clone()),
-                [(f, t)] if f == "0" => object([(name.clone(), decode(t, r)?)]),
-                fs if fs[0].0 == "0" => object([(name.clone(), Json::Array(fs.iter().map(|(_, t)| decode(t, r)).collect::<Result<_, _>>()?))]),
-                fs => object([(name.clone(), Json::Object(fields(fs, r)?))]),
-            }
-        }
-    })
-}
-
-fn object(kvs: impl IntoIterator<Item = (String, Json)>) -> Json {
-    Json::Object(kvs.into_iter().collect())
-}
-
-fn fields(fs: &[(String, Type)], r: &mut Reader) -> Result<Map<String, Json>, Refusal> {
-    fs.iter().map(|(n, t)| Ok((n.clone(), decode(t, r)?))).collect()
-}
-
-/// A JSON value's bytes under `t`, or why it is not one.
-pub fn encode(t: &Type, v: &Json, out: &mut Vec<u8>) -> Result<(), Refusal> {
-    let bad = || no(format!("{v} is not a {}", t.decl()));
-    match (t, v) {
-        (Type::Int, Json::Number(n)) => put_int(out, n.as_i64().ok_or_else(bad)?),
-        (Type::Text, Json::String(s)) => put_bytes(out, s.as_bytes()),
-        (Type::Bool, Json::Bool(b)) => out.push(*b as u8),
-        (Type::Bytes, Json::Array(xs)) => {
-            let bs: Option<Vec<u8>> = xs.iter().map(|x| x.as_u64().and_then(|n| u8::try_from(n).ok())).collect();
-            put_bytes(out, &bs.ok_or_else(bad)?)
-        }
-        (Type::Unit, Json::Null) => {}
-        (Type::Id(_), Json::String(s)) => put_bytes(out, &crate::hash::unhex(s).ok_or_else(bad)?),
-        (Type::Option(_), Json::Null) => out.push(0),
-        (Type::Option(t), v) => {
-            out.push(1);
-            encode(t, v, out)?
-        }
-        (Type::List(t), Json::Array(xs)) => {
-            for x in xs {
-                out.push(1);
-                encode(t, x, out)?;
-            }
-            out.push(0)
-        }
-        (Type::Tuple(ts), Json::Array(xs)) if ts.len() == xs.len() => ts.iter().zip(xs).try_for_each(|(t, x)| encode(t, x, out))?,
-        (Type::Record(_, fs), Json::Object(m)) => put_fields(fs, m, out)?,
-        (Type::Sum(_, vs), v) => {
-            let (name, payload) = match v {
-                Json::String(s) => (s.as_str(), None),
-                Json::Object(m) if m.len() == 1 => m.iter().next().map(|(k, p)| (k.as_str(), Some(p))).unwrap(),
-                _ => return Err(bad()),
-            };
-            let i = vs.iter().position(|(n, _)| n == name).ok_or_else(bad)?;
-            out.push(i as u8);
-            match (&vs[i].1[..], payload) {
-                ([], None) => {}
-                ([(f, t)], Some(p)) if f == "0" => encode(t, p, out)?,
-                (fs, Some(Json::Array(xs))) if !fs.is_empty() && fs[0].0 == "0" && fs.len() == xs.len() => {
-                    fs.iter().zip(xs).try_for_each(|((_, t), x)| encode(t, x, out))?
-                }
-                (fs, Some(Json::Object(m))) => put_fields(fs, m, out)?,
-                _ => return Err(bad()),
-            }
-        }
-        _ => return Err(bad()),
-    }
-    Ok(())
-}
-
-fn put_fields(fs: &[(String, Type)], m: &Map<String, Json>, out: &mut Vec<u8>) -> Result<(), Refusal> {
-    for (n, t) in fs {
-        encode(t, m.get(n).unwrap_or(&Json::Null), out)?;
-    }
-    Ok(())
-}
+// * Rows
 
 /// A table's row as JSON: an object of its columns.
 pub fn row(table: &Table, bytes: &[u8]) -> Result<Json, Refusal> {
-    let mut r = Reader::new(bytes);
-    let mut m = Map::new();
-    for c in &table.columns {
-        m.insert(c.name.clone(), decode(&column_type(c), &mut r)?);
-    }
-    r.end()?;
-    Ok(Json::Object(m))
+    serde_json::from_slice(bytes).map_err(|e| no(format!("a row of {}: {e}", table.name)))
 }
 
-/// A row's bytes from its JSON object, a column missing read as null.
+/// A row's bytes from its JSON object, a column missing read as null: the
+/// row's one encoding, as its Rust type's would be.
 pub fn row_bytes(table: &Table, v: &Json) -> Result<Vec<u8>, Refusal> {
-    let m = v.as_object().ok_or_else(|| no(format!("a row of {} is an object", table.name)))?;
-    let mut out = vec![];
-    for c in &table.columns {
-        encode(&column_type(c), m.get(&c.name).unwrap_or(&Json::Null), &mut out).map_err(|e| no(format!("{}: {e}", c.name)))?;
-    }
-    Ok(out)
+    typed_json(&table.row_type(), v)
 }
 
 /// The bytes of a key, given as its one column's value or, keyed by more,
@@ -254,7 +95,7 @@ pub fn key_bytes(table: &Table, key: &Json) -> Result<Vec<u8>, Refusal> {
     };
     let mut out = vec![];
     for (c, k) in cols.iter().zip(parts) {
-        encode(&column_type(c), k, &mut out)?;
+        typed_key(&c.ty, k, &mut out)?;
     }
     Ok(out)
 }
@@ -282,7 +123,7 @@ pub fn ordered(v: &Json, out: &mut Vec<u8>) {
         Json::Bool(b) => out.push(2 + *b as u8),
         Json::Number(n) => {
             out.push(4);
-            put_int(out, n.as_i64().unwrap_or(i64::MAX));
+            out.extend_from_slice(&((n.as_i64().unwrap_or(i64::MAX) as u64) ^ (1 << 63)).to_be_bytes());
         }
         Json::String(s) => {
             out.push(5);
@@ -674,7 +515,7 @@ fn eval(e: &Expr, env: &mut Env) -> Result<Json, Refusal> {
             let tb = table(&s, t)?;
             let ci = tb.column(c).ok_or_else(|| no(format!("{t} has no column {c}")))?;
             let mut p = vec![];
-            encode(&column_type(&tb.columns[ci]), &v, &mut p)?;
+            typed_key(&tb.columns[ci].ty, &v, &mut p)?;
             let path = if ci == 0 {
                 Some(None)
             } else {

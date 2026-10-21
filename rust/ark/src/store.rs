@@ -12,7 +12,8 @@
 //! one with the pending change lists applied, undone newest-first.
 //!
 //! The state hash is kept as the rows are written: per table, the sum
-//! modulo 2^256 of `sha256(enc(Bytes table) ‖ row)` over its rows, moved by
+//! modulo 2^256 of `sha256(table ‖ row)` over its rows (a row is its JSON,
+//! which starts `{`, so the two parts are told apart), moved by
 //! one leaf out and one in per write; the state hash is
 //! `sha256(schema_hash ‖ digests of the durable tables in schema order)`.
 //! The schema hash is in it, so two stores are equal only when their bytes
@@ -24,7 +25,7 @@
 //! the reference is judged at both ends (v4's `StillReferenced`).
 //!
 //! **The log is a table** (§1.6): `_log` ([`LOG`]) beside the schema's,
-//! keyed by sequence, each row a [`Logged`]'s bytes. It is not the
+//! keyed by sequence, each row a [`Logged`]'s JSON. It is not the
 //! schema's — not in its hash or the state hash, not in a snapshot sent,
 //! not a table a function names, not in a store's equality — and its
 //! invariant is the chain: a row is added at either end only when it
@@ -32,29 +33,43 @@
 //! ([`Store::apply_kv`]). The store's rows with the log's are what a peer
 //! makes durable ([`Store::kv_rows`]).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use ark_macros::Node;
+use serde::{Deserialize, Serialize};
 
-use crate::codec::Node;
-use crate::codec::{bytes_enc, int_enc, skip, Reader};
 use crate::hash::{add256, sha256, sub256, EntryHash, SchemaHash, StateHash};
-use crate::log::{Entry, Logged, Rows as KvRows, Seq};
-use crate::schema::{Schema, Space, Table};
-use crate::ty::Ty;
+use crate::json::{put_key, Json};
+use crate::log::{Logged, Rows as KvRows, Seq};
+use crate::schema::{Parsed, Schema, Space, Table};
 use crate::Refusal;
 
 /// The log's table (§1.6).
 pub const LOG: &str = "_log";
 
-/// One write, as the store reports it and the log keeps it (a fact).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node)]
+/// One write, as the store reports it and the log keeps it (a fact): its
+/// rows each the row's JSON, carried as that JSON.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Change {
-    Add { table: String, row: Vec<u8> },
-    Remove { table: String, row: Vec<u8> },
-    Edit { table: String, old: Vec<u8>, new: Vec<u8> },
+    Add {
+        table: String,
+        #[serde(with = "crate::json::raw")]
+        row: Vec<u8>,
+    },
+    Remove {
+        table: String,
+        #[serde(with = "crate::json::raw")]
+        row: Vec<u8>,
+    },
+    Edit {
+        table: String,
+        #[serde(with = "crate::json::raw")]
+        old: Vec<u8>,
+        #[serde(with = "crate::json::raw")]
+        new: Vec<u8>,
+    },
 }
 
 impl Change {
@@ -72,19 +87,9 @@ impl Change {
             Change::Edit { table, old, new } => Change::Edit { table, old: new, new: old },
         }
     }
-
-    /// `Sum [(table, row), (table, row), (table, old, new)]`, rows as
-    /// `Bytes` so a change reads without its schema (derived).
-    pub fn enc(&self, out: &mut Vec<u8>) {
-        self.put(out);
-    }
-
-    pub fn dec(r: &mut Reader) -> Result<Change, Refusal> {
-        Change::take(r)
-    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
     Asc,
     Desc,
@@ -145,15 +150,13 @@ pub trait Read {
     fn scan(&self, table: &str, scan: &Scan) -> Vec<Vec<u8>>;
 }
 
-/// Each column's span in a row ([`Table::spans`]).
-type Spans<'a> = &'a [(usize, usize)];
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Rows {
-    /// `enc(Bytes name)`, the first half of every leaf.
+    /// The table's name, the first half of every leaf.
     name: Vec<u8>,
     rows: BTreeMap<Vec<u8>, Vec<u8>>,
-    indexes: Vec<BTreeSet<Vec<u8>>>,
+    /// Per index, each entry and the key of its row.
+    indexes: Vec<BTreeMap<Vec<u8>, Vec<u8>>>,
     digest: [u8; 32],
 }
 
@@ -197,17 +200,21 @@ fn read(b: &[u8]) -> Logged {
 
 /// A row's sequence, state and hash, read past its entry and facts.
 fn ends(b: &[u8]) -> (Seq, StateHash, EntryHash) {
-    static TYS: std::sync::OnceLock<(Ty, Ty)> = std::sync::OnceLock::new();
-    let (entry, facts) = TYS.get_or_init(|| (Entry::ty(), Change::list_ty()));
-    let mut r = Reader::new(b);
-    let mut take = || -> Result<_, Refusal> {
-        let seq = r.int()?;
-        skip(entry, &mut r)?;
-        skip(facts, &mut r)?;
-        let h = |b: Vec<u8>| <[u8; 32]>::try_from(b).map_err(|_| Refusal::new("not a hash"));
-        Ok((seq, StateHash(h(r.bytes()?)?), EntryHash(h(r.bytes()?)?)))
-    };
-    take().expect("a row of the log reads")
+    #[derive(Deserialize)]
+    struct Ends {
+        seq: Seq,
+        state: StateHash,
+        hash: EntryHash,
+    }
+    let e: Ends = serde_json::from_slice(b).expect("a row of the log reads");
+    (e.seq, e.state, e.hash)
+}
+
+/// A sequence's key in the log's table.
+fn seq_key(seq: Seq) -> Vec<u8> {
+    let mut k = vec![];
+    put_key(&seq, &mut k);
+    k
 }
 
 impl<'a> Log<'a> {
@@ -236,17 +243,17 @@ impl<'a> Log<'a> {
 
     /// The entry at `seq`, above the row the log stands on.
     pub fn at(&self, seq: Seq) -> Option<Logged> {
-        (seq > self.base_seq()).then(|| self.0.get(&int_enc(seq)[..]).map(|b| read(b))).flatten()
+        (seq > self.base_seq()).then(|| self.0.get(&seq_key(seq)).map(|b| read(b))).flatten()
     }
 
     /// Whether this log has `hash` at `seq`: one history up to there.
     pub fn has(&self, seq: Seq, hash: &EntryHash) -> bool {
-        self.0.get(&int_enc(seq)[..]).is_some_and(|b| ends(b).2 == *hash)
+        self.0.get(&seq_key(seq)).is_some_and(|b| ends(b).2 == *hash)
     }
 
     /// The entries after `seq`, in order.
     pub fn after(&self, seq: Seq) -> impl Iterator<Item = Logged> + 'a {
-        let from = int_enc(seq.max(self.base_seq())).to_vec();
+        let from = seq_key(seq.max(self.base_seq()));
         self.0.range((Bound::Excluded(from), Bound::Unbounded)).map(|(_, b)| read(b))
     }
 
@@ -263,20 +270,6 @@ impl<'a> Log<'a> {
     pub fn is_empty(&self) -> bool {
         self.0.len() <= 1
     }
-}
-
-/// The entries a row has in its table's indexes.
-fn entries(tab: &Table, row: &[u8], spans: &[(usize, usize)], key: &[u8]) -> Vec<Vec<u8>> {
-    let mut out = Vec::with_capacity(tab.indexes.len());
-    for ix in &tab.indexes {
-        let mut e = Vec::new();
-        for &c in &ix.columns {
-            e.extend_from_slice(&row[spans[c].0..spans[c].1]);
-        }
-        e.extend_from_slice(key);
-        out.push(e);
-    }
-    out
 }
 
 fn bound(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
@@ -315,9 +308,9 @@ impl Store {
             .tables
             .iter()
             .map(|t| Rows {
-                name: bytes_enc(t.name.as_bytes()),
+                name: t.name.as_bytes().to_vec(),
                 rows: BTreeMap::new(),
-                indexes: vec![BTreeSet::new(); t.indexes.len()],
+                indexes: vec![BTreeMap::new(); t.indexes.len()],
                 digest: [0; 32],
             })
             .collect();
@@ -347,7 +340,7 @@ impl Store {
             Change::Add { row, .. } | Change::Remove { row, .. } => row,
         };
         let l = Logged::from_bytes(row)?;
-        let key = int_enc(l.seq).to_vec();
+        let key = seq_key(l.seq);
         let (first, last) = (self.log.first_key_value(), self.log.last_key_value());
         let ok = match c {
             Change::Add { .. } => match (first, last) {
@@ -393,18 +386,18 @@ impl Store {
     /// A row added at the head of the log by a peer that chained it onto
     /// the head, or checked that it links there.
     pub(crate) fn log_push(&mut self, seq: Seq, row: Vec<u8>) {
-        self.log.insert(int_enc(seq).to_vec(), row);
+        self.log.insert(seq_key(seq), row);
     }
 
     /// The log's rows above `seq` deleted, newest first.
     pub fn log_truncate(&mut self, seq: Seq) {
-        self.log.split_off(&int_enc(seq + 1)[..]);
+        self.log.split_off(&seq_key(seq + 1));
     }
 
     /// The horizon: the log's rows below `seq` deleted, so that it stands
     /// on the row there.
     pub fn log_horizon(&mut self, seq: Seq) {
-        self.log = self.log.split_off(&int_enc(seq)[..]);
+        self.log = self.log.split_off(&seq_key(seq));
     }
 
     pub fn space(&self) -> Space {
@@ -434,9 +427,9 @@ impl Store {
             .flat_map(move |t| self.tables[t].rows.values().map(|r| &r[..]))
     }
 
-    /// `sha256(enc(Bytes table) ‖ row)`, read as a 256-bit integer.
+    /// `sha256(table ‖ row)`, read as a 256-bit integer.
     pub fn leaf(table: &str, row: &[u8]) -> [u8; 32] {
-        sha256(&[&bytes_enc(table.as_bytes()), row])
+        sha256(&[table.as_bytes(), row])
     }
 
     /// A table's digest: the sum of its leaves modulo 2^256.
@@ -481,17 +474,13 @@ impl Store {
     /// A row's key, and its entry in each of its table's indexes: what a
     /// read through the key or an index covers of it (§1.10).
     pub fn paths_of(&self, table: &str, row: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>), Refusal> {
-        let tab = &self.schema.tables[self.find(table)?];
-        let spans = tab.spans(row)?;
-        let key = row[..spans[tab.key - 1].1].to_vec();
-        let es = entries(tab, row, &spans, &key);
-        Ok((key, es))
+        let p = self.schema.tables[self.find(table)?].parse(row)?;
+        Ok((p.key, p.entries))
     }
 
     /// A row's key.
     pub fn key_of(&self, table: &str, row: &[u8]) -> Result<Vec<u8>, Refusal> {
-        let tab = &self.schema.tables[self.find(table)?];
-        Ok(row[..tab.key_len(row)?].to_vec())
+        Ok(self.schema.tables[self.find(table)?].parse(row)?.key)
     }
 
     /// Applies one change, judging it: the row before must be what the
@@ -505,17 +494,14 @@ impl Store {
             Change::Remove { row, .. } => (Some(row), None),
             Change::Edit { old, new, .. } => (Some(old), Some(new)),
         };
-        let spans = new.map(|r| tab.spans(r)).transpose()?;
-        let key = match (old, new, &spans) {
-            (_, Some(n), Some(s)) => &n[..s[tab.key - 1].1],
-            (Some(o), _, _) => &o[..tab.key_len(o)?],
+        let parsed_new = new.map(|r| tab.parse(r)).transpose()?;
+        let parsed_old = old.map(|r| tab.parse(r)).transpose()?;
+        let key = match (&parsed_new, &parsed_old) {
+            (Some(n), Some(o)) if n.key != o.key => return Err(Refusal(format!("{}: an edit keeps its key", tab.name))),
+            (Some(n), _) => &n.key,
+            (None, Some(o)) => &o.key,
             _ => unreachable!(),
         };
-        if let (Some(o), Some(_)) = (old, new) {
-            if !o.starts_with(key) || tab.key_len(o)? != key.len() {
-                return Err(Refusal(format!("{}: an edit keeps its key", tab.name)));
-            }
-        }
         match (self.tables[t].rows.get(key), old) {
             (Some(have), Some(o)) if have == o => {}
             (None, None) => {}
@@ -523,13 +509,17 @@ impl Store {
             (None, Some(_)) => return Err(Refusal(format!("{}: no row has this key", tab.name))),
             (Some(_), Some(_)) => return Err(Refusal(format!("{}: the row is not the one the change replaces", tab.name))),
         }
-        if let (Some(n), Some(s)) = (new, &spans) {
-            self.judge(tab, n, s, key)?;
-        } else {
-            self.unnamed(tab, key)?;
+        match &parsed_new {
+            Some(n) => self.judge(tab, n)?,
+            None => self.unnamed(tab, key)?,
         }
-        let key = key.to_vec();
-        self.write(tab, t, &key, old.map(|o| &o[..]), new.map(|n| &n[..]).zip(spans.as_deref()));
+        let key = key.clone();
+        self.write(
+            t,
+            &key,
+            old.map(|o| &o[..]).zip(parsed_old.as_ref()),
+            new.map(|n| &n[..]).zip(parsed_new.as_ref()),
+        );
         Ok(())
     }
 
@@ -549,8 +539,8 @@ impl Store {
     /// Puts a row, adding it or replacing the one under its key.
     pub fn put(&mut self, table: &str, row: Vec<u8>) -> Result<Change, Refusal> {
         let t = self.find(table)?;
-        let key = &row[..self.schema.tables[t].key_len(&row)?];
-        let c = match self.tables[t].rows.get(key) {
+        let key = self.schema.tables[t].parse(&row)?.key;
+        let c = match self.tables[t].rows.get(&key) {
             None => Change::Add { table: table.into(), row },
             Some(old) => Change::Edit {
                 table: table.into(),
@@ -573,31 +563,24 @@ impl Store {
         self.apply(&c).map(|_| c)
     }
 
-    // The constraints on a row about to be written under `key`.
-    fn judge(&self, tab: &Table, row: &[u8], spans: &[(usize, usize)], key: &[u8]) -> Result<(), Refusal> {
+    // The constraints on a row about to be written under its key.
+    fn judge(&self, tab: &Table, p: &Parsed) -> Result<(), Refusal> {
         let t = self.find(&tab.name)?;
-        for (i, (ix, e)) in tab.indexes.iter().zip(entries(tab, row, spans, key)).enumerate() {
-            let cols = &e[..e.len() - key.len()];
+        for (i, (ix, e)) in tab.indexes.iter().zip(&p.entries).enumerate() {
+            let cols = &e[..e.len() - p.key.len()];
             let clash = ix.unique
                 && self.tables[t].indexes[i]
                     .range::<[u8], _>((Bound::Included(cols), Bound::Unbounded))
-                    .take_while(|x| x.starts_with(cols))
-                    .any(|x| &x[cols.len()..] != key);
+                    .take_while(|(x, _)| x.starts_with(cols))
+                    .any(|(_, k)| *k != p.key);
             if clash {
                 let names: Vec<&str> = ix.columns.iter().map(|c| &tab.columns[*c].name[..]).collect();
                 return Err(Refusal(format!("{}: another row has this ({})", tab.name, names.join(", "))));
             }
         }
         for r in &tab.refs {
-            let (s, e) = spans[r.column];
-            let mut b = &row[s..e];
-            if tab.columns[r.column].ty.is_option() {
-                if b[0] == 0 {
-                    continue;
-                }
-                b = &b[1..];
-            }
-            if !self.tables[self.find(&r.table)?].rows.contains_key(b) {
+            let Some(k) = p.named(tab, r.column)? else { continue };
+            if !self.tables[self.find(&r.table)?].rows.contains_key(&k) {
                 return Err(Refusal(format!(
                     "{}.{}: no {} has this key",
                     tab.name, tab.columns[r.column].name, r.table
@@ -618,11 +601,11 @@ impl Store {
                 let first = |it: &mut dyn Iterator<Item = &Vec<u8>>| it.next().is_some_and(|e| e.starts_with(&want));
                 let from = (Bound::Included(&want[..]), Bound::Unbounded);
                 let hit = match rt.indexes.iter().position(|ix| ix.columns.first() == Some(&r.column)) {
-                    Some(i) => first(&mut rows.indexes[i].range::<[u8], _>(from)),
+                    Some(i) => first(&mut rows.indexes[i].range::<[u8], _>(from).map(|(e, _)| e)),
                     None if r.column == 0 => first(&mut rows.rows.range::<[u8], _>(from).map(|(k, _)| k)),
                     None => rows.rows.values().any(|row| {
-                        let s = rt.spans(row).expect("a stored row parses");
-                        row[s[r.column].0..s[r.column].1] == want[..]
+                        let p = rt.parse(row).expect("a stored row parses");
+                        p.named(rt, r.column).expect("a stored row's reference reads").as_deref() == Some(key)
                     }),
                 };
                 if hit {
@@ -635,19 +618,18 @@ impl Store {
     }
 
     // The write itself, judged already: indexes, digest, rows.
-    fn write(&mut self, tab: &Table, t: usize, key: &[u8], old: Option<&[u8]>, new: Option<(&[u8], Spans)>) {
+    fn write(&mut self, t: usize, key: &[u8], old: Option<(&[u8], &Parsed)>, new: Option<(&[u8], &Parsed)>) {
         let rows = &mut self.tables[t];
-        if let Some(o) = old {
-            let spans = tab.spans(o).expect("a stored row parses");
-            for (set, e) in rows.indexes.iter_mut().zip(entries(tab, o, &spans, key)) {
-                set.remove(&e);
+        if let Some((o, p)) = old {
+            for (map, e) in rows.indexes.iter_mut().zip(&p.entries) {
+                map.remove(e);
             }
             sub256(&mut rows.digest, &sha256(&[&rows.name, o]));
             rows.rows.remove(key);
         }
-        if let Some((n, spans)) = new {
-            for (set, e) in rows.indexes.iter_mut().zip(entries(tab, n, spans, key)) {
-                set.insert(e);
+        if let Some((n, p)) = new {
+            for (map, e) in rows.indexes.iter_mut().zip(&p.entries) {
+                map.insert(e.clone(), key.to_vec());
             }
             add256(&mut rows.digest, &sha256(&[&rows.name, n]));
             rows.rows.insert(key.to_vec(), n.to_vec());
@@ -687,18 +669,17 @@ impl Store {
             let t = s.find(table)?;
             let tab = &schema.tables[t];
             for row in rs {
-                let spans = tab.spans(row)?;
-                let key = row[..spans[tab.key - 1].1].to_vec();
-                if s.tables[t].rows.contains_key(&key) {
+                let p = tab.parse(row)?;
+                if s.tables[t].rows.contains_key(&p.key) {
                     return Err(Refusal(format!("{table}: two rows have one key")));
                 }
-                s.write(tab, t, &key, None, Some((row, &spans)));
+                let key = p.key.clone();
+                s.write(t, &key, None, Some((row, &p)));
             }
         }
         for (t, tab) in schema.tables.iter().enumerate() {
-            for (key, row) in &s.tables[t].rows {
-                let spans = tab.spans(row)?;
-                s.judge(tab, row, &spans, key)?;
+            for row in s.tables[t].rows.values() {
+                s.judge(tab, &tab.parse(row)?)?;
             }
         }
         Ok(s)
@@ -756,17 +737,10 @@ impl Read for Store {
                 .map(|(_, r)| r.clone())
                 .collect(),
             Some(i) => {
-                let tab = &self.schema.tables[t];
-                let Some(ix) = tab.indexes.get(i) else { return vec![] };
-                ordered(rows.indexes[i].range::<[u8], _>(range), s.dir)
+                let Some(ix) = rows.indexes.get(i) else { return vec![] };
+                ordered(ix.range::<[u8], _>(range), s.dir)
                     .take(s.limit)
-                    .map(|e| {
-                        let mut r = Reader::new(e);
-                        for &c in &ix.columns {
-                            skip(&tab.columns[c].ty, &mut r).expect("an index entry parses");
-                        }
-                        rows.rows[&e[r.at..]].clone()
-                    })
+                    .map(|(_, k)| rows.rows[k].clone())
                     .collect()
             }
         }

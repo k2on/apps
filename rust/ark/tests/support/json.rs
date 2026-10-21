@@ -1,16 +1,12 @@
-//! The JSON dialect of `rust/ark/src/json.rs`, printed under a type: the
-//! human form of the vectors (`spec/README.md`, "The vectors"). `{"$int":
-//! "decimal"}`, `{"$bytes": hex}`, `{"$id": "8-4-4-4-12"}`, text as itself,
-//! an object's keys in code-point order, a vector file one named part per
-//! line. A row is a tuple, so it prints as an array in schema order, each
-//! column by its declared type's name: `Int`, `Text`, `Id<t>`, else bytes.
+//! The vectors' JSON: a value is its own JSON (`ark::json`), a row its
+//! object of columns as the store holds it, an object's keys in code-point
+//! order where the vector writer builds it, a vector file one named part
+//! per line.
 
 #![allow(dead_code)]
 
-use ark::codec::{skip, Reader};
 use ark::hash::hex;
-use ark::schema::{Schema, Space, Table};
-use ark::ty::Ty;
+use ark::schema::{Schema, Table};
 
 /// A JSON string: only `"`, `\` and the C0 controls escaped.
 pub fn quoted(s: &str) -> String {
@@ -47,80 +43,17 @@ pub fn obj(parts: &[(&str, String)]) -> String {
 }
 
 pub fn int(n: i64) -> String {
-    format!("{{\"$int\":\"{n}\"}}")
+    n.to_string()
 }
 
-fn id(b: &[u8]) -> String {
-    let h = hex(b);
-    format!("{{\"$id\":\"{}-{}-{}-{}-{}\"}}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
+/// A row: its JSON, as it is.
+pub fn row(_: &Table, b: &[u8]) -> String {
+    String::from_utf8(b.to_vec()).expect("a row is JSON")
 }
 
-/// One column's value, read from the reader by its declared type.
-fn column(decl: &str, ty: &Ty, r: &mut Reader) -> String {
-    match ty {
-        Ty::Int => int(r.int().unwrap()),
-        Ty::Bytes if decl == "Text" => quoted(&r.text().unwrap()),
-        Ty::Bytes if decl.starts_with("Id<") => id(&r.bytes().unwrap()),
-        Ty::Bytes => format!("{{\"$bytes\":\"{}\"}}", hex(&r.bytes().unwrap())),
-        _ => {
-            let s = r.at;
-            skip(ty, r).unwrap();
-            format!("{{\"$bytes\":\"{}\"}}", hex(&r.bytes[s..r.at]))
-        }
-    }
-}
-
-/// A row, as the tuple it is.
-pub fn row(t: &Table, b: &[u8]) -> String {
-    let mut r = Reader::new(b);
-    array(t.columns.iter().map(|c| column(&c.decl, &c.ty, &mut r)))
-}
-
-pub fn ty(t: &Ty) -> String {
-    let tag = |s: &str| quoted(s);
-    match t {
-        Ty::Int => object(&[("t", tag("int"))]),
-        Ty::Bytes => object(&[("t", tag("bytes"))]),
-        Ty::List(e) => object(&[("of", ty(e)), ("t", tag("list"))]),
-        Ty::Tuple(ts) => object(&[("fields", array(ts.iter().map(ty))), ("t", tag("tuple"))]),
-        Ty::Sum(vs) => object(&[("t", tag("sum")), ("variants", array(vs.iter().map(|v| array(v.iter().map(ty)))))]),
-        Ty::Named(n) => object(&[("name", quoted(n)), ("t", tag("named"))]),
-    }
-}
-
+/// The schema: its JSON, as its hash is taken over.
 pub fn schema(s: &Schema) -> String {
-    array(s.tables.iter().map(|t| {
-        let name = |i: &usize| quoted(&t.columns[*i].name);
-        object(&[
-            (
-                "columns",
-                array(t.columns.iter().map(|c| {
-                    let default = c.default.as_ref().map_or("null".into(), |d| format!("{{\"$bytes\":\"{}\"}}", hex(d)));
-                    object(&[
-                        ("decl", quoted(&c.decl)),
-                        ("default", default),
-                        ("name", quoted(&c.name)),
-                        ("ty", ty(&c.ty)),
-                    ])
-                })),
-            ),
-            (
-                "indexes",
-                array(
-                    t.indexes
-                        .iter()
-                        .map(|i| object(&[("columns", array(i.columns.iter().map(name))), ("unique", i.unique.to_string())])),
-                ),
-            ),
-            ("key", int(t.key as i64)),
-            ("name", quoted(&t.name)),
-            (
-                "refs",
-                array(t.refs.iter().map(|r| object(&[("column", name(&r.column)), ("table", quoted(&r.table))]))),
-            ),
-            ("space", quoted(if t.space == Space::Durable { "durable" } else { "volatile" })),
-        ])
-    }))
+    serde_json::to_string(s).unwrap()
 }
 
 pub fn hexed(b: &[u8]) -> String {

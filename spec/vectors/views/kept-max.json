@@ -5,7 +5,7 @@
   "plan": {"as":"p","map":{"scan":"person"},"to":{"in":[{"??":[{"var":"t.pos"},-1]},{"var":"p.name"}],"let":{"t":{"first":{"n":1,"take":{"as":"t","by":[{"desc":{"var":"t.pos"}}],"sort":{"on":"creator","related":"track","to":{"var":"p.name"}}}}}}}},
   "query": "kept-max",
   "rows_before": [[1,"Bach"],[7,"Gould"],[2,"Handel"]],
-  "schema": [{"columns":[{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"born","ty":{"t":"int"}}],"indexes":[],"key":{"$int":"1"},"name":"person","refs":[],"space":"durable"},{"columns":[{"decl":"Text","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"title","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"creator","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["creator","pos"],"unique":false}],"key":{"$int":"1"},"name":"track","refs":[],"space":"durable"}],
+  "schema": {"tables":[{"name":"person","columns":[{"name":"name","ty":"Text","default":null},{"name":"born","ty":"Int","default":null}],"key":1,"indexes":[],"refs":[],"space":"durable"},{"name":"track","columns":[{"name":"id","ty":"Text","default":null},{"name":"title","ty":"Text","default":null},{"name":"creator","ty":"Text","default":null},{"name":"pos","ty":"Int","default":null}],"key":1,"indexes":[{"columns":[2,3],"unique":false}],"refs":[],"space":"durable"}]},
   "steps": [{"patches":[{"at":1,"node":[9,"Gould"],"t":"update"}],"rows":[[1,"Bach"],[9,"Gould"],[2,"Handel"]]}
 ,{"patches":[{"at":1,"node":[7,"Gould"],"t":"update"}],"rows":[[1,"Bach"],[7,"Gould"],[2,"Handel"]]}
 ,{"patches":[],"rows":[[1,"Bach"],[7,"Gould"],[2,"Handel"]]}

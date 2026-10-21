@@ -14,7 +14,6 @@ mod support {
 
 use std::sync::Arc;
 
-use ark::codec::bytes_enc;
 use ark::frames::{Frame, Verdict};
 use ark::peer::{Functions, Input, Journal, Output, Peer, Role};
 use ark::prelude::*;
@@ -23,7 +22,7 @@ use ark::store::Read;
 use support::wire::*;
 
 /// Who is here, by session: volatile.
-#[derive(Clone, Debug, PartialEq, Eq, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[ark(volatile)]
 pub struct Here {
     #[ark(key)]
@@ -43,7 +42,7 @@ fn schema() -> Arc<Schema> {
     Arc::new(<Waves as Tables>::schema())
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Wave {
     pub name: String,
 }
@@ -56,6 +55,12 @@ pub fn wave(ctx: &Ctx, db: &mut Db<Waves>, input: Wave) -> Result<(), Refusal> {
         session: ctx.device().into(),
         name: input.name,
     })
+}
+
+fn here_key(session: &str) -> Vec<u8> {
+    let mut k = vec![];
+    ark::json::put_key(&(session,), &mut k);
+    k
 }
 
 fn cas() -> Functions {
@@ -76,7 +81,7 @@ fn authority() -> Peer {
 fn waving(name: &str) -> Input {
     Input::Mutate {
         func: "waves.wave".into(),
-        input: bytes_enc(name.as_bytes()),
+        input: Wave { name: name.into() }.to_bytes(),
         now: 1,
     }
 }
@@ -129,7 +134,7 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
         "the wave is in the volatile hash"
     );
     assert_eq!(live.store, server.store);
-    assert!(live.store.get("here", &bytes_enc(b"alice-session")).is_some());
+    assert!(live.store.get("here", &here_key("alice-session")).is_some());
 }
 
 /// A volatile intent that writes a durable table is refused, and so is a
@@ -169,10 +174,7 @@ fn a_restarted_authority_resyncs_and_takes_the_gap() {
     let (s, _) = deliver_up(&mut fresh, &who("alice"), &o);
     assert!(matches!(&s[..], [Frame::Snapshot { space: Space::Volatile, .. }]), "{s:?}");
     live.step(down(&s[0]));
-    assert!(
-        live.store.get("here", &bytes_enc(b"alice-session")).is_none(),
-        "the restart lost the wave"
-    );
+    assert!(live.store.get("here", &here_key("alice-session")).is_none(), "the restart lost the wave");
     let o = live.step(waving("laptop"));
     let (s, f) = deliver_up(&mut fresh, &who("alice"), &o);
     assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 1 })]), "{s:?}");

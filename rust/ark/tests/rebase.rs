@@ -12,18 +12,20 @@ mod support {
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use ark::codec::Node;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
+use ark::json::Json;
 use ark::log::{Durable, EntryId, Logged, Origin, Record};
 use ark::peer::{Ctx, Functions, Input, Output, Peer, Procedure};
 use ark::store::{Change, LOG};
-use demo::{create_input, pair_input, pos_of, ADD, CREATE, REMOVE, RENAME};
+use demo::{create_input, pair_input, pos_of, rename_input, ADD, CREATE, REMOVE, RENAME};
 use support::wire::*;
 
 /// The state after the scenario's four entries, on every peer: alice's
-/// playlist "Favorites" with t1, t2 and t9 at 1, 2 and 3.
-const FINAL: &str = "bb0abc1a5dc02d026eec3528b76324e73966deeb8847ea12409d771f53f1fd4b";
+/// playlist "Favorites" with t1, t2 and t9 at 1, 2 and 3. N1 moved it
+/// (`bb0abc1a…` before): rows are their JSON, and an id is drawn from
+/// `(origin, local)` without the codec; the scenario is as it was.
+const FINAL: &str = "dbd4f870f936b8fc142002dc4c605e8e81b9d59c64a95cccfd22b99637188c4e";
 
 /// The playlist alice's first intent creates: its first draw.
 fn pid() -> [u8; 16] {
@@ -119,7 +121,9 @@ trait Row {
 impl Row for ark::store::Store {
     fn get_row(&self, table: &str, id: &[u8]) -> Option<Vec<u8>> {
         use ark::store::Read;
-        self.get(table, &ark::codec::bytes_enc(id))
+        let mut k = vec![];
+        ark::json::put_key(&ark::row::Id::<()>::new(id.try_into().unwrap()), &mut k);
+        self.get(table, &k)
     }
 }
 
@@ -284,9 +288,9 @@ fn edits_and_removes_rebase_too() {
         ..
     } = scenario();
     let o1 = alice.step(mutate(ADD, pair_input(&pid(), "t4"), 5));
-    let o2 = alice.step(mutate(RENAME, pair_input(&pid(), "Old"), 6));
-    let o3 = alice.step(mutate(RENAME, pair_input(&pid(), "Older"), 6));
-    for (name, input) in [(RENAME, pair_input(&pid(), "Best")), (REMOVE, pair_input(&pid(), "t2"))] {
+    let o2 = alice.step(mutate(RENAME, rename_input(&pid(), "Old"), 6));
+    let o3 = alice.step(mutate(RENAME, rename_input(&pid(), "Older"), 6));
+    for (name, input) in [(RENAME, rename_input(&pid(), "Best")), (REMOVE, pair_input(&pid(), "t2"))] {
         let o = bob.step(mutate(name, input, 7));
         let (_, f) = deliver_up(&mut server, &who("bob"), &o);
         bob.step(down(&f[0]));
@@ -359,7 +363,7 @@ fn a_peer_opens_from_what_it_persisted() {
     records.push(Record::Logged(stray).enc());
     let rows = records.iter().map(|b| match Record::dec(b) {
         Ok(Record::Logged(l)) => {
-            assert_eq!(b[1..], l.to_bytes(), "a record is its row of the log's table alone");
+            assert_eq!(*b, Record::logged(&l.to_bytes()), "a record is its row of the log's table wrapped");
             l
         }
         other => panic!("{other:?}"),

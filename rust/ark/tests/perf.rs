@@ -30,7 +30,6 @@ use std::time::{Duration, Instant};
 
 use std::sync::Arc;
 
-use ark::codec::{put_bytes, put_int, put_option};
 use ark::frames::{Frame, Verdict};
 use ark::log::{Entry, EntryId, Logged, Origin, Seq};
 use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer, Role, Who, PAGE};
@@ -857,7 +856,7 @@ fn perf_i_partial_fanout() {
 // (h) The wire --------------------------------------------------------------------------
 
 /// A page of logged entries as a `Batch` frame, encoded and decoded, with
-/// the allocations each makes (`#[derive(Node)]`'s codec over §1.1's
+/// the allocations each makes (`#[derive(Serialize, Deserialize)]`'s codec over §1.1's
 /// bytes); and a `Push` of one entry.
 #[test]
 #[ignore]
@@ -984,7 +983,7 @@ fn perf_ids_below_the_horizon() {
 // schema, its playlists and items, and its songs.
 
 /// A song, as the library's `song` table has it.
-#[derive(Clone, Debug, PartialEq, Eq, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[ark(index(creator), index(movement_id))]
 pub struct Song {
     #[ark(key)]
@@ -1023,13 +1022,14 @@ fn it_row(n: u32, track: &str, pos: i64) -> Vec<u8> {
 }
 
 fn song_row(id: &str, creator: &str, pos: i64) -> Vec<u8> {
-    let mut b = vec![];
-    for t in [id, "x", creator] {
-        put_bytes(&mut b, t.as_bytes());
+    Song {
+        id: id.into(),
+        title: "x".into(),
+        creator: creator.into(),
+        movement_id: None,
+        pos,
     }
-    put_option(&mut b, None::<&str>, |o, m| put_bytes(o, m.as_bytes()));
-    put_int(&mut b, pos);
-    b
+    .to_bytes()
 }
 
 fn add(table: &str, row: Vec<u8>) -> Change {

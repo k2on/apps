@@ -1,6 +1,6 @@
 //! The `hash/` vectors of v4 re-derived: the same demo rows under the same
-//! schema, now tuples, hashed by §1.3 — a leaf per row, `sha256(enc(Bytes
-//! table) ‖ row)`; a digest per table, the leaves' sum modulo 2^256; the
+//! schema, each its JSON, hashed by §1.3 — a leaf per row, `sha256(table ‖
+//! row)`; a digest per table, the leaves' sum modulo 2^256; the
 //! state hash, `sha256(schema_hash ‖ durable digests in schema order)`.
 //! Written to `spec/vectors/hash/` when `ARK_WRITE_VECTORS` is set, and
 //! otherwise held to what is there.
@@ -88,7 +88,7 @@ fn leaves_and_digests() {
     let tables = array(sch.tables.iter().map(|t| {
         let mut sum = [0u8; 32];
         let rows = array(s.rows(&t.name).map(|r| {
-            let leaf = sha256(&[&ark::codec::bytes_enc(t.name.as_bytes()), r]);
+            let leaf = sha256(&[t.name.as_bytes(), r]);
             assert_eq!(leaf, Store::leaf(&t.name, r));
             let mut carry = 0u16;
             for i in (0..32).rev() {

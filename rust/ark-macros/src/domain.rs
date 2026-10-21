@@ -6,7 +6,7 @@
 //! line that registers it by name.
 
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Expr, Fields, Ident, ItemFn, LitStr, Token, Type};
@@ -174,7 +174,14 @@ pub fn row(input: DeriveInput) -> TokenStream {
     }
     let nkey = keys.len();
     let (key_names, key_tys) = (&names[..nkey], &tys[..nkey]);
-    let col_names = names.iter().map(|n| n.to_string());
+    let columns = fields.named.iter().map(|f| {
+        let (n, t) = (f.ident.as_ref().unwrap().to_string(), &f.ty);
+        let defaulted = f.attrs.iter().any(|a| a.path().is_ident("serde") && a.to_token_stream().to_string().contains("default"));
+        match defaulted {
+            true => quote!(::ark::row::column_or_default::<#t>(#n)),
+            false => quote!(::ark::row::column::<#t>(#n)),
+        }
+    });
     let space = if volatile {
         quote!(::ark::schema::Space::Volatile)
     } else {
@@ -219,7 +226,7 @@ pub fn row(input: DeriveInput) -> TokenStream {
             fn table() -> ::ark::schema::Table {
                 ::ark::schema::Table {
                     name: #table.into(),
-                    columns: vec![#(::ark::row::column::<#tys>(#col_names)),*],
+                    columns: vec![#(#columns),*],
                     key: #nkey,
                     indexes: vec![#(#ix_defs),*],
                     refs: vec![#(#ref_defs),*],

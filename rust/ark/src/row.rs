@@ -23,15 +23,16 @@ use std::borrow::Borrow;
 use std::fmt;
 use std::marker::PhantomData;
 
-use crate::codec::Node;
-use crate::codec::Reader;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+
+use crate::json::Json;
 use crate::schema::{Column, Table};
-use crate::ty::Ty;
 use crate::Refusal;
 
-/// A value a domain stores, takes or answers: one canonical encoding, read
-/// back from it alone.
-pub trait Value: Node + Clone + fmt::Debug + PartialEq + Send + Sync + 'static {
+/// A value a domain stores, takes or answers: its JSON ([`crate::json`]),
+/// read back from it alone.
+pub trait Value: Serialize + DeserializeOwned + Clone + fmt::Debug + PartialEq + Send + Sync + 'static {
     fn encode(&self) -> Vec<u8> {
         self.to_bytes()
     }
@@ -40,7 +41,7 @@ pub trait Value: Node + Clone + fmt::Debug + PartialEq + Send + Sync + 'static {
     }
 }
 
-impl<T: Node + Clone + fmt::Debug + PartialEq + Send + Sync + 'static> Value for T {}
+impl<T: Serialize + DeserializeOwned + Clone + fmt::Debug + PartialEq + Send + Sync + 'static> Value for T {}
 
 /// A part of a key: bytes in its values' order, prefix-free.
 pub trait Key {
@@ -52,15 +53,9 @@ pub trait Key {
     }
 }
 
-impl<T: Node> Key for T {
+impl<T: Serialize + ?Sized> Key for T {
     fn put_key(&self, out: &mut Vec<u8>) {
-        self.put(out)
-    }
-}
-
-impl Key for str {
-    fn put_key(&self, out: &mut Vec<u8>) {
-        crate::codec::put_bytes(out, self.as_bytes())
+        crate::json::put_key(self, out)
     }
 }
 
@@ -68,7 +63,7 @@ impl Key for str {
 
 /// What a type is, as a schema's column, a form's field and the explorer
 /// read it. A record and a sum carry their names and their fields'.
-#[derive(Clone, Debug, PartialEq, Eq, ark_macros::Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Type {
     Int,
     Text,
@@ -102,20 +97,10 @@ impl Type {
         }
     }
 
-    /// Its structure under the codec (§1.1).
-    pub fn ty(&self) -> Ty {
-        let fields = |fs: &[(String, Type)]| fs.iter().map(|(_, t)| t.ty()).collect::<Vec<_>>();
-        match self {
-            Type::Int => Ty::Int,
-            Type::Text | Type::Bytes | Type::Id(_) => Ty::Bytes,
-            Type::Bool => Ty::bool(),
-            Type::Unit => Ty::unit(),
-            Type::Option(t) => Ty::option(t.ty()),
-            Type::List(t) => Ty::list(t.ty()),
-            Type::Tuple(ts) => Ty::Tuple(ts.iter().map(Type::ty).collect()),
-            Type::Record(_, fs) => Ty::Tuple(fields(fs)),
-            Type::Sum(_, vs) => Ty::Sum(vs.iter().map(|(_, fs)| fields(fs)).collect()),
-        }
+    /// Whether this is `Option<T>`, which is what a column appended to a
+    /// table may be without a default (§1.2).
+    pub fn is_option(&self) -> bool {
+        matches!(self, Type::Option(_))
     }
 }
 
@@ -222,15 +207,14 @@ impl<R> fmt::Debug for Id<R> {
         write!(f, "Id({})", self.hex())
     }
 }
-impl<R> Node for Id<R> {
-    fn ty() -> Ty {
-        Ty::Bytes
+impl<R> Serialize for Id<R> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        crate::json::hex_bytes::serialize(&self.0, s)
     }
-    fn put(&self, out: &mut Vec<u8>) {
-        crate::codec::put_bytes(out, &self.0);
-    }
-    fn take(r: &mut Reader) -> Result<Self, Refusal> {
-        r.fixed::<16>().map(Id::new)
+}
+impl<'de, R> Deserialize<'de> for Id<R> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Id<R>, D::Error> {
+        crate::json::hex_bytes::deserialize(d).map(Id::new)
     }
 }
 impl<R: Row> Describe for Id<R> {
@@ -253,7 +237,9 @@ pub trait Row: Value + Describe {
     fn table() -> Table;
     /// The key, as the store holds it.
     fn key_bytes(&self) -> Vec<u8> {
-        self.key().to_bytes()
+        let mut out = vec![];
+        crate::json::put_key(&self.key(), &mut out);
+        out
     }
 }
 
@@ -336,12 +322,19 @@ impl<A: Key, B: Key, C: Key> Lead<(A, B, C), lead::Three> for (A, B, C) {
 /// A column of a row being derived: what `#[derive(Row)]` builds a
 /// table's columns from.
 pub fn column<T: Describe>(name: &str) -> Column {
-    let t = T::describe();
     Column {
         name: name.into(),
-        decl: t.decl(),
-        ty: t.ty(),
+        ty: T::describe(),
         default: None,
+    }
+}
+
+/// A column appended with `#[serde(default)]`: a row written before it
+/// existed takes its type's default.
+pub fn column_or_default<T: Describe + Default + Serialize>(name: &str) -> Column {
+    Column {
+        default: Some(serde_json::to_value(T::default()).expect("a default serializes")),
+        ..column::<T>(name)
     }
 }
 

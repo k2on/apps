@@ -696,19 +696,14 @@ pub fn scan_raw<S: Tables, T: Elem>(table: &str, decode: impl Fn(&Store, &[u8]) 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Desc<K>(pub K);
 
-impl<K: crate::codec::Node> crate::codec::Node for Desc<K> {
-    fn ty() -> crate::ty::Ty {
-        K::ty()
-    }
-    fn put(&self, out: &mut Vec<u8>) {
-        let at = out.len();
-        self.0.put(out);
-        for b in &mut out[at..] {
-            *b = !*b;
-        }
-    }
-    fn take(_: &mut crate::codec::Reader) -> Result<Self, Refusal> {
-        Err(Refusal::new("a sort key is not read back"))
+/// In a key, the inner key's bytes complemented, written as bytes: a
+/// tuple of keys may hold one, and it orders last first.
+impl<K: serde::Serialize> serde::Serialize for Desc<K> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut b = vec![];
+        crate::json::put_key(&self.0, &mut b);
+        b.iter_mut().for_each(|x| *x = !*x);
+        s.serialize_bytes(&b)
     }
 }
 

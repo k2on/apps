@@ -1,25 +1,18 @@
 //! ArkDB's derives and attributes (`docs/plan-v5.md` §1.16): what a domain
 //! written in plain Rust is read by ([`domain`]) — `Row`, `Input`,
 //! `Describe`, `Schema`, and the attributes that register a function by
-//! name — and `#[derive(Node)]`, a Rust type as a value of §1.1 by the
-//! codec ([`derive`]).
+//! name. A value's encoding is serde's (`ark::json`).
 
 use proc_macro::TokenStream;
 
-mod derive;
 mod domain;
-
-/// `#[derive(Node)]`: the type of a Rust struct or enum as a §1.1 `Ty`, and
-/// its encoder and decoder by the codec (`ark::codec::Node`).
-#[proc_macro_derive(Node)]
-pub fn node(input: TokenStream) -> TokenStream {
-    derive::node(syn::parse_macro_input!(input as syn::DeriveInput)).into()
-}
 
 /// `#[derive(Row)]`: a struct as a table's row — `#[ark(key)]` on its
 /// leading fields, `#[ark(refs(Row))]` on a column naming another row,
 /// `#[ark(index(a, b))]`, `#[ark(unique(a, b))]` (each `as NAME`
-/// optionally), `#[ark(volatile)]`, `#[ark(table = "..")]` on the struct.
+/// optionally), `#[ark(volatile)]`, `#[ark(table = "..")]` on the struct. A
+/// column appended with `#[serde(default)]` takes its type's default in a
+/// row written before it.
 #[proc_macro_derive(Row, attributes(ark))]
 pub fn row(input: TokenStream) -> TokenStream {
     domain::row(syn::parse_macro_input!(input as syn::DeriveInput)).into()

@@ -22,26 +22,23 @@
 //! `Held` says an intent names one it does not run, and the intent stays pending on the device, pushed
 //! again on its next connection. Nothing a client sends is ever loaded.
 //!
-//! The variants are numbered in that order. Every frame names its space, so
-//! two machines share a connection (§1.9): a verdict's id is `(origin,
-//! local)`'s, and each space counts its own. `device` is what a device says
-//! it is, the bytes the authority authors its `on_join` from (the driver's
-//! to read); `schema` and `version` are the domain the peer runs, its
-//! schema's hash and its version string. The type, the encoder and the decoder are `#[derive(Node)]`'s
-//! (§1.4), and `tests/frames.rs` holds every frame's bytes to
-//! [`frame_ty`].
+//! Every frame names its space, so two machines share a connection (§1.9):
+//! a verdict's id is `(origin, local)`'s, and each space counts its own.
+//! `device` is what a device says it is, the bytes the authority authors
+//! its `on_join` from (the driver's to read); `schema` and `version` are the
+//! domain the peer runs, its schema's hash and its version string. A frame
+//! is JSON, serde's derived form (`tests/frames.rs` holds every frame to
+//! reading back as itself).
 
-use ark_macros::Node;
+use serde::{Deserialize, Serialize};
 
-use crate::codec::Node;
 use crate::hash::{EntryHash, SchemaHash};
-use crate::log::{Entry, EntryId, Logged, Record, Seq, Snapshot};
+use crate::json::Json;
+use crate::log::{Entry, EntryId, Logged, Seq, Snapshot};
 use crate::schema::Space;
-use crate::store::Change;
-use crate::ty::Ty;
 use crate::Refusal;
 
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
     Hello {
         space: Space,
@@ -69,30 +66,11 @@ pub enum Frame {
 
 /// An authority's answer to one intent; what its journal keeps of each it
 /// judged (never `Held`, which is not a judgment).
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
     Ok { seq: Seq },
     Refused { why: String },
     Held { func: String },
-}
-
-/// The types, by name, as the derive writes them.
-pub fn ty(name: &str) -> Ty {
-    match name {
-        "Space" => Space::ty(),
-        "Entry" => Entry::ty(),
-        "Change" => Change::ty(),
-        "Logged" => Logged::ty(),
-        "Snapshot" => Snapshot::ty(),
-        "Record" => Record::ty(),
-        "Verdict" => Verdict::ty(),
-        "Frame" => Frame::ty(),
-        _ => panic!("no frame type {name}"),
-    }
-}
-
-pub fn frame_ty() -> Ty {
-    Frame::ty()
 }
 
 impl Frame {

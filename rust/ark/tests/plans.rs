@@ -13,7 +13,7 @@ use ark::plan::{splice, Make, View};
 use ark::prelude::*;
 use ark::store::Store;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(unique(user_id, name))]
 pub struct Playlist {
     #[ark(key)]
@@ -22,7 +22,7 @@ pub struct Playlist {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(unique(playlist_id, pos))]
 pub struct Item {
     #[ark(key, refs(Playlist))]
@@ -32,14 +32,14 @@ pub struct Item {
     pub pos: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 pub struct Person {
     #[ark(key)]
     pub name: String,
     pub born: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(index(composer))]
 pub struct Work {
     #[ark(key)]
@@ -49,7 +49,7 @@ pub struct Work {
     pub title: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(index(work_id))]
 pub struct Movement {
     #[ark(key)]
@@ -60,7 +60,7 @@ pub struct Movement {
     pub part: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(index(creator), index(movement_id))]
 pub struct Song {
     #[ark(key)]

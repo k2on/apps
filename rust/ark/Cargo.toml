@@ -8,4 +8,6 @@ description = "The ArkDB v5 kernel: bytes under types, the store, the chained lo
 [dependencies]
 sha2 = { workspace = true }
 ark-macros = { path = "../ark-macros" }
+serde = { workspace = true }
 serde_json = { workspace = true }
+memcomparable = { workspace = true }

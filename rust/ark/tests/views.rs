@@ -25,15 +25,14 @@ mod support {
     pub mod vectors;
 }
 
-use ark::codec::{put_bytes, put_int, put_option};
 use ark::dynamic::{evaluate, make, parse, Dynamic};
 use ark::hash::hex;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer, Role, Who};
 use ark::plan::{splice, Patch};
+use ark::row::Type;
 use ark::schema::{Schema, Table};
 use ark::store::{Change, Store};
-use ark::ty::Ty;
 use demo::*;
 use serde_json::{json, Value as Json};
 use support::json::schema as jschema;
@@ -44,13 +43,14 @@ type Dv = ark::plan::View<Dynamic, Json>;
 
 // * Rows and changes
 
-fn texts(ts: &[&str]) -> Vec<u8> {
-    let mut b = vec![];
-    ts.iter().for_each(|t| put_bytes(&mut b, t.as_bytes()));
-    b
-}
-
 type Row = (&'static str, Vec<u8>);
+
+/// A row of `table` (in `schema`) from its columns' values, in any order:
+/// its one encoding.
+fn row_of(schema: &Schema, table: &'static str, cols: Json) -> Row {
+    let t = schema.table(table).unwrap().1;
+    (table, ark::dynamic::row_bytes(t, &cols).unwrap_or_else(|e| panic!("{table}: {e}")))
+}
 
 fn pl(n: u32, name: &str, user: &str) -> Row {
     ("playlist", playlist_row(&pid(n), name, user))
@@ -61,36 +61,28 @@ fn it(n: u32, track: &str, pos: i64) -> Row {
 }
 
 fn person(name: &str, born: i64) -> Row {
-    let mut b = texts(&[name]);
-    put_int(&mut b, born);
-    ("person", b)
+    row_of(&library(), "person", json!({ "name": name, "born": born }))
 }
 
 fn work(id: &str, composer: &str, title: &str) -> Row {
-    ("work", texts(&[id, composer, title]))
+    row_of(&library(), "work", json!({ "id": id, "composer": composer, "title": title }))
 }
 
 fn mv(id: &str, work: &str, no: i64, part: &str) -> Row {
-    let mut b = texts(&[id, work]);
-    put_int(&mut b, no);
-    put_bytes(&mut b, part.as_bytes());
-    ("movement", b)
+    row_of(&library(), "movement", json!({ "id": id, "work_id": work, "no": no, "part": part }))
 }
 
 fn song(id: &str, title: &str, creator: &str, m: Option<&str>, pos: i64) -> Row {
-    let mut b = texts(&[id, title, creator]);
-    put_option(&mut b, m, |o, m| put_bytes(o, m.as_bytes()));
-    put_int(&mut b, pos);
-    ("song", b)
+    let cols = json!({ "id": id, "title": title, "creator": creator, "movement_id": m, "pos": pos });
+    row_of(&library(), "song", cols)
 }
 
 fn track(id: &str, title: &str, creator: &str, pos: i64) -> Row {
-    let mut b = texts(&[id, title, creator]);
-    put_int(&mut b, pos);
-    ("track", b)
+    row_of(&tracks(), "track", json!({ "id": id, "title": title, "creator": creator, "pos": pos }))
 }
 
-/// A field of a fuzz schema's row.
+/// A field of a fuzz schema's row, read under its column's type: an `E`
+/// a variant by its place (a `Bool`'s `false`, `true`).
 enum F<'a> {
     I(i64),
     T(&'a str),
@@ -101,21 +93,27 @@ enum F<'a> {
 }
 use F::*;
 
-fn put_f(b: &mut Vec<u8>, f: &F) {
-    match f {
-        I(n) => put_int(b, *n),
-        T(t) => put_bytes(b, t.as_bytes()),
-        Bs(x) => put_bytes(b, x),
-        Id(h) => put_bytes(b, &ark::hash::unhex(h).unwrap()),
-        E(i) => b.push(*i),
-        Opt(x) => put_option(b, *x, put_f),
+fn f_json(ty: &Type, f: &F) -> Json {
+    match (ty, f) {
+        (_, I(n)) => json!(n),
+        (_, T(t)) => json!(t),
+        (_, Bs(b)) => json!(b),
+        (_, Id(h)) => json!(h),
+        (_, Opt(None)) => Json::Null,
+        (Type::Option(t), Opt(Some(x))) => f_json(t, x),
+        (Type::Bool, E(i)) => json!(*i == 1),
+        (Type::Sum(_, vs), E(i)) => json!(vs[*i as usize].0),
+        _ => panic!("no field of that type"),
     }
 }
 
+/// A row of a fuzz schema's table, its fields in order: `fuzz_colors`'s
+/// rows have four, `fuzz_pairs`'s `t0` three and `t1` six.
 fn fz(table: &'static str, fs: &[F]) -> Row {
-    let mut b = vec![];
-    fs.iter().for_each(|f| put_f(&mut b, f));
-    (table, b)
+    let schema = if fs.len() == 4 { fuzz_colors() } else { fuzz_pairs() };
+    let t = schema.table(table).unwrap().1;
+    let cols = t.columns.iter().zip(fs).map(|(c, f)| (c.name.clone(), f_json(&c.ty, f))).collect();
+    row_of(&schema, table, Json::Object(cols))
 }
 
 fn add((t, row): Row) -> Change {
@@ -329,28 +327,28 @@ fn kept_overflows_batches() -> Vec<Vec<Change>> {
 
 fn library() -> Schema {
     let mut s = demo::schema();
-    let text = || Ty::Bytes;
+    let text = || Type::Text;
     s.tables.extend([
-        Table::new("person").col("name", "Text", text()).col("born", "Int", Ty::Int),
+        Table::new("person").col("name", text()).col("born", Type::Int),
         Table::new("work")
-            .col("id", "Text", text())
-            .col("composer", "Text", text())
-            .col("title", "Text", text())
+            .col("id", text())
+            .col("composer", text())
+            .col("title", text())
             .index(&["composer"], false)
             .refs("composer", "person"),
         Table::new("movement")
-            .col("id", "Text", text())
-            .col("work_id", "Text", text())
-            .col("no", "Int", Ty::Int)
-            .col("part", "Text", text())
+            .col("id", text())
+            .col("work_id", text())
+            .col("no", Type::Int)
+            .col("part", text())
             .index(&["work_id"], false)
             .refs("work_id", "work"),
         Table::new("song")
-            .col("id", "Text", text())
-            .col("title", "Text", text())
-            .col("creator", "Text", text())
-            .col("movement_id", "Option<Text>", Ty::option(text()))
-            .col("pos", "Int", Ty::Int)
+            .col("id", text())
+            .col("title", text())
+            .col("creator", text())
+            .col("movement_id", Type::Option(Box::new(text())))
+            .col("pos", Type::Int)
             .index(&["creator"], false)
             .index(&["movement_id"], false)
             .refs("movement_id", "movement"),
@@ -361,19 +359,21 @@ fn library() -> Schema {
 fn tracks() -> Schema {
     Schema {
         tables: vec![
-            Table::new("person").col("name", "Text", Ty::Bytes).col("born", "Int", Ty::Int),
+            Table::new("person").col("name", Type::Text).col("born", Type::Int),
             Table::new("track")
-                .col("id", "Text", Ty::Bytes)
-                .col("title", "Text", Ty::Bytes)
-                .col("creator", "Text", Ty::Bytes)
-                .col("pos", "Int", Ty::Int)
+                .col("id", Type::Text)
+                .col("title", Type::Text)
+                .col("creator", Type::Text)
+                .col("pos", Type::Int)
                 .index(&["creator", "pos"], false),
         ],
     }
 }
 
-fn color() -> Ty {
-    Ty::option(Ty::enumeration(3))
+/// `Option<Color>`, three colours named in their order.
+fn color() -> Type {
+    let v = |n: &str| (n.to_string(), vec![]);
+    Type::Option(Box::new(Type::Sum("Color".into(), vec![v("c0"), v("c1"), v("c2")])))
 }
 
 /// `a-maintained-sum-answers-where-the-fold-overflows`'s schema.
@@ -381,16 +381,16 @@ fn fuzz_colors() -> Schema {
     Schema {
         tables: vec![
             Table::new("t0")
-                .col("id", "Id<t0>", Ty::Bytes)
-                .col("c00", "Text", Ty::Bytes)
-                .col("c01", "Bytes", Ty::Bytes)
-                .col("c02", "Option<Text>", Ty::option(Ty::Bytes))
+                .col("id", Type::Id("t0".into()))
+                .col("c00", Type::Text)
+                .col("c01", Type::Bytes)
+                .col("c02", Type::Option(Box::new(Type::Text)))
                 .index(&["c02"], false),
             Table::new("t1")
-                .col("k1", "Int", Ty::Int)
-                .col("c10", "Text", Ty::Bytes)
-                .col("c11", "Text", Ty::Bytes)
-                .col("c12", "Option<Color>", color()),
+                .col("k1", Type::Int)
+                .col("c10", Type::Text)
+                .col("c11", Type::Text)
+                .col("c12", color()),
         ],
     }
 }
@@ -400,18 +400,18 @@ fn fuzz_pairs() -> Schema {
     Schema {
         tables: vec![
             Table::new("t0")
-                .col("p0", "Text", Ty::Bytes)
-                .col("n0", "Int", Ty::Int)
-                .col("c00", "Int", Ty::Int)
+                .col("p0", Type::Text)
+                .col("n0", Type::Int)
+                .col("c00", Type::Int)
                 .keyed(2)
                 .index(&["c00"], false),
             Table::new("t1")
-                .col("p1", "Text", Ty::Bytes)
-                .col("n1", "Int", Ty::Int)
-                .col("c10", "Option<Bool>", Ty::option(Ty::bool()))
-                .col("c11", "Bool", Ty::bool())
-                .col("c12", "Int", Ty::Int)
-                .col("c13", "Option<Text>", Ty::option(Ty::Bytes))
+                .col("p1", Type::Text)
+                .col("n1", Type::Int)
+                .col("c10", Type::Option(Box::new(Type::Bool)))
+                .col("c11", Type::Bool)
+                .col("c12", Type::Int)
+                .col("c13", Type::Option(Box::new(Type::Text)))
                 .keyed(2),
         ],
     }

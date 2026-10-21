@@ -4,23 +4,44 @@
 
 #[path = "demo.rs"]
 mod demo;
-mod support {
-    pub mod gen;
-}
 
 use std::sync::Arc;
 
-use ark::codec::{bytes_enc, put_bytes};
+use ark::json::put_key;
+use ark::row::{Id, Type};
 use ark::schema::{compat, Schema, Table};
 use ark::store::{Change, Dir, Read, Scan, Store};
-use ark::ty::Ty;
 use demo::{item_of, item_row, playlist_row};
-use support::gen::Rng;
+
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: u64) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (self.0 >> 11) % n.max(1)
+    }
+}
 
 fn id(n: u8) -> Vec<u8> {
     let mut i = vec![0; 16];
     i[15] = n;
     i
+}
+
+/// A key's bytes.
+fn key<T: serde::Serialize>(k: T) -> Vec<u8> {
+    let mut out = vec![];
+    put_key(&k, &mut out);
+    out
+}
+
+fn pid(n: u8) -> Id<()> {
+    Id::new(id(n).try_into().unwrap())
+}
+
+/// A row of `presence(who)`.
+fn presence(who: &str) -> Vec<u8> {
+    format!(r#"{{"who":"{who}"}}"#).into_bytes()
 }
 
 fn whys(s: &mut Store, c: Change) -> String {
@@ -50,9 +71,14 @@ fn constraints_refuse() {
     assert!(whys(&mut s, item(1, "t1", 2)).contains("a row with this key exists"));
     let short = Change::Add {
         table: "item".into(),
-        row: bytes_enc(&id(1)),
+        row: br#"{"playlist_id":"00000000000000000000000000000001"}"#.to_vec(),
     };
-    assert!(whys(&mut s, short).contains("item.track_id"));
+    assert!(whys(&mut s, short).contains("item"));
+    let unordered = Change::Add {
+        table: "item".into(),
+        row: br#"{"track_id":"t5","playlist_id":"00000000000000000000000000000001","pos":5}"#.to_vec(),
+    };
+    assert!(whys(&mut s, unordered).contains("one encoding"));
     let rekey = Change::Edit {
         table: "item".into(),
         old: item_row(&id(1), "t1", 1),
@@ -67,8 +93,8 @@ fn constraints_refuse() {
     let before = s.clone();
     assert!(s.apply_all(&[item(1, "t2", 2), item(1, "t3", 2)]).is_err());
     assert_eq!(s, before, "all or none");
-    s.delete("item", &item_row(&id(1), "t1", 1)[..bytes_enc(&id(1)).len() + 4]).unwrap();
-    s.delete("playlist", &bytes_enc(&id(1))).unwrap();
+    s.delete("item", &key((pid(1), "t1"))).unwrap();
+    s.delete("playlist", &key(pid(1))).unwrap();
     assert_eq!(s, empty);
     assert_eq!(s.state_hash(), empty.state_hash());
 }
@@ -142,14 +168,12 @@ fn scans_read_in_order() {
         }
     }
     let tracks = |rows: Vec<Vec<u8>>| rows.iter().map(|r| item_of(r).1).collect::<Vec<_>>();
-    let key = bytes_enc(&id(1));
-    assert_eq!(tracks(s.scan("item", &Scan::prefix(None, &key, Dir::Asc, 9))), ["t11", "t7", "t9"]);
-    assert_eq!(tracks(s.scan("item", &Scan::prefix(Some(0), &key, Dir::Asc, 9))), ["t7", "t9", "t11"]);
-    assert_eq!(tracks(s.scan("item", &Scan::prefix(Some(0), &key, Dir::Desc, 1))), ["t11"]);
+    let p = key(pid(1));
+    assert_eq!(tracks(s.scan("item", &Scan::prefix(None, &p, Dir::Asc, 9))), ["t11", "t7", "t9"]);
+    assert_eq!(tracks(s.scan("item", &Scan::prefix(Some(0), &p, Dir::Asc, 9))), ["t7", "t9", "t11"]);
+    assert_eq!(tracks(s.scan("item", &Scan::prefix(Some(0), &p, Dir::Desc, 1))), ["t11"]);
     assert_eq!(s.scan("item", &Scan::all()).len(), 6);
-    let mut k = key.clone();
-    put_bytes(&mut k, b"t7");
-    assert_eq!(item_of(&s.get("item", &k).unwrap()).2, 1);
+    assert_eq!(item_of(&s.get("item", &key((pid(1), "t7"))).unwrap()).2, 1);
 }
 
 /// Two schemas that differ in one column's name hash their empty stores
@@ -162,10 +186,10 @@ fn the_schema_is_in_the_hash_and_volatile_tables_are_not() {
     other.tables[0].columns[1].name = "title".into();
     assert_ne!(Store::new(demo::shared()).state_hash(), Store::new(Arc::new(other)).state_hash());
     let mut sch = demo::schema();
-    sch.tables.push(Table::new("presence").col("who", "Text", Ty::Bytes).volatile());
+    sch.tables.push(Table::new("presence").col("who", Type::Text).volatile());
     let mut s = Store::new(Arc::new(sch));
     let h = s.state_hash();
-    s.put("presence", bytes_enc(b"alice")).unwrap();
+    s.put("presence", presence("alice")).unwrap();
     assert_eq!(s.state_hash(), h);
     assert_eq!(s.snapshot_rows().len(), 2);
 }
@@ -177,14 +201,14 @@ fn the_schema_is_in_the_hash_and_volatile_tables_are_not() {
 #[test]
 fn a_volatile_store_hashes_its_own_space() {
     let mut sch = demo::schema();
-    sch.tables.push(Table::new("presence").col("who", "Text", Ty::Bytes).volatile());
+    sch.tables.push(Table::new("presence").col("who", Type::Text).volatile());
     let mut s = Store::new_in(Arc::new(sch), ark::schema::Space::Volatile);
     let h = s.state_hash();
     s.put("playlist", playlist_row(&id(1), "x", "alice")).unwrap();
     assert_eq!(s.state_hash(), h, "a durable row is not the volatile space's");
-    s.put("presence", bytes_enc(b"alice")).unwrap();
+    s.put("presence", presence("alice")).unwrap();
     assert_ne!(s.state_hash(), h);
-    assert_eq!(s.snapshot_rows(), vec![("presence".to_string(), vec![bytes_enc(b"alice")])]);
+    assert_eq!(s.snapshot_rows(), vec![("presence".to_string(), vec![presence("alice")])]);
 }
 
 /// A row others name is not removed while they do (v4's
@@ -194,54 +218,45 @@ fn a_volatile_store_hashes_its_own_space() {
 /// on it was removed.
 #[test]
 fn a_row_still_named_is_not_removed() {
-    let opt = Ty::option(Ty::Bytes);
+    let opt = Type::Option(Box::new(Type::Id("playlist".into())));
     let mut sch = demo::schema();
-    sch.tables.push(
-        Table::new("pin")
-            .col("n", "Int", Ty::Int)
-            .col("of", "Option<Id<playlist>>", opt)
-            .refs("of", "playlist"),
-    );
+    sch.tables
+        .push(Table::new("pin").col("n", Type::Int).col("of", opt).refs("of", "playlist"));
     let mut s = Store::new(Arc::new(sch));
     s.put("playlist", playlist_row(&id(1), "x", "alice")).unwrap();
     s.put("playlist", playlist_row(&id(2), "y", "alice")).unwrap();
     s.put("item", item_row(&id(1), "t", 1)).unwrap();
-    let mut pin = ark::codec::int_enc(1).to_vec();
-    pin.push(1);
-    put_bytes(&mut pin, &id(2));
-    s.put("pin", pin).unwrap();
+    s.put("pin", br#"{"n":1,"of":"00000000000000000000000000000002"}"#.to_vec()).unwrap();
     let before = s.clone();
-    let key = |n| bytes_enc(&id(n));
-    assert!(s.delete("playlist", &key(1)).unwrap_err().0.contains("named by item.playlist_id"));
-    assert!(s.delete("playlist", &key(2)).unwrap_err().0.contains("named by pin.of"));
+    assert!(s.delete("playlist", &key(pid(1))).unwrap_err().0.contains("named by item.playlist_id"));
+    assert!(s.delete("playlist", &key(pid(2))).unwrap_err().0.contains("named by pin.of"));
     assert_eq!(s, before, "refused, nothing moved");
-    s.delete("pin", &ark::codec::int_enc(1)).unwrap();
-    s.delete("playlist", &key(2)).unwrap();
-    let mut ik = key(1);
-    put_bytes(&mut ik, b"t");
-    s.delete("item", &ik).unwrap();
-    s.delete("playlist", &key(1)).unwrap();
+    s.delete("pin", &key(1i64)).unwrap();
+    s.delete("playlist", &key(pid(2))).unwrap();
+    s.delete("item", &key((pid(1), "t"))).unwrap();
+    s.delete("playlist", &key(pid(1))).unwrap();
 }
 
 /// §1.2 compat is a prefix check: appending an `Option` column, a defaulted
 /// one or a table passes; a removal, a retype or a bare appended column
 /// does not. A row written under the older schema is completed under the
-/// newer and one written under the newer is read by its prefix. Falsified
-/// by `compat` comparing only the columns' count: the retype passed.
+/// newer and one written under the newer is read without what it has
+/// beyond. Falsified by `compat` comparing only the columns' count: the
+/// retype passed.
 #[test]
 fn compat_is_a_prefix_extension() {
     let old = demo::schema();
     let mut new = old.clone();
-    new.tables[1] = new.tables[1].clone().col("note", "Option<Text>", Ty::option(Ty::Bytes));
-    new.tables[1] = new.tables[1].clone().col("plays", "Int", Ty::Int);
-    new.tables[1].columns[4].default = Some(ark::codec::int_enc(0).to_vec());
-    new.tables.push(Table::new("tag").col("name", "Text", Ty::Bytes));
+    new.tables[1] = new.tables[1].clone().col("note", Type::Option(Box::new(Type::Text)));
+    new.tables[1] = new.tables[1].clone().col("plays", Type::Int);
+    new.tables[1].columns[4].default = Some(serde_json::json!(0));
+    new.tables.push(Table::new("tag").col("name", Type::Text));
     assert_eq!(compat(&old, &new), Ok(()));
     let mut bare = new.clone();
-    bare.tables[1] = bare.tables[1].clone().col("x", "Int", Ty::Int);
+    bare.tables[1] = bare.tables[1].clone().col("x", Type::Int);
     assert!(compat(&old, &bare).is_err());
     let mut retyped = old.clone();
-    retyped.tables[1].columns[2].ty = Ty::Bytes;
+    retyped.tables[1].columns[2].ty = Type::Text;
     assert!(compat(&old, &retyped).is_err());
     assert!(compat(&new, &old).is_err());
     assert!(compat(
@@ -252,9 +267,14 @@ fn compat_is_a_prefix_extension() {
     )
     .is_err());
     let row = item_row(&id(1), "t1", 4);
-    let full = new.tables[1].complete(&row).unwrap();
-    assert_eq!(new.tables[1].spans(&full).unwrap().len(), 5);
-    assert_eq!(old.tables[1].prefix(&full).unwrap(), &row[..]);
+    let (full, other) = new.tables[1].fit(&row).unwrap();
+    assert!(other);
+    assert_eq!(
+        String::from_utf8(full.clone()).unwrap(),
+        r#"{"playlist_id":"00000000000000000000000000000001","track_id":"t1","pos":4,"note":null,"plays":0}"#
+    );
+    assert_eq!(old.tables[1].fit(&full).unwrap(), (row.clone(), true));
+    assert_eq!(old.tables[1].fit(&row).unwrap(), (row, false));
 }
 
 /// The log is a table whose invariant is the chain (§1.6): a row is added
@@ -265,8 +285,8 @@ fn compat_is_a_prefix_extension() {
 /// middle entry came out.
 #[test]
 fn the_log_is_a_table_whose_rows_are_a_chain() {
-    use ark::codec::Node;
     use ark::hash::{EntryHash, StateHash};
+    use ark::json::Json;
     use ark::log::{Entry, Logged};
     use ark::store::LOG;
     let mut s = Store::new(demo::shared());

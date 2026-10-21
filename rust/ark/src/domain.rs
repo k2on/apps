@@ -33,7 +33,7 @@ use crate::store::{Change, Store};
 use crate::Refusal;
 
 /// What a function is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, crate::prelude::Node)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     Mutator,
     Live,
@@ -87,8 +87,9 @@ fn check_of<I: Input>() -> Check {
     Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e.0)])?.check().map(|_| ()))
 }
 
+/// An input from its JSON (no bytes are `null`), refined.
 fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
-    I::decode(b)?.refine()
+    I::decode(if b.is_empty() { b"null" } else { b })?.refine()
 }
 
 struct Mutate<S: Tables, I> {

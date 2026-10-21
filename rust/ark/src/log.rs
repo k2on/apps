@@ -2,14 +2,14 @@
 //! had, the state hash after it and the hash of the chain to it.
 //!
 //! ```text
-//! Entry  { id, actor, session, origin, local, roles, fn, input, now }
+//! Entry  { id, actor, session, origin, local, roles, func, input, now }
 //! Logged { seq, entry, facts, state, hash }
-//! hash = sha256(prev.hash ‖ enc(seq, entry, facts, state))
+//! hash = sha256(prev.hash ‖ json([seq, entry, facts, state]))
 //! ```
 //!
 //! **The log is a table.** Its entries are the rows of the store's `_log`
 //! table ([`crate::store::LOG`]), keyed by sequence, each row a
-//! [`Logged`]'s bytes; the chain is that table's invariant, judged at
+//! [`Logged`]'s JSON; the chain is that table's invariant, judged at
 //! every write to it ([`Logged::links`]), and its first row is the one the
 //! log stands on (the horizon, or a snapshot's head), not checked. What a
 //! peer makes durable is the store's rows whole, the log's table's among
@@ -23,12 +23,12 @@
 //! paged from there by an authority that has that hash at that sequence
 //! and is sent a snapshot by one that does not.
 //!
-//! **Deterministic ids.** An entry's id is `sha256(enc(Bytes origin) ‖
-//! enc(Int local))[..16]`: `origin` is sixteen bytes a replica draws once,
+//! **Deterministic ids.** An entry's id is `sha256(len(origin) ‖ origin ‖
+//! local)[..16]`, the length and `local` eight bytes big-endian: `origin` is sixteen bytes a replica draws once,
 //! at its first open, and keeps — the one other non-determinism beside
 //! `now` — and `local` the replica's own count of the intents it authored,
-//! from 1. The `n`-th row id an entry draws is `sha256(id ‖ enc(Int
-//! n))[..16]` ([`EntryId::draw`]). Neither depends on who is signed in, so
+//! from 1. The `n`-th row id an entry draws is `sha256(id ‖ n)[..16]`, `n`
+//! eight bytes big-endian ([`EntryId::draw`]). In JSON an id is its hex. Neither depends on who is signed in, so
 //! what a device made signed out keeps its ids, and its rows theirs, when
 //! it signs in. Dedupe is `(origin, local)`, which also shows a gap in a
 //! replica's pushes; `actor`, `session` and `roles` are what the authority
@@ -39,19 +39,18 @@
 //! first row of its table with no entry ([`Snapshot::base`]). The horizon
 //! is a delete of the rows below it.
 
-use ark_macros::Node;
+use serde::{Deserialize, Serialize};
 
-use crate::codec::Node;
-use crate::codec::{put_bytes, put_int, Reader};
 use crate::hash::{sha256, EntryHash, StateHash};
+use crate::json::Json;
 use crate::store::Change;
 use crate::Refusal;
 
 /// A position in the log. The first entry is 1; 0 is the empty chain.
 pub type Seq = i64;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EntryId(pub [u8; 16]);
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct EntryId(#[serde(with = "crate::json::hex_bytes")] pub [u8; 16]);
 
 impl std::fmt::Debug for EntryId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -64,8 +63,8 @@ fn first16(h: [u8; 32]) -> [u8; 16] {
 }
 
 /// Where a replica's intents come from: drawn once, kept (§1.6).
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Origin(pub [u8; 16]);
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Origin(#[serde(with = "crate::json::hex_bytes")] pub [u8; 16]);
 
 impl std::fmt::Debug for Origin {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -92,17 +91,13 @@ impl EntryId {
     /// The id of the `local`-th intent from `origin` (an [`Origin`]; any
     /// bytes name an id outside the log, as a query's context does).
     pub fn of(origin: impl AsRef<[u8]>, local: i64) -> EntryId {
-        let mut b = vec![];
-        put_bytes(&mut b, origin.as_ref());
-        put_int(&mut b, local);
-        EntryId(first16(sha256(&[&b])))
+        let o = origin.as_ref();
+        EntryId(first16(sha256(&[&(o.len() as u64).to_be_bytes(), o, &local.to_be_bytes()])))
     }
 
     /// The `n`-th id drawn inside this entry.
     pub fn draw(&self, n: i64) -> [u8; 16] {
-        let mut b = self.0.to_vec();
-        put_int(&mut b, n);
-        first16(sha256(&[&b]))
+        first16(sha256(&[&self.0, &n.to_be_bytes()]))
     }
 }
 
@@ -110,7 +105,7 @@ impl EntryId {
 /// judged it under: it stamps them before sequencing (§1.7), and a replay
 /// anywhere reads what the log says. The default is no intent, what the
 /// first row of a log standing on a snapshot carries.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub id: EntryId,
     pub actor: String,
@@ -119,21 +114,29 @@ pub struct Entry {
     pub local: i64,
     pub roles: Vec<String>,
     pub func: String,
+    /// The input's JSON, carried as that JSON.
+    #[serde(with = "crate::json::raw")]
     pub input: Vec<u8>,
     pub now: i64,
 }
 
+impl Default for Entry {
+    fn default() -> Entry {
+        Entry {
+            id: EntryId::default(),
+            actor: String::new(),
+            session: String::new(),
+            origin: Origin::default(),
+            local: 0,
+            roles: vec![],
+            func: String::new(),
+            input: b"null".to_vec(),
+            now: 0,
+        }
+    }
+}
+
 impl Entry {
-    /// `(Bytes id, Bytes actor, Bytes session, Bytes origin, Int local, List
-    /// Bytes roles, Bytes fn, Bytes input, Int now)`, derived.
-    pub fn enc(&self, out: &mut Vec<u8>) {
-        self.put(out);
-    }
-
-    pub fn dec(r: &mut Reader) -> Result<Entry, Refusal> {
-        Entry::take(r)
-    }
-
     /// Whether the id is the one `(origin, local)` names: an id is never
     /// taken on trust.
     pub fn id_checks(&self) -> bool {
@@ -141,7 +144,7 @@ impl Entry {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Logged {
     pub seq: Seq,
     pub entry: Entry,
@@ -153,11 +156,7 @@ pub struct Logged {
 impl Logged {
     /// The hash of the chain to an entry, from the one before it.
     pub fn chain(prev: &EntryHash, seq: Seq, entry: &Entry, facts: &[Change], state: &StateHash) -> EntryHash {
-        let mut b = vec![];
-        put_int(&mut b, seq);
-        entry.put(&mut b);
-        Change::put_list(facts, &mut b);
-        state.put(&mut b);
+        let b = serde_json::to_vec(&(seq, entry, facts, state)).expect("an entry serializes");
         EntryHash(sha256(&[&prev.0, &b]))
     }
 
@@ -178,38 +177,20 @@ impl Logged {
     pub fn links(&self, prev: &EntryHash) -> bool {
         self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts, &self.state)
     }
-
-    /// `(Int seq, Entry, List Change, Bytes state, Bytes hash)`, derived.
-    pub fn enc(&self, out: &mut Vec<u8>) {
-        self.put(out);
-    }
-
-    pub fn dec(r: &mut Reader) -> Result<Logged, Refusal> {
-        Logged::take(r)
-    }
 }
 
 /// The state at a sequence: the chain's hash and the state hash there, and
 /// the durable rows, table by table in schema order, each in key order.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub seq: Seq,
     pub hash: EntryHash,
     pub state: StateHash,
+    #[serde(with = "crate::json::raw_tables")]
     pub rows: Vec<(String, Vec<Vec<u8>>)>,
 }
 
 impl Snapshot {
-    /// `(Int seq, Bytes hash, Bytes state, List (Bytes table, List
-    /// Bytes))`, derived.
-    pub fn enc(&self, out: &mut Vec<u8>) {
-        self.put(out);
-    }
-
-    pub fn dec(r: &mut Reader) -> Result<Snapshot, Refusal> {
-        Snapshot::take(r)
-    }
-
     /// The first row of a log standing on this snapshot: its sequence,
     /// state and hash, and no entry.
     pub fn base(&self) -> Logged {
@@ -234,18 +215,18 @@ pub type Rows = Vec<(String, Vec<Vec<u8>>)>;
 /// entry, appended, as its row of the log's table — its facts are in it —
 /// or the store's rows whole, which every entry before them is folded
 /// into.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Record {
     Logged(Logged),
-    Rows(Rows),
+    Rows(#[serde(with = "crate::json::raw_tables")] Rows),
 }
 
 impl Record {
     /// A logged entry's record from its row of the log's table, which is
-    /// the entry's encoding: the variant, then the row as it is.
+    /// the entry's JSON: the variant's object around the row as it is.
     pub fn logged(row: &[u8]) -> Vec<u8> {
-        [&[0][..], row].concat()
+        [&b"{\"Logged\":"[..], row, b"}"].concat()
     }
 
     pub fn enc(&self) -> Vec<u8> {
@@ -261,8 +242,9 @@ impl Record {
 /// whole — the log's table's among them — and the rows appended to the
 /// log's table since, in order, whose facts write the rest again; its own
 /// intents still pending; and the last `local` it drew.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Durable {
+    #[serde(with = "crate::json::raw_tables")]
     pub rows: Rows,
     pub logged: Vec<Logged>,
     pub pending: Vec<Entry>,

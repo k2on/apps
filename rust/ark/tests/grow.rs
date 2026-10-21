@@ -12,13 +12,12 @@ mod support {
 
 use std::sync::Arc;
 
-use ark::codec::bytes_enc;
 use ark::frames::Frame;
 use ark::log::{Durable, EntryId, Origin};
 use ark::peer::{Ctx, Input, Journal, Peer, Procedure, Role};
+use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
 use ark::store::{Change, Store};
-use ark::ty::Ty;
 use ark::Refusal;
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
@@ -29,11 +28,10 @@ fn wider() -> Arc<Schema> {
     let mut s = demo::schema();
     s.tables[0].columns.push(Column {
         name: "note".into(),
-        decl: "Option<Text>".into(),
-        ty: Ty::option(Ty::Bytes),
+        ty: Type::Option(Box::new(Type::Text)),
         default: None,
     });
-    s.tables.push(Table::new("tag").col("name", "Text", Ty::Bytes));
+    s.tables.push(Table::new("tag").col("name", Type::Text));
     ark::schema::compat(&demo::schema(), &s).unwrap();
     Arc::new(s)
 }
@@ -95,7 +93,10 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
     assert_eq!(wide.log(), server.log(), "head and chain kept");
     assert_eq!(wide.foreign, Some(2));
     let rows = |p: &Peer, t: &str| p.store.rows(t).map(<[u8]>::to_vec).collect::<Vec<_>>();
-    let widened: Vec<Vec<u8>> = rows(&server, "playlist").into_iter().map(|r| [r, vec![0]].concat()).collect();
+    let widened: Vec<Vec<u8>> = rows(&server, "playlist")
+        .into_iter()
+        .map(|r| [&r[..r.len() - 1], &br#","note":null}"#[..]].concat())
+        .collect();
     assert_eq!(rows(&wide, "playlist"), widened, "a row widened with None");
     assert_eq!(rows(&wide, "item"), rows(&server, "item"));
     let fresh = Store::from_rows(wider(), &wide.store.snapshot_rows()).unwrap();
@@ -104,7 +105,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
 
     let o = wide.step(Input::Mutate {
         func: TAG.into(),
-        input: bytes_enc(b"loud"),
+        input: br#"{"name":"loud"}"#.to_vec(),
         now: 3,
     });
     let fan = fanouts(&o);
@@ -148,7 +149,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
 #[test]
 fn a_replica_behind_an_appended_table_asks_for_the_snapshot() {
     let mut s = demo::schema();
-    s.tables.push(Table::new("tag").col("name", "Text", Ty::Bytes));
+    s.tables.push(Table::new("tag").col("name", Type::Text));
     let mut server = Peer::new(Arc::new(s), demo::cas(), Role::Authority { journal: Journal::default() }, who("server"));
     let mut alice = replica("alice", demo::cas());
     let mut up_frames = sends(&alice.step(mutate(CREATE, create_input("Road"), 1)));

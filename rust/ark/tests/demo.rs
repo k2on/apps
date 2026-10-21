@@ -20,14 +20,13 @@
 
 use std::sync::Arc;
 
-use ark::codec::{bytes_enc, put_bytes, put_int, Reader};
 use ark::peer::Functions;
 use ark::prelude::*;
 use ark::schema::Schema;
 use ark::store::Read;
 
 /// A playlist, one person's, its name unique among theirs.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(unique(user_id, name))]
 pub struct Playlist {
     #[ark(key)]
@@ -37,7 +36,7 @@ pub struct Playlist {
 }
 
 /// A track on a playlist, at a place unique on it.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(unique(playlist_id, pos))]
 pub struct Item {
     #[ark(key, refs(Playlist))]
@@ -54,33 +53,33 @@ pub struct Demo {
 }
 
 /// A playlist's name: trimmed, and something.
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct CreatePlaylist {
     #[ark(trim, non_empty, why = "a playlist needs a name")]
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct AddToPlaylist {
     pub playlist_id: Id<Playlist>,
     #[ark(len = "1..")]
     pub track_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct RenamePlaylist {
     pub playlist_id: Id<Playlist>,
     #[ark(trim, non_empty, why = "a playlist needs a name")]
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct RemoveFromPlaylist {
     pub playlist_id: Id<Playlist>,
     pub track_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Items {
     pub playlist_id: Id<Playlist>,
 }
@@ -163,41 +162,61 @@ pub fn shared() -> Arc<Schema> {
     Arc::new(schema())
 }
 
-pub fn playlist_row(id: &[u8], name: &str, user: &str) -> Vec<u8> {
-    let mut b = bytes_enc(id);
-    put_bytes(&mut b, name.as_bytes());
-    put_bytes(&mut b, user.as_bytes());
-    b
+fn id<R>(b: &[u8]) -> Id<R> {
+    Id::new(b.try_into().expect("an id is 16 bytes"))
+}
+
+pub fn playlist_row(pid: &[u8], name: &str, user: &str) -> Vec<u8> {
+    Playlist {
+        id: id(pid),
+        name: name.into(),
+        user_id: user.into(),
+    }
+    .to_bytes()
 }
 
 pub fn item_row(pid: &[u8], track: &str, pos: i64) -> Vec<u8> {
-    let mut b = bytes_enc(pid);
-    put_bytes(&mut b, track.as_bytes());
-    put_int(&mut b, pos);
-    b
+    Item {
+        playlist_id: id(pid),
+        track_id: track.into(),
+        pos,
+    }
+    .to_bytes()
 }
 
 /// An `item` row read back: `(playlist_id, track_id, pos)`.
 pub fn item_of(row: &[u8]) -> (Vec<u8>, String, i64) {
-    let mut r = Reader::new(row);
-    (r.bytes().unwrap(), r.text().unwrap(), r.int().unwrap())
+    let i = Item::from_bytes(row).unwrap();
+    (i.playlist_id.0.to_vec(), i.track_id, i.pos)
 }
 
 /// The `pos` of a track on a playlist, as a store holds it.
 pub fn pos_of(store: &dyn Read, pid: &[u8], track: &str) -> Option<i64> {
-    let mut key = bytes_enc(pid);
-    put_bytes(&mut key, track.as_bytes());
+    let mut key = vec![];
+    ark::json::put_key(&(id::<Playlist>(pid), track), &mut key);
     store.get("item", &key).map(|r| item_of(&r).2)
 }
 
 pub fn create_input(name: &str) -> Vec<u8> {
-    bytes_enc(name.as_bytes())
+    CreatePlaylist { name: name.into() }.to_bytes()
 }
 
-pub fn pair_input(id: &[u8], text: &str) -> Vec<u8> {
-    let mut b = bytes_enc(id);
-    put_bytes(&mut b, text.as_bytes());
-    b
+/// `add_to_playlist`'s and `remove_from_playlist`'s input.
+pub fn pair_input(pid: &[u8], track: &str) -> Vec<u8> {
+    AddToPlaylist {
+        playlist_id: id(pid),
+        track_id: track.into(),
+    }
+    .to_bytes()
+}
+
+/// `rename_playlist`'s input.
+pub fn rename_input(pid: &[u8], name: &str) -> Vec<u8> {
+    RenamePlaylist {
+        playlist_id: id(pid),
+        name: name.into(),
+    }
+    .to_bytes()
 }
 
 pub const CREATE: &str = "demo.create_playlist";
