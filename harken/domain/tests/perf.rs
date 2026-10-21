@@ -237,7 +237,7 @@ impl Alone {
 
     /// The playlist the replica's last entry made.
     fn newest_playlist(&self) -> [u8; 16] {
-        EntryId::of(&me().session, self.r.local).draw(0)
+        EntryId::of(self.r.origin, self.r.local).draw(0)
     }
 }
 

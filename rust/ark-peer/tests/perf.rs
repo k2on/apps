@@ -579,7 +579,7 @@ fn chain(store: &mut Store, (mut seq, mut prev): (Seq, EntryHash), rows: std::op
             local,
             roles: vec!["library".into()],
             func: func.into(),
-            input: vec![],
+            input: b"null".to_vec(),
             now: 1_000 + i as i64,
         };
         let state = store.state_hash();

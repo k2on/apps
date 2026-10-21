@@ -104,6 +104,9 @@ impl Serialize for AsRaw<'_> {
 }
 
 fn as_raw<E: serde::ser::Error>(b: &[u8]) -> Result<AsRaw<'_>, E> {
+    if b.is_empty() {
+        return Err(E::custom("no bytes are no JSON value"));
+    }
     std::str::from_utf8(b).map(AsRaw).map_err(E::custom)
 }
 
