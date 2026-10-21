@@ -15,7 +15,8 @@
 //! `#[derive(Effect)]` on a row with a `state: Job<T>` field writes
 //! [`Effect`]; [`Effect::register`] adds `<table>.claim {id, by}`,
 //! `<table>.finish {id, by, outcome}` and `<table>.cancel {id}` to a
-//! domain. Each is judged at the authority in log order: of a claim and a
+//! domain, and the query `<table>.due`: the rows a claim would take now,
+//! and when the next is due (what a handler outside Rust asks). Each is judged at the authority in log order: of a claim and a
 //! cancel of one pending row, whichever comes first wins and the other is
 //! refused; a finish is refused unless the row is claimed by its `by`. A
 //! claim is judged at its entry's `now`. A `Done` carries its outcome:
@@ -90,7 +91,7 @@ pub trait Effect: Row<Space = Durable> {
         Self::Key: Describe,
     {
         let name = |f: &str| format!("{}.{f}", Self::TABLE);
-        let d = d.mutator(&name("claim"), claim::<S, Self>);
+        let d = d.mutator(&name("claim"), claim::<S, Self>).query(&name("due"), due::<S, Self>);
         d.mutator(&name("finish"), finish::<S, Self>).mutator(&name("cancel"), cancel::<S, Self>)
     }
 }
@@ -206,4 +207,10 @@ fn cancel<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Cancel<R::Key>) ->
     }
     *r.job_mut() = Job::Cancelled;
     db.tab::<R>().update(r)
+}
+
+fn due<S: Tables, R: Effect>(ctx: &Ctx, db: &Db<S>, _: ()) -> Result<(Vec<R>, Option<i64>), Refusal> {
+    let open = db.tab::<R>().scan().into_iter().filter_map(|r| Some((r.job().due(R::LEASE_MS)?, r)));
+    let (now, later): (Vec<_>, Vec<_>) = open.partition(|(d, _)| *d <= ctx.now);
+    Ok((now.into_iter().map(|(_, r)| r).collect(), later.iter().map(|(d, _)| *d).min()))
 }

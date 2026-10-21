@@ -7,6 +7,7 @@
 //! bridge a [`Peer`] is called by function name with JSON — `mutate`,
 //! `query`, `view`, the live space's `call` — and says where it stands
 //! (`status`), what became of each intent (`standing`, `take_rejections`),
+//! which jobs of a kind are due for a handler written in the app (`due`),
 //! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
 //! and whether it is alone (`alone`, `join`).
 //! The typed Kotlin and Swift over these names is generated from the domain
@@ -51,6 +52,13 @@ impl<S: Into<String>> From<S> for Refusal {
     fn from(why: S) -> Refusal {
         Refusal::Refused { why: why.into() }
     }
+}
+
+/// A kind's jobs due now, each its row's JSON, and when the next is due.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Due {
+    pub rows: Vec<String>,
+    pub next_ms: Option<i64>,
 }
 
 /// A login as the server hands it over: the token the link proves itself
@@ -422,6 +430,21 @@ impl Peer {
         let s = self.shared.lock();
         let answer = s.peer.ask(&name, &s.peer.input_json(&name, &input)?)?;
         Ok(s.peer.answer_json(&name, &answer)?)
+    }
+
+    /// The jobs of `kind` (a table of `ark::effect` rows) a claim would take
+    /// now, each its row's JSON, and when the next falls due: what a
+    /// handler written in the app asks whenever the listener rings or its
+    /// timer for `next_ms` fires, then answers through `mutate` —
+    /// `<kind>.claim`, and once that is confirmed (`standing`),
+    /// `<kind>.finish`. A view's rows stream through `view` already.
+    pub fn due(&self, kind: String) -> Result<Due, Refusal> {
+        let answer = self.query(format!("{kind}.due"), "null".into())?;
+        let (rows, next_ms): (Vec<serde_json::Value>, Option<i64>) = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+        Ok(Due {
+            rows: rows.iter().map(|r| r.to_string()).collect(),
+            next_ms,
+        })
     }
 
     /// A maintained view of the function `name` on its input's JSON.

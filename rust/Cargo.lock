@@ -198,6 +198,7 @@ dependencies = [
  "ark-auth",
  "ark-dev",
  "ark-peer",
+ "serde",
  "serde_json",
  "tempfile",
  "uniffi",

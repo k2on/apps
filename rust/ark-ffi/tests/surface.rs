@@ -194,3 +194,58 @@ fn a_denied_login_is_said() {
     p.login(login("alice@phone"));
     assert_eq!(p.status().denied, None);
 }
+
+mod jobs {
+    use ark::effect::Job;
+    use ark::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+    pub struct Fetch {
+        #[ark(key)]
+        pub id: String,
+        pub state: Job<String>,
+    }
+
+    #[derive(Schema)]
+    pub struct Jobs {
+        pub fetch: Fetch,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
+    pub struct Ask {
+        pub id: String,
+        pub after_ms: i64,
+    }
+
+    fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), Refusal> {
+        let state = Job::Pending {
+            due_ms: ctx.now + i.after_ms,
+        };
+        db.fetch.insert(Fetch { id: i.id, state })
+    }
+
+    pub fn domain() -> Domain {
+        Domain::new::<Jobs>("jobs", "1").mutator("fetch.ask", ask).with(Fetch::register::<Jobs>)
+    }
+}
+
+/// A handler in the app asks which jobs of a kind are due: the rows a
+/// claim would take now, each its JSON, and when the next falls due.
+/// Falsified by `<kind>.due` answering every open row: the job due in an
+/// hour was among those due now.
+#[test]
+fn a_kinds_due_jobs_are_asked_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = Peer::open(
+        Config::of(Arc::new(jobs::domain())),
+        dir.path().to_str().unwrap(),
+        Some(login("alice@phone")),
+    )
+    .unwrap();
+    d.mutate("fetch.ask".into(), r#"{"id":"now","after_ms":0}"#.into()).unwrap();
+    d.mutate("fetch.ask".into(), r#"{"id":"later","after_ms":3600000}"#.into()).unwrap();
+    let due = d.due("fetch".into()).unwrap();
+    assert_eq!(due.rows.len(), 1, "{due:?}");
+    assert!(due.rows[0].contains(r#""id":"now""#), "{due:?}");
+    assert!(due.next_ms.is_some_and(|t| t > ark_peer::now_ms() + 3_000_000));
+}

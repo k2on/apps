@@ -26,3 +26,4 @@ required-features = ["bindgen"]
 [dev-dependencies]
 ark-dev = { path = "../ark-dev" }
 tempfile = "3"
+serde = { workspace = true }
