@@ -3,12 +3,15 @@
 //! one shared library, open their peer with [`harken_open`] and call every
 //! function of the domain by name through it — typed by what `ark-dev gen`
 //! writes from the domain — and read the listening session with
-//! [`harken_listening`], which is the domain's own reading of it.
+//! [`harken_listening`], which is the domain's own reading of it. A
+//! [`Hall`] is a harken server in the same process — the hub
+//! `harken-server` runs, over memory — that devices dial without a socket:
+//! what the apps' tests sync through.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 
 use ark_ffi::{Login, Peer, Refusal};
-use ark_peer::{Config, Live, Module};
+use ark_peer::{dev, now_ms, Config, Handle, Live, Memory, Module};
 use harken_domain::host::{self, Listening};
 use serde_json::json;
 
@@ -66,4 +69,82 @@ pub fn harken_domain() -> String {
 #[uniffi::export]
 pub fn harken_media_url(server: String, file: String) -> String {
     host::url(&server, &file)
+}
+
+/// A harken server in this process: the hub `harken-server` runs — the log
+/// and the listening session, `on_join`, `on_leave` and `on_restore` the
+/// domain's — over memory, which devices dial without a socket. Its devices
+/// are pumped by hand ([`Hall::carry`]), so a test says when what was said
+/// has been answered.
+#[derive(uniffi::Object)]
+pub struct Hall {
+    hub: Handle,
+    devices: Mutex<Vec<Weak<Peer>>>,
+}
+
+#[uniffi::export]
+impl Hall {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Hall> {
+        let d = harken_domain::shared();
+        let get = |n: &str| d.binding(&format!("listening.{n}")).map(String::from);
+        let mut c = Config::of(d.clone());
+        c.live = Some(Live {
+            on_join: get("on_join"),
+            on_leave: get("on_leave"),
+            on_restore: get("on_restore"),
+            arrive: Arc::new(host::arrive),
+            keep: Some(256),
+            ..Live::new(Module::of(&d))
+        });
+        let hub = Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), now_ms()));
+        Arc::new(Hall {
+            hub,
+            devices: Mutex::default(),
+        })
+    }
+
+    /// A device on the disk at `dir`, signed in as `token` reads in dev
+    /// (`user@device`: the device is that whole login's session), saying
+    /// `device` (a `Device`'s JSON), dialling this hall.
+    pub fn device(&self, dir: String, token: String, device: String) -> Result<Arc<Peer>, Refusal> {
+        let who = dev(&token).ok_or_else(|| Refusal::from("no login"))?;
+        let login = Login {
+            token,
+            session: who.session,
+            user: who.actor,
+            name: String::new(),
+            email: String::new(),
+            roles: who.roles,
+            expires_ms: 0,
+        };
+        let p = Peer::open(config(device.into_bytes()), &dir, Some(login))?;
+        p.by_hand();
+        p.connect_with("hall", self.hub.dialer(Arc::new(dev)));
+        self.devices.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&p));
+        self.carry();
+        Ok(p)
+    }
+
+    /// Everything every device said answered and taken in, until nobody
+    /// has anything more to say.
+    pub fn carry(&self) {
+        let devices: Vec<Arc<Peer>> = self
+            .devices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect();
+        let mut still = 0;
+        for _ in 0..64 {
+            // Whatever the hub had, answered: its thread runs this after.
+            let _ = self.hub.with(|_| ());
+            let moved = devices.iter().fold(false, |m, p| p.pump() | m);
+            still = if moved { 0 } else { still + 1 };
+            if still == 2 {
+                return;
+            }
+        }
+    }
 }

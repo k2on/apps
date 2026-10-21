@@ -211,6 +211,8 @@ struct Shared {
     state: Mutex<State>,
     listener: Mutex<Option<Arc<dyn Listener>>>,
     wake: Wake,
+    /// Pumped by whoever drives it ([`Peer::pump`]), never by its thread.
+    by_hand: std::sync::atomic::AtomicBool,
 }
 
 impl Shared {
@@ -256,7 +258,7 @@ impl Shared {
         Duration::from_millis(ms)
     }
 
-    fn pump(&self) {
+    fn pump(&self) -> bool {
         let moved = {
             let mut s = self.lock();
             let p = s.peer.pump();
@@ -268,6 +270,7 @@ impl Shared {
         if moved {
             self.tell();
         }
+        moved
     }
 }
 
@@ -284,7 +287,8 @@ fn drive(shared: Weak<Shared>, rx: Receiver<()>) {
         }
         while rx.try_recv().is_ok() {}
         match shared.upgrade() {
-            Some(s) => s.pump(),
+            Some(s) if !s.by_hand.load(std::sync::atomic::Ordering::Relaxed) => drop(s.pump()),
+            Some(_) => {}
             None => return,
         }
     }
@@ -335,6 +339,7 @@ impl Peer {
             state: Mutex::new(state),
             listener: Mutex::new(None),
             wake,
+            by_hand: Default::default(),
         });
         let weak = Arc::downgrade(&shared);
         std::thread::Builder::new()
@@ -353,6 +358,18 @@ impl Peer {
     /// [`Peer::connect`] through `dial`: a test's in-process server.
     pub fn connect_with(&self, url: &str, dial: impl Dial + 'static) {
         self.shared.act(|s| s.peer.connect_with(url, dial));
+    }
+
+    /// Pumped by hand from now on — [`Peer::pump`], and never by its own
+    /// thread — so that a test says when what arrived is taken in.
+    pub fn by_hand(&self) {
+        self.shared.by_hand.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// What the connection said taken in now, and what the peer has to say
+    /// sent: whether anything moved.
+    pub fn pump(&self) -> bool {
+        self.shared.pump()
     }
 }
 
@@ -559,6 +576,13 @@ impl Drop for ViewHandle {
 #[uniffi::export]
 pub fn socket_url(server: String) -> String {
     ark_auth::socket_url(&server)
+}
+
+/// Where a sign-in starts: the server's own page, which sends its code on
+/// to `redirect` (`harken://auth`).
+#[uniffi::export]
+pub fn login_url(server: String, redirect: String) -> String {
+    ark_auth::login_url(&server, &redirect, None)
 }
 
 /// The login a sign-in's code stands for, from the server that gave it.
