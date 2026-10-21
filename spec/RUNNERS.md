@@ -1,8 +1,9 @@
 # Running the vectors
 
-What `rust/ark-dev` does with `vectors/protocol/`, `vectors/trace/` and
-`vectors/rebase/` (`tests/vectors.rs` is the runner; where it and this
-file disagree, the code is right). A port of the kernel — the wasm build,
+What `rust/ark-dev` does with `vectors/protocol/`, `vectors/trace/`,
+`vectors/rebase/` (`tests/vectors.rs` is the runner) and `vectors/views/`
+(`ark_dev::vectors::run_view`, run by `tests/views.rs`); where it and this
+file disagree, the code is right. A port of the kernel — the wasm build,
 the FFI library — runs the same code, so it is held by the same runner;
 the forms below are what a reader of a failure needs.
 
@@ -20,7 +21,10 @@ did not write is stale.
 volatile tables (`here`, `pointer`; `room.on_join`, `room.on_leave`,
 `room.on_restore`, `room.rename`, `room.point`, the ephemeral one). An
 entry names its function; a trace is replayed with these domains, found
-by the name the trace gives.
+by the name the trace gives. The `views/` vectors' are
+`rust/ark-dev/src/library.rs`: `library` (the demo's two tables, `person`,
+`work`, `movement`, `song`, `track`, and a view per v4 scenario), `colors`
+and `pairs` (a fuzz finding each).
 
 ## protocol
 
@@ -54,3 +58,20 @@ seeded scheduler (`ark_dev::sim`): client 0 creates `playlist`, the
 stands at `head` with state `hash`. `fleet-fuzz-seed-N.json`: a fuzzer
 session (`ark_dev::fuzz::session`) once a bug, and where it stands
 settled. To run one is to run the simulator and the fuzzer themselves.
+
+## views
+
+`{batches, ctx, domain, input, rows_before, schema, steps, store_before,
+view}`: the view `view` of the reference domain `domain`, read as `ctx`
+with `input` (its input type's JSON; `null` is `()`), over the store
+`store_before` (each table's rows as JSON, in key order). Its `schema`
+is the domain's, which the runner checks first. The runner makes the view,
+checks its rows are `rows_before`, then for each batch — changes `add`
+`{row}`, `remove` `{row}`, `edit` `{old, new}` under a `table` — applies
+it to the store, pushes it to the view as one, and checks the patches
+(`insert {at, node}`, `remove {at}`, `update {at, node}`, positions in
+the list as each is applied) and the rows are that step's. After every
+push the rows are the view's answer afresh and a view made again's, and
+the patches splice the rows before into them. A second implementation
+runs the view of that name it implements: the plan is the Rust in
+`library.rs`, a few lines each.

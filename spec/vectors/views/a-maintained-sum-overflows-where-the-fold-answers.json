@@ -1,11 +1,11 @@
 {
   "batches": [[{"new":{"c00":-3,"n0":8,"p0":"ab"},"old":{"c00":-2,"n0":8,"p0":"ab"},"t":"edit","table":"t0"},{"new":{"c00":-2,"n0":8,"p0":"ab"},"old":{"c00":-3,"n0":8,"p0":"ab"},"t":"edit","table":"t0"},{"row":{"c00":-3,"n0":8,"p0":"zz"},"t":"add","table":"t0"},{"row":{"c10":null,"c11":true,"c12":0,"c13":"zz","n1":4,"p1":""},"t":"add","table":"t1"},{"row":{"c00":2,"n0":9223372036854775807,"p0":"ü"},"t":"add","table":"t0"},{"row":{"c00":4,"n0":-2,"p0":"ab"},"t":"remove","table":"t0"},{"row":{"c00":5,"n0":4,"p0":"ü"},"t":"remove","table":"t0"},{"row":{"c00":-1,"n0":6,"p0":"ü"},"t":"remove","table":"t0"},{"row":{"c00":-2,"n0":8,"p0":"ab"},"t":"remove","table":"t0"},{"row":{"c00":2,"n0":1099511627776,"p0":"ab"},"t":"remove","table":"t0"},{"row":{"c00":-3,"n0":8,"p0":"zz"},"t":"remove","table":"t0"}]],
   "ctx": {"session":"dev","user":"peer-1"},
+  "domain": "pairs",
   "input": {"f_p0":"a"},
-  "plan": {"as":"g","map":{"as":"g","filter":{"as":"r","by":{"var":"r.c00"},"group":{"as":"r","filter":{"scan":"t0"},"where":{"!=":[{"var":"r.p0"},{"arg":"f_p0"}]}},"key":"k","members":"ms","to":[{"var":"k"},{"len":{"var":"ms"}},{"sum":{"as":"m","map":{"var":"ms"},"to":{"var":"m.n0"}}}]},"where":{">=":[{"var":"g.1.1"},2]}},"to":{"var":"g.1"}},
-  "query": "a-maintained-sum-overflows-where-the-fold-answers",
   "rows_before": [],
   "schema": {"tables":[{"name":"t0","columns":[{"name":"p0","ty":"Text","default":null},{"name":"n0","ty":"Int","default":null},{"name":"c00","ty":"Int","default":null}],"key":2,"indexes":[{"columns":[2],"unique":false}],"refs":[],"space":"durable"},{"name":"t1","columns":[{"name":"p1","ty":"Text","default":null},{"name":"n1","ty":"Int","default":null},{"name":"c10","ty":{"Option":"Bool"},"default":null},{"name":"c11","ty":"Bool","default":null},{"name":"c12","ty":"Int","default":null},{"name":"c13","ty":{"Option":"Text"},"default":null}],"key":2,"indexes":[],"refs":[],"space":"durable"}]},
   "steps": [{"patches":[],"rows":[]}],
-  "store_before": {"t0":[{"c00":4,"n0":-2,"p0":"ab"},{"c00":-2,"n0":8,"p0":"ab"},{"c00":2,"n0":1099511627776,"p0":"ab"},{"c00":5,"n0":4,"p0":"ü"},{"c00":-1,"n0":6,"p0":"ü"}],"t1":[{"c10":false,"c11":false,"c12":1,"c13":"b","n1":-9223372036854775808,"p1":""},{"c10":true,"c11":false,"c12":1,"c13":null,"n1":-2,"p1":"a"},{"c10":true,"c11":false,"c12":1,"c13":"x y","n1":-1,"p1":"ü"}]}
+  "store_before": {"t0":[{"c00":4,"n0":-2,"p0":"ab"},{"c00":-2,"n0":8,"p0":"ab"},{"c00":2,"n0":1099511627776,"p0":"ab"},{"c00":5,"n0":4,"p0":"ü"},{"c00":-1,"n0":6,"p0":"ü"}],"t1":[{"c10":false,"c11":false,"c12":1,"c13":"b","n1":-9223372036854775808,"p1":""},{"c10":true,"c11":false,"c12":1,"c13":null,"n1":-2,"p1":"a"},{"c10":true,"c11":false,"c12":1,"c13":"x y","n1":-1,"p1":"ü"}]},
+  "view": "pairs.kept_sums"
 }

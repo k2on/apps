@@ -150,7 +150,7 @@ macro_rules! tuples {
         }
     )*};
 }
-tuples!((A)(A, B)(A, B, C)(A, B, C, D));
+tuples!((A)(A, B)(A, B, C)(A, B, C, D)(A, B, C, D, E));
 
 /// Bytes as a column, `Type::Bytes`: a row's encoding kept as it is.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

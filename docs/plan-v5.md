@@ -573,9 +573,14 @@ kernel through FFI (N3); ArkLang, the checker and the interpreter go.
 6. **Views are generic.** `view.rs` is `impl<R>` operators over typed rows
    and deltas (derived `Ord`/`Hash`, order keys the sort keys' key bytes),
    monomorphised per declared view; a closure's reads through `&Db` are
-   recorded and a change to what it read re-runs that element only. One
-   `DynRow` (a JSON row under its table) puts the explorer and the
-   `views/` vectors — plans carried as JSON — on the same engine.
+   recorded and a change to what it read re-runs that element only. A
+   row without a Rust type is JSON under its table (`dynamic`): what the
+   vectors, a host speaking JSON and the explorer hold. Its one query is
+   `Browse` — equal columns, a key range, a sort by a column, the first
+   `n` — a plan of the same operators, so a grid of it is kept by patches;
+   anything more is a view the domain names. No plan is written as JSON:
+   a `views/` vector is a named view of a reference domain (`ark-dev`'s
+   `library`), and another implementation runs the view of that name.
 
 Kept: the store, the chain, the one machine, the rebase, partial sync as a
 view, live state as a second machine, every `rebase/`, `protocol/`,
@@ -603,7 +608,8 @@ rust/ark-peer/      the one peer that dials and listens: storage, link, hub, the
                     app kit, the server's socket, admin listener and web build;
                     local instances and the peer's own schema (`local`)
 rust/ark-ffi/       ark-peer's app kit through UniFFI, for the phones
-rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer, and
+rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer (with
+                    the `views/` vectors' reference domains, `library`), and
                     `gen kotlin|swift` (a domain's types for the phones)
 rust/ark-auth/      dev sign-in and OpenID Connect
 rust/ark-explorer/  the admin page and the explorer over a replica

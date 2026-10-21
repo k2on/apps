@@ -1,718 +1,73 @@
-//! §1.10 maintained views and §1.8 a scoped feed. The `views/` vectors:
-//! v4's scenarios — the library (playlists, people, works, movements,
-//! songs), the tracks of `kept-max` and `has-search`, the two fuzz findings
-//! on a maintained sum — their stores and batches as they were, each query
-//! a plan as JSON (`ark::dynamic`, `support/plans.rs`) over rows as JSON.
-//! After every batch the view's answer is the plan evaluated whole and a
-//! view made afresh, and its patches splice the answer before into it (the
-//! contract); a change costs reads by what it hits, not by the size of what
-//! is viewed (the work contract); a view told a replica's `Output::Changes`
-//! holds through a rebase; and a replica fed by a scope holds exactly its
-//! union after every delivery.
-//!
-//! The patches are the ones the language's engine gave: before it was
-//! deleted, every vector's patches and rows were checked against it, step
-//! by step (N1). The library's schema declares the indexes its reads go
-//! through (`work.composer`, `movement.work_id`, `song.creator`,
-//! `song.movement_id`); the fuzz schema's unique index over an optional
-//! column is not unique, since v5's index holds `None` as a value.
+//! §1.10 maintained views told a replica's changes, and §1.8 a scoped
+//! feed. A view told a replica's `Output::Changes` holds through a rebase,
+//! and a replica fed by a scope holds exactly its union after every
+//! delivery. The `views/` vectors — a named view of a reference domain over
+//! a store and batches of changes — are `ark-dev`'s (`tests/views.rs`).
 
 #[path = "demo.rs"]
 mod demo;
-mod support {
-    pub mod json;
-    pub mod plans;
-    pub mod vectors;
-}
 
-use ark::dynamic::{evaluate, make, parse, Dynamic};
+use ark::format::Encode;
 use ark::hash::hex;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer, Role, Who};
-use ark::plan::{splice, Patch};
-use ark::row::Type;
-use ark::schema::{Schema, Table};
+use ark::plan::{splice, Maintained};
+use ark::prelude::{scan, Db, Desc, Id, Plan, Refusal};
 use ark::store::{Change, Store};
+use ark::Domain;
 use demo::*;
-use serde_json::{json, Value as Json};
-use support::json::schema as jschema;
-use support::plans;
-use support::vectors::{falsify, vector};
 
-type Dv = ark::plan::View<Dynamic, Json>;
-
-// * Rows and changes
-
-type Row = (&'static str, Vec<u8>);
-
-/// A row of `table` (in `schema`) from its columns' values, in any order:
-/// its one encoding.
-fn row_of(schema: &Schema, table: &'static str, cols: Json) -> Row {
-    let t = schema.table(table).unwrap().1;
-    (table, ark::dynamic::row_bytes(t, &cols).unwrap_or_else(|e| panic!("{table}: {e}")))
-}
-
-fn pl(n: u32, name: &str, user: &str) -> Row {
-    ("playlist", playlist_row(&pid(n), name, user))
-}
-
-fn it(n: u32, track: &str, pos: i64) -> Row {
-    ("item", item_row(&pid(n), track, pos))
-}
-
-fn person(name: &str, born: i64) -> Row {
-    row_of(&library(), "person", json!({ "name": name, "born": born }))
-}
-
-fn work(id: &str, composer: &str, title: &str) -> Row {
-    row_of(&library(), "work", json!({ "id": id, "composer": composer, "title": title }))
-}
-
-fn mv(id: &str, work: &str, no: i64, part: &str) -> Row {
-    row_of(&library(), "movement", json!({ "id": id, "work_id": work, "no": no, "part": part }))
-}
-
-fn song(id: &str, title: &str, creator: &str, m: Option<&str>, pos: i64) -> Row {
-    let cols = json!({ "id": id, "title": title, "creator": creator, "movement_id": m, "pos": pos });
-    row_of(&library(), "song", cols)
-}
-
-fn track(id: &str, title: &str, creator: &str, pos: i64) -> Row {
-    row_of(&tracks(), "track", json!({ "id": id, "title": title, "creator": creator, "pos": pos }))
-}
-
-/// A field of a fuzz schema's row, read under its column's type: an `E`
-/// a variant by its place (a `Bool`'s `false`, `true`).
-enum F<'a> {
-    I(i64),
-    T(&'a str),
-    Bs(&'a [u8]),
-    Id(&'a str),
-    E(u8),
-    Opt(Option<&'a F<'a>>),
-}
-use F::*;
-
-fn f_json(ty: &Type, f: &F) -> Json {
-    match (ty, f) {
-        (_, I(n)) => json!(n),
-        (_, T(t)) => json!(t),
-        (_, Bs(b)) => json!(b),
-        (_, Id(h)) => json!(h),
-        (_, Opt(None)) => Json::Null,
-        (Type::Option(t), Opt(Some(x))) => f_json(t, x),
-        (Type::Bool, E(i)) => json!(*i == 1),
-        (Type::Sum(_, vs), E(i)) => json!(vs[*i as usize].0),
-        _ => panic!("no field of that type"),
-    }
-}
-
-/// A row of a fuzz schema's table, its fields in order: `fuzz_colors`'s
-/// rows have four, `fuzz_pairs`'s `t0` three and `t1` six.
-fn fz(table: &'static str, fs: &[F]) -> Row {
-    let schema = if fs.len() == 4 { fuzz_colors() } else { fuzz_pairs() };
-    let t = schema.table(table).unwrap().1;
-    let cols = t.columns.iter().zip(fs).map(|(c, f)| (c.name.clone(), f_json(&c.ty, f))).collect();
-    row_of(&schema, table, Json::Object(cols))
-}
-
-fn add((t, row): Row) -> Change {
-    Change::Add { table: t.into(), row }
-}
-
-fn remove((t, row): Row) -> Change {
-    Change::Remove { table: t.into(), row }
-}
-
-fn edit((t, old): Row, (_, new): Row) -> Change {
-    Change::Edit { table: t.into(), old, new }
-}
-
-fn pid(n: u32) -> Vec<u8> {
-    [&[0; 12][..], &n.to_be_bytes()].concat()
-}
-
-// * The scenarios, as v4's vectors have them
-
-fn library_before() -> Vec<Change> {
-    vec![
-        add(mv("bwv1046#1", "bwv1046", 1, "Allegro")),
-        add(mv("bwv988#1", "bwv988", 1, "Aria")),
-        add(mv("bwv988#2", "bwv988", 2, "Var. 1")),
-        add(mv("hwv349#1", "hwv349", 1, "Overture")),
-        add(person("Bach", 1685)),
-        add(person("Gould", 1932)),
-        add(person("Handel", 1685)),
-        add(song("s1", "Aria", "Gould", Some("bwv988#1"), 3)),
-        add(song("s2", "Variation 1", "Gould", Some("bwv988#2"), 1)),
-        add(song("s3", "Allegro", "Pinnock", Some("bwv1046#1"), 2)),
-        add(song("s4", "Hum", "Gould", None, 4)),
-        add(song("s5", "Overture", "Pinnock", Some("hwv349#1"), 5)),
-        add(work("bwv1046", "Bach", "Brandenburg 1")),
-        add(work("bwv988", "Bach", "Goldberg")),
-        add(work("hwv349", "Handel", "Water Music")),
-    ]
-}
-fn library_batches() -> Vec<Vec<Change>> {
-    vec![
-        vec![add(pl(1, "Viewed", "alice"))],
-        vec![add(it(1, "t1", 1))],
-        vec![add(it(1, "t2", 2))],
-        vec![add(it(1, "t3", 3)), add(it(1, "t4", 4))],
-        vec![remove(it(1, "t1", 1))],
-        vec![add(it(1, "t5", 5))],
-        vec![add(work("hwv56", "Handel", "Messiah"))],
-        vec![add(mv("hwv56#1", "hwv56", 1, "Sinfony")), add(mv("hwv56#2", "hwv56", 2, "Comfort ye"))],
-        vec![
-            add(song("s9", "Sinfony", "Gould", Some("hwv56#1"), 8)),
-            edit(
-                song("s2", "Variation 1", "Gould", Some("bwv988#2"), 1),
-                song("s2", "Variation 1", "Gould", Some("bwv988#2"), 9),
-            ),
-        ],
-        vec![edit(work("bwv988", "Bach", "Goldberg"), work("bwv988", "Bach", "Goldberg Variations"))],
-        vec![
-            edit(
-                song("s3", "Allegro", "Pinnock", Some("bwv1046#1"), 2),
-                song("s3", "Allegro", "Gould", Some("bwv1046#1"), 2),
-            ),
-            add(person("Pinnock", 1946)),
-        ],
-        vec![remove(song("s1", "Aria", "Gould", Some("bwv988#1"), 3))],
-        vec![
-            add(song("s10", "Passing", "Gould", None, 10)),
-            edit(song("s10", "Passing", "Gould", None, 10), song("s10", "Passing", "Gould", None, 11)),
-            remove(song("s10", "Passing", "Gould", None, 11)),
-        ],
-        vec![
-            remove(song("s9", "Sinfony", "Gould", Some("hwv56#1"), 8)),
-            remove(mv("hwv56#1", "hwv56", 1, "Sinfony")),
-            remove(mv("hwv56#2", "hwv56", 2, "Comfort ye")),
-        ],
-    ]
-}
-fn tracks_before() -> Vec<Change> {
-    vec![
-        add(person("Bach", 1685)),
-        add(person("Gould", 1932)),
-        add(person("Handel", 1685)),
-        add(track("t1", "Aria", "Gould", 3)),
-        add(track("t2", "Variation 1", "Gould", 7)),
-        add(track("t3", "Variation 2", "Gould", 7)),
-        add(track("t4", "Air", "Bach", 1)),
-        add(track("t5", "Ariadne", "Handel", 2)),
-    ]
-}
-fn tracks_batches() -> Vec<Vec<Change>> {
-    vec![
-        vec![add(track("t6", "ARIA da capo", "Gould", 9))],
-        vec![remove(track("t6", "ARIA da capo", "Gould", 9))],
-        vec![remove(track("t2", "Variation 1", "Gould", 7))],
-        vec![edit(track("t3", "Variation 2", "Gould", 7), track("t3", "Sarabande", "Gould", 2))],
-        vec![edit(track("t4", "Air", "Bach", 1), track("t4", "Fair aria", "Bach", 12))],
-        vec![add(person("Nobody", 2000))],
-        vec![
-            add(track("t9", "Passing aria", "Gould", 20)),
-            remove(track("t9", "Passing aria", "Gould", 20)),
-        ],
-    ]
-}
-fn fold_overflows_before() -> Vec<Change> {
-    vec![
-        add(fz("t0", &[Id("f0000000000000000000000000000003"), T(""), Bs(&[]), Opt(None)])),
-        add(fz("t0", &[Id("f0000000000000000000000000000008"), T(""), Bs(&[]), Opt(None)])),
-        add(fz("t0", &[Id("f000000000000000000000000000000c"), T("a"), Bs(&[0]), Opt(None)])),
-        add(fz("t0", &[Id("f0000000000000000000000000000015"), T("A"), Bs(&[0]), Opt(None)])),
-        add(fz("t0", &[Id("f000000000000000000000000000001b"), T("x y"), Bs(&[]), Opt(None)])),
-        add(fz("t0", &[Id("f000000000000000000000000000001e"), T("ab"), Bs(&[]), Opt(None)])),
-        add(fz("t0", &[Id("f0000000000000000000000000000023"), T("a"), Bs(&[0]), Opt(None)])),
-        add(fz("t1", &[I(-9223372036854775808), T("a"), T("b"), Opt(None)])),
-        add(fz("t1", &[I(0), T("zz"), T("b"), Opt(Some(&E(1)))])),
-        add(fz("t1", &[I(2), T("b"), T("b"), Opt(Some(&E(2)))])),
-        add(fz("t1", &[I(1099511627776), T("b"), T("x y"), Opt(None)])),
-    ]
-}
-fn fold_overflows_batches() -> Vec<Vec<Change>> {
-    vec![
-        vec![
-            add(fz("t1", &[I(-2), T("b"), T("x y"), Opt(Some(&E(2)))])),
-            add(fz("t1", &[I(9), T("x2"), T("b"), Opt(Some(&E(2)))])),
-        ],
-        vec![edit(
-            fz("t0", &[Id("f0000000000000000000000000000023"), T("a"), Bs(&[0]), Opt(None)]),
-            fz("t0", &[Id("f0000000000000000000000000000023"), T("a"), Bs(&[0]), Opt(Some(&T("x5")))]),
-        )],
-        vec![
-            edit(
-                fz("t1", &[I(-2), T("b"), T("x y"), Opt(Some(&E(2)))]),
-                fz("t1", &[I(-2), T("b"), T("b"), Opt(Some(&E(2)))]),
-            ),
-            add(fz("t1", &[I(3), T("b"), T("x7"), Opt(None)])),
-            add(fz("t1", &[I(8), T("x2"), T("x7"), Opt(Some(&E(2)))])),
-        ],
-        vec![
-            remove(fz("t1", &[I(2), T("b"), T("b"), Opt(Some(&E(2)))])),
-            remove(fz("t1", &[I(9), T("x2"), T("b"), Opt(Some(&E(2)))])),
-        ],
-        vec![
-            edit(
-                fz("t1", &[I(3), T("b"), T("x7"), Opt(None)]),
-                fz("t1", &[I(3), T("b"), T("x7"), Opt(Some(&E(2)))]),
-            ),
-            edit(
-                fz("t0", &[Id("f0000000000000000000000000000023"), T("a"), Bs(&[0]), Opt(Some(&T("x5")))]),
-                fz("t0", &[Id("f0000000000000000000000000000023"), T("x y"), Bs(&[0]), Opt(Some(&T("x5")))]),
-            ),
-            remove(fz("t1", &[I(0), T("zz"), T("b"), Opt(Some(&E(1)))])),
-            add(fz("t1", &[I(6), T("a"), T("x y"), Opt(Some(&E(2)))])),
-        ],
-        vec![
-            add(fz("t1", &[I(2), T("a"), T("b"), Opt(Some(&E(2)))])),
-            remove(fz("t1", &[I(2), T("a"), T("b"), Opt(Some(&E(2)))])),
-            add(fz(
-                "t0",
-                &[Id("000000000000feed0000000000000014"), T("x19"), Bs(&[0]), Opt(Some(&T("x5")))],
-            )),
-        ],
-        vec![
-            add(fz("t1", &[I(4), T("x2"), T("x21"), Opt(Some(&E(1)))])),
-            remove(fz("t1", &[I(4), T("x2"), T("x21"), Opt(Some(&E(1)))])),
-        ],
-        vec![
-            edit(
-                fz("t1", &[I(1099511627776), T("b"), T("x y"), Opt(None)]),
-                fz("t1", &[I(1099511627776), T("a"), T("x y"), Opt(None)]),
-            ),
-            add(fz("t1", &[I(4), T("a"), T("x24"), Opt(Some(&E(2)))])),
-            remove(fz("t1", &[I(1099511627776), T("a"), T("x y"), Opt(None)])),
-            edit(
-                fz("t1", &[I(-9223372036854775808), T("a"), T("b"), Opt(None)]),
-                fz("t1", &[I(-9223372036854775808), T("b"), T("b"), Opt(Some(&E(2)))]),
-            ),
-        ],
-    ]
-}
-fn kept_overflows_before() -> Vec<Change> {
-    vec![
-        add(fz("t0", &[T("ab"), I(-2), I(4)])),
-        add(fz("t0", &[T("ab"), I(8), I(-2)])),
-        add(fz("t0", &[T("ab"), I(1099511627776), I(2)])),
-        add(fz("t0", &[T("ü"), I(4), I(5)])),
-        add(fz("t0", &[T("ü"), I(6), I(-1)])),
-        add(fz(
-            "t1",
-            &[T(""), I(-9223372036854775808), Opt(Some(&E(0))), E(0), I(1), Opt(Some(&T("b")))],
-        )),
-        add(fz("t1", &[T("a"), I(-2), Opt(Some(&E(1))), E(0), I(1), Opt(None)])),
-        add(fz("t1", &[T("ü"), I(-1), Opt(Some(&E(1))), E(0), I(1), Opt(Some(&T("x y")))])),
-    ]
-}
-fn kept_overflows_batches() -> Vec<Vec<Change>> {
-    vec![vec![
-        edit(fz("t0", &[T("ab"), I(8), I(-2)]), fz("t0", &[T("ab"), I(8), I(-3)])),
-        edit(fz("t0", &[T("ab"), I(8), I(-3)]), fz("t0", &[T("ab"), I(8), I(-2)])),
-        add(fz("t0", &[T("zz"), I(8), I(-3)])),
-        add(fz("t1", &[T(""), I(4), Opt(None), E(1), I(0), Opt(Some(&T("zz")))])),
-        add(fz("t0", &[T("ü"), I(9223372036854775807), I(2)])),
-        remove(fz("t0", &[T("ab"), I(-2), I(4)])),
-        remove(fz("t0", &[T("ü"), I(4), I(5)])),
-        remove(fz("t0", &[T("ü"), I(6), I(-1)])),
-        remove(fz("t0", &[T("ab"), I(8), I(-2)])),
-        remove(fz("t0", &[T("ab"), I(1099511627776), I(2)])),
-        remove(fz("t0", &[T("zz"), I(8), I(-3)])),
-    ]]
-}
-
-// * Schemas
-
-fn library() -> Schema {
-    let mut s = demo::schema();
-    let text = || Type::Text;
-    s.tables.extend([
-        Table::new("person").col("name", text()).col("born", Type::Int),
-        Table::new("work")
-            .col("id", text())
-            .col("composer", text())
-            .col("title", text())
-            .index(&["composer"], false)
-            .refs("composer", "person"),
-        Table::new("movement")
-            .col("id", text())
-            .col("work_id", text())
-            .col("no", Type::Int)
-            .col("part", text())
-            .index(&["work_id"], false)
-            .refs("work_id", "work"),
-        Table::new("song")
-            .col("id", text())
-            .col("title", text())
-            .col("creator", text())
-            .col("movement_id", Type::Option(Box::new(text())))
-            .col("pos", Type::Int)
-            .index(&["creator"], false)
-            .index(&["movement_id"], false)
-            .refs("movement_id", "movement"),
-    ]);
-    s
-}
-
-fn tracks() -> Schema {
-    Schema {
-        tables: vec![
-            Table::new("person").col("name", Type::Text).col("born", Type::Int),
-            Table::new("track")
-                .col("id", Type::Text)
-                .col("title", Type::Text)
-                .col("creator", Type::Text)
-                .col("pos", Type::Int)
-                .index(&["creator", "pos"], false),
-        ],
-    }
-}
-
-/// `Option<Color>`, three colours named in their order.
-fn color() -> Type {
-    let v = |n: &str| (n.to_string(), vec![]);
-    Type::Option(Box::new(Type::Sum("Color".into(), vec![v("c0"), v("c1"), v("c2")])))
-}
-
-/// `a-maintained-sum-answers-where-the-fold-overflows`'s schema.
-fn fuzz_colors() -> Schema {
-    Schema {
-        tables: vec![
-            Table::new("t0")
-                .col("id", Type::Id("t0".into()))
-                .col("c00", Type::Text)
-                .col("c01", Type::Bytes)
-                .col("c02", Type::Option(Box::new(Type::Text)))
-                .index(&["c02"], false),
-            Table::new("t1")
-                .col("k1", Type::Int)
-                .col("c10", Type::Text)
-                .col("c11", Type::Text)
-                .col("c12", color()),
-        ],
-    }
-}
-
-/// `a-maintained-sum-overflows-where-the-fold-answers`'s schema.
-fn fuzz_pairs() -> Schema {
-    Schema {
-        tables: vec![
-            Table::new("t0")
-                .col("p0", Type::Text)
-                .col("n0", Type::Int)
-                .col("c00", Type::Int)
-                .keyed(2)
-                .index(&["c00"], false),
-            Table::new("t1")
-                .col("p1", Type::Text)
-                .col("n1", Type::Int)
-                .col("c10", Type::Option(Box::new(Type::Bool)))
-                .col("c11", Type::Bool)
-                .col("c12", Type::Int)
-                .col("c13", Type::Option(Box::new(Type::Text)))
-                .keyed(2),
-        ],
-    }
-}
-
-// * The runner
-
-fn ctx_of(user: &str) -> Ctx {
+fn ctx() -> Ctx {
     Ctx {
         draws: Default::default(),
         id: EntryId::default(),
-        actor: user.into(),
+        actor: "alice".into(),
         session: "dev".into(),
         roles: vec![],
         now: 0,
     }
 }
 
-fn ctx() -> Ctx {
-    ctx_of("alice")
+/// Every playlist by name, with its last three items, last first.
+type WithItems = (Id<Playlist>, String, Vec<Item>);
+
+fn with_items(_: &Ctx, _: &Db<Demo>, _: ()) -> Result<Plan<Demo, WithItems>, Refusal> {
+    Ok(scan::<Demo, Playlist>().sort(|p| (p.name.clone(), p.id)).map_with(|db, p| {
+        let mut items = db.item.by(Item::KEY).from(p.id).all();
+        items.sort_by_key(|i| std::cmp::Reverse(i.pos));
+        items.truncate(3);
+        (p.id, p.name.clone(), items)
+    }))
 }
 
-/// A scenario: a plan over a schema, its input, who reads it, a store and
-/// the batches that move it.
-struct Case {
-    schema: Schema,
-    arg: Json,
-    ctx: Ctx,
-    before: Vec<Change>,
-    batches: Vec<Vec<Change>>,
+/// A playlist's first two items by place.
+fn top_two(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, Refusal> {
+    let p = input.playlist_id;
+    Ok(scan::<Demo, Item>()
+        .filter(move |i| i.playlist_id == p)
+        .sort(|i| (Desc(i.pos), i.track_id.clone()))
+        .take(2))
 }
 
-fn store_of(schema: &Schema, rows: &[Change]) -> Store {
-    let mut by: Vec<(String, Vec<Vec<u8>>)> = schema.tables.iter().map(|t| (t.name.clone(), vec![])).collect();
-    for c in rows {
-        let Change::Add { table, row } = c else { panic!("a store is rows") };
-        by.iter_mut().find(|(t, _)| t == table).unwrap().1.push(row.clone());
-    }
-    Store::from_rows(schema.clone().into(), &by).unwrap()
+fn views() -> Domain {
+    Domain::new::<Demo>("views", "1")
+        .view("views.with_items", with_items)
+        .view("views.top_two", top_two)
 }
 
-fn row_json(schema: &Schema, table: &str, row: &[u8]) -> Json {
-    ark::dynamic::row(schema.table(table).unwrap().1, row).unwrap()
-}
-
-/// A change as the protocol's facts read: its kind, its table, its rows.
-fn change_json(schema: &Schema, c: &Change) -> Json {
-    let r = |row: &[u8]| row_json(schema, c.table(), row);
-    match c {
-        Change::Add { table, row } => json!({ "t": "add", "table": table, "row": r(row) }),
-        Change::Remove { table, row } => json!({ "t": "remove", "table": table, "row": r(row) }),
-        Change::Edit { table, old, new } => json!({ "t": "edit", "table": table, "old": r(old), "new": r(new) }),
-    }
-}
-
-fn patch_json(p: &Patch<Json>) -> Json {
-    match p {
-        Patch::Insert { at, node } => json!({ "t": "insert", "at": at, "node": node }),
-        Patch::Remove { at } => json!({ "t": "remove", "at": at }),
-        Patch::Update { at, node } => json!({ "t": "update", "at": at, "node": node }),
-    }
-}
-
-/// The store, every table by name, rows in key order.
-fn store_json(schema: &Schema, s: &Store) -> Json {
-    let mut m = serde_json::Map::new();
-    for t in &schema.tables {
-        m.insert(t.name.clone(), s.rows(&t.name).map(|r| row_json(schema, &t.name, r)).collect());
-    }
-    Json::Object(m)
-}
-
-/// The contract after one push: the view's answer is the plan evaluated
-/// whole and a view made afresh's, and the patches splice the answer
-/// before into it.
-fn holds(plan: &Json, arg: &Json, v: &Dv, store: &Store, before: &[Json], patches: &[Patch<Json>]) {
-    let fresh = match evaluate(&parse(plan).unwrap(), arg, store).unwrap() {
-        Json::Array(xs) => xs,
-        x => panic!("a plan answers a list: {x}"),
-    };
-    assert_eq!(v.rows(), fresh, "the view is the plan evaluated whole");
+/// The contract after one push: the view's rows are its answer afresh
+/// and a view made again's, and the patches splice the rows before into
+/// them.
+fn holds(d: &Domain, name: &str, input: &[u8], v: &dyn Maintained, store: &Store, before: &[Vec<u8>], patches: &[ark::plan::Patch<Vec<u8>>]) {
+    let json = |rows: Vec<Vec<u8>>| rows.iter().map(|r| d.element_json(name, r).unwrap()).collect::<Vec<_>>().join(",");
+    let fresh = d.answer_json(name, &d.ask(store, &ctx(), name, input).unwrap()).unwrap();
+    assert_eq!(format!("[{}]", json(v.rows())), fresh, "{name}: the view is its answer afresh");
     assert_eq!(
-        Dv::new(make(plan, arg.clone()).unwrap(), v_ctx(v), store).unwrap().rows(),
-        fresh,
-        "and a view made again"
+        d.watch(store, &ctx(), name, input).unwrap().rows(),
+        v.rows(),
+        "{name}: and a view made again"
     );
-    assert_eq!(splice(patches, before), fresh, "the patches splice");
-}
-
-fn v_ctx(_: &Dv) -> Ctx {
-    ctx()
-}
-
-fn compact(v: &Json) -> String {
-    serde_json::to_string(v).unwrap()
-}
-
-/// The case run: hydrated over its store, then each batch applied whole
-/// and pushed as one, the contract held after each; the vector's parts.
-fn run(name: &str, c: &Case) -> Vec<(&'static str, String)> {
-    let plan = plans::plan(name);
-    let mut store = store_of(&c.schema, &c.before);
-    let before = store_json(&c.schema, &store);
-    let mut v = Dv::new(make(&plan, c.arg.clone()).unwrap(), c.ctx.clone(), &store).unwrap();
-    holds(&plan, &c.arg, &v, &store, &v.rows(), &[]);
-    let rows_before = Json::Array(v.rows());
-    let mut steps = vec![];
-    for (i, batch) in c.batches.iter().enumerate() {
-        let was = v.rows();
-        store.apply_all(batch).unwrap_or_else(|e| panic!("{name} batch {i}: {e}"));
-        let patches = v.push(batch, &store).unwrap_or_else(|e| panic!("{name} batch {i}: {e}"));
-        holds(&plan, &c.arg, &v, &store, &was, &patches);
-        steps.push(json!({ "patches": patches.iter().map(patch_json).collect::<Vec<_>>(), "rows": v.rows() }));
-    }
-    let batches: Vec<Json> = c.batches.iter().map(|b| b.iter().map(|x| change_json(&c.schema, x)).collect()).collect();
-    vec![
-        ("batches", compact(&Json::Array(batches))),
-        ("ctx", compact(&json!({ "session": c.ctx.session, "user": c.ctx.actor }))),
-        ("input", compact(&c.arg)),
-        ("plan", compact(&plan)),
-        ("query", compact(&json!(name))),
-        ("rows_before", compact(&rows_before)),
-        ("schema", jschema(&c.schema)),
-        ("steps", format!("[{}]", steps.iter().map(compact).collect::<Vec<_>>().join("\n,"))),
-        ("store_before", compact(&before)),
-    ]
-}
-
-fn library_case(arg: Json) -> Case {
-    Case {
-        schema: library(),
-        arg,
-        ctx: ctx(),
-        before: library_before(),
-        batches: library_batches(),
-    }
-}
-
-fn tracks_case(arg: Json) -> Case {
-    Case {
-        schema: tracks(),
-        arg,
-        ctx: ctx(),
-        before: tracks_before(),
-        batches: tracks_batches(),
-    }
-}
-
-/// Every library and tracks vector: the plans over v4's scenarios, the
-/// contract held after every batch, the vector as on disk. Falsified by
-/// the dynamic sort not complementing a descending key's bytes: both the
-/// view and the plan evaluated whole kept `playlist-with-items`'s first
-/// three items, and the vector disagreed at its third batch.
-#[test]
-fn vectors() {
-    let none = || json!({});
-    let cases = [
-        ("top-two-by-pos", library_case(json!({ "playlist_id": hex(&pid(1)) }))),
-        ("playlist-with-items", library_case(none())),
-        ("projection", library_case(none())),
-        ("having-admits-on-a-child", library_case(none())),
-        ("group-source", library_case(none())),
-        ("lookup-chain", library_case(none())),
-        ("related-on-a-non-key-column", library_case(none())),
-        ("expression-order-under-a-limit", library_case(none())),
-        ("related-three-deep", library_case(none())),
-        ("playlist-join-item", library_case(none())),
-        ("kept-max", tracks_case(none())),
-        ("has-search", tracks_case(json!({ "needle": "ari" }))),
-    ];
-    for (name, c) in &cases {
-        vector("views", &format!("{name}.json"), &run(name, c));
-    }
-}
-
-/// `falsify/top-two-by-pos-no-refill`: the window not refilled when t1
-/// leaves it — the step's insert of t3 dropped, its rows one short. The
-/// runner disagrees with it (`falsify` holds the two apart). Falsified by
-/// a `Take` keeping only what was in its window or in its input's delta:
-/// at the batch removing t1 the view held one row where a fresh
-/// evaluation holds two.
-#[test]
-fn a_window_not_refilled_is_wrong() {
-    let right = run("top-two-by-pos", &library_case(json!({ "playlist_id": hex(&pid(1)) })));
-    let mut wrong = right.clone();
-    let steps = &mut wrong.iter_mut().find(|p| p.0 == "steps").unwrap().1;
-    let mut parsed: Vec<Json> = serde_json::from_str(steps).unwrap();
-    let refill = parsed
-        .iter()
-        .position(|s| {
-            s["patches"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|p| p["t"] == "insert" && p["node"]["track_id"] == "t3")
-        })
-        .expect("the refill is in the vector");
-    let s = &mut parsed[refill];
-    s["patches"]
-        .as_array_mut()
-        .unwrap()
-        .retain(|p| !(p["t"] == "insert" && p["node"]["track_id"] == "t3"));
-    s["rows"].as_array_mut().unwrap().retain(|r| r["track_id"] != "t3");
-    *steps = format!("[{}]", parsed.iter().map(compact).collect::<Vec<_>>().join("\n,"));
-    falsify("views", "top-two-by-pos-no-refill.json", &wrong, &right);
-}
-
-/// v4's §6.5 rule, both ways, on the two fuzz findings: a group's sum is
-/// taken in an `i128` and judged once, after the whole batch, as a fresh
-/// sum judges its total. `a-maintained-sum-answers-where-the-fold-
-/// overflows` sums `i64::MIN` and then `-2` on the way to a total that
-/// fits; `…-overflows-where-the-fold-answers` passes through a group whose
-/// sum is past `i64::MAX` inside one batch, which a view takes net, as one.
-/// Falsified twice: by `sum` adding in a checked `i64`, the first vector's
-/// fresh evaluation refused (`integer overflow`); by the runner pushing the
-/// second's batch one change at a time, the push refused at its fifth
-/// change.
-#[test]
-fn kept_sums() {
-    let colours = Case {
-        schema: fuzz_colors(),
-        arg: json!({}),
-        ctx: ctx_of("peer-0"),
-        before: fold_overflows_before(),
-        batches: fold_overflows_batches(),
-    };
-    let name = "a-maintained-sum-answers-where-the-fold-overflows";
-    vector("views", &format!("{name}.json"), &run(name, &colours));
-    let pairs = Case {
-        schema: fuzz_pairs(),
-        arg: json!({ "f_p0": "a" }),
-        ctx: ctx_of("peer-1"),
-        before: kept_overflows_before(),
-        batches: kept_overflows_batches(),
-    };
-    let name = "a-maintained-sum-overflows-where-the-fold-answers";
-    vector("views", &format!("{name}.json"), &run(name, &pairs));
-}
-
-// * The work contract
-
-/// What one push of `c` costs a view of `name`: the reads it made, the
-/// contract held after it.
-fn cost(name: &str, arg: Json, mut store: Store, c: Change) -> ark::db::Reads {
-    let plan = plans::plan(name);
-    let mut v = Dv::new(make(&plan, arg.clone()).unwrap(), ctx(), &store).unwrap();
-    let was = v.rows();
-    store.apply(&c).unwrap();
-    let (patches, reads) = ark::db::count(|| v.push(std::slice::from_ref(&c), &store).unwrap());
-    holds(&plan, &arg, &v, &store, &was, &patches);
-    reads
-}
-
-/// The work contract (§1.10): a change costs reads by the entries it hits,
-/// not by the rows viewed — the same at 1k, 4k and 16k rows. An item added
-/// to one of `n / 4` playlists of `playlist-with-items` re-reads that
-/// playlist's items through the `(playlist_id, pos)` index and nothing
-/// else; the first item of `top-two-by-pos` leaving is refilled from the
-/// view's own order, and a song changing creator under `group-source`
-/// moves two groups — no read at all. Falsified by recording a related
-/// read as the whole table (the prefix dropped): every playlist was hit,
-/// and the item cost 1,250 rows at 1k.
-#[test]
-fn a_change_costs_what_it_hits() {
-    let mut seen = vec![];
-    for n in [1000u32, 4000, 16000] {
-        let mut rows = vec![];
-        for p in 0..n / 4 {
-            rows.push(add(pl(p, &format!("p{p}"), "alice")));
-            rows.extend((1..=4).map(|k| add(it(p, &format!("t{k}"), k as i64))));
-        }
-        let store = store_of(&library(), &rows);
-        let items = cost("playlist-with-items", json!({}), store, add(it(n / 8, "t5", 5)));
-        let top = cost(
-            "top-two-by-pos",
-            json!({ "playlist_id": hex(&pid(1)) }),
-            scaled_items(n as usize),
-            remove(it(1, "t0", 1)),
-        );
-        let (c0, c1) = (song("s0", "x", "c0", None, 0), song("s0", "x", "c1", None, 0));
-        let groups = cost("group-source", json!({}), scaled_songs(n as usize), edit(c0, c1));
-        seen.push((items, top, groups));
-    }
-    let r = |gets, rows| ark::db::Reads { gets, rows };
-    assert_eq!(seen[0], (r(0, 5), r(0, 0), r(0, 0)), "what one change reads");
-    assert!(seen.iter().all(|s| *s == seen[0]), "at every size: {seen:?}");
-}
-
-fn scaled_items(n: usize) -> Store {
-    let mut rows = vec![add(pl(1, "Viewed", "alice"))];
-    rows.extend((0..n).map(|i| add(it(1, &format!("t{i}"), i as i64 + 1))));
-    store_of(&library(), &rows)
-}
-
-fn scaled_songs(n: usize) -> Store {
-    store_of(
-        &library(),
-        &(0..n)
-            .map(|i| add(song(&format!("s{i}"), "x", &format!("c{}", i % 8), None, i as i64)))
-            .collect::<Vec<_>>(),
-    )
+    assert_eq!(splice(patches, before), v.rows(), "{name}: the patches splice");
 }
 
 // * A view told a replica's changes
@@ -720,11 +75,12 @@ fn scaled_songs(n: usize) -> Store {
 /// Views over a replica's store, told nothing but its `Output::Changes`,
 /// hold through a rebase: alice previews tracks offline, bob's land under
 /// them — hers undone, his applied, hers redone — and after every step
-/// each view is a fresh evaluation and its patches splice. One view reads
-/// the items in a lambda (`playlist-with-items`), one scans them on its
-/// spine (`top-two-by-pos`). Falsified by the view taking each key's first
-/// change as its net: alice's track, undone and redone at a new place,
-/// left `top-two-by-pos`.
+/// each view is its answer afresh and its patches splice. One view reads
+/// the items in a closure (`with_items`), one scans them on its spine
+/// (`top_two`, last place first). Falsified by the view taking each
+/// key's first change as its net (`Pushed::of` keeping a key's first
+/// move): alice's tracks, undone and redone at new places, left
+/// `top_two`, which then held one of bob's where it should hold hers.
 #[test]
 fn a_view_follows_a_replica_through_a_rebase() {
     let mut server = Peer::new(
@@ -735,16 +91,16 @@ fn a_view_follows_a_replica_through_a_rebase() {
     );
     let (mut alice, mut bob) = (replica_of("alice"), replica_of("bob"));
     let pid = EntryId::of(Origin::named("alice-session"), 1).draw(0);
+    let d = views();
     let queries = [
-        ("playlist-with-items", json!({})),
-        ("top-two-by-pos", json!({ "playlist_id": hex(&pid) })),
+        ("views.with_items", ().to_bytes()),
+        ("views.top_two", Items { playlist_id: Id::new(pid) }.to_bytes()),
     ];
-    let mut views: Vec<(Json, Json, Dv)> = queries
+    let mut views: Vec<(&str, Vec<u8>, Box<dyn Maintained>)> = queries
         .into_iter()
-        .map(|(name, arg)| {
-            let p = plans::plan(name);
-            let v = Dv::new(make(&p, arg.clone()).unwrap(), ctx(), &alice.store).unwrap();
-            (p, arg, v)
+        .map(|(name, input)| {
+            let v = d.watch(&alice.store, &ctx(), name, &input).unwrap();
+            (name, input, v)
         })
         .collect();
     let told = std::cell::Cell::new(0);
@@ -755,10 +111,10 @@ fn a_view_follows_a_replica_through_a_rebase() {
             .flat_map(|x| if let Output::Changes(cs) = x { cs.clone() } else { vec![] })
             .collect();
         told.set(told.get() + cs.len());
-        for (p, arg, v) in views.iter_mut() {
+        for (name, input, v) in views.iter_mut() {
             let was = v.rows();
             let patches = v.push(&cs, &alice.store).unwrap();
-            holds(p, arg, v, &alice.store, &was, &patches);
+            holds(&d, name, input, v.as_ref(), &alice.store, &was, &patches);
         }
         o
     };
@@ -1078,4 +434,55 @@ fn a_scoped_replica_holds_its_union() {
         }
         assert!(f.server.store.rows("item").count() > 5, "tracks were added");
     }
+}
+
+// * A table browsed
+
+/// A table browsed (`ark::dynamic::Browse`) is a plan like any other: the
+/// items of one playlist, from track `b` on, last place first, the first
+/// two, kept by patches through adds, a move, a remove and a row of another
+/// playlist — after each, its rows those a fresh browse gives, and the
+/// patches splice. Falsified by the descending sort not complementing the
+/// column's bytes: the first rows were `b`, `c` where the browse asks `d`,
+/// `c`.
+#[test]
+fn a_browse_is_kept_by_patches() {
+    let (p, q) = ([1u8; 16], [2u8; 16]);
+    let item = |pl: &[u8], t: &str, pos| Change::Add {
+        table: "item".into(),
+        row: item_row(pl, t, pos),
+    };
+    let mut store = Store::from_rows(
+        shared(),
+        &[("playlist".into(), vec![playlist_row(&p, "P", "alice"), playlist_row(&q, "Q", "bob")])],
+    )
+    .unwrap();
+    for c in [item(&p, "a", 1), item(&p, "b", 2), item(&p, "c", 3), item(&p, "d", 4), item(&q, "z", 9)] {
+        store.apply(&c).unwrap();
+    }
+    let b = ark::dynamic::Browse::table("item")
+        .eq("playlist_id", serde_json::json!(hex(&p)))
+        .range(Some(serde_json::json!([hex(&p), "b"])), None)
+        .sort("pos", true)
+        .take(2);
+    let mut v = ark::plan::View::new(b.make(&shared()).unwrap(), ctx(), &store).unwrap();
+    let tracks = |rows: Vec<Vec<u8>>| rows.iter().map(|r| item_of(r).1).collect::<Vec<_>>();
+    assert_eq!(tracks(v.rows()), ["d", "c"]);
+    let moved = Change::Edit {
+        table: "item".into(),
+        old: item_row(&p, "c", 3),
+        new: item_row(&p, "c", 7),
+    };
+    let gone = Change::Remove {
+        table: "item".into(),
+        row: item_row(&p, "d", 4),
+    };
+    for batch in [vec![item(&p, "e", 5)], vec![moved], vec![gone, item(&q, "y", 8)], vec![item(&p, "a0", 9)]] {
+        let was = v.rows();
+        store.apply_all(&batch).unwrap();
+        let patches = v.push(&batch, &store).unwrap();
+        assert_eq!(v.rows(), b.rows(&store).unwrap(), "a fresh browse");
+        assert_eq!(splice(&patches, &was), v.rows(), "the patches splice");
+    }
+    assert_eq!(tracks(v.rows()), ["c", "e"], "a0 is below the range");
 }

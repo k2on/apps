@@ -292,18 +292,16 @@ impl Explorer {
     }
 
     /// A table's rows, each its key's bytes, its bytes and its columns'
-    /// values: in the store's key order, or as the sort says.
+    /// values: browsed ([`ark::dynamic::Browse`]) in the store's key order,
+    /// or as the sort says, ties in key order. Read afresh at each call.
     pub fn rows(&self, src: &Source, table: &str) -> Vec<(Vec<u8>, Vec<u8>, Vec<Value>)> {
         let Some((_, t)) = src.schema().table(table) else { return vec![] };
-        let read = |r: &[u8]| Some((t.parse(r).ok()?.key, r.to_vec(), value::decode_all(t, r).ok()?));
-        let mut rows: Vec<_> = src.store.rows(table).filter_map(read).collect();
+        let read = |r: &Vec<u8>| Some((t.parse(r).ok()?.key, r.clone(), value::decode_all(t, r).ok()?));
+        let mut browse = ark::dynamic::Browse::table(table);
         if let Some((_, c, down)) = self.sort.as_ref().filter(|(s, ..)| s == table) {
-            rows.sort_by(|a, b| a.2.get(*c).cmp(&b.2.get(*c)));
-            if *down {
-                rows.reverse();
-            }
+            browse = browse.sort(&t.columns[*c].name, *down);
         }
-        rows
+        browse.rows(src.store).unwrap_or_default().iter().filter_map(read).collect()
     }
 
     /// Which page of `rows` the cursor is on, and how many there are.
