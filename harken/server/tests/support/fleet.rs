@@ -86,19 +86,15 @@ pub fn measured(what: &str, took: Duration) {
     println!("fleet: {what}: {:.0} ms", took.as_secs_f64() * 1000.0);
 }
 
-/// An id as the peers' lines carry it: `{"$id":"8-4-4-4-12"}`.
+/// An id as the peers' lines carry it: its hex.
 pub fn id(i: Id) -> Value {
-    let h = hex(&i);
-    json!({ "$id": format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..]) })
+    json!(hex(&i))
 }
 
 /// An id from a peer's line.
 pub fn id_of(v: &Value) -> Id {
-    let t = v["$id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("not an id: {v}"));
-    let h: String = t.chars().filter(|c| *c != '-').collect();
-    ark::hash::unhex(&h)
+    let t = v.as_str().unwrap_or_else(|| panic!("not an id: {v}"));
+    ark::hash::unhex(t)
         .and_then(|b| b.try_into().ok())
         .unwrap_or_else(|| panic!("not an id: {t}"))
 }

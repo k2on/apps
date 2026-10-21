@@ -29,9 +29,8 @@
 //! the connection, whatever this says.
 //!
 //! It runs harken's domain as this build compiled it
-//! (`harken_server::hosted`). Arguments and
-//! rows cross as JSON for the functions this binary knows the types of
-//! ([`input`], [`rows`]): harken's own.
+//! (`harken_server::hosted`), and reads a function's arguments by its
+//! input's own checks ([`input`]).
 //!
 //! `--auth-patience-ms` bounds each sign-in request — its connection and
 //! each read — where `ark_auth::client::Patience::DEFAULT` is ten seconds
@@ -50,13 +49,14 @@
 //!
 //! **It reads commands as JSON lines on stdin and answers each with one JSON
 //! line on stdout**, so a test — or a shell — drives it with no socket of
-//! its own. An id is `{"$id":"8-4-4-4-12"}`; an integer a JSON number, or
-//! `{"$int":"…"}`; an `Option` `null` or its value; a sum
-//! `{"variant":"Name", …fields}`.
+//! its own. Arguments and rows are the domain's own JSON: an id its hex, an
+//! integer a number, an `Option` `null` or its value, a sum externally
+//! tagged (`{"Playing":{"at_ms":…,"since":…}}`, a variant with no fields
+//! its name); an entry's id its hex.
 //!
 //! ```text
 //! {"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}
-//!                              {"ok":true,"id":{"$id":"…"}} | {"ok":false,"why":"…"}
+//!                              {"ok":true,"id":"<hex>"} | {"ok":false,"why":"…"}
 //! {"cmd":"status"}             {"cursor":N,"pending":K,"held":0,"behind":false,"linked":b,
 //!                               "denied":null|"…","user":"…",…}
 //! {"cmd":"hash"}               {"cursor":N,"hash":"hex","view":"hex"}
@@ -107,7 +107,7 @@ use ark_auth::client::Patience;
 use ark_auth::Login;
 use ark_peer::{now_ms, Config, Files, Live, Peer};
 use harken_server::domain::host::Listening;
-use harken_server::domain::Id;
+use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
 use serde_json::{json, Map, Value};
 
@@ -290,302 +290,32 @@ fn nobody(name: &str) -> Who {
     }
 }
 
-// -- JSON, under harken's types -------------------------------------------------
+// -- JSON: the domain's own --------------------------------------------------------
 
-/// A value of a harken type as JSON and back: what `args` and `rows` are.
-trait Json: Sized {
-    fn from_json(v: &Value) -> Result<Self, String>;
-    fn to_json(&self) -> Value;
-}
-
-impl Json for String {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        v.as_str()
-            .map(str::to_string)
-            .ok_or_else(|| format!("not text: {v}"))
-    }
-    fn to_json(&self) -> Value {
-        json!(self)
-    }
-}
-
-impl Json for i64 {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        match v {
-            Value::Number(n) => n.as_i64().ok_or_else(|| format!("not an integer: {v}")),
-            Value::Object(m) => m
-                .get("$int")
-                .and_then(|s| s.as_str()?.parse().ok())
-                .ok_or_else(|| format!("not an integer: {v}")),
-            _ => Err(format!("not an integer: {v}")),
-        }
-    }
-    fn to_json(&self) -> Value {
-        json!(self)
-    }
-}
-
-impl Json for bool {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        v.as_bool().ok_or_else(|| format!("not a bool: {v}"))
-    }
-    fn to_json(&self) -> Value {
-        json!(self)
-    }
-}
-
-impl<T: Json> Json for Option<T> {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        match v {
-            Value::Null => Ok(None),
-            v => T::from_json(v).map(Some),
-        }
-    }
-    fn to_json(&self) -> Value {
-        self.as_ref().map_or(Value::Null, T::to_json)
-    }
-}
-
-impl<T: Json> Json for Vec<T> {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        v.as_array()
-            .ok_or_else(|| format!("not a list: {v}"))?
-            .iter()
-            .map(T::from_json)
-            .collect()
-    }
-    fn to_json(&self) -> Value {
-        Value::Array(self.iter().map(T::to_json).collect())
-    }
-}
-
-impl Json for () {
-    fn from_json(_: &Value) -> Result<Self, String> {
-        Ok(())
-    }
-    fn to_json(&self) -> Value {
-        json!({})
-    }
-}
-
-/// `8-4-4-4-12` hex, as `text_of_id` writes an id.
-fn id_text(b: &[u8; 16]) -> String {
-    let h = hex(b);
-    format!(
-        "{}-{}-{}-{}-{}",
-        &h[..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..]
-    )
-}
-
-fn id_bytes(v: &Value) -> Result<[u8; 16], String> {
-    let t = v
-        .get("$id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("not an id: {v}"))?;
-    let h: String = t.chars().filter(|c| *c != '-').collect();
-    let b = ark::hash::unhex(&h)
-        .filter(|b| b.len() == 16)
-        .ok_or_else(|| format!("not an id: {t}"))?;
-    Ok(b.try_into().expect("sixteen bytes"))
-}
-
-fn id_json(b: &[u8; 16]) -> Value {
-    json!({ "$id": id_text(b) })
-}
-
-impl<R> Json for Id<R> {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        id_bytes(v).map(Id::new)
-    }
-    fn to_json(&self) -> Value {
-        id_json(&self.0)
-    }
-}
-
-/// A record by its fields' names.
-macro_rules! record {
-    ($($t:path { $($f:ident),* $(,)? })*) => {$(
-        impl Json for $t {
-            fn from_json(v: &Value) -> Result<Self, String> {
-                let o = v.as_object().ok_or_else(|| format!("not an object: {v}"))?;
-                Ok(Self { $($f: Json::from_json(o.get(stringify!($f)).unwrap_or(&Value::Null)).map_err(|e| format!("`{}`: {e}", stringify!($f)))?,)* })
-            }
-            fn to_json(&self) -> Value {
-                let mut o = Map::new();
-                $(o.insert(stringify!($f).into(), self.$f.to_json());)*
-                Value::Object(o)
-            }
-        }
-    )*};
-}
-
-use harken_server::domain::*;
-
-record! {
-    CreatePlaylist { name }
-    AddToPlaylist { playlist_id, media_id }
-    AddAllToPlaylist { playlist_id }
-    RemoveFromPlaylist { playlist_id, media_id }
-    PlaylistsOf { media_id }
-    PlaylistInput { playlist_id }
-    Library { playlist_id }
-    AddSong { title, artist, album, duration_ms, file, track, part, catalogue, performer, bpm, album_art, artist_art, disc, work_title, movement_no }
-    RemoveMedia { id }
-    Playlist { id, name, pos, created_ms, user_id }
-    LibraryEntry { added_ms, creator, duration_ms, file, id, kind, playlist_pos, pos, title, user_id }
-    Play { id, user_id, track, title, creator, album, duration_ms, file, played_ms, from }
-    RecordPlay { track, title, creator, album, duration_ms, file, from }
-    Track { album, creator, duration_ms, file, id, title }
-    Start { at, from, position, queue }
-    Seek { ms }
-    Skip { by }
-    Jump { index }
-    Transfer { to }
-    At { at_ms }
-    Report { at_ms, since }
-    Advance { from_track }
-    Enqueue { next, tracks }
-    Remove { index }
-    Move { from, to }
-    Scrub { at_ms }
-    Equip { can_volume, family, muted, volume }
-    SetVolume { device, level }
-    NudgeVolume { delta, device }
-    SetMute { device, muted }
-    ReportVolume { level, muted }
-    Member { device }
-    ReportGroup { members }
-    GroupVolume { level }
-    GroupNudge { delta }
-    GroupMute { muted }
-    Present { can_play, can_volume, family, follows, id, kind, muted, name, user, volume }
-    Active { at, clock, from, output, queue }
-}
-
-impl Json for Clock {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        let at_ms = i64::from_json(&v["at_ms"])?;
-        match v["variant"].as_str() {
-            Some("Paused") => Ok(Clock::Paused { at_ms }),
-            Some("Playing") => Ok(Clock::Playing {
-                at_ms,
-                since: i64::from_json(&v["since"])?,
-            }),
-            _ => Err(format!("not a clock: {v}")),
-        }
-    }
-    fn to_json(&self) -> Value {
-        match self {
-            Clock::Paused { at_ms } => json!({ "variant": "Paused", "at_ms": at_ms }),
-            Clock::Playing { at_ms, since } => {
-                json!({ "variant": "Playing", "at_ms": at_ms, "since": since })
-            }
-        }
-    }
-}
-
-impl Json for Output {
-    fn from_json(v: &Value) -> Result<Self, String> {
-        match v["variant"].as_str() {
-            Some("Away") => Ok(Output::Away {
-                id: String::from_json(&v["id"])?,
-                name: String::from_json(&v["name"])?,
-            }),
-            Some("Device") => Ok(Output::Device {
-                id: String::from_json(&v["id"])?,
-                moving: bool::from_json(&v["moving"])?,
-            }),
-            Some("Nowhere") => Ok(Output::Nowhere),
-            _ => Err(format!("not an output: {v}")),
-        }
-    }
-    fn to_json(&self) -> Value {
-        match self {
-            Output::Away { id, name } => json!({ "variant": "Away", "id": id, "name": name }),
-            Output::Device { id, moving } => {
-                json!({ "variant": "Device", "id": id, "moving": moving })
-            }
-            Output::Nowhere => json!({ "variant": "Nowhere" }),
-        }
-    }
+/// A function's input as the domain reads it: the command's `args` as they
+/// are, or `null` for a function that takes nothing; refused here, field by
+/// field, when the input's own checks would refuse it.
+fn input(hosted: &Hosted, name: &str, v: &Value) -> Result<Vec<u8>, String> {
+    let f = hosted
+        .domain
+        .get(name)
+        .ok_or_else(|| format!("harken-peer knows no function {name}"))?;
+    let b = match f.input {
+        ark::row::Type::Unit => b"null".to_vec(),
+        _ => serde_json::to_vec(v).map_err(|e| e.to_string())?,
+    };
+    (f.check)(&b).map_err(|fs| {
+        fs.into_iter()
+            .map(|(f, why)| format!("`{f}`: {why}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    Ok(b)
 }
 
 /// One account's session as JSON: its devices, scrubbers and what plays.
 fn listening_json(l: &Listening) -> Value {
-    json!({
-        "devices": l.devices.to_json(),
-        "scrub": l.scrub.iter().map(|(k, v)| (k.clone(), json!(v))).collect::<Map<_, _>>(),
-        "session": l.session.to_json(),
-    })
-}
-
-fn enc<T: Json + Bytes>(v: &Value) -> Result<Vec<u8>, String> {
-    T::from_json(v).map(|t| t.to_bytes())
-}
-
-fn dec<T: Json + Bytes>(b: &[u8]) -> Result<Value, String> {
-    T::from_bytes(b).map(|t| t.to_json()).map_err(|e| e.0)
-}
-
-/// A function's input, from JSON, by its binding.
-fn input(name: &str, v: &Value) -> Result<Vec<u8>, String> {
-    match name {
-        "playlists.create_playlist" => enc::<CreatePlaylist>(v),
-        "playlists.add_to_playlist" => enc::<AddToPlaylist>(v),
-        "playlists.add_all_to_playlist" => enc::<AddAllToPlaylist>(v),
-        "playlists.remove_from_playlist" => enc::<RemoveFromPlaylist>(v),
-        "playlists.playlists" | "listening.last_played" | "listening.recently_played" => {
-            enc::<()>(v)
-        }
-        "playlists.playlists_of" => enc::<PlaylistsOf>(v),
-        "playlists.playlist" => enc::<PlaylistInput>(v),
-        "library.library" => enc::<Library>(v),
-        "library.add_song" => enc::<AddSong>(v),
-        "library.remove_media" => enc::<RemoveMedia>(v),
-        "listening.record_play" => enc::<RecordPlay>(v),
-        "listening.start" => enc::<Start>(v),
-        "listening.seek" => enc::<Seek>(v),
-        "listening.skip" => enc::<Skip>(v),
-        "listening.jump" => enc::<Jump>(v),
-        "listening.transfer" => enc::<Transfer>(v),
-        "listening.started" | "listening.stalled" => enc::<At>(v),
-        "listening.report_position" => enc::<Report>(v),
-        "listening.advance" => enc::<Advance>(v),
-        "listening.enqueue" => enc::<Enqueue>(v),
-        "listening.remove" => enc::<Remove>(v),
-        "listening.move" => enc::<Move>(v),
-        "listening.scrub" => enc::<Scrub>(v),
-        "listening.equip" => enc::<Equip>(v),
-        "listening.set_volume" => enc::<SetVolume>(v),
-        "listening.nudge_volume" => enc::<NudgeVolume>(v),
-        "listening.set_mute" => enc::<SetMute>(v),
-        "listening.report_volume" => enc::<ReportVolume>(v),
-        "listening.join" | "listening.unjoin" => enc::<Member>(v),
-        "listening.report_group" => enc::<ReportGroup>(v),
-        "listening.set_group_volume" => enc::<GroupVolume>(v),
-        "listening.nudge_group_volume" => enc::<GroupNudge>(v),
-        "listening.set_group_mute" => enc::<GroupMute>(v),
-        "listening.play"
-        | "listening.pause"
-        | "listening.stop"
-        | "listening.clear_upcoming"
-        | "listening.release" => enc::<()>(v),
-        other => Err(format!("harken-peer knows no input type for {other}")),
-    }
-}
-
-/// A query's answer, as JSON, by its binding.
-fn rows(name: &str, b: &[u8]) -> Result<Value, String> {
-    match name {
-        "playlists.playlists" | "playlists.playlists_of" => dec::<Vec<Playlist>>(b),
-        "playlists.playlist" | "library.library" => dec::<Vec<LibraryEntry>>(b),
-        "listening.last_played" | "listening.recently_played" => dec::<Vec<Play>>(b),
-        other => Err(format!("harken-peer cannot print what {other} answers")),
-    }
+    json!({ "devices": l.devices, "scrub": l.scrub, "session": l.session })
 }
 
 // -- a command, and its answer ----------------------------------------------------
@@ -654,9 +384,10 @@ fn parse(line: &str) -> Result<Cmd, String> {
         None => Err(format!("`{k}` is missing")),
     };
     let int = |k: &str| match m.get(k) {
-        Some(v) => i64::from_json(v)
+        Some(v) => v
+            .as_i64()
             .map(Some)
-            .map_err(|_| format!("`{k}` is an integer")),
+            .ok_or_else(|| format!("`{k}` is an integer")),
         None => Ok(None),
     };
     let object = |k: &str| match m.get(k) {
@@ -688,9 +419,14 @@ fn parse(line: &str) -> Result<Cmd, String> {
         "rejections" => Cmd::Rejections {
             all: m.get("all") == Some(&Value::Bool(true)),
         },
-        "standing" => match m.get("id").map(id_bytes) {
-            Some(Ok(id)) => Cmd::Standing { id },
-            _ => return Err("`id` is an id: {\"$id\":\"8-4-4-4-12\"}".into()),
+        "standing" => match m
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(ark::hash::unhex)
+            .and_then(|b| b.try_into().ok())
+        {
+            Some(id) => Cmd::Standing { id },
+            _ => return Err("`id` is an entry's id, its hex".into()),
         },
         "disconnect" => Cmd::Disconnect,
         "reconnect" => Cmd::Reconnect,
@@ -958,7 +694,7 @@ impl Headless {
     fn collect(&mut self) {
         let mut fresh = vec![];
         for (id, why) in self.client.take_rejections() {
-            fresh.push(json!({ "id": id_json(&id.0), "reason": why }));
+            fresh.push(json!({ "id": hex(&id.0), "reason": why }));
             self.rejected.insert(id, why);
         }
         self.live_refusals.extend(self.client.take_live_refusals());
@@ -1169,13 +905,13 @@ impl Headless {
                     Ok(n) => n,
                     Err(e) => return Answer::refused(e),
                 };
-                let bytes = match input(&name, &args) {
+                let bytes = match input(&self.hosted, &name, &args) {
                     Ok(b) => b,
                     Err(e) => return Answer::refused(e),
                 };
                 match self.client.mutate_bytes(&name, bytes) {
                     Err(why) => Answer::refused(why),
-                    Ok(id) => Answer::ok(true).set("id", id_json(&id.0)),
+                    Ok(id) => Answer::ok(true).set("id", json!(hex(&id.0))),
                 }
             }
             Cmd::Status => self.status(),
@@ -1220,14 +956,14 @@ impl Headless {
                     roles: me.roles.clone(),
                     now: now_ms(),
                 };
-                let answer = input(&name, &args)
+                let answer = input(&self.hosted, &name, &args)
                     .and_then(|b| {
                         self.hosted
                             .domain
                             .ask(&self.client.log.store, &ctx, &name, &b)
                             .map_err(|r| r.0)
                     })
-                    .and_then(|b| rows(&name, &b));
+                    .and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string()));
                 match answer {
                     Ok(v) => Answer::default().set("rows", v),
                     Err(e) => Answer::refused(e),
@@ -1367,7 +1103,7 @@ impl Headless {
                 let Some(func) = self.hosted.get(&name) else {
                     return Answer::refused(format!("no transition {name}"));
                 };
-                let bytes = match input(&name, &args) {
+                let bytes = match input(&self.hosted, &func, &args) {
                     Ok(b) => b,
                     Err(e) => return Answer::refused(e),
                 };
@@ -1543,12 +1279,12 @@ mod tests {
         .is_err());
     }
 
-    /// Every command reads, its integers plain or as `{"$int"}`; what is
-    /// not a command says why. Falsified by reading `cursor` as text:
+    /// Every command reads, an entry's id as its hex; what is not a
+    /// command says why. Falsified by reading `cursor` as text:
     /// `wait` fails to parse.
     #[test]
     fn the_commands_read() {
-        let id = "00000000-0000-0000-0000-00000000002a";
+        let id = "0000000000000000000000000000002a";
         assert_eq!(
             parse(r#"{"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}"#)
                 .unwrap(),
@@ -1558,7 +1294,7 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(r#"{"cmd":"wait","cursor":7,"timeout_ms":{"$int":"250"}}"#).unwrap(),
+            parse(r#"{"cmd":"wait","cursor":7,"timeout_ms":250}"#).unwrap(),
             Cmd::Wait {
                 cursor: 7,
                 timeout: Duration::from_millis(250)
@@ -1580,7 +1316,7 @@ mod tests {
         let mut want = [0u8; 16];
         want[15] = 42;
         assert_eq!(
-            parse(&format!(r#"{{"cmd":"standing","id":{{"$id":"{id}"}}}}"#)).unwrap(),
+            parse(&format!(r#"{{"cmd":"standing","id":"{id}"}}"#)).unwrap(),
             Cmd::Standing { id: want }
         );
         assert_eq!(
@@ -1646,7 +1382,7 @@ mod tests {
                 r#"{"cmd":"mutate","name":"x","args":[]}"#,
                 "`args` is an object",
             ),
-            (r#"{"cmd":"standing","id":"x"}"#, "`id` is an id"),
+            (r#"{"cmd":"standing","id":"x"}"#, "`id` is an entry's id"),
             (r#"{"cmd":"join"}"#, "`server` is missing"),
         ] {
             let e = parse(bad).unwrap_err();
@@ -1654,42 +1390,33 @@ mod tests {
         }
     }
 
-    /// Arguments and rows cross as JSON under harken's own types, and back:
-    /// an id as `{"$id"}`, a sum by its variant's name. Falsified by
-    /// printing a record's fields without their names (an array): the
-    /// playlist read back had no `name`.
+    /// Arguments cross as the domain's own JSON — an id its hex, a sum
+    /// externally tagged — checked by the input's own refinements, field
+    /// by field; a function that takes nothing takes `null` whatever was
+    /// sent. Falsified by sending `playlists` its `args` as they came
+    /// (`{}`): the input did not read as `()`.
     #[test]
     fn harkens_types_cross_as_json() {
-        let id = json!({"$id": "00000000-0000-0000-0000-00000000002a"});
+        let h = harken();
+        let id = json!("0000000000000000000000000000002a");
         let b = input(
+            &h,
             "playlists.add_to_playlist",
             &json!({"playlist_id": id, "media_id": id}),
         )
         .unwrap();
-        let back = AddToPlaylist::from_bytes(&b).unwrap();
+        let back = harken_server::domain::AddToPlaylist::from_bytes(&b).unwrap();
         assert_eq!(back.media_id.0[15], 42);
-        assert_eq!(back.to_json()["playlist_id"], id);
-        let p = Playlist {
-            id: Id::new([1; 16]),
-            name: "Road trip".into(),
-            pos: 3,
-            created_ms: 9,
-            user_id: "alice".into(),
-        };
-        let v = rows("playlists.playlists", &vec![p].to_bytes()).unwrap();
-        assert_eq!(v[0]["name"], json!("Road trip"));
-        assert_eq!(v[0]["pos"], json!(3));
-        let c = Clock::Playing { at_ms: 5, since: 7 };
-        assert_eq!(Clock::from_json(&c.to_json()).unwrap(), c);
-        let o = Output::Away {
-            id: "phone".into(),
-            name: "Phone".into(),
-        };
-        assert_eq!(Output::from_json(&o.to_json()).unwrap(), o);
-        assert!(input("playlists.create_playlist", &json!({"name": 3}))
-            .unwrap_err()
-            .contains("`name`"));
-        assert!(input("nothing.here", &json!({})).is_err());
+        assert_eq!(
+            input(&h, "playlists.playlists", &json!({})).unwrap(),
+            b"null"
+        );
+        let start = json!({"at": 0, "from": "", "position": 0, "queue": [{"album": "", "creator": "", "duration_ms": 1, "file": "a", "id": id, "title": "A"}]});
+        assert!(input(&h, "listening.start", &start).is_ok());
+        let why = input(&h, "playlists.create_playlist", &json!({"name": " "})).unwrap_err();
+        assert!(why.contains("a playlist needs a name"), "{why}");
+        assert!(input(&h, "playlists.create_playlist", &json!({"name": 3})).is_err());
+        assert!(input(&h, "nothing.here", &json!({})).is_err());
     }
 
     /// A peer alone, driven through `handle` exactly as stdin would: an
@@ -1833,7 +1560,7 @@ mod tests {
             r#"{"cmd":"mutate","name":"create_playlist","args":{"name":"Offline"}}"#,
         );
         assert!(
-            made["ok"] == json!(true) && made["id"]["$id"].is_string(),
+            made["ok"] == json!(true) && made["id"].is_string(),
             "{made}"
         );
         let hash = line(&mut h, r#"{"cmd":"hash"}"#);
