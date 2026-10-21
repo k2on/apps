@@ -54,6 +54,10 @@ pub fn harken_listening(peer: Arc<Peer>) -> String {
         Some(live) => Listening::of(&live.store, &p.me().actor),
         None => Listening::default(),
     });
+    listening_json(&l)
+}
+
+fn listening_json(l: &Listening) -> String {
     json!({ "devices": l.devices, "scrub": l.scrub, "session": l.session }).to_string()
 }
 
@@ -124,6 +128,13 @@ impl Hall {
         self.devices.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&p));
         self.carry();
         Ok(p)
+    }
+
+    /// `user`'s listening session as the hall holds it, as
+    /// [`harken_listening`] says a device's.
+    pub fn listening(&self, user: String) -> String {
+        let l = self.hub.with(move |p| p.live.as_ref().map(|l| Listening::of(&l.store, &user)));
+        listening_json(&l.flatten().unwrap_or_default())
     }
 
     /// Everything every device said answered and taken in, until nobody

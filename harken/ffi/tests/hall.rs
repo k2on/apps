@@ -40,4 +40,6 @@ fn two_devices_share_a_session() {
     let s = &listening(&laptop)["session"];
     assert_eq!(s["output"]["Device"]["id"], "alice@phone", "{s}");
     assert_eq!(phone.status().pending, 0);
+    let held: serde_json::Value = serde_json::from_str(&hall.listening("alice".into())).unwrap();
+    assert_eq!(&held["session"], s, "the hall holds what the laptop does");
 }
