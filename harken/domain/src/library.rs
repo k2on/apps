@@ -395,6 +395,19 @@ pub fn credit_recording(ctx: &Ctx, db: &mut Db<Harken>, input: CreditRecording) 
     })
 }
 
+/// A look at the media directory asked for: a [`Look`] due now, which the
+/// scanner's handler claims and does.
+#[mutator("library.look")]
+pub fn look(ctx: &Ctx, db: &mut Db<Harken>, input: LookAt) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    let state = ark::effect::Job::Pending { due_ms: ctx.now };
+    db.look.insert(Look {
+        id: ctx.new_id(),
+        paths: input.paths,
+        state,
+    })
+}
+
 /// Take something out of the library, and off every playlist holding it.
 #[mutator("library.remove_media")]
 pub fn remove_media(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveMedia) -> Result<(), Refusal> {

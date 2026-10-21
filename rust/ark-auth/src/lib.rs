@@ -1,11 +1,13 @@
 //! Who an ArkDB peer is.
 //!
 //! The engine asks one question about identity: at every `Hello`, what does
-//! this token prove? (`server::Authenticate`, as `ark-server` asks it.) This crate is the
-//! answer for a server that signs people in with OpenID Connect, and the
-//! other half — how a client gets a token to send — for a desktop program
-//! and a page. It is `petros-auth` on ArkDB, with the session store in a
-//! file instead of SQLite.
+//! this token prove? This crate signs people in for a server — with OpenID
+//! Connect, or in dev mode by name — and mints the token; the session it
+//! stands for is a row of the app's log ([`rows`]: the tables, the
+//! functions over them and the scope an app's schema takes in), which the
+//! hub writes and judges by ([`server::Auth`], plugged in by `ark-peer`'s
+//! `Server::auth`). The other half is how a client gets a token to send,
+//! for a desktop program and a page.
 //!
 //! # The shape
 //!
@@ -30,13 +32,16 @@
 //! `R` is where the code goes back to: a loopback port the desktop listens
 //! on, the page's own origin, or an app's URL scheme; the server sends a
 //! code nowhere else. `C` is single-use and lives a minute. The token is
-//! what the client keeps; the server keeps its hash.
+//! the session's id and the server's HMAC of it (`server::Auth::mint`):
+//! the server keeps nothing but its key.
 //!
 //! # A session is a login on one device
 //!
 //! The session id is what every entry authored under it carries
-//! (`ctx.session`), and what a live room names a device by. Revoking one
-//! (`/auth/logout`) ends its token; entries authored under it stay its
+//! (`ctx.session`), and what a live room names a device by. It is a row
+//! ([`SignIn`]): who it is, the device, when it expires, whether it was
+//! revoked — which its owner does through [`rows::revoke`], and the hub
+//! closes its connections. Entries authored under it stay its
 //! owner's.
 //!
 //! # Without a provider
@@ -53,14 +58,14 @@ pub mod client;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod oidc;
 pub mod remember;
+pub mod rows;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod session;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
 pub use login::{Account, Login};
+pub use rows::{feed, register, AuthTables, Grant, Revoke, Role, SignIn, ADMIN};
 pub use util::{login_url, percent_decode, percent_encode, query_value, socket_url, with_code};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

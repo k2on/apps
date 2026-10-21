@@ -317,7 +317,7 @@ fn a_server_stopped_mid_stream_loses_nothing() {
     measured("server restart to first re-ack", t.elapsed());
     let done = f.converged(&mut [&mut a, &mut b, &mut c]);
     measured("converge after a server restart", t.elapsed());
-    assert_eq!(done.head, 1 + 45, "one song and forty-five playlists");
+    assert_eq!(done.work(), 1 + 45, "one song and forty-five playlists");
     println!(
         "fleet: the log on disk is {} bytes for {} entries ({} bytes an entry)",
         f.server.log_bytes(),
@@ -756,7 +756,7 @@ fn work_done_signed_out_is_the_signers_everywhere() {
     let theirs: Vec<&Logged> = done
         .entries
         .iter()
-        .filter(|(n, _)| *n > head)
+        .filter(|(n, e)| *n > head && !is_sign_in(e) && !is_look(e))
         .map(|(_, e)| e)
         .collect();
     assert_eq!(theirs.len(), 3);
@@ -836,10 +836,9 @@ fn the_same_name_twice_is_numbered_in_log_order() {
 }
 
 /// **8. Turned away.** Alice's device is linked and idle when its session
-/// is revoked at the server (`/auth/logout` with its token). The server
-/// closes that socket at once (a sign-out closes its session's
-/// connections); the peer dials again and is closed before a word, asks
-/// the sign-in routes why, and says `denied`; it keeps its store, stops
+/// is revoked by her other device (`session.revoke`). The server closes
+/// that socket at once (a revoked session's connections close); the peer
+/// dials again, is turned away (4401), and says `denied`; it keeps its store, stops
 /// dialling, and goes on authoring — three things, pending. Alice's other
 /// device is another login and is not touched. Alice signs in on it again,
 /// and what was pending is the new login's, under the ids it was made with,
@@ -860,12 +859,8 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
     p.author("add_song", song("kept"));
     f.converged(&mut [&mut p, &mut q]);
     let old = p.status().session;
-    let token = p.token();
     let t = Instant::now();
-    ureq::post(&format!("{}/auth/logout", f.server.url()))
-        .set("Authorization", &format!("Bearer {token}"))
-        .call()
-        .expect("the session is revoked");
+    q.author("session.revoke", vec![("id", json!(old))]);
     assert!(
         eventually(Duration::from_secs(5), || p.status().denied.is_some()),
         "the peer is told at once: {:?}",
@@ -977,6 +972,7 @@ fn the_scanner_authors_while_a_peer_is_away() {
     assert!(done
         .entries
         .iter()
+        .filter(|(_, e)| !is_sign_in(e))
         .all(|(_, e)| e.entry.actor == harken_server::library::ACCOUNT));
 
     // The same three again, rewritten in place: a watch event each, and no
@@ -985,8 +981,8 @@ fn the_scanner_authors_while_a_peer_is_away() {
     for name in ["one", "two", "three"] {
         common::wav(&music.join(format!("Fleet/{name}.wav")), 300);
     }
-    let head = done.head;
-    let moved = || f.server.log_on_disk().map_or(0, |l| l.head_seq()) != head;
+    let work = done.work();
+    let moved = || f.server.log_on_disk().map_or(0, |l| l.work()) != work;
     assert!(
         !eventually(Duration::from_secs(2), moved),
         "rewriting a file is not a new song"
@@ -997,12 +993,12 @@ fn the_scanner_authors_while_a_peer_is_away() {
         !eventually(Duration::from_secs(2), || f
             .server
             .log_on_disk()
-            .map_or(0, |l| l.head_seq())
-            != head),
+            .map_or(0, |l| l.work())
+            != work),
         "a rescan authors nothing"
     );
     let done = f.converged(&mut [&mut p]);
-    assert_eq!(done.head, head);
+    assert_eq!(done.work(), work);
 
     // Under new names they are new songs: the path is the identity.
     for name in ["one", "two", "three"] {
@@ -1085,7 +1081,9 @@ fn a_replayed_push_or_hello_changes_nothing() {
 
     let once = p.author("create_playlist", named("Once"));
     assert!(p.settle(PATIENCE));
-    let head = p.status().cursor;
+    // The work in the log, the scanner's looks apart (they land when
+    // they land).
+    let work = f.server.log_on_disk().map_or(0, |l| l.work());
     let frame = p
         .proxy
         .last_payload_where(is_push)
@@ -1101,8 +1099,8 @@ fn a_replayed_push_or_hello_changes_nothing() {
     p.author("create_playlist", named("After the replay"));
     let done = f.converged(&mut [&mut p, &mut q]);
     assert_eq!(
-        done.head,
-        head + 1,
+        done.work(),
+        work + 1,
         "the replayed push is not a second entry"
     );
     let names: BTreeSet<String> = done
@@ -1522,15 +1520,24 @@ fn alone_then_a_fresh_server() {
     let mut q = f.peer("q", Some("alice"));
     let done = f.converged(&mut [&mut p, &mut q]);
     measured("sixty-one local intents join a fresh server", t.elapsed());
-    assert_eq!(done.head, 61);
-    let fns: Vec<String> = done.entries.iter().map(|(_, e)| function(e)).collect();
+    assert_eq!(done.work(), 61);
+    let fns: Vec<String> = done
+        .entries
+        .iter()
+        .filter(|(_, e)| !is_sign_in(e) && !is_look(e))
+        .map(|(_, e)| function(e))
+        .collect();
     assert!(
         fns[..50].iter().all(|f| f == "add_song")
             && fns[50] == "create_playlist"
             && fns[51..].iter().all(|f| f == "add_to_playlist"),
         "in the order they were sequenced alone: {fns:?}"
     );
-    assert!(done.entries.iter().all(|(_, e)| e.entry.actor == "alice"));
+    assert!(done
+        .entries
+        .iter()
+        .filter(|(_, e)| !is_sign_in(e) && !is_look(e))
+        .all(|(_, e)| e.entry.actor == "alice"));
     assert_eq!(on_playlist(&f, list).len(), 10);
 }
 
@@ -1553,7 +1560,8 @@ fn alone_beside_two_server_users_lands_after_theirs() {
     a.author("create_playlist", named("Theirs"));
     // Not `converged`: the thirty are owed and not yet pushed.
     assert!(a.settle(PATIENCE) && b.settle(PATIENCE));
-    let head_before = f.server.log_on_disk().expect("a log").head_seq();
+    let before = f.server.log_on_disk().expect("a log");
+    let (head_before, work_before) = (before.head_seq(), before.work());
     joining(&f, &m);
     let url = m.proxy.url();
     let joined = m.ask(
@@ -1563,7 +1571,7 @@ fn alone_beside_two_server_users_lands_after_theirs() {
     assert_eq!(joined, json!({"ok": true, "pending": 30, "cursor": 0}));
     self::joined(&mut m, 30);
     let done = f.converged(&mut [&mut a, &mut b, &mut m]);
-    assert_eq!(done.head, head_before + 30);
+    assert_eq!(done.work(), work_before + 30);
     let mine = done
         .entries
         .iter()
@@ -1573,7 +1581,7 @@ fn alone_beside_two_server_users_lands_after_theirs() {
     assert!(
         done.entries
             .iter()
-            .filter(|(n, _)| *n > head_before)
+            .filter(|(n, e)| *n > head_before && !is_sign_in(e) && !is_look(e))
             .all(|(_, e)| e.entry.actor == "alice"),
         "the thirty after theirs"
     );
@@ -1633,7 +1641,7 @@ fn leave_more_intents_and_join_again() {
     );
     let done = f.converged(&mut [&mut a, &mut m]);
     assert_eq!(on_playlist(&f, list).len(), 8);
-    assert_eq!(done.head, 12 + 1 + 1 + 3 + 3 + 1);
+    assert_eq!(done.work(), 12 + 1 + 1 + 3 + 3 + 1);
 }
 
 /// **17. `kill -9` during a join.** A peer with four hundred local intents
@@ -1678,10 +1686,12 @@ fn a_join_killed_with_kill9_finishes_on_restart() {
         p.kill9();
         let replica = p.dir.join("replica");
         println!(
-            "fleet: killed at {:.0}% of a join: fork {}, joining {}",
+            "fleet: killed at {:.0}% of a join: its own state {} B",
             frac * 100.0,
-            std::fs::metadata(replica.join("fork")).map_or(0, |m| m.len()),
-            std::fs::metadata(replica.join("joining")).map_or(0, |m| m.len()),
+            ["local.kv", "local.log"]
+                .iter()
+                .map(|n| std::fs::metadata(replica.join(n)).map_or(0, |m| m.len()))
+                .sum::<u64>(),
         );
         p.alone = false;
         p.start();
@@ -1690,7 +1700,7 @@ fn a_join_killed_with_kill9_finishes_on_restart() {
     }
     let mut refs: Vec<&mut PeerProc> = peers.iter_mut().collect();
     let done = f.converged(&mut refs);
-    assert_eq!(done.head, 5 * 400);
+    assert_eq!(done.work(), 5 * 400);
 }
 
 /// **18. A peer alone killed mid-append.** Three hundred songs are said to
@@ -1741,8 +1751,8 @@ fn a_peer_alone_killed_mid_append_reopens_whole() {
     );
     assert!(p.settle(PATIENCE));
     let log = f.server.log_on_disk().expect("a log");
-    assert_eq!(log.head_seq(), cursor, "the server has what it kept");
-    for l in &log.entries {
+    assert_eq!(log.work(), cursor, "the server has what it kept");
+    for l in log.entries.iter().filter(|l| !is_sign_in(l) && !is_look(l)) {
         p.owe(l.entry.id.0, "add_song, kept past the kill");
     }
     f.converged(&mut [&mut p]);
@@ -1777,7 +1787,7 @@ fn two_thousand_local_intents_join_timed() {
         "2,000 local intents: start with --server to converged",
         t.elapsed(),
     );
-    assert_eq!(done.head, 2_000);
+    assert_eq!(done.work(), 2_000);
 }
 
 /// **The library's guard, judged at the server.** No role configured:
@@ -1865,7 +1875,7 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
 /// peers — two of alice's devices and bob's — and alice's playlist; one of
 /// her devices goes behind a black hole and makes a playlist there. The
 /// server's admin page renames hers raw (a function of the change, authored
-/// by the authority as itself, `ark_peer::admin::raw`) and is refused
+/// by the authority as itself, `Input::Write`) and is refused
 /// one the store refuses — a playlist entry naming no playlist — which is
 /// logged nowhere. The device comes back: every peer converges on the log,
 /// the rename in each one's own `playlists`, the black-holed playlist after

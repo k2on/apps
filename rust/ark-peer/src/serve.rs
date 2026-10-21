@@ -15,20 +15,21 @@
 //! so one thread owns the [`Peer`] and everything talks to it through a
 //! [`Handle`]: a socket's task, a device in this process
 //! ([`Handle::dialer`], the transport the perf tests and the scanner use),
-//! the sign-in routes revoking a session. What the peer delivers goes to
+//! the sign-in routes writing a session. What the peer delivers goes to
 //! each connection's [`Sink`]; dropping a sink — the connection closed, its
-//! session revoked — closes the connection.
+//! session revoked or expired (`Handle::watched`) — closes the connection.
 //!
-//! A connection is who its token proves (`ark-auth`'s login, or with no
-//! sign-in configured the dev reading of [`dev`]); a token proving nobody
-//! is closed with code 4401. The server pings every `keepalive` and closes
-//! a socket that leaves three unanswered.
+//! A connection is who its token proves (with `ark-auth`, the session row
+//! its signature names; with no sign-in configured the dev reading of
+//! [`dev`]); a token proving nobody is closed with code 4401. The server
+//! pings every `keepalive` and closes a socket that leaves three
+//! unanswered.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,6 +44,8 @@ use axum::routing::get;
 use axum::Router;
 use tokio::sync::oneshot;
 
+use ark_auth::server::Watch;
+
 use crate::link::{Closed, Dial, Event, Wake, Wire};
 use crate::{admin, now_ms, web, Config, ConnId, Deliver, Disk, Files, Memory, Peer};
 
@@ -53,7 +56,7 @@ pub type Sink = Box<dyn Fn(Vec<u8>) -> bool + Send>;
 pub type Admin = (String, Router);
 
 /// Who a token proves, or nobody.
-pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
+pub use ark_auth::server::Authenticate;
 
 /// The dev reading of a token: `user@device` is `user` on a session named
 /// by the whole token; `:role,role` after it, the roles.
@@ -85,25 +88,44 @@ impl Handle {
     /// The peer's thread, started; it ends when every handle is dropped or
     /// one says [`Handle::stop`], writing the volatile space for the next
     /// open.
-    pub fn spawn(mut peer: Peer) -> Handle {
+    pub fn spawn(peer: Peer) -> Handle {
+        Handle::watched(peer, None)
+    }
+
+    /// [`Handle::spawn`], with `watch` told what every job's entries
+    /// changed and, each second, the clock; the sessions it names have
+    /// their connections closed (`ark_auth::server::Auth::watcher`).
+    pub fn watched(mut peer: Peer, mut watch: Option<Watch>) -> Handle {
         let (tx, rx) = channel::<Cmd>();
+        peer.hub.watched = watch.is_some();
         std::thread::spawn(move || {
             let mut sinks = BTreeMap::new();
-            for cmd in rx {
-                let job = match cmd {
-                    Cmd::Run(job) => job,
-                    Cmd::Stop(done) => {
+            let mut ticked = now_ms();
+            loop {
+                let mut out = match rx.recv_timeout(Duration::from_secs(1)) {
+                    Ok(Cmd::Run(job)) => job(&mut peer, &mut sinks),
+                    Ok(Cmd::Stop(done)) => {
                         peer.close();
                         let _ = done.send(());
                         return;
                     }
+                    Err(RecvTimeoutError::Timeout) => vec![],
+                    Err(RecvTimeoutError::Disconnected) => break,
                 };
-                let mut out = job(&mut peer, &mut sinks);
                 out.extend(peer.release());
-                for (c, b) in out {
-                    if sinks.get(&c).is_some_and(|s: &Sink| !s(b)) {
-                        sinks.remove(&c);
-                    }
+                deliver(&mut sinks, out);
+                let Some(w) = watch.as_mut() else { continue };
+                // Delivered first: a sign-out's own confirmation, then the close.
+                let (now, seen) = (now_ms(), std::mem::take(&mut peer.hub.seen));
+                let tick = now - ticked >= 1000;
+                if !tick && seen.is_empty() {
+                    continue;
+                }
+                ticked = if tick { now } else { ticked };
+                let open: Vec<Who> = peer.connections().map(|(_, w)| w.clone()).collect();
+                for session in w(&peer.log.store, (!tick).then_some(&seen[..]), &open, now) {
+                    let out = close(&mut peer, &mut sinks, &session);
+                    deliver(&mut sinks, out);
                 }
             }
             peer.close();
@@ -140,17 +162,10 @@ impl Handle {
         });
     }
 
-    /// Every connection of a session closed: what a sign-out does.
+    /// Every connection of a session closed.
     pub fn revoke(&self, session: &str) {
         let session = session.to_string();
-        self.run(move |p, s| {
-            let mut out = vec![];
-            for c in p.of_session(&session) {
-                s.remove(&c);
-                out.extend(p.leave(c, now_ms()));
-            }
-            out
-        });
+        self.run(move |p, s| close(p, s, &session));
     }
 
     /// The peer's thread ended and the volatile space written, waited for:
@@ -175,26 +190,17 @@ impl Handle {
 
     /// An entry the authority of `space` authors itself
     /// ([`Peer::author`]): the head it was sequenced at, or the refusal.
-    /// With `once`, `func` is that function (a raw write), runnable for
-    /// this entry only: never one a client's intent may name.
-    pub fn author(
-        &self,
-        space: Space,
-        func: String,
-        input: Vec<u8>,
-        once: Option<std::sync::Arc<dyn ark::peer::Procedure>>,
-    ) -> Option<Result<Seq, String>> {
-        self.with(move |p| {
-            let raw = once.is_some();
-            if let Some(f) = once {
-                p.log.functions.insert(func.clone(), f);
-            }
-            let r = p.author(space, &func, input, now_ms());
-            if raw && p.config.log.functions.get(&func).is_none() {
-                p.log.functions.forget(&func);
-            }
-            r.map(|_| p.machine(space).map_or(0, |m| m.log().head().0))
-        })
+    pub fn author(&self, space: Space, func: String, input: Vec<u8>) -> Option<Result<Seq, String>> {
+        self.sequenced(space, move |p| p.author(space, &func, input, now_ms()))
+    }
+
+    /// Facts the authority writes raw ([`Peer::write`]): as `author`.
+    pub fn write(&self, facts: Vec<ark::store::Change>) -> Option<Result<Seq, String>> {
+        self.sequenced(Space::Durable, move |p| p.write(facts, now_ms()))
+    }
+
+    fn sequenced(&self, space: Space, f: impl FnOnce(&mut Peer) -> Result<(), String> + Send + 'static) -> Option<Result<Seq, String>> {
+        self.with(move |p| f(p).map(|_| p.machine(space).map_or(0, |m| m.log().head().0)))
     }
 
     /// The in-process transport: a device's link dialling this server in
@@ -216,6 +222,24 @@ impl Handle {
             Box::new(InProcess(hub.clone(), c, rx, false))
         }
     }
+}
+
+fn deliver(sinks: &mut BTreeMap<ConnId, Sink>, out: Vec<Deliver>) {
+    for (c, b) in out {
+        if sinks.get(&c).is_some_and(|s: &Sink| !s(b)) {
+            sinks.remove(&c);
+        }
+    }
+}
+
+/// Every connection of a session closed: its sinks dropped, and left.
+fn close(p: &mut Peer, sinks: &mut BTreeMap<ConnId, Sink>, session: &str) -> Vec<Deliver> {
+    let mut out = vec![];
+    for c in p.of_session(session) {
+        sinks.remove(&c);
+        out.extend(p.leave(c, now_ms()));
+    }
+    out
 }
 
 struct InProcess(Handle, ConnId, Receiver<Vec<u8>>, bool);
@@ -295,18 +319,17 @@ impl Server {
         }
     }
 
-    /// Sign-in: its routes, a token read as the login it is, and a
-    /// sign-out closing that session's connections.
+    /// Sign-in: its routes, each sign-in a session row the hub writes, a
+    /// token judged by its signature and the row it names, and the hub
+    /// watching for sessions to close — all `ark_auth::server::Auth`'s.
     pub fn auth(mut self, auth: Arc<ark_auth::server::Auth>) -> Self {
-        let a = auth.clone();
-        self.authenticate = Arc::new(move |token| Some(crate::who(&a.whoami(token)?)));
         self.auth = Some(auth);
         self
     }
 
     /// The peer started on its thread: its handle, the routes, and the
     /// admin page's bind and routes.
-    pub fn build(self) -> Result<(Handle, Router, Option<Admin>)> {
+    pub fn build(mut self) -> Result<(Handle, Router, Option<Admin>)> {
         let disk: Box<dyn Disk> = match &self.data {
             Some(d) => {
                 let mut f = Files::new(d.join("log"))?;
@@ -315,7 +338,12 @@ impl Server {
             }
             None => Box::new(Memory::default()),
         };
-        let hub = Handle::spawn(Peer::serve(self.config, disk, now_ms()));
+        let peer = Peer::serve(self.config, disk, now_ms());
+        let hub = Handle::watched(peer, self.auth.as_ref().map(|a| a.watcher()));
+        if let Some(auth) = &self.auth {
+            auth.serve(Box::new(hub.clone()));
+            self.authenticate = auth.authenticate();
+        }
         let shared = Shared {
             hub: hub.clone(),
             authenticate: self.authenticate.clone(),
@@ -324,8 +352,6 @@ impl Server {
         let sockets = Router::new().route("/sync", get(sync)).with_state(shared);
         let mut router = self.routes.route("/healthz", get(|| async { "ok" })).merge(sockets);
         if let Some(auth) = self.auth {
-            let h = hub.clone();
-            auth.on_revoke(move |_, session| h.revoke(session));
             router = router.merge(ark_auth::server::router(auth));
         }
         if let Some((dir, module)) = self.web {
@@ -341,6 +367,18 @@ impl Server {
     pub async fn listen(self, addr: &str) -> Result<Running> {
         let (hub, router, admin) = self.build()?;
         Running::listen(hub, router, admin, addr).await
+    }
+}
+
+/// What sign-in asks of the hub: its store read on its thread, a sign-in
+/// written as an entry it authors.
+impl ark_auth::server::Hub for Handle {
+    fn read(&self, f: Box<dyn FnOnce(&ark::store::Store) + Send>) {
+        self.with(move |p| f(&p.log.store));
+    }
+
+    fn write(&self, c: ark::store::Change) -> std::result::Result<(), String> {
+        Handle::write(self, vec![c]).ok_or("the hub is gone")?.map(|_| ())
     }
 }
 
@@ -399,7 +437,9 @@ async fn connection(mut socket: WebSocket, s: Shared) {
         Some(Ok(Message::Binary(b))) => String::from_utf8(b).unwrap_or_default(),
         _ => return,
     };
-    let Some(who) = (s.authenticate)(&token) else {
+    let authenticate = s.authenticate.clone();
+    let judged = tokio::task::spawn_blocking(move || authenticate(&token)).await;
+    let Some(who) = judged.ok().flatten() else {
         let reason = "not signed in".into();
         let _ = socket.send(Message::Close(Some(CloseFrame { code: 4401, reason }))).await;
         return;

@@ -57,11 +57,11 @@
           !build && lib.any (d: under d || leadsTo d) dirs;
       };
 
-      # The Rust workspace is `rust/`, and harken's three crates join it from
+      # The Rust workspace is `rust/`, and harken's crates join it from
       # `harken/` by path, so both trees are the source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/iced" "harken/ffi" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" ];
       # The typed Kotlin and Swift `ark-dev gen` writes, which harken/ffi's
       # tests hold to the domain (harken/ffi/tests/gen.rs).
       genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
@@ -198,8 +198,8 @@
             text = ''exec ark-fuzz "$@"'';
           };
           # The vectors as the writer writes them now: the kernel's tests
-          # (hash/, views/) and ark-dev's
-          # (protocol/, trace/, rebase/) run with ARK_WRITE_VECTORS over an
+          # (hash/) and ark-dev's
+          # (protocol/, trace/, rebase/, views/) run with ARK_WRITE_VECTORS over an
           # empty spec/vectors, which is then the output. checks.vectors
           # holds the tree's to it; `nix build .#vectors` and a copy over
           # spec/vectors is how they are written again without cargo.

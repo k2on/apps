@@ -24,8 +24,8 @@
 //! the code comes back to: a loopback port the desktop listens on, or this
 //! page's own address.
 use ark::peer::Who;
-use ark_auth::remember::Logins;
 use ark_auth::Login;
+use ark_peer::Logins;
 
 use crate::client::Replica;
 

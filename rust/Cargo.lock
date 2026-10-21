@@ -198,6 +198,7 @@ dependencies = [
  "ark-auth",
  "ark-dev",
  "ark-peer",
+ "serde",
  "serde_json",
  "tempfile",
  "uniffi",
@@ -223,6 +224,7 @@ dependencies = [
  "ark-explorer",
  "axum",
  "js-sys",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -2139,6 +2141,7 @@ name = "harken-domain"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-auth",
  "ark-dev",
  "ark-peer",
  "serde",
@@ -2155,6 +2158,7 @@ dependencies = [
  "ark-ffi",
  "ark-peer",
  "harken-domain",
+ "harken-player",
  "serde_json",
  "tempfile",
  "uniffi",
@@ -2178,6 +2182,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "harken-player"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-peer",
+ "harken-domain",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "harken-server"
 version = "0.1.0"
 dependencies = [
@@ -2189,9 +2204,11 @@ dependencies = [
  "ark-peer",
  "axum",
  "harken-domain",
+ "harken-player",
  "libc",
  "lofty",
  "notify",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

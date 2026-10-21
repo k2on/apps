@@ -2,52 +2,50 @@
 //! part a test machine cannot have, and everything after the account is
 //! known is the same code either way.
 
+mod common;
+
 use std::sync::Arc;
 
 use ark_auth::server::{router, Auth, Mode};
-use ark_auth::session::SessionStore;
+use common::{App, Memory};
 
-fn serve() -> (tokio::runtime::Runtime, String, Arc<Auth>) {
+fn serve() -> (tokio::runtime::Runtime, String, Arc<Auth>, Memory) {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
     let (addr, auth) = rt.block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let auth = Arc::new(Auth::new(SessionStore::memory(), Mode::Dev, &format!("http://{addr}")));
+        let auth = Arc::new(Auth::new::<App>(Mode::Dev, &format!("http://{addr}"), b"key"));
         let app = router(auth.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (addr, auth)
     });
-    (rt, format!("http://{addr}"), auth)
+    let rows = Memory::new();
+    auth.serve(Box::new(rows.clone()));
+    (rt, format!("http://{addr}"), auth, rows)
 }
 
+/// A dev login by name is a code, then a login whose session is the row
+/// written for it — the device the program said it is — and whose token
+/// names it; two logins are two sessions. Falsified by `login` handing the
+/// dev form's name to `finish` without its device: the row's was empty.
 #[test]
-fn a_dev_login_is_a_code_then_a_token_then_nothing() {
-    let (_rt, server, auth) = serve();
+fn a_dev_login_is_a_code_then_a_session_row_and_its_token() {
+    let (_rt, server, auth, rows) = serve();
     // Headless: a dev server given a name answers with the code at once.
     let login = ark_auth::client::login(&server, Some("alice"), |url| panic!("a browser was asked to open {url}")).expect("signed in");
     assert_eq!(login.user.id, "alice");
-    assert!(!login.token.is_empty() && !login.session.is_empty());
-    // The token proves the session, over HTTP and to the engine alike.
-    assert_eq!(
-        ark_auth::client::whoami(&server, &login.token).unwrap().map(|l| l.session),
-        Some(login.session.clone())
-    );
-    let who = auth.authenticator();
-    assert_eq!(who(&login.token).map(|i| i.actor), Some("alice".to_string()));
-    // Two logins by one person are two sessions: two devices.
+    let row = rows.sign_ins()[0].clone();
+    assert_eq!((row.id.as_str(), row.user.as_str()), (login.session.as_str(), "alice"));
+    assert!(row.device.starts_with("ureq"), "{}", row.device);
+    assert_eq!(auth.verify(&login.token), Some(login.session.as_str()));
     let again = ark_auth::client::login(&server, Some("alice"), |_| {}).unwrap();
     assert_ne!(again.session, login.session);
-    // Signed out: the token proves nothing, and the session is still hers.
-    ark_auth::client::logout(&server, &login.token).unwrap();
-    assert_eq!(ark_auth::client::whoami(&server, &login.token).unwrap(), None);
-    assert!(who(&login.token).is_none());
-    assert!(auth.owns("alice", &login.session));
-    assert!(who(&again.token).is_some(), "the other device is still signed in");
+    assert_eq!(rows.sign_ins().len(), 2);
 }
 
 #[test]
 fn a_code_is_single_use() {
-    let (_rt, server, _auth) = serve();
+    let (_rt, server, ..) = serve();
     let url = ark_auth::login_url(&server, "http://127.0.0.1:9/", Some("bob"));
     let resp = ureq::AgentBuilder::new().redirects(0).build().get(&url).call().unwrap();
     assert_eq!(resp.status(), 303);
@@ -60,7 +58,7 @@ fn a_code_is_single_use() {
 
 #[test]
 fn a_code_cannot_go_somewhere_else() {
-    let (_rt, server, _auth) = serve();
+    let (_rt, server, ..) = serve();
     let url = ark_auth::login_url(&server, "https://elsewhere.example/", Some("alice"));
     let err = ureq::AgentBuilder::new().redirects(0).build().get(&url).call().unwrap_err();
     let ureq::Error::Status(400, resp) = err else {
@@ -71,7 +69,7 @@ fn a_code_cannot_go_somewhere_else() {
 
 #[test]
 fn a_dev_login_without_a_name_is_a_form() {
-    let (_rt, server, _auth) = serve();
+    let (_rt, server, ..) = serve();
     let url = ark_auth::login_url(&server, "http://127.0.0.1:9/", None);
     let body = ureq::get(&url).call().unwrap().into_string().unwrap();
     assert!(body.contains("<form") && body.contains("takes your word"), "{body}");

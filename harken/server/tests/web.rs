@@ -81,8 +81,8 @@ fn every_file_carries_the_build_and_no_date() {
     let health = get(&base, "/healthz", &[]);
     assert!(health.body.starts_with("ok\n"), "{}", health.body);
     assert_eq!(
-        get(&base, "/auth/me", &[]).status,
-        401,
+        get(&base, "/auth/exchange", &[]).status,
+        405,
         "sign-in answers, not the page"
     );
     rt.block_on(server.stop());

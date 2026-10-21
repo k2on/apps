@@ -122,14 +122,14 @@ class KeptTests {
         assertTrue("the phone left the session with the activity", phone.linked)
         assertFalse("the session is open", session.isClosed)
         assertEquals("the service holds it still", listOf("playback"), sessions.holders(session))
-        val seen = Remote("laptop", "Laptop").session(laptop)!!
+        val seen = Presser("laptop").session(laptop)!!
         val output = seen.active!!.output
         assertTrue("the laptop sees the phone as the output, here: $output", output is Output.Device && output.id == "phone")
         assertTrue("and playing", seen.active!!.clock.playing)
         assertTrue("the phone's player plays on", sound.playing)
 
         // Still reconciled: a pause on the laptop reaches the phone's player.
-        assertEquals(null, Remote("laptop", "Laptop").press(laptop, Press.Pause, null))
+        assertEquals(null, Presser("laptop").press(laptop, Press.Pause))
         hall.carry()
         kept.listen.poke()
         assertFalse("the player is no longer reconciled", sound.playing)

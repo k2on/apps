@@ -492,7 +492,7 @@ pub struct App {
     pub login: Option<Login>,
     /// Where logins are remembered — `None` in a test, which must not write
     /// into the config directory of whoever runs it.
-    pub logins: Option<ark_auth::remember::Logins>,
+    pub logins: Option<ark_peer::Logins>,
     /// A sign-in is in flight.
     pub signing_in: bool,
     /// What the connect entry holds, while this window is alone.
@@ -1758,23 +1758,17 @@ impl App {
                 }
             }
             Message::SignOut => {
-                if let Some(login) = self.login.take() {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let server = self.server.clone();
-                        std::thread::spawn(move || {
-                            let _ = ark_auth::client::logout(&server, &login.token);
-                        });
-                    }
-                    #[cfg(target_arch = "wasm32")]
-                    let _ = login;
+                // The session revoked through the domain (pushed while
+                // online, pending until the next sign-in otherwise), and
+                // nothing dialled after it. The replica stays, and goes on
+                // authoring as that person, offline: what they do now is
+                // theirs when they sign in again.
+                if self.login.take().is_some() {
+                    let _ = self.peer.client.sign_out();
                 }
                 if let Some(logins) = &self.logins {
                     logins.forget(&self.server);
                 }
-                // The replica stays, and goes on authoring as that person,
-                // offline: what they do now is theirs when they sign in again.
-                self.peer.client.set_token(None);
                 // A device is a login, so signing out is leaving the session.
                 self.listening.close();
                 self.devices = None;

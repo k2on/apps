@@ -238,6 +238,15 @@ data class Equip(val canVolume: Boolean, val family: String?, val muted: Boolean
     }
 }
 
+/** The record `Grant`. */
+data class Grant(val user: String, val role: String) {
+    fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
+
+    companion object {
+        fun of(j: Any?): Grant = (j as JSONObject).let { o -> Grant(J.text(o.opt("user")), J.text(o.opt("role"))) }
+    }
+}
+
 /** The record `GroupMute`. */
 data class GroupMute(val muted: Boolean) {
     fun json(): String = "{" + "\"muted\":" + muted.toString() + "}"
@@ -262,6 +271,44 @@ data class GroupVolume(val level: Long) {
 
     companion object {
         fun of(j: Any?): GroupVolume = (j as JSONObject).let { o -> GroupVolume(J.int(o.opt("level"))) }
+    }
+}
+
+/** The sum `JobLooked`. */
+sealed class JobLooked {
+    abstract fun json(): String
+
+    data class Pending(val dueMs: Long) : JobLooked() {
+        override fun json(): String = "{\"Pending\":" + "{" + "\"due_ms\":" + dueMs.toString() + "}" + "}"
+    }
+
+    data class Claimed(val by: String, val atMs: Long) : JobLooked() {
+        override fun json(): String = "{\"Claimed\":" + "{" + "\"by\":" + J.q(by) + "," + "\"at_ms\":" + atMs.toString() + "}" + "}"
+    }
+
+    data class Done(val value: dev.harken.android.gen.Looked) : JobLooked() {
+        override fun json(): String = "{\"Done\":" + "{" + "\"value\":" + value.json() + "}" + "}"
+    }
+
+    data class Failed(val why: String, val retryMs: Long) : JobLooked() {
+        override fun json(): String = "{\"Failed\":" + "{" + "\"why\":" + J.q(why) + "," + "\"retry_ms\":" + retryMs.toString() + "}" + "}"
+    }
+
+    data object Cancelled : JobLooked() {
+        override fun json(): String = "\"Cancelled\""
+    }
+
+    companion object {
+        fun of(j: Any?): JobLooked = J.sum(j) { t, o ->
+            when (t) {
+                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
+                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+                "Done" -> Done(dev.harken.android.gen.Looked.of(o!!.opt("value")))
+                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+                "Cancelled" -> Cancelled
+                else -> throw IllegalArgumentException("JobLooked: no variant $t")
+            }
+        }
     }
 }
 
@@ -316,6 +363,92 @@ data class ListeningScrub(val user: String, val device: String, val atMs: Long) 
 
     companion object {
         fun of(j: Any?): ListeningScrub = (j as JSONObject).let { o -> ListeningScrub(J.text(o.opt("user")), J.text(o.opt("device")), J.int(o.opt("at_ms"))) }
+    }
+}
+
+/** The record `Look`. */
+data class Look(val id: Id, val paths: List<String>, val state: JobLooked) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"paths\":" + J.wlist(paths) { v0 -> J.q(v0) } + "," + "\"state\":" + state.json() + "}"
+
+    companion object {
+        fun of(j: Any?): Look = (j as JSONObject).let { o -> Look(Id(J.text(o.opt("id"))), J.list(o.opt("paths")) { v0 -> J.text(v0) }, JobLooked.of(o.opt("state"))) }
+    }
+}
+
+/** The record `LookAt`. */
+data class LookAt(val paths: List<String>) {
+    fun json(): String = "{" + "\"paths\":" + J.wlist(paths) { v0 -> J.q(v0) } + "}"
+
+    companion object {
+        fun of(j: Any?): LookAt = (j as JSONObject).let { o -> LookAt(J.list(o.opt("paths")) { v0 -> J.text(v0) }) }
+    }
+}
+
+/** The record `LookCancel`. */
+data class LookCancel(val id: Id) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
+
+    companion object {
+        fun of(j: Any?): LookCancel = (j as JSONObject).let { o -> LookCancel(Id(J.text(o.opt("id")))) }
+    }
+}
+
+/** The record `LookClaim`. */
+data class LookClaim(val id: Id, val by: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
+
+    companion object {
+        fun of(j: Any?): LookClaim = (j as JSONObject).let { o -> LookClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
+    }
+}
+
+/** The record `LookDue`. */
+data class LookDue(val rows: List<Look>, val nextMs: Long?) {
+    fun json(): String = "{" + "\"rows\":" + J.wlist(rows) { v0 -> v0.json() } + "," + "\"next_ms\":" + J.wopt(nextMs) { v0 -> v0.toString() } + "}"
+
+    companion object {
+        fun of(j: Any?): LookDue = (j as JSONObject).let { o -> LookDue(J.list(o.opt("rows")) { v0 -> Look.of(v0) }, J.opt(o.opt("next_ms")) { v0 -> J.int(v0) }) }
+    }
+}
+
+/** The record `LookFinish`. */
+data class LookFinish(val id: Id, val by: String, val outcome: LookOutcome) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "}"
+
+    companion object {
+        fun of(j: Any?): LookFinish = (j as JSONObject).let { o -> LookFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), LookOutcome.of(o.opt("outcome"))) }
+    }
+}
+
+/** The sum `LookOutcome`. */
+sealed class LookOutcome {
+    abstract fun json(): String
+
+    data class Ok(val value: dev.harken.android.gen.Looked) : LookOutcome() {
+        override fun json(): String = "{\"Ok\":" + "{" + "\"value\":" + value.json() + "}" + "}"
+    }
+
+    data class Err(val why: String) : LookOutcome() {
+        override fun json(): String = "{\"Err\":" + "{" + "\"why\":" + J.q(why) + "}" + "}"
+    }
+
+    companion object {
+        fun of(j: Any?): LookOutcome = J.sum(j) { t, o ->
+            when (t) {
+                "Ok" -> Ok(dev.harken.android.gen.Looked.of(o!!.opt("value")))
+                "Err" -> Err(J.text(o!!.opt("why")))
+                else -> throw IllegalArgumentException("LookOutcome: no variant $t")
+            }
+        }
+    }
+}
+
+/** The record `Looked`. */
+data class Looked(val read: Long, val authored: Long) {
+    fun json(): String = "{" + "\"read\":" + read.toString() + "," + "\"authored\":" + authored.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): Looked = (j as JSONObject).let { o -> Looked(J.int(o.opt("read")), J.int(o.opt("authored"))) }
     }
 }
 
@@ -554,6 +687,24 @@ data class ReportVolume(val level: Long, val muted: Boolean) {
     }
 }
 
+/** The record `Revoke`. */
+data class Revoke(val id: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
+
+    companion object {
+        fun of(j: Any?): Revoke = (j as JSONObject).let { o -> Revoke(J.text(o.opt("id"))) }
+    }
+}
+
+/** The record `Role`. */
+data class Role(val user: String, val role: String) {
+    fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
+
+    companion object {
+        fun of(j: Any?): Role = (j as JSONObject).let { o -> Role(J.text(o.opt("user")), J.text(o.opt("role"))) }
+    }
+}
+
 /** The record `Scrub`. */
 data class Scrub(val atMs: Long?) {
     fun json(): String = "{" + "\"at_ms\":" + J.wopt(atMs) { v0 -> v0.toString() } + "}"
@@ -619,6 +770,15 @@ data class SetVolume(val device: String, val level: Long) {
 
     companion object {
         fun of(j: Any?): SetVolume = (j as JSONObject).let { o -> SetVolume(J.text(o.opt("device")), J.int(o.opt("level"))) }
+    }
+}
+
+/** The record `SignIn`. */
+data class SignIn(val id: String, val user: String, val name: String, val email: String, val device: String, val issuedMs: Long, val expiresMs: Long, val revoked: Boolean, val roles: List<String>) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "," + "\"email\":" + J.q(email) + "," + "\"device\":" + J.q(device) + "," + "\"issued_ms\":" + issuedMs.toString() + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"revoked\":" + revoked.toString() + "," + "\"roles\":" + J.wlist(roles) { v0 -> J.q(v0) } + "}"
+
+    companion object {
+        fun of(j: Any?): SignIn = (j as JSONObject).let { o -> SignIn(J.text(o.opt("id")), J.text(o.opt("user")), J.text(o.opt("name")), J.text(o.opt("email")), J.text(o.opt("device")), J.int(o.opt("issued_ms")), J.int(o.opt("expires_ms")), J.bool(o.opt("revoked")), J.list(o.opt("roles")) { v0 -> J.text(v0) }) }
     }
 }
 
@@ -750,6 +910,9 @@ class Harken(val peer: Peer) {
     /** `library.library`, kept. */
     fun library(input: Library): View<LibraryEntry> = View(peer.view("library.library", input.json())) { j -> LibraryEntry.of(j) }
 
+    /** `library.look`: its intent's id. */
+    fun look(input: LookAt): String = peer.mutate("library.look", input.json())
+
     /** `library.recording`, kept. */
     fun recording(input: RecordingInput): View<LibraryEntry> = View(peer.view("library.recording", input.json())) { j -> LibraryEntry.of(j) }
 
@@ -876,6 +1039,18 @@ class Harken(val peer: Peer) {
     /** `listening.unjoin`, on the live space. */
     fun unjoin(input: Member) = peer.call("listening.unjoin", input.json())
 
+    /** `look.cancel`: its intent's id. */
+    fun cancel(input: LookCancel): String = peer.mutate("look.cancel", input.json())
+
+    /** `look.claim`: its intent's id. */
+    fun claim(input: LookClaim): String = peer.mutate("look.claim", input.json())
+
+    /** `look.due`. */
+    fun due(): LookDue = LookDue.of(J.parse(peer.query("look.due", "null")))
+
+    /** `look.finish`: its intent's id. */
+    fun finish(input: LookFinish): String = peer.mutate("look.finish", input.json())
+
     /** `playlists.add_all_to_playlist`: its intent's id. */
     fun addAllToPlaylist(input: AddAllToPlaylist): String = peer.mutate("playlists.add_all_to_playlist", input.json())
 
@@ -896,6 +1071,21 @@ class Harken(val peer: Peer) {
 
     /** `playlists.remove_from_playlist`: its intent's id. */
     fun removeFromPlaylist(input: RemoveFromPlaylist): String = peer.mutate("playlists.remove_from_playlist", input.json())
+
+    /** `role.grant`: its intent's id. */
+    fun grant(input: Grant): String = peer.mutate("role.grant", input.json())
+
+    /** `role.revoke`: its intent's id. */
+    fun roleRevoke(input: Grant): String = peer.mutate("role.revoke", input.json())
+
+    /** `session.current`. */
+    fun current(): SignIn? = J.opt(J.parse(peer.query("session.current", "null"))) { v0 -> SignIn.of(v0) }
+
+    /** `session.mine`, kept. */
+    fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { j -> SignIn.of(j) }
+
+    /** `session.revoke`: its intent's id. */
+    fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
 
     /** The live table `listening`, as this device holds it. */
     fun liveListening(): List<Listening> = peer.liveRows("listening").map { Listening.of(J.parse(it)) }

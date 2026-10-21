@@ -573,9 +573,14 @@ kernel through FFI (N3); ArkLang, the checker and the interpreter go.
 6. **Views are generic.** `view.rs` is `impl<R>` operators over typed rows
    and deltas (derived `Ord`/`Hash`, order keys the sort keys' key bytes),
    monomorphised per declared view; a closure's reads through `&Db` are
-   recorded and a change to what it read re-runs that element only. One
-   `DynRow` (a JSON row under its table) puts the explorer and the
-   `views/` vectors — plans carried as JSON — on the same engine.
+   recorded and a change to what it read re-runs that element only. A
+   row without a Rust type is JSON under its table (`dynamic`): what the
+   vectors, a host speaking JSON and the explorer hold. Its one query is
+   `Browse` — equal columns, a key range, a sort by a column, the first
+   `n` — a plan of the same operators, so a grid of it is kept by patches;
+   anything more is a view the domain names. No plan is written as JSON:
+   a `views/` vector is a named view of a reference domain (`ark-dev`'s
+   `library`), and another implementation runs the view of that name.
 
 Kept: the store, the chain, the one machine, the rebase, partial sync as a
 view, live state as a second machine, every `rebase/`, `protocol/`,
@@ -600,9 +605,11 @@ rust/ark/           the kernel: §1.1–§1.11 and §1.16 — format, json, hash
 rust/ark-macros/    the derives (Row, Input, Describe, Schema) and the attributes
                     that register a function by name
 rust/ark-peer/      the one peer that dials and listens: storage, link, hub, the
-                    app kit, the server's socket, admin listener and web build
+                    app kit, the server's socket, admin listener and web build;
+                    local instances and the peer's own schema (`local`)
 rust/ark-ffi/       ark-peer's app kit through UniFFI, for the phones
-rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer, and
+rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer (with
+                    the `views/` vectors' reference domains, `library`), and
                     `gen kotlin|swift` (a domain's types for the phones)
 rust/ark-auth/      dev sign-in and OpenID Connect
 rust/ark-explorer/  the admin page and the explorer over a replica
@@ -837,6 +844,7 @@ counted the same way; Unicode tables excluded)
 | library source (`ark` + `ark-macros` + `ark-ffi`) | 25,537 | 6,526 | 6,125 | 0.24 |
 | peer (`ark-peer`; v4 and v5 client + server) | 6,843 | 1,465 | 2,041 | 0.30 |
 | tooling (`ark-dev`, `ark-explorer`, `arkui`, `ark-auth`) | 19,498† | 7,515† | 7,907 | 0.41 |
+| of it `ark-auth` (S1: 1,051, carrying the sign-in tables and the hub's side) | 1,422 | 1,410 | 999 | 0.70 |
 | harken: domain | 3,711 | 2,583 | 2,373 | 0.64 |
 | harken: server (+ bins) | 4,923 (+1,720) | 4,808† (+1,618) | 4,735 (+1,360) | 0.96 |
 | harken: iced (+ bins) | 8,838 (+1,659) | 8,171† (+1,660) | 8,161 (+1,660) | 0.92 |
@@ -985,6 +993,269 @@ and re-runs the pending once, 48.8 µs/entry under 400 against v4's 64.6 (was
 linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
+
+**S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
+views vector is a named view.** `dynamic.rs`'s expression language — `Expr`,
+`Lam`, `Cmp`, `parse`, `evaluate`, `plan`, `make`, `ordered` — goes (705 →
+183 lines), and with it `Db::get_raw`, `scan_raw` and `schema`, which only
+it read. What stays is the JSON-of-rows path a vector, a host speaking JSON
+and the explorer need (`row`, `row_bytes`, `key_bytes`, `Dynamic`) and
+`Browse`: a table's rows whose columns equal given values, within a key
+range, sorted by a column (ties in key order), the first `n` — values
+compared and sorted as their columns' key bytes — built as a plan of the
+same operators (`scan_raw`, `filter`, `sort`, `take`), so a view of it is
+kept by patches, incrementally, for free; the explorer's grid reads through
+it, afresh on each call as before. Anything more than a browse is a view
+the domain names, which the explorer lists and calls already. The `views/`
+vectors are `{batches, ctx, domain, input, rows_before, schema, steps,
+store_before, view}`: a view of a reference domain in `ark-dev`
+(`library.rs`: `library` — the demo's tables, people, works, movements,
+songs, tracks, a view per v4 scenario — and `colors`, `pairs`, a fuzz
+finding each), written by `ark-dev/tests/views.rs` and run from the file
+alone (`vectors::run_view`, `spec/RUNNERS.md` § views); the falsified one
+now fails a real runner. Fourteen vectors and one falsified, as before;
+every step of every vector is the one the JSON plans gave. The work
+contract moved with them (0 gets and 5 rows, 0, 0 at 1k, 4k, 16k); the
+kernel keeps the rebase and scoped-feed view tests, over typed plans, and
+a browse test. *harken-peer*: little was the kit's twice — the binding of a
+bare name, a query's context and answer, an intent's standing, the cursor,
+pending count, alone and linked accessors, the login wrappers — and those
+now read through `Peer`; pumping, reconnect and backoff (`link.backoff`)
+were the kit's already, `--ping-ms` stays a no-op, nothing retries a login,
+and its sign-in path stays (it keeps a joined chain for the same session,
+which `Peer::login` does not), so no knob was added. A bare name now means
+the first binding ending so (`Domain::binding`), not a refusal when two do.
+Source: `ark` 5,458 → 4,956, `ark-dev` 1,705 → 2,142 (the reference domains
+and the runner, 400 lines, are now source), `ark-explorer` 2,254 → 2,251,
+`harken-server` 4,517 and bins 1,352 → 1,304; the default `tools/loc.sh`
+set 19,439 → 19,371; tests 444 passed (`ark` views 4 → 3, `ark-dev` +2;
+each new one falsified once). Not verified: the explorer's grid by a
+browse with a filter or a range (it sorts only; `Browse` is tested in the
+kernel); a second implementation running the vectors.
+
+**S3b** (`93d03a5`…): **one reconciler, two adapters.** What a phone did
+in `Remote.kt` and the server did for a Home Assistant speaker in
+`assistant.rs`'s `Bridge` — make a player agree with the listening session
+and say what happened to it — is one crate, `harken/player`
+(`harken-player`, over `harken-domain` and `ark-peer`). Its `Reconciler`
+looks at a `View { me, joined, epoch, listening, now }` (the domain's
+`host::Listening`) and drives a **`Sound`**: commands `load(queue, at, ms,
+playing, from)`, `jump`, `resume`, `pause`, `seek`, `let_go(follows)`,
+`wake_in`, `set_volume`, `join`/`unjoin`; readings `heard() -> Heard {
+queue (ids), at, playing (asked to), ready (has the hand-off), place:
+Unknown | Believed(ms) | Measured{ms, at}, ended, from }`, `take() ->
+Event { Stalled{at_ms} | Resumed | Lost{why} }`, `tracks`, `caps`,
+`volume`, `followers`. It answers through a `Say` (`call(transition,
+input, as_of, why)`, `play(RecordPlay)`). One code path, in order: `equip`
+once a connection where the entry differs from what the player can do; the
+rule for coming back; volume (read against what the player read after its
+own last write) and group, both ways; then output — load the session's whole
+queue, jump where the session moved, a move of the player's own said as
+`advance`/`jump` and waited for, `started` once ready, the queue's end once,
+a stall/resume said and not fought, play/pause, a seek where the session
+moved, a drift said (`report_position`, past `DRIFT_MS` its own `seek`) —
+or silent, let go once (no pause for a member of the new leader's group),
+or released and not taken back; plays counted once per load. Its **memory is
+rows**: `Mind` (volatile, an `Instance::ephemeral::<Minds>()`), each column a
+sum — `Alone{Quiet|Playing}`, `Role{Silent|Output|Released}`,
+`Handoff{None|Started{here}|Advanced{here}}`, `Expect{Nowhere|At}`,
+`Against{Nothing|Clock{here,clock}}`, `Waiting{Nothing|On{clock}}`,
+`Equipped{Not|Said{epoch,can_volume,family}}`,
+`Tuned{Untold|Told{wanted}|Settled{wanted,seen}}`, `Grouped{Untold|Told}` —
+and `Count { loaded: Nothing | Track{here, counted} }`, durable
+(`Instance::open::<Counts>`, the phone's under its replica's directory).
+`Player` drives one over a device's own peer: its calls, its plays in the
+log, a `Press` (the press → transition mapping, moved from Kotlin) and one
+view, `{me, joined, linked, epoch, listening, active, stats, refused}`,
+whose `active` is the session's while joined and the player's own alone.
+*Adapter 1*, `harken-server`'s `Speakers`: Home Assistant's polls read into
+`Heard`/`Event` (the hand-off fetched and its dropped seek said again, the
+blink, the stale date, the lapse, the URL spelt back, the speaker's own
+queue), commands as service calls (`Act`), which account holds a speaker;
+the `Bridge`'s decisions and its `Seen`/`released`-per-rule memory go, and
+all 14 HTTP tests (`tests/bridge.rs`) pass unchanged. *Adapter 2*, the
+phone: `harken/ffi`'s `Player` (UniFFI object) over a callback interface
+`PhoneSound` (UniFFI's `with_foreign`, as `Listener` already is), which
+`ExoSound` implements; `Remote.kt` and `Volumes` go, `Listen.kt` steps the
+Rust player, `Playback.kt`'s state layer draws `Heard.active` in both modes
+(its alone `read()` path goes; shuffle alone is the queue reordered, not a
+mode), and `Session.kt` keeps what the screens read (`Listening`, `Press`,
+`Picker`). iOS has the interface and a silent stand-in (`Player.swift`).
+Not done: subscribing with `peer.reconcile` — a speaker's machines are
+kernel machines on the hub, not `ark_peer::Peer`s, and the session is three
+volatile tables read whole, so both drivers call the reconciler on every
+change instead. Source: `harken-player` 884 (+405 tests), `harken-server`
+4,787 → 4,517 (its in-file tests 1,095 → 887 lines; the shipped adapter
+1,936 → ~1,875: the speaker's reading is most of what the bridge was),
+`harken/ffi` 123 → 274 (+523 tests), domain, `ark-peer`, `ark-ffi`
+unchanged; hand-written Kotlin main 12,269 → 11,800 (`Remote.kt`'s 757 gone, `Session.kt` 319 in), tests
+5,699 → 5,265; so the default Rust grows by 765 and Kotlin falls by 903,
+for one reconciler where there were two (three with the desktop's, which
+is `harken-iced`'s and untouched). Tests: Rust 445 passed (`RemoteTests`'s
+ten in `harken/ffi/tests/player.rs`, one more for a step told of its own
+change; the bridge's session rules as eight in `harken/player/tests`; its
+reading of the house as nineteen beside it), each new one falsified once;
+the app's JVM tests 99 (one skipped), run over a host-only library. Not
+verified: a phone or an iPhone running it (`Player.swift` not
+type-checked here), a real Home Assistant and Sonos.
+
+**S3a** (`dd26e71`…): **a peer is three instances wired; an effect is a
+row.** *Instances.* `ark_peer::Instance` (`instance.rs`) is one machine and
+what keeps it — a disk or none, the open from it (`stored`), every
+`Persist` written in order, a failed write kept with its failure
+(`flush`), and one fold rule, `Fold { keep, slack, rows }`: once the
+entries above the snapshot outnumber `keep + slack` (+ the rows held, when
+`rows`), all but `keep` are folded — a server `Fold::keep(k)` (keep `k`,
+fold at `2k`), a local instance `{0, 64, rows}`. It is over the machine,
+not a schema; typed access is layered on (`read::<S>`, `write::<S, P>`),
+so a `Peer` is three of one type — `log`, `live`, `local` — and the
+wiring: the link, the hub, frames, what it was told, and the routing of
+`Send`/`Fanout`/`To`/`Changes`/`Refused`/`Confirmed`, matched on which
+instance spoke. A closure's write is the kernel's `Input::Write { facts,
+now }` (an authority's only): an entry naming no function, whose facts a
+replay applies and nothing runs again — the fake `write` procedure,
+`admin::Raw` and `Handle::author`'s one-entry function go, and the admin
+page's raw write and `ark_auth::server::Hub::write` are the same input
+(`Peer::write`, `Handle::write`). `Local`'s columns are typed (`Origin`
+and `EntryId` describe as `Id`s, `Entry`, `Logged`, `(Seq, EntryHash)`):
+`ark_peer::Bytes` and its `read()?` chains go, `ark::row::Bytes` being a
+row's encoding as a column (the volatile space's); the volatile space and
+what waits are written whole. *Effects* (`ark::effect`, §1.16): a
+mutation may only record facts; acting on the world outside is a **job**,
+a row whose `state` is
+
+```
+Job<T> = Pending { due_ms } | Claimed { by, at_ms } | Done(T) | Failed { why, retry_ms } | Cancelled
+
+Pending ──claim, now ≥ due──► Claimed ──finish Ok──► Done(T)
+   │                           │  ▲  └──finish Err──► Failed ──claim, now ≥ retry──► Claimed
+   └──cancel──► Cancelled      └──┘ claim, now ≥ at + lease (another's claim)
+```
+
+`#[derive(Effect)]` (`#[effect(lease_ms, retry_ms, role, owner = field)]`,
+a minute each by default; one key column) registers, through
+`Effect::register::<S>`, `<table>.claim {id, by}` (refused unless due, and
+without the role), `<table>.finish {id, by, outcome}` (refused unless
+claimed by `by`), `<table>.cancel {id}` (refused unless pending, and but
+by the owner — or, with no owner, the role) and the query `<table>.due`;
+the authority's log order decides a claim against a cancel. A done job
+carries its outcome; a variant carrying one value is a record of it
+(`{"Done":{"value":…}}`), so the phones' generated types read it. Two
+registrations on a peer: **a handler**, `peer.handle::<R>(|peer, row|
+-> Result<R::Outcome, String>)`, a plain function on the driver's thread
+(ark-peer is pumped, not async: `Peer::jobs` runs at each `pump`, and
+`deadline` wakes for the nearest due): it keeps `R`'s rows not over from
+every durable change, claims each due one by a name drawn at
+registration, runs once the claim is confirmed with the row (its key the
+idempotency key) and the peer, and finishes with its answer — never in a
+replay, never on a peer that did not register it, and a claim from before
+a restart is due again only when its lease runs out; **a reconciler**,
+`peer.reconcile::<T>(space, view, input, |rows: Vec<T>|)`, told a view's
+typed rows at the start and on every change, no claim. Through the bridge
+a kind's due rows are `Peer::due(kind)` (rows as JSON, and when the next
+falls due), a view's rows stream through `view` as before, and the claim
+and the finish go through `mutate`. **The reference job** is the
+scanner's look: harken's `look` table (`Look { id, paths, state:
+Job<Looked> }`, `library.look`), asked at boot, on a rescan and per
+settled watch, done by the scanner's own handler with what it read and
+authored — no feature added (harken's schema `748e53c5…`, its pins
+re-derived in both formats; the phones' types regenerated). Not added: a
+simulator scenario (the simulator's domain is the demo, which the vectors
+pin). Source: `ark` 5,175 → 5,232 (Part A: `Input::Write`, the log's
+values as columns) → 5,458 (`domain/effect.rs`, 216), `ark-macros` 503 →
+570, `ark-peer` 2,518 → 2,414 (Part A) → 2,550 (`jobs.rs`, 121),
+`ark-ffi` 473 → 487, harken's domain 2,399 → 2,429, server 4,767 →
+4,787; the default `tools/loc.sh` set 19,013 → 18,966 (Part A) → 19,439.
+Part A came in at 2,414, not the ≈2,250 asked: the instance is one now,
+but the rows, `Shared`, `Logins` and `preset` stay. Tests 431 passed (10
+new, each falsified once). Not verified: a handler's lease against a
+look longer than ten minutes (another process's claim could take it,
+and the first's finish is then refused); a Kotlin or Swift handler (the
+bridge's `due` is tested from Rust; the phones' types regenerated, not
+compiled here); the browser's `localStorage` local instance (built for
+wasm32, not run).
+
+**S2** (`338333a`…`d9ec095`): **what a peer keeps beside its log is rows,
+by two concepts.** A table is `Durable` or `Volatile` (§1.3), nothing new; an
+instance is wired — a `Peer`, linked or serving — or not: an
+`ark_peer::Instance<S, P>`, a machine in the authority role never offered a
+link. So four combinations: durable synced (the app's log), volatile synced
+(its live state), **durable local** (`Instance::open(disk)`: the log's own
+`kv`/`log` format, one entry per write, folded into the rows whole once the
+entries outnumber the rows) and **ephemeral local** (`Instance::ephemeral()`:
+volatile tables, no journal). A write is a typed run over `Db<S, P>` whose
+changes are the one entry the machine sequences; a local table is a table of
+another `#[derive(Schema)]` struct, no attribute. `ark_peer::Local` holds the
+hub's journal (`origin` {origin, actor, last}, `verdict` {entry, why},
+`waiting` {origin, local, who, entry} — new: what waits behind a held intent
+now survives a restart), its volatile space as it closed (`volatile`, the
+space's rows and its log's row), a device's `replica` row (origin, last
+`local`, who last signed in, fork, joining) and `pending` {local, entry},
+under the `local.` names of the peer's disk (`Shared`); `ark_auth::remember`
+is the `login` table {server, user, name, email, roles, session, token,
+expiry} that `ark_peer::Logins` opens per app (or `Logins::at(dir)`, which
+harken-peer uses); harken-server's `HarkenLocal` (`print` {path, size, mtime,
+artist, covers}, `art` {name}: the pictures stay files) is the server's, not
+the domain's — the domain is what every peer links, phones too, and none of
+these rows reaches a log. Gone: the `journal`, `live`, `pending` (and its
+record format), `origin`, `fork`, `joining` and `who` blobs (a disk holding
+any is refused), `logins.json` and the per-server `localStorage` keys,
+`library-files.json`, harken-peer's `login.json`. **A run writes its own
+space's tables, and rustc says so**: `Row::Space` is `ark::db::Durable` or
+`Volatile` (the derive writes it from `#[ark(volatile)]`), `Db<S, P>` and
+`Tab<R, P>` carry the run's (`P = Durable` by default, `Domain::live` takes
+`Db<S, Volatile>`), and `insert`/`update`/`put`/`delete`/`remove` exist only
+where `R::Space = P` — a `compile_fail` doc-test in `db.rs` holds it; the
+machine's refusal stays for a function run on the other space's machine and
+for `Dynamic` rows. Source: `ark` 5,154 → 5,175, `ark-macros` 502 → 503,
+`ark-peer` 2,123 → 2,518 (`local.rs`, the instance, the schema, `Shared`,
+`Logins`, `preset`), `ark-auth` 1,051 → 1,037, harken's domain 2,399 (its 32
+live transitions take `Db<Harken, Volatile>`), server 4,742 → 4,767 and bins
+1,361 → 1,352; the default `tools/loc.sh` set 18,610 → 19,013 source — **up
+403, not the 700 down asked**: the nine formats were small (about 230 lines
+of codecs, file handling and blob names went), and rows cost a schema, a
+diff against what is kept and the instance. Tests 421 passed (10 new, each
+falsified once), no vector moved (the side blobs were never in one). Not
+verified: an old data directory is refused, not migrated (a device's pending
+intents, a server's refusals, a login, the prints — the last only a full
+read); the browser's `localStorage` path built, not run; the perf numbers
+not re-run (a mutate's local write is one entry, under 512 bytes at 8,000
+pending, as `a_mutate_writes_one_pending_record` holds).
+
+**S1** (`17fe168`…): **who is signed in is rows of the app's log.**
+`ark-auth` owns them: `SignIn` and `Role`, `Revoke`/`Grant`, the
+functions `session.revoke` (its owner's only), `session.current`,
+`session.mine`, `role.grant`/`role.revoke` (an `ADMIN`'s only), written
+once over any schema that is `AuthTables` (`ark_auth::install!(App)` for a
+schema whose `sign_in` and `role` fields are the two tables;
+`.with(ark_auth::register::<App>)`), and `feed(scope)` holding a
+connection's own person's sign-ins and roles. The token is the row's id
+and the server's HMAC of it, the key `session.key` in the data directory
+`Auth::open` is handed; `Auth::authenticate` judges a token by the HMAC and
+the row (live, its roles merged with the role table's and the
+configuration's), `Auth::watcher` names the connections the hub closes (a
+session revoked, gone or expired at the clock's tick, a person whose roles
+changed), `Auth::issue` writes the row through `server::Hub` (which
+`ark-peer`'s `Handle` is), `Auth::own` keeps a server's own peer's session
+across restarts. `ark-peer` plugs them in (`Server::auth`,
+`Handle::watched`) and reads them on a device (`Peer::current`,
+`Peer::sign_out`, the preview's roles joined by the session's); `ark-ffi`
+says `signed_in`, and `logout` revokes. Gone: `sessions.json` and
+`SessionStore`, `/auth/whoami`, `/auth/logout`, `issue/redeem/whoami/owns/
+revoke/on_revoke` of the store, `HARKEN_SESSION_KEY_FILE`. harken keeps
+two fields, the install line, the registration and its scope's table list
+(`session.feed`, fed with `HARKEN_SCOPED=1`). The dependency stays
+`ark-peer` → `ark-auth`: `ark-explorer`'s page links `ark-auth`, so the
+other way is a cycle; `ark-auth` speaks to the hub through `server::Hub`
+and the kernel's `Store`. Source: `ark-auth` 999 → 1,051 (the domain
+fragment 120, the hub's side; the 550–700 aimed at would mean cutting
+OIDC or the clients), `ark-peer` 2,041 → 2,123, harken's domain 2,373 →
+2,399, server 4,735 → 4,742, `ark-ffi` 469 → 473; `ark-auth`'s tests over
+a schema of their own (`tests/rows.rs`, 12, each falsified once). Not
+verified: a real OpenID Connect provider (the callback's row is written in
+`tests/oidc.rs` against the test's provider only); the phones (the
+generated types unmoved, the JVM and iOS builds not run here); the web
+client signing out in a browser.
 
 **N4** (`9907e0f`…): **the value format is postcard; the docs are the
 tree's.** `ark::format` writes rows, inputs, entries, frames, journal

@@ -37,8 +37,12 @@ fn songs(server: &Server) -> Vec<(String, String)> {
     out
 }
 
+/// The entries in the hub's log but the scanner's looks (asked, claimed,
+/// finished: `docs/plan-v5.md` S3a), which a rescan is.
 fn head(server: &Server) -> i64 {
-    server.running.hub.with(|h| h.log.log().head().0).unwrap()
+    let entries = server.running.hub.with(|h| h.log.log().entries()).unwrap();
+    let look = |f: &str| f == "library.look" || f.starts_with("look.");
+    entries.iter().filter(|l| !look(&l.entry.func)).count() as i64
 }
 
 /// Wait until there are `want` songs, then a little longer, so that a
@@ -137,17 +141,21 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
     // of its own that has never seen any of it. It catches up first, so the
     // rescan authors nothing at all — not even entries the procedure would
     // make no-ops of.
-    let before = head(&server);
     let scanned = server.scanner.as_ref().unwrap().authored();
     assert_eq!(scanned, 5, "one entry per song, never a second");
     let dir = root.path().join("fresh-scanner");
     let login = server
         .auth
-        .issue(&ark_auth::Account {
-            id: "library".into(),
-            ..Default::default()
-        })
+        .issue(
+            &ark_auth::Account {
+                id: "library".into(),
+                ..Default::default()
+            },
+            "a test",
+        )
         .unwrap();
+    // After its sign-in, itself an entry.
+    let before = head(&server);
     let again = harken_server::library::Scanner::start(
         media.clone(),
         hosted().clone(),
@@ -345,7 +353,8 @@ fn fetch(server: &Server, art: &str) -> (String, Vec<u8>) {
 /// an extracted picture without its extension, which is all that tells
 /// `/media` its type: the value had none; and by keeping the pictures in
 /// the data directory itself rather than in its `art`:
-/// `/media/.art/library-files.json` answered 200.
+/// `/media/.art/library-files.json` answered 200 (the prints were a
+/// file of the data directory then).
 #[test]
 fn a_record_takes_its_cover_from_beside_it_or_from_inside_its_tracks() {
     let rt = runtime();
@@ -432,13 +441,13 @@ fn a_record_takes_its_cover_from_beside_it_or_from_inside_its_tracks() {
         "the probe reaches the server"
     );
     for path in [
-        "/media/.art/library-files.json",
-        "/media/.art/../library-files.json",
-        "/media/.art/%2e%2e/library-files.json",
-        "/media/.art/..%2flibrary-files.json",
-        "/media/.cover/x/../../data/library-files.json",
-        "/media/.cover/x/%2e%2e/data/library-files.json",
-        "/media/%2e%2e/data/library-files.json",
+        "/media/.art/library-files/log",
+        "/media/.art/../library-files/log",
+        "/media/.art/%2e%2e/library-files/log",
+        "/media/.art/..%2flibrary-files/log",
+        "/media/.cover/x/../../data/library-files/log",
+        "/media/.cover/x/%2e%2e/data/library-files/log",
+        "/media/%2e%2e/data/library-files/log",
     ] {
         assert_ne!(raw_status(&server, path), 200, "{path}");
     }
@@ -624,7 +633,7 @@ fn a_rescan_of_nothing_new_reads_nothing() {
     // A library from before covers were found: the cover is there now, and
     // no file of prints says what was offered.
     picture(&album.join("folder.jpg"), JPEG);
-    std::fs::remove_file(data.join("library-files.json")).unwrap();
+    std::fs::remove_dir_all(data.join("library-files")).unwrap();
     let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
     let got = eventually(10, || {
         art(&server, "album", "Gymnopedies").filter(|a| !a.is_empty())
@@ -644,7 +653,8 @@ fn a_rescan_of_nothing_new_reads_nothing() {
     let after = head(&server);
     rt.block_on(server.stop());
 
-    std::fs::write(data.join("library-files.json"), b"{ not json").unwrap();
+    std::fs::write(data.join("library-files/log"), b"{ not a record").unwrap();
+    let _ = std::fs::remove_file(data.join("library-files/kv"));
     let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
     let scanner = server.scanner.as_ref().unwrap();
     eventually(10, || (scanner.read() == 3).then_some(()));
@@ -655,5 +665,53 @@ fn a_rescan_of_nothing_new_reads_nothing() {
         "an unreadable file of prints is one full read"
     );
     assert_eq!(head(&server), after);
+    rt.block_on(server.stop());
+}
+
+/// A look is a job (`docs/plan-v5.md` S3a): the scanner asks for one at
+/// boot and on a rescan, its handler claims and does it, and the row is
+/// done with what it read and authored. Falsified by the scanner
+/// registering no handler: the looks stayed pending and no song came.
+#[test]
+fn a_look_is_a_job_the_scanner_does() {
+    use ark::effect::Job;
+    use harken_server::domain::{Look, Looked};
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    for n in 1..=2 {
+        let file = media.join(format!("music/Satie/{n}.wav"));
+        put(
+            root.path(),
+            &file,
+            &format!("Gnossienne {n}"),
+            "Satie",
+            "Gnossiennes",
+            None,
+        );
+    }
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    settle(&server, 2);
+    server.scanner.as_ref().unwrap().rescan();
+    let done = |n: usize| {
+        eventually(20, || {
+            let looks = hub_rows::<Look>(&server, "look");
+            let done: Vec<Job<Looked>> = looks
+                .into_iter()
+                .map(|l| l.state)
+                .filter(|s| matches!(s, Job::Done(_)))
+                .collect();
+            (done.len() >= n).then_some(done)
+        })
+        .expect("the looks done")
+    };
+    let read = |l: &Job<Looked>| match l {
+        Job::Done(l) => (l.read, l.authored),
+        _ => (0, 0),
+    };
+    let looks = done(2);
+    let mut looked: Vec<(i64, i64)> = looks.iter().map(read).collect();
+    looked.sort();
+    assert_eq!(looked, [(0, 0), (2, 2)], "the rescan's, and the boot's");
     rt.block_on(server.stop());
 }

@@ -294,10 +294,10 @@ answers in lines: `ok`; `connections N`; the log's `head` and `horizon`;
 `domain <schema hash> <version> current`; and a `room <account> peers N`
 line per account with a connection open. What the data directory holds,
 and whose each file is, is `server/README.md`'s table: the log is
-`log/snapshot` and `log/chain` (the chain of entries, each with its facts,
-the state after it and the hash of the chain to it), `log/journal`,
-`log/live`, `sessions.json`, and the scanner's `library/`,
-`library-files.json` and `art/`.
+`log/kv` and `log/log` (the rows it stands on, and the entries above them,
+each with its facts, the state after it and the hash of the chain to it),
+the hub's own rows `log/local.kv` and `log/local.log`, `session.key`, and
+the scanner's `library/`, `library-files/` and `art/`.
 
 v4's `arkc backup`, `restore` and `verify-log` are not ported. A stopped
 server's data directory is the backup: copy it whole. (On open a chain

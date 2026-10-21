@@ -12,8 +12,9 @@ written down as vectors under `vectors/`:
   input by input (`trace/`);
 - **the frames** — every frame of each kind, each side, each space
   (`protocol/`);
-- **the views** — a plan, a store and a script of changes, the answer and
-  the patches after each (`views/`).
+- **the views** — a named view of a reference domain, its input, a store
+  and a script of row changes, the answer and the patches after each
+  (`views/`).
 
 The vectors are the kernel's regression suite and the contract its other
 builds keep: the wasm build the browser runs and the FFI library the
@@ -23,8 +24,8 @@ every peer that will ever read an older one's bytes. `rust/ark/tests` and
 them to what is on disk; written over an empty `vectors/` they are the
 tree byte for byte (the flake's `vectors` check). Each module's doc
 comment is the prose; where a module and this file disagree, the module
-is right. `RUNNERS.md` says what `ark-dev` does with `protocol/`, `trace/`
-and `rebase/`; `AUTHORING.md` is writing a domain.
+is right. `RUNNERS.md` says what `ark-dev` does with `protocol/`, `trace/`,
+`rebase/` and `views/`; `AUTHORING.md` is writing a domain.
 
 ## The modules
 
@@ -38,7 +39,7 @@ and `rebase/`; `AUTHORING.md` is writing a domain.
 | 1.6 | `log.rs` | `Entry`, `Logged`, the chain `sha256(prev ‖ enc(seq, entry, facts, state))`; ids from `(origin, local)`, row ids the entry's draws; `Snapshot`; what a peer makes durable (`Record`, `Durable`) |
 | 1.7–1.9 | `peer.rs` | the one sans-io machine, replica or authority (alone is an authority with a fork): sequencing, dedupe, judging, the rebase, compaction, going alone and joining, a held intent, opening a log (each entry read once; a grown schema keeps it); partial sync (`Feed`, `scoped`); the volatile space |
 | 1.10 | `plan.rs` | maintained views: `scan`, `filter`, `map`, `sort`, `take`, `group`, `join` over typed rows, each kept from deltas, a closure's reads recorded and re-run only for what a change hits; the answer a fresh run's, the patches splicing |
-| 1.10 | `dynamic.rs` | the same plans over rows as JSON, a plan written as JSON: what the explorer and the `views/` vectors use |
+| 1.16 | `dynamic.rs` | a row without a Rust type as JSON under the schema, its bytes and its key's; a table browsed (`Browse`: equal columns, a key range, a sort by a column, the first `n`) as a plan of the same operators, kept by patches: what the explorer's grids use |
 | 1.11 | `frames.rs` | the four frames — `Hello`, `Page`, `Snapshot`, `Verdict` — in the value format; no frame carries code |
 | 1.16 | `row.rs` | `Row`, `Input` and its refinements (the form's words), `Describe` and `Type`, `Id`, typed indexes |
 | 1.16 | `db.rs` | the typed store a function reads and writes, a run reading its own writes, a refusal undoing them |
@@ -59,7 +60,7 @@ writer's own runner must fail.
 | directory | written by | one vector is | holds |
 |---|---|---|---|
 | `hash/` | `rust/ark/tests/hash.rs` | a store under its schema: each row's bytes and leaf, each table's digest, the state hash | §1.1, §1.3 |
-| `views/` | `rust/ark/tests/views.rs` | a store, a plan (JSON) and batches of changes: after each, the answer and the patches | §1.10 |
+| `views/` | `rust/ark-dev/tests/views.rs` | a view named in a reference domain (`rust/ark-dev/src/library.rs`), its input, a store and batches of row changes: after each, the answer and the patches | §1.10 |
 | `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes in each space: its bytes, and its JSON | §1.11 |
 | `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session: what its two machines were given and said, and where they stood | §1.7, §1.9 |
 | `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed, and the fuzzer's sessions that once found a bug: where each stands settled | §1.6, §1.7 |

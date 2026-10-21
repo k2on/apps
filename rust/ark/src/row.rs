@@ -27,7 +27,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
+use crate::hash::{EntryHash, StateHash};
+use crate::log::{Entry, EntryId, Logged, Origin};
 use crate::schema::{Column, Table};
+use crate::store::Change;
 use crate::Refusal;
 
 /// A value a domain stores, takes or answers: its bytes in the value
@@ -147,7 +150,52 @@ macro_rules! tuples {
         }
     )*};
 }
-tuples!((A)(A, B)(A, B, C)(A, B, C, D));
+tuples!((A)(A, B)(A, B, C)(A, B, C, D)(A, B, C, D, E));
+
+/// Bytes as a column, `Type::Bytes`: a row's encoding kept as it is.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Bytes(pub Vec<u8>);
+
+// The log's own values as columns (what a peer keeps beside its log): an
+// origin and an entry's id are sixteen bytes as an `Id` is (hex in JSON and
+// in a key); a hash is bytes, hex in JSON, which `json`'s `Bytes` does not
+// read: no schema holding one is read through JSON.
+leaf!(Bytes => Type::Bytes, Origin => Type::Id("origin".into()), EntryId => Type::Id("entry".into()), EntryHash => Type::Bytes, StateHash => Type::Bytes);
+
+macro_rules! fields {
+    ($($f:ident: $t:expr),*) => { vec![$((stringify!($f).to_string(), $t)),*] };
+}
+
+impl Describe for Entry {
+    fn describe() -> Type {
+        use Type::{Bytes as B, Int, Text};
+        let (id, origin, roles) = (EntryId::describe(), Origin::describe(), Vec::<String>::describe());
+        let fs = fields! { id: id, actor: Text, session: Text, origin: origin, local: Int, roles: roles, func: Text, input: B, now: Int };
+        Type::Record("Entry".into(), fs)
+    }
+}
+
+impl Describe for Change {
+    fn describe() -> Type {
+        use Type::{Bytes as B, Text};
+        let (one, two) = (fields! { table: Text, row: B }, fields! { table: Text, old: B, new: B });
+        Type::Sum(
+            "Change".into(),
+            vec![("add".into(), one.clone()), ("remove".into(), one), ("edit".into(), two)],
+        )
+    }
+}
+
+impl Describe for Logged {
+    fn describe() -> Type {
+        let (entry, facts, b) = (Entry::describe(), Vec::<Change>::describe(), Type::Bytes);
+        Type::Record(
+            "Logged".into(),
+            fields! { seq: Type::Int, entry: entry, facts: facts, state: b.clone(), hash: b },
+        )
+    }
+}
 
 // * Ids
 
@@ -231,6 +279,9 @@ pub trait Row: Value + Describe {
     const TABLE: &'static str;
     /// The key's fields, as a tuple (one field: a one-tuple).
     type Key: Value;
+    /// Its space as a type (`#[ark(volatile)]`): which runs write it
+    /// ([`crate::db`]).
+    type Space: crate::db::Writes;
     fn key(&self) -> Self::Key;
     /// The table: its columns (the fields, in order), key, indexes,
     /// references and space.

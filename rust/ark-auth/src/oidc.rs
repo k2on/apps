@@ -50,7 +50,7 @@ pub struct Challenge {
 
 impl Challenge {
     pub fn new() -> Self {
-        use crate::session::random_token;
+        use crate::server::random_token;
         Challenge {
             state: random_token(),
             nonce: random_token(),

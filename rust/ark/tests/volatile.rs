@@ -49,7 +49,7 @@ pub struct Wave {
 
 /// `wave(name)`: the caller's row of `here`, put.
 #[live("waves.wave")]
-pub fn wave(ctx: &Ctx, db: &mut Db<Waves>, input: Wave) -> Result<(), Refusal> {
+pub fn wave(ctx: &Ctx, db: &mut Db<Waves, Volatile>, input: Wave) -> Result<(), Refusal> {
     db.here.delete(ctx.device())?;
     db.here.insert(Here {
         session: ctx.device().into(),

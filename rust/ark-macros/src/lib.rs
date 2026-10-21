@@ -32,6 +32,14 @@ pub fn describe(input: TokenStream) -> TokenStream {
     domain::describe_derive(syn::parse_macro_input!(input as syn::DeriveInput)).into()
 }
 
+/// `#[derive(Effect)]`: a row whose `state` field is an `ark::effect::Job<T>`
+/// as a job (`ark::effect::Effect`), `#[effect(lease_ms = .., retry_ms = ..,
+/// role = "..", owner = field)]` optionally.
+#[proc_macro_derive(Effect, attributes(effect))]
+pub fn effect(input: TokenStream) -> TokenStream {
+    domain::effect(syn::parse_macro_input!(input as syn::DeriveInput)).into()
+}
+
 /// `#[derive(Schema)]`: a struct of tables, each field a row type, as the
 /// schema and its handles (`ark::db::Tables`).
 #[proc_macro_derive(Schema)]

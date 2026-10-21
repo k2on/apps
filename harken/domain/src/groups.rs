@@ -19,13 +19,13 @@ pub fn in_group(present: &Present, leader: &str) -> bool {
     present.id == leader || present.follows.as_deref() == Some(leader)
 }
 
-fn entry(db: &Db<Harken>, user: &str, device: &str) -> Option<ListeningDevice> {
+fn entry(db: &Db<Harken, Volatile>, user: &str, device: &str) -> Option<ListeningDevice> {
     db.listening_device.get((user.to_string(), device.to_string()))
 }
 
 /// Whether `id` can be joined to the group `leader` leads now: a speaker
 /// that is here, can play, of the leader's family, and not the leader.
-pub fn joinable(db: &Db<Harken>, user: &str, leader: &str, id: &str) -> bool {
+pub fn joinable(db: &Db<Harken, Volatile>, user: &str, leader: &str, id: &str) -> bool {
     let family = entry(db, user, leader).and_then(|e| if e.present.follows.is_none() { e.present.family } else { None });
     entry(db, user, id).is_some_and(|e| {
         let p = &e.present;
@@ -34,14 +34,14 @@ pub fn joinable(db: &Db<Harken>, user: &str, leader: &str, id: &str) -> bool {
 }
 
 /// The group `leader` leads, those of it that have a volume.
-pub fn voiced(db: &Db<Harken>, user: &str, leader: &str) -> Vec<ListeningDevice> {
+pub fn voiced(db: &Db<Harken, Volatile>, user: &str, leader: &str) -> Vec<ListeningDevice> {
     devices_of(db, user)
         .into_iter()
         .filter(|e| in_group(&e.present, leader) && e.present.can_volume)
         .collect()
 }
 
-pub fn group_tally(db: &Db<Harken>, user: &str, leader: &str) -> Tally {
+pub fn group_tally(db: &Db<Harken, Volatile>, user: &str, leader: &str) -> Tally {
     let voiced = voiced(db, user, leader);
     Tally {
         n: voiced.len() as i64,
@@ -51,7 +51,7 @@ pub fn group_tally(db: &Db<Harken>, user: &str, leader: &str) -> Tally {
 
 /// The group's volume: the mean of its members', rounded down; 0 for a
 /// group with no volume at all.
-pub fn group_level(db: &Db<Harken>, user: &str, leader: &str) -> i64 {
+pub fn group_level(db: &Db<Harken, Volatile>, user: &str, leader: &str) -> i64 {
     let tally = group_tally(db, user, leader);
     tally.sum / tally.n.max(1)
 }
@@ -68,7 +68,7 @@ pub fn scaled(level: i64, from: i64, to: i64) -> i64 {
 }
 
 /// Every device of the account's for which `f` says a new entry, written.
-fn each(db: &mut Db<Harken>, user: &str, devices: Vec<ListeningDevice>, f: impl Fn(&Present) -> Option<Present>) -> Result<(), Refusal> {
+fn each(db: &mut Db<Harken, Volatile>, user: &str, devices: Vec<ListeningDevice>, f: impl Fn(&Present) -> Option<Present>) -> Result<(), Refusal> {
     for e in devices {
         if let Some(p) = f(&e.present) {
             put_present(db, user, &e.device, p)?;
@@ -79,7 +79,7 @@ fn each(db: &mut Db<Harken>, user: &str, devices: Vec<ListeningDevice>, f: impl 
 
 /// The group `leader` leads at the level `to`: every member with a volume
 /// moved in proportion and unmuted.
-pub fn group_at(db: &mut Db<Harken>, user: &str, leader: &str, to: i64) -> Result<(), Refusal> {
+pub fn group_at(db: &mut Db<Harken, Volatile>, user: &str, leader: &str, to: i64) -> Result<(), Refusal> {
     let from = group_level(db, user, leader);
     let members = voiced(db, user, leader);
     each(db, user, members, |p| {
@@ -92,13 +92,13 @@ pub fn group_at(db: &mut Db<Harken>, user: &str, leader: &str, to: i64) -> Resul
 }
 
 /// The group `leader` leads, every member with a volume muted or not.
-pub fn group_muted(db: &mut Db<Harken>, user: &str, leader: &str, muted: bool) -> Result<(), Refusal> {
+pub fn group_muted(db: &mut Db<Harken, Volatile>, user: &str, leader: &str, muted: bool) -> Result<(), Refusal> {
     let members = voiced(db, user, leader);
     each(db, user, members, |p| Some(Present { muted, ..p.clone() }))
 }
 
 /// `id` follows nobody, and nobody follows it.
-pub fn dissolved(db: &mut Db<Harken>, user: &str, id: &str) -> Result<(), Refusal> {
+pub fn dissolved(db: &mut Db<Harken, Volatile>, user: &str, id: &str) -> Result<(), Refusal> {
     let members = devices_of(db, user);
     each(db, user, members, |p| {
         (p.id == id || p.follows.as_deref() == Some(id)).then(|| Present { follows: None, ..p.clone() })
@@ -106,7 +106,7 @@ pub fn dissolved(db: &mut Db<Harken>, user: &str, id: &str) -> Result<(), Refusa
 }
 
 /// `id` follows `leader`; whoever followed `id` follows nobody.
-pub fn followed(db: &mut Db<Harken>, user: &str, id: &str, leader: &str) -> Result<(), Refusal> {
+pub fn followed(db: &mut Db<Harken, Volatile>, user: &str, id: &str, leader: &str) -> Result<(), Refusal> {
     let all = devices_of(db, user);
     each(db, user, all, |p| {
         if p.id == id {
@@ -124,7 +124,7 @@ pub fn followed(db: &mut Db<Harken>, user: &str, id: &str, leader: &str) -> Resu
 
 /// The sound handed to `to`: if it was following a leader, it leads that
 /// group now, as Sonos makes a member the coordinator when it is picked.
-pub fn led_by(db: &mut Db<Harken>, user: &str, to: &str) -> Result<(), Refusal> {
+pub fn led_by(db: &mut Db<Harken, Volatile>, user: &str, to: &str) -> Result<(), Refusal> {
     let was = entry(db, user, to).and_then(|e| e.present.follows);
     let all = devices_of(db, user);
     each(db, user, all, |p| {
@@ -144,7 +144,7 @@ pub fn led_by(db: &mut Db<Harken>, user: &str, to: &str) -> Result<(), Refusal> 
 /// The leader `caller`'s word on who follows it: each member that is here
 /// and of its family follows it; whoever followed it and is not named, or
 /// followed a device that is a member now, follows nobody.
-pub fn regrouped(db: &mut Db<Harken>, user: &str, caller: &str, members: &[String]) -> Result<(), Refusal> {
+pub fn regrouped(db: &mut Db<Harken, Volatile>, user: &str, caller: &str, members: &[String]) -> Result<(), Refusal> {
     let family = entry(db, user, caller).and_then(|e| e.present.family);
     let all = devices_of(db, user);
     each(db, user, all, |p| {
@@ -165,18 +165,18 @@ pub fn regrouped(db: &mut Db<Harken>, user: &str, caller: &str, members: &[Strin
 
 /// Whether the output is a device that is here and something in its group
 /// has a volume: what every group transition is guarded by.
-pub fn group_has_volume(db: &Db<Harken>, user: &str) -> bool {
+pub fn group_has_volume(db: &Db<Harken, Volatile>, user: &str) -> bool {
     output_id(&session_of(db, user)).is_some_and(|leader| group_tally(db, user, &leader).n > 0)
 }
 
 /// The output's id: the leader the group transitions move.
-pub fn leader(db: &Db<Harken>, user: &str) -> Result<String, Refusal> {
+pub fn leader(db: &Db<Harken, Volatile>, user: &str) -> Result<String, Refusal> {
     output_id(&session_of(db, user)).ok_or_else(|| Refusal::new("unwrapped none"))
 }
 
 /// A speaker joins the output's group; whatever followed it follows nobody.
 #[live("listening.join")]
-pub fn join(ctx: &Ctx, db: &mut Db<Harken>, input: Member) -> Result<(), Refusal> {
+pub fn join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), Refusal> {
     let Some(leader) = output_id(&session_of(db, ctx.user())) else {
         return refuse("nothing is playing to join");
     };
@@ -188,7 +188,7 @@ pub fn join(ctx: &Ctx, db: &mut Db<Harken>, input: Member) -> Result<(), Refusal
 
 /// …and leaves whatever group it is in.
 #[live("listening.unjoin")]
-pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken>, input: Member) -> Result<(), Refusal> {
+pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), Refusal> {
     if !entry(db, ctx.user(), &input.device).is_some_and(|e| e.present.follows.is_some()) {
         return refuse("that device is not in a group");
     }
@@ -198,7 +198,7 @@ pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken>, input: Member) -> Result<(), Refus
 
 /// A leader's word on who follows it, changed outside harken.
 #[live("listening.report_group")]
-pub fn report_group(ctx: &Ctx, db: &mut Db<Harken>, input: ReportGroup) -> Result<(), Refusal> {
+pub fn report_group(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportGroup) -> Result<(), Refusal> {
     if !entry(db, ctx.user(), ctx.device()).is_some_and(|e| e.present.family.is_some()) {
         return refuse("not here, or not a speaker that groups");
     }
@@ -206,7 +206,7 @@ pub fn report_group(ctx: &Ctx, db: &mut Db<Harken>, input: ReportGroup) -> Resul
 }
 
 /// The guard of every group transition.
-fn grouped(ctx: &Ctx, db: &Db<Harken>) -> Result<(), Refusal> {
+fn grouped(ctx: &Ctx, db: &Db<Harken, Volatile>) -> Result<(), Refusal> {
     if !group_has_volume(db, ctx.user()) {
         return refuse("nothing playing has a volume");
     }
@@ -215,14 +215,14 @@ fn grouped(ctx: &Ctx, db: &Db<Harken>) -> Result<(), Refusal> {
 
 /// The output's group at a level, every member in proportion, unmuted.
 #[live("listening.set_group_volume")]
-pub fn set_group_volume(ctx: &Ctx, db: &mut Db<Harken>, input: GroupVolume) -> Result<(), Refusal> {
+pub fn set_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupVolume) -> Result<(), Refusal> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
     group_at(db, ctx.user(), &leader, input.level)
 }
 
 #[live("listening.nudge_group_volume")]
-pub fn nudge_group_volume(ctx: &Ctx, db: &mut Db<Harken>, input: GroupNudge) -> Result<(), Refusal> {
+pub fn nudge_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupNudge) -> Result<(), Refusal> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
     let to = (group_level(db, ctx.user(), &leader) + input.delta).clamp(0, 100);
@@ -230,7 +230,7 @@ pub fn nudge_group_volume(ctx: &Ctx, db: &mut Db<Harken>, input: GroupNudge) -> 
 }
 
 #[live("listening.set_group_mute")]
-pub fn set_group_mute(ctx: &Ctx, db: &mut Db<Harken>, input: GroupMute) -> Result<(), Refusal> {
+pub fn set_group_mute(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupMute) -> Result<(), Refusal> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
     group_muted(db, ctx.user(), &leader, input.muted)

@@ -180,7 +180,7 @@ impl Peer {
 
     /// The one timer the link needs: the next dial.
     pub fn deadline(&self) -> Option<u64> {
-        self.link.due
+        self.link.due.into_iter().chain(self.due()).min()
     }
 
     /// Whether a connection is being made.
@@ -239,6 +239,7 @@ impl Peer {
             }
         }
         self.tick(crate::now_ms());
+        self.jobs(crate::now_ms());
         self.flush();
         p
     }

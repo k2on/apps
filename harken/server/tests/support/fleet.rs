@@ -170,6 +170,36 @@ pub fn function(e: &Logged) -> String {
     }
 }
 
+/// Whether an entry is a sign-in: the hub's own raw write of a `sign_in`
+/// row (`docs/plan-v5.md` S1), which every login now is.
+pub fn is_sign_in(e: &Logged) -> bool {
+    e.entry.func.is_empty() && e.facts.iter().all(|c| c.table() == "sign_in")
+}
+
+/// Whether an entry is the scanner's own bookkeeping of a look: asking for
+/// one, claiming it, finishing it (`docs/plan-v5.md` S3a).
+pub fn is_look(e: &Logged) -> bool {
+    e.entry.func == "library.look" || e.entry.func.starts_with("look.")
+}
+
+impl Log {
+    /// How many of its entries are neither sign-ins nor looks: the work in
+    /// it.
+    pub fn work(&self) -> i64 {
+        self.entries
+            .iter()
+            .filter(|e| !is_sign_in(e) && !is_look(e))
+            .count() as i64
+    }
+}
+
+impl Converged {
+    /// How many entries above the horizon are not sign-ins.
+    pub fn work(&self) -> i64 {
+        self.log.work()
+    }
+}
+
 /// The rows an entry added to `table`.
 pub fn added<T: Encode>(e: &Logged, table: &str) -> Vec<T> {
     e.facts
@@ -801,11 +831,16 @@ impl PeerProc {
             .unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 
-    /// The token the remembered login proves, from `DIR/login.json`.
+    /// The token the remembered login proves, from `DIR/logins`.
     pub fn token(&self) -> String {
-        let body = std::fs::read_to_string(self.dir.join("login.json")).unwrap();
-        let v: Value = serde_json::from_str(&body).unwrap();
-        text(&v["login"]["token"])
+        let logins = ark_peer::Instance::open::<ark_auth::remember::Remembered>(Box::new(
+            ark_peer::Files::new(self.dir.join("logins")).unwrap(),
+        ));
+        logins
+            .read::<ark_auth::remember::Remembered, _>(|db| db.login.scan())
+            .pop()
+            .expect("a login remembered")
+            .token
     }
 
     /// `kill -9`: whatever was not written is gone; the directory stays.

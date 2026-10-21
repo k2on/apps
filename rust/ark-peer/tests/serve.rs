@@ -250,7 +250,7 @@ fn nothing_is_delivered_before_it_is_written() {
     let alice = dev("alice@laptop").unwrap();
     let c = hub.accept(alice.clone());
     assert!(hub.frame(c, push(&alice, 1, "Road"), 1).is_empty());
-    assert!(hub.failure.as_deref().is_some_and(|f| f.contains("the disk is full")));
+    assert!(hub.failure().is_some_and(|f| f.contains("the disk is full")));
     fail.store(false, Ordering::Relaxed);
     let out = hub.release();
     let frames: Vec<Frame> = out.iter().map(|(_, b)| Frame::dec(b).unwrap()).collect();
@@ -267,7 +267,7 @@ fn nothing_is_delivered_before_it_is_written() {
         ),
         "{frames:?}"
     );
-    assert!(hub.failure.is_none());
+    assert!(hub.failure().is_none());
 }
 
 /// A refusal is kept beside the log: after a restart the session's next
@@ -292,7 +292,7 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
         })
     };
     assert!(refused(&hub.frame(c, push(&alice, 1, " "), 1)), "a playlist needs a name");
-    let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
+    let disk = hub.log.disk.take().unwrap();
     let mut hub = Peer::serve(config(), disk, 0);
     let c = hub.accept(alice.clone());
     let out = hub.frame(c, push(&alice, 2, "Road"), 1);
@@ -330,44 +330,6 @@ fn a_web_build_is_its_own_validator() {
     std::fs::write(dir.path().join("index.html"), b"a page").unwrap();
     assert_eq!(build_tag(dir.path(), m), named, "named, only the module is the build");
     assert_ne!(build_tag(dir.path(), None), whole);
-}
-
-/// Signing in through `ark-auth`: a login's token is the session it was
-/// issued, and a sign-out closes it. Falsified by the builder reading
-/// tokens the dev way whatever `auth` says: the entry's actor was the
-/// token itself, not carol.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_login_is_the_connection_and_a_sign_out_closes_it() {
-    use ark_auth::server::{Auth, Mode};
-    let auth = Arc::new(Auth::new(ark_auth::session::SessionStore::memory(), Mode::Dev, "http://127.0.0.1"));
-    let login = auth
-        .issue(&ark_auth::Account {
-            id: "carol".into(),
-            ..Default::default()
-        })
-        .unwrap();
-    let running = Server::new(config()).auth(auth.clone()).listen("127.0.0.1:0").await.unwrap();
-    let url = format!("ws://{}/sync", running.addr);
-    let (token, session) = (login.token.clone(), login.session.clone());
-    let hub = running.hub.clone();
-    tokio::task::spawn_blocking(move || {
-        let (wake, rx) = bell();
-        let mut c = (peer(ark_peer::who(&login)), rx);
-        c.0.set_waker(wake);
-        c.0.link.backoff = (5, 20);
-        c.0.set_token(Some(token.clone()));
-        c.0.connect(&url);
-        until(&mut c, "carol linked", |c, _| c.linked);
-        create(&mut c.0, "Carol's");
-        until(&mut c, "confirmed", |c, _| c.log.log().head().0 == 1);
-        assert_eq!(c.0.log.log().entries()[0].entry.session, session);
-        assert_eq!(hub.with(|h| h.log.log().entries()[0].entry.actor.clone()).unwrap(), "carol");
-        auth.revoke(&token).unwrap();
-        until(&mut c, "closed", |_, p| !p.closed.is_empty());
-    })
-    .await
-    .unwrap();
-    running.stop().await;
 }
 
 /// The live space across a restart: what the hub held when it closed is
@@ -408,7 +370,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         "here, and a pointer"
     );
     hub.close();
-    let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
+    let disk = hub.log.disk.take().unwrap();
     let hub = Peer::serve(config, disk, 3);
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),

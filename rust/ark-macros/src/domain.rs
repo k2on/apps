@@ -67,8 +67,12 @@ impl Parse for Item {
 }
 
 fn items(attrs: &[syn::Attribute]) -> syn::Result<Vec<Vec<Item>>> {
+    items_of(attrs, "ark")
+}
+
+fn items_of(attrs: &[syn::Attribute], name: &str) -> syn::Result<Vec<Vec<Item>>> {
     let mut out = vec![];
-    for a in attrs.iter().filter(|a| a.path().is_ident("ark")) {
+    for a in attrs.iter().filter(|a| a.path().is_ident(name)) {
         let list = a.meta.require_list()?;
         out.push(
             Punctuated::<Item, Token![,]>::parse_terminated
@@ -122,6 +126,70 @@ fn describe(input: &DeriveInput) -> TokenStream {
         impl ::ark::row::Describe for #name {
             fn describe() -> ::ark::row::Type {
                 #body
+            }
+        }
+    }
+}
+
+/// `Effect` for a row: its `state: Job<T>` field, and what `#[effect(..)]`
+/// says — the lease and the retry (a minute each by default), the role a
+/// claim needs, the field naming its owner.
+pub fn effect(input: DeriveInput) -> TokenStream {
+    let name = &input.ident;
+    let fields = match fields_of(&input) {
+        Ok(f) => f,
+        Err(e) => return e,
+    };
+    let state = fields.named.iter().find(|f| f.ident.as_ref().is_some_and(|i| i == "state"));
+    let outcome = state.and_then(|f| match &f.ty {
+        Type::Path(p) => match &p.path.segments.last()?.arguments {
+            syn::PathArguments::AngleBracketed(a) if p.path.segments.last()?.ident == "Job" => a.args.first().cloned(),
+            _ => None,
+        },
+        _ => None,
+    });
+    let Some(outcome) = outcome else {
+        return err(name.span(), "a job is a row with a `state: Job<T>` field");
+    };
+    let keyed = |f: &&syn::Field| matches!(items(&f.attrs), Ok(i) if i.iter().flatten().any(|i| matches!(i, Item::Flag(k) if k == "key")));
+    let keys: Vec<&syn::Field> = fields.named.iter().filter(keyed).collect();
+    let [key] = keys[..] else {
+        return err(name.span(), "a job is keyed by one column");
+    };
+    let (key, key_ty) = (key.ident.as_ref().unwrap(), &key.ty);
+    let (mut lease, mut retry, mut role, mut owner) = (quote!(60_000), quote!(60_000), quote!(None), quote!());
+    let its = match items_of(&input.attrs, "effect") {
+        Ok(i) => i,
+        Err(e) => return e.to_compile_error(),
+    };
+    for it in its.into_iter().flatten() {
+        match it {
+            Item::Is(n, e) if n == "lease_ms" => lease = e.to_token_stream(),
+            Item::Is(n, e) if n == "retry_ms" => retry = e.to_token_stream(),
+            Item::Is(n, e) if n == "role" => role = quote!(Some(#e)),
+            Item::Is(n, Expr::Path(f)) if n == "owner" => owner = quote!(fn owner(&self) -> Option<&str> { Some(&self.#f) }),
+            _ => return err(name.span(), "#[effect(..)]: lease_ms = .., retry_ms = .., role = \"..\", owner = field"),
+        }
+    }
+    quote! {
+        impl ::ark::effect::Effect for #name {
+            type Outcome = #outcome;
+            const LEASE_MS: i64 = #lease;
+            const RETRY_MS: i64 = #retry;
+            const ROLE: Option<&'static str> = #role;
+            fn job(&self) -> &::ark::effect::Job<#outcome> {
+                &self.state
+            }
+            fn job_mut(&mut self) -> &mut ::ark::effect::Job<#outcome> {
+                &mut self.state
+            }
+            #owner
+            type Id = #key_ty;
+            fn key_of(id: #key_ty) -> Self::Key {
+                (id,)
+            }
+            fn id(&self) -> #key_ty {
+                self.#key.clone()
             }
         }
     }
@@ -185,10 +253,10 @@ pub fn row(input: DeriveInput) -> TokenStream {
             false => quote!(::ark::row::column::<#t>(#n)),
         }
     });
-    let space = if volatile {
-        quote!(::ark::schema::Space::Volatile)
+    let (space, marker) = if volatile {
+        (quote!(::ark::schema::Space::Volatile), quote!(::ark::db::Volatile))
     } else {
-        quote!(::ark::schema::Space::Durable)
+        (quote!(::ark::schema::Space::Durable), quote!(::ark::db::Durable))
     };
     let mut ix_defs = vec![];
     let mut ix_consts = vec![];
@@ -223,6 +291,7 @@ pub fn row(input: DeriveInput) -> TokenStream {
         impl ::ark::row::Row for #name {
             const TABLE: &'static str = #table;
             type Key = (#(#key_tys,)*);
+            type Space = #marker;
             fn key(&self) -> Self::Key {
                 (#(::std::clone::Clone::clone(&self.#key_names),)*)
             }
@@ -457,13 +526,13 @@ pub fn schema(input: DeriveInput) -> TokenStream {
     let doc = format!("The tables of [`{name}`], each a handle (§1.16).");
     quote! {
         #[doc = #doc]
-        #vis struct #db<'t> {
-            #(pub #names: ::ark::db::Tab<'t, #tys>,)*
+        #vis struct #db<'t, P = ::ark::db::Durable> {
+            #(pub #names: ::ark::db::Tab<'t, #tys, P>,)*
         }
 
         impl ::ark::db::Tables for #name {
-            type Db<'t> = #db<'t>;
-            fn handles<'t>(txn: &'t ::std::cell::RefCell<::ark::db::Txn<'t>>) -> #db<'t> {
+            type Db<'t, P: ::ark::db::Writes> = #db<'t, P>;
+            fn handles<'t, P: ::ark::db::Writes>(txn: &'t ::std::cell::RefCell<::ark::db::Txn<'t>>) -> #db<'t, P> {
                 #db { #(#names: ::ark::db::Tab::new(txn),)* }
             }
             fn schema() -> ::ark::schema::Schema {

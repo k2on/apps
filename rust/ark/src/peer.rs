@@ -321,6 +321,13 @@ pub enum Input {
     Alone,
     Join,
     Compact(Seq),
+    /// An authority's own facts, made by its driver (a closure over an
+    /// unwired instance's tables): logged as an entry naming no function,
+    /// which nothing runs again — a replay applies the facts.
+    Write {
+        facts: Vec<Change>,
+        now: i64,
+    },
     /// The driver gave the peer more functions: what waits behind a held
     /// intent is judged again.
     Loaded,
@@ -567,6 +574,16 @@ impl Peer {
             Input::Alone => self.alone(&mut o),
             Input::Join => self.join(&mut o),
             Input::Compact(n) => self.compact(n, &mut o),
+            Input::Write { facts, now } if self.is_authority() => {
+                let entry = self.entry(String::new(), vec![], now);
+                let given = self.store.apply_all(&facts).map(|_| facts);
+                o.told.extend(given.iter().flatten().cloned());
+                let id = entry.id;
+                let v = self.judged(entry, given, &mut o);
+                self.local += v.is_ok() as i64;
+                o.out.push(v.map_or_else(|why| Output::Refused { id, why }, |_| Output::Confirmed(id)));
+            }
+            Input::Write { .. } => {}
             Input::Loaded => {
                 let origins: Vec<Origin> = match &self.role {
                     Role::Authority { journal } => journal.waiting.keys().copied().collect(),
@@ -647,9 +664,10 @@ impl Peer {
         true
     }
 
-    fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, o: &mut Out) {
+    /// The next intent of this peer's own.
+    fn entry(&self, func: String, input: Vec<u8>, now: i64) -> Entry {
         let local = self.local + 1;
-        let entry = Entry {
+        Entry {
             id: EntryId::of(self.origin, local),
             actor: self.me.actor.clone(),
             session: self.me.session.clone(),
@@ -660,8 +678,12 @@ impl Peer {
             // An input is its encoding; no bytes are `()`'s.
             input: if input.is_empty() { ().to_bytes() } else { input },
             now,
-        };
-        let id = entry.id;
+        }
+    }
+
+    fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, o: &mut Out) {
+        let entry = self.entry(func, input, now);
+        let (id, local) = (entry.id, entry.local);
         if self.is_authority() {
             // One it refuses draws no `local`: a chain made alone has no gaps.
             self.decide(entry, o);
@@ -699,6 +721,12 @@ impl Peer {
                 r = Err(Refusal::new("its facts are not what this authority's run of it gives"));
             }
         }
+        self.judged(entry, r, o)
+    }
+
+    /// An intent judged: logged with its facts and told everyone, or
+    /// refused; the verdict kept.
+    fn judged(&mut self, entry: Entry, r: Result<Vec<Change>, Refusal>, o: &mut Out) -> Result<Seq, String> {
         let id = entry.id;
         self.journal().pass(entry.origin, &entry.actor, entry.local);
         let v = match r {

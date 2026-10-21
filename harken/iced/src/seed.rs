@@ -4534,7 +4534,6 @@ pub fn seeded_disk(copies: usize) -> Memory {
     };
     let mut disk = Memory::default();
     disk.record(&Record::Rows(snapshot.kv_rows()).enc()).expect("memory takes it");
-    disk.put("who", &(DEMO.to_string(), LOCAL.to_string()).to_bytes())
-        .expect("memory takes it");
+    ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (Some(DEMO.into()), LOCAL.into())).expect("memory takes it");
     disk
 }

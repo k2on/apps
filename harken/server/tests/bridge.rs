@@ -986,11 +986,14 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
     // A library of two pages, authored by the library's own account.
     let login = server
         .auth
-        .issue(&Account {
-            id: "library".into(),
-            roles: vec![harken_server::domain::LIBRARY.into()],
-            ..Account::default()
-        })
+        .issue(
+            &Account {
+                id: "library".into(),
+                roles: vec![harken_server::domain::LIBRARY.into()],
+                ..Account::default()
+            },
+            "a test",
+        )
         .unwrap();
     let mut library = open(ark_peer::who(&login), None);
     library.connect(&server.url(), &login.token);

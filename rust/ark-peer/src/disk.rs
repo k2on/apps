@@ -20,17 +20,15 @@
 //!   rows of the schema's tables are not journaled: the peer writes them
 //!   again as it opens, from each entry's facts, each entry linking onto
 //!   the one before it, and writes `kv` whole when one does not.
-//! - the rest, each written whole or appended to: a server's `journal` and
-//!   `live`, written whole; a device's `pending` (its own intents not yet
-//!   confirmed and the last `local` its session drew), a journal of
-//!   records, each a four-byte big-endian length and `((Int local, Int
-//!   gone), List Entry)`: the intents left are those before with the first
-//!   `gone` taken off and these added. It is read up to the first record
-//!   that does not read, as `log` is.
+//!
+//! What a peer keeps beside its log is the rows of its local instance
+//! (`local`), in this same format under the names `local.kv` and
+//! `local.log` ([`crate::Shared`]).
 //!
 //! A disk holding the blobs of a format before — the log not yet a table
-//! (`snapshot`, `chain`), or every write journaled (`writes`) — is refused,
-//! never read as empty.
+//! (`snapshot`, `chain`), every write journaled (`writes`), or a peer's own
+//! state in blobs of their own (`journal`, `live`, `pending`, `origin`,
+//! `fork`, `joining`, `who`) — is refused, never read as empty.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -38,7 +36,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use ark::format::Encode;
-use ark::log::{Entry, Logged, Record, Rows};
+use ark::log::{Logged, Record, Rows};
 
 /// The store made durable, read back: its rows as last written whole, and
 /// the log's rows appended since.
@@ -66,6 +64,12 @@ pub trait Disk: Send {
         if self.get("writes")?.is_some() {
             let why = "a log of the format that journaled every write (writes), not the log's rows alone: not read";
             return Err(io::Error::other(why));
+        }
+        for old in ["journal", "live", "pending", "origin", "fork", "joining", "who"] {
+            if self.get(old)?.is_some() {
+                let why = format!("a disk of the format that kept a peer's own state in blobs ({old}), not rows: not read");
+                return Err(io::Error::other(why));
+            }
         }
         let (log, had) = self.get("log")?.map_or((vec![], false), |l| (l, true));
         let rows = kv.and_then(|b| match Record::dec(&b) {
@@ -95,22 +99,6 @@ pub trait Disk: Send {
         }
         self.append("log", &frame(bytes))
     }
-}
-
-/// One record of the `pending` journal.
-pub fn pending_record(local: i64, gone: usize, new: Vec<Entry>) -> Vec<u8> {
-    frame(&((local, gone as i64), new).to_bytes())
-}
-
-/// The `pending` journal read: the last `local` and the intents left.
-pub fn pending(bytes: &[u8]) -> (i64, Vec<Entry>) {
-    let (mut local, mut left) = (0, vec![]);
-    for ((l, gone), new) in framed::<((i64, i64), Vec<Entry>)>(bytes).0 {
-        left.drain(..(gone.max(0) as usize).min(left.len()));
-        left.extend(new);
-        local = l;
-    }
-    (local, left)
 }
 
 /// Length-framed records read up to the first that does not read; and the

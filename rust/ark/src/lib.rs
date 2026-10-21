@@ -14,13 +14,14 @@
 //! inputs and the schema derived ([`row`]), functions registered by name
 //! in a [`Domain`] ([`domain`]), reads and writes through a typed store
 //! ([`db`]) and views as plans maintained per operator ([`plan`]); rows
-//! without a Rust type are JSON under the schema ([`dynamic`]).
+//! without a Rust type are JSON under the schema ([`dynamic`]); effects
+//! are rows, jobs a handler claims and finishes ([`effect`]).
 
 use ::std::fmt;
 
 extern crate self as ark;
 
-pub use domain::Domain;
+pub use domain::{effect, Domain};
 
 pub mod db;
 pub mod domain;
@@ -58,13 +59,14 @@ impl fmt::Display for Refusal {
 /// attributes that register a function by name, the context, the typed
 /// store, plans, ids and indexes.
 pub mod prelude {
-    pub use crate::db::{Db, Tables};
+    pub use crate::db::{Db, Tables, Volatile};
     pub use crate::domain::{Domain, Scope};
+    pub use crate::effect::{Effect, Job};
     pub use crate::format::Encode;
     pub use crate::peer::Ctx;
     pub use crate::plan::{scan, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};
     pub use crate::Refusal;
-    pub use ark_macros::{live, mutator, query, scope, view, Describe, Input, Row, Schema};
+    pub use ark_macros::{live, mutator, query, scope, view, Describe, Effect, Input, Row, Schema};
     pub use serde::{Deserialize, Serialize};
 }

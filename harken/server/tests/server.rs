@@ -52,7 +52,7 @@ fn a_login_from_the_routes_is_who_the_socket_says_you_are() {
     );
 
     let mut phone = signed_in(&server, "alice");
-    pump_until(&mut [&mut phone], 10, |ps| ps[0].cursor() == 1);
+    pump_until(&mut [&mut phone], 10, |ps| ps[0].cursor() == head(&server));
     let mine: Vec<Playlist> = phone.query("playlists.playlists", &()).unwrap();
     assert_eq!(
         mine.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
@@ -113,9 +113,18 @@ fn work_done_signed_out_or_under_an_older_login_arrives_as_its_owners() {
     // Offline, then signed out of that login everywhere, then in again.
     p.disconnect();
     p.mutate("playlists.create_playlist", &named("On the train"));
-    ark_auth::client::logout(&url, &first.token).unwrap();
     let second = ark_auth::client::login(&url, Some("dana"), |_| {}).unwrap();
     assert_ne!(second.session, first.session);
+    let mut other = open(ark_peer::who(&second), None);
+    other.connect(&url, &second.token);
+    pump_until(&mut [&mut other], 10, |ps| ps[0].client.current().is_some());
+    let revoke = ark_auth::Revoke {
+        id: first.session.clone(),
+    };
+    other.mutate("session.revoke", &revoke);
+    pump_until(&mut [&mut other], 10, |ps| ps[0].pending() == 0);
+    assert!(other.refused.is_empty(), "{:?}", other.refused);
+    drop(other);
     p.sign_in(&url, &second);
     pump_until(&mut [&mut p], 10, |ps| ps[0].pending() == 0);
     assert!(p.refused.is_empty(), "{:?}", p.refused);
@@ -147,7 +156,7 @@ fn the_log_and_the_logins_survive_a_restart() {
     );
     let mut again = open(ark_peer::who(&login), None);
     again.connect(&server.url(), &login.token);
-    pump_until(&mut [&mut again], 10, |ps| ps[0].cursor() == 1);
+    pump_until(&mut [&mut again], 10, |ps| ps[0].cursor() == head(&server));
     rt.block_on(server.stop());
 }
 
@@ -197,7 +206,7 @@ fn the_health_says_the_head_and_who_is_connected() {
     let mut b = signed_in(&server, "alice");
     a.mutate("playlists.create_playlist", &named("One"));
     pump_until(&mut [&mut a, &mut b], 10, |ps| {
-        ps[0].pending() == 0 && ps[1].cursor() == 1
+        ps[0].pending() == 0 && ps[1].cursor() == head(&server)
     });
     let h = ureq::get(&format!("{}/healthz", server.url()))
         .call()
@@ -206,7 +215,8 @@ fn the_health_says_the_head_and_who_is_connected() {
         .unwrap();
     let lines: Vec<&str> = h.lines().collect();
     assert_eq!(lines[0], "ok", "{h}");
-    assert!(lines.contains(&"head 1"), "{h}");
+    // Two sign-ins and the playlist.
+    assert!(lines.contains(&"head 3"), "{h}");
     assert!(lines.contains(&"horizon 0"), "{h}");
     assert!(lines.contains(&"room alice peers 2"), "{h}");
     assert!(
@@ -286,7 +296,11 @@ fn the_admin_page_is_the_authoritys() {
     );
     let rows = &state.rows.iter().find(|(t, _)| t == "playlist").unwrap().1;
     let mine = Playlist::from_bytes(&rows[0]).unwrap();
-    assert_eq!((mine.name.as_str(), state.head), ("Mine", 1));
+    assert_eq!(
+        (mine.name.as_str(), state.head),
+        ("Mine", 2),
+        "a sign-in and the playlist"
+    );
     assert_eq!(
         state.lines.last().unwrap().function,
         "playlists.create_playlist"
@@ -311,7 +325,7 @@ fn the_admin_page_is_the_authoritys() {
     let raw = format!("{at}/admin/api/raw");
     assert_eq!(
         admin("POST", &raw, None, Some(edit(&mine, "Kept"))),
-        Ok("2".into())
+        Ok("3".into())
     );
     pump_until(&mut [&mut phone], 10, |ps| {
         ps[0]
@@ -335,7 +349,7 @@ fn the_admin_page_is_the_authoritys() {
     );
     assert_eq!(
         admin("POST", &format!("{at}/admin/api/author"), None, Some(body)),
-        Ok("3".into())
+        Ok("4".into())
     );
     let state =
         State::from_body(&admin("GET", &format!("{at}/admin/api/state"), None, None).unwrap())
@@ -344,12 +358,14 @@ fn the_admin_page_is_the_authoritys() {
     assert_eq!(
         names,
         [
+            "raw write",
             "playlists.create_playlist",
             "raw write",
             "playlists.create_playlist"
-        ]
+        ],
+        "a sign-in (a raw write of its session) first"
     );
-    assert_eq!(state.lines[2].entry.actor, state.who);
+    assert_eq!(state.lines[3].entry.actor, state.who);
     rt.block_on(server.stop());
 }
 
@@ -387,7 +403,7 @@ fn a_wider_admin_page_asks_for_the_admin_role() {
     );
     let root = login(&server, "root");
     let s = State::from_body(&admin("GET", &state, Some(&root.token), None).unwrap()).unwrap();
-    assert_eq!(s.head, 0);
+    assert_eq!(s.head, 2, "alice's sign-in and root's");
     rt.block_on(server.stop());
 }
 
@@ -419,9 +435,22 @@ fn a_clients_raw_write_is_refused() {
         old: mine.to_bytes(),
         new: hijacked.to_bytes(),
     };
-    let (h, raw) = ark_peer::admin::raw(&edit);
+    // The authority's raw write before S3a, a function of no input.
+    struct Raw(Change);
+    impl ark::peer::Procedure for Raw {
+        fn apply(
+            &self,
+            store: &mut ark::store::Store,
+            _: &ark::peer::Ctx,
+            _: &[u8],
+        ) -> Result<Vec<Change>, ark::Refusal> {
+            store.apply(&self.0)?;
+            Ok(vec![self.0.clone()])
+        }
+    }
+    let (h, raw) = ("raw write".to_string(), std::sync::Arc::new(Raw(edit)));
     let mut bob = signed_in(&server, "bob");
-    pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == 1);
+    pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == head(&server));
     bob.client.log.functions.insert(h.clone(), raw);
     let _ = bob
         .client

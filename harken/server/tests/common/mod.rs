@@ -51,10 +51,13 @@ pub fn serve(
 pub fn login(server: &Server, user: &str) -> Login {
     server
         .auth
-        .issue(&Account {
-            id: user.into(),
-            ..Account::default()
-        })
+        .issue(
+            &Account {
+                id: user.into(),
+                ..Account::default()
+            },
+            "a test",
+        )
         .unwrap()
 }
 
@@ -273,6 +276,11 @@ pub fn hub_rows<T: Encode + Send + 'static>(server: &Server, table: &'static str
                 .collect()
         })
         .unwrap()
+}
+
+/// The head of the hub's log: sign-ins among its entries.
+pub fn head(server: &Server) -> i64 {
+    server.running.hub.with(|h| h.log.log().head().0).unwrap()
 }
 
 /// Pump every peer until `done` says so, or `secs` pass.

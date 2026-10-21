@@ -44,7 +44,6 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use ark_auth::oidc::Provider;
 use ark_auth::server::{Auth, Mode};
-use ark_auth::session::SessionStore;
 use ark_auth::Account;
 use ark_peer::{Config as HubConfig, Live, Running};
 
@@ -114,9 +113,15 @@ impl Default for Retention {
 pub struct Config {
     /// `host:port`; port 0 takes an ephemeral one.
     pub listen: String,
-    /// The log, the kept listening sessions, the sign-in sessions and the
-    /// scanner's replica.
+    /// The log (sign-ins among its rows), the kept listening sessions, the
+    /// key tokens are signed with (`session.key`), and the scanner's
+    /// replica.
     pub data: PathBuf,
+    /// Whether every connection is fed `session.feed` (`HARKEN_SCOPED=1`):
+    /// the library whole and only its person's sign-ins and roles. Off,
+    /// every connection holds the log whole, every person's sign-ins among
+    /// it, as it holds every person's playlists.
+    pub scoped: bool,
     /// Where a browser reaches this server — the proxy's address behind one.
     /// The provider sends people back under it, and the page it serves
     /// signs in against it. `http://{listen}` when unset.
@@ -165,6 +170,7 @@ impl Config {
         Config {
             listen: listen.into(),
             data: data.into(),
+            scoped: false,
             public_url: None,
             sign_in: SignIn::Dev,
             redirects: vec![],
@@ -184,6 +190,7 @@ impl Config {
     ///
     /// ```text
     /// HARKEN_DATA                   where the state lives (default: the temp dir)
+    /// HARKEN_SCOPED=1               each connection fed its person's sign-ins only
     /// HARKEN_PUBLIC_URL             where a browser reaches this server
     /// HARKEN_DEV_AUTH=1             anyone is whoever they say
     /// HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID, HARKEN_OIDC_CLIENT_SECRET_FILE
@@ -275,6 +282,7 @@ impl Config {
             listen: listen.into(),
             data: env("HARKEN_DATA")
                 .map_or_else(|| std::env::temp_dir().join("harken-server"), PathBuf::from),
+            scoped: env("HARKEN_SCOPED").is_some(),
             public_url: env("HARKEN_PUBLIC_URL"),
             sign_in,
             redirects: list("HARKEN_REDIRECTS"),
@@ -403,6 +411,9 @@ pub fn pretty(entity: &str) -> String {
         None => entity.to_string(),
     }
 }
+
+/// What the scanner's session says signed in.
+const SCANNER: &str = "the scanner";
 
 /// The hub's configuration for `hosted`: the log and the listening
 /// session's volatile space over the one domain, `on_join`, `on_leave` and
@@ -542,10 +553,6 @@ pub async fn start(config: Config) -> Result<Server> {
         .with_context(|| format!("creating {}", config.data.display()))?;
     eprintln!("harken-server: data in {}", config.data.display());
 
-    // Sessions beside the log, in their own file: they are not part of the
-    // log and never leave this machine.
-    let sessions = SessionStore::open(config.data.join("sessions.json"))
-        .map_err(|e| anyhow!("the sessions: {e}"))?;
     let public_url = config.public_url();
     // `docs/plan-auth.md` The roles the configuration grants, and the
     // scanner's own `library`, by construction: the scanner is the library,
@@ -560,7 +567,11 @@ pub async fn start(config: Config) -> Result<Server> {
             crate::domain::LIBRARY.to_string(),
             vec![library::ACCOUNT.to_string()],
         )]);
-    let mut auth = Auth::new(sessions, mode(&config.sign_in).await?, &public_url)
+    // A sign-in is a row of the log, its token signed with a key kept in
+    // the data directory (`ark_auth::server`).
+    let mode = mode(&config.sign_in).await?;
+    let mut auth = Auth::open::<crate::domain::Harken>(mode, &public_url, &config.data)
+        .context("the session key")?
         .allow_redirect(PHONE_SCHEME)
         .with_roles(roles);
     for prefix in &config.redirects {
@@ -580,8 +591,11 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let auth = Arc::new(auth);
 
-    let mut server =
-        ark_peer::Server::new(hub_config(&hosted, config.retain.entries)).auth(auth.clone());
+    let mut hub = hub_config(&hosted, config.retain.entries);
+    if config.scoped {
+        hub.feed = Arc::new(|_| ark::peer::Feed::Scoped("session.feed".into()));
+    }
+    let mut server = ark_peer::Server::new(hub).auth(auth.clone());
     (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive.every);
     if config.keepalive != Keepalive::default() {
         eprintln!(
@@ -646,13 +660,14 @@ pub async fn start(config: Config) -> Result<Server> {
     // The scanner signs in like everything else, as the account `library`.
     let scanner = match &config.media {
         Some(dir) => {
+            let account = Account {
+                id: library::ACCOUNT.into(),
+                name: "Library".into(),
+                roles: vec![crate::domain::LIBRARY.into()],
+                ..Account::default()
+            };
             let login = auth
-                .issue(&Account {
-                    id: library::ACCOUNT.into(),
-                    name: "Library".into(),
-                    roles: vec![crate::domain::LIBRARY.into()],
-                    ..Account::default()
-                })
+                .own(&account, SCANNER)
                 .map_err(|e| anyhow!("signing the scanner in: {e}"))?;
             Some(Scanner::start(
                 dir.clone(),

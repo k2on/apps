@@ -232,8 +232,8 @@ class CarTests {
             val phonePeer = hall.device("phone", true)
             val laptopPeer = hall.device("laptop", true, "computer")
             val phone = Listen(ArkSession.inline(phonePeer, server, testLogin("alice", "phone")), "Phone").also { hall.carry() }
-            val laptop = Remote("laptop", "Laptop")
-            assertNull(laptop.press(laptopPeer, Press.Start(listOf(queuedTrack("a", 1), queuedTrack("b", 2)), 0, 0, ""), null))
+            val laptop = Presser("laptop")
+            assertNull(laptop.press(laptopPeer, Press.Start(listOf(queuedTrack("a", 1), queuedTrack("b", 2)), 0, 0, "")))
             hall.carry()
             phone.poke()
             assertTrue("playing on the laptop", hall.state().outputs("laptop") && hall.state().sounding)

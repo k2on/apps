@@ -3,13 +3,16 @@
 //! library ([`library`], [`browse`]), the playlists ([`playlists`]), the
 //! plays ([`plays`]) and the listening session ([`listening`], [`queue`],
 //! [`devices`], [`groups`]) — one file per part — and what a host knows of
-//! it beside its functions ([`host`]). [`domain`] registers every function
+//! it beside its functions ([`host`]). Who is signed in is `ark-auth`'s
+//! two tables and functions ([`ark_auth::rows`]), and [`feed`]. [`domain`] registers every function
 //! by its name; the apps link this crate and call its types and functions
 //! as they are.
 
 use std::sync::{Arc, OnceLock};
 
-use ark::domain::Domain;
+use ark::domain::{Domain, Scope};
+use ark::peer::Ctx;
+use ark::prelude::scope;
 
 pub mod browse;
 pub mod devices;
@@ -40,7 +43,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn domain() -> Domain {
     ark::register!(Domain::new::<Harken>("harken", VERSION);
         library::add_song, library::describe_work, library::describe_recording, library::describe_person,
-        library::credit_recording, library::remove_media,
+        library::credit_recording, library::remove_media, library::look,
         browse::library, browse::search, browse::albums, browse::artists, browse::track_details, browse::album,
         browse::artist, browse::composers, browse::works, browse::work, browse::recordings, browse::credits,
         browse::recording,
@@ -54,7 +57,32 @@ pub fn domain() -> Domain {
         devices::equip, devices::set_volume, devices::nudge_volume, devices::set_mute, devices::report_volume,
         devices::scrub, devices::on_join, devices::on_leave, devices::on_restore,
         groups::join, groups::unjoin, groups::report_group, groups::set_group_volume, groups::nudge_group_volume,
-        groups::set_group_mute)
+        groups::set_group_mute, feed)
+    .with(ark_auth::register::<Harken>)
+    .with(<Look as ark::effect::Effect>::register::<Harken>)
+}
+
+/// What a connection fed by scope holds (§1.8): every durable table whole
+/// and, of the sign-ins and the roles, its person's.
+#[scope("session.feed")]
+pub fn feed() -> Scope<Harken> {
+    fn all<R>(_: &Ctx, _: &R) -> bool {
+        true
+    }
+    ark_auth::feed(
+        Scope::new()
+            .on::<Media>(all)
+            .on::<Album>(all)
+            .on::<Person>(all)
+            .on::<Work>(all)
+            .on::<Movement>(all)
+            .on::<Recording>(all)
+            .on::<Credit>(all)
+            .on::<Song>(all)
+            .on::<Playlist>(all)
+            .on::<PlaylistItem>(all)
+            .on::<Play>(all),
+    )
 }
 
 /// [`domain`], once.

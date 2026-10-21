@@ -7,7 +7,9 @@
 //! bridge a [`Peer`] is called by function name with JSON — `mutate`,
 //! `query`, `view`, the live space's `call` — and says where it stands
 //! (`status`), what became of each intent (`standing`, `take_rejections`),
-//! who it is (`login`, `logout`) and whether it is alone (`alone`, `join`).
+//! which jobs of a kind are due for a handler written in the app (`due`),
+//! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
+//! and whether it is alone (`alone`, `join`).
 //! The typed Kotlin and Swift over these names is generated from the domain
 //! (`ark-dev gen`), types only.
 //!
@@ -50,6 +52,13 @@ impl<S: Into<String>> From<S> for Refusal {
     fn from(why: S) -> Refusal {
         Refusal::Refused { why: why.into() }
     }
+}
+
+/// A kind's jobs due now, each its row's JSON, and when the next is due.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Due {
+    pub rows: Vec<String>,
+    pub next_ms: Option<i64>,
 }
 
 /// A login as the server hands it over: the token the link proves itself
@@ -423,6 +432,22 @@ impl Peer {
         Ok(s.peer.answer_json(&name, &answer)?)
     }
 
+    /// The jobs of `kind` (a table of `ark::effect` rows) a claim would take
+    /// now, each its row's JSON, and when the next falls due: what a
+    /// handler written in the app asks whenever the listener rings or its
+    /// timer for `next_ms` fires, then answers through `mutate` —
+    /// `<kind>.claim`, and once that is confirmed (`standing`),
+    /// `<kind>.finish`. A view's rows stream through `view` already.
+    pub fn due(&self, kind: String) -> Result<Due, Refusal> {
+        let answer = self.query(format!("{kind}.due"), "null".into())?;
+        let a: serde_json::Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+        let rows = a["rows"].as_array().into_iter().flatten();
+        Ok(Due {
+            rows: rows.map(|r| r.to_string()).collect(),
+            next_ms: a["next_ms"].as_i64(),
+        })
+    }
+
     /// A maintained view of the function `name` on its input's JSON.
     pub fn view(&self, name: String, input: String) -> Result<Arc<ViewHandle>, Refusal> {
         let id = self.shared.act(|s| -> Result<u64, String> {
@@ -476,7 +501,7 @@ impl Peer {
             user: st.user,
             session: s.peer.me().session.clone(),
             alone: st.alone,
-            failure: s.peer.failure.clone(),
+            failure: s.peer.failure().map(Into::into),
             denied: s.denied.clone(),
         }
     }
@@ -520,10 +545,27 @@ impl Peer {
         });
     }
 
-    /// Signed out: nothing dialled, what is pending kept for the next
-    /// sign-in.
+    /// Who this device is signed in as, as its replica holds its session
+    /// row (`ark_auth::rows::current`): its person, roles granted merged,
+    /// and no token. Nobody signed out, or before the session has synced.
+    pub fn signed_in(&self) -> Option<Login> {
+        let s = self.shared.lock().peer.current()?;
+        Some(Login {
+            token: String::new(),
+            session: s.id,
+            user: s.user,
+            name: s.name,
+            email: s.email,
+            roles: s.roles,
+            expires_ms: s.expires_ms,
+        })
+    }
+
+    /// Signed out: the session revoked through `session.revoke` (pushed
+    /// while linked, pending for the next sign-in otherwise), nothing
+    /// dialled after it, what is pending kept.
     pub fn logout(&self) {
-        self.shared.act(|s| s.peer.set_token(None));
+        self.shared.act(|s| drop(s.peer.sign_out()));
     }
 
     /// Alone: its own authority over a local history (§1.7).
@@ -607,16 +649,4 @@ pub fn login_url(server: String, redirect: String) -> String {
 #[uniffi::export]
 pub fn exchange(server: String, code: String) -> Result<Login, Refusal> {
     Ok(ark_auth::client::exchange(&server, &code)?.into())
-}
-
-/// Whether `token` still proves a login at `server`, and whose.
-#[uniffi::export]
-pub fn whoami(server: String, token: String) -> Result<Option<Login>, Refusal> {
-    Ok(ark_auth::client::whoami(&server, &token)?.map(Login::from))
-}
-
-/// The login `token` proves ended at `server`.
-#[uniffi::export]
-pub fn sign_out(server: String, token: String) -> Result<(), Refusal> {
-    Ok(ark_auth::client::logout(&server, &token)?)
 }

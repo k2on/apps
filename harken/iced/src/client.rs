@@ -77,7 +77,8 @@ pub fn memory(me: Who, token: Option<&str>) -> Replica {
 #[cfg_attr(all(feature = "demo", not(test)), allow(dead_code))]
 pub fn memory_as(me: Who, token: Option<&str>, device: Vec<u8>) -> Replica {
     let mut disk = Memory::default();
-    let _ = disk.put("who", &(me.actor.clone(), me.session.clone()).to_bytes());
+    let (actor, session) = (Some(me.actor.clone()), me.session.clone());
+    let _ = ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (actor, session));
     let mut r = open(Box::new(disk), None, device);
     r.set_roles(me.roles);
     r.link.token = token.map(Into::into);

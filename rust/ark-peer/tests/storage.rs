@@ -1,7 +1,8 @@
 //! The store on disk held: what was persisted reads back; a torn tail is
 //! cut on open, in the file too; the rows written whole fold every entry
 //! before them; blobs are written whole; a directory of a format before —
-//! the log not a table, or every write journaled — is refused.
+//! the log not a table, every write journaled, or a peer's own state in
+//! blobs of its own — is refused.
 
 use ark::log::{Entry, Logged, Record};
 use ark_peer::disk::Stored;
@@ -66,8 +67,8 @@ fn the_rows_fold_every_write_before() {
             logged: (3..5).map(row).collect(),
         };
         assert_eq!(d.load().unwrap(), want);
-        d.put("pending", b"\x00\x01").unwrap();
-        assert_eq!(d.get("pending").unwrap().as_deref(), Some(&b"\x00\x01"[..]));
+        d.put("blob", b"\x00\x01").unwrap();
+        assert_eq!(d.get("blob").unwrap().as_deref(), Some(&b"\x00\x01"[..]));
         assert_eq!(d.get("nothing").unwrap(), None);
     }
 }
@@ -95,4 +96,16 @@ fn the_format_that_journaled_every_write_is_refused() {
     std::fs::write(dir.path().join("writes"), [0, 0, 0, 2, 0, 0]).unwrap();
     let err = Files::new(dir.path()).unwrap().load().unwrap_err();
     assert!(err.to_string().contains("journaled every write"), "{err}");
+}
+
+/// A directory that kept a peer's own state in blobs of its own (here a
+/// device's `pending` journal) is refused, not opened as one with nothing
+/// pending. Falsified by `load` not looking for them: it opened, and the
+/// pending intents were lost.
+#[test]
+fn the_format_of_side_blobs_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pending"), [0, 0, 0, 1, 0]).unwrap();
+    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
+    assert!(err.to_string().contains("in blobs (pending)"), "{err}");
 }

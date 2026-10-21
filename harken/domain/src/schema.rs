@@ -2,7 +2,9 @@
 
 use ark::prelude::*;
 
-use crate::types::{Present, Session};
+use ark::effect::Job;
+
+use crate::types::{Looked, Present, Session};
 
 // The library: every playable thing, what only a song has, and the rows a
 // track belongs to, each keyed by what it is (`keys.rs`).
@@ -200,6 +202,18 @@ pub struct ListeningScrub {
     pub at_ms: i64,
 }
 
+/// A look the library is asked to take at its media directory (`paths`
+/// under it, or the whole of it): a job (`ark::effect`) the scanner's
+/// handler claims and does, done with what it read and authored.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+#[effect(role = crate::LIBRARY, lease_ms = 600_000)]
+pub struct Look {
+    #[ark(key)]
+    pub id: Id<Look>,
+    pub paths: Vec<String>,
+    pub state: Job<Looked>,
+}
+
 /// harken's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Harken {
@@ -217,4 +231,9 @@ pub struct Harken {
     pub listening: Listening,
     pub listening_device: ListeningDevice,
     pub listening_scrub: ListeningScrub,
+    pub sign_in: ark_auth::SignIn,
+    pub role: ark_auth::Role,
+    pub look: Look,
 }
+
+ark_auth::install!(Harken);
