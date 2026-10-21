@@ -124,7 +124,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 
 | variable | |
 |---|---|
-| `HARKEN_DATA` | the log, the kept listening sessions, sign-ins, the scanner's replica, its prints and the covers it took out of files (default: `$TMPDIR/harken-server`; below) |
+| `HARKEN_DATA` | the log (sign-ins among its rows), the kept listening sessions, the session key, the scanner's replica, its prints and the covers it took out of files (default: `$TMPDIR/harken-server`; below) |
 | `HARKEN_DEV_AUTH=1` | anyone is whoever they say — a laptop only, said loudly at start |
 | `HARKEN_OIDC_ISSUER`, `HARKEN_OIDC_CLIENT_ID`, `HARKEN_OIDC_CLIENT_SECRET_FILE` | all three or none; the secret is a file (a systemd credential); `HARKEN_OIDC_SCOPES` |
 | `HARKEN_PUBLIC_URL` | where a browser reaches this server (default `http://ADDR`) |
@@ -136,7 +136,9 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |
 | `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
 | `HARKEN_BRIDGE_TRACE=1` | a line per poll per speaker: what the house said of it and what the bridge did (below) |
-| `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice` |
+| `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice`; an `admin` grants more as rows (`role.grant`) |
+| `HARKEN_SESSION_KEY_FILE` | the key tokens are signed with (default: `session.key` in `HARKEN_DATA`, made at first start) |
+| `HARKEN_SCOPED=1` | every connection fed `session.feed`: the library whole, its person's sign-ins and roles only (off: the log whole, as the fleet holds it) |
 | `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark_peer::admin`, its raw writes and mutations authored by the authority as itself |
 | `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
 
@@ -145,10 +147,10 @@ whose it is:
 
 | path | |
 |---|---|
-| `log/snapshot`, `log/chain` | the log: the library, every playlist, every person's work — the snapshot it stands on and the chain above it. This *is* the database |
+| `log/snapshot`, `log/chain` | the log: the library, every playlist, every person's work, every sign-in (a `sign_in` row) and granted role — the snapshot it stands on and the chain above it. This *is* the database |
 | `log/journal` | each session's last intent and the intents refused, so a push after a restart is judged as before |
 | `log/live` | the listening sessions' volatile space as the hub last closed it, restored by `on_restore` |
-| `sessions.json` | the sign-ins: every login this server issued |
+| `session.key` | the key every token is signed with (`HARKEN_SESSION_KEY_FILE` names another); made at first start, never leaves the machine |
 | `library/` | the scanner's replica, a peer like any other |
 | `library-files.json` | the scanner's prints; local, never the log's |
 | `art/` | the pictures taken out of files, by hash |
@@ -159,7 +161,7 @@ authors an entry for each record whose cover it finds. Dropping the
 database is never needed for covers. If it is wanted anyway — to start the
 library over — stop the service and delete `log/`, which is every song *and every
 playlist*; `library/` and `library-files.json` may go with it,
-and keeping `sessions.json` keeps everybody signed in. On v5 a device
+and with the log every sign-in goes: everybody signs in again. On v5 a device
 that held the old log does **not** re-base onto the new one: a server
 whose log is empty serves it at sequence 0, which every replica takes for
 its own base, and nothing converges (`fleet.rs`

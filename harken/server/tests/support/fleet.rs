@@ -170,6 +170,26 @@ pub fn function(e: &Logged) -> String {
     }
 }
 
+/// Whether an entry is a sign-in: the hub's own raw write of a `sign_in`
+/// row (`docs/plan-v5.md` S1), which every login now is.
+pub fn is_sign_in(e: &Logged) -> bool {
+    e.entry.func.starts_with(ark_peer::admin::RAW) && e.facts.iter().all(|c| c.table() == "sign_in")
+}
+
+impl Log {
+    /// How many of its entries are not sign-ins: the work in it.
+    pub fn work(&self) -> i64 {
+        self.entries.iter().filter(|e| !is_sign_in(e)).count() as i64
+    }
+}
+
+impl Converged {
+    /// How many entries above the horizon are not sign-ins.
+    pub fn work(&self) -> i64 {
+        self.log.work()
+    }
+}
+
 /// The rows an entry added to `table`.
 pub fn added<T: Encode>(e: &Logged, table: &str) -> Vec<T> {
     e.facts

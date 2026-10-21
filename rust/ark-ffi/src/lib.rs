@@ -7,7 +7,8 @@
 //! bridge a [`Peer`] is called by function name with JSON — `mutate`,
 //! `query`, `view`, the live space's `call` — and says where it stands
 //! (`status`), what became of each intent (`standing`, `take_rejections`),
-//! who it is (`login`, `logout`) and whether it is alone (`alone`, `join`).
+//! who it is (`login`, `logout`; `session.current` by `query`) and whether
+//! it is alone (`alone`, `join`).
 //! The typed Kotlin and Swift over these names is generated from the domain
 //! (`ark-dev gen`), types only.
 //!
@@ -520,10 +521,12 @@ impl Peer {
         });
     }
 
-    /// Signed out: nothing dialled, what is pending kept for the next
-    /// sign-in.
+    /// Signed out: the session revoked through the domain's
+    /// `session.revoke` (pushed while linked, pending for the next sign-in
+    /// otherwise), nothing dialled after it, what is pending kept. Who is
+    /// signed in is the domain's `session.current`, asked with `query`.
     pub fn logout(&self) {
-        self.shared.act(|s| s.peer.set_token(None));
+        self.shared.act(|s| drop(s.peer.sign_out()));
     }
 
     /// Alone: its own authority over a local history (§1.7).
@@ -607,16 +610,4 @@ pub fn login_url(server: String, redirect: String) -> String {
 #[uniffi::export]
 pub fn exchange(server: String, code: String) -> Result<Login, Refusal> {
     Ok(ark_auth::client::exchange(&server, &code)?.into())
-}
-
-/// Whether `token` still proves a login at `server`, and whose.
-#[uniffi::export]
-pub fn whoami(server: String, token: String) -> Result<Option<Login>, Refusal> {
-    Ok(ark_auth::client::whoami(&server, &token)?.map(Login::from))
-}
-
-/// The login `token` proves ended at `server`.
-#[uniffi::export]
-pub fn sign_out(server: String, token: String) -> Result<(), Refusal> {
-    Ok(ark_auth::client::logout(&server, &token)?)
 }

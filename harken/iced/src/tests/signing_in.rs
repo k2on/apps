@@ -59,10 +59,14 @@ fn signing_in_moves_the_same_replica_on() {
     assert_eq!(app.peer.client.standing(&id), Standing::Pending);
     assert!(app.note.contains("1 change from before"), "{}", app.note);
 
-    // Signing out keeps the replica and goes on as her, offline.
+    // Signing out revokes the session through the domain, keeps the
+    // replica and goes on as her, offline. Falsified by `SignOut` only
+    // dropping the token: no `session.revoke` was authored.
     let _ = app.update(Message::SignOut);
     assert!(app.login.is_none());
     assert!(app.peer.client.is_signed_out());
+    let funcs: Vec<String> = app.peer.client.log.pending.iter().map(|p| p.entry.func.clone()).collect();
+    assert_eq!(funcs.last().map(String::as_str), Some("session.revoke"), "{funcs:?}");
     assert_eq!(app.peer.items.len(), 1);
 }
 

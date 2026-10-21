@@ -332,44 +332,6 @@ fn a_web_build_is_its_own_validator() {
     assert_ne!(build_tag(dir.path(), None), whole);
 }
 
-/// Signing in through `ark-auth`: a login's token is the session it was
-/// issued, and a sign-out closes it. Falsified by the builder reading
-/// tokens the dev way whatever `auth` says: the entry's actor was the
-/// token itself, not carol.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_login_is_the_connection_and_a_sign_out_closes_it() {
-    use ark_auth::server::{Auth, Mode};
-    let auth = Arc::new(Auth::new(ark_auth::session::SessionStore::memory(), Mode::Dev, "http://127.0.0.1"));
-    let login = auth
-        .issue(&ark_auth::Account {
-            id: "carol".into(),
-            ..Default::default()
-        })
-        .unwrap();
-    let running = Server::new(config()).auth(auth.clone()).listen("127.0.0.1:0").await.unwrap();
-    let url = format!("ws://{}/sync", running.addr);
-    let (token, session) = (login.token.clone(), login.session.clone());
-    let hub = running.hub.clone();
-    tokio::task::spawn_blocking(move || {
-        let (wake, rx) = bell();
-        let mut c = (peer(ark_peer::who(&login)), rx);
-        c.0.set_waker(wake);
-        c.0.link.backoff = (5, 20);
-        c.0.set_token(Some(token.clone()));
-        c.0.connect(&url);
-        until(&mut c, "carol linked", |c, _| c.linked);
-        create(&mut c.0, "Carol's");
-        until(&mut c, "confirmed", |c, _| c.log.log().head().0 == 1);
-        assert_eq!(c.0.log.log().entries()[0].entry.session, session);
-        assert_eq!(hub.with(|h| h.log.log().entries()[0].entry.actor.clone()).unwrap(), "carol");
-        auth.revoke(&token).unwrap();
-        until(&mut c, "closed", |_, p| !p.closed.is_empty());
-    })
-    .await
-    .unwrap();
-    running.stop().await;
-}
-
 /// The live space across a restart: what the hub held when it closed is
 /// what it opens with, and `on_restore` is authored over it — the room
 /// keeps who was here and lets every pointer go. Falsified by `Peer::serve`

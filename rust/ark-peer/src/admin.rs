@@ -141,7 +141,8 @@ async fn on_hub<T: Send + 'static>(hub: &Handle, f: impl FnOnce(&mut Peer) -> T 
 async fn refused(With(ctx): With<Ctx>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let Some(check) = &ctx.check else { return next.run(req).await };
     let token = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
-    match token.and_then(|v| v.strip_prefix("Bearer ")).and_then(|t| check(t)) {
+    let (token, check) = (token.and_then(|v| v.strip_prefix("Bearer ")).map(String::from), check.clone());
+    match tokio::task::spawn_blocking(move || check(&token?)).await.ok().flatten() {
         None => text(StatusCode::UNAUTHORIZED, "sign in: this admin page is not on loopback"),
         Some(who) if who.roles.iter().any(|r| r == ROLE) => next.run(req).await,
         Some(who) => text(StatusCode::FORBIDDEN, format!("{} does not hold the {ROLE} role", who.actor)),

@@ -217,4 +217,6 @@ pub struct Harken {
     pub listening: Listening,
     pub listening_device: ListeningDevice,
     pub listening_scrub: ListeningScrub,
+    pub sign_in: crate::session::SignIn,
+    pub role: crate::session::Role,
 }

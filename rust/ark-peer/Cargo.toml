@@ -7,6 +7,7 @@ description = "The ArkDB v5 peer (docs/plan-v5.md §1.7, §1.9, §1.11): the two
 
 [dependencies]
 ark = { path = "../ark" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 ark-auth = { path = "../ark-auth" }
 

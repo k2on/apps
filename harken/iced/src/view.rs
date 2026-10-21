@@ -714,9 +714,12 @@ impl App {
         if !cfg!(feature = "demo") && p.client.is_alone() {
             line = format!("alone \u{b7} {line}");
         } else if !cfg!(feature = "demo") {
-            let who = match &self.login {
-                Some(l) => crate::auth::who(l),
-                None => "nobody".into(),
+            // Who the replica's session row says, once it has synced.
+            let who = match (&self.login, p.client.current()) {
+                (Some(_), Some(s)) if !s.name.is_empty() => s.name,
+                (Some(_), Some(s)) => s.user,
+                (Some(l), None) => crate::auth::who(l),
+                (None, _) => "nobody".into(),
             };
             let joining = p.client.status().joining;
             let link = match (&self.login, p.client.linked) {

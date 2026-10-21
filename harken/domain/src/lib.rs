@@ -2,7 +2,7 @@
 //! ([`schema`]), the types ([`types`]), the library's keys ([`keys`]), the
 //! library ([`library`], [`browse`]), the playlists ([`playlists`]), the
 //! plays ([`plays`]) and the listening session ([`listening`], [`queue`],
-//! [`devices`], [`groups`]) — one file per part — and what a host knows of
+//! [`devices`], [`groups`]), who is signed in ([`session`]) — one file per part — and what a host knows of
 //! it beside its functions ([`host`]). [`domain`] registers every function
 //! by its name; the apps link this crate and call its types and functions
 //! as they are.
@@ -22,6 +22,7 @@ pub mod playlists;
 pub mod plays;
 pub mod queue;
 pub mod schema;
+pub mod session;
 pub mod types;
 
 pub use ark::row::Id;
@@ -54,7 +55,8 @@ pub fn domain() -> Domain {
         devices::equip, devices::set_volume, devices::nudge_volume, devices::set_mute, devices::report_volume,
         devices::scrub, devices::on_join, devices::on_leave, devices::on_restore,
         groups::join, groups::unjoin, groups::report_group, groups::set_group_volume, groups::nudge_group_volume,
-        groups::set_group_mute)
+        groups::set_group_mute,
+        session::revoke, session::grant, session::revoke_role, session::current, session::mine, session::feed)
 }
 
 /// [`domain`], once.

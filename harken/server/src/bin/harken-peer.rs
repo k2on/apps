@@ -676,15 +676,14 @@ impl Headless {
 
     /// The hub closed a connection before saying a word, which is what it
     /// does to a token that proves nobody (with code 4401, `denied`) — or a
-    /// server going down. Which one is asked of the sign-in routes when it
-    /// did not say: a token they no longer know is denied, and the peer
-    /// stops dialling with it until it signs in again; its store and its
-    /// pending intents stay.
+    /// server going down, or a session revoked, which the next dial is
+    /// denied. Denied, the peer stops dialling with it until it signs in
+    /// again; its store and its pending intents stay.
     fn ask_why(&mut self, denied: bool) {
-        let (Some(server), Some(token)) = (&self.server, &self.token) else {
+        if self.token.is_none() {
             return;
-        };
-        if denied || matches!(ark_auth::client::whoami(server, token), Ok(None)) {
+        }
+        if denied {
             self.denied = Some(REVOKED.into());
             self.drop_link();
             eprintln!("harken-peer: denied: {REVOKED}");
@@ -1033,6 +1032,8 @@ impl Headless {
                     .set("session", json!(login.session))
             }
             Cmd::SignOut => {
+                // The session revoked through the domain, while linked.
+                let _ = self.client.sign_out();
                 self.token = None;
                 self.client.sign_in(nobody(""));
                 self.dial();

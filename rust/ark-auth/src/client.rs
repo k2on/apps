@@ -22,8 +22,8 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long a request waits on each read of the server's answer, and on
 /// each write of its own, once connected. Every request here is answered
-/// from the server's own memory and its session file — the login's first
-/// redirect, a code traded for a session, `me`, `logout` — and none waits
+/// from the server's own memory and its hub — the login's first redirect,
+/// a code traded for a session — and none waits
 /// on a provider, so an answer twenty seconds late is a server that is
 /// not answering: a black hole, a proxy holding the socket, a process
 /// stopped under it. That is what used to wait for ever, on a thread the
@@ -130,38 +130,6 @@ pub fn exchange_with(server: &str, code: &str, patience: Patience) -> Result<Log
         })?;
     let body = resp.into_string().map_err(|e| e.to_string())?;
     serde_json::from_str(&body).map_err(|e| format!("the login did not parse: {e}"))
-}
-
-/// Whether `token` still proves a login at `server`, and whose; the
-/// server is waited on for [`Patience::DEFAULT`] at most.
-pub fn whoami(server: &str, token: &str) -> Result<Option<Login>, String> {
-    let url = format!("{}/auth/me", server.trim_end_matches('/'));
-    match Patience::DEFAULT
-        .agent(5)
-        .get(&url)
-        .set("Authorization", &format!("Bearer {token}"))
-        .call()
-    {
-        Ok(resp) => {
-            let body = resp.into_string().map_err(|e| e.to_string())?;
-            serde_json::from_str(&body).map(Some).map_err(|e| format!("the login did not parse: {e}"))
-        }
-        Err(ureq::Error::Status(401, _)) => Ok(None),
-        Err(e) => Err(format!("cannot reach {server}: {e}")),
-    }
-}
-
-/// End the login `token` proves; the server is waited on for
-/// [`Patience::DEFAULT`] at most.
-pub fn logout(server: &str, token: &str) -> Result<(), String> {
-    let url = format!("{}/auth/logout", server.trim_end_matches('/'));
-    Patience::DEFAULT
-        .agent(5)
-        .post(&url)
-        .set("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
 }
 
 /// One request on the loopback listener, which the server's redirect makes

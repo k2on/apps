@@ -55,20 +55,6 @@ pub async fn exchange(server: &str, code: &str) -> Result<Login, String> {
     serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
 }
 
-/// Whether `token` still proves a login at `server`, and whose.
-pub async fn whoami(server: &str, token: &str) -> Result<Option<Login>, String> {
-    let url = format!("{}/auth/me", server.trim_end_matches('/'));
-    let init = web_sys::RequestInit::new();
-    let headers = web_sys::Headers::new().map_err(js)?;
-    headers.set("Authorization", &format!("Bearer {token}")).map_err(js)?;
-    init.set_headers(&headers);
-    match fetch_text(&url, &init).await {
-        Ok(text) => serde_json::from_str(&text).map(Some).map_err(|e| format!("the login did not parse: {e}")),
-        Err(e) if e.starts_with("401") => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
 /// The browser's storage, for keeping a login between loads.
 pub fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?

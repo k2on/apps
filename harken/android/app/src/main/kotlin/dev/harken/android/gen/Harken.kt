@@ -238,6 +238,15 @@ data class Equip(val canVolume: Boolean, val family: String?, val muted: Boolean
     }
 }
 
+/** The record `Grant`. */
+data class Grant(val user: String, val role: String) {
+    fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
+
+    companion object {
+        fun of(j: Any?): Grant = (j as JSONObject).let { o -> Grant(J.text(o.opt("user")), J.text(o.opt("role"))) }
+    }
+}
+
 /** The record `GroupMute`. */
 data class GroupMute(val muted: Boolean) {
     fun json(): String = "{" + "\"muted\":" + muted.toString() + "}"
@@ -554,6 +563,24 @@ data class ReportVolume(val level: Long, val muted: Boolean) {
     }
 }
 
+/** The record `Revoke`. */
+data class Revoke(val id: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
+
+    companion object {
+        fun of(j: Any?): Revoke = (j as JSONObject).let { o -> Revoke(J.text(o.opt("id"))) }
+    }
+}
+
+/** The record `Role`. */
+data class Role(val user: String, val role: String) {
+    fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
+
+    companion object {
+        fun of(j: Any?): Role = (j as JSONObject).let { o -> Role(J.text(o.opt("user")), J.text(o.opt("role"))) }
+    }
+}
+
 /** The record `Scrub`. */
 data class Scrub(val atMs: Long?) {
     fun json(): String = "{" + "\"at_ms\":" + J.wopt(atMs) { v0 -> v0.toString() } + "}"
@@ -619,6 +646,15 @@ data class SetVolume(val device: String, val level: Long) {
 
     companion object {
         fun of(j: Any?): SetVolume = (j as JSONObject).let { o -> SetVolume(J.text(o.opt("device")), J.int(o.opt("level"))) }
+    }
+}
+
+/** The record `SignIn`. */
+data class SignIn(val id: String, val user: String, val name: String, val email: String, val device: String, val issuedMs: Long, val expiresMs: Long, val revoked: Boolean, val roles: List<String>) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "," + "\"email\":" + J.q(email) + "," + "\"device\":" + J.q(device) + "," + "\"issued_ms\":" + issuedMs.toString() + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"revoked\":" + revoked.toString() + "," + "\"roles\":" + J.wlist(roles) { v0 -> J.q(v0) } + "}"
+
+    companion object {
+        fun of(j: Any?): SignIn = (j as JSONObject).let { o -> SignIn(J.text(o.opt("id")), J.text(o.opt("user")), J.text(o.opt("name")), J.text(o.opt("email")), J.text(o.opt("device")), J.int(o.opt("issued_ms")), J.int(o.opt("expires_ms")), J.bool(o.opt("revoked")), J.list(o.opt("roles")) { v0 -> J.text(v0) }) }
     }
 }
 
@@ -896,6 +932,21 @@ class Harken(val peer: Peer) {
 
     /** `playlists.remove_from_playlist`: its intent's id. */
     fun removeFromPlaylist(input: RemoveFromPlaylist): String = peer.mutate("playlists.remove_from_playlist", input.json())
+
+    /** `role.grant`: its intent's id. */
+    fun grant(input: Grant): String = peer.mutate("role.grant", input.json())
+
+    /** `role.revoke`: its intent's id. */
+    fun roleRevoke(input: Grant): String = peer.mutate("role.revoke", input.json())
+
+    /** `session.current`. */
+    fun current(): SignIn? = J.opt(J.parse(peer.query("session.current", "null"))) { v0 -> SignIn.of(v0) }
+
+    /** `session.mine`, kept. */
+    fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { j -> SignIn.of(j) }
+
+    /** `session.revoke`: its intent's id. */
+    fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
 
     /** The live table `listening`, as this device holds it. */
     fun liveListening(): List<Listening> = peer.liveRows("listening").map { Listening.of(J.parse(it)) }

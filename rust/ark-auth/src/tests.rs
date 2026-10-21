@@ -1,17 +1,13 @@
 //! The crate's unit tests: the URL helpers, the secret file, the redirect
-//! rules, codes, roles and revocation, and the session store. What the
+//! rules, codes, roles and the tokens. What the
 //! `openidconnect` crate now owns (the JWT payload's parsing, base64url,
 //! the ID token's claim checks) is its own to test, and is tested end to
 //! end against a provider in `tests/oidc.rs`.
 
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ark::peer::Who;
-
 use crate::oidc::read_secret;
-use crate::server::{dev_account, Auth, Mode};
-use crate::session::{hash, SessionStore};
+use crate::server::{dev_account, Auth, Mode, Opened};
 use crate::util::*;
 use crate::Account;
 
@@ -49,8 +45,19 @@ fn a_secret_file_loses_its_newline_and_an_empty_one_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An auth whose sign-ins are written to `rows`.
+fn writing(a: Auth) -> (Auth, Arc<Mutex<Vec<Opened>>>) {
+    let rows: Arc<Mutex<Vec<Opened>>> = Arc::default();
+    let r = rows.clone();
+    a.on_sign_in(move |o| {
+        r.lock().unwrap().push(o.clone());
+        Ok(())
+    });
+    (a, rows)
+}
+
 fn dev_auth() -> Auth {
-    Auth::new(SessionStore::memory(), Mode::Dev, "https://app.example/").allow_redirect("myapp://")
+    Auth::new(Mode::Dev, "https://app.example/", b"the key").allow_redirect("myapp://")
 }
 
 #[test]
@@ -67,142 +74,69 @@ fn a_code_goes_only_where_it_is_allowed() {
     assert!(!a.redirect_allowed("https://elsewhere/"));
 }
 
+/// A code is redeemed once, for a login whose session is the row written
+/// and whose token names it. Falsified by `finish` not writing the row:
+/// the login named a session nobody wrote.
 #[test]
-fn a_code_is_redeemed_once_and_the_engine_is_told_who_it_is() {
-    let a = Arc::new(dev_auth());
-    let code = a
-        .finish(&Account {
-            id: "alice".into(),
-            name: "alice".into(),
-            ..Account::default()
-        })
-        .unwrap();
-    let login = a.redeem(&code).expect("first time");
-    assert_eq!(login.user.id, "alice");
-    assert!(a.redeem(&code).is_none(), "second time");
-    let who = a.authenticator();
-    let alice = Who {
-        actor: "alice".into(),
-        session: login.session.clone(),
-        roles: vec![],
+fn a_code_is_redeemed_once_for_the_session_written() {
+    let (a, rows) = writing(dev_auth());
+    let alice = Account {
+        id: "alice".into(),
+        name: "alice".into(),
+        ..Account::default()
     };
-    assert_eq!(who(&login.token), Some(alice));
-    assert_eq!(who("forged"), None);
-    assert_eq!(who(""), None);
-    assert!(a.owns("alice", &login.session));
-    assert!(!a.owns("bob", &login.session));
+    let code = a.finish(&alice, "a laptop").unwrap();
+    let login = a.redeem(&code).expect("first time");
+    assert!(a.redeem(&code).is_none(), "second time");
+    let row = rows.lock().unwrap().pop().expect("a row written");
+    assert_eq!(
+        (row.id.as_str(), row.user.as_str(), row.device.as_str()),
+        (login.session.as_str(), "alice", "a laptop")
+    );
+    assert!(!row.revoked && row.expires_ms == login.expires_ms && row.expires_ms > row.issued_ms);
+    assert_eq!(a.verify(&login.token), Some(login.session.as_str()));
+    assert!(dev_auth().issue(&alice, "").is_err(), "nowhere to write a session, no login");
+}
+
+/// A token is its session's id signed with the server's key: another key's
+/// signature, a changed id or a changed signature names nothing. Falsified
+/// by `verify` answering the id without checking the signature: the
+/// forged token named alice's session.
+#[test]
+fn a_token_is_judged_by_its_signature() {
+    let a = dev_auth();
+    let token = a.mint("s1");
+    assert_eq!(a.verify(&token), Some("s1"));
+    let other = Auth::new(Mode::Dev, "https://app.example/", b"another key").mint("s1");
+    assert_eq!(a.verify(&other), None, "another server's key");
+    let (_, sig) = token.split_once('.').unwrap();
+    assert_eq!(a.verify(&format!("s2.{sig}")), None, "another session under this one's signature");
+    let mut flipped = token.clone().into_bytes();
+    let last = flipped.len() - 1;
+    flipped[last] = if flipped[last] == b'0' { b'1' } else { b'0' };
+    assert_eq!(a.verify(std::str::from_utf8(&flipped).unwrap()), None, "a signature changed");
+    assert_eq!(a.verify("s1"), None);
+    assert_eq!(a.verify(""), None);
 }
 
 /// `docs/plan-auth.md` A login holds the roles it was issued with and
-/// the ones the configuration grants its account, in what the exchange
-/// hands the client and in what the engine is told at `Hello`; a
-/// server started again with other configuration answers the same
-/// token with the new roles, and the dev form's `name:role,role` is a
-/// login holding them. Falsified by leaving the configured roles out
-/// of `completed`: the exchange's login held only `scanner`.
+/// the ones the configuration grants its account; the row keeps only its
+/// own, so a restart with other configuration grants or revokes at once,
+/// and the dev form's `name:role,role` is a login holding them. Falsified
+/// by leaving the configured roles out of `issue`: the login held only
+/// `scanner`.
 #[test]
 fn a_login_holds_its_own_roles_and_the_configured_ones() {
-    let sessions = || SessionStore::memory();
-    let a = Arc::new(Auth::new(sessions(), Mode::Dev, "https://app.example/").with_roles([("library", vec!["alice"])]));
-    let code = a
-        .finish(&Account {
-            id: "alice".into(),
-            roles: vec!["scanner".into()],
-            ..Account::default()
-        })
-        .unwrap();
-    let login = a.redeem(&code).expect("redeemed");
-    assert_eq!(login.user.roles, ["library", "scanner"]);
-    let who = a.authenticator()(&login.token).expect("signed in");
-    assert_eq!(
-        (who.actor.as_str(), &who.session, who.roles),
-        ("alice", &login.session, vec!["library".to_string(), "scanner".into()])
-    );
-    assert!(a.announce().contains("role library: alice"), "{}", a.announce());
-    // The same session store, the configuration moved: the role goes.
-    let store = std::mem::replace(&mut *a.sessions(), sessions());
-    let b = Arc::new(Auth::new(store, Mode::Dev, "https://app.example/"));
-    let who = b.authenticator()(&login.token).expect("signed in");
-    assert_eq!(who.roles, ["scanner".to_string()]);
-    // Dev auth's name, with roles.
-    let dev = dev_account("bob:library, admin,");
-    assert_eq!((dev.id.as_str(), dev.roles), ("bob", vec!["admin".to_string(), "library".into()]));
-}
-
-/// R6: revoking a session tells every listener whose and which, once,
-/// and a token already revoked or never issued tells nobody. Falsified
-/// by leaving out the loop over the listeners in `Auth::revoke` (the
-/// store revoking alone, as `logout` did): the listener hears nothing.
-#[test]
-fn a_revocation_is_told_to_whoever_asked() {
-    let a = dev_auth();
-    let heard: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
-    let h = heard.clone();
-    a.on_revoke(move |user, session| h.lock().unwrap().push((user.into(), session.into())));
+    let a = Auth::new(Mode::Dev, "https://app.example/", b"k").with_roles([("library", vec!["alice"])]);
+    let (a, rows) = writing(a);
     let account = Account {
         id: "alice".into(),
-        name: "Alice".into(),
+        roles: vec!["scanner".into()],
         ..Account::default()
     };
-    let login = a.issue(&account).unwrap();
-    assert!(a.revoke(&login.token).unwrap());
-    assert!(!a.revoke(&login.token).unwrap(), "already gone");
-    assert!(!a.revoke("no such token").unwrap());
-    assert_eq!(*heard.lock().unwrap(), [("alice".to_string(), login.session.clone())]);
-}
-
-fn alice() -> Account {
-    Account {
-        id: "sub-alice".into(),
-        name: "Alice".into(),
-        email: "alice@example".into(),
-        roles: vec![],
-    }
-}
-
-#[test]
-fn a_token_proves_its_session_until_it_does_not() {
-    let clock = Arc::new(AtomicI64::new(1_000));
-    let tick = clock.clone();
-    let mut store = SessionStore::memory().with_ttl(100).with_clock(move || tick.load(Ordering::SeqCst));
-    let login = store.issue(&alice()).unwrap();
-    assert_eq!(login.expires_ms, 1_100);
-    assert_eq!(store.lookup(&login.token).unwrap().session, login.session);
-    assert!(store.lookup("not a token").is_none());
-    clock.store(1_100, Ordering::SeqCst);
-    assert!(store.lookup(&login.token).is_none(), "expired");
-    assert!(store.owned_by("sub-alice", &login.session), "expired is not forgotten");
-    assert!(!store.owned_by("sub-bob", &login.session));
-}
-
-#[test]
-fn revoking_ends_the_token_and_keeps_the_ownership() {
-    let mut store = SessionStore::memory();
-    let login = store.issue(&alice()).unwrap();
-    assert!(store.revoke(&login.token).unwrap());
-    assert!(!store.revoke(&login.token).unwrap(), "already gone");
-    assert!(store.lookup(&login.token).is_none());
-    assert!(store.owned_by("sub-alice", &login.session));
-}
-
-#[test]
-fn the_file_survives_a_restart_and_holds_no_token() {
-    let dir = std::env::temp_dir().join(format!("ark-auth-sessions-{}", std::process::id()));
-    let path = dir.join("sessions.json");
-    let _ = std::fs::remove_dir_all(&dir);
-    let (kept, gone) = {
-        let mut store = SessionStore::open(&path).unwrap();
-        let kept = store.issue(&alice()).unwrap();
-        let gone = store.issue(&alice()).unwrap();
-        store.revoke(&gone.token).unwrap();
-        (kept, gone)
-    };
-    let text = std::fs::read_to_string(&path).unwrap();
-    assert!(!text.contains(&kept.token), "the token itself is never written");
-    assert!(text.contains(&hash(&kept.token)));
-    let mut again = SessionStore::open(&path).unwrap();
-    assert_eq!(again.lookup(&kept.token).map(|l| l.session), Some(kept.session));
-    assert!(again.lookup(&gone.token).is_none(), "a revocation survives the restart");
-    assert!(again.owned_by("sub-alice", &gone.session));
-    let _ = std::fs::remove_dir_all(&dir);
+    let login = a.redeem(&a.finish(&account, "").unwrap()).expect("redeemed");
+    assert_eq!(login.user.roles, ["library", "scanner"]);
+    assert_eq!(rows.lock().unwrap()[0].roles, ["scanner"]);
+    let dev = dev_account("bob:library, admin,");
+    assert_eq!((dev.id.as_str(), dev.roles), ("bob", vec!["admin".to_string(), "library".into()]));
 }

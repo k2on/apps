@@ -137,17 +137,21 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
     // of its own that has never seen any of it. It catches up first, so the
     // rescan authors nothing at all — not even entries the procedure would
     // make no-ops of.
-    let before = head(&server);
     let scanned = server.scanner.as_ref().unwrap().authored();
     assert_eq!(scanned, 5, "one entry per song, never a second");
     let dir = root.path().join("fresh-scanner");
     let login = server
         .auth
-        .issue(&ark_auth::Account {
-            id: "library".into(),
-            ..Default::default()
-        })
+        .issue(
+            &ark_auth::Account {
+                id: "library".into(),
+                ..Default::default()
+            },
+            "a test",
+        )
         .unwrap();
+    // After its sign-in, itself an entry.
+    let before = head(&server);
     let again = harken_server::library::Scanner::start(
         media.clone(),
         hosted().clone(),

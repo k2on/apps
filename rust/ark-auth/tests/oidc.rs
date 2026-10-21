@@ -8,8 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use ark_auth::oidc::Provider;
-use ark_auth::server::{router, Auth, Mode};
-use ark_auth::session::SessionStore;
+use ark_auth::server::{router, Auth, Mode, Opened};
 use axum::extract::{Form, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -27,6 +26,8 @@ struct Fake {
     nonce: String,
     key: String,
     asked: Vec<HashMap<String, String>>,
+    /// The session rows the server wrote.
+    rows: Vec<Opened>,
 }
 
 fn jwt(claims: serde_json::Value, key: &str) -> String {
@@ -78,7 +79,9 @@ fn serve() -> (tokio::runtime::Runtime, Arc<Mutex<Fake>>, String) {
     rt.spawn(async move { axum::serve(pl, app).await.unwrap() });
     let provider = Provider::discover(&issuer, "harken", SECRET, &["openid", "profile", "email"]).expect("discovered");
     let (sl, server) = listen(&rt);
-    let auth = Arc::new(Auth::new(SessionStore::memory(), Mode::Oidc(provider), &server));
+    let auth = Arc::new(Auth::new(Mode::Oidc(provider), &server, b"key"));
+    let f = fake.clone();
+    auth.on_sign_in(move |o| Ok(f.lock().unwrap().rows.push(o.clone())));
     rt.spawn(async move { axum::serve(sl, router(auth)).await.unwrap() });
     (rt, fake, server)
 }
@@ -115,7 +118,7 @@ fn callback(server: &str, state: &str) -> Result<String, (u16, String)> {
 /// and the scopes; the callback trades the code (with the verifier the
 /// challenge was made from, and the secret) for an ID token whose nonce is
 /// this login's, and the person is who its `sub` says, with its name and
-/// email. Falsified by sending the token endpoint a verifier of its own
+/// email, and its session the row the callback wrote. Falsified by sending the token endpoint a verifier of its own
 /// (`PkceCodeVerifier::new("x"…)` in `exchange`): the challenge did not
 /// hash from what the provider was sent.
 #[test]
@@ -134,6 +137,8 @@ fn a_login_through_the_provider_is_its_subject() {
     let login = ark_auth::client::exchange(&server, code).unwrap();
     assert_eq!((login.user.id.as_str(), login.user.name.as_str()), ("42", "Ann"));
     assert_eq!(login.user.email, "ann@example.org");
+    let row = fake.lock().unwrap().rows.pop().expect("the callback wrote the session");
+    assert_eq!((row.id, row.user, row.email), (login.session, "42".into(), "ann@example.org".into()));
     let sent = fake.lock().unwrap().asked.pop().unwrap();
     assert_eq!((sent["grant_type"].as_str(), sent["code"].as_str()), ("authorization_code", "the-code"));
     assert_eq!(B64.encode(Sha256::digest(sent["code_verifier"].as_bytes())), q["code_challenge"]);

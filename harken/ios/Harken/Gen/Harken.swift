@@ -419,6 +419,21 @@ public struct Equip: Equatable {
     public var json: String { J.obj(["\"can_volume\":" + String(canVolume), "\"family\":" + J.wopt(family) { v0 in J.q(v0) }, "\"muted\":" + String(muted), "\"volume\":" + String(volume)]) }
 }
 
+/// The record `Grant`.
+public struct Grant: Equatable {
+    public var user: String
+    public var role: String
+
+    public init(user: String, role: String) { self.user = user; self.role = role; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(user: J.text(o["user"]), role: J.text(o["role"]))
+    }
+
+    public var json: String { J.obj(["\"user\":" + J.q(user), "\"role\":" + J.q(role)]) }
+}
+
 /// The record `GroupMute`.
 public struct GroupMute: Equatable {
     public var muted: Bool
@@ -978,6 +993,35 @@ public struct ReportVolume: Equatable {
     public var json: String { J.obj(["\"level\":" + String(level), "\"muted\":" + String(muted)]) }
 }
 
+/// The record `Revoke`.
+public struct Revoke: Equatable {
+    public var id: String
+
+    public init(id: String) { self.id = id; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: J.text(o["id"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id)]) }
+}
+
+/// The record `Role`.
+public struct Role: Equatable {
+    public var user: String
+    public var role: String
+
+    public init(user: String, role: String) { self.user = user; self.role = role; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(user: J.text(o["user"]), role: J.text(o["role"]))
+    }
+
+    public var json: String { J.obj(["\"user\":" + J.q(user), "\"role\":" + J.q(role)]) }
+}
+
 /// The record `Scrub`.
 public struct Scrub: Equatable {
     public var atMs: Int64?
@@ -1071,6 +1115,28 @@ public struct SetVolume: Equatable {
     }
 
     public var json: String { J.obj(["\"device\":" + J.q(device), "\"level\":" + String(level)]) }
+}
+
+/// The record `SignIn`.
+public struct SignIn: Equatable {
+    public var id: String
+    public var user: String
+    public var name: String
+    public var email: String
+    public var device: String
+    public var issuedMs: Int64
+    public var expiresMs: Int64
+    public var revoked: Bool
+    public var roles: [String]
+
+    public init(id: String, user: String, name: String, email: String, device: String, issuedMs: Int64, expiresMs: Int64, revoked: Bool, roles: [String]) { self.id = id; self.user = user; self.name = name; self.email = email; self.device = device; self.issuedMs = issuedMs; self.expiresMs = expiresMs; self.revoked = revoked; self.roles = roles; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: J.text(o["id"]), user: J.text(o["user"]), name: J.text(o["name"]), email: J.text(o["email"]), device: J.text(o["device"]), issuedMs: J.int(o["issued_ms"]), expiresMs: J.int(o["expires_ms"]), revoked: J.bool(o["revoked"]), roles: J.list(o["roles"]) { v0 in J.text(v0) })
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id), "\"user\":" + J.q(user), "\"name\":" + J.q(name), "\"email\":" + J.q(email), "\"device\":" + J.q(device), "\"issued_ms\":" + String(issuedMs), "\"expires_ms\":" + String(expiresMs), "\"revoked\":" + String(revoked), "\"roles\":" + J.wlist(roles) { v0 in J.q(v0) }]) }
 }
 
 /// The record `Skip`.
@@ -1441,6 +1507,21 @@ public struct Harken {
 
     /// `playlists.remove_from_playlist`: its intent's id.
     @discardableResult public func removeFromPlaylist(_ input: RemoveFromPlaylist) throws -> String { try peer.mutate(name: "playlists.remove_from_playlist", input: input.json) }
+
+    /// `role.grant`: its intent's id.
+    @discardableResult public func grant(_ input: Grant) throws -> String { try peer.mutate(name: "role.grant", input: input.json) }
+
+    /// `role.revoke`: its intent's id.
+    @discardableResult public func roleRevoke(_ input: Grant) throws -> String { try peer.mutate(name: "role.revoke", input: input.json) }
+
+    /// `session.current`.
+    public func current() throws -> SignIn? { J.opt(J.parse(try peer.query(name: "session.current", input: "null"))) { v0 in SignIn(json: v0) } }
+
+    /// `session.mine`, kept.
+    public func mine() throws -> View<SignIn> { View(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }
+
+    /// `session.revoke`: its intent's id.
+    @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
 
     /// The live table `listening`, as this device holds it.
     public func liveListening() -> [Listening] { peer.liveRows(table: "listening").map { Listening(json: J.parse($0)) } }

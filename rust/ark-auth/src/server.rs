@@ -1,29 +1,39 @@
-//! The routes: `/auth/login`, `/auth/callback`, `/auth/exchange`,
-//! `/auth/me`, `/auth/logout`. Mount them beside the socket.
+//! The routes: `/auth/login`, `/auth/callback`, `/auth/exchange`. Mount
+//! them beside the socket.
+//!
+//! A sign-in is a session row the hub writes as the authority
+//! ([`Auth::on_sign_in`]), and its token is the row's id with this
+//! server's HMAC of it ([`Auth::mint`]): nothing here keeps a session. The
+//! hub judges a token by the HMAC ([`Auth::verify`]) and the row it names;
+//! who is signed in, and signing out, are the domain's query and mutation.
 //!
 //! ```ignore
-//! let sessions = SessionStore::open(data.join("sessions.json"))?;
-//! let auth = Arc::new(Auth::new(sessions, Mode::Dev, "http://127.0.0.1:8787").allow_redirect("myapp://"));
-//! // ark-server does the rest: `.auth(auth)` mounts these routes and opens
-//! // the sync server with `auth.authenticator()`.
+//! let auth = Arc::new(Auth::new(Mode::Dev, "http://127.0.0.1:8787", &key).allow_redirect("myapp://"));
+//! // ark-peer does the rest: `.auth(auth)` mounts these routes, writes the
+//! // sessions and judges every connection's token.
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use ark::peer::Who;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
 
+use ark::hash::hex;
+
 use crate::oidc::{Challenge, Provider};
-use crate::session::{now_ms, random_token, SessionStore};
 use crate::util::with_code;
 use crate::{Account, Login};
+
+/// Thirty days. A phone that has not spoken to the server in a month signs
+/// in again, and loses nothing by it.
+pub const DEFAULT_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 /// How people sign in.
 #[derive(Debug)]
@@ -47,17 +57,37 @@ impl Mode {
     }
 }
 
-/// A login that has been started and not finished: the state the provider
-/// will hand back, and what has to match when it does.
+/// A sign-in as the session row the hub writes for it: the domain's
+/// `sign_in` table's columns, by name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Opened {
+    pub id: String,
+    pub user: String,
+    pub name: String,
+    pub email: String,
+    pub device: String,
+    pub issued_ms: i64,
+    pub expires_ms: i64,
+    pub revoked: bool,
+    pub roles: Vec<String>,
+}
+
+/// What [`Auth::on_sign_in`] is handed: the row to write, written before
+/// the token is handed out.
+pub type Open = Box<dyn Fn(&Opened) -> Result<(), String> + Send + Sync>;
+
+/// A login started and not finished: what the provider's answer has to
+/// match, where the code goes, and what is signing in.
 #[derive(Debug)]
 struct Pending {
     challenge: Challenge,
     redirect: String,
+    device: String,
     started_ms: i64,
 }
 
-/// A login that has finished and not been collected: a one-minute,
-/// single-use code standing in for the token in the URL.
+/// A login finished and not collected: a one-minute, single-use code
+/// standing in for the token in the URL.
 #[derive(Debug)]
 struct Issued {
     login: Login,
@@ -72,7 +102,6 @@ const PENDING_TTL_MS: i64 = 10 * 60 * 1000;
 /// Everything the routes share. `Arc` it; the same one is what the hub is
 /// opened with, so the socket and the routes agree on who is who.
 pub struct Auth {
-    sessions: Mutex<SessionStore>,
     mode: Mode,
     /// Where this server is reachable from a browser, with no trailing
     /// slash: the provider sends people back to `{public_url}/auth/callback`.
@@ -80,49 +109,41 @@ pub struct Auth {
     /// Prefixes a redirect may have, besides the loopback ones every server
     /// allows and its own `public_url`.
     redirects: Vec<String>,
+    /// What tokens are signed with.
+    key: Vec<u8>,
+    ttl_ms: i64,
     pending: Mutex<HashMap<String, Pending>>,
     codes: Mutex<HashMap<String, Issued>>,
-    /// Told `(user, session)` of every session revoked ([`Auth::on_revoke`]).
-    revoked: Mutex<Vec<Revoked>>,
+    open: OnceLock<Open>,
     /// `docs/plan-auth.md` The roles the configuration grants, by account
-    /// id ([`Auth::with_roles`]). Asked at every `Hello` rather than written
-    /// into a session, so a restart with new configuration grants or
-    /// revokes a role for every login at once.
+    /// id ([`Auth::with_roles`]), merged at every judging.
     roles: BTreeMap<String, BTreeSet<String>>,
 }
 
-/// What [`Auth::on_revoke`] is handed: told the user and the session id of
-/// every session revoked, after the store has written it down.
-pub type Revoked = Box<dyn Fn(&str, &str) + Send + Sync>;
-
-impl std::fmt::Debug for Auth {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Auth")
-            .field("mode", &self.mode)
-            .field("public_url", &self.public_url)
-            .field("redirects", &self.redirects)
-            .finish_non_exhaustive()
-    }
-}
-
 impl Auth {
-    pub fn new(sessions: SessionStore, mode: Mode, public_url: &str) -> Self {
+    /// Signing in by `mode` at `public_url`, tokens signed with `key`.
+    pub fn new(mode: Mode, public_url: &str, key: &[u8]) -> Self {
         Auth {
-            sessions: Mutex::new(sessions),
             mode,
             public_url: public_url.trim_end_matches('/').to_string(),
             redirects: Vec::new(),
+            key: key.to_vec(),
+            ttl_ms: DEFAULT_TTL_MS,
             pending: Mutex::new(HashMap::new()),
             codes: Mutex::new(HashMap::new()),
-            revoked: Mutex::new(Vec::new()),
+            open: OnceLock::new(),
             roles: BTreeMap::new(),
         }
     }
 
-    /// `docs/plan-auth.md` Grant roles from the configuration: role name →
-    /// the account ids holding it, as `services.harken.roles` says them.
-    /// Every login of such an account holds the role, beside any it was
-    /// issued with (the scanner's own; a dev login's from its name).
+    /// How long a session lasts from issue.
+    pub fn with_ttl(mut self, ttl_ms: i64) -> Self {
+        self.ttl_ms = ttl_ms;
+        self
+    }
+
+    /// `docs/plan-auth.md` Grant roles from the configuration: role → the
+    /// account ids holding it, as `services.harken.roles` says them.
     pub fn with_roles<R: Into<String>, A: Into<String>>(mut self, roles: impl IntoIterator<Item = (R, Vec<A>)>) -> Self {
         for (role, accounts) in roles {
             let role = role.into();
@@ -136,31 +157,6 @@ impl Auth {
     /// The roles the configuration grants an account.
     pub fn configured_roles(&self, account: &str) -> BTreeSet<String> {
         self.roles.get(account).cloned().unwrap_or_default()
-    }
-
-    /// What a server says about how it signs people in, every time it
-    /// starts: the mode, and every role the configuration grants, by role.
-    pub fn announce(&self) -> String {
-        let mut by_role: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for (account, roles) in &self.roles {
-            for r in roles {
-                by_role.entry(r).or_default().push(account);
-            }
-        }
-        let mut out = self.mode.announce();
-        for (r, accounts) in by_role {
-            out.push_str(&format!("\nrole {r}: {}", accounts.join(", ")));
-        }
-        out
-    }
-
-    // A login as a client and the engine are told of it: the roles it was
-    // issued with and the configuration's, sorted, once each.
-    fn completed(&self, mut login: Login) -> Login {
-        let mut roles: BTreeSet<String> = login.user.roles.drain(..).collect();
-        roles.extend(self.configured_roles(&login.user.id));
-        login.user.roles = roles.into_iter().collect();
-        login
     }
 
     /// Let a login code go back to anything starting with `prefix` — an
@@ -196,21 +192,64 @@ impl Auth {
         self.redirects.iter().any(|p| url.starts_with(p))
     }
 
-    pub(crate) fn sessions(&self) -> std::sync::MutexGuard<'_, SessionStore> {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner())
+    /// Where every sign-in's session row is written: the hub, as its
+    /// authority. Once; a sign-in before it is refused.
+    pub fn on_sign_in(&self, f: impl Fn(&Opened) -> Result<(), String> + Send + Sync + 'static) {
+        let _ = self.open.set(Box::new(f));
     }
 
-    /// A session for `account` issued directly, with no code and no
-    /// browser: for a peer the server runs itself (a scanner authoring what
-    /// it finds), which signs in like everything else because the engine
-    /// holds every entry to a session.
-    pub fn issue(&self, account: &Account) -> Result<Login, String> {
-        self.sessions().issue(account)
+    fn mac(&self, id: &str) -> Hmac<sha2::Sha256> {
+        let mut m = Hmac::<sha2::Sha256>::new_from_slice(&self.key).expect("an HMAC takes any key");
+        m.update(id.as_bytes());
+        m
+    }
+
+    /// The token for session `id`: `id.hmac(key, id)`, hex.
+    pub fn mint(&self, id: &str) -> String {
+        format!("{id}.{}", hex(&self.mac(id).finalize().into_bytes()))
+    }
+
+    /// The session a token names, when this server signed it.
+    pub fn verify<'t>(&self, token: &'t str) -> Option<&'t str> {
+        let (id, sig) = token.rsplit_once('.')?;
+        let sig = unhex(sig)?;
+        self.mac(id).verify_slice(&sig).ok().map(|_| id)
+    }
+
+    /// Sign `account` in on `device`, with no code and no browser: the
+    /// session row written, and the login. What a peer the server runs
+    /// itself signs in with (a scanner authoring what it finds).
+    pub fn issue(&self, account: &Account, device: &str) -> Result<Login, String> {
+        let open = self.open.get().ok_or("no hub writes sessions here")?;
+        let issued_ms = now_ms();
+        let row = Opened {
+            id: random_id(),
+            user: account.id.clone(),
+            name: account.name.clone(),
+            email: account.email.clone(),
+            device: device.into(),
+            issued_ms,
+            expires_ms: issued_ms + self.ttl_ms,
+            revoked: false,
+            roles: account.roles.clone(),
+        };
+        open(&row).map_err(|e| format!("could not record the session: {e}"))?;
+        let mut roles: BTreeSet<String> = account.roles.iter().cloned().collect();
+        roles.extend(self.configured_roles(&account.id));
+        Ok(Login {
+            token: self.mint(&row.id),
+            session: row.id,
+            user: Account {
+                roles: roles.into_iter().collect(),
+                ..account.clone()
+            },
+            expires_ms: row.expires_ms,
+        })
     }
 
     /// Sign `account` in and mint the code the redirect carries.
-    pub(crate) fn finish(&self, account: &Account) -> Result<String, String> {
-        let login = self.sessions().issue(account).map_err(|e| format!("could not record the session: {e}"))?;
+    pub fn finish(&self, account: &Account, device: &str) -> Result<String, String> {
+        let login = self.issue(account, device)?;
         let code = random_token();
         let now = now_ms();
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
@@ -223,65 +262,7 @@ impl Auth {
     pub fn redeem(&self, code: &str) -> Option<Login> {
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         let issued = codes.remove(code)?;
-        (now_ms() - issued.issued_ms < CODE_TTL_MS).then(|| self.completed(issued.login))
-    }
-
-    /// The login a bearer token proves, if it is live, with every role it
-    /// holds now.
-    pub fn whoami(&self, token: &str) -> Option<Login> {
-        let login = self.sessions().lookup(token)?;
-        Some(self.completed(login))
-    }
-
-    /// Whether `session` is or was `user`'s — live, expired or revoked. What
-    /// the sync server asks of an entry authored under an earlier login of
-    /// the same person.
-    pub fn owns(&self, user: &str, session: &str) -> bool {
-        self.sessions().owned_by(user, session)
-    }
-
-    /// Be told of every session revoked from here on (`docs/plan-perf.md`
-    /// R6). The token is asked at a connection's `Hello` and not again, so
-    /// without this a revoked session's open socket went on syncing until
-    /// it happened to drop; the sync server registers here and closes that
-    /// session's connections at once. Called on the thread that revoked,
-    /// with no lock of this one held.
-    pub fn on_revoke(&self, f: impl Fn(&str, &str) + Send + Sync + 'static) {
-        self.revoked.lock().unwrap_or_else(|e| e.into_inner()).push(Box::new(f));
-    }
-
-    /// End the session `token` proves, and tell everything registered with
-    /// [`Auth::on_revoke`]. Whether there was a live one.
-    pub fn revoke(&self, token: &str) -> Result<bool, String> {
-        let gone = self.sessions().revoke_session(token)?;
-        let Some((user, session)) = gone else {
-            return Ok(false);
-        };
-        for f in self.revoked.lock().unwrap_or_else(|e| e.into_inner()).iter() {
-            f(&user, &session);
-        }
-        Ok(true)
-    }
-}
-
-/// What the sync server asks of a connection's token: who it proves, or
-/// nobody (`ark-server`'s `Authenticate`).
-pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
-
-impl Auth {
-    /// What the sync server asks of every connection's token: the login it
-    /// proves, as the engine's [`Who`] — the account's id, the session, and
-    /// the roles it holds now (issued with it, and configured).
-    pub fn authenticator(self: &Arc<Self>) -> Authenticate {
-        let auth = self.clone();
-        Arc::new(move |token: &str| {
-            let login = auth.whoami(token)?;
-            Some(Who {
-                actor: login.user.id,
-                session: login.session,
-                roles: login.user.roles,
-            })
-        })
+        (now_ms() - issued.issued_ms < CODE_TTL_MS).then_some(issued.login)
     }
 }
 
@@ -302,14 +283,11 @@ pub fn dev_account(name: &str) -> Account {
 ///
 /// Permissive CORS on all of them: the token is a bearer, never a cookie, so
 /// another origin reading these answers learns only what it already sent.
-/// A browser client served from another port on a laptop is the case.
 pub fn router(auth: Arc<Auth>) -> Router {
     Router::new()
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/exchange", post(exchange))
-        .route("/auth/me", get(me))
-        .route("/auth/logout", post(logout))
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .with_state(auth)
 }
@@ -320,8 +298,24 @@ struct LoginQuery {
     user: Option<String>,
 }
 
+/// What is signing in, as its browser or program says.
+fn device(headers: &HeaderMap) -> String {
+    let agent = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok());
+    agent.unwrap_or_default().chars().take(200).collect()
+}
+
+/// `account` signed in on `device` off the runtime (the hub is asked), and
+/// sent back to `redirect` with the code.
+async fn finished(auth: Arc<Auth>, account: Account, device: String, redirect: String) -> Response {
+    match tokio::task::spawn_blocking(move || auth.finish(&account, &device)).await {
+        Ok(Ok(code)) => Redirect::to(&with_code(&redirect, &code)).into_response(),
+        Ok(Err(e)) => failed(e),
+        Err(e) => failed(e.to_string()),
+    }
+}
+
 /// Start a login, or in dev mode finish one.
-async fn login(State(auth): State<Arc<Auth>>, Query(q): Query<LoginQuery>) -> Response {
+async fn login(State(auth): State<Arc<Auth>>, headers: HeaderMap, Query(q): Query<LoginQuery>) -> Response {
     if !auth.redirect_allowed(&q.redirect) {
         return bad(format!(
             "a login code cannot be sent to {}; the server allows loopback, its own \
@@ -337,10 +331,7 @@ async fn login(State(auth): State<Arc<Auth>>, Query(q): Query<LoginQuery>) -> Re
             // `name:role,role` is a login holding those roles
             // ([`dev_account`]), which the announcement says.
             let account = dev_account(user.trim());
-            match auth.finish(&account) {
-                Ok(code) => Redirect::to(&with_code(&q.redirect, &code)).into_response(),
-                Err(e) => failed(e),
-            }
+            finished(auth.clone(), account, device(&headers), q.redirect).await
         }
         Mode::Oidc(provider) => {
             let challenge = Challenge::new();
@@ -356,6 +347,7 @@ async fn login(State(auth): State<Arc<Auth>>, Query(q): Query<LoginQuery>) -> Re
                 Pending {
                     challenge,
                     redirect: q.redirect,
+                    device: device(&headers),
                     started_ms: now,
                 },
             );
@@ -395,17 +387,12 @@ async fn callback(State(auth): State<Arc<Auth>>, Query(q): Query<CallbackQuery>)
     }
 
     // Two round trips to the provider, off the runtime.
-    let provider = provider.clone();
-    let callback = callback_url(&auth);
-    let exchanged = tokio::task::spawn_blocking(move || provider.exchange(&code, &pending.challenge, &callback)).await;
-    let account = match exchanged {
-        Ok(Ok(account)) => account,
-        Ok(Err(e)) => return failed(e),
-        Err(e) => return failed(e.to_string()),
-    };
-    match auth.finish(&account) {
-        Ok(code) => Redirect::to(&with_code(&pending.redirect, &code)).into_response(),
-        Err(e) => failed(e),
+    let (provider, callback, challenge) = (provider.clone(), callback_url(&auth), pending.challenge);
+    let exchanged = tokio::task::spawn_blocking(move || provider.exchange(&code, &challenge, &callback)).await;
+    match exchanged {
+        Ok(Ok(account)) => finished(auth.clone(), account, pending.device, pending.redirect).await,
+        Ok(Err(e)) => failed(e),
+        Err(e) => failed(e.to_string()),
     }
 }
 
@@ -420,28 +407,6 @@ async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> 
         Some(login) => Json(login).into_response(),
         None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
     }
-}
-
-/// Who a bearer token is.
-async fn me(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
-    match bearer(&headers).and_then(|t| auth.whoami(t)) {
-        Some(login) => Json(login).into_response(),
-        None => StatusCode::UNAUTHORIZED.into_response(),
-    }
-}
-
-/// End the session a bearer token proves.
-async fn logout(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
-    let revoked = bearer(&headers).map(|t| auth.revoke(t).unwrap_or(false)).unwrap_or(false);
-    if revoked {
-        StatusCode::NO_CONTENT.into_response()
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
-}
-
-fn bearer(headers: &HeaderMap) -> Option<&str> {
-    headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ").map(str::trim)
 }
 
 fn bad(why: String) -> Response {
@@ -469,4 +434,35 @@ fn dev_form(redirect: &str) -> String {
          <input name=user placeholder=\"a name\" autofocus autocapitalize=off>\
          <button>sign in</button></form>"
     )
+}
+
+/// 128 bits from the OS, as hex: a session id, which entries carry.
+pub fn random_id() -> String {
+    random_hex::<16>()
+}
+
+/// 256 bits from the OS, as hex.
+pub fn random_token() -> String {
+    random_hex::<32>()
+}
+
+fn random_hex<const N: usize>() -> String {
+    let mut b = [0u8; N];
+    getrandom::getrandom(&mut b).expect("the OS gives no randomness");
+    hex(&b)
+}
+
+/// Hex's bytes, when it is hex.
+pub fn unhex(s: &str) -> Option<Vec<u8>> {
+    let pairs = (0..s.len())
+        .step_by(2)
+        .map(|i| s.get(i..i + 2).and_then(|p| u8::from_str_radix(p, 16).ok()));
+    (s.len() % 2 == 0).then(|| pairs.collect()).flatten()
+}
+
+pub(crate) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }

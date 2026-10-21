@@ -15,10 +15,11 @@ pub struct Account {
     /// May be empty.
     #[serde(default)]
     pub email: String,
-    /// `docs/plan-auth.md` The roles this person holds, as the server says:
-    /// what it was configured with for the account
+    /// `docs/plan-auth.md` The roles this person holds, as the server says
+    /// at sign-in: what it was configured with for the account
     /// (`server::Auth::with_roles`) and, signed in through dev auth, what
-    /// the name asked for (`alice:library`). What `has_role` asks, of the
+    /// the name asked for (`alice:library`); a granted role is the
+    /// domain's, read with who is signed in. What `has_role` asks, of the
     /// roles the server stamps on every entry this login pushes
     /// (`docs/plan-guards.md` D1).
     /// Absent when there are none, so a login written before roles reads
