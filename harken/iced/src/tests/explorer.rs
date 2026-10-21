@@ -4,7 +4,7 @@
 //! exposes no CRUD and a client has no raw write.
 
 use crate::domain::CreatePlaylist;
-use ark::codec::Node;
+use ark::json::Json;
 use ark_explorer::value::Value;
 use iced::keyboard::{key::Named, Key, Modifiers};
 
@@ -114,7 +114,7 @@ fn a_function_from_the_explorer_is_authored_as_the_signed_in_person() {
     explore(&mut app, ark_explorer::Msg::Function(at("playlists")));
     explore(&mut app, ark_explorer::Msg::Call);
     let ui = &app.explore.as_ref().unwrap().ui;
-    let g = ui.answer_grid().expect("an answer");
+    let g = ui.answer_grid().unwrap_or_else(|| panic!("an answer: {}", ui.note));
     let name = g.columns.iter().position(|c| c == "name").unwrap();
     assert!(g.rows.iter().any(|r| r[name] == Value::text("From the explorer")), "{:?}", g.rows);
     // An id is chosen from the replica's playlists.

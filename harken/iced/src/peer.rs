@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use crate::domain::Id as Key;
 use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
 use crate::domain::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, Works};
-use ark::codec::Node;
+use ark::json::Json;
 use ark_peer::Patch;
 
 use crate::client::{Replica, Update};

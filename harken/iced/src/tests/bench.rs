@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::{AddToPlaylist, PlaylistInput, PlaylistsOf, RemoveFromPlaylist};
 use crate::domain::{AlbumInput, Artist, Credits, DescribePerson, Library, LibraryEntry, RecordingInput, Recordings, WorkInput, WorkSummary, Works};
-use ark::codec::Node;
+use ark::json::Json;
 
 use crate::peer::key;
 use crate::rows::Id;

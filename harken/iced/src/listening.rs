@@ -456,7 +456,7 @@ fn device_name() -> String {
 pub mod input {
     use crate::domain::Id;
     use crate::domain::*;
-    use ark::codec::Node;
+    use ark::json::Json;
 
     /// A transition that takes nothing.
     pub fn none() -> Vec<u8> {

@@ -846,7 +846,7 @@ impl App {
     /// Author a change, and remember what it was. A refusal here is the
     /// domain's own verdict — a guard, a check — and is said at once; one the
     /// server reaches later is matched back to this by its id.
-    pub fn author(&mut self, what: String, name: &str, input: &impl ark::codec::Node) -> bool {
+    pub fn author(&mut self, what: String, name: &str, input: &impl ark::json::Json) -> bool {
         match self.peer.client.mutate(name, input) {
             Ok(id) => {
                 self.edits.push(Edit { id, what });
