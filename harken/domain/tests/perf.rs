@@ -19,10 +19,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use ark::codec::Node;
 use ark::db::{count, Reads};
 use ark::domain::Domain;
-use ark::hash::{EntryHash, FnHash};
-use ark::ir::Node;
+use ark::hash::EntryHash;
 use ark::log::{Durable, EntryId, Snapshot};
 use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, Who};
 use ark::store::{Read, Scan, Store};
@@ -66,9 +66,9 @@ fn domain() -> &'static Domain {
     D.get_or_init(harken_domain::domain)
 }
 
-/// A function's hash by its name.
-fn f(name: &str) -> FnHash {
-    Domain::hash_of(name)
+/// A function by its name, as an entry calls it.
+fn f(name: &str) -> String {
+    name.to_string()
 }
 
 /// A mutator run over `st`, as the machine runs it.
@@ -162,7 +162,7 @@ fn with_playlists(n: u64) -> Store {
 }
 
 fn opened(role: Role, st: &Store) -> Peer {
-    let mut p = Peer::new(domain().schema.clone(), domain().cas(), role, me());
+    let mut p = Peer::new(domain().schema.clone(), domain().functions(), role, me());
     let snapshot = Snapshot {
         seq: 0,
         hash: EntryHash::default(),
@@ -205,12 +205,9 @@ impl Alone {
     fn mutate(&mut self, name: &str, input: Vec<u8>) -> (Duration, Duration, Duration) {
         self.now += 1;
         let (func, now) = (f(name), self.now);
+        let (alone, solo_input) = (func.clone(), input.clone());
         let t = Instant::now();
-        let o = self.r.step(Input::Mutate {
-            func,
-            input: input.clone(),
-            now,
-        });
+        let o = self.r.step(Input::Mutate { func, input, now });
         let t1 = Instant::now();
         for x in o {
             match x {
@@ -228,7 +225,11 @@ impl Alone {
         let t2 = Instant::now();
         assert!(self.r.pending.is_empty(), "{name}: confirmed");
         let t3 = Instant::now();
-        let o = self.solo.step(Input::Mutate { func, input, now });
+        let o = self.solo.step(Input::Mutate {
+            func: alone,
+            input: solo_input,
+            now,
+        });
         let solo = t3.elapsed();
         assert!(matches!(o.last(), Some(Output::Confirmed(_))), "{name}: alone {o:?}");
         (t1 - t, t2 - t1, solo)

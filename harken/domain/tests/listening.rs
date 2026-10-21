@@ -20,8 +20,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ark::domain::Domain;
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::store::Store;
@@ -1210,7 +1209,7 @@ fn a_report_of_a_volume_is_heard_in_order() {
 const RELAY_MS: i64 = 250;
 
 fn module() -> Module {
-    Module::native(domain())
+    Module::of(domain())
 }
 
 /// The house over the wire: the hub, the session in its volatile machine,
@@ -1224,7 +1223,7 @@ struct Wire {
 impl Wire {
     fn new() -> Wire {
         let mut hub = Config::new(module());
-        let get = |n: &str| Some(Domain::hash_of(&format!("listening.{n}")));
+        let get = |n: &str| Some(format!("listening.{n}"));
         hub.live = Some(Live {
             on_join: get("on_join"),
             on_leave: get("on_leave"),
@@ -1251,7 +1250,7 @@ impl Wire {
         };
         let live = Live {
             device: Some(said.to_bytes()),
-            ephemeral: [Domain::hash_of("listening.scrub")].into(),
+            ephemeral: ["listening.scrub".to_string()].into(),
             every_ms: RELAY_MS,
             ..Live::new(module())
         };
@@ -1274,7 +1273,7 @@ impl Wire {
 
     /// A call from the device's newest connection, and everything delivered.
     fn call(&mut self, id: &str, transition: &str, input: &impl Node) {
-        let f = Domain::hash_of(&format!("listening.{transition}"));
+        let f = format!("listening.{transition}");
         self.net.run(&Op::Call(self.devices[id], f, input.to_bytes()));
         self.net.deliver();
         assert!(self.net.refused.is_empty(), "{:?}", self.net.refused);
@@ -1292,11 +1291,8 @@ impl Wire {
 
     /// The transitions client `i`'s volatile machine applied, in order.
     fn heard(&self, i: i64) -> Vec<String> {
-        let names: BTreeMap<_, _> = domain().fns.keys().map(|n| (Domain::hash_of(n), n.clone())).collect();
         let log = self.net.clients[&i].live.as_ref().unwrap().log().entries();
-        log.iter()
-            .map(|l| names[&l.entry.func].trim_start_matches("listening.").to_string())
-            .collect()
+        log.iter().map(|l| l.entry.func.trim_start_matches("listening.").to_string()).collect()
     }
 
     fn converged(&self) {

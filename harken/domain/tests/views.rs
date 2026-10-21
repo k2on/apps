@@ -19,7 +19,7 @@
 
 mod common;
 
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::plan::{splice, Patch};

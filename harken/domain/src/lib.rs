@@ -62,12 +62,3 @@ pub fn shared() -> Arc<Domain> {
     static D: OnceLock<Arc<Domain>> = OnceLock::new();
     D.get_or_init(|| Arc::new(domain())).clone()
 }
-
-/// The domain's directory of ArkLang, which this crate replaced: what
-/// `tests/port.rs` holds it to, until the language goes.
-pub const DIR: &str = env!("CARGO_MANIFEST_DIR");
-
-/// The module the ArkLang directory builds.
-pub fn text() -> ark::Domain {
-    ark::sexp::build_dir(std::path::Path::new(DIR)).unwrap_or_else(|r| panic!("harken's domain: {r}"))
-}

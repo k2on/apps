@@ -9,7 +9,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark_dev::sim::{Net, Op};
@@ -36,7 +36,7 @@ impl Fleet {
     /// `ark-dev`'s simulator: a device per login, each its connection's
     /// verified identity.
     fn new(seed: u64, logins: Vec<Who>) -> Fleet {
-        let config = Config::native(std::sync::Arc::new(harken_domain::domain()));
+        let config = Config::of(std::sync::Arc::new(harken_domain::domain()));
         let devices = logins.into_iter().map(|w| (w, config.clone())).collect();
         Fleet {
             net: Net::of(config.clone(), devices, seed),
@@ -45,7 +45,7 @@ impl Fleet {
 
     /// Author on client `i` as whoever it believes it is.
     fn mutate(&mut self, i: i64, name: &str, input: &impl Node) {
-        self.net.run(&Op::Mutate(i, ark::domain::Domain::hash_of(&full(name)), input.to_bytes()));
+        self.net.run(&Op::Mutate(i, full(name), input.to_bytes()));
     }
 
     /// What client `i` shows, as `user`: its optimistic view.

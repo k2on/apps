@@ -6,8 +6,8 @@
 
 use std::sync::OnceLock;
 
+use ark::codec::Node;
 use ark::domain::Domain;
-use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
