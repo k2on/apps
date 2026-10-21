@@ -872,6 +872,25 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**N1** (`1e60dda`…`b3da7f4`): **one runtime; the domain is Rust** (§1.16).
+ArkLang, its checker, interpreter, std and Unicode tables, the CAS and the
+`eval/` `verify/` `module/` `text/` vectors are gone; an entry names its
+function, values are serde JSON and keys memcomparable; JSON plans
+(`ark::dynamic`) carry the `views/` vectors. Source: `ark` 9,480 → 4,752,
+`ark-macros` 74 → 502; harken's 1,834 lines of ArkLang (and the demo's 69)
+are 2,373 of Rust; all-in 58,585 → 53,045. Vectors: `views/` patches
+byte-identical; `hash/`, `protocol/`, `trace/`, `rebase/` re-derived
+(`fleet-seed-7` `8316d1f4…`, was `ff04f56d…`). 394 tests (iced demo 69),
+fuzz 1,000 with traces, 0 failed. Release, before → after, µs: (a) whole
+38 → 48, mutate 10.9 → 9.2, alone 15.8 → 16.7 (2,000); (g) sequence 17 → 20;
+`add_song` 232 → 144, alone 109 → 59; (e) acks of 1,000 pending 215 → 39;
+views hydrate (16,000) 51 → 13 ms; but JSON costs bytes and decoding: (d)
+267 → 557 B/entry, receive 8.6 → 21 µs/entry; (h) a page 55/247 → 159/730
+µs; a 400k chain opens in 32 s against 9; 2,000 intents join in 14 s
+against 7. Not verified: the Kotlin and Swift runtimes (frozen) read none
+of the new vectors; harken-peer's command JSON keeps its `$id` dialect;
+open re-checks every row's encoding; FFI (N3) not begun.
+
 **K3b** (`e60c1b2`…): **one peer crate.** `ark-client` and `ark-server` are
 `rust/ark-peer`: one `Peer` over one disk that dials (`link`: a `Wire` a
 `Dial` makes, redial with backoff, close 4401 a denial that stops it, the
