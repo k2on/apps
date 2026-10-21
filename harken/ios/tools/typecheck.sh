@@ -32,5 +32,5 @@ cat "$BINDINGS"/*.modulemap > "$OUT/ffi/module.modulemap"
 SWIFTC="${SWIFT_EXEC:-swiftc}"
 "$SWIFTC" -emit-module -module-name SwiftUI -parse-as-library "$OUT/SwiftUI.swift" -emit-module-path "$OUT/SwiftUI.swiftmodule"
 "$SWIFTC" -typecheck -parse-as-library -module-name Harken -I "$OUT" -I "$OUT/ffi" \
-  "$BINDINGS"/*.swift "$TYPED" "$APP/Gen/Harken.swift" "$APP/Rows.swift" "$APP/Bridge.swift" "$APP/Model.swift"
-echo "harken/ios: Rows.swift, Bridge.swift, Model.swift and Gen/Harken.swift type-check against harken's library"
+  "$BINDINGS"/*.swift "$TYPED" "$APP/Gen/Harken.swift" "$APP/Rows.swift" "$APP/Bridge.swift" "$APP/Model.swift" "$APP/Player.swift"
+echo "harken/ios: Rows.swift, Bridge.swift, Model.swift, Player.swift and Gen/Harken.swift type-check against harken's library"
