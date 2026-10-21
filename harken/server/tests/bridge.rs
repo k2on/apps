@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ark::codec::Node;
+use ark::json::Json as _;
 use ark_auth::Account;
 use ark_peer::now_ms as now;
 use axum::extract::{Path, State};

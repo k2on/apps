@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::AddSong;
 use anyhow::{Context, Result};
-use ark::codec::Node;
+use ark::json::Json;
 use ark::peer::{Ctx, Who};
 use ark::store::{Dir, Read, Scan as Range, Store};
 use ark_auth::Login;
@@ -547,7 +547,9 @@ fn known_file(store: &Store, file: &str) -> bool {
         .indexes
         .iter()
         .position(|i| Some(i.columns.as_slice()) == col.as_ref().map(std::slice::from_ref));
-    let range = Range::prefix(index, &file.to_string().to_bytes(), Dir::Asc, 1);
+    let mut key = vec![];
+    ark::json::put_key(file, &mut key);
+    let range = Range::prefix(index, &key, Dir::Asc, 1);
     !store.scan("media", &range).is_empty()
 }
 

@@ -99,8 +99,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use ark::codec::Node;
 use ark::hash::hex;
+use ark::json::Json as Bytes;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Journal, Role, Who};
 use ark_auth::client::Patience;
@@ -523,11 +523,11 @@ fn listening_json(l: &Listening) -> Value {
     })
 }
 
-fn enc<T: Json + Node>(v: &Value) -> Result<Vec<u8>, String> {
+fn enc<T: Json + Bytes>(v: &Value) -> Result<Vec<u8>, String> {
     T::from_json(v).map(|t| t.to_bytes())
 }
 
-fn dec<T: Json + Node>(b: &[u8]) -> Result<Value, String> {
+fn dec<T: Json + Bytes>(b: &[u8]) -> Result<Value, String> {
     T::from_bytes(b).map(|t| t.to_json()).map_err(|e| e.0)
 }
 

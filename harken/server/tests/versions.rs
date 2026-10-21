@@ -27,9 +27,8 @@ mod support {
 use std::path::PathBuf;
 use std::time::Instant;
 
-use ark::codec::Node;
+use ark::row::Type;
 use ark::schema::{compat, Column, Ref, Schema, Space, Table};
-use ark::ty::Ty;
 use serde_json::json;
 use support::fleet::*;
 
@@ -42,15 +41,17 @@ fn harken() -> Schema {
 
 /// A table appended, `tag` — a playlist's labels.
 fn grown() -> Schema {
-    let col = |name: &str, decl: &str| Column {
+    let col = |name: &str, ty: Type| Column {
         name: name.into(),
-        decl: decl.into(),
-        ty: Ty::Bytes,
+        ty,
         default: None,
     };
     let mut s = harken();
     s.tables.push(Table {
-        columns: vec![col("playlist_id", "Id<playlist>"), col("tag", "Text")],
+        columns: vec![
+            col("playlist_id", Type::Id("playlist".into())),
+            col("tag", Type::Text),
+        ],
         key: 2,
         refs: vec![Ref {
             column: 0,
@@ -70,8 +71,7 @@ fn with_note(mut s: Schema) -> Schema {
         .unwrap();
     t.columns.push(Column {
         name: "note".into(),
-        decl: "Option<Text>".into(),
-        ty: Ty::option(Ty::Bytes),
+        ty: Type::Option(Box::new(Type::Text)),
         default: None,
     });
     s
@@ -113,21 +113,20 @@ fn what_is_not_additive_is_refused() {
     };
     let msg = |s: &Schema| refused(compat(&h, s));
     assert!(msg(&with(&|t| t.columns.swap(1, 4))).contains("reordered or retyped"));
-    assert!(msg(&with(&|t| t.columns[2].ty = Ty::Bytes)).contains("reordered or retyped"));
+    assert!(msg(&with(&|t| t.columns[2].ty = Type::Bytes)).contains("reordered or retyped"));
     assert!(msg(&with(&|t| t.key = 2)).contains("rekeyed"));
     assert!(msg(&with(&|t| t.space = Space::Volatile)).contains("another space"));
-    let rating = |default: Option<Vec<u8>>| {
+    let rating = |default: Option<serde_json::Value>| {
         with(&move |t: &mut Table| {
             t.columns.push(Column {
                 name: "rating".into(),
-                decl: "Int".into(),
-                ty: Ty::Int,
+                ty: Type::Int,
                 default: default.clone(),
             })
         })
     };
     assert!(msg(&rating(None)).contains("rating is appended with neither"));
-    assert_eq!(compat(&h, &rating(Some(0i64.to_bytes()))), Ok(()));
+    assert_eq!(compat(&h, &rating(Some(json!(0)))), Ok(()));
 }
 
 // -- the fleet across versions ----------------------------------------------------
