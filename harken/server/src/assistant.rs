@@ -59,8 +59,8 @@ use crate::domain::{Output, Track};
 
 pub type Args = Vec<u8>;
 
-/// The inputs of the session's transitions, as the bridge and its tests
-/// say them: each the domain's input type, encoded.
+/// The inputs of the session's transitions the bridge and its tests say,
+/// each the domain's input type, encoded; and a position in one moved on.
 pub mod input {
     use crate::domain::*;
     use ark::format::Encode;
@@ -79,31 +79,12 @@ pub mod input {
         .to_bytes()
     }
 
-    pub fn seek(ms: i64) -> Vec<u8> {
-        Seek { ms }.to_bytes()
-    }
-
-    pub fn skip(by: i64) -> Vec<u8> {
-        Skip { by }.to_bytes()
-    }
-
-    pub fn jump(index: usize) -> Vec<u8> {
-        Jump {
-            index: index as i64,
-        }
-        .to_bytes()
-    }
-
     pub fn transfer(to: &str) -> Vec<u8> {
         Transfer { to: to.into() }.to_bytes()
     }
 
     pub fn at(at_ms: i64) -> Vec<u8> {
         At { at_ms }.to_bytes()
-    }
-
-    pub fn report_position(at_ms: i64, since: i64) -> Vec<u8> {
-        Report { at_ms, since }.to_bytes()
     }
 
     pub fn advance(from_track: usize) -> Vec<u8> {
@@ -128,52 +109,6 @@ pub mod input {
         .to_bytes()
     }
 
-    pub fn move_track(from: usize, to: usize) -> Vec<u8> {
-        Move {
-            from: from as i64,
-            to: to as i64,
-        }
-        .to_bytes()
-    }
-
-    pub fn scrub(at_ms: Option<i64>) -> Vec<u8> {
-        Scrub { at_ms }.to_bytes()
-    }
-
-    pub fn equip(can_volume: bool, family: Option<&str>, volume: i64, muted: bool) -> Vec<u8> {
-        Equip {
-            can_volume,
-            family: family.map(|f| f.into()),
-            muted,
-            volume,
-        }
-        .to_bytes()
-    }
-
-    pub fn set_volume(device: &str, level: i64) -> Vec<u8> {
-        SetVolume {
-            device: device.into(),
-            level,
-        }
-        .to_bytes()
-    }
-
-    pub fn nudge_volume(device: &str, delta: i64) -> Vec<u8> {
-        NudgeVolume {
-            delta,
-            device: device.into(),
-        }
-        .to_bytes()
-    }
-
-    pub fn set_mute(device: &str, muted: bool) -> Vec<u8> {
-        SetMute {
-            device: device.into(),
-            muted,
-        }
-        .to_bytes()
-    }
-
     pub fn report_volume(level: i64, muted: bool) -> Vec<u8> {
         ReportVolume { level, muted }.to_bytes()
     }
@@ -185,23 +120,8 @@ pub mod input {
         .to_bytes()
     }
 
-    pub fn report_group(members: &[&str]) -> Vec<u8> {
-        ReportGroup {
-            members: members.iter().map(|m| m.to_string()).collect(),
-        }
-        .to_bytes()
-    }
-
     pub fn set_group_volume(level: i64) -> Vec<u8> {
         GroupVolume { level }.to_bytes()
-    }
-
-    pub fn nudge_group_volume(delta: i64) -> Vec<u8> {
-        GroupNudge { delta }.to_bytes()
-    }
-
-    pub fn set_group_mute(muted: bool) -> Vec<u8> {
-        GroupMute { muted }.to_bytes()
     }
 
     pub fn record_play(track: &Track, from: &str) -> Vec<u8> {
@@ -224,9 +144,15 @@ pub mod input {
             "started" | "stalled" => {
                 At::from_bytes(input).map_or(input.to_vec(), |a| at(a.at_ms + by))
             }
-            "seek" => Seek::from_bytes(input).map_or(input.to_vec(), |a| seek(a.ms + by)),
-            "report_position" => Report::from_bytes(input)
-                .map_or(input.to_vec(), |r| report_position(r.at_ms + by, r.since)),
+            "seek" => Seek::from_bytes(input)
+                .map_or(input.to_vec(), |a| Seek { ms: a.ms + by }.to_bytes()),
+            "report_position" => Report::from_bytes(input).map_or(input.to_vec(), |r| {
+                Report {
+                    at_ms: r.at_ms + by,
+                    since: r.since,
+                }
+                .to_bytes()
+            }),
             _ => input.to_vec(),
         }
     }
