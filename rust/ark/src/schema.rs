@@ -17,7 +17,10 @@
 //! A table is [`Space::Durable`] or [`Space::Volatile`] (§1.3, §1.9): a
 //! volatile table is not in snapshots and not in the state hash.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use serde_json::{Map, Value as J};
 
 use crate::hash::SchemaHash;
@@ -167,13 +170,49 @@ impl Table {
     /// A row read: its columns as JSON, checking its bytes are the row's
     /// one encoding; and its key's bytes and each index's entry.
     pub fn parse(&self, row: &[u8]) -> Result<Parsed, Refusal> {
+        self.read(row, true)
+    }
+
+    /// [`Table::parse`] of a row known to be its one encoding — one the
+    /// store holds — not checked again.
+    pub fn parse_held(&self, row: &[u8]) -> Result<Parsed, Refusal> {
+        self.read(row, false)
+    }
+
+    fn read(&self, row: &[u8], check: bool) -> Result<Parsed, Refusal> {
         let at = |e: String| Refusal(format!("{}: {e}", self.name));
-        let v: J = serde_json::from_slice(row).map_err(|e| at(e.to_string()))?;
-        if typed_json(&self.row_type(), &v).map_err(|e| at(e.0))? != row {
-            return Err(at("not a row's one encoding".into()));
+        let raw: BTreeMap<&str, &RawValue> = serde_json::from_slice(row).map_err(|e| at(e.to_string()))?;
+        let mut cols: Vec<Option<J>> = vec![None; self.columns.len()];
+        let value = |c: &Column| -> Result<J, Refusal> {
+            let r = raw.get(c.name.as_str()).ok_or_else(|| at(format!("a row without {}", c.name)))?;
+            serde_json::from_str(r.get()).map_err(|e| at(e.to_string()))
+        };
+        if check {
+            // The row's one encoding: its columns in order, each its own.
+            let mut want = Vec::with_capacity(row.len());
+            for (i, c) in self.columns.iter().enumerate() {
+                want.push(if i == 0 { b'{' } else { b',' });
+                serde_json::to_writer(&mut want, &c.name).map_err(|e| at(e.to_string()))?;
+                want.push(b':');
+                let v = value(c)?;
+                want.extend(typed_json(&c.ty, &v).map_err(|e| at(e.0))?);
+                cols[i] = Some(v);
+            }
+            want.push(b'}');
+            if want != row {
+                return Err(at("not a row's one encoding".into()));
+            }
+        } else {
+            let read = (0..self.key)
+                .chain(self.indexes.iter().flat_map(|ix| ix.columns.iter().copied()))
+                .chain(self.refs.iter().map(|r| r.column));
+            for c in read {
+                if cols[c].is_none() {
+                    cols[c] = Some(value(&self.columns[c])?);
+                }
+            }
         }
-        let J::Object(cols) = v else { unreachable!("a record is an object") };
-        let col = |c: usize| &cols[&self.columns[c].name];
+        let col = |c: usize| cols[c].as_ref().expect("a key's or an index's column is read");
         let mut key = vec![];
         for c in 0..self.key {
             typed_key(&self.columns[c].ty, col(c), &mut key)?;
@@ -217,7 +256,9 @@ impl Table {
 /// A row as the store reads it: its columns, its key's bytes and its entry
 /// in each of its table's indexes, in order.
 pub struct Parsed {
-    pub cols: Map<String, J>,
+    /// The columns read: every one of a row checked, of a held row those
+    /// its key, indexes and references cover.
+    pub cols: Vec<Option<J>>,
     pub key: Vec<u8>,
     pub entries: Vec<Vec<u8>>,
 }
@@ -227,7 +268,8 @@ impl Parsed {
     /// none for an `Option` column that is null.
     pub fn named(&self, t: &Table, c: usize) -> Result<Option<Vec<u8>>, Refusal> {
         let col = &t.columns[c];
-        let (ty, v) = match (&col.ty, &self.cols[&col.name]) {
+        let v = self.cols[c].as_ref().expect("a reference's column is read");
+        let (ty, v) = match (&col.ty, v) {
             (Type::Option(_), J::Null) => return Ok(None),
             (Type::Option(t), v) => (&**t, v),
             (t, v) => (t, v),

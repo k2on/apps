@@ -144,7 +144,7 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
     assert!(done.len() > 1000 && done.iter().any(|c| matches!(c, Change::Edit { .. })));
     let full = s.state_hash();
     assert_eq!(
-        s.hash_beside(done.iter().rev()),
+        s.hash_beside([&s.undo_of(done.iter().rev())]),
         empty.state_hash(),
         "the digests' arithmetic undoes it too"
     );

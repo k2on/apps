@@ -177,6 +177,11 @@ impl PartialEq for Store {
 }
 impl Eq for Store {}
 
+/// Per table, the leaves undoing some changes adds to its digest and
+/// takes from it ([`Store::undo_of`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Undo(Vec<(usize, [u8; 32], [u8; 32])>);
+
 /// The log as its table holds it, read (§1.6). Every peer's log stands on
 /// a first row; the entries are the rows after it.
 #[derive(Clone, Copy)]
@@ -468,21 +473,39 @@ impl Store {
         self.hash_of(self.tables.iter().map(|r| r.digest))
     }
 
+    /// What undoing `changes` does to the tables' digests, summed per
+    /// table: worked out once for changes [`Store::hash_beside`] is asked
+    /// past many times.
+    pub fn undo_of<'a>(&self, changes: impl IntoIterator<Item = &'a Change>) -> Undo {
+        let mut u: Vec<(usize, [u8; 32], [u8; 32])> = vec![];
+        for c in changes {
+            let Ok(t) = self.find(c.table()) else { continue };
+            let i = u.iter().position(|x| x.0 == t).unwrap_or_else(|| {
+                u.push((t, [0; 32], [0; 32]));
+                u.len() - 1
+            });
+            let (_, plus, minus) = &mut u[i];
+            match c {
+                Change::Add { table, row } => add256(minus, &Store::leaf(table, row)),
+                Change::Remove { table, row } => add256(plus, &Store::leaf(table, row)),
+                Change::Edit { table, old, new } => {
+                    add256(minus, &Store::leaf(table, new));
+                    add256(plus, &Store::leaf(table, old));
+                }
+            }
+        }
+        Undo(u)
+    }
+
     /// The state hash the store would have with `undone` undone, by the
     /// digests' arithmetic alone: what a replica checks a confirmed state
     /// by while its pending changes stay applied.
-    pub fn hash_beside<'a>(&self, undone: impl IntoIterator<Item = &'a Change>) -> StateHash {
+    pub fn hash_beside<'a>(&self, undone: impl IntoIterator<Item = &'a Undo>) -> StateHash {
         let mut ds: Vec<[u8; 32]> = self.tables.iter().map(|r| r.digest).collect();
-        for c in undone {
-            let Ok(t) = self.find(c.table()) else { continue };
-            let d = &mut ds[t];
-            match c {
-                Change::Add { table, row } => sub256(d, &Store::leaf(table, row)),
-                Change::Remove { table, row } => add256(d, &Store::leaf(table, row)),
-                Change::Edit { table, old, new } => {
-                    sub256(d, &Store::leaf(table, new));
-                    add256(d, &Store::leaf(table, old));
-                }
+        for Undo(u) in undone {
+            for (t, plus, minus) in u {
+                add256(&mut ds[*t], plus);
+                sub256(&mut ds[*t], minus);
             }
         }
         self.hash_of(ds.into_iter())
@@ -512,7 +535,8 @@ impl Store {
             Change::Edit { old, new, .. } => (Some(old), Some(new)),
         };
         let parsed_new = new.map(|r| tab.parse(r)).transpose()?;
-        let parsed_old = old.map(|r| tab.parse(r)).transpose()?;
+        // An old row must be the one held, which is canonical: checked below.
+        let parsed_old = old.map(|r| tab.parse_held(r)).transpose()?;
         let key = match (&parsed_new, &parsed_old) {
             (Some(n), Some(o)) if n.key != o.key => return Err(Refusal(format!("{}: an edit keeps its key", tab.name))),
             (Some(n), _) => &n.key,
@@ -621,7 +645,7 @@ impl Store {
                     Some(i) => first(&mut rows.indexes[i].range::<[u8], _>(from).map(|(e, _)| e)),
                     None if r.column == 0 => first(&mut rows.rows.range::<[u8], _>(from).map(|(k, _)| k)),
                     None => rows.rows.values().any(|row| {
-                        let p = rt.parse(row).expect("a stored row parses");
+                        let p = rt.parse_held(row).expect("a stored row parses");
                         p.named(rt, r.column).expect("a stored row's reference reads").as_deref() == Some(key)
                     }),
                 };

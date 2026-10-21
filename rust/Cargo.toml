@@ -20,3 +20,17 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# The kernel and what it serializes and hashes with are optimised in tests
+# too: every test that runs a peer spends its time there.
+[profile.dev.package.ark]
+opt-level = 2
+
+[profile.dev.package.serde_json]
+opt-level = 2
+
+[profile.dev.package.memcomparable]
+opt-level = 2
+
+[profile.dev.package.sha2]
+opt-level = 2

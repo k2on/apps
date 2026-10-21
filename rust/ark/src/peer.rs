@@ -102,7 +102,7 @@ use crate::hash::EntryHash;
 use crate::json::Json;
 use crate::log::{Durable, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Snapshot};
 use crate::schema::{Schema, Space};
-use crate::store::{Change, Log, Store, LOG};
+use crate::store::{Change, Log, Store, Undo, LOG};
 use crate::Refusal;
 
 /// How many logged entries a `Page` carries at most.
@@ -222,7 +222,27 @@ pub struct Who {
 pub struct Pending {
     pub entry: Entry,
     pub changes: Vec<Change>,
+    /// What undoing `changes` does to the digests, worked out once.
+    undo: Memo<Undo>,
 }
+
+impl Pending {
+    pub fn new(entry: Entry, changes: Vec<Change>) -> Pending {
+        Pending { entry, changes, undo: Memo::default() }
+    }
+}
+
+/// A value worked out when first asked for, not part of what holds it.
+#[derive(Clone, Debug, Default)]
+struct Memo<T>(std::sync::OnceLock<T>);
+
+impl<T> PartialEq for Memo<T> {
+    fn eq(&self, _: &Memo<T>) -> bool {
+        true
+    }
+}
+
+impl<T> Eq for Memo<T> {}
 
 /// What an authority keeps beside its log: every intent it judged and how;
 /// each origin's last `local` and the actor it is bound to; for a device
@@ -628,9 +648,9 @@ impl Peer {
     /// one that now refuses stays pending with no changes, the authority's
     /// to judge.
     fn redo_pending(&mut self, o: &mut Out) {
-        for mut p in std::mem::take(&mut self.pending) {
-            p.changes = self.attempt(&p.entry, o).unwrap_or_default();
-            self.pending.push(p);
+        for p in std::mem::take(&mut self.pending) {
+            let changes = self.attempt(&p.entry, o).unwrap_or_default();
+            self.pending.push(Pending::new(p.entry, changes));
         }
     }
 
@@ -673,7 +693,7 @@ impl Peer {
             Ok(changes) => {
                 self.local = local;
                 o.send(Frame::push(self.space, [entry.clone()]));
-                self.pending.push(Pending { entry, changes });
+                self.pending.push(Pending::new(entry, changes));
             }
         }
     }
@@ -1083,7 +1103,9 @@ impl Peer {
             let trust = self.faith || other;
             let own = self.pending.first().is_some_and(|p| p.entry.id == l.entry.id);
             if !undone && own && self.pending[0].changes == facts {
-                let same = self.store.hash_beside(self.pending[1..].iter().flat_map(|p| &p.changes)) == l.state;
+                let store = &self.store;
+                let undone = self.pending[1..].iter().map(|p| p.undo.0.get_or_init(|| store.undo_of(&p.changes)));
+                let same = store.hash_beside(undone) == l.state;
                 if !same && !trust {
                     return self.diverge(l.seq, o);
                 }
@@ -1241,10 +1263,7 @@ impl Peer {
         self.store.log_truncate(at);
         self.pending = chain
             .iter()
-            .map(|l| Pending {
-                entry: l.entry.clone(),
-                changes: l.facts.clone(),
-            })
+            .map(|l| Pending::new(l.entry.clone(), l.facts.clone()))
             .collect();
         self.role = Role::Replica;
         self.asked = Some(at);
@@ -1319,7 +1338,7 @@ impl Peer {
             }
         }
         self.local = self.local.max(d.local);
-        self.pending = d.pending.into_iter().map(|entry| Pending { entry, changes: vec![] }).collect();
+        self.pending = d.pending.into_iter().map(|entry| Pending::new(entry, vec![])).collect();
         self.redo_pending(o);
     }
 }
