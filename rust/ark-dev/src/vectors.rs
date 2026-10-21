@@ -1,6 +1,6 @@
 //! The vectors D1 writes under `spec/vectors/` (`spec/RUNNERS.md` says
-//! how each is run): `protocol/`, every frame as its bytes and as JSON read
-//! under the frame type; `trace/`, every client of the scripted sessions;
+//! how each is run): `protocol/`, every frame as its JSON;
+//! `trace/`, every client of the scripted sessions;
 //! `rebase/`, `fleet-seed-7` and the sessions the fuzzer found a bug with.
 //! `ARK_WRITE_VECTORS` set writes them; otherwise each must be what is on
 //! disk.

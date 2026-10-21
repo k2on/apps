@@ -13,9 +13,10 @@ The other directories are `README.md`'s.
 with why. A directory holds exactly what the writer wrote; a file it did
 not write is a stale vector.
 
-**The JSON here is plain**: bytes are lowercase hex strings, an `Int` a
-JSON number (every one fits a 64-bit integer), an object's keys in
-code-point order. A vector under `falsify/` carries `"expect": "fail"`:
+**The JSON here is plain**: a value is its own JSON (§1.1), bytes and
+hashes lowercase hex strings, an integer a JSON number (every one fits a
+64-bit integer); where a vector carries bytes, they are the hex of that
+JSON. A vector under `falsify/` carries `"expect": "fail"`:
 it is a right vector with one thing changed, and a runner must fail it.
 
 **The demo** is `rust/ark-dev/src/demo.rs`: `playlist(id, name,
@@ -33,14 +34,10 @@ own implementation of the domain it names — the demo and the room.
 
 ## protocol — client
 
-`{bytes, frame, name}`: `bytes` a frame's encoding (§1.11, `frames.rs`),
-`frame` the same value as JSON read under the frame type `frame_ty()` —
-an `Int` a number, `Bytes` hex, a list or a tuple an array, a sum
-`{"variant": i, "fields": [...]}` — and `name` who writes it, its kind
-and its space (`client-hello-volatile`).
-**Do and compare**: `frame` written under the frame type is `bytes`;
-`bytes` decodes to a frame that encodes to `bytes`; `bytes` read under the
-frame type is `frame`.
+`{frame, name}`: `frame` a frame (§1.11, `frames.rs`) as its JSON, and
+`name` who writes it, its kind and its space (`client-hello-volatile`).
+**Do and compare**: `frame` reads as a frame whose JSON is `frame`, byte
+for byte as the file holds it compactly.
 
 There are four frames, and one idea: a peer sends pages of its chain; an
 authority answers with verdicts and its own pages. `Hello { space, cursor,
@@ -71,7 +68,7 @@ calls it made, the state an open was given).
 
 **The file**: `{device, from, live, log, steps}`. `log` and `live` are each
 space's module as the machines hold it: `domain`, its name (`demo`,
-`room`); `schema`, the schema's bytes (`Node` encoding of `Schema`); and
+`room`); `schema`, the hex of the schema's JSON; and
 `functions`, the names of the domain's functions the machine runs; `live`
 is `null` for a client without live state. `device` is the hex of
 what the live machine says it is in its `Hello`, or `null`. `from` names

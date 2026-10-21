@@ -20,13 +20,11 @@ the history, at the commits `kotlin/FROZEN.md` names.
 
 | § | `rust/ark/src/` | what it defines |
 |---|---|---|
-| 1.1 | `ty.rs` | the five constructors — `Int`, `Bytes`, `List`, `Tuple`, `Sum` — and `Named`, a declaration's name, through which a type recurs |
-| 1.1 | `codec.rs` | the encoding: canonical, prefix-free, order-preserving; `skip` and the structural `parse` |
-| 1.1 | `codec.rs` (`Node`), `rust/ark-macros` (`#[derive(Node)]`) | a Rust type as a value: a struct is the `Tuple` of its fields in order, an enum the `Sum` of its variants' tuples, `Vec<u8>` and `String` are `Bytes`, a `Vec<T>` a `List`, an `Option<T>` `Sum [(), (T)]`, a hash `Bytes`; the schema, the log's records and every frame are encoded so |
+| 1.1 | `json.rs` | a value is its JSON: `serde_json`, compact, a struct's fields in declaration order, an enum externally tagged, no floats, so one value has one encoding; a key is the same value in the memcomparable encoding (prefix-free, ordered as the values are); bytes and hashes are lowercase hex in JSON; `Typed` serializes a JSON value under a `Type` exactly as the Rust type it describes, so a row without a Rust type has that type's bytes and key; bytes that are JSON (a row, an input) travel as the JSON they are |
 | 1.16 | `row.rs` (`Type`, `Input`) | what a type is as a column, a form's field and the explorer read it, records and sums with their names; an input's refinements — `trim`, `non_empty`, `len`, `range`, a predicate — each with the words a form shows (`at least 1 character`, `must not be empty`), checked before a mutator runs: its refusal |
 | 1.1 | `hash.rs` | the hash spaces, each its own type |
 | 1.2 | `schema.rs` (`compat`, `Table::fit`), `peer.rs` (`open`) | a schema grows by appending: a row of a table as another schema of it wrote it reads under this one completed (an older one's) or cut to its prefix (a newer one's). A log opened under a prefix-extension of the schema it was written under is checked entry against entry by each hash over its own bytes, never derived again; its rows are widened and the store's digests are the new schema's; what it logs then carries new-schema hashes. A replica whose authority runs another schema takes a confirmed entry's state as it says; one that diverges twice at one entry asks for the snapshot (`Hello` at cursor `-1`) |
-| 1.6 | `log.rs` (`Origin`, `EntryId`) | an entry's id is `sha256(enc(Bytes origin) ‖ enc(Int local))[..16]`, `origin` sixteen bytes a replica draws once at its first open and keeps, `local` its count of intents from 1; the `n`-th row id an entry draws is `sha256(id ‖ enc(Int n))[..16]`. Neither depends on who is signed in. An authority dedupes and orders by `(origin, local)`, binds an origin to the actor whose intents first came from it, and stamps each entry with the actor, session and roles of the connection it judged it on |
+| 1.6 | `log.rs` (`Origin`, `EntryId`) | an entry's id is `sha256(len(origin) as u64be ‖ origin ‖ local as i64be)[..16]`, `origin` sixteen bytes a replica draws once at its first open and keeps, `local` its count of intents from 1; the `n`-th row id an entry draws is `sha256(id ‖ n as i64be)[..16]`. Neither depends on who is signed in. An authority dedupes and orders by `(origin, local)`, binds an origin to the actor whose intents first came from it, and stamps each entry with the actor, session and roles of the connection it judged it on |
 
 ## §7 The kernel
 
@@ -38,7 +36,7 @@ the history, at the commits `kotlin/FROZEN.md` names.
 | 1.8 | `peer.rs` (`Feed`, `scoped`), `domain.rs` (`Scope`) | partial sync: a scope is, per table, a function of the row and who reads it; an authority keeps a union per scoped connection (`Input::Feed`, the scope by name) and answers it by `Output::To`, a union holding what its rows reference |
 | 1.9 | `peer.rs` (the volatile space) | live state: tables marked `Volatile`, a second machine of the same kind over them on the same socket, frames tagged with their `space`; `on_join`, `on_leave` and `on_restore` entries the authority authors; not in the state hash, not journaled |
 | 1.10 | `plan.rs`, `dynamic.rs` | maintained views: a plan of operators (`scan`, `filter`, `map`, `sort`, `take`, `group`, `join`) over typed rows, each updated from a delta, a closure's reads recorded and re-run only for what a change hits; after every step the answer equals a fresh run and the patches (`Insert`, `Remove`, `Update` at a position) splice the old list into the new. `dynamic.rs` is the same plans over rows as JSON, written as JSON |
-| 1.11 | `frames.rs` | the frames, one derived `Sum` of four: `Hello` (with the schema's hash and the domain's version), `Page` (a peer's intents, or its chain made alone; an authority's log), `Snapshot`, `Verdict` (`Ok`, `Refused`, `Held` naming the function). A peer sends pages of its chain; an authority answers with verdicts and its own pages. No frame carries code |
+| 1.11 | `frames.rs` | the frames, one enum of four, each frame its JSON: `Hello` (with the schema's hash and the domain's version), `Page` (a peer's intents, or its chain made alone; an authority's log), `Snapshot`, `Verdict` (`Ok`, `Refused`, `Held` naming the function). A peer sends pages of its chain; an authority answers with verdicts and its own pages. No frame carries code |
 | 1.16 | `domain.rs`, `db.rs`, `rust/ark-macros` | a domain in plain Rust: rows, inputs and the schema derived; mutators, live transitions, queries, views and scopes registered by name in a `Domain`; reads and writes through a typed `Db`, a write a `Change` the store judges, a refused run undone; `ctx.now` and `ctx.new_id()` a function's only non-determinism |
 
 The drivers are not the specification but the reference reading of it:
@@ -50,17 +48,17 @@ trace recorder and player, the fuzzer, the vector writer).
 
 ## The vectors
 
-`hash/` is printed in the JSON dialect of `rust/ark/tests/support/json.rs`
-(`{"$int": …}`, `{"$bytes": …}`, `{"$id": …}`, text as itself); `views/`
-is plain JSON, a row an object of its columns (`ark::dynamic`).
+Every vector is plain JSON, a value its own JSON (§1.1) and a row an
+object of its columns; `hash/` is written one named part per line
+(`rust/ark/tests/support/json.rs`).
 `RUNNERS.md` gives the form of `protocol/`, `trace/` and `rebase/`. Every
 directory but `hash/` has a `falsify/` vector a conformant runner must
 fail.
 
 | directory | written by | one vector is | holds | since |
 |---|---|---|---|---|
-| `hash/` | `rust/ark/tests/hash.rs` | a store and its hash under its schema; `leaves-and-digests`, each table's digest and the state hash | §1.1, §1.3 | K1; unmoved by K2 and N1 |
+| `hash/` | `rust/ark/tests/hash.rs` | a store and its hash under its schema; `leaves-and-digests`, each table's digest and the state hash | §1.1, §1.3 | K1; unmoved by K2; N1 re-derived it, values as JSON |
 | `views/` | `rust/ark/tests/views.rs` | a store, a plan (JSON) and a script of batches: after each, the answer and the patches; `top-two-by-pos`, `group-source`, `playlist-with-items` and the rest of v4's shapes, and the maintained sum's overflow both ways | §1.10 | V1; N1 carried each query as a plan and every value as JSON, the patches the language's engine gave, checked step by step before it went |
-| `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes, in each space it is sent in: its bytes and the same value as JSON under the frame type | §1.11 | D1; K3a made the frames four; N1 re-derived every one naming a function (by name) and every `Hello` (the schema's hash and version) |
-| `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session, step by step: what its two machines were given and said, and where they stood; its domains by name | §1.7, §1.9 | D1; N1 re-derived all (functions by name), every state unmoved |
-| `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed (Rust's only: `RUNNERS.md`): `fleet-seed-7`, its script and where the hub stands settled, and `fleet-fuzz-seed-N` sessions of the fuzzer, each where it stands settled | §1.6, §1.7 | D1; N1: `fleet-seed-7`'s script names functions by name, its head and state (`ff04f56d…`) held; the fuzz sessions are the new fuzzer's, over the demo |
+| `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes, in each space it is sent in: the frame as its JSON | §1.11 | D1; K3a made the frames four; N1 re-derived every one: functions by name, `Hello` with the schema's hash and version, frames as JSON |
+| `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session, step by step: what its two machines were given and said, and where they stood; its domains by name | §1.7, §1.9 | D1; N1 re-derived all: functions by name, then values as JSON, which moved every hash |
+| `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed (Rust's only: `RUNNERS.md`): `fleet-seed-7`, its script and where the hub stands settled, and `fleet-fuzz-seed-N` sessions of the fuzzer, each where it stands settled | §1.6, §1.7 | D1; N1: `fleet-seed-7`'s script names functions by name, its head held and its state re-derived with values as JSON (`8316d1f4…`, was `ff04f56d…`); the fuzz sessions are the new fuzzer's, over the demo |

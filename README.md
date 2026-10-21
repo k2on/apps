@@ -10,7 +10,7 @@ as one typed language every peer runs — and harken, the first app on it.
   the record of how it landed and replaced v4 (Part 3 measures the two);
   where the two documents disagree, the plan is newer.
 - `rust/` — `ark`, the runtime and the specification (`spec/README.md`
-  indexes its modules by section): types and the order-preserving codec,
+  indexes its modules by section): values as JSON and keys memcomparable,
   the schema and the store, the chained log, the one peer machine, the
   frames, a domain in plain Rust (derives, the `Domain` registry, the
   typed `Db`), and maintained views over typed plans. `ark-dev` is the

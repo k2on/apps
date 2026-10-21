@@ -10,7 +10,7 @@ per part. Everything below comes from `ark::prelude::*`.
 ## Rows and the schema
 
 ```rust
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(index(playlist_id, pos))]
 pub struct PlaylistItem {
     #[ark(key, refs(Playlist))]
@@ -45,12 +45,13 @@ carried in every `Hello`, prefix-checked when a log opens, and read by the
 explorer.
 
 A column is an `i64`, `String`, `bool`, `Vec<u8>`, `Id<T>`, `Option`,
-`Vec`, tuple, or a record or enum deriving `Describe`; no floats.
+`Vec`, tuple, or a record or enum deriving `Describe`; no floats. A row is
+its JSON (serde), and a key the same value memcomparable (§1.1).
 
 ## Inputs
 
 ```rust
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct CreatePlaylist {
     #[ark(trim, len = "1..=80", why = "a playlist needs a name")]
     pub name: String,
