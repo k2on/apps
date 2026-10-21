@@ -1,111 +1,49 @@
-//! The module the hub runs (§1.5): harken's own — the domain's directory as
-//! this build compiled it (`crate::domain::MODULE`) — or one `HARKEN_MODULE`
-//! names: a domain's directory of ArkLang, a file of it, or a module file
-//! (`(Module, [body])` under §1.1's codec), read by `ark::sexp::load` — what
-//! `harken-peer --module` runs, so a fleet can run "the next release"
-//! (`tests/versions.rs`). A module loaded must be one this build's bindings
-//! may call ([`crate::domain::fits`]: its schema grown only by appending).
-//! An old module (`HARKEN_OLD_MODULES`, read the same ways) only adds its
-//! bodies to the library: "did this authority run this function" is "is it
-//! in the store". It must be one this module may follow ([`compat`]):
-//! §1.2's prefix check on the schema, plus one verify per new hash.
+//! The domain the hub runs (§1.16): harken's, in plain Rust, as this build
+//! compiled it — its functions registered by name, its schema derived from
+//! its structs. What a release changes is this build: there is no module to
+//! load at run time, and an intent naming a function this build does not
+//! register is held, as any unknown name is.
 
-use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
-use ark::hash::{FnHash, ModuleHash};
-use ark::Domain;
+use ark::domain::Domain;
+use ark::hash::FnHash;
 
-/// A module assembled, and the same as a peer's per-space module.
+/// The domain assembled, and the same as a peer's per-space module.
 #[derive(Clone)]
 pub struct Hosted {
     pub domain: Arc<Domain>,
     pub module: ark_peer::Module,
-    /// The modules held as run before ([`Hosted::hold`]), by hash.
-    pub held: Vec<ModuleHash>,
-}
-
-/// A module read from a path, as [`ark::sexp::load`] reads one.
-fn load(path: &Path, what: &str) -> Result<Domain> {
-    ark::sexp::load(path).map_err(|e| anyhow!("{what} {}: {}", path.display(), e.0))
 }
 
 impl Hosted {
     /// harken's own domain, as this build compiled it.
     pub fn harken() -> Hosted {
-        Hosted::of(crate::domain::host::load())
+        Hosted::of(harken_domain::shared())
     }
 
-    pub fn of(domain: Domain) -> Hosted {
+    pub fn of(domain: Arc<Domain>) -> Hosted {
         Hosted {
-            module: ark_peer::Module::of(&domain),
-            domain: Arc::new(domain),
-            held: vec![],
+            module: ark_peer::Module::native(&domain),
+            domain,
         }
     }
 
-    /// A module read — every body installed and the module verified — that
-    /// this build's bindings may call.
-    pub fn read(path: &Path) -> Result<Hosted> {
-        let d = load(path, "the module")?;
-        crate::domain::fits(&d).map_err(|e| {
-            anyhow!(
-                "the module {} is not one this build calls: {}",
-                path.display(),
-                e.0
-            )
-        })?;
-        Ok(Hosted::of(d))
-    }
-
-    /// Another module's bodies, held beside these: how many.
-    pub fn hold(self, path: &Path) -> Result<(Hosted, usize)> {
-        let old = load(path, "the old module")?;
-        let d = Arc::try_unwrap(self.domain).unwrap_or_else(|d| Domain {
-            schema: d.schema.clone(),
-            module: d.module.clone(),
-            lib: d.lib.clone(),
-            bodies: d.bodies.clone(),
-        });
-        ark::module::compat(&old.module, &d.module, &d.lib).map_err(|e| {
-            anyhow!(
-                "this module may not follow the old module {}: {}",
-                path.display(),
-                e.0
-            )
-        })?;
-        let n = old.bodies.len();
-        let d = d
-            .with(old.bodies.values().cloned().collect())
-            .map_err(|e| anyhow!("the old module {}: {}", path.display(), e.0))?;
-        let held = self.held.into_iter().chain([old.module.hash()]).collect();
-        Ok((
-            Hosted {
-                held,
-                ..Hosted::of(d)
-            },
-            n,
-        ))
-    }
-
-    /// A function's hash by its binding, `library.add_song`.
+    /// The hash a registered function is called by, by its name,
+    /// `library.add_song`.
     pub fn get(&self, name: &str) -> Option<FnHash> {
-        self.domain.module.get(name)
+        self.domain.get(name).map(|_| Domain::hash_of(name))
     }
 
-    /// A function's hash by its binding, which must be there.
+    /// [`Hosted::get`] of a function that must be there.
     pub fn func(&self, name: &str) -> FnHash {
-        self.domain.get(name)
+        self.get(name)
+            .unwrap_or_else(|| panic!("no function {name}"))
     }
 
-    /// The module file: the binding map and every body.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.domain.to_file()
+    /// What this build runs, in a word: its domain's schema hash and
+    /// version.
+    pub fn version(&self) -> String {
+        format!("{} {}", self.domain.schema_hash(), self.domain.version)
     }
-}
-
-/// A module file of `domain`, at `path`.
-pub fn write(domain: Domain, path: &Path) -> Result<()> {
-    std::fs::write(path, domain.to_file()).with_context(|| format!("writing {}", path.display()))
 }

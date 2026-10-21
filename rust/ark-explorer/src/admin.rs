@@ -3,12 +3,14 @@
 //! wasm and served by the server on its admin listener, or run natively
 //! against one (`ark-admin http://127.0.0.1:8788`).
 //!
-//! What it is shown is one [`State`] per request: the module and its
-//! functions, the store, the log's last lines and the connections, read
-//! into a store and a library the explorer reads like any other. What it writes it asks
-//! the server to write — a raw write, or a domain mutation through the
-//! CRUD the module exposes — and the server authors it as itself. A
-//! request is answered after the write, and the state is read again.
+//! What it is shown is one [`State`] per request: the domain's catalog —
+//! its schema and its functions described — the store, the log's last
+//! lines and the connections, read into a store the explorer reads like any
+//! other. The page holds no domain, so it answers no query itself (§1.16).
+//! What it writes it asks the server to write — a raw write, or a domain
+//! mutation through the CRUD the domain exposes — and the server authors
+//! it as itself. A request is answered after the write, and the state is
+//! read again.
 //!
 //! Bound to loopback the server asks nothing; bound wider it asks for a
 //! login holding `admin`, and the page signs in the way the browser peer
@@ -19,45 +21,30 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark::ir::Node;
 use ark::log::{EntryId, Seq};
-use ark::module::{Lib, Module};
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
 use iced::widget::{column, container, text};
 use iced::{Element, Length, Subscription, Task};
 
-use crate::data::{Connection, CrudVerbs, Line, LogView, Source, Ticket, Verdict, Writer};
+use crate::data::{Catalog, Connection, CrudVerbs, Line, LogView, Source, Ticket, Verdict, Writer};
 use crate::model::{Explorer, Msg, Outcome};
 use crate::wire::{author_body, raw_body, Hello, State};
 
-/// The state as the explorer reads it: the module decoded, its functions
-/// checked into a library, the store laid out under its schema, the rest as
-/// it came.
+/// The state as the explorer reads it: the store laid out under the
+/// catalog's schema, the rest as it came.
 pub struct Loaded {
-    pub module: Module,
-    pub lib: Lib,
+    pub catalog: Catalog,
     pub store: Store,
     pub state: State,
 }
 
 impl Loaded {
-    /// A state as the server sent it, read: every body checked, callees
-    /// before their callers, as a peer loads what it is sent.
+    /// A state as the server sent it, read.
     pub fn of(state: State) -> Result<Loaded, String> {
-        let module = Module::from_bytes(&state.module).map_err(|e| format!("the module: {e}"))?;
-        let lib = Lib::default();
-        let mut left: Vec<&Vec<u8>> = state.bodies.iter().collect();
-        while !left.is_empty() {
-            let before = left.len();
-            left.retain(|b| lib.load(&module.schema, b).is_err());
-            if left.len() == before {
-                return Err(format!("{} function bodies do not check", left.len()));
-            }
-        }
-        ark::module::verify(&module, &lib).map_err(|e| format!("the module: {e}"))?;
-        let store = Store::from_rows(Arc::new(module.schema.clone()), &state.rows).map_err(|e| format!("the store: {e}"))?;
-        Ok(Loaded { module, lib, store, state })
+        let catalog = state.catalog.clone();
+        let store = Store::from_rows(Arc::new(catalog.schema.clone()), &state.rows).map_err(|e| format!("the store: {e}"))?;
+        Ok(Loaded { catalog, store, state })
     }
 
     fn source(&self) -> Source<'_> {
@@ -71,8 +58,8 @@ impl Loaded {
         };
         Source {
             store: &self.store,
-            module: &self.module,
-            lib: &self.lib,
+            catalog: &self.catalog,
+            ask: None,
             log: self,
             ctx,
         }

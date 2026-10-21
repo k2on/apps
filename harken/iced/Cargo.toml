@@ -15,6 +15,7 @@ demo = []
 
 [dependencies]
 ark = { path = "../../rust/ark" }
+harken-domain = { path = "../domain" }
 ark-peer = { path = "../../rust/ark-peer" }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
@@ -46,5 +47,3 @@ web-sys = { version = "0.3", features = ["Window", "Location", "Document", "Elem
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 
-[build-dependencies]
-ark = { path = "../../rust/ark" }

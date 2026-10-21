@@ -25,10 +25,9 @@ use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
-use ark::view::Patch;
 use ark::Domain;
 
-use crate::{now_ms, Config, Disk, Peer};
+use crate::{now_ms, Config, Disk, Patch, Peer};
 
 /// What has become of an intent this device authored.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,14 +193,36 @@ impl Peer {
         self.config.domain.as_deref().expect("a peer called by name has a domain")
     }
 
+    /// The domain in plain Rust its functions are called in, if it is one.
+    pub fn native(&self) -> Option<&ark::domain::Domain> {
+        self.config.native.as_deref()
+    }
+
     /// The binding a name means ([`Domain::binding`]).
     pub fn binding(&self, name: &str) -> Option<String> {
-        self.domain().binding(name).map(String::from)
+        match self.native() {
+            Some(d) => d.binding(name).map(String::from),
+            None => self.domain().binding(name).map(String::from),
+        }
     }
 
     fn func(&self, name: &str) -> Result<FnHash, String> {
         let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
-        Ok(self.domain().get(&b))
+        Ok(match self.native() {
+            Some(_) => ark::domain::Domain::hash_of(&b),
+            None => self.domain().get(&b),
+        })
+    }
+
+    /// A query's or a view's answer over the optimistic state, as this
+    /// login reads it: its encoding.
+    pub fn ask(&self, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
+        let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
+        let r = match self.native() {
+            Some(d) => d.ask(&self.log.store, &self.ctx(), &b, input),
+            None => self.domain().ask(&self.log.store, &self.ctx(), &b, input),
+        };
+        r.map_err(|r| r.0)
     }
 
     /// An intent: its id, or the refusal its preview — or, alone, its
@@ -235,21 +256,34 @@ impl Peer {
 
     /// A query's answer over the optimistic state, as this login reads it.
     pub fn query<T: Node>(&self, name: &str, input: &impl Node) -> Result<T, String> {
-        let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
-        let bytes = self.domain().ask(&self.log.store, &self.ctx(), &b, &input.to_bytes()).map_err(|r| r.0)?;
+        let bytes = self.ask(name, &input.to_bytes())?;
         T::from_bytes(&bytes).map_err(|r| format!("{name}: {r}"))
+    }
+
+    /// A view function of the domain in Rust (§1.16) answered afresh over
+    /// the optimistic state, as this login reads it: the domain's own
+    /// function, called as it is.
+    pub fn answer<S: ark::db::Tables, I, T: ark::plan::Elem>(&self, f: ark::domain::ViewFn<S, I, T>, input: I) -> Result<Vec<T>, String> {
+        let ctx = self.ctx();
+        let plan = ark::db::read::<S, _>(&self.log.store, |db| f(&ctx, db, input)).map_err(|r| r.0)?;
+        Ok(plan.run(&self.log.store, &ctx))
     }
 
     /// A maintained view of a query (§1.10) over the optimistic state, as
     /// this login reads it: its number, or the query's refusal.
     pub fn view(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
-        let (f, ctx) = (self.func(name)?, self.ctx());
+        let ctx = self.ctx();
+        if self.native().is_some() {
+            let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
+            return self.watch_native(Space::Durable, &b, input, ctx).map_err(|r| r.0);
+        }
+        let f = self.func(name)?;
         self.watch(Space::Durable, &f, input, ctx).map_err(|r| r.0)
     }
 
     /// A view's rows as they stand, each its bytes.
     pub fn rows(&self, view: usize) -> Vec<Vec<u8>> {
-        self.values(view).unwrap_or_default().iter().map(|v| v.to_bytes()).collect()
+        self.values(view).unwrap_or_default()
     }
 
     /// What a view did since it was last asked.

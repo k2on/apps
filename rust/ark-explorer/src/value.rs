@@ -1,16 +1,12 @@
-//! A value as the explorer shows and edits it (`docs/plan-v5.md` §1.1):
+//! A value as the explorer shows and edits it (`docs/plan-v5.md` §1.16):
 //! bytes read under a type, the type said the way a person reads it.
 //!
-//! v5 has no run-time value and keeps no names but a table's columns: a
-//! record is a `Tuple`, an enum a `Sum`, `Bool` and `Option` are sums by
-//! shape and `Text` and `Id<t>` are declarations over `Bytes`. [`resolve`]
-//! turns a type of the module into a [`Ty`] a form and a cell can draw —
-//! `Text` as text, `Id<playlist>` as an id of `playlist`, `Sum [(), ()]` as
-//! a bool, `Sum [(), (T)]` as an option — and labels a record's fields from
-//! what the module does say: a field refined by its own declaration
-//! (`CreatePlaylist.name`) by that name, an id by its table, anything else
-//! by its type and place. A list of rows whose types are a table's columns
-//! is labelled by the table's column names ([`row_labels`]).
+//! [`of_type`] turns a domain's type description into a [`Ty`] a form and a
+//! cell can draw — a record by its fields' names, an enum by its variants'
+//! places — and [`column_ty`] a table's column, from its declared name
+//! (`Text`, `Id<playlist>`, `Option<Text>`) or else its structure. A list
+//! of records whose fields are a table's columns is labelled by the table's
+//! column names ([`columns_of`]).
 //!
 //! [`Value`] is a value of a [`Ty`], read from bytes by [`decode`] and
 //! written back by [`encode`] — the codec's own encoding, so what a form
@@ -18,10 +14,8 @@
 //! [`text_of`], which [`parse_cell`] reads back: what a cell shows, its
 //! editor starts with, and a form's field is typed as.
 
-use ark::check::Types;
 use ark::codec::{put_bytes, put_int, put_variant, Reader};
-use ark::ir::Rule;
-use ark::module::Module;
+use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
 use ark::ty::Ty as Structure;
 use ark::Refusal;
@@ -68,121 +62,69 @@ fn is_bool(vs: &[Vec<Structure>]) -> bool {
     vs.len() == 2 && vs.iter().all(Vec::is_empty)
 }
 
-/// The name a type is declared by, or its constructor's: what tells a
-/// table's columns apart from another record's.
-pub fn decl_name(t: &Structure) -> String {
+/// A domain's type as the explorer draws it. An enum of no fields is an
+/// enum, whatever its size.
+pub fn of_type(t: &Type) -> Ty {
+    let fields = |fs: &[(String, Type)]| fs.iter().map(|(n, t)| (n.clone(), of_type(t))).collect();
     match t {
-        Structure::Named(n) => n.clone(),
-        Structure::Int => "Int".into(),
-        Structure::Bytes => "Bytes".into(),
-        Structure::Sum(vs) if is_bool(vs) => "Bool".into(),
-        _ => String::new(),
+        Type::Int => Ty::Int,
+        Type::Text => Ty::Text,
+        Type::Bool => Ty::Bool,
+        Type::Bytes => Ty::Bytes,
+        Type::Unit => Ty::Struct(vec![]),
+        Type::Id(t) => Ty::Id(t.clone()),
+        Type::Option(t) => Ty::Option(Box::new(of_type(t))),
+        Type::List(t) => Ty::List(Box::new(of_type(t))),
+        Type::Tuple(ts) => Ty::Struct(ts.iter().enumerate().map(|(i, t)| ((i + 1).to_string(), of_type(t))).collect()),
+        Type::Record(_, fs) => Ty::Struct(fields(fs)),
+        Type::Sum(_, vs) if vs.iter().all(|(_, fs)| fs.is_empty()) => Ty::Enum(vs.len()),
+        Type::Sum(_, vs) => Ty::Sum(vs.iter().map(|(_, fs)| fs.iter().map(|(_, t)| of_type(t)).collect()).collect()),
     }
 }
 
-/// The module's declarations, `Text` among them.
-pub fn types(m: &Module) -> Types {
-    Types::new(&m.types)
+/// A structure as the explorer draws it, where nothing names its parts.
+pub fn of_structure(t: &Structure) -> Ty {
+    match t {
+        Structure::Int => Ty::Int,
+        Structure::Bytes | Structure::Named(_) => Ty::Bytes,
+        Structure::List(t) => Ty::List(Box::new(of_structure(t))),
+        Structure::Tuple(ts) => Ty::Struct(ts.iter().enumerate().map(|(i, t)| ((i + 1).to_string(), of_structure(t))).collect()),
+        Structure::Sum(vs) if is_bool(vs) => Ty::Bool,
+        Structure::Sum(vs) if vs.len() == 2 && vs[0].is_empty() && vs[1].len() == 1 => Ty::Option(Box::new(of_structure(&vs[1][0]))),
+        Structure::Sum(vs) if vs.iter().all(Vec::is_empty) => Ty::Enum(vs.len()),
+        Structure::Sum(vs) => Ty::Sum(vs.iter().map(|f| f.iter().map(of_structure).collect()).collect()),
+    }
 }
 
-/// A module's type as the explorer draws it. A declared enum is an enum,
-/// whatever its size: only `Bool`'s shape unnamed is a bool.
-pub fn resolve(cx: &Types, t: &Structure) -> Ty {
-    fn at(cx: &Types, t: &Structure, depth: usize) -> Ty {
-        let go = |t: &Structure| at(cx, t, depth + 1);
-        match t {
-            _ if depth > 32 => Ty::Bytes,
-            Structure::Int => Ty::Int,
-            Structure::Bytes => Ty::Bytes,
-            Structure::Named(n) if n == "Text" => Ty::Text,
-            Structure::Named(n) if n.starts_with("Id<") && n.ends_with('>') => Ty::Id(n[3..n.len() - 1].to_string()),
-            Structure::Named(n) => match cx.decl(n) {
-                Some(d) if cx.texty(d) => Ty::Text,
-                Some(d) => match &d.ty {
-                    Structure::Sum(vs) if vs.iter().all(Vec::is_empty) && n != "Bool" => Ty::Enum(vs.len()),
-                    t => go(t),
-                },
-                None => Ty::Bytes,
-            },
-            Structure::List(t) => Ty::List(Box::new(go(t))),
-            Structure::Tuple(ts) => Ty::Struct(labelled(ts).into_iter().zip(ts).map(|(l, t)| (l, go(t))).collect()),
-            Structure::Sum(vs) if is_bool(vs) => Ty::Bool,
-            Structure::Sum(vs) if vs.len() == 2 && vs[0].is_empty() && vs[1].len() == 1 => Ty::Option(Box::new(go(&vs[1][0]))),
-            Structure::Sum(vs) if vs.iter().all(Vec::is_empty) => Ty::Enum(vs.len()),
-            Structure::Sum(vs) => Ty::Sum(vs.iter().map(|f| f.iter().map(go).collect()).collect()),
+/// A type by its declared name and its structure: `Text`, `Int`, `Bool`,
+/// `Id<t>`, `Option<…>` by name, anything else by its structure.
+fn of_decl(decl: &str, ty: &Structure) -> Ty {
+    match (decl, ty) {
+        ("Int", _) => Ty::Int,
+        ("Text", _) => Ty::Text,
+        ("Bool", _) => Ty::Bool,
+        (d, _) if d.starts_with("Id<") && d.ends_with('>') => Ty::Id(d[3..d.len() - 1].to_string()),
+        (d, Structure::Sum(vs)) if d.starts_with("Option<") && d.ends_with('>') && vs.len() == 2 && vs[1].len() == 1 => {
+            Ty::Option(Box::new(of_decl(&d[7..d.len() - 1], &vs[1][0])))
         }
+        _ => of_structure(ty),
     }
-    at(cx, t, 0)
-}
-
-/// A function's input as fields: a record's (named, or a tuple as a row's
-/// is), or each parameter's; and whether the input is the record of them
-/// rather than the one field itself.
-pub fn fields_of(cx: &Types, params: &[Structure]) -> (Vec<Structure>, bool) {
-    match params {
-        [Structure::Tuple(fs)] => (fs.clone(), true),
-        [p @ Structure::Named(n)] => match cx.decl(n).map(|d| &d.ty) {
-            Some(Structure::Tuple(fs)) => (fs.clone(), true),
-            _ => (vec![p.clone()], false),
-        },
-        [p] => (vec![p.clone()], false),
-        ps => (ps.to_vec(), true),
-    }
-}
-
-/// A record's fields' labels from their types: a field's own declaration
-/// (`AddSong.title`) by its name, an id by its table, the rest by what they
-/// are; the same label twice is numbered.
-pub fn labelled(ts: &[Structure]) -> Vec<String> {
-    let base: Vec<String> = ts
-        .iter()
-        .map(|t| match t {
-            Structure::Named(n) if n.starts_with("Id<") => n[3..n.len() - 1].to_string(),
-            Structure::Named(n) => n.rsplit_once('.').map_or(n.to_lowercase(), |(_, f)| f.to_string()),
-            Structure::Sum(vs) if is_bool(vs) => "bool".into(),
-            Structure::Int | Structure::Bytes | Structure::List(_) => format!("{t:?}").split('(').next().unwrap_or_default().to_lowercase(),
-            _ => "value".into(),
-        })
-        .collect();
-    let count = |upto: &[String], b: &String| upto.iter().filter(|x| *x == b).count();
-    let numbered = |(i, b): (usize, &String)| {
-        if count(&base, b) == 1 {
-            b.clone()
-        } else {
-            format!("{b} {}", count(&base[..=i], b))
-        }
-    };
-    base.iter().enumerate().map(numbered).collect()
 }
 
 /// The type of a table's row, its columns by their names.
-pub fn row_ty(cx: &Types, t: &Table) -> Ty {
-    Ty::Struct(t.columns.iter().map(|c| (c.name.clone(), column_ty(cx, c))).collect())
+pub fn row_ty(t: &Table) -> Ty {
+    Ty::Struct(t.columns.iter().map(|c| (c.name.clone(), column_ty(c))).collect())
 }
 
 /// A column's type: its declaration, else its structure.
-pub fn column_ty(cx: &Types, c: &Column) -> Ty {
-    match c.decl.as_str() {
-        "Int" => Ty::Int,
-        "Bool" => Ty::Bool,
-        d if d == "Text" || d.starts_with("Id<") || cx.decl(d).is_some() => resolve(cx, &Structure::Named(d.into())),
-        _ => resolve(cx, &c.ty),
-    }
+pub fn column_ty(c: &Column) -> Ty {
+    of_decl(&c.decl, &c.ty)
 }
 
-/// When the elements of a list are some table's rows — their fields'
-/// declarations the table's columns', in order — the table's column names.
-pub fn row_labels(schema: &Schema, element: &Structure, cx: &Types) -> Option<Vec<String>> {
-    let (fields, true) = fields_of(cx, std::slice::from_ref(element)) else {
-        return None;
-    };
-    columns_of(schema, &fields)
-}
-
-/// When these fields' declarations are some table's columns', in order,
+/// When these fields' declared types are some table's columns', in order,
 /// the table's column names.
-pub fn columns_of(schema: &Schema, fields: &[Structure]) -> Option<Vec<String>> {
-    let said: Vec<String> = fields.iter().map(decl_name).collect();
+pub fn columns_of(schema: &Schema, fields: &[(String, Type)]) -> Option<Vec<String>> {
+    let said: Vec<String> = fields.iter().map(|(_, t)| t.decl()).collect();
     let t = schema.tables.iter().find(|t| t.columns.iter().map(|c| &c.decl).eq(said.iter()))?;
     Some(t.columns.iter().map(|c| c.name.clone()).collect())
 }
@@ -279,35 +221,6 @@ pub fn ty_name(t: &Ty) -> String {
         Ty::Sum(vs) => format!("sum({})", vs.iter().map(|f| format!("({})", join(f))).collect::<Vec<_>>().join(" | ")),
         t => format!("{t:?}").to_lowercase(),
     }
-}
-
-/// What a declared type is checked against, said: its own refinements and
-/// those of the declarations it names, outermost first — `trimmed`,
-/// `1 to 120 chars`, `non-empty`, a predicate by its message.
-pub fn checks_of(cx: &Types, t: &Structure) -> Vec<String> {
-    let said = |r: &ark::ir::Refine| {
-        let why = r.why.as_ref().map_or(String::new(), |w| format!(" (\u{201c}{w}\u{201d})"));
-        let chars = |n: i64| if n == 1 { "char" } else { "chars" };
-        Some(match &r.rule {
-            Rule::Utf8 => return None,
-            Rule::Trim => "trimmed".into(),
-            Rule::Len(n) => format!("exactly {n} {}{why}", chars(*n)),
-            Rule::LenRange(lo, i64::MAX) => format!("min {lo} {}{why}", chars(*lo)),
-            Rule::LenRange(0, hi) => format!("max {hi} {}{why}", chars(*hi)),
-            Rule::LenRange(lo, hi) => format!("{lo} to {hi} {}{why}", chars(*hi)),
-            Rule::NonEmpty => format!("non-empty{why}"),
-            Rule::Refine(_) => r.why.clone().unwrap_or_else(|| "refined".into()),
-        })
-    };
-    let (mut out, mut t) = (vec![], t.clone());
-    while let Some(d) = (out.len() < 64)
-        .then_some(&t)
-        .and_then(|t| if let Structure::Named(n) = t { cx.decl(n) } else { None })
-    {
-        out.extend(d.refine.iter().filter_map(said));
-        t = d.ty.clone();
-    }
-    out
 }
 
 /// A value as one line of text: an id as `8-4-4-4-12` hex, bytes as hex,

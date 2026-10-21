@@ -3,7 +3,7 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's server, an ark-peer that listens: the log and the listening session (harken/domain, through its generated bindings) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
+description = "harken's server, an ark-peer that listens: the log and the listening session (harken/domain, linked) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
 workspace = "../../rust"
 
 [[bin]]
@@ -20,6 +20,7 @@ path = "src/bin/harken-peer.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
+harken-domain = { path = "../domain" }
 # The server is a peer that listens; the scanner and the house's speakers
 # are peers in this process that reach it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer" }
@@ -42,9 +43,6 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 # same ureq ark-auth talks to an identity provider with.
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 serde_json = { workspace = true }
-
-[build-dependencies]
-ark = { path = "../../rust/ark" }
 
 [dev-dependencies]
 # The simulator, for a log written before the server starts.

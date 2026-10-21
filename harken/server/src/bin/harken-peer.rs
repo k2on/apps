@@ -4,7 +4,7 @@
 //! harken-peer --dir DIR --server URL [--user NAME]     a peer of that server
 //! harken-peer --dir DIR --alone [--user NAME]          its own authority
 //!   [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
-//!   [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
+//!   [--auth-patience-ms N] [--roles ROLE,ROLE]
 //!   [--device KIND,NAME,CAN_PLAY]
 //! ```
 //!
@@ -28,8 +28,8 @@
 //! preview; the hub stamps every entry with the roles its own sign-in gives
 //! the connection, whatever this says.
 //!
-//! `--module FILE` runs the module in that file instead of harken's own
-//! (`harken_server::hosted`, the server's `HARKEN_MODULE`). Arguments and
+//! It runs harken's domain as this build compiled it
+//! (`harken_server::hosted`). Arguments and
 //! rows cross as JSON for the functions this binary knows the types of
 //! ([`input`], [`rows`]): harken's own.
 //!
@@ -114,7 +114,7 @@ use serde_json::{json, Map, Value};
 const USAGE: &str =
     "usage: harken-peer --dir DIR (--server URL [--user NAME] | --alone [--user NAME])
                    [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
-                   [--auth-patience-ms N] [--module FILE] [--roles ROLE,ROLE]
+                   [--auth-patience-ms N] [--roles ROLE,ROLE]
                    [--device KIND,NAME,CAN_PLAY]
 Commands are JSON lines on stdin; see the source's first page.";
 
@@ -139,7 +139,6 @@ struct Flags {
     pump: Duration,
     backoff: (u64, u64),
     patience: Patience,
-    module: Option<PathBuf>,
     roles: Vec<String>,
     device: Option<DeviceFlag>,
 }
@@ -153,7 +152,6 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         pump: Duration::from_millis(50),
         backoff: (500, 30_000),
         patience: Patience::DEFAULT,
-        module: None,
         roles: vec![],
         device: None,
     };
@@ -198,7 +196,6 @@ fn flags(args: &[String]) -> Result<Flags, String> {
                     ms(it.next(), "--auth-patience-ms")?.max(1),
                 ))
             }
-            "--module" => f.module = Some(PathBuf::from(it.next().ok_or("--module needs a file")?)),
             "--roles" => {
                 f.roles = it
                     .next()
@@ -829,7 +826,7 @@ impl Headless {
         });
         let config = Config {
             live,
-            ..Config::of(hosted.domain.clone())
+            ..Config::native(hosted.domain.clone())
         };
         let disk = Files::new(f.dir.join("replica"))
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
@@ -1109,14 +1106,13 @@ impl Headless {
     /// A bare name, `create_playlist`, as its binding,
     /// `playlists.create_playlist`, when exactly one binding ends so.
     fn binding(&self, name: &str) -> Result<String, String> {
-        let m = &self.hosted.domain.module;
-        if m.get(name).is_some() {
+        let d = &self.hosted.domain;
+        if d.get(name).is_some() {
             return Ok(name.into());
         }
-        let hit: Vec<&String> = m
-            .bindings
-            .iter()
-            .map(|b| &b.0)
+        let hit: Vec<&String> = d
+            .fns
+            .keys()
             .filter(|b| b.rsplit('.').next() == Some(name))
             .collect();
         match hit[..] {
@@ -1423,11 +1419,7 @@ impl Headless {
 }
 
 fn run(f: Flags) -> Result<(), String> {
-    let hosted = match &f.module {
-        None => Hosted::harken(),
-        Some(p) => Hosted::read(p).map_err(|e| format!("{e:#}"))?,
-    };
-    let mut h = Headless::open(&f, hosted)?;
+    let mut h = Headless::open(&f, Hosted::harken())?;
     let mut out = std::io::stdout().lock();
     h.pump();
     loop {

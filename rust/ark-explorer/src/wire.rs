@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! GET  <admin>/api/hello    → Hello: whether the page is open, where to sign in
-//! GET  <admin>/api/state    → State: the module and its functions' bodies, the
+//! GET  <admin>/api/state    → State: the domain's catalog, the
 //!                             store's rows, the log's lines, the connections,
 //!                             the CRUD exposed, whether raw writes are open, who
 //!                             writes
@@ -21,7 +21,7 @@ use ark::gen::Node;
 use ark::log::Seq;
 use ark::store::Change;
 
-use crate::data::{Connection, CrudVerbs, Line};
+use crate::data::{Catalog, Connection, CrudVerbs, Line};
 
 /// What `GET <admin>/api/hello` answers.
 #[derive(Clone, Debug, PartialEq, Eq, Node)]
@@ -33,11 +33,8 @@ pub struct Hello {
 /// What `GET <admin>/api/state` answers.
 #[derive(Clone, Debug, PartialEq, Eq, Node)]
 pub struct State {
-    /// The server's module, its bytes.
-    pub module: Vec<u8>,
-    /// The bodies of the functions it binds and they call: the page checks
-    /// each into a library of its own, as a peer loads a body it is sent.
-    pub bodies: Vec<Vec<u8>>,
+    /// The server's domain: its schema and its functions described.
+    pub catalog: Catalog,
     /// Every durable table's rows, as a snapshot carries them.
     pub rows: Vec<(String, Vec<Vec<u8>>)>,
     pub head: Seq,

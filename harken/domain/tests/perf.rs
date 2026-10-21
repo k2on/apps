@@ -4,36 +4,33 @@
 //! so the two outputs diff. Over the machine alone — a replica and the
 //! authority it pushes to, frames as bytes, and beside them the one peer
 //! in the authority's role that a v5 peer alone is — so that what is
-//! measured is the domain's functions, the interpreter that runs them and
-//! the store under them, not a storage or a socket.
+//! measured is the domain's functions, in Rust (§1.16), and the store under
+//! them, not a storage or a socket.
 //!
-//! Counted beside the timings: the rows each mutation's reads examine (the
-//! counting store of `rust/ark/tests/support/counting.rs`; v5's store
-//! examines only what it returns) and the allocations a read makes.
+//! Counted beside the timings: the rows each mutation's reads examine
+//! (`ark::db::count`; the store examines only what it returns) and the
+//! allocations a read makes.
 //!
 //! Ignored by default; run with
 //! `cargo test -p harken-domain --release --test perf -- --ignored --nocapture --test-threads=1`.
-
-#[path = "../../../rust/ark/tests/support/counting.rs"]
-mod counting;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use ark::db::{count, Reads};
+use ark::domain::Domain;
 use ark::hash::{EntryHash, FnHash};
 use ark::ir::Node;
 use ark::log::{Durable, EntryId, Snapshot};
 use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, Who};
 use ark::store::{Read, Scan, Store};
-use ark::Domain;
-use counting::Counting;
-use harken_domain::domain::host::LIBRARY;
-use harken_domain::domain::Id;
-use harken_domain::domain::{AddSong, Library};
-use harken_domain::domain::{AddToPlaylist, CreatePlaylist};
-use harken_domain::domain::{Media, Playlist, PlaylistItem};
+use harken_domain::Id;
+use harken_domain::LIBRARY;
+use harken_domain::{AddSong, Library};
+use harken_domain::{AddToPlaylist, CreatePlaylist};
+use harken_domain::{Media, Playlist, PlaylistItem};
 
 // Counting allocations ---------------------------------------------------------
 
@@ -66,13 +63,17 @@ fn allocs() -> usize {
 
 fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(harken_domain::text)
+    D.get_or_init(harken_domain::domain)
 }
 
-/// A function's hash by its binding, looked up once.
+/// A function's hash by its name.
 fn f(name: &str) -> FnHash {
-    static F: OnceLock<std::collections::BTreeMap<String, FnHash>> = OnceLock::new();
-    F.get_or_init(|| domain().module.bindings.iter().cloned().collect())[name]
+    Domain::hash_of(name)
+}
+
+/// A mutator run over `st`, as the machine runs it.
+fn run(st: &mut Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<ark::store::Change>, ark::Refusal> {
+    domain().get(name).and_then(|f| f.proc.clone()).expect("a mutator").apply(st, ctx, input)
 }
 
 fn idv(tag: u8, n: u64) -> [u8; 16] {
@@ -383,38 +384,26 @@ fn perf_playlists() {
     }
 }
 
-/// `playlist_name` alone, interpreted (v5 has no native path), among one
-/// person's P playlists: a name they do not have, and one they do
-/// (`free_number`: each name's rank among them, then the least rank free).
+/// `playlist_name` alone, among one person's P playlists: a name they do
+/// not have, and one they do (`free_number`: each name's rank among them,
+/// then the least rank free).
 #[test]
 #[ignore]
 fn perf_playlist_name() {
-    eprintln!("\n== playlist_name among P names (native, harken_domain::playlists)");
-    note("interpreted: Domain::ask(\"playlists.playlist_name\"), the one path");
+    eprintln!("\n== playlist_name among P names (harken_domain::playlists, in Rust)");
     eprintln!("{:<40} {:>7} {:>12}", "name", "P", "µs per call");
-    let st = Store::new(domain().schema.clone());
-    let ctx = Ctx {
-        draws: Default::default(),
-        id: EntryId::of("q", 0),
-        actor: "alice".into(),
-        session: "q".into(),
-        roles: vec![],
-        now: 0,
-    };
     for p in [10usize, 100, 1000] {
         let names: Vec<String> = std::iter::once("Favorites".to_string())
             .chain((1..p).map(|i| format!("List {i}")))
             .collect();
         for (label, name) in [("a free name", "Night"), ("a taken name", "Favorites")] {
-            let input = (names.clone(), name.to_string()).to_bytes();
             let reps = if p >= 1000 { 5 } else { 50 };
             let t = Instant::now();
-            let mut out = vec![];
+            let mut out = String::new();
             for _ in 0..reps {
-                out = std::hint::black_box(domain().ask(&st, &ctx, "playlists.playlist_name", &input).unwrap());
+                out = std::hint::black_box(harken_domain::playlists::playlist_name(&names, name));
             }
-            let named = String::from_bytes(&out).unwrap();
-            assert_eq!(named, if name == "Night" { "Night" } else { "Favorites (1)" });
+            assert_eq!(out, if name == "Night" { "Night" } else { "Favorites (1)" });
             eprintln!("{:<40} {:>7} {:>12.1}", label, p, us(t.elapsed()) / reps as f64);
         }
     }
@@ -459,12 +448,11 @@ fn ctx_of(n: i64) -> Ctx {
     }
 }
 
-fn reads_of(n: u64, name: &str, make: &dyn Fn(u64) -> (Store, Vec<u8>)) -> counting::Reads {
-    let (st, input) = make(n);
-    let c = Counting::new(&st);
-    let out = domain().run(&c, &ctx_of(1_000_000), name, &input);
+fn reads_of(n: u64, name: &str, make: &dyn Fn(u64) -> (Store, Vec<u8>)) -> Reads {
+    let (mut st, input) = make(n);
+    let (out, reads) = count(|| run(&mut st, &ctx_of(1_000_000), name, &input));
     assert!(out.as_ref().is_ok_and(|cs| !cs.is_empty()), "{name}: {out:?}");
-    c.reads()
+    reads
 }
 
 /// The rows each mutation's reads examine, counted, at two library sizes
@@ -472,7 +460,7 @@ fn reads_of(n: u64, name: &str, make: &dyn Fn(u64) -> (Store, Vec<u8>)) -> count
 #[test]
 #[ignore]
 fn perf_rows_read_per_mutation() {
-    eprintln!("\n== rows a mutation's reads examine (Counting store), by library size");
+    eprintln!("\n== rows a mutation's reads examine (ark::db::count), by library size");
     note("g = Read::get calls, r = rows a scan returned (v5's store examines only what it returns)");
     eprintln!("{:<52} {:>12} {:>12}", "mutation", "N=500", "N=8000");
     for (label, name, make) in &read_cases() {
@@ -487,14 +475,14 @@ fn perf_rows_read_per_mutation() {
 }
 
 /// What the mutations read is bounded by what they need, as v4's was, at
-/// any library size: `add_song` at most v4's 15 gets and one row (its
-/// `first` of the file's rows and of the media by `pos` descending each one
-/// bounded read), `add_to_playlist` onto a playlist of N-1 one row, the
-/// 102nd "Favorites" the 101 names from "Favorites" up to "Favorites )"
-/// and the last playlist by `pos` — not every playlist. Not ignored: it
-/// pins the routing. Falsified by routing no `first` (add_song read 500
-/// rows at 500) and by reading no bounds on the column past the lead (the
-/// 102nd "Favorites" read 1,001 rows: alice's 1,000 and the last).
+/// any library size: `add_song` at most v4's 15 gets and one row (the
+/// file's media by `Media::FILE`, the newest by `Media::POS` from its
+/// end), `add_to_playlist` onto a playlist of N-1 one row, the 102nd
+/// "Favorites" the 101 names from "Favorites" up to "Favorites )" and the
+/// last playlist by `pos` — not every playlist. Not ignored: it pins the
+/// paths the domain names. Falsified by `add_song` reading the media by
+/// scan for its file (500 rows at 500) and by `create_playlist` reading
+/// all of the person's names (1,001 rows: alice's 1,000 and the last).
 #[test]
 fn reads_are_bounded_by_what_they_need() {
     for n in [500u64, 8000] {
@@ -521,7 +509,7 @@ fn perf_row_keys() {
     let item_row = st.scan("playlist_item", &Scan::all())[0].clone();
     row_cost::<Media>("media", 9, &media_row);
     row_cost::<PlaylistItem>("playlist_item", 5, &item_row);
-    eprintln!("`media.title` in a plan's expression: n/a: the interpreter reads a field by its span in the row's bytes; not timed alone");
+    eprintln!("`media.title` in a plan's closure: a field of the struct built above; not timed alone");
     eprintln!(
         "{:<36} {:>7} {:>10} {:>12} {:>12} {:>14}",
         "read", "N", "time", "allocs", "rows out", "rows built"
@@ -530,14 +518,13 @@ fn perf_row_keys() {
         let (st, pl) = with_playlist(n, n / 3);
         let ctx = ctx_of(1);
         let input = Library { playlist_id: Id::new(pl) }.to_bytes();
-        let c = Counting::new(&st);
-        domain().ask(&c, &ctx, "library.library", &input).unwrap();
-        let rows_out = c.reads().rows + c.reads().gets;
+        let (_, reads) = count(|| domain().ask(&st, &ctx, "library.library", &input).unwrap());
+        let rows_out = st.rows("media").count() + reads.rows + reads.gets;
         let a0 = allocs();
         let t = Instant::now();
         let v = domain().ask(&st, &ctx, "library.library", &input).unwrap();
         let (dt, al) = (t.elapsed(), allocs() - a0);
-        assert_eq!(harken_domain::domain::LibraryEntry::list(&v).unwrap().len(), n as usize);
+        assert_eq!(harken_domain::LibraryEntry::list(&v).unwrap().len(), n as usize);
         eprintln!(
             "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>14}",
             "library (read whole, as hydrate)",
@@ -567,14 +554,13 @@ fn perf_row_keys() {
             n
         );
         let ap = on(pl, idv(1, n - 1));
+        let mut st = st;
         let a0 = allocs();
         let t = Instant::now();
-        let out = domain().run(&st, &ctx, "playlists.add_to_playlist", &ap);
+        let (out, reads) = count(|| run(&mut st, &ctx, "playlists.add_to_playlist", &ap));
         let (dt, al) = (t.elapsed(), allocs() - a0);
         assert!(out.is_ok_and(|cs| cs.len() == 1));
-        let c = Counting::new(&st);
-        domain().run(&c, &ctx, "playlists.add_to_playlist", &ap).unwrap();
-        let rows_out = c.reads().rows + c.reads().gets;
+        let rows_out = reads.rows + reads.gets;
         eprintln!(
             "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>14}",
             "add_to_playlist applied (N/3 items)",
@@ -618,7 +604,7 @@ fn row_cost<T: Node>(table: &str, columns: usize, row: &[u8]) {
 #[ignore]
 fn perf_not_ported() {
     eprintln!("\n== one apply, native against interpreted");
-    eprintln!("n/a: v5 has one execution path, the interpreter (§1.12); the interpreted figures are add_song's and create_playlist's above");
+    eprintln!("n/a: one execution path, the domain in Rust (§1.16); its figures are add_song's and create_playlist's above");
     eprintln!("\n== (f) harken's views, the scanner's known_file, (g) search");
     eprintln!("not measured by M1: Part 3 asks for add_song, playlists, playlist_name, rows examined and allocations; the views shape is rust/ark/tests/perf.rs's");
 }

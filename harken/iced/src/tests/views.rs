@@ -15,22 +15,22 @@ fn check(peer: &Peer, what: &str) {
     assert_eq!(peer.items, peer.library_now(), "library, {what}");
     assert_eq!(
         peer.playlists(),
-        Peer::rows_of::<_, Playlist>(crate::domain::playlists::playlists(&peer.client)),
+        Peer::rows_of::<_, Playlist>(peer.client.answer(crate::domain::playlists::playlists, ())),
         "playlists, {what}"
     );
     assert_eq!(
         peer.albums,
-        Peer::rows_of::<_, Album>(crate::domain::library::albums(&peer.client)),
+        Peer::rows_of::<_, Album>(peer.client.answer(crate::domain::browse::albums, ())),
         "albums, {what}"
     );
     assert_eq!(
         peer.artists,
-        Peer::rows_of::<_, Artist>(crate::domain::library::artists(&peer.client)),
+        Peer::rows_of::<_, Artist>(peer.client.answer(crate::domain::browse::artists, ())),
         "artists, {what}"
     );
     assert_eq!(
         peer.composers,
-        Peer::rows_of::<_, Composer>(crate::domain::library::composers(&peer.client)),
+        Peer::rows_of::<_, Composer>(peer.client.answer(crate::domain::browse::composers, ())),
         "composers, {what}"
     );
     let details: HashMap<_, _> = peer.track_details().into_iter().map(|t| (t.media_id, t)).collect();
@@ -142,7 +142,7 @@ fn the_search_box_drives_a_view() {
             playlist_id: key(app.peer.playlist),
             needle: needle.into(),
         };
-        Peer::rows_of::<_, Item>(crate::domain::library::search(&app.peer.client, &input))
+        Peer::rows_of::<_, Item>(app.peer.client.answer(crate::domain::browse::search, input))
     };
     let all = app.peer.rows().len();
     press(&mut app, Key::Character("/".into()));

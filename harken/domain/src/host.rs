@@ -1,23 +1,17 @@
-//! What a host knows of harken's domain beyond its bindings: the session
+//! What a host knows of harken's domain beyond its functions: the session
 //! as plain Rust for a player ([`Listening`]), the keys a scanner derives
-//! ([`work_key`]…) — each by calling the domain's own helper, so there is
-//! no second copy of a rule — and the constants every host shares. A host
-//! includes this beside its generated bindings (`super`), whose types it
-//! reads: `harken-server`, `harken-iced`, and the domain's tests.
+//! ([`work_key`]…) — each the domain's own helper, so there is no second
+//! copy of a rule — and the constants every host shares.
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
-use ark::ir::Node;
+use ark::peer::Who;
+use ark::plan::rows;
+use ark::row::Value;
 use ark::store::Read;
-use ark::Domain;
 
-use super::*;
-
-/// The library's role: the scanner's account holds it, and nobody else
-/// unless the server's configuration grants it. Every library mutation is
-/// guarded by it (`library.is_library`).
-pub const LIBRARY: &str = "library";
+use crate::keys;
+use crate::types::*;
 
 /// The level a device that has said nothing of its volume is drawn at.
 pub const UNSAID_VOLUME: i64 = 100;
@@ -27,50 +21,35 @@ pub const UNSAID_VOLUME: i64 = 100;
 /// coarsest output (a speaker read through Home Assistant).
 pub const SYNC_MS: i64 = 600;
 
-/// The module these bindings were made with, read from its file.
-pub fn load() -> Domain {
-    Domain::from_file(MODULE).unwrap_or_else(|r| panic!("harken's module: {r}"))
-}
-
 /// What a server authors `on_join` and `on_leave` with: what the device
 /// said it is, its user and its id the verified login's — a device is a
 /// session. What a device says that does not read as a device is no device.
-pub fn arrive(who: &ark::peer::Who, said: &[u8]) -> Option<Vec<u8>> {
-    let d = Device::from_bytes(said).ok()?;
+pub fn arrive(who: &Who, said: &[u8]) -> Option<Vec<u8>> {
+    let d = Device::decode(said).ok()?;
     let (user, id) = (who.actor.clone(), who.session.clone());
-    Some(Device { user, id, ..d }.to_bytes())
+    Some(Device { user, id, ..d }.encode())
 }
 
-/// [`load`], once.
-pub fn domain() -> &'static Domain {
-    static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(load)
-}
-
-fn key(answer: Result<String, String>) -> String {
-    answer.unwrap_or_else(|e| unreachable!("a key helper never refuses: {e}"))
-}
-
-/// `library.work_key`: a work's key, from its composer, catalogue number
-/// and title, trimmed as `add_song` trims them.
+/// `keys::work_key`: a work's key, from its composer, catalogue number and
+/// title, trimmed as `add_song` trims them.
 pub fn work_key(composer: &str, catalogue: &str, title: &str) -> String {
-    key(library::work_key(domain(), composer.trim(), catalogue.trim(), title.trim()))
+    keys::work_key(composer.trim(), catalogue.trim(), title.trim())
 }
 
-/// `library.movement_key`: a movement's key, from its work's and its number.
+/// `keys::movement_key`: a movement's key, from its work's and its number.
 pub fn movement_key(work_id: &str, no: i64) -> String {
-    key(library::movement_key(domain(), work_id, &no))
+    keys::movement_key(work_id, no)
 }
 
-/// `library.recording_key`: a recording's key, from what it is of and who
+/// `keys::recording_key`: a recording's key, from what it is of and who
 /// played.
 pub fn recording_key(of: &str, who: &str) -> String {
-    key(library::recording_key(domain(), of, who.trim()))
+    keys::recording_key(of, who.trim())
 }
 
-/// `library.key_part`: one name as it stands in a key.
+/// `keys::key_part`: one name as it stands in a key.
 pub fn key_part(name: &str) -> String {
-    key(library::key_part(domain(), name.trim()))
+    keys::key_part(name.trim())
 }
 
 /// What sort of thing a device is, for the glyph a picker draws.
@@ -143,7 +122,7 @@ impl Active {
 impl LibraryEntry {
     /// The rows of a query's answer, a list of entries.
     pub fn list(bytes: &[u8]) -> Result<Vec<LibraryEntry>, ark::Refusal> {
-        Vec::<LibraryEntry>::from_bytes(bytes)
+        Vec::<LibraryEntry>::decode(bytes)
     }
 
     /// On the playlist it was read against.
@@ -164,19 +143,19 @@ pub struct Listening {
 impl Listening {
     /// `user`'s state as a store holds it.
     pub fn of(store: &dyn Read, user: &str) -> Listening {
-        let session = ark::gen::rows::<super::Listening>(store, "listening")
+        let session = rows::<crate::schema::Listening>(store)
             .into_iter()
             .find(|r| r.user == user)
             .and_then(|r| match r.session {
                 Session::Active { active } => Some(active),
                 Session::Idle => None,
             });
-        let devices = ark::gen::rows::<ListeningDevice>(store, "listening_device")
+        let devices = rows::<crate::schema::ListeningDevice>(store)
             .into_iter()
             .filter(|r| r.user == user)
             .map(|r| r.present)
             .collect();
-        let scrub = ark::gen::rows::<ListeningScrub>(store, "listening_scrub")
+        let scrub = rows::<crate::schema::ListeningScrub>(store)
             .into_iter()
             .filter(|r| r.user == user)
             .map(|r| (r.device, r.at_ms))

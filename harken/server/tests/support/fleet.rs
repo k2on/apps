@@ -169,13 +169,12 @@ impl Log {
 pub fn function(e: &Logged) -> String {
     hosted()
         .domain
-        .module
-        .bindings
-        .iter()
-        .find(|(_, h)| *h == e.entry.func)
+        .fns
+        .keys()
+        .find(|n| ark::domain::Domain::hash_of(n) == e.entry.func)
         .map_or_else(
             || format!("#{}", e.entry.func),
-            |(n, _)| n.rsplit('.').next().unwrap_or(n).to_string(),
+            |n| n.rsplit('.').next().unwrap_or(n).to_string(),
         )
 }
 

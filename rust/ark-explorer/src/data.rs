@@ -6,13 +6,13 @@
 
 use std::collections::BTreeMap;
 
+use ark::domain::{Domain, Kind};
 use ark::gen::Node;
 use ark::hash::FnHash;
-use ark::ir::{Effect, Expr};
 use ark::log::{Entry, Seq};
-use ark::module::{Lib, Module};
 use ark::peer::Ctx;
-use ark::schema::{Schema, Space};
+use ark::row::Type;
+use ark::schema::Schema;
 use ark::store::{Change, Store};
 
 /// `docs/plan-guards.md` D4 Which of a table's four CRUD mutations a module
@@ -153,43 +153,113 @@ pub trait LogView {
     fn connections(&self) -> Vec<Connection>;
 }
 
+/// What the explorer knows of a domain (§1.16): its schema, and per
+/// function its name, its kind, and the descriptions of its input, of what
+/// it answers and of its input's refinements — what a form is drawn from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
+pub struct Catalog {
+    pub schema: Schema,
+    pub functions: Vec<Described>,
+}
+
+/// One function, described.
+#[derive(Clone, Debug, PartialEq, Eq, Node)]
+pub struct Described {
+    pub name: String,
+    pub kind: Kind,
+    pub input: Type,
+    pub output: Option<Type>,
+    pub checks: Vec<(String, Vec<String>)>,
+}
+
+impl Catalog {
+    /// A domain's, as it registers its functions.
+    pub fn of(d: &Domain) -> Catalog {
+        let functions = d
+            .fns
+            .values()
+            .map(|f| Described {
+                name: f.name.clone(),
+                kind: f.kind,
+                input: f.input.clone(),
+                output: f.output.clone(),
+                checks: f.checks.clone(),
+            })
+            .collect();
+        Catalog {
+            schema: (*d.schema).clone(),
+            functions,
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Described> {
+        self.functions.iter().find(|f| f.name == name)
+    }
+}
+
+/// What answers a query and checks an input for the explorer: the domain,
+/// where the host holds it.
+pub trait Ask {
+    /// The function's answer over `store` as `ctx` reads it: its encoding.
+    fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, String>;
+    /// The input's refinements: every field that fails, and why.
+    fn check(&self, name: &str, input: &[u8]) -> Result<(), Vec<(String, String)>>;
+}
+
+impl Ask for Domain {
+    fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
+        Domain::ask(self, store, ctx, name, input).map_err(|r| r.0)
+    }
+    fn check(&self, name: &str, input: &[u8]) -> Result<(), Vec<(String, String)>> {
+        match self.get(name) {
+            Some(f) => (f.check)(input),
+            None => Err(vec![(String::new(), format!("no function {name}"))]),
+        }
+    }
+}
+
 /// Everything the explorer reads, handed to it on every call: it keeps no
 /// copy of any of it. `store` is what the host holds — the authority's
-/// whole store, a partial replica's union — `module` and `lib` name and
-/// run the functions, and `ctx` is who a query reads as.
+/// whole store, a partial replica's union — `catalog` names and describes
+/// the functions, `ask` answers and checks them where the host holds the
+/// domain, and `ctx` is who a query reads as.
 pub struct Source<'a> {
     pub store: &'a Store,
-    pub module: &'a Module,
-    pub lib: &'a Lib,
+    pub catalog: &'a Catalog,
+    pub ask: Option<&'a dyn Ask>,
     pub log: &'a dyn LogView,
     pub ctx: Ctx,
 }
 
 impl Source<'_> {
     pub fn schema(&self) -> &Schema {
-        &self.module.schema
+        &self.catalog.schema
     }
 }
 
-/// The CRUD a module exposes, per table, as its bindings say it: a
-/// mutation bound as `insert_<t>`, `update_<t>` or `put_<t>` whose input is
-/// `t`'s row, or `delete_<t>` whose input is its key's columns. `may_author`
+/// The fields of a record the input of a function is: their names and
+/// declared types; none for an input that is not one.
+pub fn record_fields(t: &Type) -> Option<&[(String, Type)]> {
+    match t {
+        Type::Record(_, fs) => Some(fs),
+        _ => None,
+    }
+}
+
+/// The CRUD a domain exposes, per table, as its names say it: a mutation
+/// named `insert_<t>`, `update_<t>` or `put_<t>` whose input's fields are
+/// `t`'s columns, or `delete_<t>` whose input's are its key's. `may_author`
 /// is false: the host decides that.
-pub fn crud_of(module: &Module, lib: &Lib) -> Vec<(String, CrudVerbs)> {
-    let cx = crate::value::types(module);
+pub fn crud_of(catalog: &Catalog) -> Vec<(String, CrudVerbs)> {
     let mut out = Vec::new();
-    for t in &module.schema.tables {
+    for t in &catalog.schema.tables {
         let said = |cs: &[ark::schema::Column]| cs.iter().map(|c| c.decl.clone()).collect::<Vec<_>>();
         let takes = |verb: &str, want: Vec<String>| {
-            module
-                .bindings
+            catalog
+                .functions
                 .iter()
-                .filter(|(n, _)| n.rsplit('.').next() == Some(&format!("{verb}_{}", t.name)))
-                .filter_map(|(_, h)| lib.get(h))
-                .any(|f| {
-                    let input: Vec<String> = crate::value::fields_of(&cx, &f.f.params).0.iter().map(crate::value::decl_name).collect();
-                    f.f.effect == Effect::Write && input == want
-                })
+                .filter(|f| f.kind == Kind::Mutator && f.name.rsplit('.').next() == Some(&format!("{verb}_{}", t.name)))
+                .any(|f| record_fields(&f.input).is_some_and(|fs| fs.iter().map(|(_, t)| t.decl()).collect::<Vec<_>>() == want))
         };
         let verbs = CrudVerbs {
             insert: takes("insert", said(&t.columns)),
@@ -205,33 +275,16 @@ pub fn crud_of(module: &Module, lib: &Lib) -> Vec<(String, CrudVerbs)> {
     out
 }
 
-/// Every function a log may name, by hash: the module's bindings.
-pub fn function_names(module: &Module) -> BTreeMap<FnHash, String> {
-    module.bindings.iter().map(|(n, h)| (*h, n.clone())).collect()
+/// Every function a log may name, by the hash it is called by: the
+/// domain's.
+pub fn function_names(catalog: &Catalog) -> BTreeMap<FnHash, String> {
+    catalog.functions.iter().map(|f| (Domain::hash_of(&f.name), f.name.clone())).collect()
 }
 
-/// Whether a function reads or writes a volatile table: a live transition
-/// or a read of the live state (§1.9), which the log's machine does not run.
-pub fn is_live(module: &Module, lib: &Lib, h: &FnHash) -> bool {
-    let volatile = |t: &str| module.schema.table(t).is_some_and(|(_, t)| t.space == Space::Volatile);
-    let mut todo: Vec<FnHash> = vec![*h];
-    let mut seen = std::collections::BTreeSet::new();
-    while let Some(h) = todo.pop() {
-        if !seen.insert(h) {
-            continue;
-        }
-        let Some(f) = lib.get(&h) else { continue };
-        let mut hit = false;
-        ark::interp::walk(&f.f.body, None, &mut |e, _| match e {
-            Expr::Scan(t) | Expr::Lookup(t, _) | Expr::Insert(t, _) | Expr::Update(t, ..) | Expr::Delete(t, _) => hit |= volatile(t),
-            Expr::Call(c, _) => todo.push(*c),
-            _ => {}
-        });
-        if hit {
-            return true;
-        }
-    }
-    false
+/// Whether a function is a live transition (§1.9), which the log's
+/// machine does not run.
+pub fn is_live(catalog: &Catalog, name: &str) -> bool {
+    catalog.get(name).is_some_and(|f| f.kind == Kind::Live)
 }
 
 /// A log view of nothing: a host with no log to show.

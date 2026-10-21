@@ -19,10 +19,10 @@
 use std::collections::HashMap;
 
 use crate::domain::Id as Key;
-use crate::domain::{library, playlists, CreatePlaylist, PlaylistInput, PlaylistsOf};
+use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
 use crate::domain::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, Works};
 use ark::ir::Node;
-use ark::view::Patch;
+use ark_peer::Patch;
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
@@ -159,7 +159,7 @@ fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&[u8]) -> T) {
         match p {
             Patch::Insert { at, node } => {
                 let at = (*at).min(rows.len());
-                rows.insert(at, read(&node.to_bytes()));
+                rows.insert(at, read(node));
             }
             Patch::Remove { at } => {
                 if *at < rows.len() {
@@ -168,7 +168,7 @@ fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&[u8]) -> T) {
             }
             Patch::Update { at, node } => {
                 if *at < rows.len() {
-                    rows[*at] = read(&node.to_bytes());
+                    rows[*at] = read(node);
                 }
             }
         }
@@ -372,7 +372,7 @@ impl Peer {
     /// no playlist yet.
     pub fn ensure_playlist(&mut self) {
         let made = CreatePlaylist { name: "Favorites".into() };
-        if self.playlists.is_empty() && playlists::create_playlist(&mut self.client, &made).is_ok() {
+        if self.playlists.is_empty() && self.client.mutate("create_playlist", &made).is_ok() {
             self.refresh();
         }
     }
@@ -523,19 +523,19 @@ impl Peer {
     }
 
     pub fn work(&self, id: &str) -> Vec<Work> {
-        Peer::rows_of(library::work(&self.client, &WorkInput { id: id.into() }))
+        Peer::rows_of(self.client.answer(browse::work, WorkInput { id: id.into() }))
     }
 
     /// What a page's query answers, read once. The page holds views; these
     /// are what the tests compare them with.
     #[cfg(test)]
     pub fn works_of(&self, composer: &str) -> Vec<Work> {
-        Peer::rows_of(library::works(&self.client, &Works { composer: composer.into() }))
+        Peer::rows_of(self.client.answer(browse::works, Works { composer: composer.into() }))
     }
 
     #[cfg(test)]
     pub fn recordings_of(&self, work: &str) -> Vec<Recording> {
-        Peer::rows_of(library::recordings(&self.client, &Recordings { work_id: work.into() }))
+        Peer::rows_of(self.client.answer(browse::recordings, Recordings { work_id: work.into() }))
     }
 
     #[cfg(test)]
@@ -543,7 +543,7 @@ impl Peer {
         let input = crate::domain::Credits {
             recording_id: recording.into(),
         };
-        library::credits(&self.client, &input).unwrap_or_default()
+        self.client.answer(browse::credits, input).unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -552,21 +552,21 @@ impl Peer {
             playlist_id: key(self.playlist),
             name: name.into(),
         };
-        Peer::rows_of(library::album(&self.client, &input))
+        Peer::rows_of(self.client.answer(browse::album, input))
     }
 
     #[cfg(test)]
     pub fn track_details(&self) -> Vec<TrackDetail> {
-        Peer::rows_of(library::track_details(&self.client))
+        Peer::rows_of(self.client.answer(browse::track_details, ()))
     }
 
     /// The library as its query answers it now, against the playlist it is
     /// read against.
     #[cfg(test)]
     pub fn library_now(&self) -> Vec<Item> {
-        Peer::rows_of(library::library(
-            &self.client,
-            &Library {
+        Peer::rows_of(self.client.answer(
+            browse::library,
+            Library {
                 playlist_id: key(self.playlist),
             },
         ))
@@ -765,7 +765,7 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
     for p in patches {
         match p {
             Patch::Insert { at, node } => {
-                let d = TrackDetail::from_bytes(&node.to_bytes());
+                let d = TrackDetail::from_bytes(node);
                 map.insert(d.media_id, d.clone());
                 rows.insert((*at).min(rows.len()), d);
             }
@@ -777,7 +777,7 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
             }
             Patch::Update { at, node } => {
                 if *at < rows.len() {
-                    let d = TrackDetail::from_bytes(&node.to_bytes());
+                    let d = TrackDetail::from_bytes(node);
                     map.remove(&rows[*at].media_id);
                     map.insert(d.media_id, d.clone());
                     rows[*at] = d;
@@ -862,7 +862,7 @@ mod tests {
         use ark_peer::{Config, Module, Peer as Hub};
         let mut client = crate::client::memory(crate::client::nobody(), None);
         client.alone();
-        client.set_roles([crate::domain::host::LIBRARY]);
+        client.set_roles([crate::domain::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.ensure_playlist();
         for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
@@ -882,13 +882,13 @@ mod tests {
         assert_eq!(peer.client.pending_len(), 5);
 
         let d = crate::client::domain();
-        let mut hub = Hub::serve(Config::new(Module::of(d)), Box::new(ark_peer::Memory::default()), 0);
+        let mut hub = Hub::serve(Config::new(Module::native(d)), Box::new(ark_peer::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles of the login.
         let alice = Who {
             actor: "alice".into(),
             session: "alice@desktop".into(),
-            roles: vec![crate::domain::host::LIBRARY.into()],
+            roles: vec![crate::domain::LIBRARY.into()],
         };
         peer.client.login(alice.clone(), "alice@desktop:library".into());
         peer.refresh();

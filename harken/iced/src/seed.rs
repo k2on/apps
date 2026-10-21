@@ -4255,8 +4255,8 @@ fn work_of(catalogue: &str) -> Option<&'static WorkSeed> {
 ///
 /// A peer alone sequences each intent through its own authority and writes
 /// its chain after every one: seeding four hundred tracks that way is a log
-/// of four hundred entries every load. Here each mutation runs once, by the
-/// interpreter, over one store, with the entry a peer would have authored
+/// of four hundred entries every load. Here each mutation runs once, as the
+/// machine runs it, over one store, with the entry a peer would have authored
 /// (numbered from one, so the demo is the same library every load) — the
 /// same changes the log would have recorded, and no log.
 struct Seeder {
@@ -4277,7 +4277,7 @@ impl Seeder {
                 id: EntryId::of(LOCAL, 0),
                 actor: DEMO.into(),
                 session: LOCAL.into(),
-                roles: vec![crate::domain::host::LIBRARY.into()],
+                roles: vec![crate::domain::LIBRARY.into()],
                 now: 1_700_000_000_000,
             },
             local: 0,
@@ -4293,10 +4293,12 @@ impl Seeder {
         self.ctx.id = EntryId::of(LOCAL, self.local);
         self.ctx.now += 1;
         let b = domain().binding(name).unwrap_or_else(|| panic!("the demo authors {name}"));
-        let changes = domain()
-            .run(&self.store, &self.ctx, b, &input.to_bytes())
+        let f = domain()
+            .get(b)
+            .and_then(|f| f.proc.clone())
+            .unwrap_or_else(|| panic!("{name} writes nothing"));
+        f.apply(&mut self.store, &self.ctx, &input.to_bytes())
             .unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
-        self.store.apply_all(&changes).unwrap_or_else(|r| panic!("{what}: the store refused {r}"));
     }
 
     fn query<T: Node>(&self, name: &str, input: &impl Node) -> T {
@@ -4342,7 +4344,7 @@ pub fn open(disk: Memory) -> Replica {
     let mut peer = crate::client::open(Box::new(disk), None, crate::listening::device());
     // The demo's identity is the library's, as its seed was
     // (`docs/plan-guards.md` D1).
-    peer.set_roles([crate::domain::host::LIBRARY]);
+    peer.set_roles([crate::domain::LIBRARY]);
     peer.alone();
     peer
 }

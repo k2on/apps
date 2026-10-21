@@ -3,10 +3,9 @@
 //! to an exposed CRUD mutation, or to the authority's raw write, or refused
 //! where the host has neither.
 
-use ark::module::Module;
 use ark::store::Change;
 
-use crate::data::{CrudVerbs, Writer};
+use crate::data::{Catalog, CrudVerbs, Writer};
 use crate::value::{self, decode, encode, Ty, Value};
 
 /// Where an edit goes: a mutation of the domain's, authored as the host's
@@ -47,9 +46,9 @@ pub struct Via<'v> {
 }
 
 /// The binding `<verb>_<table>` goes by, under whatever router.
-fn bound(module: &Module, verb: &str, table: &str) -> String {
+fn bound(catalog: &Catalog, verb: &str, table: &str) -> String {
     let want = format!("{verb}_{table}");
-    let named = module.bindings.iter().map(|(n, _)| n).find(|n| n.rsplit('.').next() == Some(&want));
+    let named = catalog.functions.iter().map(|f| &f.name).find(|n| n.rsplit('.').next() == Some(&want));
     named.cloned().unwrap_or(want)
 }
 
@@ -63,15 +62,15 @@ fn nowhere(table: &str, verb: &str) -> String {
 /// that is), unless `force_raw`; through the authority's raw write
 /// otherwise, where the host has one; and refused, with why, where it has
 /// neither. A key column is not edited: a key is what names the row.
-pub fn route_edit(module: &Module, via: Via, table: &str, old: &[u8], column: &str, value: Value) -> Result<Route, String> {
-    let (_, t) = module.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
+pub fn route_edit(catalog: &Catalog, via: Via, table: &str, old: &[u8], column: &str, value: Value) -> Result<Route, String> {
+    let (_, t) = catalog.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
     let c = t.column(column).ok_or_else(|| format!("{table} has no column {column}"))?;
     if c < t.key {
         return Err(format!(
             "{table}.{column} is part of the key, which names the row: delete it and put a new one"
         ));
     }
-    let row = value::row_ty(&value::types(module), t);
+    let row = value::row_ty(t);
     let (Ty::Struct(fs), Value::Struct(mut vs)) = (&row, decode(&row, old).map_err(|e| e.0)?) else {
         unreachable!("a row reads as a record")
     };
@@ -80,7 +79,7 @@ pub fn route_edit(module: &Module, via: Via, table: &str, old: &[u8], column: &s
     let new = encode(&row, &Value::Struct(vs))?;
     match (via.verbs.filter(|v| v.may_author && !via.force_raw), via.can_raw) {
         (Some(v), _) if v.update || v.put => {
-            let function = bound(module, if v.update { "update" } else { "put" }, table);
+            let function = bound(catalog, if v.update { "update" } else { "put" }, table);
             Ok(Route::Author { function, input: new })
         }
         (_, true) => Ok(Route::Raw(Change::Edit {
@@ -96,13 +95,13 @@ pub fn route_edit(module: &Module, via: Via, table: &str, old: &[u8], column: &s
 /// `delete_<t>`, its input the key's columns, when it is exposed and this
 /// host may author it, unless `force_raw`; the raw write otherwise, where
 /// there is one; refused where there is neither.
-pub fn route_delete(module: &Module, via: Via, table: &str, row: &[u8]) -> Result<Route, String> {
-    let (_, t) = module.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
+pub fn route_delete(catalog: &Catalog, via: Via, table: &str, row: &[u8]) -> Result<Route, String> {
+    let (_, t) = catalog.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
     match (via.verbs.filter(|v| v.may_author && v.delete && !via.force_raw), via.can_raw) {
         (Some(_), _) => {
             let input = row[..t.key_len(row).map_err(|e| e.0)?].to_vec();
             Ok(Route::Author {
-                function: bound(module, "delete", table),
+                function: bound(catalog, "delete", table),
                 input,
             })
         }

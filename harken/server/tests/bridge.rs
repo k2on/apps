@@ -988,7 +988,7 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
         .auth
         .issue(&Account {
             id: "library".into(),
-            roles: vec![harken_server::domain::host::LIBRARY.into()],
+            roles: vec![harken_server::domain::LIBRARY.into()],
             ..Account::default()
         })
         .unwrap();

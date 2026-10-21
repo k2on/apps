@@ -68,7 +68,7 @@ impl Key for str {
 
 /// What a type is, as a schema's column, a form's field and the explorer
 /// read it. A record and a sum carry their names and their fields'.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ark_macros::Node)]
 pub enum Type {
     Int,
     Text,
@@ -353,6 +353,11 @@ pub fn column<T: Describe>(name: &str) -> Column {
 /// is what a refused intent says.
 pub trait Input: Value + Describe {
     fn check(self) -> Result<Self, Vec<(String, String)>>;
+
+    /// Each refined field's refinements, as a form says them beside it.
+    fn checks() -> Vec<(String, Vec<String>)> {
+        vec![]
+    }
 
     /// [`Input::check`], the first failure its refusal.
     fn refine(self) -> Result<Self, Refusal> {

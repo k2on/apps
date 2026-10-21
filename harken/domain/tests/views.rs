@@ -1,6 +1,6 @@
 //! Every harken query, maintained (§1.10): `harken/domain/tests/views.rs`,
 //! one test per query, held to V1's contract — after every change the
-//! view's answer is a fresh evaluation's (`ark::view::query`) and its
+//! view's answer is a fresh run of its plan's and its
 //! patches splice the list a screen holds into the new one.
 //!
 //! The library is seeded through the domain's own functions, as v4's was,
@@ -14,21 +14,20 @@
 //! patched, by inserts, removes or updates, over its seeds.
 //!
 //! Every test was falsified at once by a `View::push` that changed nothing
-//! (`rust/ark/src/view.rs`, broken in the working tree and restored): each
+//! (`rust/ark/src/plan.rs`, broken in the working tree and restored): each
 //! failed at the first change its view should have moved by.
 
 mod common;
 
-use ark::interp::V;
 use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::Ctx;
+use ark::plan::{splice, Patch};
 use ark::store::Store;
-use ark::view::{query, splice, Patch, View};
 use common::{domain, full, song, track, with, Lib};
-use harken_domain::domain::host::LIBRARY;
-use harken_domain::domain::Id;
-use harken_domain::domain::*;
+use harken_domain::Id;
+use harken_domain::LIBRARY;
+use harken_domain::*;
 
 struct Seeded {
     lib: Lib,
@@ -303,7 +302,8 @@ struct Tally {
 /// churn: after every push the view is the query, and the patches splice.
 fn hold(name: &str, input: &impl Node) -> Tally {
     let d = domain();
-    let (f, input) = (d.get(&full(name)), input.to_bytes());
+    let (f, input) = (full(name), input.to_bytes());
+    let fresh = |store: &Store, ctx: &Ctx| d.watch(store, ctx, &f, &input).unwrap().rows();
     let ctx = Ctx {
         draws: Default::default(),
         id: EntryId::of("q", 0),
@@ -315,7 +315,7 @@ fn hold(name: &str, input: &impl Node) -> Tally {
     let mut sum = Tally::default();
     for seed in 0..SEEDS {
         let mut c = seeded().lib;
-        let mut v = View::new(&d.lib, &f, &input, ctx.clone(), &c.store).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut v = d.watch(&c.store, &ctx, &f, &input).unwrap_or_else(|e| panic!("{name}: {e}"));
         let mut shown = v.rows();
         assert!(seed > 0 || !shown.is_empty(), "{name}: the seed answers something to maintain");
         let mut r = Rng(seed);
@@ -333,7 +333,7 @@ fn hold(name: &str, input: &impl Node) -> Tally {
                 }
             }
             shown = splice(&ps, &shown);
-            let fresh = query(&d.lib, &f, &input, &ctx, &c.store).unwrap();
+            let fresh = fresh(&c.store, &ctx);
             assert_eq!(v.rows(), fresh, "{name} seed {seed} step {step}: the view is the query");
             assert_eq!(shown, fresh, "{name} seed {seed} step {step}: the patches splice");
         }
@@ -499,7 +499,8 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     let favs = c.playlist("alice", "Favorites");
     let other = c.playlist("alice", "Other");
     let d = domain();
-    let (f, input) = (d.get(&full("library")), Library { playlist_id: favs }.to_bytes());
+    let (f, input) = (full("library"), Library { playlist_id: favs }.to_bytes());
+    let query = |store: &Store, ctx: &Ctx| d.watch(store, ctx, &f, &input).unwrap().rows();
     let ctx = Ctx {
         draws: Default::default(),
         id: EntryId::of("q", 0),
@@ -508,7 +509,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
         roles: vec![],
         now: 0,
     };
-    let mut v = View::new(&d.lib, &f, &input, ctx.clone(), &c.store).unwrap();
+    let mut v = d.watch(&c.store, &ctx, &f, &input).unwrap();
     let mut shown = v.rows();
     let mut patched = 0;
     let mut kept: Option<Store> = None;
@@ -518,7 +519,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
         let ps = v.push(&c.last, &c.store).unwrap();
         patched += ps.len();
         shown = splice(&ps, &shown);
-        let fresh: Vec<V> = query(&d.lib, &f, &input, &ctx, &c.store).unwrap();
+        let fresh = query(&c.store, &ctx);
         assert_eq!(v.rows(), fresh, "{name}: the view is the query");
         assert_eq!(shown, fresh, "{name}: the spliced list is the query");
         if kept.is_none() && name == "add_to_playlist" {
@@ -544,7 +545,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     step(&mut c, "remove_media", RemoveMedia { id: ids[0] }.to_bytes());
     step(&mut c, "add_song", with("e", song("Late", "Z", "")).to_bytes());
     assert!(patched > 0);
-    let entries: Vec<LibraryEntry> = shown.iter().map(|r| LibraryEntry::from_bytes(&r.to_bytes()).unwrap()).collect();
+    let entries: Vec<LibraryEntry> = shown.iter().map(|r| LibraryEntry::from_bytes(r).unwrap()).collect();
     let got: Vec<(String, Option<i64>)> = entries.iter().map(|e| (e.title.clone(), e.playlist_pos)).collect();
     assert_eq!(
         got,
@@ -558,7 +559,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
 
     // A rollback: the view made again over the store as it was is the query.
     c.store = kept.expect("a store to roll back to");
-    let v = View::new(&d.lib, &f, &input, ctx.clone(), &c.store).unwrap();
-    assert_eq!(v.rows(), query(&d.lib, &f, &input, &ctx, &c.store).unwrap());
+    let v = d.watch(&c.store, &ctx, &f, &input).unwrap();
+    assert_eq!(v.rows(), query(&c.store, &ctx));
     assert_eq!(v.rows().len(), c.library(&favs).len());
 }

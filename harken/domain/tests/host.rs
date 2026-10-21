@@ -1,8 +1,7 @@
-//! What a host knows beyond the bindings (`harken/domain/host.rs`): the
-//! keys, each the domain's own helper asked, a play's threshold and a
-//! file's URL.
+//! What a host knows beside the domain's functions (`src/host.rs`): the
+//! keys, each the domain's own helper, a play's threshold and a file's URL.
 
-use harken_domain::domain::host::*;
+use harken_domain::host::*;
 
 /// Keys as v4 made them, where a name has no run of separators.
 /// Falsified by dropping `trim` from `slug`: " Goldberg Variations "
@@ -28,12 +27,12 @@ fn keys_are_names_every_peer_agrees_on() {
     );
 }
 
-/// v4's keys for names with a run of separators: one dash per run.
-/// Waits for a standard function that sees a character beside another
-/// (a fold, or the alphanumeric runs of a text): `slug` maps each
-/// character alone, and makes "a  b" `a--b`.
+/// v4's keys for names with a run of separators: one dash per run. The
+/// ArkLang `slug` mapped each character alone and made "a  b" `a--b`, and
+/// keys are permanent: collapsing runs now would key a library's rows
+/// again, which is a migration, not a port.
 #[test]
-#[ignore = "waits for a std function that sees neighbouring characters; slug does not collapse a run"]
+#[ignore = "keys are permanent: collapsing a run in slug re-keys every row named with one"]
 fn a_run_of_separators_is_one_dash() {
     assert_eq!(
         key_part("Dvořák: Symphony No. 9, \"From the New World\"!"),
@@ -53,7 +52,7 @@ fn playlist_name_was(names: &[&str], name: &str) -> String {
 
 fn playlist_name(names: &[&str], name: &str) -> String {
     let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
-    harken_domain::domain::playlists::playlist_name(domain(), &names, name).unwrap()
+    harken_domain::playlists::playlist_name(&names, name)
 }
 
 /// `playlist_name` answers v4's rule, for a name that is free, one that

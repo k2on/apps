@@ -1,7 +1,7 @@
 //! The listening session's rules, as transitions: `harken/domain/tests/
-//! listening.rs`, case for case, the transitions run by the interpreter
-//! over a store holding the session's volatile tables (§1.9) and their
-//! changes applied — what the volatile machine will do with each entry.
+//! listening.rs`, case for case, the transitions run as the machine runs
+//! them over a store holding the session's volatile tables (§1.9) — what
+//! the volatile machine does with each entry.
 //!
 //! A device arriving is `on_join` authored for it, and its connection
 //! going `on_leave`, as the authority authors them. What v4's desk did
@@ -20,7 +20,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ark::ir::Expr;
+use ark::domain::Domain;
 use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
@@ -28,9 +28,9 @@ use ark::store::Store;
 use ark_dev::sim::{Net, Op};
 use ark_peer::{Config, Live, Module};
 use common::domain;
-use harken_domain::domain::host::Listening;
-use harken_domain::domain::Id;
-use harken_domain::domain::*;
+use harken_domain::host::Listening;
+use harken_domain::Id;
+use harken_domain::*;
 
 /// The server's clock at the start of every test.
 const T0: i64 = 1_700_000_000_000;
@@ -68,11 +68,31 @@ impl House {
             roles: vec![],
             now: self.now,
         };
-        let changes = domain()
-            .run(&self.store, &ctx, &format!("listening.{name}"), &input.to_bytes())
-            .map_err(|r| r.0)?;
-        self.store.apply_all(&changes).unwrap_or_else(|r| panic!("{name}: the store refused {r}"));
+        let f = domain()
+            .get(&format!("listening.{name}"))
+            .and_then(|f| f.proc.clone())
+            .ok_or(format!("no function {name}"))?;
+        f.apply(&mut self.store, &ctx, &input.to_bytes()).map_err(|r| r.0)?;
         Ok(())
+    }
+
+    /// An entry of `name` from its input's bytes, as `user` on `session`:
+    /// nothing, or the refusal.
+    fn author_bytes(&mut self, user: &str, session: &str, name: &str, input: &[u8]) -> Result<(), String> {
+        self.local += 1;
+        let ctx = Ctx {
+            draws: Default::default(),
+            id: EntryId::of(session, self.local),
+            actor: user.into(),
+            session: session.into(),
+            roles: vec![],
+            now: self.now,
+        };
+        let f = domain()
+            .get(&format!("listening.{name}"))
+            .and_then(|f| f.proc.clone())
+            .ok_or(format!("no function {name}"))?;
+        f.apply(&mut self.store, &ctx, input).map(|_| ()).map_err(|r| r.0)
     }
 
     /// A device of `user` connects, saying what it is: `on_join`.
@@ -826,7 +846,8 @@ fn a_call_nobody_can_read_changes_nothing() {
     h.arrive("laptop", true);
     h.playing_on("laptop", 0);
     let before = h.state();
-    assert!(domain().module.get("listening.rewind").is_none(), "no transition rewind");
+    assert!(domain().get("listening.rewind").is_none(), "no transition rewind");
+    assert_eq!(h.call("laptop", "rewind", &()), Err("no function rewind".to_string()));
     assert_eq!(
         h.call("laptop", "skip", &Skip { by: 0 }),
         Err("a skip is one track either way".to_string())
@@ -840,39 +861,15 @@ fn a_call_nobody_can_read_changes_nothing() {
     assert_eq!(h.state(), before);
 }
 
-/// The tables a function and everything it calls read and write.
-fn touches(name: &str) -> (Vec<String>, Vec<String>) {
-    let f = domain().lib.get(&domain().get(name)).unwrap();
-    let (mut reads, mut writes) = (vec![], vec![]);
-    let mut todo = vec![f.f.body.clone()];
-    let mut seen = vec![];
-    while let Some(body) = todo.pop() {
-        ark::interp::walk(&body, None, &mut |e, _| match e {
-            Expr::Scan(t) | Expr::Lookup(t, _) => reads.push(t.clone()),
-            Expr::Insert(t, _) | Expr::Delete(t, _) => writes.push(t.clone()),
-            Expr::Update(t, ..) => {
-                reads.push(t.clone());
-                writes.push(t.clone())
-            }
-            Expr::Call(h, _) if !seen.contains(h) => {
-                seen.push(*h);
-                todo.push(domain().lib.get(h).unwrap().f.body.clone());
-            }
-            _ => {}
-        });
-    }
-    (reads, writes)
-}
-
 /// `scrub` is the one ephemeral transition, and the two kinds are two
-/// tables: it touches nothing but `listening_scrub`, and no ordered one
+/// tables: it writes nothing but `listening_scrub`, and no ordered one
 /// reads that table (v4's verifier rule, "no ordered reads of ephemeral
-/// fields", by construction). Falsified by `pause` reading its caller's
-/// scrubber: it read `listening_scrub`.
+/// fields"), held by what they do — every ordered transition, from a house
+/// with scrubbers and one without, changes the other tables alike.
+/// Falsified by `pause` refusing while its caller's scrubber was held: it
+/// answered otherwise with a scrubber.
 #[test]
 fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
-    let (reads, writes) = touches("listening.scrub");
-    assert!(reads.is_empty() && writes.iter().all(|t| t == "listening_scrub"), "{reads:?} {writes:?}");
     let ordered = [
         "start",
         "play",
@@ -905,17 +902,93 @@ fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
         "on_leave",
         "on_restore",
     ];
+    let others = |h: &House| -> Vec<(String, Vec<Vec<u8>>)> {
+        h.store
+            .schema_arc()
+            .tables
+            .iter()
+            .filter(|t| t.name != "listening_scrub")
+            .map(|t| (t.name.clone(), h.store.rows(&t.name).map(|r| r.to_vec()).collect()))
+            .collect()
+    };
+    let input = |t: &str| -> Vec<u8> {
+        match t {
+            "seek" => Seek { ms: 1_000 }.to_bytes(),
+            "skip" => Skip { by: 1 }.to_bytes(),
+            "jump" | "remove" => Jump { index: 1 }.to_bytes(),
+            "transfer" => Transfer { to: "phone".into() }.to_bytes(),
+            "start" => start(&queue(), 0, 0, "").to_bytes(),
+            "enqueue" => Enqueue { next: true, tracks: queue() }.to_bytes(),
+            "move" => Move { from: 0, to: 1 }.to_bytes(),
+            "started" | "stalled" => At { at_ms: 2_000 }.to_bytes(),
+            "advance" => Advance { from_track: 0 }.to_bytes(),
+            "equip" => Equip {
+                can_volume: true,
+                family: Some("sonos".into()),
+                muted: false,
+                volume: 40,
+            }
+            .to_bytes(),
+            "set_volume" => SetVolume {
+                device: "phone".into(),
+                level: 30,
+            }
+            .to_bytes(),
+            "nudge_volume" => NudgeVolume {
+                delta: 5,
+                device: "phone".into(),
+            }
+            .to_bytes(),
+            "set_mute" => SetMute {
+                device: "phone".into(),
+                muted: true,
+            }
+            .to_bytes(),
+            "report_volume" => ReportVolume { level: 20, muted: false }.to_bytes(),
+            "join" | "unjoin" => member("laptop").to_bytes(),
+            "report_group" => ReportGroup {
+                members: vec!["laptop".into()],
+            }
+            .to_bytes(),
+            "set_group_volume" => GroupVolume { level: 50 }.to_bytes(),
+            "nudge_group_volume" => GroupNudge { delta: 5 }.to_bytes(),
+            "set_group_mute" => GroupMute { muted: true }.to_bytes(),
+            "on_join" | "on_leave" => Device {
+                can_play: true,
+                id: "phone".into(),
+                kind: "phone".into(),
+                name: "phone".into(),
+                user: "alice".into(),
+            }
+            .to_bytes(),
+            _ => ().to_bytes(),
+        }
+    };
     for t in ordered {
-        let name = format!("listening.{t}");
-        assert!(!touches(&name).0.contains(&"listening_scrub".to_string()), "{t} reads the scrubbers");
-        assert_eq!(domain().lib.get(&domain().get(&name)).map(|_| ()), Some(()));
+        let house = |scrubbing: bool| {
+            let mut h = House::new();
+            h.arrive("laptop", true);
+            h.arrive("phone", true);
+            h.playing_on("laptop", 0);
+            if scrubbing {
+                h.ok("phone", "scrub", &Scrub { at_ms: Some(9_000) });
+                h.ok("laptop", "scrub", &Scrub { at_ms: Some(1) });
+            }
+            let said = h.author_bytes("alice", "phone", t, &input(t));
+            (said, others(&h))
+        };
+        assert_eq!(house(true), house(false), "{t} reads the scrubbers");
     }
     let lives = domain()
-        .module
-        .bindings
-        .iter()
-        .filter(|b| b.0.starts_with("listening.") && b.0 != "listening.record_play");
+        .fns
+        .keys()
+        .filter(|n| n.starts_with("listening.") && *n != "listening.record_play" && !n.contains("played"));
     assert!(lives.clone().count() > ordered.len());
+    let mut h = House::new();
+    h.arrive("phone", true);
+    let before = others(&h);
+    h.ok("phone", "scrub", &Scrub { at_ms: Some(5) });
+    assert_eq!(others(&h), before, "a scrub writes nothing but the scrubbers");
 
     let mut h = House::new();
     h.arrive("laptop", true);
@@ -1137,7 +1210,7 @@ fn a_report_of_a_volume_is_heard_in_order() {
 const RELAY_MS: i64 = 250;
 
 fn module() -> Module {
-    Module::of(domain())
+    Module::native(domain())
 }
 
 /// The house over the wire: the hub, the session in its volatile machine,
@@ -1151,12 +1224,12 @@ struct Wire {
 impl Wire {
     fn new() -> Wire {
         let mut hub = Config::new(module());
-        let get = |n: &str| Some(domain().get(&format!("listening.{n}")));
+        let get = |n: &str| Some(Domain::hash_of(&format!("listening.{n}")));
         hub.live = Some(Live {
             on_join: get("on_join"),
             on_leave: get("on_leave"),
             on_restore: get("on_restore"),
-            arrive: Arc::new(harken_domain::domain::host::arrive),
+            arrive: Arc::new(harken_domain::host::arrive),
             keep: Some(64),
             ..Live::new(module())
         });
@@ -1178,7 +1251,7 @@ impl Wire {
         };
         let live = Live {
             device: Some(said.to_bytes()),
-            ephemeral: [domain().get("listening.scrub")].into(),
+            ephemeral: [Domain::hash_of("listening.scrub")].into(),
             every_ms: RELAY_MS,
             ..Live::new(module())
         };
@@ -1201,7 +1274,7 @@ impl Wire {
 
     /// A call from the device's newest connection, and everything delivered.
     fn call(&mut self, id: &str, transition: &str, input: &impl Node) {
-        let f = domain().get(&format!("listening.{transition}"));
+        let f = Domain::hash_of(&format!("listening.{transition}"));
         self.net.run(&Op::Call(self.devices[id], f, input.to_bytes()));
         self.net.deliver();
         assert!(self.net.refused.is_empty(), "{:?}", self.net.refused);
@@ -1219,7 +1292,7 @@ impl Wire {
 
     /// The transitions client `i`'s volatile machine applied, in order.
     fn heard(&self, i: i64) -> Vec<String> {
-        let names: BTreeMap<_, _> = domain().module.bindings.iter().map(|(n, h)| (*h, n.clone())).collect();
+        let names: BTreeMap<_, _> = domain().fns.keys().map(|n| (Domain::hash_of(n), n.clone())).collect();
         let log = self.net.clients[&i].live.as_ref().unwrap().log().entries();
         log.iter()
             .map(|l| names[&l.entry.func].trim_start_matches("listening.").to_string())

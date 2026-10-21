@@ -6,11 +6,10 @@
 //! ```text
 //! <bind> ── /admin/              the page (`ark-admin`, a static build)
 //!        ── /admin/api/hello     whether a login is needed, and where to get one
-//!        ── /admin/api/state     the module and its bodies, the store's rows, the log's
+//!        ── /admin/api/state     the domain's catalog, the store's rows, the log's
 //!        │                       last lines, the connections, the CRUD exposed
 //!        ── /admin/api/raw       a raw write, as the authority
-//!        ── /admin/api/author    a binding of the module, as the authority
-//!        ── /admin/api/load      a module file's functions, loaded into the authority
+//!        ── /admin/api/author    a function of the domain, by name, as the authority
 //! ```
 //!
 //! Each body is a value of §1.1's codec in hex (`ark_explorer::wire`).
@@ -22,30 +21,23 @@
 //!
 //! **No second door** (§1.7). A mutation is an entry the authority authors
 //! through `Input::Mutate`, as the server half of a mutator is; so is a raw
-//! write: [`raw`] makes the change a function — a `Write` of no input, its
-//! literals parsed under the module's types, the row it replaces checked to
-//! be the one there — which the authority's content store loads and runs.
+//! write: [`raw`] makes the change a function of no input — the store
+//! judging it as any write, the row it replaces the one there — runnable
+//! for its own entry only, under a name no client's intent can carry.
 //! Replicas apply its facts like any entry's. Both are answered once the
-//! entry is written, as an acknowledgement is.
-//!
-//! **Loading** is the operator giving the running authority another
-//! module's functions — a newer release's a device authors at, over this
-//! same schema — without a restart: the file (`(Module, [body])`, hex) is
-//! verified whole, its bodies loaded ([`Handle::load`]), and an intent held
-//! for one of them is judged with what waits behind it. It is the only way
-//! a function reaches the content store but the modules the server started
-//! with; nothing a client sends is loaded.
+//! entry is written, as an acknowledgement is. A domain's functions are
+//! the ones its build registered (§1.16): nothing is loaded at run time.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark::check::Types;
-use ark::ir::{Effect, Expr, Function, Node, Op};
-use ark::module::{Lib, Module};
-use ark::schema::{Column, Space};
-use ark::store::Change;
-use ark::ty::Ty;
+use ark::hash::FnHash;
+use ark::ir::Node;
+use ark::peer::{Ctx as Run, Procedure};
+use ark::schema::Space;
+use ark::store::{Change, Read};
 use ark_explorer::wire::{self, Hello, State};
+pub use ark_explorer::Catalog;
 use ark_explorer::{crud_of, function_names, Connection, CrudVerbs, Line};
 use axum::extract::State as With;
 use axum::http::{header, StatusCode};
@@ -70,9 +62,8 @@ pub struct Admin {
     pub page: Option<PathBuf>,
     /// Where the page signs in, when it must: the server's public address.
     pub server: Option<String>,
-    /// The log's module (its bindings) and the library its functions are checked in.
-    pub module: Module,
-    pub lib: Lib,
+    /// The domain the log's functions are, described.
+    pub catalog: Catalog,
 }
 
 /// Whether `bind` is plainly loopback: a loopback address, or `localhost`.
@@ -105,7 +96,6 @@ pub fn router(admin: Admin, hub: Handle, authenticate: Authenticate) -> Router {
         .route("/admin/api/state", get(state))
         .route("/admin/api/raw", post(raw_write))
         .route("/admin/api/author", post(author))
-        .route("/admin/api/load", post(load))
         .route_layer(axum::middleware::from_fn_with_state(ctx.clone(), refused))
         .route("/admin/api/hello", get(hello))
         .route("/", get(|| async { Redirect::to("/admin/") }))
@@ -116,43 +106,21 @@ pub fn router(admin: Admin, hub: Handle, authenticate: Authenticate) -> Router {
     r
 }
 
-/// A raw write as a function the authority authors: `Write`, no input, the
-/// change's rows as literals of the table's row type.
-pub fn raw(module: &Module, c: &Change) -> Result<Function, String> {
-    let (_, t) = module.schema.table(c.table()).ok_or_else(|| format!("no table {}", c.table()))?;
-    let types = Types::new(&module.types);
-    let col = |c: &Column| match types.decl(&c.decl) {
-        Some(_) if types.deep(&Ty::Named(c.decl.clone())) == c.ty => Ty::Named(c.decl.clone()),
-        _ => c.ty.clone(),
-    };
-    let row_ty = Ty::Tuple(t.columns.iter().map(col).collect());
-    let key_ty = Ty::Tuple(t.columns[..t.key].iter().map(col).collect());
-    let lit = |ty: &Ty, b: &[u8]| Box::new(Expr::Lit(ty.clone(), b.to_vec()));
-    let key = |r: &[u8]| t.key_len(r).map(|n| lit(&key_ty, &r[..n])).map_err(|e| e.0);
-    // Only over the row the change says is there.
-    let over = |old: &[u8], then: Expr| -> Result<Expr, String> {
-        let there = Expr::Lookup(t.name.clone(), key(old)?);
-        let was = lit(&Ty::option(row_ty.clone()), &[&[1], old].concat());
-        let why = lit(&Types::text(), &"the row is not the one the change replaces".to_string().to_bytes());
-        Ok(Expr::If(
-            Box::new(Expr::Op(Op::Eq, Box::new(there), was)),
-            Box::new(then),
-            Box::new(Expr::Refuse(why)),
-        ))
-    };
-    let body = match c {
-        Change::Add { row, .. } => Expr::Insert(t.name.clone(), lit(&row_ty, row)),
-        Change::Remove { row, .. } => over(row, Expr::Delete(t.name.clone(), key(row)?))?,
-        Change::Edit { old, new, .. } => over(old, Expr::Update(t.name.clone(), key(new)?, Box::new(Expr::Lambda(1, lit(&row_ty, new)))))?,
-    };
-    Ok(Function {
-        types: module.types.clone(),
-        params: vec![],
-        ret: Ty::unit(),
-        effect: Effect::Write,
-        body,
-        names: vec![],
-    })
+/// A raw write as a function the authority authors: no input, its one
+/// change judged by the store as any write is.
+pub struct Raw(pub Change);
+
+impl Procedure for Raw {
+    fn run(&self, _: &dyn Read, _: &Run, _: &[u8]) -> Result<Vec<Change>, ark::Refusal> {
+        Ok(vec![self.0.clone()])
+    }
+}
+
+/// A raw write's function, and the hash its entry names: the change's, so
+/// it is called by no name a client knows.
+pub fn raw(c: &Change) -> (FnHash, Arc<dyn Procedure>) {
+    let h = FnHash::of(&[b"raw write: ".as_slice(), &c.to_bytes()].concat());
+    (h, Arc::new(Raw(c.clone())))
 }
 
 fn text(code: StatusCode, why: impl Into<String>) -> Response {
@@ -186,8 +154,8 @@ async fn hello(With(ctx): With<Ctx>) -> String {
 
 async fn state(With(ctx): With<Ctx>) -> Response {
     let admin = ctx.admin.clone();
-    let names = function_names(&admin.module);
-    let exposed: Vec<(String, CrudVerbs)> = crud_of(&admin.module, &admin.lib)
+    let names = function_names(&admin.catalog);
+    let exposed: Vec<(String, CrudVerbs)> = crud_of(&admin.catalog)
         .into_iter()
         .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
         .collect();
@@ -195,8 +163,7 @@ async fn state(With(ctx): With<Ctx>) -> Response {
         let head = h.log.log().head().0;
         let name = |f| match names.get(f) {
             Some(n) => n.clone(),
-            None if admin.lib.get(f).is_some_and(|l| l.f.params.is_empty()) => "raw write".into(),
-            None => f.to_string(),
+            None => "raw write".into(),
         };
         let at = h.log.log().entries().len().saturating_sub(LINES);
         let lines = h.log.log().entries()[at..]
@@ -220,8 +187,7 @@ async fn state(With(ctx): With<Ctx>) -> Response {
             })
             .collect();
         State {
-            module: admin.module.to_bytes(),
-            bodies: h.log.cas.bodies().cloned().collect(),
+            catalog: admin.catalog.clone(),
             rows: h.log.store.snapshot_rows(),
             head,
             lines,
@@ -238,58 +204,26 @@ async fn state(With(ctx): With<Ctx>) -> Response {
 }
 
 async fn raw_write(With(ctx): With<Ctx>, body: String) -> Response {
-    let f = match wire::raw_from(&body).and_then(|c| raw(&ctx.admin.module, &c)) {
-        Ok(f) => f,
-        Err(why) => return text(StatusCode::BAD_REQUEST, why),
-    };
-    if let Err(e) = ctx.admin.lib.install(&ctx.admin.module.schema, f.clone()) {
-        return text(StatusCode::CONFLICT, e.0);
-    }
-    answer(&ctx.hub, f.hash(), vec![], Some(f.to_bytes())).await
-}
-
-async fn author(With(ctx): With<Ctx>, body: String) -> Response {
-    match wire::author_from(&body) {
-        Ok((name, input)) => match ctx.admin.module.get(&name) {
-            Some(func) => answer(&ctx.hub, func, input, None).await,
-            None => text(StatusCode::BAD_REQUEST, format!("no function {name}")),
-        },
+    match wire::raw_from(&body) {
+        Ok(c) => {
+            let (h, f) = raw(&c);
+            answer(&ctx.hub, h, vec![], Some(f)).await
+        }
         Err(why) => text(StatusCode::BAD_REQUEST, why),
     }
 }
 
-/// A module file verified over this schema ([`ark::Domain::from_file`]):
-/// its bodies.
-pub fn module_bodies(schema: &ark::schema::Schema, bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
-    let d = ark::Domain::from_file(bytes).map_err(|e| e.0)?;
-    if *d.schema != *schema {
-        return Err("a module loaded runs over this schema; another needs a restart".into());
-    }
-    Ok(d.bodies.into_values().collect())
-}
-
-async fn load(With(ctx): With<Ctx>, body: String) -> Response {
-    let bodies = match ark::hash::unhex(body.trim())
-        .ok_or("not hex".to_string())
-        .and_then(|b| module_bodies(&ctx.admin.module.schema, &b))
-    {
-        Ok(b) => b,
-        Err(why) => return text(StatusCode::BAD_REQUEST, why),
-    };
-    let hub = ctx.hub.clone();
-    match tokio::task::spawn_blocking(move || hub.with(move |p| p.load(bodies)))
-        .await
-        .ok()
-        .flatten()
-    {
-        Some(n) => n.to_string().into_response(),
-        None => text(StatusCode::SERVICE_UNAVAILABLE, "the hub is gone"),
+async fn author(With(ctx): With<Ctx>, body: String) -> Response {
+    match wire::author_from(&body) {
+        Ok((name, input)) if ctx.admin.catalog.get(&name).is_some() => answer(&ctx.hub, ark::domain::Domain::hash_of(&name), input, None).await,
+        Ok((name, _)) => text(StatusCode::BAD_REQUEST, format!("no function {name}")),
+        Err(why) => text(StatusCode::BAD_REQUEST, why),
     }
 }
 
 // Authored as the authority, its deliveries delivered: the sequence once
-// written, or the refusal. A raw write's body is runnable for its entry only.
-async fn answer(hub: &Handle, func: ark::hash::FnHash, input: Vec<u8>, once: Option<Vec<u8>>) -> Response {
+// written, or the refusal. A raw write's function is runnable for its entry only.
+async fn answer(hub: &Handle, func: FnHash, input: Vec<u8>, once: Option<Arc<dyn Procedure>>) -> Response {
     let hub = hub.clone();
     match tokio::task::spawn_blocking(move || hub.author(Space::Durable, func, input, once))
         .await

@@ -12,12 +12,18 @@ use super::alone;
 use crate::client::domain;
 use crate::{App, Message};
 
+/// harken's domain, described.
+fn catalog() -> &'static ark_explorer::Catalog {
+    static C: std::sync::OnceLock<ark_explorer::Catalog> = std::sync::OnceLock::new();
+    C.get_or_init(|| ark_explorer::Catalog::of(domain()))
+}
+
 /// What the explorer reads, over this window's replica.
 fn source(app: &App) -> ark_explorer::Source<'_> {
     ark_explorer::Source {
         store: &app.peer.client.log.store,
-        module: &domain().module,
-        lib: &domain().lib,
+        catalog: catalog(),
+        ask: Some(&**domain()),
         log: &ark_explorer::NoLog,
         ctx: app.peer.client.ctx(),
     }
@@ -83,7 +89,7 @@ fn a_function_from_the_explorer_is_authored_as_the_signed_in_person() {
     let mut app = App::with_peer(alone("alice"), String::new(), None);
     press(&mut app, "E");
     press(&mut app, "f");
-    let all = ark_explorer::form::callables(&domain().module, &domain().lib);
+    let all = ark_explorer::form::callables(catalog());
     let at = |name: &str| all.iter().position(|c| c.name.ends_with(&format!(".{name}"))).unwrap();
     let explore = |app: &mut App, m: ark_explorer::Msg| {
         let _ = app.update(Message::Explore(m));

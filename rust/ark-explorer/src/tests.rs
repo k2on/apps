@@ -1,91 +1,140 @@
 //! The explorer's model, without a window (`docs/plan-guards.md` D4): what a
 //! cell edit and a row delete become and which writer they reach, what a
 //! cell's or a field's text reads back as, how a table sorts and lights what
-//! changed, what a call becomes, and how the keys walk it — over a module of
-//! two tables written in ArkLang (§1.15).
+//! changed, what a call becomes, and how the keys walk it — over a domain of
+//! two tables written in Rust (§1.16).
 
 use std::sync::OnceLock;
 
-use ark::gen::{Id, Node};
+use ark::domain::Domain;
 use ark::log::EntryId;
 use ark::peer::Ctx;
+use ark::prelude::*;
 use ark::store::{Change, Store};
-use ark::Domain;
 use iced::keyboard::{key::Named, Key, Modifiers};
 
-use crate::data::{crud_of, CrudVerbs, NoLog, Source, Ticket, Writer};
+use crate::data::{crud_of, Catalog, CrudVerbs, NoLog, Source, Ticket, Writer};
 use crate::edit::{route_delete, route_edit, Route, Via};
 use crate::form::{self, Callable, Field, Form, Kind};
 use crate::model::{Called, Explorer, Grid, Msg, Outcome, Screen, FADE_MS, MAX_CHARS, MIN_CHARS};
 use crate::value::{self, parse_cell, text_of as cell_text, Ty, Value};
 
-/// A user table with its CRUD exposed, a team table with none, one query,
-/// and two mutations of the module's own on a second router.
-const PEOPLE: &str = r#"
-(schema (table team (name Text key) (size Int))
-  (table user (id (id user) key) (name Text) (team Text (refs team)) (admin Bool) (email (option Text))))
-(type UserKey (record (id (id user))))
-(type OfTeam (record (team Text)))
-(type NewTeam
-  (record (name (where Text (trim) (non-empty) "a team needs a name" (len 0 12)))
-    (size (where Int (fn (n) (and (>= n 1) (<= n 10))) "between 1 and 10"))))
-(type Level (sum (Low) (High)))
-(type Kick (record (user (id user)) (why (option Text)) (tags (where (list Text) (non-empty))) (level Level) (loud Bool)))
-(mutator people.insert_user ((input (row user))) (insert user input))
-(mutator people.update_user ((input (row user))) (update user input.id (fn (old) input)))
-(mutator people.put_user ((input (row user)))
-  (if (some? (get user input.id)) (update user input.id (fn (old) input)) (insert user input)))
-(mutator people.delete_user ((input UserKey)) (delete user input.id))
-(query people.members ((input OfTeam)) (list (row user)) (sort (filter user (fn (u) (== u.team input.team))) (fn (u) u.name)))
-(mutator teams.make_team ((input NewTeam)) (insert team (record (name input.name) (size input.size))))
-(mutator teams.kick ((input Kick)) (if (none? (get user input.user)) (refuse "no such user")) (delete user input.user))
-"#;
+// A user table with its CRUD exposed, a team table with none, one query,
+// and two mutations of the domain's own on a second router.
 
-#[derive(Node, Clone, Debug, PartialEq)]
+#[derive(Node, Row, Clone, Debug, PartialEq, Eq)]
 pub struct Team {
+    #[ark(key)]
     pub name: String,
     pub size: i64,
 }
 
-#[derive(Node, Clone, Debug, PartialEq)]
+#[derive(Node, Row, Clone, Debug, PartialEq, Eq)]
 pub struct User {
+    #[ark(key)]
     pub id: Id<User>,
     pub name: String,
+    #[ark(refs(Team))]
     pub team: String,
     pub admin: bool,
     pub email: Option<String>,
 }
 
-#[derive(Node, Clone, Debug, PartialEq)]
+#[derive(Schema)]
+#[allow(dead_code)]
+pub struct People {
+    pub team: Team,
+    pub user: User,
+}
+
+#[derive(Node, Input, Clone, Debug, PartialEq)]
 pub struct UserKey {
     pub id: Id<User>,
 }
 
-#[derive(Node, Clone, Debug, PartialEq)]
+#[derive(Node, Input, Clone, Debug, PartialEq)]
+pub struct OfTeam {
+    pub team: String,
+}
+
+#[derive(Node, Input, Clone, Debug, PartialEq)]
 pub struct NewTeam {
+    #[ark(trim, non_empty, why = "a team needs a name")]
+    #[ark(len = "0..=12")]
     pub name: String,
+    #[ark(range = "1..=10", why = "between 1 and 10")]
     pub size: i64,
 }
 
-#[derive(Node, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Node, Describe, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
     Low,
     High,
 }
 
 /// A mutation over every kind of field a form draws.
-#[derive(Node, Clone, Debug, PartialEq)]
+#[derive(Node, Input, Clone, Debug, PartialEq)]
 pub struct Kick {
     pub user: Id<User>,
     pub why: Option<String>,
+    #[ark(non_empty)]
     pub tags: Vec<String>,
     pub level: Level,
     pub loud: bool,
 }
 
+#[mutator("people.insert_user")]
+pub fn insert_user(_: &Ctx, db: &mut Db<People>, input: User) -> Result<(), Refusal> {
+    db.user.insert(input)
+}
+
+#[mutator("people.update_user")]
+pub fn update_user(_: &Ctx, db: &mut Db<People>, input: User) -> Result<(), Refusal> {
+    db.user.update(input)
+}
+
+#[mutator("people.put_user")]
+pub fn put_user(_: &Ctx, db: &mut Db<People>, input: User) -> Result<(), Refusal> {
+    db.user.put(input)
+}
+
+#[mutator("people.delete_user")]
+pub fn delete_user(_: &Ctx, db: &mut Db<People>, input: UserKey) -> Result<(), Refusal> {
+    db.user.delete(input.id)
+}
+
+#[view("people.members")]
+pub fn members(_: &Ctx, _: &Db<People>, input: OfTeam) -> Result<Plan<People, User>, Refusal> {
+    Ok(scan::<People, User>().filter(move |u| u.team == input.team).sort(|u| u.name.clone()))
+}
+
+#[mutator("teams.make_team")]
+pub fn make_team(_: &Ctx, db: &mut Db<People>, input: NewTeam) -> Result<(), Refusal> {
+    db.team.insert(Team {
+        name: input.name,
+        size: input.size,
+    })
+}
+
+#[mutator("teams.kick")]
+pub fn kick(_: &Ctx, db: &mut Db<People>, input: Kick) -> Result<(), Refusal> {
+    if !db.user.has(input.user) {
+        return Err(Refusal::new("no such user"));
+    }
+    db.user.delete(input.user)
+}
+
 fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(|| ark::sexp::build(PEOPLE).unwrap_or_else(|r| panic!("{r}")))
+    D.get_or_init(|| {
+        ark::register!(Domain::new::<People>("people", "1");
+            insert_user, update_user, put_user, delete_user, members, make_team, kick)
+    })
+}
+
+fn catalog() -> &'static Catalog {
+    static C: OnceLock<Catalog> = OnceLock::new();
+    C.get_or_init(|| Catalog::of(domain()))
 }
 
 fn id(k: u8) -> Id<User> {
@@ -153,8 +202,7 @@ impl Writer for Recorder {
 }
 
 fn exposed() -> Vec<(String, CrudVerbs)> {
-    let d = domain();
-    crud_of(&d.module, &d.lib)
+    crud_of(catalog())
         .into_iter()
         .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
         .collect()
@@ -171,8 +219,8 @@ fn writer(authority: bool) -> Recorder {
 fn source(st: &Store) -> Source<'_> {
     Source {
         store: st,
-        module: &domain().module,
-        lib: &domain().lib,
+        catalog: catalog(),
+        ask: Some(domain()),
         log: &NoLog,
         ctx: Ctx {
             draws: Default::default(),
@@ -200,34 +248,29 @@ fn input<T: Node>(w: &Recorder) -> (String, T) {
 }
 
 fn at(name: &str) -> usize {
-    let d = domain();
-    crate::form::callables(&d.module, &d.lib)
+    crate::form::callables(catalog())
         .iter()
         .position(|c| c.name.ends_with(&format!(".{name}")))
         .unwrap_or_else(|| panic!("no {name}"))
 }
 
-/// `crud_of` finds the four a module binds, by name and input — the table
+/// `crud_of` finds the four a domain names, by name and input — the table
 /// without one has none, and a mutator of the right name that does not take
 /// the row (or the key) is not one. Falsified by recognising the verbs by
-/// name alone: the delete bound to `make_team`'s body was still counted.
+/// name alone: a delete taking `make_team`'s input was still counted.
 #[test]
-fn the_exposed_crud_is_read_off_the_module() {
-    let d = domain();
-    let crud = crud_of(&d.module, &d.lib);
+fn the_exposed_crud_is_read_off_the_domain() {
+    let crud = crud_of(catalog());
     assert_eq!(crud.len(), 1, "{crud:?}");
     let (t, v) = &crud[0];
     assert_eq!(t, "user");
     assert!(v.insert && v.update && v.delete && v.put && !v.may_author);
-    let mut odd = d.module.clone();
-    let make = d.get("teams.make_team");
-    for b in odd.bindings.iter_mut().filter(|(n, _)| n == "people.delete_user") {
-        b.1 = make;
+    let mut odd = catalog().clone();
+    let make = odd.get("teams.make_team").unwrap().input.clone();
+    for f in odd.functions.iter_mut().filter(|f| f.name == "people.delete_user") {
+        f.input = make.clone();
     }
-    assert!(
-        !crud_of(&odd, &d.lib)[0].1.delete,
-        "a delete that does not take the key is not the CRUD verb"
-    );
+    assert!(!crud_of(&odd)[0].1.delete, "a delete that does not take the key is not the CRUD verb");
 }
 
 /// A cell edit on a table whose CRUD is exposed goes through its
@@ -348,7 +391,7 @@ fn a_delete_goes_through_delete_or_raw() {
         can_raw: true,
         force_raw: false,
     };
-    let m = &domain().module;
+    let m = catalog();
     assert_eq!(
         route_delete(m, authority, "team", &team),
         Ok(Route::Raw(Change::Remove {
@@ -374,7 +417,7 @@ fn a_key_is_not_edited() {
         can_raw: true,
         force_raw: false,
     };
-    let r = route_edit(&domain().module, via, "user", &old, "id", uid(9));
+    let r = route_edit(catalog(), via, "user", &old, "id", uid(9));
     assert!(matches!(&r, Err(why) if why.contains("part of the key")), "{r:?}");
 }
 
@@ -384,10 +427,9 @@ fn a_key_is_not_edited() {
 #[test]
 fn a_cell_reads_back_as_its_column() {
     let d = domain();
-    let cx = value::types(&d.module);
     let ty = |t: &str, c: &str| {
         let (_, tbl) = d.schema.table(t).unwrap();
-        value::column_ty(&cx, &tbl.columns[tbl.column(c).unwrap()])
+        value::column_ty(&tbl.columns[tbl.column(c).unwrap()])
     };
     for (c, v) in [
         ("id", uid(7)),
@@ -460,12 +502,10 @@ fn every_screen_draws() {
     }
 }
 
-/// The admin state as the server would send it for this module and store.
+/// The admin state as the server would send it for this domain and store.
 fn state(st: &Store, exposed: Vec<(String, CrudVerbs)>) -> crate::wire::State {
-    let d = domain();
     crate::wire::State {
-        module: d.module.to_bytes(),
-        bodies: d.bodies.values().cloned().collect(),
+        catalog: catalog().clone(),
         rows: st.snapshot_rows(),
         head: 0,
         lines: vec![],
@@ -491,7 +531,7 @@ fn the_admin_wire_reads_back() {
         origin: Default::default(),
         local: 1,
         roles: vec![],
-        func: domain().get("teams.make_team"),
+        func: Domain::hash_of("teams.make_team"),
         input: vec![],
         now: 5,
     };
@@ -762,8 +802,7 @@ fn a_query_answer_is_a_grid() {
 /// `members` was missing.
 #[test]
 fn every_query_and_mutation_is_listed_by_router() {
-    let d = domain();
-    let all = form::callables(&d.module, &d.lib);
+    let all = form::callables(catalog());
     let names: Vec<(&str, &str)> = all.iter().map(|c| (c.router.as_str(), c.name.as_str())).collect();
     let routers: Vec<&str> = names.iter().map(|(r, _)| *r).collect();
     let first_teams = routers.iter().position(|r| *r == "teams").unwrap();
@@ -785,13 +824,7 @@ fn every_query_and_mutation_is_listed_by_router() {
         .collect();
     assert_eq!(
         said,
-        [
-            "user: id(user)",
-            "option<text>: option(text)",
-            "tags: list(text)",
-            "level: enum(2)",
-            "bool: bool"
-        ]
+        ["user: id(user)", "why: option(text)", "tags: list(text)", "level: enum(2)", "loud: bool"]
     );
     let make = &all[at("make_team")];
     assert_eq!(

@@ -13,9 +13,9 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::domain::Device;
+use ark::domain::Domain;
 use ark::ir::Node;
 use ark::peer::Who;
-use ark::Domain;
 pub use ark_peer::link::Wake;
 #[cfg_attr(all(feature = "demo", not(test)), allow(unused_imports))]
 pub use ark_peer::nobody;
@@ -26,10 +26,10 @@ use ark_peer::{Config, Disk, Live, Memory};
 /// scrubber dragged — twenty a second; the last always goes.
 pub const THROTTLE_MS: u64 = 50;
 
-/// harken's module, assembled once.
+/// harken's domain, registered once.
 pub fn domain() -> &'static Arc<Domain> {
     static D: OnceLock<Arc<Domain>> = OnceLock::new();
-    D.get_or_init(|| Arc::new(crate::domain::host::load()))
+    D.get_or_init(harken_domain::shared)
 }
 
 /// What this device says it is in its volatile `Hello` (§1.9): the server
@@ -51,13 +51,13 @@ pub fn config(device: Vec<u8>) -> Config {
     let d = domain();
     let live = Live {
         device: Some(device),
-        ephemeral: [d.get("listening.scrub")].into(),
+        ephemeral: [Domain::hash_of("listening.scrub")].into(),
         every_ms: THROTTLE_MS as i64,
-        ..Live::new(ark_peer::Module::of(d))
+        ..Live::new(ark_peer::Module::native(d))
     };
     Config {
         live: Some(live),
-        ..Config::of(d.clone())
+        ..Config::native(d.clone())
     }
 }
 

@@ -176,14 +176,23 @@ impl Handle {
 
     /// An entry the authority of `space` authors itself
     /// ([`Peer::author`]): the head it was sequenced at, or the refusal.
-    /// With `once`, the function is that body (a raw write), runnable for
+    /// With `once`, `func` is that function (a raw write), runnable for
     /// this entry only: never one a client's intent may name.
-    pub fn author(&self, space: Space, func: FnHash, input: Vec<u8>, once: Option<Vec<u8>>) -> Option<Result<Seq, String>> {
+    pub fn author(
+        &self,
+        space: Space,
+        func: FnHash,
+        input: Vec<u8>,
+        once: Option<std::sync::Arc<dyn ark::peer::Procedure>>,
+    ) -> Option<Result<Seq, String>> {
         self.with(move |p| {
-            let raw = once.map(|b| p.log.cas.add_body(b));
-            let r = p.author(space, raw.unwrap_or(func), input, now_ms());
-            if let Some(f) = raw.filter(|f| p.config.log.cas.get(f).is_none()) {
-                p.log.cas.forget(&f);
+            let raw = once.is_some();
+            if let Some(f) = once {
+                p.log.cas.insert(func, f);
+            }
+            let r = p.author(space, func, input, now_ms());
+            if raw && p.config.log.cas.get(&func).is_none() {
+                p.log.cas.forget(&func);
             }
             r.map(|_| p.machine(space).map_or(0, |m| m.log().head().0))
         })

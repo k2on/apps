@@ -31,6 +31,41 @@ use crate::Refusal;
 /// prefix of the key or entries it covered (empty: all of them).
 pub type Dep = (&'static str, Option<usize>, Vec<u8>);
 
+/// What reads cost on this thread: the `get`s made and the rows ranges
+/// returned — the store examines only the rows it returns.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Reads {
+    pub gets: usize,
+    pub rows: usize,
+}
+
+thread_local!(static READS: std::cell::Cell<Reads> = const { std::cell::Cell::new(Reads { gets: 0, rows: 0 }) });
+
+fn tally(gets: usize, rows: usize) {
+    READS.with(|r| {
+        let x = r.get();
+        r.set(Reads {
+            gets: x.gets + gets,
+            rows: x.rows + rows,
+        })
+    });
+}
+
+/// `f`, and what the reads through typed handles it made on this thread
+/// cost.
+pub fn count<T>(f: impl FnOnce() -> T) -> (T, Reads) {
+    let before = READS.with(|r| r.get());
+    let t = f();
+    let after = READS.with(|r| r.get());
+    (
+        t,
+        Reads {
+            gets: after.gets - before.gets,
+            rows: after.rows - before.rows,
+        },
+    )
+}
+
 enum Backing<'t> {
     Read(&'t Store),
     Write(&'t mut Store),
@@ -208,6 +243,7 @@ impl<'t, R: Row> Tab<'t, R> {
         let mut t = self.txn.borrow_mut();
         let row = t.store().get(R::TABLE, &key);
         t.note((R::TABLE, None, key));
+        tally(1, 0);
         row
     }
 
@@ -253,26 +289,33 @@ impl<'t, R: Row> Tab<'t, R> {
     }
 
     /// A row in place of the one with its key; refused when there is none.
+    /// The row as it was is no change.
     pub fn update(&mut self, row: R) -> Result<(), Refusal> {
         let old = self
             .get_bytes(row.key_bytes())
             .ok_or_else(|| Refusal(format!("{}: no row has this key", R::TABLE)))?;
-        let c = Change::Edit {
-            table: R::TABLE.into(),
-            old,
-            new: row.encode(),
-        };
-        self.txn.borrow_mut().apply(c)
+        self.edit(old, row.encode())
     }
 
-    /// A row, new or in place of the one with its key.
+    fn edit(&mut self, old: Vec<u8>, new: Vec<u8>) -> Result<(), Refusal> {
+        if old == new {
+            return Ok(());
+        }
+        let table = R::TABLE.into();
+        self.txn.borrow_mut().apply(Change::Edit { table, old, new })
+    }
+
+    /// A row, new or in place of the one with its key (as it was: no
+    /// change).
     pub fn put(&mut self, row: R) -> Result<(), Refusal> {
-        let (table, new) = (R::TABLE.to_string(), row.encode());
-        let c = match self.get_bytes(row.key_bytes()) {
-            Some(old) => Change::Edit { table, old, new },
-            None => Change::Add { table, row: new },
-        };
-        self.txn.borrow_mut().apply(c)
+        let new = row.encode();
+        match self.get_bytes(row.key_bytes()) {
+            Some(old) => self.edit(old, new),
+            None => self.txn.borrow_mut().apply(Change::Add {
+                table: R::TABLE.into(),
+                row: new,
+            }),
+        }
     }
 
     /// The row with this key gone; nothing when there is none.
@@ -380,6 +423,7 @@ impl<'t, R: Row> Range<'t, R> {
         };
         let rows = t.store().scan(R::TABLE, &scan);
         t.note((R::TABLE, self.index, self.prefix));
+        tally(0, rows.len());
         rows.iter().map(|b| decode(b)).collect()
     }
 

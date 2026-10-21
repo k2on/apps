@@ -210,7 +210,7 @@ fn the_health_says_the_head_and_who_is_connected() {
     assert!(lines.contains(&"horizon 0"), "{h}");
     assert!(lines.contains(&"room alice peers 2"), "{h}");
     assert!(
-        lines.contains(&format!("module {} current", hosted().domain.module.hash()).as_str()),
+        lines.contains(&format!("domain {} current", hosted().version()).as_str()),
         "{h}"
     );
     rt.block_on(server.stop());
@@ -279,16 +279,11 @@ fn the_admin_page_is_the_authoritys() {
     let state =
         State::from_body(&admin("GET", &format!("{at}/admin/api/state"), None, None).unwrap())
             .unwrap();
-    let module = ark::module::Module::from_bytes(&state.module).unwrap();
-    assert_eq!(module, hosted().domain.module);
-    let lib = ark::module::Lib::default();
-    let mut left = state.bodies.clone();
-    while !left.is_empty() {
-        let before = left.len();
-        left.retain(|b| lib.load(&module.schema, b).is_err());
-        assert!(left.len() < before, "{} bodies do not check", left.len());
-    }
-    ark::module::verify(&module, &lib).unwrap();
+    assert_eq!(
+        state.catalog,
+        ark_explorer::Catalog::of(&hosted().domain),
+        "the domain, described"
+    );
     let rows = &state.rows.iter().find(|(t, _)| t == "playlist").unwrap().1;
     let mine = Playlist::from_bytes(&rows[0]).unwrap();
     assert_eq!((mine.name.as_str(), state.head), ("Mine", 1));
@@ -331,7 +326,7 @@ fn the_admin_page_is_the_authoritys() {
     let (status, why) = admin("POST", &raw, None, Some(edit(&mine, "Stale"))).unwrap_err();
     assert_eq!(
         (status, why.as_str()),
-        (409, "the row is not the one the change replaces")
+        (409, "playlist: the row is not the one the change replaces")
     );
 
     let body = wire::author_body(
@@ -424,10 +419,10 @@ fn a_clients_raw_write_is_refused() {
         old: mine.to_bytes(),
         new: hijacked.to_bytes(),
     };
-    let raw = ark_peer::admin::raw(&hosted().domain.module, &edit).unwrap();
+    let (h, raw) = ark_peer::admin::raw(&edit);
     let mut bob = signed_in(&server, "bob");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == 1);
-    let h = bob.client.log.cas.add_body(raw.to_bytes());
+    bob.client.log.cas.insert(h, raw);
     let _ = bob
         .client
         .author(ark::schema::Space::Durable, h, vec![], ark_peer::now_ms());

@@ -16,7 +16,7 @@
 //!   (`harken/domain/listening.ark`), sequenced by the hub's volatile
 //!   authority, and needs nothing of this crate;
 //! - [`domain`]: the domain's bindings and the host's Rust beside them;
-//! - [`hosted`]: the module the hub runs, harken's own or one from a path;
+//! - [`hosted`]: the domain the hub runs, harken's own, as this build compiled it;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
 //!   environment (what the NixOS module sets) and the server built from it.
 //!
@@ -117,15 +117,6 @@ pub struct Config {
     /// The log, the kept listening sessions, the sign-in sessions and the
     /// scanner's replica.
     pub data: PathBuf,
-    /// A module to host instead of harken's own: a domain's directory, an
-    /// ArkLang file or a module file ([`hosted::Hosted::read`]).
-    pub module: Option<PathBuf>,
-    /// Modules whose functions this server is to hold though it never
-    /// started with them (`HARKEN_OLD_MODULES`, comma-separated paths; what
-    /// `services.harken.oldModules` sets): their bodies go in the content
-    /// store, so an intent a client built with one is sequenced through it
-    /// without the client being asked for the body.
-    pub old_modules: Vec<PathBuf>,
     /// Where a browser reaches this server — the proxy's address behind one.
     /// The provider sends people back under it, and the page it serves
     /// signs in against it. `http://{listen}` when unset.
@@ -174,8 +165,6 @@ impl Config {
         Config {
             listen: listen.into(),
             data: data.into(),
-            module: None,
-            old_modules: vec![],
             public_url: None,
             sign_in: SignIn::Dev,
             redirects: vec![],
@@ -195,8 +184,6 @@ impl Config {
     ///
     /// ```text
     /// HARKEN_DATA                   where the state lives (default: the temp dir)
-    /// HARKEN_MODULE                 a module to host instead of harken's own: a domain's directory, an ArkLang file or a module file
-    /// HARKEN_OLD_MODULES            modules to hold as run before, comma-separated, read the same ways
     /// HARKEN_PUBLIC_URL             where a browser reaches this server
     /// HARKEN_DEV_AUTH=1             anyone is whoever they say
     /// HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID, HARKEN_OIDC_CLIENT_SECRET_FILE
@@ -288,11 +275,6 @@ impl Config {
             listen: listen.into(),
             data: env("HARKEN_DATA")
                 .map_or_else(|| std::env::temp_dir().join("harken-server"), PathBuf::from),
-            module: env("HARKEN_MODULE").map(PathBuf::from),
-            old_modules: list("HARKEN_OLD_MODULES")
-                .into_iter()
-                .map(PathBuf::from)
-                .collect(),
             public_url: env("HARKEN_PUBLIC_URL"),
             sign_in,
             redirects: list("HARKEN_REDIRECTS"),
@@ -423,7 +405,7 @@ pub fn pretty(entity: &str) -> String {
 }
 
 /// The hub's configuration for `hosted`: the log and the listening
-/// session's volatile space over the one module, `on_join`, `on_leave` and
+/// session's volatile space over the one domain, `on_join`, `on_leave` and
 /// `on_restore` the domain's, `host::arrive` reading a device, and `keep`
 /// entries above the log's snapshot.
 pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
@@ -442,17 +424,13 @@ pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
 }
 
 /// What `/healthz` says, a line each: `ok`; the connections open; the
-/// log's head and its horizon (the snapshot it stands on); the module it
-/// runs, `current`, and each it holds as run before (`HARKEN_OLD_MODULES`),
-/// by hash; and every account with a connection open, with how many — what
-/// the fleet and the VM test read. Answered in front of `ark-peer`'s own
-/// `/healthz`, which says `ok` alone.
+/// log's head and its horizon (the snapshot it stands on); the domain it
+/// runs, its schema's hash and its version (§1.16); and every account with
+/// a connection open, with how many — what the fleet and the VM test read.
+/// Answered in front of `ark-peer`'s own `/healthz`, which says `ok` alone.
 pub async fn health(hub: &ark_peer::Handle, hosted: &Hosted) -> Option<String> {
     let hub = hub.clone();
-    let mut modules = format!("module {} current\n", hosted.domain.module.hash());
-    for m in &hosted.held {
-        modules.push_str(&format!("module {m}\n"));
-    }
+    let modules = format!("domain {} current\n", hosted.version());
     tokio::task::spawn_blocking(move || {
         hub.with(move |h| {
             let mut rooms: std::collections::BTreeMap<String, usize> = Default::default();
@@ -559,18 +537,7 @@ async fn mode(sign_in: &SignIn) -> Result<Mode> {
 /// Build the server from `config`, listen, and start the scanner and the
 /// bridge beside it.
 pub async fn start(config: Config) -> Result<Server> {
-    let mut hosted = match &config.module {
-        None => Hosted::harken(),
-        Some(p) => Hosted::read(p)?,
-    };
-    for p in &config.old_modules {
-        let n;
-        (hosted, n) = hosted.hold(p)?;
-        eprintln!(
-            "harken-server: holding {} as a module run before ({n} functions)",
-            p.display()
-        );
-    }
+    let hosted = Hosted::harken();
     std::fs::create_dir_all(&config.data)
         .with_context(|| format!("creating {}", config.data.display()))?;
     eprintln!("harken-server: data in {}", config.data.display());
@@ -590,7 +557,7 @@ pub async fn start(config: Config) -> Result<Server> {
         .iter()
         .map(|(r, a)| (r.clone(), a.clone()))
         .chain([(
-            crate::domain::host::LIBRARY.to_string(),
+            crate::domain::LIBRARY.to_string(),
             vec![library::ACCOUNT.to_string()],
         )]);
     let mut auth = Auth::new(sessions, mode(&config.sign_in).await?, &public_url)
@@ -648,8 +615,7 @@ pub async fn start(config: Config) -> Result<Server> {
             bind: bind.clone(),
             page: config.admin_web.clone(),
             server: Some(public_url.clone()),
-            module: hosted.domain.module.clone(),
-            lib: hosted.domain.lib.clone(),
+            catalog: ark_peer::admin::Catalog::of(&hosted.domain),
         });
     }
     // Everything the routes above do not match falls through to the page,
@@ -684,7 +650,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 .issue(&Account {
                     id: library::ACCOUNT.into(),
                     name: "Library".into(),
-                    roles: vec![crate::domain::host::LIBRARY.into()],
+                    roles: vec![crate::domain::LIBRARY.into()],
                     ..Account::default()
                 })
                 .map_err(|e| anyhow!("signing the scanner in: {e}"))?;

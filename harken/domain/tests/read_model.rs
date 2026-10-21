@@ -6,8 +6,8 @@
 mod common;
 
 use common::{each, song, track, with, Lib};
-use harken_domain::domain::Id;
-use harken_domain::domain::*;
+use harken_domain::Id;
+use harken_domain::*;
 
 fn titles(rows: &[LibraryEntry]) -> Vec<String> {
     each(rows, |r| r.title.clone())
@@ -477,7 +477,7 @@ fn one_work_holds_every_recording_of_it() {
     );
     assert_eq!(works.len(), 1, "two performances are not two works");
     assert_eq!(works[0].catalogue, "BWV 988");
-    assert_eq!(works[0].id, harken_domain::domain::host::work_key("Johann Sebastian Bach", "BWV 988", ""));
+    assert_eq!(works[0].id, harken_domain::host::work_key("Johann Sebastian Bach", "BWV 988", ""));
     assert_eq!(each(&works, |w| w.recordings), [2]);
     assert_eq!(each(&works, |w| w.tracks), [6]);
     assert_eq!(

@@ -174,7 +174,7 @@ impl Scanner {
         // what `is_library` asks, on the device and, of the roles the hub
         // stamps, at the authority.
         let mut roles = login.user.roles.clone();
-        roles.push(crate::domain::host::LIBRARY.to_string());
+        roles.push(crate::domain::LIBRARY.to_string());
         roles.sort();
         roles.dedup();
         let who = Who {
@@ -185,7 +185,7 @@ impl Scanner {
         let dir = replica_dir(&data);
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
-        let config = Config::of(hosted.domain.clone());
+        let config = Config::native(hosted.domain.clone());
         let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk), false);
         // Each start is a login of its own: what the replica kept pending
         // is authored again under it, from its session's first `local`,
@@ -565,7 +565,11 @@ fn would_change(peer: &Peer, name: &str, input: &[u8]) -> bool {
         roles: me.roles.clone(),
         now: ark_peer::now_ms(),
     };
-    !matches!(peer.hosted.domain.run(&peer.client.log.store, &ctx, name, input), Ok(changes) if changes.is_empty())
+    let Some(f) = peer.hosted.domain.get(name).and_then(|f| f.proc.clone()) else {
+        return true;
+    };
+    let mut store = peer.client.log.store.clone();
+    !matches!(f.apply(&mut store, &ctx, input), Ok(changes) if changes.is_empty())
 }
 
 /// Every file under `dir`. A directory that cannot be read is skipped rather

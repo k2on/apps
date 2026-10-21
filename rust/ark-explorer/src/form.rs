@@ -1,9 +1,9 @@
-//! Every query and mutation of a module, callable (`docs/plan-guards.md`
+//! Every query and mutation of a domain, callable (`docs/plan-guards.md`
 //! D4): which there are, grouped by router; a form per function, a line
-//! per field of its input type, typed as its type's values are written; the field's checks,
-//! said beside it and run before calling with the module's own messages
-//! (§1.1: the form validator is `parse`). No window: the view draws what is
-//! here.
+//! per field of its input's type description, typed as its type's values
+//! are written; the field's checks, said beside it and run before calling
+//! with the domain's own messages (§1.16: the input's generated check is
+//! the form's validation). No window: the view draws what is here.
 //!
 //! A mutation called from here is authored through the host's
 //! [`Writer`](crate::data::Writer) exactly as a button in the app authors
@@ -11,13 +11,10 @@
 //! on the host's store. Helpers, guards, provides, scopes and §1.9's live
 //! transitions are not called by anybody, so they are not listed.
 
-use ark::check::Types;
-use ark::interp::{check_form, Interp};
-use ark::ir::Effect;
-use ark::module::{Lib, Module};
-use ark::ty::Ty as Structure;
+use ark::domain::Kind as Fn;
+use ark::row::Type;
 
-use crate::data::Source;
+use crate::data::{Catalog, Source};
 use crate::value::{self, decode, encode, Ty, Value};
 
 /// What a callable is.
@@ -72,42 +69,51 @@ impl Callable {
     }
 }
 
-/// Every query and mutation of `module` — a function that writes, or reads
-/// and answers a list — grouped by router in the order each router first
-/// appears, and in binding order within one.
-pub fn callables(module: &Module, lib: &Lib) -> Vec<Callable> {
+/// Every query and mutation of `catalog` — a mutator, or a view or a
+/// query answering a list — grouped by router in the order each router
+/// first appears, and in name order within one. Live transitions, scopes
+/// and queries of one value are nobody's to call from here.
+pub fn callables(catalog: &Catalog) -> Vec<Callable> {
     let mut out: Vec<Callable> = Vec::new();
-    for (name, h) in &module.bindings {
-        let Some(f) = lib.get(h) else { continue };
-        let kind = match (f.f.effect, &f.f.ret) {
-            (Effect::Write, _) => Kind::Mutation,
-            (Effect::Read, Structure::List(_)) => Kind::Query,
+    for f in &catalog.functions {
+        let kind = match (f.kind, &f.output) {
+            (Fn::Mutator, _) => Kind::Mutation,
+            (Fn::View, _) | (Fn::Query, Some(Type::List(_))) => Kind::Query,
             _ => continue,
         };
-        if crate::data::is_live(module, lib, h) {
-            continue;
-        }
-        let cx = Types::new(&f.f.types);
-        let (fields, record) = value::fields_of(&cx, &f.f.params);
-        let labels = value::columns_of(&module.schema, &fields).unwrap_or_else(|| value::labelled(&fields));
-        let field = |t: &Structure| Field {
-            ty: value::resolve(&cx, t),
-            checks: value::checks_of(&cx, t),
+        let (fields, record): (Vec<(String, Type)>, bool) = match &f.input {
+            Type::Record(_, fs) => (fs.clone(), true),
+            Type::Unit => (vec![], false),
+            t => (vec![("input".into(), t.clone())], false),
         };
-        let input = labels.into_iter().zip(&fields).map(|(l, t)| (l, field(t))).collect();
-        let element = match &f.f.ret {
-            Structure::List(t) => (**t).clone(),
-            t => t.clone(),
+        let checks = |n: &str| f.checks.iter().find(|(c, _)| c == n).map(|(_, cs)| cs.clone()).unwrap_or_default();
+        let input = fields
+            .iter()
+            .map(|(n, t)| {
+                let field = Field {
+                    ty: value::of_type(t),
+                    checks: checks(n),
+                };
+                (n.clone(), field)
+            })
+            .collect();
+        let element = match (f.kind, &f.output) {
+            (Fn::Query, Some(Type::List(t))) => (**t).clone(),
+            (_, Some(t)) => t.clone(),
+            (_, None) => Type::Unit,
         };
-        let columns = value::row_labels(&module.schema, &element, &cx);
-        let mut returns = value::resolve(&cx, &element);
+        let columns = match &element {
+            Type::Record(_, fs) => value::columns_of(&catalog.schema, fs),
+            _ => None,
+        };
+        let mut returns = value::of_type(&element);
         if let (Ty::Struct(fs), Some(cs)) = (&mut returns, &columns) {
             fs.iter_mut().zip(cs).for_each(|((n, _), c)| n.clone_from(c));
         }
-        let router = name.rsplit_once('.').map_or("", |(r, _)| r).to_string();
+        let router = f.name.rsplit_once('.').map_or("", |(r, _)| r).to_string();
         out.push(Callable {
             router,
-            name: name.clone(),
+            name: f.name.clone(),
             kind,
             input,
             record,
@@ -166,26 +172,25 @@ impl Form {
     }
 
     /// Run every check before calling: each field read as its type, then the
-    /// input's bytes held to its refinements by the module's own
-    /// `check_form` (§1.1: the form validator is `parse`), each failure said
-    /// with the module's message against the field it is in. Nothing is
-    /// written. The input, when there is nothing to say against it.
-    pub fn validate(&mut self, c: &Callable, lib: &Lib, module: &Module) -> Option<Value> {
+    /// input's bytes held to its refinements by the domain's own check
+    /// (§1.16), where the host holds the domain, each failure said with the
+    /// domain's words against the field it is in. Nothing is written. The
+    /// input, when there is nothing to say against it.
+    pub fn validate(&mut self, c: &Callable, src: &Source) -> Option<Value> {
         let (read, mut messages) = self.read();
-        let field = |i: Option<u32>| match (c.record, i) {
-            (true, Some(i)) => self.fields.get(i as usize).map_or(String::new(), |(n, _)| n.clone()),
-            (false, _) => self.fields.first().map_or(String::new(), |(n, _)| n.clone()),
-            (true, None) => String::new(),
+        let field = |n: String| match c.record {
+            true => n,
+            false => self.fields.first().map_or(String::new(), |(n, _)| n.clone()),
         };
         if let Some(v) = &read {
-            match (c.input_bytes(v), module.get(&c.name).and_then(|h| lib.get(&h))) {
+            match (c.input_bytes(v), src.ask) {
                 (Err(why), _) => messages.push((String::new(), why)),
-                (_, None) => messages.push((String::new(), format!("the module has no function {}", c.name))),
-                (Ok(bytes), Some(f)) => {
-                    if let Err(fails) = check_form(&f.cx, &Interp::input_ty(&f.f), &bytes) {
-                        messages.extend(fails.into_iter().map(|(path, why)| (field(path.first().copied()), why)));
+                (Ok(bytes), Some(ask)) => {
+                    if let Err(fails) = ask.check(&c.name, &bytes) {
+                        messages.extend(fails.into_iter().map(|(n, why)| (field(n), why)));
                     }
                 }
+                (Ok(_), None) => {}
             }
         }
         messages.sort_by_key(|(n, _)| self.fields.iter().position(|(f, _)| f == n).unwrap_or(usize::MAX));
@@ -203,10 +208,11 @@ impl Form {
 /// the record of its fields: its answer, each element read under the
 /// query's element type.
 pub fn query(src: &Source, c: &Callable, input: &Value) -> Result<Value, String> {
-    let h = src.module.get(&c.name).ok_or_else(|| format!("no function {}", c.name))?;
-    let rows = ark::view::query(src.lib, &h, &c.input_bytes(input)?, &src.ctx, src.store).map_err(|r| format!("refused: {}", r.0))?;
-    let read = rows.iter().map(|v| decode(&c.returns, &v.to_bytes()).map_err(|e| format!("a bug: {e}")));
-    read.collect::<Result<Vec<_>, _>>().map(Value::List)
+    let ask = src.ask.ok_or("this host does not hold the domain: queries are answered where it is")?;
+    let bytes = ask
+        .ask(src.store, &src.ctx, &c.name, &c.input_bytes(input)?)
+        .map_err(|r| format!("refused: {r}"))?;
+    decode(&Ty::List(Box::new(c.returns.clone())), &bytes).map_err(|e| format!("a bug: {e}"))
 }
 
 /// The picker, open on one id field of the form (by its place): which

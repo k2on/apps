@@ -50,7 +50,7 @@ pub mod model;
 #[cfg(feature = "ui")]
 pub mod view;
 
-pub use data::{crud_of, function_names, Connection, CrudVerbs, Line, LogView, NoLog, Source, Ticket, Verdict, Writer};
+pub use data::{crud_of, function_names, Ask, Catalog, Connection, CrudVerbs, Described, Line, LogView, NoLog, Source, Ticket, Verdict, Writer};
 pub use edit::Route;
 #[cfg(feature = "ui")]
 pub use model::{Explorer, Msg, Outcome, Screen};

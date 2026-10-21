@@ -59,7 +59,6 @@ use std::sync::Arc;
 
 use ark::frames::Frame;
 use ark::hash::{EntryHash, FnHash};
-use ark::interp::V;
 use ark::ir::Node;
 use ark::log::{Durable, Entry, EntryId, Logged, Origin, Seq};
 use ark::module::Lib;
@@ -152,6 +151,9 @@ pub struct Config {
     pub log: Module,
     pub live: Option<Live>,
     pub domain: Option<Arc<Domain>>,
+    /// The domain in plain Rust its functions are called by name in, when
+    /// it is one (§1.16).
+    pub native: Option<Arc<ark::domain::Domain>>,
     pub feed: Arc<dyn Fn(&Who) -> Feed + Send + Sync>,
     pub keep: Option<usize>,
 }
@@ -162,6 +164,7 @@ impl Config {
             log,
             live: None,
             domain: None,
+            native: None,
             feed: Arc::new(|_| Feed::Whole),
             keep: None,
         }
@@ -173,6 +176,48 @@ impl Config {
             domain: Some(domain.clone()),
             ..Config::new(Module::of(&domain))
         }
+    }
+
+    /// A domain in plain Rust's: its functions for the log, by name.
+    pub fn native(domain: Arc<ark::domain::Domain>) -> Config {
+        Config {
+            native: Some(domain.clone()),
+            ..Config::new(Module::native(&domain))
+        }
+    }
+}
+
+/// A view a peer keeps: of a module's query, or of a plan (§1.16).
+pub enum Kept {
+    Lang(Box<View>),
+    Native(Box<dyn ark::plan::Maintained>),
+}
+
+impl Kept {
+    /// Its rows, each its bytes.
+    pub fn rows(&self) -> Vec<Vec<u8>> {
+        match self {
+            Kept::Lang(v) => v.rows().iter().map(|x| x.to_bytes()).collect(),
+            Kept::Native(v) => v.rows(),
+        }
+    }
+
+    fn push(&mut self, cs: &[Change], store: &ark::store::Store) -> Result<Vec<Patch>, Refusal> {
+        match self {
+            Kept::Lang(v) => Ok(v.push(cs, store)?.into_iter().map(patch_of).collect()),
+            Kept::Native(v) => v.push(cs, store),
+        }
+    }
+}
+
+/// A patch of a view's rows, each its bytes.
+pub type Patch = ark::plan::Patch<Vec<u8>>;
+
+fn patch_of(p: ark::view::Patch) -> Patch {
+    match p {
+        ark::view::Patch::Insert { at, node } => Patch::Insert { at, node: node.to_bytes() },
+        ark::view::Patch::Remove { at } => Patch::Remove { at },
+        ark::view::Patch::Update { at, node } => Patch::Update { at, node: node.to_bytes() },
     }
 }
 
@@ -233,7 +278,7 @@ pub struct Peer {
     unwritten: Vec<Vec<u8>>,
     /// Frames for its server.
     frames: Vec<Vec<u8>>,
-    views: Vec<(Space, Option<View>)>,
+    views: Vec<(Space, Option<Kept>)>,
     relay: BTreeMap<FnHash, (Vec<u8>, i64)>,
     relayed: Option<i64>,
     /// What became of its own intents, and what its views did.
@@ -670,13 +715,23 @@ impl Peer {
         };
         let store = &self.machine(space).expect("a module of that space").store;
         let view = View::new(lib, f, input, ctx, store)?;
-        self.views.push((space, Some(view)));
+        self.views.push((space, Some(Kept::Lang(Box::new(view)))));
         Ok(self.views.len() - 1)
     }
 
     /// A view's answer as it stands.
-    pub fn values(&self, view: usize) -> Option<Vec<V>> {
-        self.views.get(view)?.1.as_ref().map(View::rows)
+    pub fn values(&self, view: usize) -> Option<Vec<Vec<u8>>> {
+        self.views.get(view)?.1.as_ref().map(Kept::rows)
+    }
+
+    /// A maintained view of the native domain's function `name` on `input`
+    /// over `space`'s optimistic state, as `ctx` reads it (§1.16).
+    pub fn watch_native(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
+        let d = self.config.native.clone().ok_or_else(|| Refusal::new("no domain in Rust here"))?;
+        let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;
+        let view = d.watch(store, &ctx, name, input)?;
+        self.views.push((space, Some(Kept::Native(view))));
+        Ok(self.views.len() - 1)
     }
 
     /// A view held no more: no change is pushed into it again, and its

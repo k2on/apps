@@ -37,7 +37,7 @@ fn who(me: &str) -> Who {
 /// `add_song`, which `is_library` gives that role alone, as a server's
 /// scanner holds it.
 fn lists(mut client: Replica) -> crate::peer::Peer {
-    client.set_roles([crate::domain::host::LIBRARY]);
+    client.set_roles([crate::domain::LIBRARY]);
     crate::peer::Peer::open(client)
 }
 

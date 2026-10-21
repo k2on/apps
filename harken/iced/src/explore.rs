@@ -1,6 +1,6 @@
 //! `E` — the explorer, over this device's own replica (`docs/plan-guards.md`
 //! D4): every table the replica holds, the log as this device knows it, a
-//! read-only query console, and every query and mutation of the module,
+//! read-only query console, and every query and mutation of the domain,
 //! callable from a form. `ark_explorer` draws it and decides what an edit or
 //! a call becomes; this file is what it is handed.
 //!
@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use ark::hash::FnHash;
 use ark::log::EntryId;
 use ark::store::{Change, Store};
-use ark_explorer::{Connection, CrudVerbs, Explorer, Line, LogView, Source, Ticket, Verdict, Writer};
+use ark_explorer::{Catalog, Connection, CrudVerbs, Explorer, Line, LogView, Source, Ticket, Verdict, Writer};
 
 use iced::{Point, Size};
 
@@ -26,25 +26,28 @@ use crate::client::{domain, Replica, Standing};
 use crate::{App, Edit, Message};
 
 /// The explorer while it is open, and what it needs that does not move:
-/// the names of the functions an entry may name, and the CRUD exposed.
+/// the domain described, the names of the functions an entry may name, and
+/// the CRUD exposed.
 pub struct Explore {
     pub ui: Explorer,
+    catalog: Catalog,
     names: BTreeMap<FnHash, String>,
     exposed: Vec<(String, CrudVerbs)>,
 }
 
 impl Explore {
-    /// Opened over harken's module: every table's CRUD, as the module binds
+    /// Opened over harken's domain: every table's CRUD, as the domain names
     /// it, authorable by this device as whoever is signed in.
     pub fn open() -> Explore {
-        let d = domain();
+        let catalog = Catalog::of(domain());
         Explore {
             ui: Explorer::new(),
-            names: ark_explorer::function_names(&d.module),
-            exposed: ark_explorer::crud_of(&d.module, &d.lib)
+            names: ark_explorer::function_names(&catalog),
+            exposed: ark_explorer::crud_of(&catalog)
                 .into_iter()
                 .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
                 .collect(),
+            catalog,
         }
     }
 }
@@ -198,11 +201,10 @@ impl App {
         let store: Store = client.log.store.clone();
         let ctx = client.ctx();
         let log = Owned::of(client, &x.names);
-        let d = domain();
         let src = Source {
             store: &store,
-            module: &d.module,
-            lib: &d.lib,
+            catalog: &x.catalog,
+            ask: Some(&**domain()),
             log: &log,
             ctx,
         };
@@ -230,11 +232,10 @@ impl App {
         let Some(x) = self.explore.as_mut() else { return };
         let client = &self.peer.client;
         let log = Seen { client, names: &x.names };
-        let d = domain();
         let src = Source {
             store: &client.log.store,
-            module: &d.module,
-            lib: &d.lib,
+            catalog: &x.catalog,
+            ask: Some(&**domain()),
             log: &log,
             ctx: client.ctx(),
         };
@@ -246,11 +247,10 @@ impl App {
         let x = self.explore.as_ref()?;
         let client = &self.peer.client;
         let log = Seen { client, names: &x.names };
-        let d = domain();
         let src = Source {
             store: &client.log.store,
-            module: &d.module,
-            lib: &d.lib,
+            catalog: &x.catalog,
+            ask: Some(&**domain()),
             log: &log,
             ctx: client.ctx(),
         };

@@ -2,8 +2,8 @@
 //! converge.rs`): one authority and clients, every one the one peer
 //! machine (§1.7), over the simulator's seeded network that reorders,
 //! duplicates and drops — no sockets, no threads, no sleeps, and a seed
-//! that reproduces the run exactly. Every peer runs the domain through the
-//! interpreter; converging is one chain and one state on every peer.
+//! that reproduces the run exactly. Every peer runs the domain in Rust
+//! (§1.16); converging is one chain and one state on every peer.
 
 mod common;
 
@@ -13,11 +13,11 @@ use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark_dev::sim::{Net, Op};
-use ark_peer::{Config, Module};
+use ark_peer::Config;
 use common::{domain, full, song};
-use harken_domain::domain::host::LIBRARY;
-use harken_domain::domain::Id;
-use harken_domain::domain::*;
+use harken_domain::Id;
+use harken_domain::LIBRARY;
+use harken_domain::*;
 
 struct Fleet {
     net: Net,
@@ -36,7 +36,7 @@ impl Fleet {
     /// `ark-dev`'s simulator: a device per login, each its connection's
     /// verified identity.
     fn new(seed: u64, logins: Vec<Who>) -> Fleet {
-        let config = Config::new(Module::of(domain()));
+        let config = Config::native(std::sync::Arc::new(harken_domain::domain()));
         let devices = logins.into_iter().map(|w| (w, config.clone())).collect();
         Fleet {
             net: Net::of(config.clone(), devices, seed),
@@ -45,7 +45,7 @@ impl Fleet {
 
     /// Author on client `i` as whoever it believes it is.
     fn mutate(&mut self, i: i64, name: &str, input: &impl Node) {
-        self.net.run(&Op::Mutate(i, domain().get(&full(name)), input.to_bytes()));
+        self.net.run(&Op::Mutate(i, ark::domain::Domain::hash_of(&full(name)), input.to_bytes()));
     }
 
     /// What client `i` shows, as `user`: its optimistic view.

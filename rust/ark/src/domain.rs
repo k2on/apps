@@ -33,7 +33,7 @@ use crate::store::{Change, Read, Store};
 use crate::Refusal;
 
 /// What a function is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ark_macros::Node)]
 pub enum Kind {
     Mutator,
     Live,
@@ -63,6 +63,9 @@ pub struct Function {
     pub ask: Option<Ask>,
     pub watch: Option<Watch>,
     pub check: Check,
+    /// Each refined field of the input, and its refinements as a form says
+    /// them.
+    pub checks: Vec<(String, Vec<String>)>,
 }
 
 impl std::fmt::Debug for Function {
@@ -99,6 +102,9 @@ impl<S: Tables, I: Input> Procedure for Mutate<S, I> {
 
     fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
         let input = input_of::<I>(input)?;
+        // Every run draws from the entry's first id: a run again is the
+        // same run (§1.6).
+        ctx.draws.set(0);
         write::<S, _>(store, |db| (self.f)(ctx, db, input)).map(|(_, cs)| cs)
     }
 }
@@ -184,6 +190,7 @@ impl Domain {
             ask: None,
             watch: None,
             check: check_of::<I>(),
+            checks: I::checks(),
         })
     }
 
@@ -210,6 +217,7 @@ impl Domain {
             ask: Some(ask),
             watch: None,
             check: check_of::<I>(),
+            checks: I::checks(),
         })
     }
 
@@ -229,6 +237,7 @@ impl Domain {
             ask: Some(ask),
             watch: Some(watch),
             check: check_of::<I>(),
+            checks: I::checks(),
         })
     }
 
@@ -243,6 +252,7 @@ impl Domain {
             ask: None,
             watch: None,
             check: check_of::<()>(),
+            checks: vec![],
         })
     }
 

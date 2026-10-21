@@ -1,7 +1,7 @@
 //! The explorer's state and what each message does to it — every decision
 //! the component makes, tested without a window; the view only draws what
-//! is decided here. One generic browser, driven by the module and its
-//! types (`docs/plan-guards.md` D4):
+//! is decided here. One generic browser, driven by the domain's schema and
+//! its functions' descriptions (`docs/plan-guards.md` D4):
 //!
 //! - **tables → grids**: a table's columns from the schema, its rows from
 //!   the store a page at a time, sortable by any column (`s`, or a click on
@@ -295,7 +295,7 @@ impl Explorer {
     /// values: in the store's key order, or as the sort says.
     pub fn rows(&self, src: &Source, table: &str) -> Vec<(Vec<u8>, Vec<u8>, Vec<Value>)> {
         let Some((_, t)) = src.schema().table(table) else { return vec![] };
-        let tys: Vec<Ty> = t.columns.iter().map(|c| value::column_ty(&value::types(src.module), c)).collect();
+        let tys: Vec<Ty> = t.columns.iter().map(value::column_ty).collect();
         let read = |r: &[u8]| Some((r[..t.key_len(r).ok()?].to_vec(), r.to_vec(), value::decode_all(&tys, r).ok()?));
         let mut rows: Vec<_> = src.store.rows(table).filter_map(read).collect();
         if let Some((_, c, down)) = self.sort.as_ref().filter(|(s, ..)| s == table) {
@@ -402,7 +402,7 @@ impl Explorer {
     }
 
     fn callable(src: &Source, name: &str) -> Option<Callable> {
-        form::callables(src.module, src.lib).into_iter().find(|c| c.name == name)
+        form::callables(src.catalog).into_iter().find(|c| c.name == name)
     }
 
     /// The form of the function on screen.
@@ -549,7 +549,7 @@ impl Explorer {
     }
 
     fn open_function(&mut self, src: &Source, i: usize) {
-        let Some(c) = form::callables(src.module, src.lib).into_iter().nth(i) else {
+        let Some(c) = form::callables(src.catalog).into_iter().nth(i) else {
             return;
         };
         self.forms.entry(c.name.clone()).or_insert_with(|| Form::new(&c));
@@ -566,7 +566,7 @@ impl Explorer {
         let Some(f) = self.form_mut() else { return };
         f.values.get_mut(i).into_iter().for_each(|v| *v = text.clone());
         if let Some(c) = Explorer::callable(src, &f.function) {
-            f.validate(&c, src.lib, src.module);
+            f.validate(&c, src);
         }
     }
 
@@ -618,7 +618,7 @@ impl Explorer {
             return;
         };
         let f = self.form_mut().expect("a form is on screen");
-        let Some(args) = f.validate(&c, src.lib, src.module) else {
+        let Some(args) = f.validate(&c, src) else {
             let said: Vec<String> = f.messages.iter().map(|(_, m)| m.clone()).collect();
             return self.note = format!("not called: {}", said.join("; "));
         };
@@ -727,7 +727,7 @@ impl Explorer {
         match (s, m) {
             (Screen::Tables, _) => self.tables_at = step(Explorer::tables(src).len(), self.tables_at),
             (Screen::Log, _) => self.log_at = step(src.log.lines().len(), self.log_at),
-            (Screen::Functions, _) => self.functions_at = step(form::callables(src.module, src.lib).len(), self.functions_at),
+            (Screen::Functions, _) => self.functions_at = step(form::callables(src.catalog).len(), self.functions_at),
             (Screen::Table(t), Motion::Left(_) | Motion::Right(_)) => {
                 self.column_at = Steps::row(Explorer::columns(src, &t).len())
                     .step(self.column_at, m)
@@ -761,7 +761,7 @@ impl Explorer {
     fn read_edit(src: &Source, e: &Editing) -> Result<(Vec<u8>, Value, bool), String> {
         let (_, tbl) = src.schema().table(&e.table).ok_or_else(|| format!("no table {}", e.table))?;
         let c = tbl.column(&e.column).ok_or_else(|| format!("{} has no column {}", e.table, e.column))?;
-        let tys: Vec<Ty> = tbl.columns.iter().map(|c| value::column_ty(&value::types(src.module), c)).collect();
+        let tys: Vec<Ty> = tbl.columns.iter().map(value::column_ty).collect();
         let value = value::parse_cell(&e.column, &tys[c], &e.text)?;
         let old = ark::store::Read::get(src.store, &e.table, &e.key).ok_or_else(|| format!("the row of {} is gone", e.table))?;
         let same = value::decode_all(&tys, &old).ok().and_then(|vs| vs.get(c).cloned()) == Some(value.clone());
@@ -785,7 +785,7 @@ impl Explorer {
         let outcome = Explorer::read_edit(src, &e).and_then(|(old, value, same)| match same {
             true => Ok("nothing to change".to_string()),
             false => {
-                let route = edit::route_edit(src.module, self.via(w, &verbs), &e.table, &old, &e.column, value)?;
+                let route = edit::route_edit(src.catalog, self.via(w, &verbs), &e.table, &old, &e.column, value)?;
                 let said = route.describe();
                 route.send(w).map(|()| format!("{}.{} written, {said}", e.table, e.column))
             }
@@ -823,7 +823,7 @@ impl Explorer {
             return;
         };
         let verbs = Explorer::verbs(w, t);
-        let outcome = edit::route_delete(src.module, self.via(w, &verbs), t, &row).and_then(|route| {
+        let outcome = edit::route_delete(src.catalog, self.via(w, &verbs), t, &row).and_then(|route| {
             let said = route.describe();
             route.send(w).map(|()| format!("a row of {t} deleted, {said}"))
         });

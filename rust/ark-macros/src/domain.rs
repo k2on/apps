@@ -228,6 +228,14 @@ pub fn row(input: DeriveInput) -> TokenStream {
             }
         }
 
+        /// A row is an input as it is, refined by nothing: what a table's
+        /// CRUD takes.
+        impl ::ark::row::Input for #name {
+            fn check(self) -> ::std::result::Result<Self, ::std::vec::Vec<(::std::string::String, ::std::string::String)>> {
+                Ok(self)
+            }
+        }
+
         impl #name {
             /// The rows by their key.
             pub const KEY: ::ark::row::Index<#name, (#(#key_tys,)*)> = ::ark::row::Index::key();
@@ -327,6 +335,41 @@ fn rules(f: &syn::Field) -> Result<Vec<TokenStream>, TokenStream> {
     Ok(out)
 }
 
+/// What a field's refinements are, as a form says them beside it.
+fn said(f: &syn::Field) -> syn::Result<Vec<String>> {
+    let mut out = vec![];
+    for group in items(&f.attrs)? {
+        let why = group.iter().find_map(|i| match i {
+            Item::Is(n, Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. })) if n == "why" => Some(s.value()),
+            _ => None,
+        });
+        let quoted = why.as_ref().map_or(String::new(), |w| format!(" (\u{201c}{w}\u{201d})"));
+        for it in &group {
+            let lit = |e: &Expr| match e {
+                Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => s.value(),
+                _ => String::new(),
+            };
+            out.push(match it {
+                Item::Flag(k) if k == "trim" => "trimmed".into(),
+                Item::Flag(k) if k == "non_empty" => format!("non-empty{quoted}"),
+                Item::Is(k, e) if k == "len" => {
+                    let chars = |n: usize| if n == 1 { "char" } else { "chars" };
+                    match bounds(&lit(e)) {
+                        Some((lo, usize::MAX)) => format!("min {lo} {}{quoted}", chars(lo)),
+                        Some((0, hi)) => format!("max {hi} {}{quoted}", chars(hi)),
+                        Some((lo, hi)) => format!("{lo} to {hi} {}{quoted}", chars(hi)),
+                        None => continue,
+                    }
+                }
+                Item::Is(k, e) if k == "range" => why.clone().unwrap_or_else(|| format!("in {}", lit(e))),
+                Item::Is(k, _) if k == "check" => why.clone().unwrap_or_else(|| "refined".into()),
+                _ => continue,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// `"1..=80"`, `"0..120"`, `"1.."` as inclusive bounds.
 fn bounds(s: &str) -> Option<(usize, usize)> {
     let (lo, hi) = s.split_once("..")?;
@@ -349,7 +392,16 @@ pub fn input(input: DeriveInput) -> TokenStream {
         Err(e) => return e,
     };
     let mut per = vec![];
+    let mut checks = vec![];
     for f in &fields.named {
+        let s = match said(f) {
+            Ok(s) => s,
+            Err(e) => return e.to_compile_error(),
+        };
+        if !s.is_empty() {
+            let n = f.ident.as_ref().unwrap().to_string();
+            checks.push(quote!((#n.to_string(), vec![#(#s.to_string()),*])));
+        }
         match rules(f) {
             Ok(r) => per.push(quote! {
                 #[allow(unused_mut, unused_assignments)]
@@ -364,6 +416,10 @@ pub fn input(input: DeriveInput) -> TokenStream {
         #describe
 
         impl ::ark::row::Input for #name {
+            fn checks() -> ::std::vec::Vec<(::std::string::String, ::std::vec::Vec<::std::string::String>)> {
+                vec![#(#checks),*]
+            }
+
             #[allow(unused_mut)]
             fn check(mut self) -> ::std::result::Result<Self, ::std::vec::Vec<(::std::string::String, ::std::string::String)>> {
                 let mut fails: ::std::vec::Vec<(::std::string::String, ::std::string::String)> = vec![];

@@ -1,34 +1,32 @@
-//! One library, one store, every mutation run by the interpreter (the one
-//! execution path, §1.12) over it and its changes applied, every query
-//! asked of it: v4's `tests/common`, without the native half v4 held the
-//! interpreter to, which v5 does not have.
+//! One library, one store, every mutation run over it as the machine runs
+//! it, every query asked of it: v4's `tests/common`, over the domain in
+//! Rust (§1.16).
 
 #![allow(dead_code)]
 
 use std::sync::OnceLock;
 
+use ark::domain::Domain;
 use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
-use ark::Domain;
-use harken_domain::domain::host::LIBRARY;
-use harken_domain::domain::CreatePlaylist;
-use harken_domain::domain::Id;
-use harken_domain::domain::Playlist;
-use harken_domain::domain::{AddSong, LibraryEntry};
+use harken_domain::CreatePlaylist;
+use harken_domain::Id;
+use harken_domain::Playlist;
+use harken_domain::LIBRARY;
+use harken_domain::{AddSong, LibraryEntry};
 
 /// The module, assembled once.
 pub fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(harken_domain::text)
+    D.get_or_init(harken_domain::domain)
 }
 
 /// A function's binding by its last name: `create_playlist` is
 /// `playlists.create_playlist`.
 pub fn full(name: &str) -> String {
-    let m = &domain().module;
-    let hit: Vec<&String> = m.bindings.iter().map(|b| &b.0).filter(|b| b.rsplit('.').next() == Some(name)).collect();
+    let hit: Vec<&String> = domain().fns.keys().filter(|b| b.rsplit('.').next() == Some(name)).collect();
     match hit[..] {
         [b] => b.clone(),
         _ => panic!("{name}: {hit:?}"),
@@ -89,9 +87,11 @@ impl Lib {
 
     /// Author the entry `ctx`, its input as bytes.
     pub fn mutate_bytes(&mut self, ctx: &Ctx, name: &str, input: &[u8]) -> Result<usize, String> {
-        let changes = domain().run(&self.store, ctx, &full(name), input).map_err(|r| r.0)?;
-        self.store.apply_all(&changes).unwrap_or_else(|r| panic!("{name}: the store refused {r}"));
-        self.last = changes;
+        let f = domain()
+            .get(&full(name))
+            .and_then(|f| f.proc.clone())
+            .unwrap_or_else(|| panic!("{name} writes nothing"));
+        self.last = f.apply(&mut self.store, ctx, input).map_err(|r| r.0)?;
         Ok(self.last.len())
     }
 
@@ -124,7 +124,7 @@ impl Lib {
 
     /// The library read against a playlist.
     pub fn library(&self, playlist: &Id<Playlist>) -> Vec<LibraryEntry> {
-        self.list("library", &harken_domain::domain::Library { playlist_id: *playlist })
+        self.list("library", &harken_domain::Library { playlist_id: *playlist })
     }
 
     /// Add a song as the scanner would: a refusal here is a bug.
