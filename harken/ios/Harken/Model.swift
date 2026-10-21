@@ -162,7 +162,11 @@ enum Logins {
         let q = user.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? user
         guard let url = URL(string: loginUrl(server: server, redirect: "harken://auth") + "&user=" + q) else { throw NoCode() }
         let session = URLSession(configuration: .ephemeral, delegate: Stay(), delegateQueue: nil)
-        let (_, answer) = try await session.data(from: url)
+        let answer: URLResponse? = try await withCheckedThrowingContinuation { done in
+            session.dataTask(with: url) { _, answer, error in
+                if let e = error { done.resume(throwing: e) } else { done.resume(returning: answer) }
+            }.resume()
+        }
         guard let to = (answer as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location"),
               let code = URLComponents(string: to)?.queryItems?.first(where: { $0.name == "code" })?.value else { throw NoCode() }
         return try await Task.detached { try exchange(server: server, code: code) }.value
