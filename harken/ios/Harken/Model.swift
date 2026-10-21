@@ -11,6 +11,9 @@
 // signing out keeps what that person left pending for when they sign in
 // again. Alone, the peer is its own authority over a local history.
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import SwiftUI
 
 @MainActor
@@ -93,9 +96,9 @@ final class Model: ObservableObject {
 
     // MARK: reading
 
-    var library: [Track] { snapshot.library }
+    var library: [LibraryEntry] { snapshot.library }
     var playlists: [Playlist] { snapshot.playlists }
-    var items: [Track] { snapshot.items }
+    var items: [LibraryEntry] { snapshot.items }
     var status: Status? { snapshot.status }
     var changes: [Authored] { snapshot.changes }
     var selectedPlaylist: Id? { snapshot.selected }
@@ -104,10 +107,10 @@ final class Model: ObservableObject {
     func select(_ id: Id) { bridge?.select(id) }
 
     /// Which of the person's playlists a track is on, for the menu's ticks.
-    func playlistsOf(_ track: Track) -> Set<Id> { bridge?.playlistsOf(track) ?? [] }
+    func playlistsOf(_ track: LibraryEntry) -> Set<Id> { bridge?.playlistsOf(track) ?? [] }
 
     func caption(forPlaylist id: Id) -> String? { snapshot.caption(forPlaylist: id) }
-    func caption(for track: Track, on playlist: Id) -> String? { snapshot.caption(for: track, on: playlist) }
+    func caption(for track: LibraryEntry, on playlist: Id) -> String? { snapshot.caption(for: track, on: playlist) }
     func caption(for change: Authored) -> String { snapshot.caption(for: change) }
 
     // MARK: writing, each one of the domain's functions
@@ -116,9 +119,9 @@ final class Model: ObservableObject {
     func nameProblem(_ name: String) -> String? { bridge?.nameProblem(name) }
 
     func createPlaylist(named name: String) { bridge?.createPlaylist(name) }
-    func add(_ track: Track, to playlist: Id? = nil) { bridge?.add(track, to: playlist) }
-    func remove(_ track: Track, from playlist: Id) { bridge?.remove(track, from: playlist) }
-    func toggle(_ track: Track, on playlist: Id) { bridge?.toggle(track, on: playlist) }
+    func add(_ track: LibraryEntry, to playlist: Id? = nil) { bridge?.add(track, to: playlist) }
+    func remove(_ track: LibraryEntry, from playlist: Id) { bridge?.remove(track, from: playlist) }
+    func toggle(_ track: LibraryEntry, on playlist: Id) { bridge?.toggle(track, on: playlist) }
 
     // MARK: the status line
 

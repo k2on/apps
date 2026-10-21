@@ -25,10 +25,10 @@ struct Prefs: Equatable {
 
 /// Everything a screen reads, at one moment.
 struct Snapshot: Equatable {
-    var library = [Track]()
+    var library = [LibraryEntry]()
     var playlists = [Playlist]()
     var selected: Id? = nil
-    var items = [Track]()
+    var items = [LibraryEntry]()
     var status: Status? = nil
     /// Every change this phone made while it has been running, newest first.
     var changes = [Authored]()
@@ -48,7 +48,7 @@ struct Snapshot: Equatable {
     func caption(forPlaylist id: Id) -> String? { madeBy[id].flatMap { standings[$0] }.flatMap(Phone.caption) }
 
     /// What to write under an item of a playlist.
-    func caption(for track: Track, on playlist: Id) -> String? {
+    func caption(for track: LibraryEntry, on playlist: Id) -> String? {
         touchedBy[Pair(playlist: playlist, media: track.id)].flatMap { standings[$0] }.flatMap(Phone.caption)
     }
 
@@ -131,9 +131,9 @@ final class Bridge {
         let sel = want.flatMap { id in snap.playlists.contains { $0.id == id } ? id : nil } ?? snap.playlists.first?.id
         snap.selected = sel
         libraryView = try? h.library(Library(playlistId: sel ?? Phone.noPlaylist))
-        snap.library = (libraryView?.rows() ?? []).map(Track.init)
+        snap.library = (libraryView?.rows() ?? [])
         itemsView = sel.flatMap { try? h.playlist(PlaylistInput(playlistId: $0)) }
-        snap.items = (itemsView?.rows() ?? []).map(Track.init)
+        snap.items = (itemsView?.rows() ?? [])
     }
 
     // Each view asked what it did, and its list spliced by its patches, or
@@ -143,8 +143,8 @@ final class Bridge {
         apply(playlistsView, &snap.playlists) { $0 }
         if let b = before, !snap.playlists.contains(where: { $0.id == b }) { return reselect(h, nil) }
         if before == nil, let first = snap.playlists.first { return reselect(h, first.id) }
-        apply(libraryView, &snap.library, Track.init)
-        apply(itemsView, &snap.items, Track.init)
+        apply(libraryView, &snap.library) { $0 }
+        apply(itemsView, &snap.items) { $0 }
     }
 
     private func apply<E, T>(_ v: View<E>?, _ rows: inout [T], _ of: (E) -> T) {
@@ -212,7 +212,7 @@ final class Bridge {
     }
 
     /// Which of the person's playlists a track is on, for the menu's ticks.
-    func playlistsOf(_ track: Track) -> Set<Id> { now([]) { Set(Phone.playlistsOf($0, media: track.id).map { $0.id }) } }
+    func playlistsOf(_ track: LibraryEntry) -> Set<Id> { now([]) { Set(Phone.playlistsOf($0, media: track.id).map { $0.id }) } }
 
     /// The `create_playlist` input's checks on a name being typed; nil when it would pass.
     func nameProblem(_ name: String) -> String? { now(nil) { Phone.nameProblem($0, name) } }
@@ -229,7 +229,7 @@ final class Bridge {
 
     /// Put a track on a playlist — the given one, the selected one, or for
     /// somebody with none, "Favorites", made now.
-    func add(_ track: Track, to playlist: Id? = nil) {
+    func add(_ track: LibraryEntry, to playlist: Id? = nil) {
         onPeer { h in
             var target = playlist ?? self.snap.selected
             if target == nil {
@@ -242,7 +242,7 @@ final class Bridge {
         }
     }
 
-    func remove(_ track: Track, from playlist: Id) {
+    func remove(_ track: LibraryEntry, from playlist: Id) {
         onPeer { h in
             let name = self.snap.playlists.first { $0.id == playlist }?.name ?? "a playlist"
             _ = self.record(Phone.removeFromPlaylist(h, playlist, track.id), "take \(track.title) off \(name)", Snapshot.Pair(playlist: playlist, media: track.id))
@@ -250,7 +250,7 @@ final class Bridge {
     }
 
     /// On the playlist it is not on, or off the one it is on.
-    func toggle(_ track: Track, on playlist: Id) {
+    func toggle(_ track: LibraryEntry, on playlist: Id) {
         if playlistsOf(track).contains(playlist) { remove(track, from: playlist) } else { add(track, to: playlist) }
     }
 

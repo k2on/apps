@@ -22,10 +22,15 @@ has not been built: this was written in a Linux container with no Mac, no
 Xcode and no SwiftUI. What *was* checked here: the Rust targets install
 (`rustup target add aarch64-apple-ios aarch64-apple-ios-sim`), UniFFI
 writes the Swift for the library built for Linux (`checks.ffi`), and the
-generated `Harken.swift` is held to the domain. `tools/typecheck.sh`
-type-checks `Rows.swift`, `Bridge.swift`, `Model.swift` and the generated
-Swift against that Swift and the library's headers, with a stand-in for
-SwiftUI — when there is a Swift compiler to run it with; none ran here. The
+generated `Harken.swift` is held to the domain; and `Rows.swift`,
+`Bridge.swift`, `Model.swift` and the generated Swift **type-check** on
+Linux against UniFFI's Swift and the library's headers, with a stand-in for
+SwiftUI (`tools/typecheck.sh`, `checks.harken-ios-typecheck`: nixpkgs'
+Swift 5.8, which predates the `nonisolated(unsafe)` UniFFI writes twice for
+Swift 6, so the check's copy has it taken out — Xcode's Swift reads it as
+written). That check found two things a Mac would have: the app's own
+`Track` beside the domain's (the rows are `LibraryEntry` now), and
+`URLSession` living in `FoundationNetworking` off Apple's platforms. The
 views were written against iOS 17's SwiftUI and read, not compiled. Expect
 the first build in Xcode to want small fixes.
 
@@ -59,9 +64,10 @@ outputs; regenerate rather than edit.
   work alone, the login whole so a restart reuses it), the snapshot, the
   last notice, and the sign-in (dev auth: the code read off the server's
   redirect, exchanged through the kernel).
-- **`Phone`** (Rows.swift) reads rows of harken's views into `Track` and
-  makes each write one of the domain's functions through the generated
-  stubs, returning the entry's id so that its standing can be asked later.
+- **`Phone`** (Rows.swift) reads harken's views as the domain's own rows
+  (`LibraryEntry`, `Playlist`) and makes each write one of the domain's
+  functions through the generated stubs, returning the entry's id so that
+  its standing can be asked later.
 
 The replica is `Application Support/harken/<server-…|alone>/replica`, the
 kernel's own files — one directory per server (or alone), not per person,

@@ -7,26 +7,10 @@
 import Foundation
 
 /// Something playable as a list draws it: a row of the `library` or
-/// `playlist` view (the domain's `LibraryEntry`). `playlistPos` is where it
-/// sits on the playlist the list was read against, when it is on it.
-struct Track: Identifiable, Hashable {
-    let id: Id
-    let title: String
-    let creator: String
-    let kind: String
-    let durationMs: Int64
-    let file: String
-    let playlistPos: Int64?
-
-    init(_ e: LibraryEntry) {
-        id = e.id
-        title = e.title
-        creator = e.creator
-        kind = e.kind
-        durationMs = e.durationMs
-        file = e.file
-        playlistPos = e.playlistPos
-    }
+/// `playlist` view as the domain answers it. `playlistPos` is where it sits
+/// on the playlist the list was read against, when it is on it.
+extension LibraryEntry: Identifiable, Hashable {
+    public func hash(into h: inout Hasher) { h.combine(id) }
 
     var duration: String {
         let s = Int(durationMs / 1000)
