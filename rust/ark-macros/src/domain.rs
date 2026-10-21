@@ -176,7 +176,10 @@ pub fn row(input: DeriveInput) -> TokenStream {
     let (key_names, key_tys) = (&names[..nkey], &tys[..nkey]);
     let columns = fields.named.iter().map(|f| {
         let (n, t) = (f.ident.as_ref().unwrap().to_string(), &f.ty);
-        let defaulted = f.attrs.iter().any(|a| a.path().is_ident("serde") && a.to_token_stream().to_string().contains("default"));
+        let defaulted = f
+            .attrs
+            .iter()
+            .any(|a| a.path().is_ident("serde") && a.to_token_stream().to_string().contains("default"));
         match defaulted {
             true => quote!(::ark::row::column_or_default::<#t>(#n)),
             false => quote!(::ark::row::column::<#t>(#n)),

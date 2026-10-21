@@ -208,7 +208,7 @@ impl PartialEq for Log<'_> {
 
 impl std::fmt::Debug for Log<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_list().entries(self.0.values().map(|b| read(b))).finish()
+        f.debug_list().entries(self.0.values().map(read)).finish()
     }
 }
 
@@ -261,7 +261,7 @@ impl<'a> Log<'a> {
 
     /// The entry at `seq`, above the row the log stands on.
     pub fn at(&self, seq: Seq) -> Option<Logged> {
-        (seq > self.base_seq()).then(|| self.0.get(&seq_key(seq)).map(|b| read(b))).flatten()
+        (seq > self.base_seq()).then(|| self.0.get(&seq_key(seq)).map(read)).flatten()
     }
 
     /// Whether this log has `hash` at `seq`: one history up to there.

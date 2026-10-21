@@ -228,7 +228,11 @@ pub struct Pending {
 
 impl Pending {
     pub fn new(entry: Entry, changes: Vec<Change>) -> Pending {
-        Pending { entry, changes, undo: Memo::default() }
+        Pending {
+            entry,
+            changes,
+            undo: Memo::default(),
+        }
     }
 }
 
@@ -1261,10 +1265,7 @@ impl Peer {
         };
         let chain: Vec<Logged> = self.log().after(at).collect();
         self.store.log_truncate(at);
-        self.pending = chain
-            .iter()
-            .map(|l| Pending::new(l.entry.clone(), l.facts.clone()))
-            .collect();
+        self.pending = chain.iter().map(|l| Pending::new(l.entry.clone(), l.facts.clone())).collect();
         self.role = Role::Replica;
         self.asked = Some(at);
         o.send(Frame::Hello {

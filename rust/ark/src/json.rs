@@ -20,7 +20,9 @@ use std::collections::BTreeSet;
 use std::sync::Mutex;
 
 use serde::de::{DeserializeOwned, Error as _};
-use serde::ser::{Error as _, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant};
+use serde::ser::{
+    Error as _, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 use serde_json::Value as J;
