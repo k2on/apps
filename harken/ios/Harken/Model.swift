@@ -5,13 +5,11 @@
 // publishes, the last notice, and the sign-in, which is a request to the
 // server off the main thread.
 //
-// The app works with nobody signed in: the peer is opened signed out, what
-// is authored is nobody's, kept and written down, and nothing is dialled.
+// The app works with nobody signed in: the peer is opened as nobody, what is
+// authored is nobody's, kept and written down, and nothing is dialled.
 // Signing in (dev auth: a name) makes all of it the signer's and syncs it;
 // signing out keeps what that person left pending for when they sign in
 // again. Alone, the peer is its own authority over a local history.
-import ArkDB
-import ArkDBClient
 import Foundation
 import SwiftUI
 
@@ -26,26 +24,17 @@ final class Model: ObservableObject {
 
     init() {
         prefs = Model.load()
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("harken")
-        do {
-            // harken's module, as the domain crate writes it: in the app's
-            // bundle (project.yml copies `../domain/harken.ark`), verified on load.
-            guard let url = Bundle.main.url(forResource: "harken", withExtension: "ark"), let bytes = FileManager.default.contents(atPath: url.path) else {
-                throw PeerError("this build carries no harken.ark")
-            }
-            let b = try Bridge(module: [UInt8](bytes), root: support, publish: { [weak self] s in self?.snapshot = s }, notice: { [weak self] n in self?.notice = n })
-            bridge = b
-            b.start(prefs)
-        } catch {
-            notice = "could not load harken.ark: \(error)"
-        }
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let b = Bridge(root: support, publish: { [weak self] s in self?.snapshot = s }, notice: { [weak self] n in self?.notice = n })
+        bridge = b
+        b.start(prefs)
     }
 
     // MARK: prefs
 
     private static func load() -> Prefs {
         let d = UserDefaults.standard
-        let login = d.string(forKey: "login").flatMap { try? Login.parse($0) }
+        let login = d.string(forKey: "login").flatMap(Logins.parse)
         return Prefs(server: d.string(forKey: "server") ?? Prefs.defaults.server, workAlone: d.object(forKey: "workAlone") as? Bool ?? false, login: login)
     }
 
@@ -53,11 +42,11 @@ final class Model: ObservableObject {
         let d = UserDefaults.standard
         d.set(p.server, forKey: "server")
         d.set(p.workAlone, forKey: "workAlone")
-        if let l = p.login { d.set(l.toJson(), forKey: "login") } else { d.removeObject(forKey: "login") }
+        if let l = p.login { d.set(Logins.json(l), forKey: "login") } else { d.removeObject(forKey: "login") }
         prefs = p
     }
 
-    /// Save and reopen: the old peer is closed and written down first.
+    /// Save and reopen: the old peer let go first.
     func apply(server: String, workAlone: Bool) {
         var p = prefs
         p.server = server
@@ -73,29 +62,28 @@ final class Model: ObservableObject {
     /// Somebody signs in with a name: the server's dev auth, which answers
     /// `/auth/login` with a code and no page — the redirect is `harken://`,
     /// the scheme the server allows a phone, and is read off the answer, not
-    /// followed. A server with a real provider answers with a page, which
-    /// this app does not open: it says so instead. Everything done so far as
-    /// nobody becomes theirs and is pushed.
+    /// followed — and the code exchanged by the bridge (`exchange`). A server
+    /// with a real provider answers with a page, which this app does not
+    /// open: it says so instead. Everything done so far as nobody becomes
+    /// theirs and is pushed.
     func signIn(as name: String) {
         let who = name.trimmingCharacters(in: .whitespaces)
         guard !who.isEmpty else { return }
         let server = prefs.server
         Task {
-            let result = await Task.detached { Result { try Auth.devLogin(server, who, redirect: "harken://auth") } }.value
-            switch result {
-            case .failure(let e):
-                notice = "could not sign in: \(e)"
-            case .success(let login):
+            do {
+                let login = try await Logins.dev(server, who)
                 var p = prefs
                 p.login = login
                 save(p)
                 bridge?.signIn(login)
+            } catch {
+                notice = "could not sign in: \(why(error))"
             }
         }
     }
 
-    /// Sign out: the token forgotten and the link stopped; what that person
-    /// left pending stays theirs.
+    /// Sign out: the link stopped; what that person left pending stays theirs.
     func signOut() {
         var p = prefs
         p.login = nil
@@ -122,7 +110,7 @@ final class Model: ObservableObject {
     func caption(for track: Track, on playlist: Id) -> String? { snapshot.caption(for: track, on: playlist) }
     func caption(for change: Authored) -> String { snapshot.caption(for: change) }
 
-    // MARK: writing, each one of harken.ark's mutations
+    // MARK: writing, each one of the domain's functions
 
     /// The `create_playlist` input's checks on a name being typed; nil when it would pass.
     func nameProblem(_ name: String) -> String? { bridge?.nameProblem(name) }
@@ -131,9 +119,6 @@ final class Model: ObservableObject {
     func add(_ track: Track, to playlist: Id? = nil) { bridge?.add(track, to: playlist) }
     func remove(_ track: Track, from playlist: Id) { bridge?.remove(track, from: playlist) }
     func toggle(_ track: Track, on playlist: Id) { bridge?.toggle(track, on: playlist) }
-
-    /// Ask the authority whether it agrees: alone, at once; linked, on a later pump.
-    func verify() { bridge?.verify() }
 
     // MARK: the status line
 
@@ -147,7 +132,47 @@ final class Model: ObservableObject {
         guard let st = status else { return .gray }
         if st.denied != nil { return .red }
         if st.alone { return .blue }
-        if st.signedOut { return .gray }
+        if st.link == "signed out" { return .gray }
         return st.linked ? .green : .orange
+    }
+}
+
+/// A login kept whole as `ark_auth::Login`'s JSON, and the dev sign-in.
+enum Logins {
+    static func json(_ l: Login) -> String {
+        let user: [String: Any] = ["id": l.user, "name": l.name, "email": l.email, "roles": l.roles]
+        let o: [String: Any] = ["token": l.token, "session": l.session, "user": user, "expires_ms": l.expiresMs]
+        let d = (try? JSONSerialization.data(withJSONObject: o)) ?? Data()
+        return String(decoding: d, as: UTF8.self)
+    }
+
+    static func parse(_ s: String) -> Login? {
+        guard let o = (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any], let u = o["user"] as? [String: Any],
+              let token = o["token"] as? String, let session = o["session"] as? String, let id = u["id"] as? String else { return nil }
+        return Login(token: token, session: session, user: id, name: u["name"] as? String ?? "", email: u["email"] as? String ?? "",
+                     roles: u["roles"] as? [String] ?? [], expiresMs: (o["expires_ms"] as? NSNumber)?.int64Value ?? 0)
+    }
+
+    struct NoCode: Error, CustomStringConvertible {
+        var description: String { "the server answered with a page, not a code: only dev auth signs in here" }
+    }
+
+    /// Dev auth: the code off `/auth/login`'s redirect, not followed, then exchanged.
+    static func dev(_ server: String, _ user: String) async throws -> Login {
+        let q = user.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? user
+        guard let url = URL(string: loginUrl(server: server, redirect: "harken://auth") + "&user=" + q) else { throw NoCode() }
+        let session = URLSession(configuration: .ephemeral, delegate: Stay(), delegateQueue: nil)
+        let (_, answer) = try await session.data(from: url)
+        guard let to = (answer as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location"),
+              let code = URLComponents(string: to)?.queryItems?.first(where: { $0.name == "code" })?.value else { throw NoCode() }
+        return try await Task.detached { try exchange(server: server, code: code) }.value
+    }
+
+    /// A redirect read, not followed.
+    private final class Stay: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+            completionHandler(nil)
+        }
     }
 }

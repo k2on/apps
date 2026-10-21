@@ -1,0 +1,4 @@
+# What `nix build .#harken-android-lib -o ffi/android` and
+# `.#harken-ios-xcframework -o ffi/ios` leave for a local build.
+/android
+/ios

@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 # Type-check what of the iOS app Linux can: Rows.swift, Bridge.swift and
-# Model.swift, against the ArkDB and ArkDBClient modules SwiftPM built in
-# ../../swift (debug, or release with RELEASE=1) and a stand-in for the
-# three things of SwiftUI's that Model.swift names — ObservableObject,
-# @Published and Color — so that what is checked is the app's use of the
-# client, not SwiftUI. The views are not checked: SwiftUI is not on Linux.
+# Model.swift with the generated types (Gen/Harken.swift), the Swift UniFFI
+# writes for harken's library and the bridge's typed half — against the
+# library's C headers, and a stand-in for the three things of SwiftUI's that
+# Model.swift names (ObservableObject, @Published, Color) — so that what is
+# checked is the app's use of the bridge, not SwiftUI. The views are not
+# checked: SwiftUI is not on Linux.
 #
-#   cd swift && nix develop ..#swift -c tools/swift.sh build
-#   nix develop .#swift -c harken/ios/tools/typecheck.sh
+#   typecheck.sh BINDINGS   # a directory of `uniffi-bindgen generate --language swift`
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HERE/../Harken"
-CONFIG=debug
-if [ -n "${RELEASE:-}" ]; then CONFIG=release; fi
-BUILD="${SWIFT_BUILD:-$HERE/../../../swift/.build/$CONFIG}"
+BINDINGS="$1"
+TYPED="${TYPED:-$HERE/../../../rust/ark-ffi/swift/Typed.swift}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 cat > "$OUT/SwiftUI.swift" <<'SWIFT'
@@ -27,7 +26,11 @@ public struct Color {
     public static let gray = Color(), red = Color(), blue = Color(), green = Color(), orange = Color()
 }
 SWIFT
+mkdir -p "$OUT/ffi"
+cp "$BINDINGS"/*.h "$OUT/ffi/"
+cat "$BINDINGS"/*.modulemap > "$OUT/ffi/module.modulemap"
 SWIFTC="${SWIFT_EXEC:-swiftc}"
 "$SWIFTC" -emit-module -module-name SwiftUI -parse-as-library "$OUT/SwiftUI.swift" -emit-module-path "$OUT/SwiftUI.swiftmodule"
-"$SWIFTC" -typecheck -parse-as-library -I "$BUILD" -I "$OUT" "$APP/Rows.swift" "$APP/Bridge.swift" "$APP/Model.swift"
-echo "harken/ios: Rows.swift, Bridge.swift and Model.swift type-check against ArkDBClient"
+"$SWIFTC" -typecheck -parse-as-library -module-name Harken -I "$OUT" -I "$OUT/ffi" \
+  "$BINDINGS"/*.swift "$TYPED" "$APP/Gen/Harken.swift" "$APP/Rows.swift" "$APP/Bridge.swift" "$APP/Model.swift"
+echo "harken/ios: Rows.swift, Bridge.swift, Model.swift and Gen/Harken.swift type-check against harken's library"

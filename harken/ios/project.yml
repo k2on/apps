@@ -1,33 +1,28 @@
 # XcodeGen project for the iOS peer. `xcodegen generate` here writes
 # Harken.xcodeproj; nothing under it is committed.
 #
-# One target, one package: the Swift runtime and its client from
-# ../../swift, and harken's module, ../domain/harken.ark — the file the
-# domain crate writes and every peer runs — copied into the bundle as a
-# resource, referenced in place (never copied into this tree: a copy is a
-# second thing to keep in step with the domain).
+# One target over harken's library for iOS — `nix build
+# .#harken-ios-xcframework -o ../ffi/ios` on a Mac: `HarkenFFI.xcframework`
+# (the Rust kernel with harken's domain linked in, for a phone and the
+# simulator) and `swift/`, the Swift UniFFI writes for it with the bridge's
+# typed half — and the app's own sources, the generated types in
+# `Harken/Gen/` among them.
 name: Harken
 options:
   bundleIdPrefix: dev.arkdb
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
-packages:
-  ArkDB:
-    path: ../../swift
 targets:
   Harken:
     type: application
     platform: iOS
     sources:
       - path: Harken
-      - path: ../domain/harken.ark
-        buildPhase: resources
+      - path: ../ffi/ios/swift
     dependencies:
-      - package: ArkDB
-        product: ArkDB
-      - package: ArkDB
-        product: ArkDBClient
+      - framework: ../ffi/ios/HarkenFFI.xcframework
+        embed: false
     info:
       path: Harken/Info.plist
       properties:
