@@ -21,24 +21,26 @@
 //! session's first such connection says it and `on_leave` when its last
 //! closes, so a device on two connections is one device. On a restart the
 //! volatile space is what the server wrote of it when it last closed
-//! (`live`), and `on_restore` is authored over it.
+//! (its local instance's `volatile` rows), and `on_restore` is authored
+//! over it.
 //!
-//! **The journal** beside the log keeps what the log cannot: each origin's
-//! last `local` and the intents refused, written when either a refusal or
-//! the horizon moves, so that after a restart a push past a refusal is not
+//! **The journal** beside the log keeps what the log cannot, as rows of the
+//! peer's local instance (`origin`, `verdict`, `waiting`): each origin's
+//! last `local` and actor, the intents refused and those waiting behind a
+//! held one, written when a refusal, the horizon or what waits moves, so that after a restart a push past a refusal is not
 //! taken for a gap, a refused intent pushed again is answered again, and
 //! one sequenced below the horizon is acknowledged there. **The horizon**
 //! moves as `keep` says: the log keeps that many entries above its
 //! snapshot.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::log::{Durable, EntryId, Origin, Snapshot};
+use ark::log::{Durable, Entry, Origin, Snapshot};
 use ark::peer::{Feed, Input, Journal, Output, Peer as Machine, Role, Who};
 use ark::schema::Space;
 
+use crate::local::{Bytes, Last, LiveRow, Refused, Waits};
 use crate::{machine, Config, Disk, Peer};
 
 pub type ConnId = u64;
@@ -62,8 +64,9 @@ pub(crate) struct Hub {
     next: ConnId,
     /// Deliveries waiting for what is unwritten.
     pub held: Vec<Deliver>,
-    /// The refusals and the horizon the journal was last written at.
-    mark: (usize, i64),
+    /// The refusals, the horizon and what waits the journal was last
+    /// written at.
+    mark: (usize, i64, usize),
     /// What the log's entries changed since the hub's watch last looked,
     /// kept while one watches (`serve`).
     pub watched: bool,
@@ -103,7 +106,8 @@ pub fn authority() -> Who {
 
 impl Peer {
     /// A server opened from what `disk` holds: the authority of each space.
-    pub fn serve(config: Config, mut disk: Box<dyn Disk>, now: i64) -> Peer {
+    pub fn serve(config: Config, disk: Box<dyn Disk>, now: i64) -> Peer {
+        let (mut disk, local) = crate::local::beside(disk);
         let me = authority();
         let auth = || Role::Authority { journal: Journal::default() };
         let mut log = machine(&config.log, auth(), &me, None, Space::Durable);
@@ -120,44 +124,85 @@ impl Peer {
             .map(|l| l.entry.local)
             .max()
             .unwrap_or(0);
-        type Kept = (Vec<(Origin, (String, i64))>, Vec<(EntryId, String)>);
-        if let Some(Ok((last, refused))) = disk.get("journal").ok().flatten().map(|b| Kept::from_bytes(&b)) {
-            let j = journal(&mut log);
-            for (o, (actor, n)) in last {
-                j.pass(o, &actor, n);
+        let (last, refused, waiting, kept) = local.read(|db| (db.origin.scan(), db.verdict.scan(), db.waiting.scan(), db.volatile.scan()));
+        let j = journal(&mut log);
+        for l in last {
+            if let Some(o) = l.origin.read() {
+                j.pass(o, &l.actor, l.last);
             }
-            j.verdicts.extend(refused.into_iter().map(|(id, why)| (id, Verdict::Refused { why })));
+        }
+        let refused = refused
+            .into_iter()
+            .filter_map(|r| Some((r.entry.read()?, Verdict::Refused { why: r.why })));
+        j.verdicts.extend(refused);
+        for w in waiting {
+            if let (Some(o), Some(e)) = (w.origin.read::<Origin>(), w.entry.read::<Entry>()) {
+                let who = Who {
+                    actor: w.actor,
+                    session: w.session,
+                    roles: w.roles,
+                };
+                j.waiting.entry(o).or_default().push((who, e));
+            }
         }
         let origin = log.origin;
         log.local = log.local.max(journal(&mut log).last_of(&origin));
         let live = config.live.as_ref().map(|l| machine(&l.module, auth(), &me, None, Space::Volatile));
-        let mut p = Peer::with(config, log, live, disk);
+        let mut p = Peer::with(config, log, live, disk, local);
         p.hub.serving = true;
         p.hub.next = 1;
-        let kept = p.disk.get("live").ok().flatten().and_then(|b| Snapshot::from_bytes(&b).ok());
-        if let (Some(snapshot), Some(live)) = (kept, &mut p.live) {
-            live.step(Input::Open(Durable {
-                rows: snapshot.kv_rows(),
-                ..Durable::default()
-            }));
+        if let (false, Some(live)) = (kept.is_empty(), &mut p.live) {
+            let schema = live.store.schema_arc().clone();
+            let mut rows: Vec<(String, Vec<Vec<u8>>)> = schema
+                .tables
+                .iter()
+                .filter(|t| t.space == Space::Volatile)
+                .map(|t| (t.name.clone(), vec![]))
+                .collect();
+            rows.push((ark::store::LOG.into(), vec![]));
+            for k in kept {
+                if let Some(t) = rows.iter_mut().find(|(t, _)| *t == k.table) {
+                    t.1.push(k.row.0);
+                }
+            }
+            live.step(Input::Open(Durable { rows, ..Durable::default() }));
             if let Some(f) = p.config.live.as_ref().and_then(|l| l.on_restore.clone()) {
                 let _ = p.author(Space::Volatile, &f, vec![], now);
             }
         }
+        p.hub.mark = p.mark();
         p
     }
 
-    /// Writes the volatile space as it stands, for the next open.
+    /// Writes the volatile space as it stands, for the next open: its rows,
+    /// and its log's.
     pub fn close(&mut self) {
-        if let Some(live) = &self.live {
-            let (seq, hash) = live.log().head();
-            let s = Snapshot {
-                seq,
-                hash,
-                state: live.store.state_hash(),
-                rows: live.store.snapshot_rows(),
-            };
-            let _ = self.disk.put("live", &s.to_bytes());
+        let Some(live) = &self.live else { return };
+        let (seq, hash) = live.log().head();
+        let s = Snapshot {
+            seq,
+            hash,
+            state: live.store.state_hash(),
+            rows: live.store.snapshot_rows(),
+        };
+        let want: BTreeSet<(String, Vec<u8>)> = s
+            .kv_rows()
+            .into_iter()
+            .flat_map(|(t, rs)| rs.into_iter().map(move |r| (t.clone(), r)))
+            .collect();
+        let wrote = self.local.write(|db| {
+            for k in db.volatile.scan() {
+                if !want.contains(&(k.table.clone(), k.row.0.clone())) {
+                    db.volatile.remove(&k)?;
+                }
+            }
+            for (table, row) in want {
+                db.volatile.put(LiveRow { table, row: Bytes(row) })?;
+            }
+            Ok(())
+        });
+        if let Err(e) = wrote {
+            self.failure = Some(e.0);
         }
     }
 
@@ -268,20 +313,72 @@ impl Peer {
             }
             self.write();
         }
-        let j = journal(&mut self.log);
-        let why = |v: &Verdict| match v {
-            Verdict::Refused { why } => Some(why.clone()),
-            _ => None,
-        };
-        let mark = (j.verdicts.values().filter(|v| why(v).is_some()).count(), self.log.log().base_seq());
+        let mark = self.mark();
         if space == Space::Durable && mark != self.hub.mark {
             self.hub.mark = mark;
-            let j = journal(&mut self.log);
-            let last: Vec<(Origin, (String, i64))> = j.last.clone().into_iter().collect();
-            let refused: Vec<(EntryId, String)> = j.verdicts.iter().filter_map(|(id, v)| Some((*id, why(v)?))).collect();
-            if let Err(e) = self.disk.put("journal", &(last, refused).to_bytes()) {
-                self.failure = Some(e.to_string());
+            self.keep_journal();
+        }
+    }
+
+    /// What the journal moves with: the refusals, the horizon, what waits.
+    fn mark(&mut self) -> (usize, i64, usize) {
+        let base = self.log.log().base_seq();
+        let j = journal(&mut self.log);
+        let refused = j.verdicts.values().filter(|v| matches!(v, Verdict::Refused { .. })).count();
+        (refused, base, j.waiting.values().map(Vec::len).sum())
+    }
+
+    /// The journal as rows: each origin's last and what it refused put,
+    /// what waits as it is.
+    fn keep_journal(&mut self) {
+        let j = journal(&mut self.log);
+        let last: Vec<Last> = j
+            .last
+            .iter()
+            .map(|(o, (actor, last))| Last {
+                origin: Bytes::of(o),
+                actor: actor.clone(),
+                last: *last,
+            })
+            .collect();
+        let refused: Vec<Refused> = j
+            .verdicts
+            .iter()
+            .filter_map(|(id, v)| match v {
+                Verdict::Refused { why } => Some(Refused {
+                    entry: Bytes::of(id),
+                    why: why.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        let waiting: Vec<Waits> = j
+            .waiting
+            .iter()
+            .flat_map(|(o, q)| {
+                q.iter().map(|(who, e)| Waits {
+                    origin: Bytes::of(o),
+                    local: e.local,
+                    actor: who.actor.clone(),
+                    session: who.session.clone(),
+                    roles: who.roles.clone(),
+                    entry: Bytes::of(e),
+                })
+            })
+            .collect();
+        let wrote = self.local.write(|db| {
+            last.into_iter().try_for_each(|l| db.origin.put(l))?;
+            refused.into_iter().try_for_each(|r| db.verdict.put(r))?;
+            let keys: BTreeSet<(Bytes, i64)> = waiting.iter().map(|w| (w.origin.clone(), w.local)).collect();
+            for w in db.waiting.scan() {
+                if !keys.contains(&(w.origin.clone(), w.local)) {
+                    db.waiting.remove(&w)?;
+                }
             }
+            waiting.into_iter().try_for_each(|w| db.waiting.put(w))
+        });
+        if let Some(e) = wrote.err().map(|r| r.0).or_else(|| self.local.failure.clone()) {
+            self.failure = Some(e);
         }
     }
 

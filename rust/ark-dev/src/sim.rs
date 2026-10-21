@@ -16,12 +16,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ark::format::Encode;
 use ark::frames::Frame;
 use ark::peer::{Ctx, Who};
 use ark::plan::splice;
 use ark::schema::Space;
-use ark_peer::{Config, ConnId, Deliver, Disk, Memory, Peer, Update};
+use ark_peer::{Config, ConnId, Deliver, Memory, Peer, Update};
 
 /// Knuth's MMIX constants: the whole of the simulation's randomness.
 pub fn lcg(s: u64) -> u64 {
@@ -120,7 +119,8 @@ impl Net {
         self.logins.insert(who.session.clone(), who.clone());
         // The origin a device draws once, seeded: its first session's.
         let mut disk = Memory::default();
-        let _ = disk.put("origin", &ark::log::Origin::named(&who.session).to_bytes());
+        let origin = ark_peer::Bytes::of(&ark::log::Origin::named(&who.session));
+        let _ = ark_peer::local::preset(&mut disk, |r| r.origin = origin);
         self.clients.insert(i, Peer::open(config, who, Box::new(disk), true));
         self.heal(i);
         i

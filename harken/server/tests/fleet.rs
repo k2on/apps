@@ -1684,10 +1684,12 @@ fn a_join_killed_with_kill9_finishes_on_restart() {
         p.kill9();
         let replica = p.dir.join("replica");
         println!(
-            "fleet: killed at {:.0}% of a join: fork {}, joining {}",
+            "fleet: killed at {:.0}% of a join: its own state {} B",
             frac * 100.0,
-            std::fs::metadata(replica.join("fork")).map_or(0, |m| m.len()),
-            std::fs::metadata(replica.join("joining")).map_or(0, |m| m.len()),
+            ["local.kv", "local.log"]
+                .iter()
+                .map(|n| std::fs::metadata(replica.join(n)).map_or(0, |m| m.len()))
+                .sum::<u64>(),
         );
         p.alone = false;
         p.start();

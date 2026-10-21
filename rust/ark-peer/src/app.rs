@@ -120,21 +120,23 @@ impl Peer {
     /// ([`nobody`]) on a disk nobody ever signed in on — and then, given a
     /// login and its token, as that login, its pending intents made the
     /// login's when they were somebody else's.
-    pub fn open_as(config: Config, mut disk: Box<dyn Disk>, login: Option<(Who, String)>) -> Peer {
-        let kept = disk.get("who").ok().flatten().and_then(|b| <(String, String)>::from_bytes(&b).ok());
-        let me = match kept {
-            Some((actor, session)) => Who {
+    pub fn open_as(config: Config, disk: Box<dyn Disk>, login: Option<(Who, String)>) -> Peer {
+        let (disk, mut local) = crate::local::beside(disk);
+        let kept = local.read(|db| crate::local::replica(db)).unwrap_or_default();
+        let me = match kept.actor {
+            Some(actor) => Who {
                 actor,
-                session,
+                session: kept.session,
                 roles: vec![],
             },
             None => {
                 let me = nobody();
-                let _ = disk.put("who", &(me.actor.clone(), me.session.clone()).to_bytes());
+                let (actor, session) = (Some(me.actor.clone()), me.session.clone());
+                let _ = local.write(|db| db.replica.put(crate::local::Replica { actor, session, ..kept }));
                 me
             }
         };
-        let mut p = Peer::open(config, me, disk, false);
+        let mut p = Peer::opened(config, me, disk, local, None, crate::link::Link::default());
         match login {
             Some((who, token)) if (&who.actor, &who.session) != (&p.log.me.actor, &p.log.me.session) => p.login(who, token),
             Some((who, token)) => {
@@ -152,7 +154,8 @@ impl Peer {
         // A joined history goes as intents under the login, not as a chain
         // only nobody's session could hand over.
         self.log.joining = None;
-        let _ = self.disk.put("who", &(who.actor.clone(), who.session.clone()).to_bytes());
+        let (actor, session) = (Some(who.actor.clone()), who.session.clone());
+        self.replica(|r| (r.actor, r.session) = (actor, session));
         self.set_token(None);
         self.sign_in(who);
         self.set_token(Some(token));
