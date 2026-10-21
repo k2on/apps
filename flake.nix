@@ -198,8 +198,8 @@
             text = ''exec ark-fuzz "$@"'';
           };
           # The vectors as the writer writes them now: the kernel's tests
-          # (hash/, views/) and ark-dev's
-          # (protocol/, trace/, rebase/) run with ARK_WRITE_VECTORS over an
+          # (hash/) and ark-dev's
+          # (protocol/, trace/, rebase/, views/) run with ARK_WRITE_VECTORS over an
           # empty spec/vectors, which is then the output. checks.vectors
           # holds the tree's to it; `nix build .#vectors` and a copy over
           # spec/vectors is how they are written again without cargo.
