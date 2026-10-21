@@ -10,6 +10,7 @@
 // offline. Nothing of it is kept on the phone.
 package dev.harken.android
 
+import dev.harken.android.gen.Playlist
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,21 +35,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.arkdb.ui.Cover
-import dev.arkdb.ui.CoverCard
-import dev.arkdb.ui.Empty
-import dev.arkdb.ui.FETCHING_DELAY_MS
-import dev.arkdb.ui.Fetching
-import dev.arkdb.ui.Glyph
-import dev.arkdb.ui.Heading
-import dev.arkdb.ui.Recompositions
-import dev.arkdb.ui.ScrollsToTop
-import dev.arkdb.ui.Shelf
-import dev.arkdb.ui.Space
-import dev.arkdb.ui.TabTitle
-import dev.arkdb.ui.destinationKeepsAPlace
-import dev.arkdb.ui.quiet
-import dev.arkdb.ui.rememberDestinationListState
+import dev.harken.android.ui.Cover
+import dev.harken.android.ui.CoverCard
+import dev.harken.android.ui.Empty
+import dev.harken.android.ui.FETCHING_DELAY_MS
+import dev.harken.android.ui.Fetching
+import dev.harken.android.ui.Glyph
+import dev.harken.android.ui.Heading
+import dev.harken.android.ui.Recompositions
+import dev.harken.android.ui.ScrollsToTop
+import dev.harken.android.ui.Shelf
+import dev.harken.android.ui.Space
+import dev.harken.android.ui.TabTitle
+import dev.harken.android.ui.destinationKeepsAPlace
+import dev.harken.android.ui.quiet
+import dev.harken.android.ui.rememberDestinationListState
 
 /**
  * What was played last, and the page it was started from, so Home can offer it back. `live` when it
@@ -69,7 +70,7 @@ fun lastPlayed(h: Heard, played: Played?, playlists: List<Playlist>, art: (Strin
         val s = h.listening!!
         val on =
             if (!s.sounding) null
-            else (a.output as? dev.harken.android.listening.Output.Device)?.id?.let { id ->
+            else (a.output as? dev.harken.android.gen.Output.Device)?.id?.let { id ->
                 if (id == h.me) "Playing on $here" else "Playing on ${s.devices[id]?.name ?: "another device"}"
             }
         return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album)), Page.ofPlace(a.from, playlists), live = true, on = on)

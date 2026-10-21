@@ -1,4 +1,3 @@
-import ArkDB
 import SwiftUI
 
 /// Everything in the library, in the order it was added — the `library`
@@ -54,7 +53,7 @@ struct LibraryView: View {
 
 struct TrackRow: View {
     @EnvironmentObject private var model: Model
-    let track: Track
+    let track: LibraryEntry
 
     var body: some View {
         HStack {

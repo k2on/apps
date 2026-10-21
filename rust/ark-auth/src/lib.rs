@@ -1,7 +1,7 @@
 //! Who an ArkDB peer is.
 //!
 //! The engine asks one question about identity: at every `Hello`, what does
-//! this token prove? (`ark::protocol::Authenticate`.) This crate is the
+//! this token prove? (`server::Authenticate`, as `ark-server` asks it.) This crate is the
 //! answer for a server that signs people in with OpenID Connect, and the
 //! other half — how a client gets a token to send — for a desktop program
 //! and a page. It is `petros-auth` on ArkDB, with the session store in a
@@ -48,19 +48,20 @@
 mod login;
 mod util;
 
-#[cfg(feature = "server")]
-pub mod oidc;
-#[cfg(feature = "server")]
-pub mod server;
-#[cfg(feature = "server")]
-pub mod session;
-
-#[cfg(all(feature = "client", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub mod client;
-#[cfg(feature = "client")]
+#[cfg(not(target_arch = "wasm32"))]
+pub mod oidc;
 pub mod remember;
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
+pub mod server;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod session;
+#[cfg(target_arch = "wasm32")]
 pub mod web;
 
 pub use login::{Account, Login};
 pub use util::{login_url, percent_decode, percent_encode, query_value, socket_url, with_code};
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;

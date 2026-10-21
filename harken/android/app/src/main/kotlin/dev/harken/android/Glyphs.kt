@@ -20,7 +20,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
-import dev.arkdb.ui.ArkGlyphs
+import dev.harken.android.ui.ArkGlyphs
 
 object Glyphs {
     // A 24-unit glyph from SVG path data, stroked two units wide — or filled,

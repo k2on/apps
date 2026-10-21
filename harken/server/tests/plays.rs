@@ -10,16 +10,17 @@
 
 mod common;
 
-use ark::eval::Args;
-use ark::value::Value;
+use ark::format::Encode;
 use common::*;
-use harken_domain::listening::read::{input, Track};
+use harken_server::domain::Id;
+use harken_server::domain::Play;
+use harken_server::domain::{RecordPlay, Track};
 
 fn track(title: &str, n: u8) -> Track {
     let mut id = [0u8; 16];
     id[15] = n;
     Track {
-        id,
+        id: Id::new(id),
         title: title.into(),
         creator: "Handel".into(),
         album: "Water Music".into(),
@@ -29,16 +30,13 @@ fn track(title: &str, n: u8) -> Track {
 }
 
 /// The titles a play query answers, in its order.
-fn titles(p: &ark_client::Peer, query: &str) -> Vec<String> {
-    p.query(query, &Args::new())
-        .unwrap()
-        .as_list()
-        .iter()
-        .map(|row| match row.field("title") {
-            Value::Text(t) => t.to_string(),
-            other => panic!("a play's title is {other:?}"),
-        })
-        .collect()
+fn titles(p: &Peer, query: &str) -> Vec<String> {
+    let rows: Vec<Play> = p.query(&format!("listening.{query}"), &()).unwrap();
+    rows.into_iter().map(|r| r.title).collect()
+}
+
+fn played(track: &Track, from: &str) -> RecordPlay {
+    RecordPlay::from_bytes(&harken_server::assistant::input::record_play(track, from)).unwrap()
 }
 
 /// A phone plays two tracks while it has no connection: both are there at
@@ -57,7 +55,10 @@ fn a_play_made_offline_reaches_every_device_when_it_comes_back() {
     let rt = runtime();
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |_| {});
-    let mut phone = signed_in(&server, "max");
+    let l = login(&server, "max");
+    let token = l.token.clone();
+    let mut phone = open(ark_peer::who(&l), None);
+    phone.connect(&server.url(), &token);
     let mut laptop = signed_in(&server, "max");
     let mut ana = signed_in(&server, "ana");
     pump_until(&mut [&mut phone, &mut laptop, &mut ana], 10, |ps| {
@@ -67,21 +68,14 @@ fn a_play_made_offline_reaches_every_device_when_it_comes_back() {
     phone.disconnect();
     pump_until(&mut [&mut phone], 10, |ps| !ps[0].linked());
     let from = "album/Water Music";
-    phone
-        .mutate(
-            "record_play",
-            input::record_play(&track("Hornpipe", 1), from),
-        )
-        .unwrap();
+    phone.mutate(
+        "listening.record_play",
+        &played(&track("Hornpipe", 1), from),
+    );
     // A clock that moves between them, so newest is a fact and not a tie
     // broken by an id.
     std::thread::sleep(std::time::Duration::from_millis(5));
-    phone
-        .mutate(
-            "record_play",
-            input::record_play(&track("Bourrée", 2), from),
-        )
-        .unwrap();
+    phone.mutate("listening.record_play", &played(&track("Bourrée", 2), from));
     assert_eq!(
         titles(&phone, "recently_played"),
         ["Bourrée", "Hornpipe"],
@@ -97,11 +91,11 @@ fn a_play_made_offline_reaches_every_device_when_it_comes_back() {
         titles(&laptop, "recently_played").is_empty(),
         "nothing reached the laptop while the phone was away"
     );
-    assert!(phone.pending_len() > 0, "the plays are pending");
+    assert!(phone.pending() > 0, "the plays are pending");
 
-    phone.connect(&server.running.sync_url());
+    phone.connect(&server.url(), &token);
     pump_until(&mut [&mut phone, &mut laptop, &mut ana], 10, |ps| {
-        ps[0].linked() && ps[0].pending_len() == 0 && titles(&*ps[1], "recently_played").len() == 2
+        ps[0].linked() && ps[0].pending() == 0 && titles(&*ps[1], "recently_played").len() == 2
     });
     assert_eq!(titles(&laptop, "recently_played"), ["Bourrée", "Hornpipe"]);
     assert_eq!(titles(&laptop, "last_played"), ["Bourrée"]);
@@ -110,11 +104,14 @@ fn a_play_made_offline_reaches_every_device_when_it_comes_back() {
         ["Bourrée", "Hornpipe"],
         "confirmed as it was made"
     );
-    let row = laptop.query("last_played", &Args::new()).unwrap().as_list()[0].clone();
-    assert_eq!(row.field("from"), Value::text(from));
+    let row = laptop
+        .query::<Vec<Play>>("listening.last_played", &())
+        .unwrap()[0]
+        .clone();
+    assert_eq!(row.from, from);
     assert_eq!(
-        row.field("track"),
-        Value::text(ark::stdlib::text_of_id(&track("Bourrée", 2).id))
+        row.track, "00000000-0000-0000-0000-000000000002",
+        "the id as text"
     );
     assert!(
         titles(&ana, "recently_played").is_empty(),

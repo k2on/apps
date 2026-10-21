@@ -3,31 +3,22 @@ name = "ark"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "The ArkDB runtime: the value model, the canonical encoding, the store, the standard library, the interpreter, the log, the peer and the protocol, as spec/ defines them."
-# The binaries are named below: discovery would build `src/bin/vectors.rs`
-# a second time, as `vectors` beside `ark-vectors`.
-autobins = false
+description = "The ArkDB v5 kernel: bytes under types, the store, the chained log and the one peer machine, as docs/plan-v5.md Part 1 defines them."
 
 [dependencies]
 sha2 = { workspace = true }
-
-[dev-dependencies]
+ark-macros = { path = "../ark-macros" }
+serde = { workspace = true }
 serde_json = { workspace = true }
+memcomparable = { workspace = true }
+postcard = { workspace = true, optional = true }
 
-# The conformance vectors, written by this crate (spec/README.md, "The
-# vectors").
-[[bin]]
-name = "ark-vectors"
-path = "src/bin/vectors.rs"
-
-# Everything about a module rather than about running one: verify, hash,
-# check, vectors.
-[[bin]]
-name = "arkc"
-path = "src/bin/arkc.rs"
-
-# The three Unicode tables of §5, from the UCD. Run by hand when the pinned
-# Unicode version moves.
-[[bin]]
-name = "gen-unicode"
-path = "src/bin/gen-unicode.rs"
+[features]
+# The value format (docs/plan-v5.md §1.16, `ark::format`): what rows,
+# entries, frames, journal records and the hashed bytes are written in.
+# postcard by default; `values-json` writes JSON instead, whatever else is
+# on (`--features ark/values-json`). Keys are memcomparable under either,
+# and JSON is the explorer's and the vectors' human form under both.
+default = ["values-postcard"]
+values-postcard = ["dep:postcard"]
+values-json = []

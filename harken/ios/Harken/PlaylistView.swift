@@ -1,4 +1,3 @@
-import ArkDB
 import SwiftUI
 
 /// One playlist's contents in playlist order — the `playlist` query, which
@@ -11,7 +10,7 @@ struct PlaylistView: View {
 
     /// The rows for this playlist, whether or not it is the model's
     /// selection yet (it becomes so on appear).
-    private var rows: [Track] {
+    private var rows: [LibraryEntry] {
         return model.selectedPlaylist == playlist.id ? model.items : []
     }
 

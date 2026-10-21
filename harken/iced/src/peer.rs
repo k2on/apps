@@ -1,29 +1,32 @@
-//! A replica, and the lists a window draws from it — every one of them an
-//! `ark_client::View`, held open and told what moved.
+//! A replica, and the lists a window draws from it — every one of them a
+//! maintained view the client holds (§1.10), told what moved.
 //!
 //! One of these exists for as long as the window does — signed in or not.
-//! Whoever is signed in is the replica's business (`ark_client::Peer`
+//! Whoever is signed in is the replica's business (`client::Replica`
 //! authors as them, or as nobody); what is drawn is this.
 //!
-//! **Nothing here reads a list again.** Every query is a plan and every plan
-//! is maintained (`docs/plan-v4.md` §1.5), so the peer holds a small set of
-//! open views keyed by query and arguments — the library, the sidebar's four
+//! **Nothing here reads a list again.** Every query is a view the client
+//! keeps up to date (`docs/plan-v5.md` §1.10), so the peer holds a small
+//! set of them keyed by query and input — the library, the sidebar's four
 //! lists, the song details the table joins in, whatever the page shows, and
-//! the playlists the picker asked about — and [`Peer::refresh`] hands each
-//! of them the changes of one settle. What comes back is spliced into the
-//! rows the screens hold, or taken whole on a reset (a rebase, §1.6; a
-//! middleware outcome that moved, §1.7). A change costs each view the
-//! entries it touched, so a playlist toggle no longer has to be told apart
-//! from a song arriving to keep the sidebar cheap: the albums view is not
-//! touched by a toggle and costs two index probes for it.
+//! the playlists the picker asked about — and every change the client
+//! makes or receives is pushed into each as it happens; [`Peer::refresh`]
+//! takes what each one patched and splices it into the rows the screens
+//! hold, or takes the list whole when the view could not be kept up or was
+//! made for somebody else. A change costs each view the entries it touched,
+//! so a playlist toggle no longer has to be told apart from a song arriving
+//! to keep the sidebar cheap: the albums view is not touched by a toggle.
 use std::collections::HashMap;
 
-use ark_client::ark::eval::Ctx;
-use ark_client::{args, Args, Changes, Id, Patch, Update, Value};
-use harken_domain::view::Item;
+use crate::domain::Id as Key;
+use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
+use crate::domain::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, Works};
+use ark::format::Encode;
+use ark_peer::Patch;
 
+use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
-use crate::rows::{self, Album, Artist, Composer, Playlist, Recording, TrackDetail, Work};
+use crate::rows::{Album, Artist, Composer, Id, Item, Playlist, Recording, TrackDetail, Work};
 
 /// One line of the sidebar: somewhere the cursor can be and something it can
 /// open.
@@ -38,73 +41,102 @@ pub struct Choice {
 /// No playlist: what the library is read against before there is one.
 const NONE: Id = [0; 16];
 
-/// One query held open: its name and arguments — the key a page's views are
-/// kept or replaced by — and the engine's view of it.
+/// An id as the domain's input types carry it.
+pub fn key<T>(id: Id) -> Key<T> {
+    Key::new(id)
+}
+
+/// One query held open: its name and input — the key a page's views are
+/// kept or replaced by — who it was opened for, and the client's view of
+/// it.
 struct Open {
     name: &'static str,
-    args: Args,
-    /// The view, or — while its middleware refuses (somebody else's
-    /// playlist, nobody signed in) — who it refused, which is no rows.
-    view: Result<ark_client::View, Ctx>,
+    input: Vec<u8>,
+    who: ark::peer::Who,
+    /// The view, or — while its query refuses (somebody else's playlist,
+    /// nobody signed in) — none, which is no rows.
+    view: Option<usize>,
 }
 
 impl Open {
     /// Hydrate once. A refusal is no rows rather than an error: a page that
     /// is not yours is an empty page, as the query's answer was.
-    fn hydrate(client: &ark_client::Peer, name: &'static str, args: Args) -> Open {
-        let view = client.view(name, args.clone()).map_err(|_| client.ctx().clone());
-        Open { name, args, view }
-    }
-
-    fn is(&self, name: &str, args: &Args) -> bool {
-        self.name == name && self.args == *args
-    }
-
-    /// The list as the view holds it.
-    fn values(&self) -> &[Value] {
-        match &self.view {
-            Ok(v) => v.rows(),
-            Err(_) => &[],
+    fn hydrate(client: &mut Replica, name: &'static str, input: Vec<u8>) -> Open {
+        let view = client.view(name, &input).ok();
+        Open {
+            name,
+            input,
+            who: client.me().clone(),
+            view,
         }
     }
 
-    /// Push one settle's changes through. A view that faults is read again
-    /// whole, which is what a reset is; one refused at open is asked again
-    /// when anything moved or somebody else is signed in — the query it
+    fn is(&self, name: &str, input: &[u8]) -> bool {
+        self.name == name && self.input == input
+    }
+
+    /// Held no more.
+    fn close(self, client: &mut Replica) {
+        if let Some(v) = self.view {
+            client.unwatch(v);
+        }
+    }
+
+    /// The list as the view holds it, each row its bytes.
+    fn values(&self, client: &Replica) -> Vec<Vec<u8>> {
+        self.view.map(|v| client.rows(v)).unwrap_or_default()
+    }
+
+    /// What one settle did to it. A view that faults is read again whole,
+    /// which is what a reset is; so is one opened for somebody else; one
+    /// refused at open is asked again when anything moved — the query it
     /// stands for would have been.
-    fn update(&mut self, client: &ark_client::Peer, changes: &Changes) -> Update {
-        match &mut self.view {
-            Ok(v) => v.update(client, changes).unwrap_or(Update::Reset),
-            Err(who) => {
-                let quiet = matches!(changes, Changes::Applied(chs) if chs.is_empty());
-                if quiet && client.ctx() == who {
-                    return Update::Unchanged;
+    fn update(&mut self, client: &mut Replica, moved: bool) -> Update {
+        match self.view {
+            Some(v) if self.who == *client.me() => match client.update(v) {
+                Update::Reset => {
+                    self.reopen(client);
+                    Update::Reset
                 }
-                *self = Open::hydrate(client, self.name, self.args.clone());
+                u => u,
+            },
+            Some(_) => {
+                self.reopen(client);
+                Update::Reset
+            }
+            None if !moved && self.who == *client.me() => Update::Unchanged,
+            None => {
+                self.reopen(client);
                 match self.view {
-                    Ok(_) => Update::Reset,
-                    Err(_) => Update::Unchanged,
+                    Some(_) => Update::Reset,
+                    None => Update::Unchanged,
                 }
             }
         }
     }
 
+    fn reopen(&mut self, client: &mut Replica) {
+        let input = std::mem::take(&mut self.input);
+        let old = std::mem::replace(self, Open::hydrate(client, self.name, input));
+        old.close(client);
+    }
+
     /// Hydrate into `rows`, decoded by `read`.
-    fn fill<T>(&self, rows: &mut Vec<T>, read: fn(&Value) -> T) {
-        *rows = self.values().iter().map(read).collect();
+    fn fill<T>(&self, client: &Replica, rows: &mut Vec<T>, read: fn(&[u8]) -> T) {
+        *rows = self.values(client).iter().map(|b| read(b)).collect();
     }
 
     /// [`Open::update`], onto the rows a screen holds: what moved, if
     /// anything did.
-    fn refresh<T>(&mut self, client: &ark_client::Peer, changes: &Changes, rows: &mut Vec<T>, read: fn(&Value) -> T) -> Option<Moved> {
-        match self.update(client, changes) {
+    fn refresh<T>(&mut self, client: &mut Replica, moved: bool, rows: &mut Vec<T>, read: fn(&[u8]) -> T) -> Option<Moved> {
+        match self.update(client, moved) {
             Update::Unchanged => None,
             Update::Patched(patches) => {
                 splice(rows, &patches, read);
                 Some(Moved::Patched(patches.len()))
             }
             Update::Reset => {
-                self.fill(rows, read);
+                self.fill(client, rows, read);
                 Some(Moved::Reset)
             }
         }
@@ -120,11 +152,9 @@ pub enum Moved {
     Reset,
 }
 
-/// The patches, in order, onto the decoded list: `ark_client::splice` with
-/// the decoding said rather than implied, because a row here is a type of
-/// the domain's ([`Item`]) or of this crate's, and `Value` converts to
-/// neither by `Into`.
-fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&Value) -> T) {
+/// The patches, in order, onto the decoded list: `ark::plan::splice` with
+/// the decoding said, because a row here is a type of this crate's.
+fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&[u8]) -> T) {
     for p in patches {
         match p {
             Patch::Insert { at, node } => {
@@ -167,39 +197,35 @@ struct Views {
 }
 
 /// A page slot, brought to what the source wants: kept when it is already
-/// that query with those arguments, opened when it is not, dropped (and its
-/// rows cleared) when the page wants nothing there.
-fn want<T>(
-    client: &ark_client::Peer,
-    slot: &mut Option<Open>,
-    wanted: Option<(&'static str, Args)>,
-    rows: &mut Vec<T>,
-    read: fn(&Value) -> T,
-) -> bool {
+/// that query with that input, opened when it is not, dropped (and its rows
+/// cleared) when the page wants nothing there.
+fn want<T>(client: &mut Replica, slot: &mut Option<Open>, wanted: Option<(&'static str, Vec<u8>)>, rows: &mut Vec<T>, read: fn(&[u8]) -> T) -> bool {
     match wanted {
         None => {
-            let had = slot.take().is_some();
+            let had = slot.take().map(|o| o.close(client)).is_some();
             rows.clear();
             had
         }
         Some((name, a)) if slot.as_ref().is_some_and(|o| o.is(name, &a)) => false,
         Some((name, a)) => {
             let open = Open::hydrate(client, name, a);
-            open.fill(rows, read);
-            *slot = Some(open);
+            open.fill(client, rows, read);
+            if let Some(old) = slot.replace(open) {
+                old.close(client);
+            }
             true
         }
     }
 }
 
 /// A page slot's settle, when the page has one there.
-fn settle<T>(client: &ark_client::Peer, slot: &mut Option<Open>, changes: &Changes, rows: &mut Vec<T>, read: fn(&Value) -> T) -> Option<Moved> {
-    slot.as_mut().and_then(|o| o.refresh(client, changes, rows, read))
+fn settle<T>(client: &mut Replica, slot: &mut Option<Open>, moved: bool, rows: &mut Vec<T>, read: fn(&[u8]) -> T) -> Option<Moved> {
+    slot.as_mut().and_then(|o| o.refresh(client, moved, rows, read))
 }
 
 /// A replica, and the lists a window draws from it.
 pub struct Peer {
-    pub client: ark_client::Peer,
+    pub client: Replica,
     views: Views,
     /// What `view` draws of the library: decoded once per change, not per
     /// frame.
@@ -249,36 +275,45 @@ pub struct Peer {
     /// see that a change cost the lists it touched and no others.
     pub moved: Vec<(&'static str, Moved)>,
     /// Bumped whenever a list that carries covers moved: the window asks for
-    /// covers when this moves, which is the *data* changing — not the wire,
-    /// which was wrong both ways (the demo has no wire; a real client's first
-    /// library comes out of its own replica).
+    /// covers when this moves, which is the *data* changing.
     pub art_gen: u64,
-    /// Bumped whenever the store moved at all — what a refresh took was not
-    /// nothing. The explorer diffs what it shows against what it last drew
-    /// when this moves, and not on an update where nothing did.
+    /// Bumped whenever the store moved at all — its state hash is not what
+    /// the last refresh saw. The explorer diffs what it shows against what
+    /// it last drew when this moves, and not on an update where nothing did.
     pub store_gen: u64,
+    seen: ark::hash::StateHash,
+}
+
+/// `()`'s bytes: a query with no input.
+fn none() -> Vec<u8> {
+    ().to_bytes()
+}
+
+fn library_of(playlist: Id) -> Vec<u8> {
+    Library { playlist_id: key(playlist) }.to_bytes()
 }
 
 impl Peer {
     /// Every list the window starts on, hydrated once; everything after this
     /// is maintained.
-    pub fn open(client: ark_client::Peer) -> Peer {
-        let playlists = Open::hydrate(&client, "playlists", args([]));
+    pub fn open(mut client: Replica) -> Peer {
+        let playlists = Open::hydrate(&mut client, "playlists", none());
         let mut rows = Vec::new();
-        playlists.fill(&mut rows, Playlist::from_value);
+        playlists.fill(&client, &mut rows, Playlist::from_bytes);
         let playlist = rows.first().map_or(NONE, |p: &Playlist| p.id);
         let views = Views {
-            library: Open::hydrate(&client, "library", args([("playlist_id", Value::Id(playlist))])),
+            library: Open::hydrate(&mut client, "library", library_of(playlist)),
             playlists,
-            albums: Open::hydrate(&client, "albums", args([])),
-            artists: Open::hydrate(&client, "artists", args([])),
-            composers: Open::hydrate(&client, "composers", args([])),
-            details: Open::hydrate(&client, "track_details", args([])),
+            albums: Open::hydrate(&mut client, "albums", none()),
+            artists: Open::hydrate(&mut client, "artists", none()),
+            composers: Open::hydrate(&mut client, "composers", none()),
+            details: Open::hydrate(&mut client, "track_details", none()),
             shown: None,
             works: None,
             recordings: None,
             on: None,
         };
+        let seen = client.state();
         let mut peer = Peer {
             client,
             views,
@@ -300,16 +335,28 @@ impl Peer {
             moved: Vec::new(),
             art_gen: 1,
             store_gen: 1,
+            seen,
         };
-        let v = &peer.views;
-        v.library.fill(&mut peer.items, Item::from_value);
-        v.albums.fill(&mut peer.albums, Album::from_value);
-        v.artists.fill(&mut peer.artists, Artist::from_value);
-        v.composers.fill(&mut peer.composers, Composer::from_value);
-        v.details.fill(&mut peer.detail_rows, TrackDetail::from_value);
+        let (c, v) = (&peer.client, &peer.views);
+        v.library.fill(c, &mut peer.items, Item::from_bytes);
+        v.albums.fill(c, &mut peer.albums, Album::from_bytes);
+        v.artists.fill(c, &mut peer.artists, Artist::from_bytes);
+        v.composers.fill(c, &mut peer.composers, Composer::from_bytes);
+        v.details.fill(c, &mut peer.detail_rows, TrackDetail::from_bytes);
         peer.details = peer.detail_rows.iter().map(|t| (t.media_id, t.clone())).collect();
         // What the hydrate already read is not news.
-        let _ = peer.client.take_changes();
+        for v in [
+            &peer.views.library,
+            &peer.views.playlists,
+            &peer.views.albums,
+            &peer.views.artists,
+            &peer.views.composers,
+            &peer.views.details,
+        ] {
+            if let Some(v) = v.view {
+                peer.client.update(v);
+            }
+        }
         peer.choose();
         peer
     }
@@ -324,76 +371,75 @@ impl Peer {
     /// device. A refusal is not worth a status line: it only means there is
     /// no playlist yet.
     pub fn ensure_playlist(&mut self) {
-        if self.playlists.is_empty() && self.client.mutate("create_playlist", args([("name", Value::text("Favorites"))])).is_ok() {
+        let made = CreatePlaylist { name: "Favorites".into() };
+        if self.playlists.is_empty() && self.client.mutate("create_playlist", &made).is_ok() {
             self.refresh();
         }
     }
 
     /// Hand what this peer did alone to the server at `url`
-    /// (`ark_client::Peer::join`, `docs/plan-alone.md` §4), in place: the
-    /// replica rolls back to its fork and re-queues its local history, and
-    /// every open list is told that as changes — patched, not rebuilt, so
-    /// the library does not blink. With no login the history stays
-    /// nobody's until a sign-in makes it the signer's.
-    pub fn join(&mut self, url: &str, login: Option<ark_client::Login>) -> Result<(), ark_client::Error> {
-        self.client.join(url, login)?;
+    /// (`docs/plan-alone.md` §4), in place: the replica goes back to its
+    /// fork and its local history is pending again, and every open list is
+    /// told that as changes — none, so the library does not blink. With no
+    /// login the history stays nobody's until a sign-in makes it the
+    /// signer's.
+    pub fn join(&mut self, url: &str) {
+        self.client.join();
+        self.client.connect(url);
         self.refresh();
-        Ok(())
     }
 
     /// Bring every list up to date with whatever just happened. `true` when
     /// any of them moved.
     ///
-    /// Nothing is read again here: each open view is handed the settle's
-    /// changes and answers with what it moved. A rebase is changes too: the
-    /// inverse of what it undid, what landed, what it re-applied
-    /// (`docs/plan-perf.md` R2). `Rebuilt` is a store replaced whole — a
-    /// snapshot adopted from the server, below its horizon or past its head
-    /// (R6) — and resets every view, which is the one thing no list of
-    /// changes describes (§1.6). The views are asked even when
-    /// nothing changed, because a view also answers to who is signed in
-    /// (§1.7); that costs a comparison each.
+    /// Nothing is read again here: each open view has been handed the
+    /// client's changes as they happened (§1.10) and answers with the
+    /// patches they made. A rebase is changes too: the inverse of what it
+    /// undid, what landed, what it re-applied. A view the client dropped,
+    /// or one opened for somebody else, is read whole again.
     pub fn refresh(&mut self) -> bool {
-        let changes = self.client.take_changes();
-        if !matches!(&changes, Changes::Applied(c) if c.is_empty()) {
+        let state = self.client.state();
+        let moved = state != self.seen;
+        if moved {
+            self.seen = state;
             self.store_gen += 1;
         }
-        let (c, v) = (&self.client, &mut self.views);
-        let mut moved = Vec::new();
+        let (c, v) = (&mut self.client, &mut self.views);
+        let mut changed = Vec::new();
         let mut note = |name: &'static str, m: Option<Moved>| match m {
             Some(m) => {
-                moved.push((name, m));
+                changed.push((name, m));
                 true
             }
             None => false,
         };
-        let lists = note("playlists", v.playlists.refresh(c, &changes, &mut self.playlists, Playlist::from_value));
-        let library = note("library", v.library.refresh(c, &changes, &mut self.items, Item::from_value));
-        let albums = note("albums", v.albums.refresh(c, &changes, &mut self.albums, Album::from_value));
-        let artists = note("artists", v.artists.refresh(c, &changes, &mut self.artists, Artist::from_value));
-        let composers = note("composers", v.composers.refresh(c, &changes, &mut self.composers, Composer::from_value));
-        let details = match v.details.update(c, &changes) {
+        let lists = note("playlists", v.playlists.refresh(c, moved, &mut self.playlists, Playlist::from_bytes));
+        let library = note("library", v.library.refresh(c, moved, &mut self.items, Item::from_bytes));
+        let albums = note("albums", v.albums.refresh(c, moved, &mut self.albums, Album::from_bytes));
+        let artists = note("artists", v.artists.refresh(c, moved, &mut self.artists, Artist::from_bytes));
+        let composers = note("composers", v.composers.refresh(c, moved, &mut self.composers, Composer::from_bytes));
+        let details = match v.details.update(c, moved) {
             Update::Unchanged => None,
             Update::Patched(patches) => {
                 patch_details(&mut self.detail_rows, &mut self.details, &patches);
                 Some(Moved::Patched(patches.len()))
             }
             Update::Reset => {
-                v.details.fill(&mut self.detail_rows, TrackDetail::from_value);
+                v.details.fill(c, &mut self.detail_rows, TrackDetail::from_bytes);
                 self.details = self.detail_rows.iter().map(|t| (t.media_id, t.clone())).collect();
                 Some(Moved::Reset)
             }
         };
         let details = note("track_details", details);
         let name = |slot: &Option<Open>| slot.as_ref().map_or("", |o| o.name);
-        let shown = note(name(&v.shown), settle(c, &mut v.shown, &changes, &mut self.shown, Item::from_value));
-        let works = note(name(&v.works), settle(c, &mut v.works, &changes, &mut self.works, Work::from_value));
+        let shown = note(name(&v.shown), settle(c, &mut v.shown, moved, &mut self.shown, Item::from_bytes));
+        let works = note(name(&v.works), settle(c, &mut v.works, moved, &mut self.works, Work::from_bytes));
         let recordings = note(
             name(&v.recordings),
-            settle(c, &mut v.recordings, &changes, &mut self.recordings, Recording::from_value),
+            settle(c, &mut v.recordings, moved, &mut self.recordings, Recording::from_bytes),
         );
-        let on = note(name(&v.on), settle(c, &mut v.on, &changes, &mut self.on, Playlist::from_value));
-        self.moved = moved;
+        let on = note(name(&v.on), settle(c, &mut v.on, moved, &mut self.on, Playlist::from_bytes));
+        self.moved = changed;
 
         // The playlist the library is read against can stop existing, and
         // routinely does: the default this peer made on its first run is
@@ -404,8 +450,9 @@ impl Peer {
         let repointed = !self.playlists.iter().any(|p| p.id == self.playlist) && self.playlist != first;
         if repointed {
             self.playlist = first;
-            self.views.library = Open::hydrate(&self.client, "library", args([("playlist_id", Value::Id(first))]));
-            self.views.library.fill(&mut self.items, Item::from_value);
+            let old = std::mem::replace(&mut self.views.library, Open::hydrate(&mut self.client, "library", library_of(first)));
+            old.close(&mut self.client);
+            self.views.library.fill(&self.client, &mut self.items, Item::from_bytes);
             self.open_page();
         }
         if lists || library || albums || artists || composers || repointed {
@@ -462,55 +509,67 @@ impl Peer {
     /// the last track asked about, so the picker reopened on the same track —
     /// after it made a playlist — reads nothing.
     pub fn playlists_of(&mut self, media: Id) -> Vec<Playlist> {
-        let wanted = Some(("playlists_of", args([("media_id", Value::Id(media))])));
-        want(&self.client, &mut self.views.on, wanted, &mut self.on, Playlist::from_value);
+        let wanted = Some(("playlists_of", PlaylistsOf { media_id: key(media) }.to_bytes()));
+        want(&mut self.client, &mut self.views.on, wanted, &mut self.on, Playlist::from_bytes);
         self.on.clone()
     }
 
-    /// Run a query once and read its rows; a refusal (a guard, nobody signed
-    /// in) is no rows. For what is not a list on screen: resolving a link,
-    /// and the tests, which hold the maintained lists to what the query
-    /// answers.
-    pub(crate) fn ask<T>(&self, name: &str, a: Args, f: impl Fn(&Value) -> T) -> Vec<T> {
-        match self.client.query(name, &a) {
-            Ok(v) => rows::list(&v, f),
-            Err(_) => Vec::new(),
-        }
+    /// A query's rows, asked once through its stub; a refusal (a guard,
+    /// nobody signed in) is no rows. For what is not a list on screen:
+    /// resolving a link, and the tests, which hold the maintained lists to
+    /// what the query answers.
+    pub(crate) fn rows_of<E, T: From<E>>(answer: Result<Vec<E>, String>) -> Vec<T> {
+        answer.map_or_else(|_| vec![], |es| es.into_iter().map(T::from).collect())
     }
 
     pub fn work(&self, id: &str) -> Vec<Work> {
-        self.ask("work", args([("id", Value::text(id))]), Work::from_value)
+        Peer::rows_of(self.client.answer(browse::work, WorkInput { id: id.into() }))
     }
 
     /// What a page's query answers, read once. The page holds views; these
     /// are what the tests compare them with.
     #[cfg(test)]
     pub fn works_of(&self, composer: &str) -> Vec<Work> {
-        self.ask("works", args([("composer", Value::text(composer))]), Work::from_value)
+        Peer::rows_of(self.client.answer(browse::works, Works { composer: composer.into() }))
     }
 
     #[cfg(test)]
     pub fn recordings_of(&self, work: &str) -> Vec<Recording> {
-        self.ask("recordings", args([("work_id", Value::text(work))]), Recording::from_value)
+        Peer::rows_of(self.client.answer(browse::recordings, Recordings { work_id: work.into() }))
     }
 
     #[cfg(test)]
-    pub fn credits(&self, recording: &str) -> Vec<rows::Credit> {
-        self.ask("credits", args([("recording_id", Value::text(recording))]), rows::Credit::from_value)
+    pub fn credits(&self, recording: &str) -> Vec<crate::domain::CreditsEntry> {
+        let input = crate::domain::Credits {
+            recording_id: recording.into(),
+        };
+        self.client.answer(browse::credits, input).unwrap_or_default()
     }
 
     #[cfg(test)]
     pub fn album_rows(&self, name: &str) -> Vec<Item> {
-        self.ask(
-            "album",
-            args([("playlist_id", Value::Id(self.playlist)), ("name", Value::text(name))]),
-            Item::from_value,
-        )
+        let input = AlbumInput {
+            playlist_id: key(self.playlist),
+            name: name.into(),
+        };
+        Peer::rows_of(self.client.answer(browse::album, input))
     }
 
     #[cfg(test)]
     pub fn track_details(&self) -> Vec<TrackDetail> {
-        self.ask("track_details", args([]), TrackDetail::from_value)
+        Peer::rows_of(self.client.answer(browse::track_details, ()))
+    }
+
+    /// The library as its query answers it now, against the playlist it is
+    /// read against.
+    #[cfg(test)]
+    pub fn library_now(&self) -> Vec<Item> {
+        Peer::rows_of(self.client.answer(
+            browse::library,
+            Library {
+                playlist_id: key(self.playlist),
+            },
+        ))
     }
 
     /// What is true of a track as a song, or nothing if its kind has none.
@@ -523,52 +582,88 @@ impl Peer {
 
     /// Open the views the page needs for whatever the sidebar picked, and
     /// drop the last page's. A view the new page shares with the old one —
-    /// the same query with the same arguments, a work's recordings from its
+    /// the same query with the same input, a work's recordings from its
     /// work page to one of them — is kept rather than read again.
     pub fn open_page(&mut self) {
-        let text = |s: &str| Value::text(s);
-        let on = |key: &str, value: &str| args([("playlist_id", Value::Id(self.playlist)), (key, text(value))]);
-        let (shown, works, recordings): (Option<(&'static str, Args)>, _, _) = match &self.source {
+        let pl = key(self.playlist);
+        type Wanted = Option<(&'static str, Vec<u8>)>;
+        let (shown, works, recordings): (Wanted, Wanted, Wanted) = match &self.source {
             // The library is `items` itself, unless a search narrows it: then
-            // the page is the `search` view, read through the text indexes
-            // and kept like any other (`docs/plan-db.md` D4).
+            // the page is the `search` view, kept like any other
+            // (`docs/plan-db.md` D4).
             Source::Library => (
-                self.search
-                    .as_deref()
-                    .map(|n| ("search", args([("playlist_id", Value::Id(self.playlist)), ("needle", text(n))]))),
+                self.search.as_deref().map(|n| {
+                    let s = Search {
+                        playlist_id: pl,
+                        needle: n.into(),
+                    };
+                    ("search", s.to_bytes())
+                }),
                 None,
                 None,
             ),
             Source::Albums | Source::Artists | Source::Composers => (None, None, None),
-            Source::Works(composer) => (None, Some(("works", args([("composer", text(composer))]))), None),
+            Source::Works(composer) => (None, Some(("works", Works { composer: composer.clone() }.to_bytes())), None),
             // Both halves: the work itself, for the header, and its
             // performances. This page may have been reached without opening a
             // composer at all — a link somebody sent — so the row is read by
             // key rather than looked up in a composer's list.
             Source::Work(id, _) => (
                 None,
-                Some(("work", args([("id", text(id))]))),
-                Some(("recordings", args([("work_id", text(id))]))),
+                Some(("work", WorkInput { id: id.clone() }.to_bytes())),
+                Some(("recordings", Recordings { work_id: id.clone() }.to_bytes())),
             ),
-            Source::Playlist(id, _) => (Some(("playlist", args([("playlist_id", Value::Id(*id))]))), None, None),
-            Source::Album(name) => (Some(("album", on("name", name))), None, None),
-            Source::Artist(name) => (Some(("artist", on("name", name))), None, None),
+            Source::Playlist(id, _) => (Some(("playlist", PlaylistInput { playlist_id: key(*id) }.to_bytes())), None, None),
+            Source::Album(name) => (
+                Some((
+                    "album",
+                    AlbumInput {
+                        playlist_id: pl,
+                        name: name.clone(),
+                    }
+                    .to_bytes(),
+                )),
+                None,
+                None,
+            ),
+            Source::Artist(name) => (
+                Some((
+                    "artist",
+                    ArtistInput {
+                        playlist_id: pl,
+                        name: name.clone(),
+                    }
+                    .to_bytes(),
+                )),
+                None,
+                None,
+            ),
             // The one list ordered by the *work* rather than the release, and
             // every recording of that work, so the header can find this one —
             // the work's key is everything before the `@`.
-            Source::Recording(id, _) => match id.split_once('@') {
-                Some((work, _)) => (
-                    Some(("recording", on("id", id))),
-                    Some(("work", args([("id", text(work))]))),
-                    Some(("recordings", args([("work_id", text(work))]))),
-                ),
-                None => (Some(("recording", on("id", id))), None, None),
-            },
+            Source::Recording(id, _) => {
+                let shown = Some((
+                    "recording",
+                    RecordingInput {
+                        playlist_id: pl,
+                        id: id.clone(),
+                    }
+                    .to_bytes(),
+                ));
+                match id.split_once('@') {
+                    Some((work, _)) => (
+                        shown,
+                        Some(("work", WorkInput { id: work.into() }.to_bytes())),
+                        Some(("recordings", Recordings { work_id: work.into() }.to_bytes())),
+                    ),
+                    None => (shown, None, None),
+                }
+            }
         };
-        let (c, v) = (&self.client, &mut self.views);
-        want(c, &mut v.shown, shown, &mut self.shown, Item::from_value);
-        let works = want(c, &mut v.works, works, &mut self.works, Work::from_value);
-        want(c, &mut v.recordings, recordings, &mut self.recordings, Recording::from_value);
+        let (c, v) = (&mut self.client, &mut self.views);
+        want(c, &mut v.shown, shown, &mut self.shown, Item::from_bytes);
+        let works = want(c, &mut v.works, works, &mut self.works, Work::from_bytes);
+        want(c, &mut v.recordings, recordings, &mut self.recordings, Recording::from_bytes);
         if works {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
@@ -635,14 +730,8 @@ impl Peer {
     /// the library. `true` when that changed what the page shows.
     ///
     /// The box drives a view: each keystroke opens `search` over the new
-    /// needle and drops the last one. That is one hydrate per keystroke —
-    /// the text index's read of the rows holding every trigram of the
-    /// needle, and each one's playlist entry — rather than a view patched
-    /// from the last needle's, which would be a second kind of view for
-    /// something a hydrate already answers at typing speed; what one costs
-    /// is `harken/domain/tests/perf.rs`'s `perf_search`. A needle of one or
-    /// two characters has no trigram and is a scan, which is what this
-    /// client did for every search before.
+    /// needle and drops the last one — one hydrate per keystroke rather than
+    /// a view patched from the last needle's.
     pub fn search(&mut self, needle: Option<&str>) -> bool {
         let needle = needle.filter(|n| !n.is_empty()).map(str::to_string);
         if needle == self.search {
@@ -676,7 +765,7 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
     for p in patches {
         match p {
             Patch::Insert { at, node } => {
-                let d = TrackDetail::from_value(node);
+                let d = TrackDetail::from_bytes(node);
                 map.insert(d.media_id, d.clone());
                 rows.insert((*at).min(rows.len()), d);
             }
@@ -688,7 +777,7 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
             }
             Patch::Update { at, node } => {
                 if *at < rows.len() {
-                    let d = TrackDetail::from_value(node);
+                    let d = TrackDetail::from_bytes(node);
                     map.remove(&rows[*at].media_id);
                     map.insert(d.media_id, d.clone());
                     rows[*at] = d;
@@ -701,27 +790,17 @@ fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_client::{Domain, Options};
+    use crate::domain::AddToPlaylist;
+    use crate::tests::{alone, signed_in, song};
+    use ark::frames::{Frame, Verdict};
+    use ark::peer::Who;
+    use ark::schema::Space;
 
-    fn song(title: &str, artist: &str, album: &str, file: &str) -> Args {
-        let t = |s: &str| Value::text(s);
-        args([
-            ("title", t(title)),
-            ("artist", t(artist)),
-            ("album", t(album)),
-            ("duration_ms", Value::Int(1000)),
-            ("file", t(file)),
-            ("track", Value::Int(0)),
-            ("part", t("")),
-            ("catalogue", t("")),
-            ("performer", t("")),
-            ("bpm", Value::Int(0)),
-            ("album_art", t("")),
-            ("artist_art", t("")),
-            ("disc", Value::Int(0)),
-            ("work_title", t("")),
-            ("movement_no", Value::Int(0)),
-        ])
+    fn on(playlist: Id, media: Id) -> AddToPlaylist {
+        AddToPlaylist {
+            playlist_id: key(playlist),
+            media_id: key(media),
+        }
     }
 
     /// The maintained list is the query, after every step — one change, a
@@ -729,138 +808,120 @@ mod tests {
     ///
     /// Falsified by dropping the `Update` arm of `splice`: the toggle — which
     /// arrives as an update to the row it moved — leaves the old
-    /// `playlist_pos`. A batch is pushed against the final store, once per
-    /// touched entry (`docs/plan-v4.md` §1.5).
+    /// `playlist_pos`.
     #[test]
     fn the_maintained_library_is_the_query() {
-        let domain = Domain::new(&harken_domain::module());
-        let mut client = ark_client::Peer::open_memory(domain, Options::alone("me")).unwrap();
-        // It fills its own library, as the scanner does (`docs/plan-guards.md` D1).
-        client.set_roles([harken_domain::schema::LIBRARY]);
-        let mut peer = Peer::open(client);
+        let mut peer = alone("me");
         peer.ensure_playlist();
         assert_ne!(peer.playlist, [0; 16], "Favorites was made");
-        let read = |p: &Peer| p.ask("library", args([("playlist_id", Value::Id(p.playlist))]), Item::from_value);
 
-        peer.client.mutate("add_song", song("Air", "Bach", "Suites", "a")).unwrap();
+        peer.client.mutate("add_song", &song("Air", "Bach", "Suites", "a")).unwrap();
         assert!(peer.refresh());
-        assert_eq!(peer.items, read(&peer));
+        assert_eq!(peer.items, peer.library_now());
 
         for (t, f) in [("Glue", "b"), ("Opal", "c"), ("Gosh", "d")] {
-            peer.client.mutate("add_song", song(t, "X", "Y", f)).unwrap();
+            peer.client.mutate("add_song", &song(t, "X", "Y", f)).unwrap();
         }
         peer.refresh();
-        assert_eq!(peer.items, read(&peer), "a batch, each change against its own store");
+        assert_eq!(peer.items, peer.library_now(), "a batch, each change pushed in turn");
 
         let id = peer.items[2].id;
-        peer.client
-            .mutate(
-                "add_to_playlist",
-                args([("playlist_id", Value::Id(peer.playlist)), ("media_id", Value::Id(id))]),
-            )
-            .unwrap();
+        peer.client.mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
-        assert_eq!(peer.items, read(&peer));
+        assert_eq!(peer.items, peer.library_now());
         assert!(peer.items[2].on_playlist());
         assert!(!peer.refresh(), "nothing moved, nothing read");
 
-        // A song and its place on the playlist in one batch: the song's entry
-        // is built once, against the final store, already carrying its place.
-        peer.client.mutate("add_song", song("Late", "Z", "", "e")).unwrap();
-        let late = peer.client.query("library", &args([("playlist_id", Value::Id(peer.playlist))])).unwrap();
-        let late = rows::list(&late, Item::from_value).last().unwrap().id;
-        peer.client
-            .mutate(
-                "add_to_playlist",
-                args([("playlist_id", Value::Id(peer.playlist)), ("media_id", Value::Id(late))]),
-            )
-            .unwrap();
+        // A song and its place on the playlist before the next refresh: the
+        // song's entry is patched in, then its place.
+        peer.client.mutate("add_song", &song("Late", "Z", "", "e")).unwrap();
+        let late = peer.library_now().last().unwrap().id;
+        peer.client.mutate("add_to_playlist", &on(peer.playlist, late)).unwrap();
         peer.refresh();
-        assert_eq!(peer.items, read(&peer), "a song and its playlist entry in one batch");
+        assert_eq!(peer.items, peer.library_now(), "a song and its playlist entry in one refresh");
     }
 
     /// `docs/plan-alone.md` §4: a window alone joins a server in place. The
     /// replica is opened alone as nobody, as the desktop opens it, a
     /// playlist and songs are made and one put on it, and the join hands
-    /// all of it to an in-process hub: no open list is taken whole through
-    /// the join — as nobody to nobody, the rebase undoes and re-applies the
-    /// same rows, and the lists are told nothing moved — and each is the
-    /// query after it; a
-    /// sign-in then makes it the signer's, and once the hub has taken it
-    /// all, the lists are patched again and still the query.
+    /// all of it back to pending: no open list moves through the join —
+    /// the store is what it was — and each is the query after it. A
+    /// sign-in then makes it the signer's (every view is the signer's
+    /// afresh, so each is read again), and once an in-process hub has taken
+    /// it all, the lists are the query and the hub's log has every change,
+    /// the add naming the playlist made signed out included: an intent's id,
+    /// and so the row it drew, is its origin's and survives the sign-in.
     ///
-    /// Falsified by `ark_client::Peer::join` replacing the replica whole
-    /// (`Replica::open` at the fork with the history pending, instead of
-    /// `Replica::fork_back`): every list is `Reset`.
+    /// Falsified by `Peer::join` opening every view afresh after the join (a
+    /// new `who_epoch`): every list was `Reset` and "nothing moved" failed;
+    /// and by `ark_client::Client::sign_in` authoring the pending intents
+    /// again from a new origin: the log held 4, the add refused "not your
+    /// playlist".
     #[test]
     fn a_window_alone_joins_a_server_in_place() {
-        use ark_client::ark::peer::Authority;
-        use ark_client::ark::protocol::{open_access, trusting, Server};
-        let domain = Domain::new(&harken_domain::module());
-        let mut client = ark_client::Peer::open_memory(domain.clone(), Options::alone_as_nobody()).unwrap();
-        client.set_roles([harken_domain::schema::LIBRARY]);
+        use ark_peer::{Config, Module, Peer as Hub};
+        let mut client = crate::client::memory(crate::client::nobody(), None);
+        client.alone();
+        client.set_roles([crate::domain::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.ensure_playlist();
         for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
-            peer.client.mutate("add_song", song(t, "Bach", "Suites", f)).unwrap();
+            peer.client.mutate("add_song", &song(t, "Bach", "Suites", f)).unwrap();
         }
         peer.refresh();
         let id = peer.items[1].id;
-        peer.client
-            .mutate(
-                "add_to_playlist",
-                args([("playlist_id", Value::Id(peer.playlist)), ("media_id", Value::Id(id))]),
-            )
-            .unwrap();
+        peer.client.mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
         assert_eq!(peer.client.status().link, "alone");
-        let read = |p: &Peer| p.ask("library", args([("playlist_id", Value::Id(p.playlist))]), Item::from_value);
         let before = peer.items.clone();
 
-        peer.join("ws://hub/sync", None).unwrap();
-        assert!(
-            peer.moved.iter().all(|(_, m)| matches!(m, Moved::Patched(_))),
-            "patched, not reset: {:?}",
-            peer.moved
-        );
+        peer.join("ws://hub/sync");
+        assert!(peer.moved.is_empty(), "nothing moved: {:?}", peer.moved);
         assert_eq!(peer.items, before, "the library does not blink");
-        assert_eq!(peer.items, read(&peer));
+        assert_eq!(peer.items, peer.library_now());
         assert_eq!(peer.client.pending_len(), 5);
 
-        let mut a = Authority::new(domain.module().schema.clone(), domain.closures().clone());
-        a.hold(domain.native_list());
-        let mut hub = Server::open(trusting(), open_access(), a);
+        let d = crate::client::domain();
+        let mut hub = Hub::serve(Config::new(Module::of(d)), Box::new(ark_peer::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
-        // and the server judges them under the roles it stamps: dev auth's
-        // `name:role` is a login holding it.
-        peer.client.sign_in("alice", "dev", Some("alice:library".into())).unwrap();
+        // and the server judges them under the roles of the login.
+        let alice = Who {
+            actor: "alice".into(),
+            session: "alice@desktop".into(),
+            roles: vec![crate::domain::LIBRARY.into()],
+        };
+        peer.client.login(alice.clone(), "alice@desktop:library".into());
         peer.refresh();
+        let c = hub.accept(alice);
         peer.client.connected();
         loop {
-            let up = peer.client.take_outgoing();
-            for m in up.iter().cloned() {
-                hub.recv(1, m);
+            let up = peer.client.take_frames();
+            let mut down = vec![];
+            for f in up.iter().cloned() {
+                down.extend(hub.frame(c, f, crate::client::now_ms()));
             }
-            let down = hub.take_outgoing();
             if up.is_empty() && down.is_empty() {
                 break;
             }
-            for (_, m) in down {
-                peer.client.recv(m);
+            for (_, f) in down {
+                peer.client.receive(f);
             }
         }
         peer.refresh();
-        assert!(peer.moved.iter().all(|(_, m)| matches!(m, Moved::Patched(_))), "{:?}", peer.moved);
-        assert_eq!(hub.authority.log.head_seq(), 5);
         assert_eq!(peer.client.pending_len(), 0);
-        assert_eq!(peer.items, read(&peer));
+        assert_eq!(peer.items, peer.library_now());
+        // An intent's id is its origin's (§1.6), whoever signs in: the
+        // playlist made alone keeps its id through the sign-in, and the item
+        // put on it names it still.
+        assert_eq!(hub.log.log().head().0, 5, "the playlist, the three songs and the add");
+        assert!(peer.client.take_rejections().is_empty());
         assert!(peer.items[1].on_playlist());
     }
 
-    /// The playlist the library is read against can go — here a rebase
-    /// takes back the one this peer made, with another still pending — and
-    /// the library is re-pointed at the first that is left: a view with new
-    /// arguments, hydrated, and an album page read against the old one
+    /// The playlist the library is read against can go — here the server
+    /// refuses the one this peer made, with another still pending — and
+    /// the library is re-pointed at the first that is left: a view with a
+    /// new input, hydrated, and an album page read against the old one
     /// reopened against the new. The rest of the sidebar is patched, not
     /// re-read.
     ///
@@ -870,39 +931,31 @@ mod tests {
     /// the page on a re-point: "…and so is the page" fails.
     #[test]
     fn a_playlist_that_goes_repoints_the_library() {
-        use ark_client::ark::protocol::ServerMsg;
-        let domain = Domain::new(&harken_domain::module());
-        let mut client = ark_client::Peer::open_memory(domain, Options::dev("me")).unwrap();
-        client.set_roles([harken_domain::schema::LIBRARY]);
-        let mut peer = Peer::open(client);
-        peer.client.mutate("add_song", song("Air", "Bach", "Suites", "a")).unwrap();
-        let made = peer.client.mutate("create_playlist", args([("name", Value::text("Mine"))])).unwrap();
-        peer.client.mutate("create_playlist", args([("name", Value::text("Other"))])).unwrap();
+        let mut peer = signed_in("me");
+        peer.client.mutate("add_song", &song("Air", "Bach", "Suites", "a")).unwrap();
+        let mine = CreatePlaylist { name: "Mine".into() };
+        let made = peer.client.mutate("create_playlist", &mine).unwrap();
+        peer.client.mutate("create_playlist", &CreatePlaylist { name: "Other".into() }).unwrap();
         peer.refresh();
         let [mine, other] = [0, 1].map(|i| peer.playlists()[i].id);
         assert_eq!(peer.playlist, mine, "the first is read against");
-        peer.client
-            .mutate(
-                "add_to_playlist",
-                args([("playlist_id", Value::Id(other)), ("media_id", Value::Id(peer.items[0].id))]),
-            )
-            .unwrap();
+        let air = peer.items[0].id;
+        peer.client.mutate("add_to_playlist", &on(other, air)).unwrap();
         peer.refresh();
         assert!(!peer.items[0].on_playlist(), "on Other, not on Mine");
         peer.source = Source::Album("Suites".into());
         peer.open_page();
 
-        peer.client.recv(ServerMsg::Reject {
+        let reject = Frame::Verdict {
+            space: Space::Durable,
             id: made,
-            reason: "no".into(),
-        });
+            verdict: Verdict::Refused { why: "no".into() },
+        };
+        peer.client.receive(reject.enc());
         peer.refresh();
         assert_eq!(peer.playlist, other, "re-pointed at what is left");
         assert!(peer.items[0].on_playlist(), "the library is read against Other now");
-        assert_eq!(
-            peer.items,
-            peer.ask("library", args([("playlist_id", Value::Id(other))]), Item::from_value)
-        );
+        assert_eq!(peer.items, peer.library_now());
         assert!(peer.shown[0].on_playlist(), "…and so is the page");
         let lines: Vec<&str> = peer.choices.iter().map(|c| c.label.as_str()).collect();
         assert_eq!(lines, ["Songs", "Albums", "Artists", "Other"]);

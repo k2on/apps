@@ -1,7 +1,7 @@
 // The reconciler (Remote.kt) against harken's own session, as the desktop's
-// tests hold `harken/iced/src/listening.rs`: real Kotlin peers, a server in
-// the test (`Hall`) that runs the module's transitions and hooks, and a
-// stand-in player. The six the desktop has — the output obeying and nobody
+// tests hold `harken/iced/src/listening.rs`: real peers of the kernel, a
+// harken server in the process (`Hall`, `harken/ffi`) that runs the domain's
+// transitions and hooks, and a stand-in player. The six the desktop has — the output obeying and nobody
 // else sounding, a track's end said once, a play recorded once by the output
 // alone, both branches of coming back, and a device unlinked being its own
 // session — and the phone's own: the player moving on by itself, a stall,
@@ -11,9 +11,11 @@
 // each says how, and what failed.
 package dev.harken.android
 
-import dev.arkdb.client.Peer
-import dev.harken.android.listening.Clock
-import dev.harken.android.listening.Output
+import dev.harken.android.gen.Clock
+import dev.harken.android.gen.Harken
+import dev.harken.android.gen.Output
+import dev.harken.android.gen.Play
+import dev.harken.ffi.Hall
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -24,7 +26,7 @@ import org.junit.Test
 class RemoteTests {
     private val queue = listOf(queuedTrack("a", 1), queuedTrack("b", 2))
 
-    private class Device(val hall: Hall, val peer: Peer, session: String, stream: FakeStream? = null) {
+    private class Device(val hall: Hall, val peer: Harken, session: String, stream: FakeStream? = null) {
         val remote = Remote(session, session)
         val sound = FakeSound(stream)
 
@@ -33,8 +35,8 @@ class RemoteTests {
             hall.carry()
         }
 
-        fun call(transition: String, input: Map<String, dev.arkdb.Value>) {
-            assertNull("$transition was refused", remote.call(peer, transition, input))
+        fun call(transition: String, f: Harken.() -> Unit) {
+            assertNull("$transition was refused", remote.call(peer, transition, f))
             hall.carry()
         }
 
@@ -62,7 +64,7 @@ class RemoteTests {
         val hall = Hall()
         val phone = hall.on("phone", true)
         val desk = hall.on("desktop", false, "computer")
-        phone.call("start", Inputs.start(queue, 0, 0, "#album/Water%20Music"))
+        phone.call("start") { start(Inputs.start(queue, 0, 0, "#album/Water%20Music")) }
         phone.reconcile()
         assertEquals("the phone loaded what it pressed", queue, phone.sound.queue)
         assertTrue(phone.sound.playing)
@@ -72,18 +74,18 @@ class RemoteTests {
         assertEquals("and loads nothing", 0, desk.sound.loads)
         assertTrue(desk.remote.elsewhere(desk.session()!!))
 
-        desk.call("pause", Inputs.none)
+        desk.call("pause") { pause() }
         phone.reconcile()
         assertFalse("a pause pressed on the desktop is a pause on the phone", phone.sound.playing)
-        desk.call("seek", Inputs.seek(40_000))
+        desk.call("seek") { seek(Inputs.seek(40_000)) }
         phone.reconcile()
         assertEquals("and a seek is a seek", 40_000L, phone.sound.positionMs)
-        desk.call("play", Inputs.none)
+        desk.call("play") { play() }
         phone.reconcile()
         assertTrue("a play pressed on the desktop plays the phone", phone.sound.playing)
 
         val laptop = hall.on("laptop", true, "computer")
-        desk.call("transfer", Inputs.transfer("laptop"))
+        desk.call("transfer") { transfer(Inputs.transfer("laptop")) }
         phone.reconcile()
         laptop.reconcile()
         assertFalse("the phone lost the sound and is silent", phone.sound.playing)
@@ -109,7 +111,7 @@ class RemoteTests {
     fun aTrackThatEndsIsSaidOnceAndTheNextOnePlays() {
         val hall = Hall()
         val phone = hall.on("phone", true)
-        phone.call("start", Inputs.start(queue, 0, 0, ""))
+        phone.call("start") { start(Inputs.start(queue, 0, 0, "")) }
         phone.reconcile()
         phone.sound.finish()
         val calls = phone.remote.stats.calls
@@ -129,7 +131,7 @@ class RemoteTests {
         assertEquals(1L, a.at)
         assertEquals(Clock.Paused(0), a.clock)
         assertFalse(phone.sound.playing)
-        phone.call("play", Inputs.none)
+        phone.call("play") { play() }
         phone.reconcile()
         assertTrue("and played again from its start", phone.sound.playing)
         assertEquals(0L, phone.sound.positionMs)
@@ -151,15 +153,14 @@ class RemoteTests {
         val hall = Hall()
         val phone = hall.on("phone", true)
         val desk = hall.on("desktop", false, "computer")
-        phone.call("start", Inputs.start(queue, 0, 40_000, ""))
+        phone.call("start") { start(Inputs.start(queue, 0, 40_000, "")) }
         phone.reconcile()
         val loaded = phone.sound.positionMs
         assertTrue("loaded where it was pressed: $loaded", loaded in 40_000L until 40_100L)
-        fun counted(): Long = phone.session()!!.active!!.position(phone.peer.serverNow())
+        fun counted(): Long = phone.session()!!.active!!.position(System.currentTimeMillis())
 
         // A second on the clock, and the player has played none of it.
         Thread.sleep(1_000)
-        hall.now = System.currentTimeMillis()
         val seeks = phone.sound.seeks
         phone.reconcile()
         assertEquals("not sent ahead to where the clock counts", loaded, phone.sound.positionMs)
@@ -184,8 +185,7 @@ class RemoteTests {
         phone.sound.positionMs = counted()
 
         // A seek on the desktop is the session moving: the player goes.
-        hall.now = System.currentTimeMillis()
-        desk.call("seek", Inputs.seek(100_000))
+        desk.call("seek") { seek(Inputs.seek(100_000)) }
         phone.reconcile()
         assertTrue("sought where the session is: ${phone.sound.positionMs}", kotlin.math.abs(phone.sound.positionMs - 100_000) <= Remote.SYNC_MS)
         assertEquals("and nothing said back", calls, phone.remote.stats.calls)
@@ -200,30 +200,30 @@ class RemoteTests {
      * Falsified by counting on every reconcile past the threshold: the second one authored a
      * second play. And by counting from the session's clock on every device part of it: the
      * laptop, watching, recorded one too. (Counting the laptop's own player first passed: a device
-     * that is not the output has nothing loaded to count, which is a reason, not the rule.)
+     * that is not the output has nothing loaded to count, which is a reason, not the rule.) Over the
+     * kernel, by `count` never calling `record_play`: "thirty seconds in: a play" failed.
      */
     @Test
     fun aPlayIsRecordedOnceByTheOutputAlone() {
         val hall = Hall()
         val phone = hall.on("phone", true)
         val laptop = hall.on("laptop", true, "computer")
-        phone.call("start", Inputs.start(queue, 0, 29_000, "#album/Water%20Music"))
+        phone.call("start") { start(Inputs.start(queue, 0, 29_000, "#album/Water%20Music")) }
         phone.reconcile()
-        val pending = phone.peer.pendingLen
-        assertEquals("not yet: half of a hundred seconds is fifty, thirty is first", pending, phone.peer.pendingLen)
+        fun plays() = Phone.once({ phone.peer.recentlyPlayed() }) { it: Play -> it }
+        assertEquals("not yet: half of a hundred seconds is fifty, thirty is first", 0, plays().size)
         assertEquals("a wake at the threshold", true, (phone.sound.wake ?: 0) in 900L..1_100L)
         phone.sound.positionMs = 30_500
-        phone.call("seek", Inputs.seek(30_500))
+        phone.call("seek") { seek(Inputs.seek(30_500)) }
         phone.reconcile()
-        assertEquals("thirty seconds in: a play", pending + 1, phone.peer.pendingLen)
+        assertEquals("thirty seconds in: a play", 1, plays().size)
         phone.reconcile()
-        assertEquals("once per play", pending + 1, phone.peer.pendingLen)
+        assertEquals("once per play", 1, plays().size)
         laptop.sound.positionMs = 40_000
         laptop.reconcile()
         assertEquals("a device watching records nothing", 0L, laptop.remote.stats.plays)
-        val recent = phone.peer.query("recently_played", emptyMap()).asList()
-        assertEquals(1, recent.size)
-        assertEquals("#album/Water%20Music", recent[0].field("from").asText())
+        assertEquals("#album/Water%20Music", plays()[0].from)
+        assertEquals("the play reached the server", 0, phone.peer.peer.status().pending.toInt())
 
         // Offline the phone is its own session, and a play is the log's all the same.
         hall.drop(phone.peer)
@@ -231,8 +231,8 @@ class RemoteTests {
         phone.reconcile()
         phone.sound.positionMs = 31_000
         phone.reconcile()
-        assertEquals("a play made offline, pending", pending + 2, phone.peer.pendingLen)
-        assertEquals(2, phone.peer.query("recently_played", emptyMap()).asList().size)
+        assertEquals("a play made offline, pending", 1, phone.peer.peer.status().pending.toInt())
+        assertEquals(2, plays().size)
     }
 
     /**
@@ -248,14 +248,14 @@ class RemoteTests {
         val hall = Hall()
         val phone = hall.on("phone", true)
         val laptop = hall.on("laptop", true, "computer")
-        phone.call("start", Inputs.start(queue, 0, 0, ""))
+        phone.call("start") { start(Inputs.start(queue, 0, 0, "")) }
         phone.reconcile()
         laptop.reconcile()
 
         hall.drop(phone.peer)
         phone.reconcile()
         assertTrue("offline, its own session: it plays on", phone.sound.playing)
-        laptop.call("skip", Inputs.skip(1))
+        laptop.call("skip") { skip(Inputs.skip(1)) }
         laptop.reconcile()
         assertTrue("the laptop took the sound: the phone that had it is away", laptop.sound.playing)
 
@@ -279,7 +279,7 @@ class RemoteTests {
     fun comingBackPlayingToAQuietSessionMakesItThisOne() {
         val hall = Hall()
         val phone = hall.on("phone", true)
-        phone.call("start", Inputs.start(queue, 0, 0, ""))
+        phone.call("start") { start(Inputs.start(queue, 0, 0, "")) }
         phone.reconcile()
 
         hall.drop(phone.peer)
@@ -312,7 +312,7 @@ class RemoteTests {
     fun aPhoneUnlinkedIsItsOwnSession() {
         val hall = Hall()
         val phone = hall.on("phone", true)
-        phone.call("start", Inputs.start(queue, 0, 0, ""))
+        phone.call("start") { start(Inputs.start(queue, 0, 0, "")) }
         phone.reconcile()
         hall.drop(phone.peer)
         phone.sound.pause()
@@ -335,7 +335,7 @@ class RemoteTests {
     fun aStallIsSaidAndNotFought() {
         val hall = Hall()
         val phone = hall.on("phone", true)
-        phone.call("start", Inputs.start(queue, 0, 5_000, ""))
+        phone.call("start") { start(Inputs.start(queue, 0, 5_000, "")) }
         phone.reconcile()
         phone.sound.playing = false
         phone.sound.stalled = true

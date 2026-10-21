@@ -1,176 +1,169 @@
 //! The explorer's model, without a window (`docs/plan-guards.md` D4): what a
-//! cell edit and a row delete become and which writer they reach, what the
-//! console runs, what a cell's text reads back as, and how the keys walk it.
+//! cell edit and a row delete become and which writer they reach, what a
+//! cell's or a field's text reads back as, how a table sorts and lights what
+//! changed, what a call becomes, and how the keys walk it — over a domain of
+//! two tables written in Rust (§1.16).
 
-// The row structs are the vocabulary's: a body reads their fields only
-// natively.
-#![allow(dead_code)]
+use std::sync::OnceLock;
 
-use ark::authoring::*;
-use ark::eval::{Args, Ctx};
-use ark::store::{Change, MemoryStore, Store};
-use ark::value::{TableName, Value};
+use ark::domain::Domain;
+use ark::log::EntryId;
+use ark::peer::Ctx;
+use ark::prelude::*;
+use ark::store::{Change, Store};
 use iced::keyboard::{key::Named, Key, Modifiers};
 
-use crate::data::{crud_of, CrudVerbs, NoLog, Source, Ticket, Writer};
-use crate::edit::{cell_text, console, parse_cell, route_delete, route_edit, Route, Via};
-use crate::model::{Explorer, Msg, Outcome, Screen};
+use crate::data::{crud_of, Catalog, CrudVerbs, NoLog, Source, Ticket, Writer};
+use crate::edit::{route_delete, route_edit, Route, Via};
+use crate::form::{self, Callable, Field, Form, Kind};
+use crate::model::{Called, Explorer, Grid, Msg, Outcome, Screen, FADE_MS, MAX_CHARS, MIN_CHARS};
+use crate::value::{self, parse_cell, text_of as cell_text, Ty, Value};
 
-pub struct People {
-    pub team: Table<Team>,
-    pub user: Table<User>,
-}
-impl Tables for People {
-    fn open() -> Self {
-        People {
-            team: table(),
-            user: table(),
-        }
-    }
-}
+// A user table with its CRUD exposed, a team table with none, one query,
+// and two mutations of the domain's own on a second router.
 
+#[derive(Serialize, Deserialize, Row, Clone, Debug, PartialEq, Eq)]
 pub struct Team {
-    pub name: Text,
-    pub size: Int,
-}
-impl Row for Team {
-    const NAME: &str = "team";
-    type Key = (Text,);
-    fn columns() -> Columns<Self> {
-        columns().text(Self::name).int(Self::size).key((Self::name,))
-    }
-}
-#[allow(non_upper_case_globals)]
-impl Team {
-    pub const name: Col<Self, Text> = col("name");
-    pub const size: Col<Self, Int> = col("size");
+    #[ark(key)]
+    pub name: String,
+    pub size: i64,
 }
 
+#[derive(Serialize, Deserialize, Row, Clone, Debug, PartialEq, Eq)]
 pub struct User {
+    #[ark(key)]
     pub id: Id<User>,
-    pub name: Text,
-    pub team: Text,
-    pub admin: Bool,
-    pub email: Opt<Text>,
-}
-impl Row for User {
-    const NAME: &str = "user";
-    type Key = (Id<User>,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .id(Self::id)
-            .text(Self::name)
-            .text(Self::team)
-            .refs::<Team>()
-            .bool(Self::admin)
-            .text(Self::email)
-            .nullable()
-            .key((Self::id,))
-    }
-}
-#[allow(non_upper_case_globals)]
-impl User {
-    pub const id: Col<Self, Id<Self>> = col("id");
-    pub const name: Col<Self, Text> = col("name");
-    pub const team: Col<Self, Text> = col("team");
-    pub const admin: Col<Self, Bool> = col("admin");
-    pub const email: Col<Self, Opt<Text>> = col("email");
+    pub name: String,
+    #[ark(refs(Team))]
+    pub team: String,
+    pub admin: bool,
+    pub email: Option<String>,
 }
 
+#[derive(Schema)]
+#[allow(dead_code)]
+pub struct People {
+    pub team: Team,
+    pub user: User,
+}
+
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
+pub struct UserKey {
+    pub id: Id<User>,
+}
+
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
 pub struct OfTeam {
-    pub team: Text,
-}
-impl Input for OfTeam {
-    fn schema() -> Object<Self> {
-        object().field("team", text())
-    }
+    pub team: String,
 }
 
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
 pub struct NewTeam {
-    pub name: Text,
-    pub size: Int,
-}
-impl Input for NewTeam {
-    fn schema() -> Object<Self> {
-        object()
-            .field("name", text().trim().min(1).why("a team needs a name").max(12))
-            .field("size", int().range(1, 10))
-    }
+    #[ark(trim, non_empty, why = "a team needs a name")]
+    #[ark(len = "0..=12")]
+    pub name: String,
+    #[ark(range = "1..=10", why = "between 1 and 10")]
+    pub size: i64,
 }
 
-pub struct Level;
-impl Variants for Level {
-    const VARIANTS: &'static [&'static str] = &["low", "high"];
+#[derive(Serialize, Deserialize, Describe, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Low,
+    High,
 }
 
 /// A mutation over every kind of field a form draws.
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
 pub struct Kick {
     pub user: Id<User>,
-    pub why: Opt<Text>,
-    pub tags: List<Text>,
-    pub level: Text,
-    pub loud: Bool,
-}
-impl Input for Kick {
-    fn schema() -> Object<Self> {
-        object()
-            .field("user", id::<User>().exists())
-            .field("why", opt(text()))
-            .field("tags", text().list().non_empty())
-            .field("level", enum_::<Level>())
-            .field("loud", bool_())
-    }
+    pub why: Option<String>,
+    #[ark(non_empty)]
+    pub tags: Vec<String>,
+    pub level: Level,
+    pub loud: bool,
 }
 
-/// A user table with its CRUD exposed, a team table with none, one query,
-/// and two mutations of the module's own on a second router.
-fn module() -> ark::ir::Module {
-    let people = router::<People>("people");
-    let teams = router::<People>("teams");
-    Module::new((
-        people.routes((
-            people.crud::<User>(),
-            people.input::<OfTeam>().query("members", |_ctx, db, input| {
-                db.user.filter(User::team.eq(input.team)).order_by(User::name.asc())
-            }),
-        )),
-        teams.routes((
-            teams.input::<NewTeam>().mutation("make_team", |_ctx, db, input| {
-                db.team.insert(Team {
-                    name: input.name,
-                    size: input.size,
-                })
-            }),
-            teams.input::<Kick>().mutation("kick", |_ctx, db, input| db.user.delete((input.user,))),
-        )),
-    ))
-    .build()
-    .clone()
+#[mutator("people.insert_user")]
+pub fn insert_user(_: &Ctx, db: &mut Db<People>, input: User) -> Result<(), Refusal> {
+    db.user.insert(input)
+}
+
+#[mutator("people.update_user")]
+pub fn update_user(_: &Ctx, db: &mut Db<People>, input: User) -> Result<(), Refusal> {
+    db.user.update(input)
+}
+
+#[mutator("people.put_user")]
+pub fn put_user(_: &Ctx, db: &mut Db<People>, input: User) -> Result<(), Refusal> {
+    db.user.put(input)
+}
+
+#[mutator("people.delete_user")]
+pub fn delete_user(_: &Ctx, db: &mut Db<People>, input: UserKey) -> Result<(), Refusal> {
+    db.user.delete(input.id)
+}
+
+#[view("people.members")]
+pub fn members(_: &Ctx, _: &Db<People>, input: OfTeam) -> Result<Plan<People, User>, Refusal> {
+    Ok(scan::<People, User>().filter(move |u| u.team == input.team).sort(|u| u.name.clone()))
+}
+
+#[mutator("teams.make_team")]
+pub fn make_team(_: &Ctx, db: &mut Db<People>, input: NewTeam) -> Result<(), Refusal> {
+    db.team.insert(Team {
+        name: input.name,
+        size: input.size,
+    })
+}
+
+#[mutator("teams.kick")]
+pub fn kick(_: &Ctx, db: &mut Db<People>, input: Kick) -> Result<(), Refusal> {
+    if !db.user.has(input.user) {
+        return Err(Refusal::new("no such user"));
+    }
+    db.user.delete(input.user)
+}
+
+fn domain() -> &'static Domain {
+    static D: OnceLock<Domain> = OnceLock::new();
+    D.get_or_init(|| {
+        ark::register!(Domain::new::<People>("people", "1");
+            insert_user, update_user, put_user, delete_user, members, make_team, kick)
+    })
+}
+
+fn catalog() -> &'static Catalog {
+    static C: OnceLock<Catalog> = OnceLock::new();
+    C.get_or_init(|| Catalog::of(domain()))
+}
+
+fn id(k: u8) -> Id<User> {
+    let mut i = [0u8; 16];
+    i[15] = k;
+    Id::new(i)
 }
 
 fn uid(k: u8) -> Value {
-    let mut i = [0u8; 16];
-    i[15] = k;
-    Value::Id(i)
+    Value::Id(id(k).0)
 }
 
-fn store(m: &ark::ir::Module) -> MemoryStore {
-    let mut st = MemoryStore::empty(m.schema.clone());
-    let row = |pairs: &[(&str, Value)]| pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
-    st.put("team", row(&[("name", Value::text("blue")), ("size", Value::Int(2))])).unwrap();
-    st.put("team", row(&[("name", Value::text("red")), ("size", Value::Int(1))])).unwrap();
+fn user(k: u8, name: &str, team: &str) -> User {
+    User {
+        id: id(k),
+        name: name.into(),
+        team: team.into(),
+        admin: false,
+        email: None,
+    }
+}
+
+fn store() -> Store {
+    let mut st = Store::new(domain().schema.clone());
+    for (name, size) in [("blue", 2), ("red", 1)] {
+        st.put("team", Team { name: name.into(), size }.to_bytes()).unwrap();
+    }
     for (k, name, team) in [(1, "ann", "blue"), (2, "bob", "blue"), (3, "cat", "red")] {
-        st.put(
-            "user",
-            row(&[
-                ("id", uid(k)),
-                ("name", Value::text(name)),
-                ("team", Value::text(team)),
-                ("admin", Value::Bool(false)),
-                ("email", Value::Null),
-            ]),
-        )
-        .unwrap();
+        st.put("user", user(k, name, team).to_bytes()).unwrap();
     }
     st
 }
@@ -179,20 +172,20 @@ fn store(m: &ark::ir::Module) -> MemoryStore {
 /// authority's.
 #[derive(Default)]
 struct Recorder {
-    exposed: Vec<(TableName, CrudVerbs)>,
+    exposed: Vec<(String, CrudVerbs)>,
     authority: bool,
-    authored: Vec<(String, Args)>,
+    authored: Vec<(String, Vec<u8>)>,
     raws: Vec<Change>,
     /// Every raw write asked for, refused or not.
     asked_raw: usize,
 }
 
 impl Writer for Recorder {
-    fn exposed(&self) -> Vec<(TableName, CrudVerbs)> {
+    fn exposed(&self) -> Vec<(String, CrudVerbs)> {
         self.exposed.clone()
     }
-    fn author(&mut self, function: &str, args: Args) -> Result<Ticket, String> {
-        self.authored.push((function.into(), args));
+    fn author(&mut self, function: &str, input: Vec<u8>) -> Result<Ticket, String> {
+        self.authored.push((function.into(), input));
         Ok(Ticket(self.authored.len().to_string()))
     }
     fn raw(&mut self, change: Change) -> Result<(), String> {
@@ -208,21 +201,35 @@ impl Writer for Recorder {
     }
 }
 
-fn writer(m: &ark::ir::Module, authority: bool) -> Recorder {
+fn exposed() -> Vec<(String, CrudVerbs)> {
+    crud_of(catalog())
+        .into_iter()
+        .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
+        .collect()
+}
+
+fn writer(authority: bool) -> Recorder {
     Recorder {
-        exposed: crud_of(m).into_iter().map(|(t, v)| (t, CrudVerbs { may_author: true, ..v })).collect(),
+        exposed: exposed(),
         authority,
         ..Recorder::default()
     }
 }
 
-fn source<'a>(m: &'a ark::ir::Module, st: &'a MemoryStore) -> Source<'a> {
+fn source(st: &Store) -> Source<'_> {
     Source {
         store: st,
-        schema: &m.schema,
-        module: m,
+        catalog: catalog(),
+        ask: Some(domain()),
         log: &NoLog,
-        ctx: Ctx::new("alice", "s1"),
+        ctx: Ctx {
+            draws: Default::default(),
+            id: EntryId::of("s1", 0),
+            actor: "alice".into(),
+            session: "s1".into(),
+            roles: vec![],
+            now: 0,
+        },
     }
 }
 
@@ -234,38 +241,49 @@ fn named(n: Named) -> Msg {
     Msg::Key(Key::Named(n), Modifiers::empty())
 }
 
-/// `crud_of` finds the four a `crud` declares, by name and input — the
-/// table without one has none, and a mutator of the right name that does
-/// not take the row's columns (or the key's) is not one. Falsified by
-/// recognising the verbs by name alone: the delete whose input was renamed
-/// was still counted.
+/// What a mutation was authored with, read as its input.
+fn input<T: ark::format::Encode>(w: &Recorder) -> (String, T) {
+    let (f, b) = w.authored.last().expect("authored");
+    (f.clone(), T::from_bytes(b).unwrap_or_else(|e| panic!("{f}: {e}")))
+}
+
+fn at(name: &str) -> usize {
+    crate::form::callables(catalog())
+        .iter()
+        .position(|c| c.name.ends_with(&format!(".{name}")))
+        .unwrap_or_else(|| panic!("no {name}"))
+}
+
+/// `crud_of` finds the four a domain names, by name and input — the table
+/// without one has none, and a mutator of the right name that does not take
+/// the row (or the key) is not one. Falsified by recognising the verbs by
+/// name alone: a delete taking `make_team`'s input was still counted.
 #[test]
-fn the_exposed_crud_is_read_off_the_module() {
-    let m = module();
-    let crud = crud_of(&m);
+fn the_exposed_crud_is_read_off_the_domain() {
+    let crud = crud_of(catalog());
     assert_eq!(crud.len(), 1, "{crud:?}");
     let (t, v) = &crud[0];
     assert_eq!(t, "user");
     assert!(v.insert && v.update && v.delete && v.put && !v.may_author);
-    let mut odd = m.clone();
-    for f in odd.functions.iter_mut().filter(|f| f.name == "delete_user") {
-        f.input[0].0 = "who".into();
+    let mut odd = catalog().clone();
+    let make = odd.get("teams.make_team").unwrap().input.clone();
+    for f in odd.functions.iter_mut().filter(|f| f.name == "people.delete_user") {
+        f.input = make.clone();
     }
     assert!(!crud_of(&odd)[0].1.delete, "a delete that does not take the key is not the CRUD verb");
 }
 
 /// A cell edit on a table whose CRUD is exposed goes through its
-/// `update_<t>`, authored, the new row's columns as its arguments, and
-/// reaches no raw writer — on a client and at the authority alike, unless
-/// the switch says raw. Falsified by routing an edit raw whenever the
-/// writer can: the authority's edit of a user went raw.
+/// `update_<t>`, authored with the new row as its input, and reaches no raw
+/// writer — on a client and at the authority alike, unless the switch says
+/// raw. Falsified by routing an edit raw whenever the writer can: the
+/// authority's edit of a user went raw.
 #[test]
 fn an_edit_goes_through_the_exposed_update() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
+    let st = store();
+    let src = source(&st);
     for authority in [false, true] {
-        let mut w = writer(&m, authority);
+        let mut w = writer(authority);
         let mut ex = Explorer::new();
         ex.update(Msg::Open("user".into()), &src, &mut w);
         ex.update(Msg::Cell(1, 1), &src, &mut w);
@@ -274,12 +292,10 @@ fn an_edit_goes_through_the_exposed_update() {
         ex.update(Msg::EditText("robert".into()), &src, &mut w);
         ex.update(Msg::Commit, &src, &mut w);
         assert!(w.raws.is_empty(), "{:?}", w.raws);
-        let (f, args) = w.authored.last().expect("authored");
-        assert_eq!(f, "update_user");
-        assert_eq!(args.get("name"), Some(&Value::text("robert")));
-        assert_eq!(args.get("id"), Some(&uid(2)));
-        assert_eq!(args.len(), 5, "every column");
-        assert!(ex.note.contains("through update_user"), "{}", ex.note);
+        let (f, u): (String, User) = input(&w);
+        assert_eq!(f, "people.update_user");
+        assert_eq!(u, user(2, "robert", "blue"), "every column, the name changed");
+        assert!(ex.note.contains("through people.update_user"), "{}", ex.note);
     }
 }
 
@@ -289,10 +305,9 @@ fn an_edit_goes_through_the_exposed_update() {
 /// client's switch said "writing raw".
 #[test]
 fn the_switch_writes_raw_at_the_authority_alone() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, true);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(true);
     let mut ex = Explorer::new();
     ex.update(Msg::Open("user".into()), &src, &mut w);
     ex.update(key("R"), &src, &mut w);
@@ -303,15 +318,20 @@ fn the_switch_writes_raw_at_the_authority_alone() {
     ex.update(Msg::Commit, &src, &mut w);
     assert!(w.authored.is_empty());
     match w.raws.as_slice() {
-        [Change::Edit(t, old, new)] => {
-            assert_eq!(t, "user");
-            assert_eq!(old.get("admin"), Some(&Value::Bool(false)));
-            assert_eq!(new.get("admin"), Some(&Value::Bool(true)));
-            assert_eq!(old.get("id"), new.get("id"));
+        [Change::Edit { table, old, new }] => {
+            assert_eq!(table, "user");
+            assert_eq!(User::from_bytes(old).unwrap(), user(1, "ann", "blue"));
+            assert_eq!(
+                User::from_bytes(new).unwrap(),
+                User {
+                    admin: true,
+                    ..user(1, "ann", "blue")
+                }
+            );
         }
         other => panic!("{other:?}"),
     }
-    let mut client = writer(&m, false);
+    let mut client = writer(false);
     let mut ex = Explorer::new();
     ex.update(Msg::ToggleRaw, &src, &mut client);
     assert!(!ex.raw);
@@ -324,9 +344,8 @@ fn the_switch_writes_raw_at_the_authority_alone() {
 /// recorder refused it, but it was asked.
 #[test]
 fn a_table_with_no_crud_is_the_authoritys_alone() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
+    let st = store();
+    let src = source(&st);
     let edit_size = |w: &mut Recorder| {
         let mut ex = Explorer::new();
         ex.update(Msg::Open("team".into()), &src, w);
@@ -336,62 +355,69 @@ fn a_table_with_no_crud_is_the_authoritys_alone() {
         ex.update(Msg::Commit, &src, w);
         ex
     };
-    let mut authority = writer(&m, true);
+    let mut authority = writer(true);
     edit_size(&mut authority);
-    assert!(matches!(authority.raws.as_slice(), [Change::Edit(t, _, new)] if t == "team" && new.get("size") == Some(&Value::Int(7))));
-    let mut client = writer(&m, false);
+    assert!(
+        matches!(authority.raws.as_slice(), [Change::Edit { table, new, .. }] if table == "team" && Team::from_bytes(new).unwrap().size == 7),
+        "{:?}",
+        authority.raws
+    );
+    let mut client = writer(false);
     let ex = edit_size(&mut client);
     assert!(client.asked_raw == 0 && client.authored.is_empty(), "no writer is reached");
     assert!(ex.note.contains("not the authority"), "{}", ex.note);
     assert!(ex.editing.is_some(), "the edit is kept, to be fixed or dropped");
 }
 
-/// A row delete: through `delete_<t>` with the key as its arguments where
-/// it is exposed, raw where the host is the authority, refused where it is
-/// neither. Falsified by giving the delete every column: the arguments were
-/// not the key's.
+/// A row delete: through `delete_<t>` with the key as its input where it is
+/// exposed, raw where the host is the authority, refused where it is
+/// neither. Falsified by giving the delete the whole row: its input did not
+/// read as the key.
 #[test]
 fn a_delete_goes_through_delete_or_raw() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, true);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(true);
     let mut ex = Explorer::new();
     ex.update(Msg::Open("user".into()), &src, &mut w);
     ex.update(named(Named::ArrowDown), &src, &mut w);
     ex.update(key("x"), &src, &mut w);
-    let (f, args) = w.authored.last().expect("a delete");
-    assert_eq!(f, "delete_user");
-    assert_eq!(args.keys().collect::<Vec<_>>(), ["id"]);
-    assert_eq!(args["id"], uid(2));
-    let team = st.scan("team")[0].clone();
+    let (f, k): (String, UserKey) = input(&w);
+    assert_eq!(f, "people.delete_user");
+    assert_eq!(k.id, id(2));
+    let team = st.rows("team").next().unwrap().to_vec();
     let authority = Via {
         verbs: None,
         can_raw: true,
         force_raw: false,
     };
+    let m = catalog();
     assert_eq!(
-        route_delete(&m.schema, authority, "team", &team),
-        Ok(Route::Raw(Change::Remove("team".into(), team.clone())))
+        route_delete(m, authority, "team", &team),
+        Ok(Route::Raw(Change::Remove {
+            table: "team".into(),
+            row: team.clone()
+        }))
     );
-    assert!(route_delete(&m.schema, Via::default(), "team", &team).is_err());
+    assert!(route_delete(m, Via::default(), "team", &team).is_err());
 }
 
 /// A key column names the row and is not edited, by either route. Falsified
 /// by letting it through: the update carried a moved key.
 #[test]
 fn a_key_is_not_edited() {
-    let m = module();
-    let st = store(&m);
-    let old = st.scan("user")[0].clone();
-    let verbs = crud_of(&m)[0].1;
-    let verbs = CrudVerbs { may_author: true, ..verbs };
+    let st = store();
+    let old = st.rows("user").next().unwrap().to_vec();
+    let verbs = CrudVerbs {
+        may_author: true,
+        ..exposed()[0].1
+    };
     let via = Via {
         verbs: Some(&verbs),
         can_raw: true,
         force_raw: false,
     };
-    let r = route_edit(&m.schema, via, "user", &old, "id", uid(9));
+    let r = route_edit(catalog(), via, "user", &old, "id", uid(9));
     assert!(matches!(&r, Err(why) if why.contains("part of the key")), "{r:?}");
 }
 
@@ -400,9 +426,11 @@ fn a_key_is_not_edited() {
 /// showing a bool as `yes`: the round trip failed.
 #[test]
 fn a_cell_reads_back_as_its_column() {
-    let m = module();
-    let user = m.schema.lookup_table("user").unwrap();
-    let col = |n: &str| user.column(n).unwrap();
+    let d = domain();
+    let ty = |t: &str, c: &str| {
+        let (_, tbl) = d.schema.table(t).unwrap();
+        value::column_ty(&tbl.columns[tbl.column(c).unwrap()])
+    };
     for (c, v) in [
         ("id", uid(7)),
         ("name", Value::text("  spaced  ")),
@@ -410,45 +438,13 @@ fn a_cell_reads_back_as_its_column() {
         ("email", Value::Null),
         ("email", Value::text("a@b")),
     ] {
-        assert_eq!(parse_cell(col(c), &cell_text(&v)), Ok(v.clone()), "{c}");
+        assert_eq!(parse_cell(c, &ty("user", c), &cell_text(&v)), Ok(v.clone()), "{c}");
     }
-    let team = m.schema.lookup_table("team").unwrap();
-    assert_eq!(parse_cell(team.column("size").unwrap(), "-3"), Ok(Value::Int(-3)));
-    assert!(parse_cell(team.column("size").unwrap(), "three").unwrap_err().contains("size"));
-    assert!(parse_cell(col("admin"), "yes").is_err());
-    assert!(parse_cell(col("id"), "beef").is_err());
-    assert_eq!(parse_cell(col("email"), ""), Ok(Value::Null), "an empty nullable cell is nothing");
-}
-
-/// The console runs a query by name with its arguments, and a plan in the
-/// IR's form, read-only; a mutator's name is refused. Falsified by running
-/// whatever is named through `query_as` without the kind check: a mutator
-/// was run as a query, and came back a bug rather than a refusal.
-#[test]
-fn the_console_runs_queries_alone() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let got = console(&src, "members", r#"{"team": "blue"}"#).expect("members of blue");
-    let names: Vec<String> = got.as_list().iter().map(|r| r.field("name").as_text().to_string()).collect();
-    assert_eq!(names, ["ann", "bob"]);
-    let plan = m.lookup_function("members").and_then(|f| f.plan.clone()).unwrap();
-    let mut whole = plan.clone();
-    whole.filter = None;
-    let text = ark::json::json(&ark::ir::plan_value(&whole));
-    let every = console(&src, &text, "").expect("the plan runs");
-    assert_eq!(every.as_list().len(), 3);
-    let refused = console(&src, "put_user", "{}").unwrap_err();
-    assert!(refused.contains("runs queries alone"), "{refused}");
-    assert!(console(&src, "nope", "").is_err());
-    let mut ex = Explorer::new();
-    let mut w = writer(&m, false);
-    ex.update(Msg::Show(Screen::Console), &src, &mut w);
-    ex.update(Msg::Query("members".into()), &src, &mut w);
-    ex.update(Msg::Args(r#"{"team": "red"}"#.into()), &src, &mut w);
-    ex.update(named(Named::Enter), &src, &mut w);
-    assert!(matches!(&ex.answer, Some(Ok(s)) if s.contains("cat")), "{:?}", ex.answer);
-    assert!(w.authored.is_empty() && w.raws.is_empty(), "the console writes nothing");
+    assert_eq!(parse_cell("size", &ty("team", "size"), "-3"), Ok(Value::Int(-3)));
+    assert!(parse_cell("size", &ty("team", "size"), "three").unwrap_err().contains("size"));
+    assert!(parse_cell("admin", &ty("user", "admin"), "yes").is_err());
+    assert!(parse_cell("id", &ty("user", "id"), "beef").is_err());
+    assert_eq!(parse_cell("email", &ty("user", "email"), ""), Ok(Value::Null), "an empty option is none");
 }
 
 /// The keys: `j` and `k` walk the tables, `<Enter>` opens one, `l` walks its
@@ -457,10 +453,9 @@ fn the_console_runs_queries_alone() {
 /// the explorer could not be left by the keyboard.
 #[test]
 fn the_keys_walk_open_and_close() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     ex.update(key("j"), &src, &mut w);
     assert_eq!(ex.tables_at, 1);
@@ -478,7 +473,7 @@ fn the_keys_walk_open_and_close() {
     ex.update(named(Named::Tab), &src, &mut w);
     assert_eq!(ex.screen, Screen::Log);
     ex.update(named(Named::Tab), &src, &mut w);
-    assert_eq!(ex.screen, Screen::Console);
+    assert_eq!(ex.screen, Screen::Functions);
     assert_eq!(ex.update(named(Named::Escape), &src, &mut w), Outcome::Close);
 }
 
@@ -487,19 +482,18 @@ fn the_keys_walk_open_and_close() {
 /// Falsified by a panic in the log's view: the test failed.
 #[test]
 fn every_screen_draws() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
+    let st = store();
+    let src = source(&st);
     for authority in [false, true] {
-        let w = writer(&m, authority);
+        let w = writer(authority);
         let mut ex = Explorer::new();
-        for s in [Screen::Tables, Screen::Table("user".into()), Screen::Log, Screen::Console] {
+        for s in [Screen::Tables, Screen::Table("user".into()), Screen::Log, Screen::Functions] {
             ex.screen = s;
             let _ = ex.view(&src, &w);
         }
         ex.editing = Some(crate::model::Editing {
             table: "user".into(),
-            key: vec![uid(1)],
+            key: id(1).to_bytes(),
             column: "name".into(),
             text: "ann".into(),
         });
@@ -508,64 +502,43 @@ fn every_screen_draws() {
     }
 }
 
+/// The admin state as the server would send it for this domain and store.
+fn state(st: &Store, exposed: Vec<(String, CrudVerbs)>) -> crate::wire::State {
+    crate::wire::State {
+        catalog: catalog().clone(),
+        rows: st.snapshot_rows(),
+        head: 0,
+        lines: vec![],
+        connections: vec![],
+        exposed,
+        raw: true,
+        who: "authority".into(),
+    }
+}
+
 /// The admin page's wire reads back as itself: the state, a raw write's
 /// body and a mutation's. Falsified by reading `may_author` from the
 /// insert's field: the exposure came back authorable where it was not.
 #[test]
 fn the_admin_wire_reads_back() {
-    use crate::data::{Connection, Line, Verified};
+    use crate::data::{Connection, Line};
     use crate::wire::{author_body, author_from, raw_body, raw_from, State};
-    let m = module();
-    let st = store(&m);
+    let st = store();
     let entry = ark::log::Entry {
-        id: [7; 16],
-        actor: ark::raw::AUTHOR.into(),
+        id: EntryId([7; 16]),
+        actor: "authority".into(),
         session: "server-1".into(),
-        roles: Default::default(),
-        fn_hash: ark::raw::Raw::PutRow.hash().clone(),
-        args: Args::new(),
-        autos: Args::new(),
+        origin: Default::default(),
+        local: 1,
+        roles: vec![],
+        func: "teams.make_team".into(),
+        input: b"null".to_vec(),
+        now: 5,
     };
-    let row = st.scan("team")[0].clone();
-    let state = State {
-        module: ark::canon::encode(&ark::ir::module_value(&m)),
-        store: st.store_value(),
-        head: 3,
-        lines: vec![
-            Line {
-                seq: Some(3),
-                entry: entry.clone(),
-                function: "ark.put_row".into(),
-                facts: Some(vec![Change::Add("team".into(), row.clone())]),
-                standing: "in the log".into(),
-            },
-            Line {
-                seq: None,
-                entry,
-                function: "put_user".into(),
-                facts: None,
-                standing: "pending".into(),
-            },
-        ],
-        connections: vec![Connection {
-            who: "alice".into(),
-            cursor: 2,
-            pending: None,
-            note: "1 behind".into(),
-        }],
-        verifies: vec![
-            Verified {
-                who: "alice".into(),
-                seq: 2,
-                answer: Some(true),
-            },
-            Verified {
-                who: "bob".into(),
-                seq: 9,
-                answer: None,
-            },
-        ],
-        exposed: vec![(
+    let row = st.rows("team").next().unwrap().to_vec();
+    let mut s = state(
+        &st,
+        vec![(
             "user".into(),
             CrudVerbs {
                 insert: true,
@@ -575,46 +548,69 @@ fn the_admin_wire_reads_back() {
                 may_author: false,
             },
         )],
-        raw: true,
-        who: "authority".into(),
+    );
+    s.head = 3;
+    s.lines = vec![
+        Line {
+            seq: Some(3),
+            entry: entry.clone(),
+            function: "teams.make_team".into(),
+            facts: Some(vec![Change::Add {
+                table: "team".into(),
+                row: row.clone(),
+            }]),
+            standing: "in the log".into(),
+        },
+        Line {
+            seq: None,
+            entry,
+            function: "people.put_user".into(),
+            facts: None,
+            standing: "pending".into(),
+        },
+    ];
+    s.connections = vec![Connection {
+        who: "alice".into(),
+        cursor: 2,
+        pending: None,
+        note: "1 behind".into(),
+    }];
+    assert_eq!(State::from_body(&s.to_body()), Ok(s.clone()));
+    let back = crate::admin::Loaded::of(State::from_body(&s.to_body()).unwrap()).expect("it loads");
+    assert_eq!(back.store.rows("user").collect::<Vec<_>>(), st.rows("user").collect::<Vec<_>>());
+    let change = Change::Edit {
+        table: "team".into(),
+        old: row.clone(),
+        new: Team {
+            name: "blue".into(),
+            size: 9,
+        }
+        .to_bytes(),
     };
-    assert_eq!(State::from_json(&state.to_json()), Ok(state.clone()));
-    let back = MemoryStore::from_value(m.schema.clone(), &State::from_json(&state.to_json()).unwrap().store);
-    assert_eq!(back.scan("user"), st.scan("user"));
-    let change = Change::Edit("team".into(), row.clone(), row.with("size", Value::Int(9)));
     assert_eq!(raw_from(&raw_body(&change)), Ok(change));
-    let mut args = Args::new();
-    args.insert("id".into(), uid(1));
-    assert_eq!(author_from(&author_body("delete_user", &args)), Ok(("delete_user".to_string(), args)));
+    let k = UserKey { id: id(1) }.to_bytes();
+    assert_eq!(
+        author_from(&author_body("people.delete_user", &k)),
+        Ok(("people.delete_user".to_string(), k))
+    );
 }
 
 /// The admin page's host: a state as the server sends it, read into a store
-/// the explorer edits like any other, and an edit asked of the server — raw
-/// with the switch on, through the CRUD the module exposes without it — as
-/// the request the server's routes read. Falsified by sending the edit's
-/// old row rather than its new: the raw request carried the name it had.
+/// and a library the explorer edits like any other, and an edit asked of
+/// the server — raw with the switch on, through the CRUD the module exposes
+/// without it — as the request the server's routes read. Falsified by
+/// sending the edit's old row rather than its new: the raw request carried
+/// the size it had.
 #[test]
 fn the_admin_page_asks_the_server_for_its_writes() {
     use crate::admin::{hello_of, Loaded, Message, Page, Request};
-    use crate::wire::{raw_from, State};
-    let m = module();
-    let st = store(&m);
-    let state = State {
-        module: ark::canon::encode(&ark::ir::module_value(&m)),
-        store: st.store_value(),
-        head: 0,
-        lines: vec![],
-        connections: vec![],
-        verifies: vec![],
-        exposed: crud_of(&m).into_iter().map(|(t, v)| (t, CrudVerbs { may_author: true, ..v })).collect(),
-        raw: true,
-        who: ark::raw::AUTHOR.into(),
-    };
+    use crate::wire::{body, raw_from, Hello};
+    let st = store();
     let mut page = Page::new("http://127.0.0.1:8788/".into(), None);
     assert_eq!(page.base, "http://127.0.0.1:8788");
-    let _ = page.update(Message::Loaded(Ok(state.to_json())));
+    let _ = page.update(Message::Loaded(Ok(state(&st, exposed()).to_body())));
     let l: &Loaded = page.loaded.as_ref().expect("the state reads");
-    assert_eq!(l.store.scan("user"), st.scan("user"));
+    assert_eq!(l.store.rows("user").collect::<Vec<_>>(), st.rows("user").collect::<Vec<_>>());
     let edit = |page: &mut Page, table: &str, row: usize, col: usize, to: &str| {
         let _ = page.update(Message::Explorer(Msg::Open(table.into())));
         let _ = page.update(Message::Explorer(Msg::Cell(row, col)));
@@ -625,8 +621,8 @@ fn the_admin_page_asks_the_server_for_its_writes() {
     edit(&mut page, "user", 0, 1, "anne");
     match page.sent.last() {
         Some(Request::Author(f, a)) => {
-            assert_eq!(f, "update_user");
-            assert_eq!(a.get("name"), Some(&Value::text("anne")));
+            assert_eq!(f, "people.update_user");
+            assert_eq!(User::from_bytes(a).unwrap().name, "anne");
         }
         other => panic!("{other:?}"),
     }
@@ -635,247 +631,321 @@ fn the_admin_page_asks_the_server_for_its_writes() {
     let Some(Request::Raw(change)) = page.sent.last().cloned() else {
         panic!("{:?}", page.sent)
     };
-    let (path, body) = Request::Raw(change.clone()).to();
+    let (path, b) = Request::Raw(change.clone()).to();
     assert_eq!(path, "/admin/api/raw");
-    assert_eq!(raw_from(&body), Ok(change.clone()));
+    assert_eq!(raw_from(&b), Ok(change.clone()));
     assert!(
-        matches!(&change, Change::Edit(t, _, new) if t == "team" && new.get("size") == Some(&Value::Int(5))),
+        matches!(&change, Change::Edit { table, new, .. } if table == "team" && Team::from_bytes(new).unwrap().size == 5),
         "{change:?}"
     );
-    assert_eq!(
-        hello_of(r#"{"open":false,"server":"https://h.example"}"#),
-        Ok((false, Some("https://h.example".into())))
-    );
-    assert_eq!(hello_of(r#"{"open":true,"server":null}"#), Ok((true, None)));
+    let said = Hello {
+        open: false,
+        server: Some("https://h.example".into()),
+    };
+    assert_eq!(hello_of(&body(&said)), Ok((false, Some("https://h.example".into()))));
+    assert_eq!(hello_of(&body(&Hello { open: true, server: None })), Ok((true, None)));
 }
 
-// -- the table's cells, the functions, their forms and the picker ----------
-
-use crate::cells::{self, Grid};
-use crate::form::{self, Callable, Called, Form};
-use ark::ir::{Field, FnKind};
-use ark::schema::Ty;
-
-fn row_of(m: &ark::ir::Module, table: &str, pairs: &[(&str, Value)]) -> ark::store::Row {
-    let tbl = m.schema.lookup_table(table).unwrap();
-    ark::store::Row::of(tbl, pairs.iter().map(|(k, v)| (k.to_string(), v.clone())))
-}
+// -- grids, sorting, and what changed ------------------------------------------
 
 /// A long value is cut to its column and never drawn past it; a column is as
-/// wide as its header and its values, within the bounds; an id is drawn as
-/// eight hex digits; and the detail line holds the whole of any of them.
-/// Falsified by returning the shown text uncut from `Grid::cell`: the
-/// two-hundred-character name came out 200 characters into a column of 36.
+/// wide as its heading and its values, within the bounds; an id is drawn as
+/// eight hex digits; the key's columns say so; and the detail line holds
+/// the whole of any of them. Falsified by returning the shown text uncut
+/// from `Grid::cell`: the 210-character name came out whole into a column
+/// of 36.
 #[test]
 fn a_long_value_never_exceeds_its_column() {
-    let m = module();
-    let mut st = store(&m);
+    let mut st = store();
     let long = "Variatio 25 a 2 Clav. (Adagio), from the Goldberg Variations, BWV 988 ".repeat(3);
     st.put(
         "user",
-        row_of(
-            &m,
-            "user",
-            &[
-                ("id", uid(9)),
-                ("name", Value::text(long.clone())),
-                ("team", Value::text("red")),
-                ("admin", Value::Bool(true)),
-                ("email", Value::Null),
-            ],
-        ),
+        User {
+            admin: true,
+            ..user(9, &long, "red")
+        }
+        .to_bytes(),
     )
     .unwrap();
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     ex.update(Msg::Open("user".into()), &src, &mut w);
-    let g = ex.table_grid(&src, "user");
+    let (g, _) = ex.lit_table(&src, "user");
     assert_eq!(g.columns, ["id", "name", "team", "admin", "email"]);
     assert_eq!(g.headings[0], "id \u{b7} key");
     for (c, w) in g.widths.iter().enumerate() {
-        assert!((cells::MIN_CHARS..=cells::MAX_CHARS).contains(w), "column {c}: {w}");
-        assert!(g.heading(c).chars().count() <= *w);
+        assert!((MIN_CHARS..=MAX_CHARS).contains(w), "column {c}: {w}");
         for r in 0..g.rows.len() {
             assert!(g.cell(r, c).chars().count() <= *w, "{} is wider than {w}", g.cell(r, c));
         }
     }
     let at = g.rows.iter().position(|r| r[1] == Value::text(long.clone())).expect("the long row");
-    assert_eq!(g.widths[1], cells::MAX_CHARS, "a long column stops at the most");
+    assert_eq!(g.widths[1], MAX_CHARS, "a long column stops at the most");
     let drawn = g.cell(at, 1);
     let (start, end) = drawn.split_once('\u{2026}').expect("the long value is cut");
-    assert!(
-        long.starts_with(start) && long.ends_with(end) && !end.is_empty(),
-        "{drawn}: its start and its end"
-    );
-    assert_eq!(g.widths[3], cells::MIN_CHARS, "a column of booleans is narrow");
+    assert!(long.starts_with(start) && long.ends_with(end) && !end.is_empty(), "{drawn}");
+    assert_eq!(g.widths[3], MIN_CHARS, "a column of booleans is narrow");
     assert_eq!(g.cell(at, 0), "00000000", "an id is its first eight hex digits");
     assert_eq!(g.detail(at, 1), Some(format!("name: {long}")), "the detail line is the whole value");
     assert_eq!(g.detail(at, 0), Some("id: 00000000-0000-0000-0000-000000000009".into()));
-    // And the explorer's own detail line follows the cursor.
     ex.update(Msg::Cell(at, 1), &src, &mut w);
     assert_eq!(ex.detail(&src), Some(format!("name: {long}")));
-    assert!(g.width_px() >= g.widths.iter().map(|w| cells::px(*w)).sum::<f32>());
 }
 
-/// A query's answer as a table: a list of structs is a row each under the
-/// union of their fields; a list of values one column; one value one row.
-/// Falsified by taking the columns from the first struct alone: the second
-/// row's `extra` had no column.
+/// A table sorts by any column — `s` on the cursor's, or a click on a
+/// heading — up, then down, the heading saying which; and what the cursor
+/// edits or deletes is the row drawn under it, sorted. Falsified by
+/// leaving the sort out of `Explorer::rows`: sorted down, the rows were
+/// still ann, bob, cat.
+#[test]
+fn a_table_sorts_by_a_column_and_edits_the_row_drawn() {
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
+    let mut ex = Explorer::new();
+    ex.update(Msg::Open("user".into()), &src, &mut w);
+    let names = |ex: &Explorer| ex.lit_table(&src, "user").0.rows.iter().map(|r| cell_text(&r[1])).collect::<Vec<_>>();
+    ex.update(key("l"), &src, &mut w);
+    ex.update(key("s"), &src, &mut w);
+    assert_eq!(names(&ex), ["ann", "bob", "cat"]);
+    assert!(ex.lit_table(&src, "user").0.headings[1].ends_with('\u{25b2}'));
+    ex.update(Msg::Sort(1), &src, &mut w);
+    assert_eq!(names(&ex), ["cat", "bob", "ann"], "the same column again sorts down");
+    ex.update(Msg::Sort(2), &src, &mut w);
+    assert_eq!(names(&ex), ["ann", "bob", "cat"], "by team: blue, blue, red");
+    ex.update(Msg::Sort(2), &src, &mut w);
+    assert_eq!(names(&ex)[0], "cat");
+    ex.update(Msg::Cell(0, 1), &src, &mut w);
+    ex.update(Msg::Edit, &src, &mut w);
+    ex.update(Msg::EditText("catherine".into()), &src, &mut w);
+    ex.update(Msg::Commit, &src, &mut w);
+    let (_, u): (String, User) = input(&w);
+    assert_eq!(u, user(3, "catherine", "red"));
+}
+
+/// A table on screen: when the host's store moves, a changed cell is lit,
+/// and only it; a new row is lit whole; all of it fades out over FADE_MS.
+/// By key, not by place: a row added above every other moves them all down
+/// one and lights none of them; a row taken away is simply not drawn.
+/// Falsified by diffing by place: the row added at the top was compared
+/// with ann, who used to be there, and lit only where the two differ.
+#[test]
+fn a_change_in_the_store_is_lit_by_key_and_fades() {
+    let st = store();
+    let mut w = writer(false);
+    let mut ex = Explorer::new();
+    ex.update(Msg::Open("user".into()), &source(&st), &mut w);
+    ex.observe(&source(&st), 1, 0);
+    let (_, quiet) = ex.lit_table(&source(&st), "user");
+    assert!(quiet.iter().all(|l| l.cells.iter().all(|s| *s == 0.0)), "nothing is lit on first sight");
+    // bob renamed, dan added above everyone, cat gone.
+    let mut moved = st.clone();
+    let rename = Change::Edit {
+        table: "user".into(),
+        old: user(2, "bob", "blue").to_bytes(),
+        new: user(2, "robert", "blue").to_bytes(),
+    };
+    moved.apply(&rename).unwrap();
+    moved.put("user", user(0, "dan", "red").to_bytes()).unwrap();
+    moved.delete("user", &key_of(id(3))).unwrap();
+    ex.observe(&source(&moved), 1, 500);
+    assert!(!ex.fading(), "the same generation is not a move: nothing is diffed");
+    ex.observe(&source(&moved), 2, 1000);
+    let (g, lights) = ex.lit_table(&source(&moved), "user");
+    assert_eq!(g.rows.iter().map(|r| cell_text(&r[1])).collect::<Vec<_>>(), ["dan", "ann", "robert"]);
+    assert!(lights[0].cells.iter().all(|s| *s == 1.0), "a new row is lit whole: {:?}", lights[0]);
+    assert!(
+        lights[1].cells.iter().all(|s| *s == 0.0),
+        "ann did not change, only moved: {:?}",
+        lights[1]
+    );
+    assert_eq!(lights[2].cells, [0.0, 1.0, 0.0, 0.0, 0.0], "only robert's name is lit");
+    assert!(ex.fading());
+    ex.observe(&source(&moved), 2, 1000 + FADE_MS / 2);
+    let (_, lights) = ex.lit_table(&source(&moved), "user");
+    assert!((lights[2].cells[1] - 0.75).abs() < 1e-6, "{:?}", lights[2]);
+    ex.observe(&source(&moved), 2, 1000 + FADE_MS + 1);
+    let (_, lights) = ex.lit_table(&source(&moved), "user");
+    assert!(lights.iter().all(|l| l.cells.iter().all(|s| *s == 0.0)));
+    assert!(!ex.fading());
+    ex.update(Msg::Open("team".into()), &source(&moved), &mut w);
+    ex.observe(&source(&moved), 3, 5000);
+    assert!(!ex.fading(), "a table seen for the first time lights nothing");
+    let _ = ex.view(&source(&moved), &w);
+}
+
+/// A query's answer as a grid: a list of records is a row each under the
+/// record's fields; a list of values one column; one value one row.
+/// Falsified by taking every answer as one column: the records' two fields
+/// were drawn as one.
 #[test]
 fn a_query_answer_is_a_grid() {
-    let s = |pairs: &[(&str, Value)]| Value::Struct(Box::new(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()));
-    let g = Grid::of_value(&Value::list(vec![
-        s(&[("name", Value::text("ann"))]),
-        s(&[("name", Value::text("bob")), ("extra", Value::Int(2))]),
-    ]));
+    let ty = Ty::Struct(vec![("name".into(), Ty::Text), ("extra".into(), Ty::Int)]);
+    let two = |n: &str, k: i64| Value::Struct(vec![Value::text(n), Value::Int(k)]);
+    let g = Grid::of_value(&ty, &Value::List(vec![two("ann", 1), two("bob", 2)]));
     assert_eq!(g.columns, ["name", "extra"]);
-    assert_eq!(g.rows[0][1], Value::Null);
     assert_eq!(g.cell(1, 1), "2");
-    let g = Grid::of_value(&Value::list(vec![Value::Int(1), Value::Int(2)]));
+    let g = Grid::of_value(&Ty::Int, &Value::List(vec![Value::Int(1), Value::Int(2)]));
     assert_eq!((g.columns.as_slice(), g.rows.len()), (&["value".to_string()][..], 2));
-    let g = Grid::of_value(&Value::Int(7));
+    let g = Grid::of_value(&Ty::Int, &Value::Int(7));
     assert_eq!(g.rows, vec![vec![Value::Int(7)]]);
 }
 
-/// The Functions screen lists every query and mutation of the module, by
-/// router in the order each router first appears, with its input and its
-/// checks as they are said. Falsified by listing mutations alone: `members`
-/// was missing.
+// -- the functions, their forms and the picker ---------------------------------
+
+/// The functions are every query and mutation of the module, by router in
+/// the order each router first appears, with its input — each field
+/// labelled by what the module says of it, its type said — and its checks,
+/// the module's refinements with their words. A query of a table's rows is
+/// labelled by the table's columns. Falsified by listing mutations alone:
+/// `members` was missing.
 #[test]
 fn every_query_and_mutation_is_listed_by_router() {
-    let m = module();
-    let all = form::callables(&m);
+    let all = form::callables(catalog());
     let names: Vec<(&str, &str)> = all.iter().map(|c| (c.router.as_str(), c.name.as_str())).collect();
     let routers: Vec<&str> = names.iter().map(|(r, _)| *r).collect();
     let first_teams = routers.iter().position(|r| *r == "teams").unwrap();
     assert!(routers[..first_teams].iter().all(|r| *r == "people"), "{names:?}");
     assert!(routers[first_teams..].iter().all(|r| *r == "teams"), "{names:?}");
     for want in ["members", "insert_user", "update_user", "delete_user", "put_user", "make_team", "kick"] {
-        assert!(names.iter().any(|(_, n)| *n == want), "{want} in {names:?}");
+        assert!(names.iter().any(|(_, n)| n.ends_with(want)), "{want} in {names:?}");
     }
-    assert!(all.iter().all(|c| matches!(c.kind, FnKind::Query | FnKind::Mutator)));
-    let kick = all.iter().find(|c| c.name == "kick").unwrap();
-    let said: Vec<String> = kick.input.iter().map(|(n, f)| format!("{n}: {}", form::ty_name(&f.ty))).collect();
+    let members = &all[at("members")];
+    assert_eq!(members.kind, Kind::Query);
+    assert_eq!(
+        members.columns.as_deref(),
+        Some(&["id", "name", "team", "admin", "email"].map(String::from)[..])
+    );
+    let said: Vec<String> = all[at("kick")]
+        .input
+        .iter()
+        .map(|(n, f)| format!("{n}: {}", value::ty_name(&f.ty)))
+        .collect();
     assert_eq!(
         said,
         [
             "user: id(user)",
             "why: option(text)",
             "tags: list(text)",
-            "level: enum(low | high)",
+            "level: enum(Low | High)",
             "loud: bool"
         ]
     );
-    let make = all.iter().find(|c| c.name == "make_team").unwrap();
+    let make = &all[at("make_team")];
     assert_eq!(
-        form::checks_said(&make.input[0].1),
-        ["trimmed", "min 1 char (\u{201c}a team needs a name\u{201d})", "max 12 chars"]
+        make.input[0].1.checks,
+        ["trimmed", "non-empty (\u{201c}a team needs a name\u{201d})", "max 12 chars"]
     );
-    assert_eq!(form::checks_said(&make.input[1].1), ["1 to 10"]);
+    assert_eq!(make.input[1].1.checks, ["between 1 and 10"]);
 }
 
-/// Every type reads from its input as its value, and what does not read is
-/// said with the field's name: a text, an int (a word refused), a bool, an
-/// enum, an option (none and some), a list (items added and taken out), a
-/// struct, an id (pasted with dashes, or refused), bytes. Falsified by
-/// dropping the option's "none" reading: `note`, at none, was refused as not
-/// an input of its type rather than read as none.
+/// Every type reads from its field's text as its value, the way a cell
+/// writes one, and what does not read is said with the field's name: a
+/// text, an int (a word refused), a bool, an enum, an option (none and
+/// some), a list, a record, an id (pasted with dashes, or refused), bytes, a
+/// sum with fields; and every value's text reads back as itself. Falsified
+/// by splitting a list at every comma: the records inside `tags` were cut
+/// in two, and the form did not read.
 #[test]
-fn every_type_reads_from_its_input() {
+fn every_type_reads_from_its_text() {
     let fs = |pairs: &[(&str, Ty)]| Ty::Struct(pairs.iter().map(|(k, t)| (k.to_string(), t.clone())).collect());
+    let at = fs(&[("x", Ty::Int), ("label", Ty::Text)]);
+    let sum = Ty::Sum(vec![
+        ("Dot".into(), vec![]),
+        ("Line".into(), vec![("0".into(), Ty::Int), ("1".into(), Ty::Text)]),
+    ]);
+    let fields = [
+        ("title", Ty::Text),
+        ("count", Ty::Int),
+        ("on", Ty::Bool),
+        ("level", Ty::Enum(vec!["Low".into(), "High".into()])),
+        ("note", Ty::Option(Box::new(Ty::Text))),
+        ("tags", Ty::List(Box::new(at.clone()))),
+        ("at", at),
+        ("who", Ty::Id("user".into())),
+        ("blob", Ty::Bytes),
+        ("shape", sum),
+    ];
+    let input = fields
+        .iter()
+        .map(|(n, ty)| {
+            (
+                n.to_string(),
+                Field {
+                    ty: ty.clone(),
+                    checks: vec![],
+                },
+            )
+        })
+        .collect();
     let callable = Callable {
         router: "r".into(),
-        name: "f".into(),
-        kind: FnKind::Mutator,
-        input: [
-            ("title", Ty::Text),
-            ("count", Ty::Int),
-            ("on", Ty::Bool),
-            ("level", Ty::Enum(vec!["low".into(), "high".into()])),
-            ("note", Ty::Option(Box::new(Ty::Text))),
-            ("tags", Ty::List(Box::new(Ty::Int))),
-            ("at", fs(&[("x", Ty::Int), ("label", Ty::Text)])),
-            ("who", Ty::Id("user".into())),
-            ("blob", Ty::Bytes),
-        ]
-        .into_iter()
-        .map(|(n, t)| (n.to_string(), Field::plain(t)))
-        .collect(),
+        name: "r.f".into(),
+        kind: Kind::Mutation,
+        input,
+        record: true,
+        returns: Ty::Int,
+        columns: None,
     };
     let mut f = Form::new(&callable);
-    let p = |xs: &[usize]| xs.to_vec();
-    f.set_text(&p(&[0]), "a title".into());
-    f.set_text(&p(&[1]), "twelve".into());
-    f.toggle(&p(&[2]));
-    f.choose(&p(&[3]), 1);
-    f.set_text(&p(&[4, 0]), "x".into()); // typed while it is none
-    f.add(&p(&[5]));
-    f.add(&p(&[5]));
-    f.add(&p(&[5]));
-    f.set_text(&p(&[5, 0]), "1".into());
-    f.set_text(&p(&[5, 1]), "2".into());
-    f.set_text(&p(&[5, 2]), "3".into());
-    f.remove(&p(&[5, 1]));
-    f.set_text(&p(&[6, 1]), "4".into()); // the struct's fields are in its type's order: label, x
-    f.set_text(&p(&[6, 0]), "here".into());
-    f.set_text(&p(&[7]), "00000000-0000-0000-0000-000000000002".into());
-    f.set_text(&p(&[8]), "beef".into());
+    let typed = [
+        "a title",
+        "twelve",
+        "true",
+        "#1",
+        "",
+        "[(1, a), (2, b)]",
+        "(4, here)",
+        "00000000-0000-0000-0000-000000000002",
+        "beef",
+        "#1(3, x)",
+    ];
+    f.values = typed.map(String::from).to_vec();
+    assert_eq!(f.read(), (None, vec![("count".to_string(), "count: a whole number".to_string())]));
+    f.values[1] = " 12 ".into();
     let (args, bad) = f.read();
-    assert_eq!(bad, [("count".to_string(), "count: a whole number".to_string())]);
-    assert_eq!(args["title"], Value::text("a title"));
-    assert_eq!(args["on"], Value::Bool(true));
-    assert_eq!(args["level"], Value::text("high"));
-    assert_eq!(args["note"], Value::Null, "an option at none is none, whatever was typed");
-    assert_eq!(args["tags"], Value::list(vec![Value::Int(1), Value::Int(3)]));
-    assert_eq!(args["at"].field("x"), Value::Int(4));
-    assert_eq!(args["at"].field("label"), Value::text("here"));
-    assert_eq!(args["who"], uid(2));
-    assert_eq!(args["blob"], Value::Bytes(vec![0xbe, 0xef].into()));
-    f.set_text(&p(&[1]), " 12 ".into());
-    f.toggle(&p(&[4]));
-    f.set_text(&p(&[7]), "not an id".into());
-    let (args, bad) = f.read();
-    assert_eq!(args["count"], Value::Int(12));
-    assert_eq!(args["note"], Value::text("x"));
-    assert_eq!(bad, [("who".to_string(), "who: an id, 32 hex digits".to_string())]);
-    // Every line of the form, nested ones under their field.
-    let labels: Vec<(usize, String)> = f.slots().into_iter().map(|s| (s.depth, s.label)).collect();
-    assert!(labels.contains(&(1, "value".into())), "the option's value, now it has one");
-    assert!(labels.contains(&(1, "2".into())), "the list's second item");
-    assert!(labels.contains(&(1, "label".into())) && labels.contains(&(1, "x".into())));
-    // `<Enter>` on a line: a bool flips, an enum moves on, a list grows.
-    f.activate(&p(&[2]));
-    f.activate(&p(&[3]));
-    f.activate(&p(&[5]));
-    let (args, _) = f.read();
-    assert_eq!(args["on"], Value::Bool(false));
-    assert_eq!(args["level"], Value::text("low"));
-    assert!(
-        f.read().1.iter().any(|(n, m)| n == "tags" && m == "tags.3: a whole number"),
-        "{:?}",
-        f.read().1
+    assert_eq!(bad, []);
+    let Some(Value::Struct(vs)) = &args else { panic!("{args:?}") };
+    let pair = |x: i64, l: &str| Value::Struct(vec![Value::Int(x), Value::text(l)]);
+    assert_eq!(
+        vs[..4],
+        [Value::text("a title"), Value::Int(12), Value::Bool(true), Value::Variant(1, vec![])]
     );
+    assert_eq!(vs[4], Value::Null, "an empty option is none");
+    assert_eq!(vs[5], Value::List(vec![pair(1, "a"), pair(2, "b")]));
+    assert_eq!(vs[6..9], [pair(4, "here"), uid(2), Value::Bytes(vec![0xbe, 0xef])]);
+    assert_eq!(vs[9], Value::Variant(1, vec![Value::Int(3), Value::text("x")]));
+    for ((n, ty), v) in fields.iter().zip(vs) {
+        assert_eq!(parse_cell(n, ty, &cell_text(v)).as_ref(), Ok(v), "{n} reads back");
+    }
+    let bytes = callable.input_bytes(args.as_ref().unwrap()).expect("it encodes");
+    let whole = Ty::Struct(callable.input.iter().map(|(n, f)| (n.clone(), f.ty.clone())).collect());
+    assert_eq!(value::decode(&whole, &bytes).ok(), args, "the bytes read back as the form");
+    f.values[5] = "[(1, a), (x, b)]".into();
+    f.values[7] = "not an id".into();
+    let (_, bad) = f.read();
+    assert_eq!(bad[0], ("tags".to_string(), "tags.2.1: a whole number".to_string()));
+    assert_eq!(bad[1], ("who".to_string(), "who: an id, 32 hex digits".to_string()));
 }
 
-/// The checks run before calling, with the module's own messages, and a call
-/// that fails them reaches no writer. Falsified by calling whatever the
-/// checks said: `make_team` was authored with an empty name.
+/// The checks run before calling, with the module's own messages — `parse`'s
+/// words, against the field they are in — and a call that fails them
+/// reaches no writer. Falsified by calling whatever the checks said:
+/// `make_team` was authored with an empty name.
 #[test]
 fn the_checks_run_before_calling_with_the_modules_messages() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
-    let at = form::callables(&m).iter().position(|c| c.name == "make_team").unwrap();
-    ex.update(Msg::Function(at), &src, &mut w);
-    assert_eq!(ex.screen, Screen::Call("make_team".into()));
+    ex.update(Msg::Function(at("make_team")), &src, &mut w);
+    assert_eq!(ex.screen, Screen::Call("teams.make_team".into()));
     ex.update(Msg::FormText(vec![0], "   ".into()), &src, &mut w);
     ex.update(Msg::FormText(vec![1], "11".into()), &src, &mut w);
     let f = ex.form().unwrap();
     assert_eq!(f.message("name"), Some("a team needs a name"));
-    assert_eq!(f.message("size"), Some("size: between 1 and 10"));
+    assert_eq!(f.message("size"), Some("between 1 and 10"));
     ex.update(Msg::Call, &src, &mut w);
     assert!(w.authored.is_empty(), "nothing is called that the checks refuse");
     assert!(ex.note.starts_with("not called: a team needs a name"), "{}", ex.note);
@@ -883,31 +953,30 @@ fn the_checks_run_before_calling_with_the_modules_messages() {
     ex.update(Msg::FormText(vec![1], "4".into()), &src, &mut w);
     assert_eq!(ex.form().unwrap().messages, vec![]);
     ex.update(key("r"), &src, &mut w);
-    let (f, args) = w.authored.last().expect("called");
-    assert_eq!(f, "make_team");
-    assert_eq!(args["name"], Value::text("green"), "sent as the checks normalised it");
-    assert_eq!(args["size"], Value::Int(4));
+    let (f, t): (String, NewTeam) = input(&w);
+    assert_eq!(f, "teams.make_team");
+    assert_eq!(t.name, "  green ", "the entry keeps the raw input; parse trims it when it runs");
+    assert_eq!(t.size, 4);
 }
 
-/// A query called from its form runs on the host's store with those
-/// arguments, and its rows are a table; the keys walk the answer until
-/// `<Esc>` hands them back to the form. Falsified by running it with no
-/// arguments: the query refused the missing team and there was no answer.
+/// A query called from its call screen runs on the host's store with that
+/// input, and its rows are a grid under the table's columns; the keys walk
+/// the answer until `<Esc>` hands them back to the form; and when the
+/// store moves the answer is run again. Falsified by running it with an
+/// empty team: there were no rows.
 #[test]
-fn a_query_call_returns_rows() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+fn a_query_call_returns_rows_and_is_run_again() {
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     ex.update(key("f"), &src, &mut w);
     assert_eq!(ex.screen, Screen::Functions);
-    let at = form::callables(&m).iter().position(|c| c.name == "members").unwrap();
-    for _ in 0..at {
+    for _ in 0..at("members") {
         ex.update(key("j"), &src, &mut w);
     }
     ex.update(named(Named::Enter), &src, &mut w);
-    assert_eq!(ex.screen, Screen::Call("members".into()));
+    assert_eq!(ex.screen, Screen::Call("people.members".into()));
     ex.update(Msg::FormText(vec![0], "blue".into()), &src, &mut w);
     ex.update(Msg::Call, &src, &mut w);
     let g = ex.answer_grid().expect("an answer");
@@ -921,14 +990,15 @@ fn a_query_call_returns_rows() {
     ex.update(key("j"), &src, &mut w);
     assert_eq!(ex.answer_at.0, 1);
     ex.update(named(Named::Escape), &src, &mut w);
-    assert!(!ex.in_answer && ex.screen == Screen::Call("members".into()));
+    assert!(!ex.in_answer && ex.screen == Screen::Call("people.members".into()));
     assert!(w.authored.is_empty() && w.raws.is_empty(), "a query writes nothing");
-    // Kept for the session, and called again as it was.
+    ex.observe(&src, 1, 0);
+    let mut moved = st.clone();
+    moved.put("user", user(5, "abe", "blue").to_bytes()).unwrap();
+    ex.observe(&source(&moved), 2, 100);
+    assert_eq!(ex.answer_grid().unwrap().rows.len(), 3, "run again when the store moved");
     ex.update(named(Named::Escape), &src, &mut w);
     assert_eq!(ex.screen, Screen::Functions);
-    ex.update(key("."), &src, &mut w);
-    assert_eq!(ex.calls.len(), 2);
-    assert_eq!(ex.calls[1].args, ex.calls[0].args);
 }
 
 /// A writer that refuses a mutation now, or authors it and says later that
@@ -938,10 +1008,10 @@ struct Refusing {
 }
 
 impl Writer for Refusing {
-    fn exposed(&self) -> Vec<(TableName, CrudVerbs)> {
+    fn exposed(&self) -> Vec<(String, CrudVerbs)> {
         vec![]
     }
-    fn author(&mut self, _f: &str, _a: Args) -> Result<Ticket, String> {
+    fn author(&mut self, _f: &str, _a: Vec<u8>) -> Result<Ticket, String> {
         match self.now {
             true => Err("kick: not yours to kick".into()),
             false => Ok(Ticket("t1".into())),
@@ -956,42 +1026,38 @@ impl Writer for Refusing {
 }
 
 /// A mutation called from its form reaches the writer with exactly the
-/// arguments typed — an id chosen in the picker, an option, a list, an
-/// enum, a bool — as the host's author would author it; what it came to is
-/// the writer's verdict; a refusal now is said with its text. Falsified by
-/// not filling the field the picker chose: the checks refused the call and
+/// input typed — an id chosen in the picker, an option, a list, an enum, a
+/// bool — as the host's author would author it; what it came to is the
+/// writer's verdict; a refusal now is said with its text. Falsified by not
+/// filling the field the picker chose: the field did not read as an id and
 /// no writer was reached.
 #[test]
 fn a_mutation_call_reaches_the_writer_and_its_verdict_is_said() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
+    let st = store();
+    let src = source(&st);
     let fill = |ex: &mut Explorer, w: &mut dyn Writer| {
-        let at = form::callables(&m).iter().position(|c| c.name == "kick").unwrap();
-        ex.update(Msg::Function(at), &src, w);
+        ex.update(Msg::Function(at("kick")), &src, w);
         ex.update(Msg::Pick(vec![0]), &src, w);
         ex.update(Msg::PickFilter("bob".into()), &src, w);
         ex.update(Msg::Picked(0), &src, w);
-        ex.update(Msg::FormToggle(vec![1]), &src, w);
-        ex.update(Msg::FormText(vec![1, 0], "late".into()), &src, w);
-        ex.update(Msg::FormAdd(vec![2]), &src, w);
-        ex.update(Msg::FormText(vec![2, 0], "a".into()), &src, w);
-        ex.update(Msg::FormChoose(vec![3], 1), &src, w);
-        ex.update(Msg::FormToggle(vec![4]), &src, w);
+        for (i, t) in [(1, "late"), (2, "[a]"), (3, "#1"), (4, "true")] {
+            ex.update(Msg::FormText(vec![i], t.into()), &src, w);
+        }
         ex.update(Msg::Call, &src, w);
     };
-    let mut w = writer(&m, false);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     fill(&mut ex, &mut w);
-    let (f, args) = w.authored.last().expect("authored");
-    assert_eq!(f, "kick");
-    let mut want = Args::new();
-    want.insert("user".into(), uid(2));
-    want.insert("why".into(), Value::text("late"));
-    want.insert("tags".into(), Value::list(vec![Value::text("a")]));
-    want.insert("level".into(), Value::text("high"));
-    want.insert("loud".into(), Value::Bool(true));
-    assert_eq!(args, &want);
+    let (f, k): (String, Kick) = input(&w);
+    assert_eq!(f, "teams.kick");
+    let want = Kick {
+        user: id(2),
+        why: Some("late".into()),
+        tags: vec!["a".into()],
+        level: Level::High,
+        loud: true,
+    };
+    assert_eq!(k, want);
     assert!(w.raws.is_empty(), "a client never writes raw");
     assert!(matches!(&ex.calls.last().unwrap().called, Called::Authored(_)));
     assert_eq!(
@@ -999,170 +1065,72 @@ fn a_mutation_call_reaches_the_writer_and_its_verdict_is_said() {
         "authored",
         "the recorder keeps no verdict"
     );
-    // Refused now, with its text; refused later, the verdict's.
     for (now, says) in [(true, "refused: kick: not yours to kick"), (false, "refused: the authority says no")] {
         let mut w = Refusing { now };
         let mut ex = Explorer::new();
         fill(&mut ex, &mut w);
-        let call = ex.calls.last().expect("a call");
-        assert_eq!(Explorer::outcome(call, &w), says);
+        assert_eq!(Explorer::outcome(ex.calls.last().expect("a call"), &w), says);
         assert!(ex.note.ends_with(says), "{}", ex.note);
     }
 }
 
-/// The picker: a table's rows labelled by the column that tells them apart
-/// and a second where there is one, the short id otherwise; filtered by a
-/// substring of the label; walked and chosen with the keys, `/` filtering as
-/// it is typed; and a table with no rows says so. Pasting an id works too.
-/// Falsified by labelling by the first text column that holds anything: the
-/// table whose rows all share one name was labelled by that name.
+/// The picker: a table's rows, each as its cells say; filtered by a
+/// substring, ignoring case; walked and chosen with the keys, `/` filtering
+/// as it is typed; and a table with no rows says so. Pasting an id works
+/// too. Falsified by filtering on the id alone: "CAT" left nothing.
 #[test]
-fn the_picker_labels_filters_and_chooses() {
-    let m = module();
-    let mut st = store(&m);
-    // `email` tells two of them apart; nobody's is the null.
-    for (k, email) in [(1, "ann@x"), (3, "cat@y")] {
-        let mut r = st.get("user", &[uid(k)]).unwrap();
-        r = r.with("email", Value::text(email));
-        st.put("user", r).unwrap();
-    }
-    assert_eq!(form::label_columns(&st, "user"), (Some("name".into()), Some("email".into())));
-    let picks = form::pickables(&st, "user");
-    let lines: Vec<String> = picks.iter().map(|p| p.line()).collect();
-    assert_eq!(lines[0], "ann \u{b7} ann@x \u{b7} 00000000");
-    assert_eq!(picks[1].secondary, None);
-    assert_eq!(form::filter(&picks, "CAT"), [2]);
-    assert_eq!(form::filter(&picks, ""), [0, 1, 2]);
-    assert_eq!(form::filter(&picks, "zzz"), Vec::<usize>::new());
-    // A column holding one value on every row is passed over for one that
-    // tells rows apart.
-    let mut same = MemoryStore::empty(m.schema.clone());
-    same.put("team", row_of(&m, "team", &[("name", Value::text("t")), ("size", Value::Int(1))]))
-        .unwrap();
-    for (k, name) in [(1, "x"), (2, "y")] {
-        same.put(
-            "user",
-            row_of(
-                &m,
-                "user",
-                &[
-                    ("id", uid(k)),
-                    ("name", Value::text("same")),
-                    ("team", Value::text("t")),
-                    ("admin", Value::Bool(false)),
-                    ("email", Value::text(name)),
-                ],
-            ),
-        )
-        .unwrap();
-    }
-    assert_eq!(form::label_columns(&same, "user"), (Some("email".into()), None));
-    // The first column that tells rows apart well, not the one that tells
-    // them apart best: a name repeated once still labels them, ahead of an
-    // email that differs on every row.
-    let mut twice = same.clone();
-    for (k, name, email) in [(1, "x", "a@x"), (2, "x", "b@x"), (3, "y", "c@x"), (4, "z", "d@x")] {
-        twice
-            .put(
-                "user",
-                row_of(
-                    &m,
-                    "user",
-                    &[
-                        ("id", uid(k)),
-                        ("name", Value::text(name)),
-                        ("team", Value::text("t")),
-                        ("admin", Value::Bool(false)),
-                        ("email", Value::text(email)),
-                    ],
-                ),
-            )
-            .unwrap();
-    }
-    assert_eq!(form::label_columns(&twice, "user"), (Some("name".into()), Some("email".into())));
-    // By the keys.
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+fn the_picker_filters_and_chooses() {
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
-    let at = form::callables(&m).iter().position(|c| c.name == "kick").unwrap();
-    ex.update(Msg::Function(at), &src, &mut w);
+    ex.update(Msg::Function(at("kick")), &src, &mut w);
     ex.update(named(Named::Enter), &src, &mut w);
     assert!(ex.picker.is_some(), "<Enter> on an id field opens the picker");
-    for c in ["/", "c", "a"] {
+    let (all, shown) = ex.pick_rows(&src);
+    assert_eq!(all[0].1, "00000000 \u{b7} ann \u{b7} blue \u{b7} false \u{b7} null");
+    assert_eq!(shown, [0, 1, 2]);
+    ex.update(Msg::PickFilter("CAT".into()), &src, &mut w);
+    assert_eq!(ex.pick_rows(&src).1, [2]);
+    ex.update(Msg::PickFilter(String::new()), &src, &mut w);
+    for c in ["/", "b", "o"] {
         ex.update(key(c), &src, &mut w);
     }
-    assert_eq!(ex.picker.as_ref().unwrap().filter, "ca", "filtered as it is typed");
-    assert_eq!(ex.pick_rows(&src).1, [2]);
+    assert_eq!(ex.picker.as_ref().unwrap().filter, "bo", "filtered as it is typed");
+    assert_eq!(ex.pick_rows(&src).1, [1]);
     ex.update(named(Named::Enter), &src, &mut w); // accepts the search
     ex.update(named(Named::Enter), &src, &mut w); // chooses
     assert!(ex.picker.is_none());
-    let (args, _) = ex.form().unwrap().read();
-    assert_eq!(args["user"], uid(3));
-    // `j` walks it, `<Esc>` closes it and leaves the field as it was.
+    assert_eq!(ex.form().unwrap().values[0], cell_text(&uid(2)));
     ex.update(named(Named::Enter), &src, &mut w);
     ex.update(key("j"), &src, &mut w);
     assert_eq!(ex.picker.as_ref().unwrap().at, 1);
     ex.update(named(Named::Escape), &src, &mut w);
-    assert!(ex.picker.is_none() && ex.screen == Screen::Call("kick".into()));
-    assert_eq!(ex.form().unwrap().read().0["user"], uid(3));
-    // Pasted, with dashes; and refused when it is not one.
-    ex.update(Msg::FormText(vec![0], "00000000-0000-0000-0000-000000000001".into()), &src, &mut w);
-    assert_eq!(ex.form().unwrap().read().0["user"], uid(1));
+    assert!(ex.picker.is_none() && ex.screen == Screen::Call("teams.kick".into()));
     ex.update(Msg::FormText(vec![0], "0001".into()), &src, &mut w);
     assert_eq!(ex.form().unwrap().message("user"), Some("user: an id, 32 hex digits"));
-    // A table with no rows says so.
-    let empty = MemoryStore::empty(m.schema.clone());
-    let src = source(&m, &empty);
+    let empty = Store::new(domain().schema.clone());
+    let src = source(&empty);
     let mut ex = Explorer::new();
-    ex.update(Msg::Function(at), &src, &mut w);
+    ex.update(Msg::Function(at("kick")), &src, &mut w);
     ex.update(Msg::Pick(vec![0]), &src, &mut w);
     assert_eq!(ex.note, "user holds no rows here");
-    assert_eq!(ex.pick_rows(&src).0.len(), 0);
 }
 
-/// A recent call is put back in its form, every field as it was called.
-/// Falsified by filling the form blank: the team's name was empty.
-#[test]
-fn a_recent_call_is_put_back_in_its_form() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
-    let mut ex = Explorer::new();
-    let at = form::callables(&m).iter().position(|c| c.name == "make_team").unwrap();
-    ex.update(Msg::Function(at), &src, &mut w);
-    ex.update(Msg::FormText(vec![0], "green".into()), &src, &mut w);
-    ex.update(Msg::FormText(vec![1], "3".into()), &src, &mut w);
-    ex.update(Msg::Call, &src, &mut w);
-    ex.forms.clear();
-    ex.update(Msg::Recall(0), &src, &mut w);
-    let f = ex.form().expect("the form, again");
-    assert_eq!(f.values[0], form::Input::Text("green".into()));
-    assert_eq!(f.values[1], form::Input::Text("3".into()));
-    ex.update(Msg::Again(0), &src, &mut w);
-    assert_eq!(w.authored.len(), 2);
-    assert_eq!(w.authored[0], w.authored[1]);
-}
-
-/// The form, the picker and an answer all draw. Falsified by a panic in
-/// the picker's view: the test failed.
+/// The functions, a form, the picker and an answer all draw. Falsified by a
+/// panic in the picker's view: the test failed.
 #[test]
 fn the_functions_screens_draw() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     ex.update(key("f"), &src, &mut w);
     let _ = ex.view(&src, &w);
-    let kick = form::callables(&m).iter().position(|c| c.name == "kick").unwrap();
-    ex.update(Msg::Function(kick), &src, &mut w);
-    ex.update(Msg::FormAdd(vec![2]), &src, &mut w);
-    ex.update(Msg::FormToggle(vec![1]), &src, &mut w);
+    ex.update(Msg::Function(at("kick")), &src, &mut w);
     ex.update(Msg::Pick(vec![0]), &src, &mut w);
     let _ = ex.view(&src, &w);
-    let members = form::callables(&m).iter().position(|c| c.name == "members").unwrap();
-    ex.update(Msg::Function(members), &src, &mut w);
+    ex.update(Msg::Function(at("members")), &src, &mut w);
     ex.update(Msg::FormText(vec![0], "blue".into()), &src, &mut w);
     ex.update(Msg::Call, &src, &mut w);
     let _ = ex.view(&src, &w);
@@ -1176,36 +1144,23 @@ fn the_functions_screens_draw() {
 #[test]
 fn the_admin_page_says_the_servers_verdict_when_it_arrives() {
     use crate::admin::{Message, Outbox, Page, Request};
-    use crate::wire::State;
-    let m = module();
-    let st = store(&m);
-    let state = State {
-        module: ark::canon::encode(&ark::ir::module_value(&m)),
-        store: st.store_value(),
-        head: 0,
-        lines: vec![],
-        connections: vec![],
-        verifies: vec![],
-        exposed: vec![],
-        raw: true,
-        who: ark::raw::AUTHOR.into(),
-    };
+    let st = store();
+    let s = state(&st, vec![]);
     let mut page = Page::new("http://127.0.0.1:8788".into(), None);
-    let _ = page.update(Message::Loaded(Ok(state.to_json())));
-    let at = form::callables(&m).iter().position(|c| c.name == "make_team").unwrap();
+    let _ = page.update(Message::Loaded(Ok(s.to_body())));
     let call = |page: &mut Page, name: &str| {
-        let _ = page.update(Message::Explorer(Msg::Function(at)));
+        let _ = page.update(Message::Explorer(Msg::Function(at("make_team"))));
         let _ = page.update(Message::Explorer(Msg::FormText(vec![0], name.into())));
         let _ = page.update(Message::Explorer(Msg::FormText(vec![1], "2".into())));
         let _ = page.update(Message::Explorer(Msg::Call));
     };
     let said = |page: &Page| {
-        let w = Outbox::of(&state, page.sent.len(), &page.answers);
+        let w = Outbox::of(&s, page.sent.len(), &page.answers);
         Explorer::outcome(page.explorer.calls.last().unwrap(), &w)
     };
     call(&mut page, "green");
     assert!(
-        matches!(page.sent.as_slice(), [Request::Author(f, _)] if f == "make_team"),
+        matches!(page.sent.as_slice(), [Request::Author(f, _)] if f == "teams.make_team"),
         "{:?}",
         page.sent
     );
@@ -1215,7 +1170,7 @@ fn the_admin_page_says_the_servers_verdict_when_it_arrives() {
     call(&mut page, "blue");
     let _ = page.update(Message::Answered(1, Err("team: a row with this key exists".into())));
     assert_eq!(said(&page), "refused: team: a row with this key exists");
-    let first = Explorer::outcome(&page.explorer.calls[0], &Outbox::of(&state, page.sent.len(), &page.answers));
+    let first = Explorer::outcome(&page.explorer.calls[0], &Outbox::of(&s, page.sent.len(), &page.answers));
     assert_eq!(first, "in the log, at 12", "each call keeps its own answer");
 }
 
@@ -1229,6 +1184,11 @@ fn editing(ex: &mut Explorer, src: &Source, w: &mut Recorder, r: usize, text: &s
     ex.update(Msg::EditText(text.into()), src, w);
 }
 
+fn authored_name(w: &Recorder) -> (Id<User>, String) {
+    let (_, u): (String, User) = input(w);
+    (u.id, u.name)
+}
+
 /// A click on another row while a changed, valid value is in the editor
 /// submits it exactly as <Enter> would — to the row it was typed on, not the
 /// one clicked — and the cursor lands on the clicked row with no editor
@@ -1236,40 +1196,31 @@ fn editing(ex: &mut Explorer, src: &Source, w: &mut Recorder, r: usize, text: &s
 /// open and nothing was written.
 #[test]
 fn a_click_elsewhere_submits_a_changed_edit() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     editing(&mut ex, &src, &mut w, 0, "annie");
     ex.update(Msg::Cell(2, 3), &src, &mut w);
     assert!(ex.editing.is_none(), "no editor is left open");
     assert_eq!((ex.row_at, ex.column_at), (2, 3), "the cursor is where the click was");
-    let (f, args) = w.authored.last().expect("submitted");
-    assert_eq!(f, "update_user");
-    assert_eq!(args["id"], uid(1), "on the row it was typed on");
-    assert_eq!(args["name"], Value::text("annie"));
+    assert_eq!(w.authored[0].0, "people.update_user");
+    assert_eq!(authored_name(&w), (id(1), "annie".into()), "on the row it was typed on");
     assert_eq!(w.authored.len(), 1);
-    // <Enter> reaching the grammar — the box does not have the keys — submits
-    // too, rather than opening the editor again over what was typed.
     editing(&mut ex, &src, &mut w, 1, "robert");
     ex.update(named(Named::Enter), &src, &mut w);
     assert!(ex.editing.is_none());
-    assert_eq!(w.authored.last().unwrap().1["name"], Value::text("robert"));
+    assert_eq!(authored_name(&w).1, "robert");
 }
 
 /// An edit that changed nothing is dropped by a click elsewhere, as <Esc>
-/// would drop it: nothing is written, and nothing is said — it is not
-/// submitted to find out there was nothing to change. Falsified by
-/// submitting whatever the editor holds: nothing was written either (the
-/// submit has its own guard), so the test first passed for that reason; it
-/// asserts the note now, and the falsified run said "nothing to change".
+/// would drop it: nothing is written, and nothing is said. Falsified by
+/// submitting whatever the editor holds: the note said "nothing to change".
 #[test]
 fn a_click_elsewhere_drops_an_unchanged_edit() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     editing(&mut ex, &src, &mut w, 0, "ann");
     ex.note = "before".into();
@@ -1286,10 +1237,9 @@ fn a_click_elsewhere_drops_an_unchanged_edit() {
 /// read: it stayed open over the row the cursor had left.
 #[test]
 fn a_click_elsewhere_drops_an_invalid_edit() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, true);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(true);
     let mut ex = Explorer::new();
     ex.update(Msg::Open("team".into()), &src, &mut w);
     ex.update(Msg::Cell(0, 1), &src, &mut w);
@@ -1308,141 +1258,25 @@ fn a_click_elsewhere_drops_an_invalid_edit() {
 /// open after the click into the app, and nothing was written.
 #[test]
 fn a_click_outside_the_table_ends_the_edit() {
-    let m = module();
-    let st = store(&m);
-    let src = source(&m, &st);
-    let mut w = writer(&m, false);
+    let st = store();
+    let src = source(&st);
+    let mut w = writer(false);
     let mut ex = Explorer::new();
     editing(&mut ex, &src, &mut w, 2, "catherine");
     ex.update(Msg::Show(Screen::Log), &src, &mut w);
     assert!(ex.editing.is_none() && ex.screen == Screen::Log);
-    assert_eq!(w.authored.last().unwrap().1["name"], Value::text("catherine"));
+    assert_eq!(authored_name(&w).1, "catherine");
     editing(&mut ex, &src, &mut w, 0, "anne");
     ex.update(Msg::Blur, &src, &mut w);
     assert!(ex.editing.is_none());
     assert_eq!(ex.screen, Screen::Table("user".into()), "the explorer stays where it was");
-    assert_eq!(w.authored.last().unwrap().1["name"], Value::text("anne"));
+    assert_eq!(authored_name(&w).1, "anne");
     assert_eq!(w.authored.len(), 2);
 }
 
-// -- what changed, lit as it lands --------------------------------------------
-
-fn user(m: &ark::ir::Module, k: u8, name: &str, team: &str) -> ark::store::Row {
-    row_of(
-        &m.clone(),
-        "user",
-        &[
-            ("id", uid(k)),
-            ("name", Value::text(name)),
-            ("team", Value::text(team)),
-            ("admin", Value::Bool(false)),
-            ("email", Value::Null),
-        ],
-    )
-}
-
-/// A table on screen: when the host's store moves, a changed cell is lit,
-/// and only it; a new row is lit whole; a removed row is drawn, as gone,
-/// while it fades; all of it fades out over FADE_MS. By key, not by place:
-/// a row added above every other moves them all down one and lights none of
-/// them. Falsified by diffing by place: the row added at the top was
-/// compared with ann, who used to be there, and lit only where the two
-/// differ — [1, 1, 1, 0, 0] — rather than whole, as new.
-#[test]
-fn a_change_in_the_store_is_lit_by_key_and_fades() {
-    let m = module();
-    let st = store(&m);
-    let mut w = writer(&m, false);
-    let mut ex = Explorer::new();
-    ex.update(Msg::Open("user".into()), &source(&m, &st), &mut w);
-    ex.observe(&source(&m, &st), 1, 0);
-    let (_, quiet) = ex.lit_table(&source(&m, &st), "user");
-    assert!(quiet.iter().all(|l| l.cells.iter().all(|s| *s == 0.0)), "nothing is lit on first sight");
-    // bob renamed, dan added above everyone, cat gone.
-    let mut moved = st.clone();
-    moved.put("user", user(&m, 2, "robert", "blue")).unwrap();
-    moved.put("user", user(&m, 0, "dan", "red")).unwrap();
-    moved.delete("user", &[uid(3)]).unwrap();
-    // The same generation is not a move: nothing is diffed.
-    ex.observe(&source(&m, &moved), 1, 500);
-    assert!(!ex.fading());
-    ex.observe(&source(&m, &moved), 2, 1000);
-    let (g, lights) = ex.lit_table(&source(&m, &moved), "user");
-    let name_of = |r: &Vec<Value>| r[1].as_text().to_string();
-    let drawn: Vec<(String, Option<usize>)> = g.rows.iter().zip(&lights).map(|(r, l)| (name_of(r), l.origin)).collect();
-    assert_eq!(
-        drawn,
-        [
-            ("dan".into(), Some(0)),
-            ("ann".into(), Some(1)),
-            ("cat".into(), None),
-            ("robert".into(), Some(2))
-        ],
-        "the gone row is drawn where it was"
-    );
-    assert!(lights[0].cells.iter().all(|s| *s == 1.0), "a new row is lit whole: {:?}", lights[0]);
-    assert!(
-        lights[1].cells.iter().all(|s| *s == 0.0),
-        "ann did not change, only moved: {:?}",
-        lights[1]
-    );
-    assert_eq!(lights[2].gone, 1.0, "cat is drawn as gone");
-    assert_eq!(lights[3].cells, [0.0, 1.0, 0.0, 0.0, 0.0], "only robert's name is lit");
-    assert!(ex.fading());
-    // Half way, fading; past FADE_MS, nothing lit and the gone row gone.
-    ex.observe(&source(&m, &moved), 2, 1000 + crate::flash::FADE_MS / 2);
-    let (_, lights) = ex.lit_table(&source(&m, &moved), "user");
-    assert!((lights[3].cells[1] - 0.75).abs() < 1e-6, "{:?}", lights[3]);
-    ex.observe(&source(&m, &moved), 2, 1000 + crate::flash::FADE_MS + 1);
-    let (g, lights) = ex.lit_table(&source(&m, &moved), "user");
-    assert_eq!(g.rows.len(), 3, "the gone row has gone");
-    assert!(lights.iter().all(|l| l.cells.iter().all(|s| *s == 0.0) && l.gone == 0.0));
-    assert!(!ex.fading());
-    // Another table is only remembered, not lit as new.
-    ex.update(Msg::Open("team".into()), &source(&m, &moved), &mut w);
-    ex.observe(&source(&m, &moved), 3, 5000);
-    assert!(!ex.fading(), "a table seen for the first time lights nothing");
-    let _ = ex.view(&source(&m, &moved), &w);
-}
-
-/// A query's answer on its form is run again when the store moves, and its
-/// rows are lit the same way: a new row whole, a changed cell alone, by the
-/// column that names its rows. Falsified by not running the answer again:
-/// it stayed two rows and nothing was lit.
-#[test]
-fn a_query_answer_is_run_again_and_lit() {
-    let m = module();
-    let st = store(&m);
-    let mut w = writer(&m, false);
-    let mut ex = Explorer::new();
-    let at = form::callables(&m).iter().position(|c| c.name == "members").unwrap();
-    ex.update(Msg::Function(at), &source(&m, &st), &mut w);
-    ex.update(Msg::FormText(vec![0], "blue".into()), &source(&m, &st), &mut w);
-    ex.update(Msg::Call, &source(&m, &st), &mut w);
-    ex.observe(&source(&m, &st), 1, 0);
-    let mut moved = st.clone();
-    moved.put("user", user(&m, 5, "abe", "blue")).unwrap();
-    moved.put("user", user(&m, 2, "bobby", "blue")).unwrap();
-    ex.observe(&source(&m, &moved), 2, 100);
-    let (g, lights) = ex.lit_answer().expect("an answer");
-    let name = g.columns.iter().position(|c| c == "name").unwrap();
-    let lit: Vec<(String, Vec<f32>)> = g
-        .rows
-        .iter()
-        .zip(&lights)
-        .map(|(r, l)| (r[name].as_text().to_string(), l.cells.clone()))
-        .collect();
-    assert_eq!(lit.len(), 3, "{lit:?}");
-    for (who, cells) in &lit {
-        match who.as_str() {
-            "abe" => assert!(cells.iter().all(|s| *s > 0.99), "{lit:?}"),
-            "ann" => assert!(cells.iter().all(|s| *s == 0.0), "{lit:?}"),
-            "bobby" => {
-                assert!(cells[name] > 0.99, "{lit:?}");
-                assert_eq!(cells.iter().filter(|s| **s > 0.0).count(), 1, "{lit:?}");
-            }
-            other => panic!("{other}"),
-        }
-    }
-    let _ = ex.view(&source(&m, &moved), &w);
+/// A one-column key's bytes.
+fn key_of<T: serde::Serialize>(k: T) -> Vec<u8> {
+    let mut out = vec![];
+    ark::format::put_key(&(k,), &mut out);
+    out
 }

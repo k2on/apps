@@ -1,0 +1,28 @@
+[package]
+name = "ark-ffi"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ArkDB's peer for an app in another language (docs/plan-v5.md §1.16, N3): ark-peer's app kit through UniFFI, values as JSON. A domain is linked in by the app's own crate (harken/ffi)."
+
+[dependencies]
+ark = { path = "../ark" }
+ark-peer = { path = "../ark-peer" }
+ark-auth = { path = "../ark-auth" }
+serde_json = { workspace = true }
+uniffi = { version = "0.32.2", default-features = false }
+
+# `uniffi-bindgen`, which writes the Kotlin and Swift for an app's library
+# (`cargo run -p ark-ffi --features bindgen --bin uniffi-bindgen -- generate
+# --library libharken_ffi.so --language kotlin --out-dir …`).
+[features]
+bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[dev-dependencies]
+ark-dev = { path = "../ark-dev" }
+tempfile = "3"

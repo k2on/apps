@@ -1,0 +1,740 @@
+{
+  "clients": 3,
+  "expect": "fail",
+  "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "head": 20,
+  "playlist": "Fleet",
+  "script": [
+    {
+      "client": 0,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403302d31",
+      "t": "mutate"
+    },
+    {
+      "client": 1,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403312d31",
+      "t": "mutate"
+    },
+    {
+      "client": 2,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403322d31",
+      "t": "mutate"
+    },
+    {
+      "client": 0,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403302d32",
+      "t": "mutate"
+    },
+    {
+      "client": 1,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403312d32",
+      "t": "mutate"
+    },
+    {
+      "client": 2,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403322d32",
+      "t": "mutate"
+    },
+    {
+      "client": 0,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403302d33",
+      "t": "mutate"
+    },
+    {
+      "client": 1,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403312d33",
+      "t": "mutate"
+    },
+    {
+      "client": 2,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403322d33",
+      "t": "mutate"
+    },
+    {
+      "client": 0,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403302d34",
+      "t": "mutate"
+    },
+    {
+      "client": 1,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403312d34",
+      "t": "mutate"
+    },
+    {
+      "client": 2,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403322d34",
+      "t": "mutate"
+    },
+    {
+      "client": 2,
+      "t": "partition"
+    },
+    {
+      "client": 2,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403322d35",
+      "t": "mutate"
+    },
+    {
+      "client": 2,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403322d36",
+      "t": "mutate"
+    },
+    {
+      "client": 2,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403322d37",
+      "t": "mutate"
+    },
+    {
+      "client": 0,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403302d38",
+      "t": "mutate"
+    },
+    {
+      "client": 1,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9403312d39",
+      "t": "mutate"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "client": 0,
+      "t": "partition"
+    },
+    {
+      "client": 1,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9404312d3130",
+      "t": "mutate"
+    },
+    {
+      "client": 0,
+      "fn": "demo.add_to_playlist",
+      "input": "10ff553eb2adcf202aa3512111bd8d5b9404302d3131",
+      "t": "mutate"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "client": 0,
+      "t": "heal"
+    },
+    {
+      "client": 2,
+      "t": "heal"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    },
+    {
+      "t": "step"
+    }
+  ],
+  "seed": 7
+}

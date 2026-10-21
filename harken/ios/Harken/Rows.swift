@@ -1,31 +1,16 @@
 // The domain as the screens see it, and nothing SwiftUI: rows of harken's
-// queries read into the types the screens draw, every write one of
-// `harken.ark`'s mutations by name — the module interpreted by the Swift
-// client, as every peer interprets it — returning the entry's id so that
-// where it stands can be asked later. The phone's twin of
-// `harken/android/.../Phone.kt`; type-checked on Linux (README.md).
-import ArkDB
-import ArkDBClient
+// views read into the types the screens draw, and every write one of the
+// domain's functions by name — the generated, typed calls over the bridge
+// (`Gen/Harken.swift`, `ark-dev gen swift`), run by the Rust kernel the phone
+// embeds (`harken/ffi`) — returning the entry's id so that where it stands
+// can be asked later. The phone's twin of `harken/android/.../Phone.kt`.
 import Foundation
 
 /// Something playable as a list draws it: a row of the `library` or
-/// `playlist` query (the domain's `LibraryEntry` record). `playlistPos` is
-/// where it sits on the playlist the list was read against, when it is on it.
-struct Track: Identifiable, Hashable {
-    let id: Id
-    let title: String
-    let creator: String
-    let kind: String
-    let durationMs: Int64
-    let file: String
-    let playlistPos: Int64?
-
-    static func of(_ v: Value) -> Track? {
-        guard case .record(let r) = v, case .id(let id)? = r["id"], case .text(let title)? = r["title"], case .text(let creator)? = r["creator"], case .text(let kind)? = r["kind"], case .int(let d)? = r["duration_ms"], case .text(let file)? = r["file"] else { return nil }
-        var pos: Int64? = nil
-        if case .int(let p)? = r["playlist_pos"] { pos = p }
-        return Track(id: id, title: title, creator: creator, kind: kind, durationMs: d, file: file, playlistPos: pos)
-    }
+/// `playlist` view as the domain answers it. `playlistPos` is where it sits
+/// on the playlist the list was read against, when it is on it.
+extension LibraryEntry: Identifiable, Hashable {
+    public func hash(into h: inout Hasher) { h.combine(id) }
 
     var duration: String {
         let s = Int(durationMs / 1000)
@@ -33,29 +18,26 @@ struct Track: Identifiable, Hashable {
     }
 }
 
-/// A row of `playlists`.
-struct Playlist: Identifiable, Hashable {
-    let id: Id
-    let name: String
-    let userId: String
-    let createdMs: Int64
-
-    static func of(_ v: Value) -> Playlist? {
-        guard case .record(let r) = v, case .id(let id)? = r["id"], case .text(let name)? = r["name"], case .text(let user)? = r["user_id"], case .int(let made)? = r["created_ms"] else { return nil }
-        return Playlist(id: id, name: name, userId: user, createdMs: made)
-    }
+extension Playlist: Identifiable, Hashable {
+    public func hash(into h: inout Hasher) { h.combine(id) }
 }
 
-/// What a write came to: the entry, whose standing `Peer.standing` answers, or the local refusal.
+/// What a write came to: the entry, whose standing the peer answers, or the local refusal.
 enum Wrote: Equatable {
-    case entry(Id)
+    case entry(String)
     case refused(String)
 }
 
 /// One change this phone made, and what to call it beside its standing.
 struct Authored: Identifiable, Hashable {
-    let id: Id
+    let id: String
     let what: String
+}
+
+/// A refusal's sentence.
+func why(_ error: Error) -> String {
+    if let r = error as? Refusal, case let .Refused(why: w) = r { return w }
+    return "\(error)"
 }
 
 enum Phone {
@@ -63,48 +45,43 @@ enum Phone {
     static let defaultPlaylist = "Favorites"
 
     /// The playlist a list is read against when there is none: `library` marks nothing.
-    static let noPlaylist = Id.nilId
+    static let noPlaylist = Id.none
 
-    /// The `library` view's arguments, read against a playlist.
-    static func libraryArgs(_ against: Id?) -> [String: Value] { ["playlist_id": .id(against ?? noPlaylist)] }
-
-    /// The `playlist` view's arguments.
-    static func playlistArgs(_ id: Id) -> [String: Value] { ["playlist_id": .id(id)] }
+    /// A view's rows once, and the view let go; none when it is refused.
+    static func once<E, T>(_ v: () throws -> View<E>, _ of: (E) -> T) -> [T] {
+        (try? v().rows().map(of)) ?? []
+    }
 
     /// Which of the caller's playlists a track is on; nothing when it is refused.
-    static func playlistsOf(_ p: Peer, media: Id) -> [Playlist] {
-        guard case .list(let rows)? = try? p.query("playlists_of", ["media_id": .id(media)]) else { return [] }
-        return rows.compactMap(Playlist.of)
+    static func playlistsOf(_ h: Harken, media: Id) -> [Playlist] {
+        once({ try h.playlistsOf(PlaylistsOf(mediaId: media)) }) { $0 }
     }
 
-    /// What the form validator says of a name as it is typed: the message
+    /// What the form validator says of a name as it is typed: the sentence
     /// `create_playlist`'s own checks would refuse it with, or nil. A name
     /// the person already has passes: the log numbers it "Name (1)".
-    static func nameProblem(_ p: Peer, _ name: String) -> String? {
-        guard let c = try? p.check("create_playlist", ["name": .text(name)]) else { return nil }
-        return c.messages.first { $0.0 == "name" }?.1
+    static func nameProblem(_ h: Harken, _ name: String) -> String? {
+        h.peer.check(name: "playlists.create_playlist", input: CreatePlaylist(name: name).json)
     }
 
-    private static func wrote(_ f: () throws -> Id) -> Wrote {
+    private static func wrote(_ f: () throws -> String) -> Wrote {
         do {
             return .entry(try f())
-        } catch let r as Refused {
-            return .refused(r.description)
         } catch {
-            return .refused("\(error)")
+            return .refused(why(error))
         }
     }
 
-    static func createPlaylist(_ p: Peer, _ name: String) -> Wrote {
-        wrote { try p.mutate("create_playlist", ["name": .text(name)]) }
+    static func createPlaylist(_ h: Harken, _ name: String) -> Wrote {
+        wrote { try h.createPlaylist(CreatePlaylist(name: name)) }
     }
 
-    static func addToPlaylist(_ p: Peer, _ playlist: Id, _ media: Id) -> Wrote {
-        wrote { try p.mutate("add_to_playlist", ["playlist_id": .id(playlist), "media_id": .id(media)]) }
+    static func addToPlaylist(_ h: Harken, _ playlist: Id, _ media: Id) -> Wrote {
+        wrote { try h.addToPlaylist(AddToPlaylist(playlistId: playlist, mediaId: media)) }
     }
 
-    static func removeFromPlaylist(_ p: Peer, _ playlist: Id, _ media: Id) -> Wrote {
-        wrote { try p.mutate("remove_from_playlist", ["playlist_id": .id(playlist), "media_id": .id(media)]) }
+    static func removeFromPlaylist(_ h: Harken, _ playlist: Id, _ media: Id) -> Wrote {
+        wrote { try h.removeFromPlaylist(RemoveFromPlaylist(playlistId: playlist, mediaId: media)) }
     }
 
     /// What a screen writes beside an item: nothing once it is in the log,

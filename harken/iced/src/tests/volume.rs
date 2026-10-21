@@ -4,6 +4,9 @@
 //! hand — what the reconciler would have read — because these are the
 //! window's rules over a session, not the session's (those are the domain's
 //! tests, and the reconciler's are `listening`'s).
+use crate::domain::Id;
+
+use super::device;
 use crate::listening::{Active, Clock, Device, Kind, Listening, Output, Track};
 use crate::{App, Change, Level, Message, Volumed, NUDGE};
 
@@ -17,7 +20,7 @@ fn speaker(id: &str, name: &str, volume: i64, follows: Option<&str>) -> Device {
         volume,
         family: Some("sonos".into()),
         follows: follows.map(str::to_string),
-        ..Device::new(id, name, Kind::Speaker, true)
+        ..device(id, name, Kind::Speaker, true)
     }
 }
 
@@ -25,10 +28,10 @@ fn speaker(id: &str, name: &str, volume: i64, follows: Option<&str>) -> Device {
 /// kitchen with the study joined to it, the den beside them, and the phone,
 /// which has said nothing of a volume.
 fn app() -> App {
-    let mut app = App::with_peer(super::peer(ark_client::Options::alone("me")), String::new(), None);
+    let mut app = App::with_peer(super::alone("me"), String::new(), None);
     app.listening.open("phone");
     let track = Track {
-        id: [1; 16],
+        id: Id::new([1; 16]),
         title: "Air".into(),
         creator: "Bach".into(),
         album: String::new(),
@@ -37,7 +40,7 @@ fn app() -> App {
     };
     app.session = Some(Listening {
         devices: vec![
-            Device::new("phone", "Phone", Kind::Phone, true),
+            device("phone", "Phone", Kind::Phone, true),
             speaker(KITCHEN, "Kitchen", 30, None),
             Device {
                 muted: true,

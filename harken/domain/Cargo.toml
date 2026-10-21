@@ -1,17 +1,19 @@
 [package]
 name = "harken-domain"
-workspace = "../../rust"
 version = "0.1.0"
+workspace = "../../rust"
 edition = "2021"
-description = "harken's domain, authored in the vocabulary of spec/AUTHORING.md: emitted, it is harken.ark; run natively, it applies entries"
+description = "harken's domain in plain Rust (docs/plan-v5.md §1.16): its schema, types and functions, and its tests."
 
 [lib]
 name = "harken_domain"
 path = "src/lib.rs"
 
-[[bin]]
-name = "harken-domain"
-path = "src/main.rs"
-
 [dependencies]
 ark = { path = "../../rust/ark" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+ark-peer = { path = "../../rust/ark-peer" }
+ark-dev = { path = "../../rust/ark-dev" }

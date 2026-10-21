@@ -1,40 +1,36 @@
-//! What harken's own mutations and reads cost as the library grows, printed
-//! rather than asserted — the harken-shaped half of the performance pass
-//! whose engine half is `rust/ark/tests/perf.rs`. Over the engine alone (a
-//! replica and the authority it commits to, as a peer alone is), so that
-//! what is measured is the domain's procedures and the store under them,
-//! not a storage or a socket.
+//! What harken's own mutations and reads cost on ArkDB v5 as the library
+//! grows, printed rather than asserted: `harken/domain/tests/perf.rs`'s
+//! shapes (`docs/plan-v5.md` Part 3), the same sizes, columns and labels,
+//! so the two outputs diff. Over the machine alone — a replica and the
+//! authority it pushes to, frames as bytes, and beside them the one peer
+//! in the authority's role that a v5 peer alone is — so that what is
+//! measured is the domain's functions, in Rust (§1.16), and the store under
+//! them, not a storage or a socket.
 //!
-//! Beside the timings, two things are counted rather than timed, because a
-//! count does not move with the machine: the rows each mutation's reads
-//! examine (the `Counting` store `rust/ark/tests/toggle.rs` counts with),
-//! and the allocations a read makes — with what a row costs beside them:
-//! handed out (a clone), and built into the struct it is. The first was
-//! the measurement the question "how much of a read is `Row`'s owned
-//! `String` keys" needed; the row is positional since (`docs/plan-perf.md`
-//! R11) and a clone is two reference counts.
+//! Counted beside the timings: the rows each mutation's reads examine
+//! (`ark::db::count`; the store examines only what it returns) and the
+//! allocations a read makes.
 //!
 //! Ignored by default; run with
 //! `cargo test -p harken-domain --release --test perf -- --ignored --nocapture --test-threads=1`.
 
-#[path = "../../../rust/ark/tests/support/counting.rs"]
-mod counting;
-
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use ark::authoring::Procedure;
-use ark::eval::{Args, Ctx};
-use ark::hash::{closures, FnHash};
-use ark::ir::Auto;
-use ark::log::{snapshot_of, Log};
-use ark::peer::{local_commit, Authority, Replica};
-use ark::schema::Schema;
-use ark::store::{Change, MemoryStore, Overlay, Row, Store};
-use ark::value::Value;
-use counting::Counting;
+use ark::db::{count, Reads};
+use ark::domain::Domain;
+use ark::format::Encode;
+use ark::hash::EntryHash;
+use ark::log::{Durable, EntryId, Snapshot};
+use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, Who};
+use ark::store::{Read, Scan, Store};
+use harken_domain::Id;
+use harken_domain::LIBRARY;
+use harken_domain::{AddSong, Library};
+use harken_domain::{AddToPlaylist, CreatePlaylist};
+use harken_domain::{Media, Playlist, PlaylistItem};
 
 // Counting allocations ---------------------------------------------------------
 
@@ -63,10 +59,21 @@ fn allocs() -> usize {
     ALLOCS.load(Ordering::Relaxed)
 }
 
-// The library, as a peer alone holds it ---------------------------------------
+// The library, as a peer alone holds it -----------------------------------------
 
-fn args<const N: usize>(pairs: [(&str, Value); N]) -> Args {
-    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+fn domain() -> &'static Domain {
+    static D: OnceLock<Domain> = OnceLock::new();
+    D.get_or_init(harken_domain::domain)
+}
+
+/// A function by its name, as an entry calls it.
+fn f(name: &str) -> String {
+    name.to_string()
+}
+
+/// A mutator run over `st`, as the machine runs it.
+fn run(st: &mut Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<ark::store::Change>, ark::Refusal> {
+    domain().get(name).and_then(|f| f.proc.clone()).expect("a mutator").apply(st, ctx, input)
 }
 
 fn idv(tag: u8, n: u64) -> [u8; 16] {
@@ -76,197 +83,190 @@ fn idv(tag: u8, n: u64) -> [u8; 16] {
     b
 }
 
-struct Harken {
-    schema: Schema,
-    procs: BTreeMap<String, (FnHash, Procedure)>,
-    bodies: BTreeMap<FnHash, ark::hash::Closure>,
-}
-
-fn harken() -> Harken {
-    let m = harken_domain::module();
-    Harken {
-        schema: m.build().schema.clone(),
-        bodies: closures(m.build()),
-        procs: m.procedures().into_iter().map(|(h, p)| (p.name().to_string(), (h, p))).collect(),
-    }
-}
-
 /// A media row, as `add_song` writes one.
-fn media(i: u64) -> Row {
-    [
-        ("id", Value::Id(idv(1, i))),
-        ("kind", Value::text("song")),
-        ("title", Value::text(format!("Track {i}"))),
-        ("creator", Value::text(format!("Artist {}", i % 50))),
-        ("duration_ms", Value::int(180_000)),
-        ("file", Value::text(format!("music/a{}/t{i}.flac", i % 50))),
-        ("pos", Value::int(i as i64 + 1)),
-        ("added_ms", Value::int(1_000 + i as i64)),
-        ("user_id", Value::text("library")),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v))
-    .collect()
+fn media(i: u64) -> Media {
+    Media {
+        id: Id::new(idv(1, i)),
+        kind: "song".into(),
+        title: format!("Track {i}"),
+        creator: format!("Artist {}", i % 50),
+        duration_ms: 180_000,
+        file: format!("music/a{}/t{i}.flac", i % 50),
+        pos: i as i64 + 1,
+        added_ms: 1_000 + i as i64,
+        user_id: "library".into(),
+    }
 }
 
-/// A peer alone over a confirmed store, and its authority: a replica, and
-/// an authority whose log stands on that store as its snapshot.
-struct Alone {
-    a: Authority,
-    r: Replica,
-    ctx: Ctx,
-    next: u64,
+fn me() -> Who {
+    Who {
+        actor: "alice".into(),
+        session: "local".into(),
+        roles: vec![LIBRARY.into()],
+    }
 }
 
-impl Harken {
-    fn alone(&self, confirmed: MemoryStore) -> Alone {
-        let mut a = Authority::new(self.schema.clone(), self.bodies.clone());
-        a.log = Log {
-            base: snapshot_of(0, confirmed.clone()),
-            entries: BTreeMap::new(),
-            ids: BTreeMap::new(),
-            below: Default::default(),
+/// A library of `n` media rows, and nothing else.
+fn library(n: u64) -> Store {
+    let mut st = Store::new(domain().schema.clone());
+    for i in 0..n {
+        st.put("media", media(i).to_bytes()).unwrap();
+    }
+    st
+}
+
+fn playlist_row(id: [u8; 16], name: &str, pos: i64, user: &str) -> Vec<u8> {
+    Playlist {
+        id: Id::new(id),
+        name: name.into(),
+        pos,
+        created_ms: 1,
+        user_id: user.into(),
+    }
+    .to_bytes()
+}
+
+/// A library of `n` media rows and one playlist of alice's holding the
+/// first `items` of them, written as rows.
+fn with_playlist(n: u64, items: u64) -> (Store, [u8; 16]) {
+    let mut st = library(n);
+    let pl = idv(2, 1);
+    st.put("playlist", playlist_row(pl, "Mine", 1, "alice")).unwrap();
+    for i in 0..items {
+        let row = PlaylistItem {
+            playlist_id: Id::new(pl),
+            media_id: Id::new(idv(1, i)),
+            pos: i as i64 + 1,
+            added_ms: 1,
+            user_id: "alice".into(),
         };
-        a.store = confirmed.clone();
-        let natives: Vec<_> = self.procs.values().cloned().collect();
-        a.hold(natives.clone());
-        let mut r = Replica::open(self.schema.clone(), self.bodies.clone(), confirmed, 0, vec![]);
-        r.hold(natives);
-        Alone {
-            a,
-            r,
-            ctx: Ctx::new("alice", "local").with_roles([harken_domain::schema::LIBRARY]),
-            next: 0,
-        }
+        st.put("playlist_item", row.to_bytes()).unwrap();
     }
+    (st, pl)
+}
 
-    /// A library of `n` media rows, and nothing else.
-    fn library(&self, n: u64) -> MemoryStore {
-        let mut st = MemoryStore::empty(self.schema.clone());
-        for i in 0..n {
-            st.apply_change(&Change::Add("media".into(), media(i)));
-        }
-        st
+/// A library of `n` media rows, and a thousand playlists each for alice
+/// and bob: alice's "Favorites", a hundred "Favorites (k)" and 899 others,
+/// bob's a thousand "Favorites (k)".
+fn with_playlists(n: u64) -> Store {
+    let mut st = library(n);
+    let alice = std::iter::once("Favorites".to_string())
+        .chain((1..=100).map(|k| format!("Favorites ({k})")))
+        .chain((0..899).map(|k| format!("List {k}")))
+        .map(|name| ("alice", name));
+    let bob = (1..=1000).map(|k| ("bob", format!("Favorites ({k})")));
+    for (i, (user, name)) in alice.chain(bob).enumerate() {
+        st.put("playlist", playlist_row(idv(3, i as u64), &name, i as i64 + 1, user)).unwrap();
     }
+    st
+}
 
-    /// A library of `n` media rows, and one playlist of alice's holding the
-    /// first `items` of them — written as rows, so that a size is not paid
-    /// for by the quadratic append it measures elsewhere.
-    fn with_playlist(&self, n: u64, items: u64) -> (MemoryStore, Value) {
-        let mut st = self.library(n);
-        let pl = Value::Id(idv(2, 1));
-        let row = |pairs: Vec<(&str, Value)>| -> Row { pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect() };
-        st.apply_change(&Change::Add(
-            "playlist".into(),
-            row(vec![
-                ("id", pl.clone()),
-                ("name", Value::text("Mine")),
-                ("pos", Value::int(1)),
-                ("created_ms", Value::int(1)),
-                ("user_id", Value::text("alice")),
-            ]),
-        ));
-        for i in 0..items {
-            st.apply_change(&Change::Add(
-                "playlist_item".into(),
-                row(vec![
-                    ("playlist_id", pl.clone()),
-                    ("media_id", Value::Id(idv(1, i))),
-                    ("pos", Value::int(i as i64 + 1)),
-                    ("added_ms", Value::int(1)),
-                    ("user_id", Value::text("alice")),
-                ]),
-            ));
-        }
-        (st, pl)
-    }
+fn opened(role: Role, st: &Store) -> Peer {
+    let mut p = Peer::new(domain().schema.clone(), domain().functions(), role, me());
+    let snapshot = Snapshot {
+        seq: 0,
+        hash: EntryHash::default(),
+        state: st.state_hash(),
+        rows: st.snapshot_rows(),
+    };
+    p.step(Input::Open(Durable {
+        rows: snapshot.kv_rows(),
+        ..Durable::default()
+    }));
+    assert_eq!(p.store, *st, "opened on the library");
+    p
+}
 
-    /// A library of `n` media rows, and a thousand playlists each for
-    /// alice and bob: alice's are "Favorites", a hundred "Favorites (k)"
-    /// and 899 others, bob's a thousand "Favorites (k)" — what naming a
-    /// person's next "Favorites" reads a range of (`docs/plan-perf.md` R6).
-    fn with_playlists(&self, n: u64) -> MemoryStore {
-        let mut st = self.library(n);
-        let alice = std::iter::once("Favorites".to_string())
-            .chain((1..=100).map(|k| format!("Favorites ({k})")))
-            .chain((0..899).map(|k| format!("List {k}")))
-            .map(|name| ("alice", name));
-        let bob = (1..=1000).map(|k| ("bob", format!("Favorites ({k})")));
-        for (i, (user, name)) in alice.chain(bob).enumerate() {
-            let row: Row = [
-                ("id", Value::Id(idv(3, i as u64))),
-                ("name", Value::text(name)),
-                ("pos", Value::int(i as i64 + 1)),
-                ("created_ms", Value::int(1)),
-                ("user_id", Value::text(user)),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-            st.apply_change(&Change::Add("playlist".into(), row));
-        }
-        st
-    }
-
-    fn autos(&self, name: &str, next: &mut u64) -> Args {
-        self.procs[name]
-            .1
-            .function()
-            .autos
-            .iter()
-            .map(|(n, a)| {
-                *next += 1;
-                let v = match a {
-                    Auto::NewId(_) => Value::Id(idv(9, *next)),
-                    Auto::Now => Value::int(*next as i64),
-                };
-                (n.clone(), v)
-            })
-            .collect()
-    }
+/// A peer alone over a confirmed store, both ways: a replica and the
+/// authority it pushes to (v4's shape), and one peer in the authority's
+/// role (v5's).
+struct Alone {
+    a: Peer,
+    r: Peer,
+    solo: Peer,
+    now: i64,
 }
 
 impl Alone {
-    /// Author and commit, as `ark_client::Peer::mutate` does alone: the
-    /// optimistic apply, and the commit (authority + confirmed), timed
-    /// apart.
-    fn mutate(&mut self, h: &Harken, name: &str, a: Args) -> (Duration, Duration) {
-        let autos = h.autos(name, &mut self.next);
-        self.next += 1;
-        let id = idv(7, self.next);
+    fn new(st: &Store) -> Alone {
+        let mut solo = opened(Role::Replica, st);
+        solo.step(Input::Alone);
+        Alone {
+            a: opened(Role::Authority { journal: Journal::default() }, st),
+            r: opened(Role::Replica, st),
+            solo,
+            now: 1_000,
+        }
+    }
+
+    /// Author on the replica and confirm through the authority — the
+    /// optimistic run, and the push, sequence and confirm — timed apart;
+    /// then the same intent on the peer alone, timed. Refusals panic.
+    fn mutate(&mut self, name: &str, input: Vec<u8>) -> (Duration, Duration, Duration) {
+        self.now += 1;
+        let (func, now) = (f(name), self.now);
+        let (alone, solo_input) = (func.clone(), input.clone());
         let t = Instant::now();
-        self.r
-            .mutate(id, &self.ctx, &h.procs[name].0, &autos, &a)
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let o = self.r.step(Input::Mutate { func, input, now });
         let t1 = Instant::now();
-        local_commit(&mut self.a, &mut self.r);
+        for x in o {
+            match x {
+                Output::Send(b) => {
+                    for y in self.a.step(Input::Frame { from: Some(me()), bytes: b }) {
+                        if let Output::Send(b) | Output::Fanout(b) = y {
+                            self.r.step(Input::Frame { from: None, bytes: b });
+                        }
+                    }
+                }
+                Output::Refused { why, .. } => panic!("{name}: {why}"),
+                _ => {}
+            }
+        }
         let t2 = Instant::now();
-        assert!(self.r.pending.is_empty(), "{name}: {:?}", self.r.rejections);
-        (t1 - t, t2 - t1)
+        assert!(self.r.pending.is_empty(), "{name}: confirmed");
+        let t3 = Instant::now();
+        let o = self.solo.step(Input::Mutate {
+            func: alone,
+            input: solo_input,
+            now,
+        });
+        let solo = t3.elapsed();
+        assert!(matches!(o.last(), Some(Output::Confirmed(_))), "{name}: alone {o:?}");
+        (t1 - t, t2 - t1, solo)
+    }
+
+    /// The playlist the replica's last entry made.
+    fn newest_playlist(&self) -> [u8; 16] {
+        EntryId::of(self.r.origin, self.r.local).draw(0)
     }
 }
 
-fn song(i: u64) -> Args {
-    args([
-        ("title", Value::text(format!("Track {i}"))),
-        ("artist", Value::text(format!("Artist {}", i % 50))),
-        ("album", Value::text(format!("Album {}", i % 200))),
-        ("duration_ms", Value::int(180_000)),
-        ("file", Value::text(format!("music/new/{i}.flac"))),
-        ("track", Value::int((i % 12) as i64 + 1)),
-        ("part", Value::text("")),
-        ("catalogue", Value::text("")),
-        ("performer", Value::text("")),
-        ("bpm", Value::int(0)),
-        ("album_art", Value::text("")),
-        ("artist_art", Value::text("")),
-        ("disc", Value::int(0)),
-        ("work_title", Value::text("")),
-        ("movement_no", Value::int(0)),
-    ])
+fn song(i: u64) -> Vec<u8> {
+    AddSong {
+        title: format!("Track {i}"),
+        artist: format!("Artist {}", i % 50),
+        album: format!("Album {}", i % 200),
+        duration_ms: 180_000,
+        file: format!("music/new/{i}.flac"),
+        track: (i % 12) as i64 + 1,
+        ..AddSong::default()
+    }
+    .to_bytes()
 }
 
-// Reporting ----------------------------------------------------------------------
+fn on(pl: [u8; 16], m: [u8; 16]) -> Vec<u8> {
+    AddToPlaylist {
+        playlist_id: Id::new(pl),
+        media_id: Id::new(m),
+    }
+    .to_bytes()
+}
+
+fn named(name: &str) -> Vec<u8> {
+    CreatePlaylist { name: name.into() }.to_bytes()
+}
+
+// Reporting ------------------------------------------------------------------------
 
 fn us(d: Duration) -> f64 {
     d.as_secs_f64() * 1e6
@@ -287,6 +287,10 @@ fn header(title: &str) {
     );
 }
 
+fn note(s: &str) {
+    eprintln!("   v5: {s}");
+}
+
 fn line(label: &str, per: &[Duration]) {
     let n = per.len();
     let k = n.min(100);
@@ -303,86 +307,91 @@ fn line(label: &str, per: &[Duration]) {
     );
 }
 
-// The mutations ----------------------------------------------------------------------
+const ALONE: &str = "whole = replica step(Mutate) + authority step(Push) + replica step(Batch, Ack); `alone` = one Peer in the authority's role";
+
+// The mutations -----------------------------------------------------------------------
 
 /// `add_song` into a library that grows from nothing, as the scanner
 /// authors one per file.
 #[test]
 #[ignore]
 fn perf_add_song() {
-    let h = harken();
     header("add_song, one per file, into a library growing from 0 (peer alone, engine)");
+    note(ALONE);
     for n in [500u64, 2000, 8000] {
-        let mut p = h.alone(MemoryStore::empty(h.schema.clone()));
-        let (mut whole, mut opt, mut commit) = (vec![], vec![], vec![]);
+        let mut p = Alone::new(&Store::new(domain().schema.clone()));
+        let (mut whole, mut opt, mut commit, mut solo) = (vec![], vec![], vec![], vec![]);
         for i in 0..n {
-            let (o, c) = p.mutate(&h, "add_song", song(i));
+            let (o, c, s) = p.mutate("library.add_song", song(i));
             opt.push(o);
             commit.push(c);
             whole.push(o + c);
+            solo.push(s);
         }
-        assert_eq!(p.r.view.scan("media").len(), n as usize);
+        assert_eq!(p.r.store.rows("media").count(), n as usize);
         line("add_song: whole", &whole);
         line("  … Replica::mutate (optimistic)", &opt);
         line("  … local_commit (authority + confirm)", &commit);
+        line("  … alone: Peer (authority) step(Mutate)", &solo);
     }
 }
 
 /// `add_to_playlist` onto one playlist that grows to N, and onto N/10
 /// playlists of ten, over a library of N media; and `create_playlist` for
-/// one person, with names that differ and with one name every time (the
-/// default every device makes, which `free_number` numbers).
+/// one person, with names that differ and with one name every time.
 #[test]
 #[ignore]
 fn perf_playlists() {
-    let h = harken();
     header("add_to_playlist over a library of N (peer alone, engine)");
+    note(ALONE);
     for n in [500u64, 2000, 8000] {
         for (shape, lists) in [("one playlist", 1u64), ("playlists of 10", n / 10)] {
-            let mut p = h.alone(h.library(n));
+            let mut p = Alone::new(&library(n));
             let mut ids = vec![];
             for j in 0..lists {
-                p.mutate(&h, "create_playlist", args([("name", Value::text(format!("P{j}")))]));
-                ids.push(newest_playlist(&p.r.view));
+                p.mutate("playlists.create_playlist", named(&format!("P{j}")));
+                ids.push(p.newest_playlist());
             }
-            let (mut whole, mut opt, mut commit) = (vec![], vec![], vec![]);
+            let (mut whole, mut opt, mut commit, mut solo) = (vec![], vec![], vec![], vec![]);
             for i in 0..n {
-                let a = args([("playlist_id", ids[(i % lists) as usize].clone()), ("media_id", Value::Id(idv(1, i)))]);
-                let (o, c) = p.mutate(&h, "add_to_playlist", a);
+                let (o, c, s) = p.mutate("playlists.add_to_playlist", on(ids[(i % lists) as usize], idv(1, i)));
                 opt.push(o);
                 commit.push(c);
                 whole.push(o + c);
+                solo.push(s);
             }
+            assert_eq!(p.r.store.rows("playlist_item").count(), n as usize);
             line(&format!("add_to_playlist, {shape}: whole"), &whole);
             line("  … Replica::mutate (optimistic)", &opt);
             line("  … local_commit (authority + confirm)", &commit);
+            line("  … alone: Peer (authority) step(Mutate)", &solo);
         }
     }
     header("create_playlist, one person's P playlists (peer alone, engine)");
+    note("whole, as above");
     for n in [50u64, 200, 800] {
         for (shape, same) in [("distinct names", false), ("all \"Favorites\"", true)] {
-            let mut p = h.alone(MemoryStore::empty(h.schema.clone()));
+            let mut p = Alone::new(&Store::new(domain().schema.clone()));
             let per: Vec<Duration> = (0..n)
                 .map(|j| {
                     let name = if same { "Favorites".to_string() } else { format!("List {j}") };
-                    let (o, c) = p.mutate(&h, "create_playlist", args([("name", Value::text(name))]));
+                    let (o, c, _) = p.mutate("playlists.create_playlist", named(&name));
                     o + c
                 })
                 .collect();
+            assert_eq!(p.r.store.rows("playlist").count(), n as usize);
             line(&format!("create_playlist, {shape}"), &per);
         }
     }
 }
 
-/// `playlist_name` alone, natively, among one person's P playlists: a
-/// name they do not have (one `contains`, since R1 made the branch lazy)
-/// and one they do (`free_number`, quadratic in P). The number
-/// `free_number`'s doc comment quotes at a thousand.
+/// `playlist_name` alone, among one person's P playlists: a name they do
+/// not have, and one they do (`free_number`: each name's rank among them,
+/// then the least rank free).
 #[test]
 #[ignore]
 fn perf_playlist_name() {
-    use ark::authoring::{evaluate, list, Text};
-    eprintln!("\n== playlist_name among P names (native, harken_domain::playlists)");
+    eprintln!("\n== playlist_name among P names (harken_domain::playlists, in Rust)");
     eprintln!("{:<40} {:>7} {:>12}", "name", "P", "µs per call");
     for p in [10usize, 100, 1000] {
         let names: Vec<String> = std::iter::once("Favorites".to_string())
@@ -391,79 +400,72 @@ fn perf_playlist_name() {
         for (label, name) in [("a free name", "Night"), ("a taken name", "Favorites")] {
             let reps = if p >= 1000 { 5 } else { 50 };
             let t = Instant::now();
+            let mut out = String::new();
             for _ in 0..reps {
-                let v = evaluate(|| {
-                    let of = list(names.iter().map(|n| Text::from(n.as_str())).collect::<Vec<_>>());
-                    harken_domain::playlists::playlist_name(of, Text::from(name))
-                })
-                .unwrap();
-                std::hint::black_box(v);
+                out = std::hint::black_box(harken_domain::playlists::playlist_name(&names, name));
             }
+            assert_eq!(out, if name == "Night" { "Night" } else { "Favorites (1)" });
             eprintln!("{:<40} {:>7} {:>12.1}", label, p, us(t.elapsed()) / reps as f64);
         }
     }
 }
 
-fn newest_playlist(st: &MemoryStore) -> Value {
-    st.scan("playlist")
-        .into_iter()
-        .max_by_key(|r| r["pos"].as_int())
-        .map(|r| r["id"].clone())
-        .expect("a playlist")
-}
+type Make = Box<dyn Fn(u64) -> (Store, Vec<u8>)>;
 
-type Make<'a> = Box<dyn Fn(u64) -> (MemoryStore, Args) + 'a>;
-
-/// The mutations whose reads R1 is about, each with the store and the
-/// arguments it is applied to at a library of `n`.
-fn read_cases(h: &Harken) -> Vec<(&'static str, &'static str, Make<'_>)> {
+/// The mutations whose reads are about, each with the store and the input
+/// it is applied to at a library of `n`.
+fn read_cases() -> Vec<(&'static str, &'static str, Make)> {
     let onto = |filled: bool| {
         move |n: u64| {
-            let (st, pl) = h.with_playlist(n, if filled { n - 1 } else { 0 });
-            (st, args([("playlist_id", pl), ("media_id", Value::Id(idv(1, n - 1)))]))
+            let (st, pl) = with_playlist(n, if filled { n - 1 } else { 0 });
+            (st, on(pl, idv(1, n - 1)))
         }
     };
     vec![
-        ("add_song (a new file)", "add_song", Box::new(|n| (h.library(n), song(99_999_999)))),
-        ("add_to_playlist (an empty playlist)", "add_to_playlist", Box::new(onto(false))),
-        ("add_to_playlist (a playlist of N-1)", "add_to_playlist", Box::new(onto(true))),
+        ("add_song (a new file)", "library.add_song", Box::new(|n| (library(n), song(99_999_999)))),
+        ("add_to_playlist (an empty playlist)", "playlists.add_to_playlist", Box::new(onto(false))),
+        ("add_to_playlist (a playlist of N-1)", "playlists.add_to_playlist", Box::new(onto(true))),
         (
             "create_playlist (alice's second)",
-            "create_playlist",
-            Box::new(|n| (h.with_playlist(n, 0).0, args([("name", Value::text("Other"))]))),
+            "playlists.create_playlist",
+            Box::new(|n| (with_playlist(n, 0).0, named("Other"))),
         ),
         (
             "create_playlist (a 102nd Favorites, of 1,000)",
-            "create_playlist",
-            Box::new(|n| (h.with_playlists(n), args([("name", Value::text("Favorites"))]))),
+            "playlists.create_playlist",
+            Box::new(|n| (with_playlists(n), named("Favorites"))),
         ),
     ]
 }
 
-/// What one mutation's reads examine, applied once through a counting
-/// store over a peer alone at a library of `n`.
-fn reads_of(h: &Harken, n: u64, name: &str, make: &dyn Fn(u64) -> (MemoryStore, Args)) -> counting::Reads {
-    let (st, a) = make(n);
-    let p = h.alone(st);
-    let autos = h.autos(name, &mut 1_000_000);
-    let c = Counting::new(&p.r.view);
-    let mut ov = Overlay::new(&c);
-    let out = h.procs[name].1.apply(&p.ctx, &autos, &a, &mut ov);
-    assert!(matches!(out, Ok(Ok(_))), "{name}: {out:?}");
-    c.reads()
+fn ctx_of(n: i64) -> Ctx {
+    Ctx {
+        draws: Default::default(),
+        id: EntryId::of("local", n),
+        actor: "alice".into(),
+        session: "local".into(),
+        roles: vec![LIBRARY.into()],
+        now: 5,
+    }
+}
+
+fn reads_of(n: u64, name: &str, make: &dyn Fn(u64) -> (Store, Vec<u8>)) -> Reads {
+    let (mut st, input) = make(n);
+    let (out, reads) = count(|| run(&mut st, &ctx_of(1_000_000), name, &input));
+    assert!(out.as_ref().is_ok_and(|cs| !cs.is_empty()), "{name}: {out:?}");
+    reads
 }
 
 /// The rows each mutation's reads examine, counted, at two library sizes
-/// sixteen times apart: a mutation whose reads go through an index reads
-/// the same number at both; one that scans reads sixteen times as many.
+/// sixteen times apart.
 #[test]
 #[ignore]
 fn perf_rows_read_per_mutation() {
-    let h = harken();
-    eprintln!("\n== rows a mutation's reads examine (Counting store), by library size");
+    eprintln!("\n== rows a mutation's reads examine (ark::db::count), by library size");
+    note("g = Read::get calls, r = rows a scan returned (v5's store examines only what it returns)");
     eprintln!("{:<52} {:>12} {:>12}", "mutation", "N=500", "N=8000");
-    for (label, name, make) in &read_cases(&h) {
-        let (small, big) = (reads_of(&h, 500, name, &**make), reads_of(&h, 8000, name, &**make));
+    for (label, name, make) in &read_cases() {
+        let (small, big) = (reads_of(500, name, &**make), reads_of(8000, name, &**make));
         eprintln!(
             "{:<52} {:>12} {:>12}",
             label,
@@ -473,130 +475,65 @@ fn perf_rows_read_per_mutation() {
     }
 }
 
-/// The guard for `docs/plan-perf.md` R1, run with the suite rather than
-/// printed: every read these mutations make is served by an index, so the
-/// rows they examine are a handful at a library of 8,000 and the same at
-/// 500. At 8,000: `add_song` examines one row (the last by `pos`; the file
-/// is new, so its lookup finds none) and fifteen gets — fourteen until it
-/// became an upsert by file and asked for the song the file already is,
-/// which a new file has not; `add_to_playlist`
-/// onto a playlist of 7,999 examines one (its last item) and seven gets,
-/// onto an empty one none; `create_playlist` two (the last playlist, and
-/// alice's one other) and two gets. Before the indexes these were 16,000,
-/// 7,999 and 2 rows (the harness's round-1 rows, `docs/plan-perf.md`).
-/// Falsified by taking `.index((Self::playlist_id, Self::pos))` off
-/// `playlist_item`: the playlist of 7,999 is 7,999 rows again; and by
-/// taking `.index((Self::file,))` off `media`: `add_song` is 8,001.
-///
-/// R6: `create_playlist` now reads only the names from its own up to its
-/// numbered siblings, so alice's second is one row (the last playlist;
-/// "Mine" is not near "Other"), and her next "Favorites" among a thousand
-/// of hers — a hundred of them "Favorites (k)" — and a thousand of bob's
-/// "Favorites (k)" is 102: the last playlist, "Favorites" and its hundred
-/// siblings, where reading all of hers was 1,001. It is named
-/// "Favorites (101)". Falsified by dropping the span from `view::read`
-/// (`&[]` for `&spans`): alice's second is two rows again and the 102nd
-/// Favorites 1,001; and by ending the range at `name (` in
-/// `create_playlist`: the siblings go unread and it names the playlist
-/// "Favorites (1)", which she has — a unique violation.
+/// What the mutations read is bounded by what they need, as v4's was, at
+/// any library size: `add_song` at most v4's 15 gets and one row (the
+/// file's media by `Media::FILE`, the newest by `Media::POS` from its
+/// end), `add_to_playlist` onto a playlist of N-1 one row, the 102nd
+/// "Favorites" the 101 names from "Favorites" up to "Favorites )" and the
+/// last playlist by `pos` — not every playlist. Not ignored: it pins the
+/// paths the domain names. Falsified by `add_song` reading the media by
+/// scan for its file (500 rows at 500) and by `create_playlist` reading
+/// all of the person's names (1,001 rows: alice's 1,000 and the last).
 #[test]
-fn a_mutation_examines_the_rows_it_needs_not_the_library() {
-    let h = harken();
-    let want = [(15, 1), (7, 0), (7, 1), (2, 1), (2, 102)];
-    for ((label, name, make), (gets, rows)) in read_cases(&h).iter().zip(want) {
-        let (small, big) = (reads_of(&h, 500, name, &**make), reads_of(&h, 8000, name, &**make));
-        assert_eq!((big.gets, big.rows), (gets, rows), "{label} at 8,000");
-        assert_eq!(small, big, "{label}: the same at 500 as at 8,000");
+fn reads_are_bounded_by_what_they_need() {
+    for n in [500u64, 8000] {
+        let reads: Vec<_> = read_cases().iter().map(|(_, name, make)| reads_of(n, name, &**make)).collect();
+        let (song, onto, favorites) = (reads[0], reads[2], reads[4]);
+        assert!(song.gets <= 15 && song.rows <= 1, "add_song at {n}: {song:?}");
+        assert!(onto.rows <= 1, "add_to_playlist onto N-1 at {n}: {onto:?}");
+        assert!(favorites.rows <= 102, "the 102nd Favorites at {n}: {favorites:?}");
     }
-    // And the range named it as reading everything would have.
-    let p = h.alone(h.with_playlists(10));
-    let mut ov = Overlay::new(&p.r.view);
-    let autos = h.autos("create_playlist", &mut 1_000_000);
-    let out = h.procs["create_playlist"]
-        .1
-        .apply(&p.ctx, &autos, &args([("name", Value::text("Favorites"))]), &mut ov);
-    assert!(matches!(out, Ok(Ok(_))), "{out:?}");
-    let made: Vec<Value> = ov
-        .scan("playlist")
-        .into_iter()
-        .filter(|r| p.r.view.get("playlist", &[r["id"].clone()]).is_none())
-        .map(|r| r["name"].clone())
-        .collect();
-    assert_eq!(made, [Value::text("Favorites (101)")]);
 }
 
-// Reads, and what a row's keys cost ---------------------------------------------------
+// Reads, and what a row costs --------------------------------------------------------
 
 /// `library` read whole (what a hydrate pulls), with the allocations it
-/// makes, beside what a `Row` costs: handed out (a clone — its keys, its
-/// map and its values before R11; two reference counts since) and built
-/// into the struct it is, which a read does only where a row is used
-/// whole (a bare plan's node: each item the related plan finds). The rows
-/// built are the row-shaped part of the allocations left. The apply's is
-/// an upper bound: every row its reads return — a native procedure's
-/// reads hand the domain a struct (`cx::lit`) — counted at an item's cost.
+/// makes; what a row costs — handed out (its bytes copied) and built into
+/// its struct (`Node::from_bytes`); and an `add_to_playlist` run, as a
+/// rebase runs each pending intent.
 #[test]
 #[ignore]
 fn perf_row_keys() {
-    let h = harken();
     eprintln!("\n== what a Row costs");
-    let (st, _) = h.with_playlist(2, 1);
-    let media_row = st.scan("media")[0].clone();
-    let item_row = st.scan("playlist_item")[0].clone();
-    row_cost("media", &media_row);
-    let ki = row_cost("playlist_item", &item_row);
-
-    // One field of a row read by a plan's expression: `media.title` with
-    // `media` bound as the store holds it, as `library_entry` reads each
-    // of its ten — the title found by position and copied, nothing else.
-    let module = harken_domain::module();
-    let m = module.build();
-    let (ctx, none) = (Ctx::default(), Args::new());
-    let scope = ark::eval::Scope::new(&m.schema, &[], &ctx, &none, &none);
-    let mut node = scope.node();
-    node.bind_row_owned(0, media_row.clone());
-    let read = ark::ir::Expr::Field(Box::new(ark::ir::Expr::Var(0)), "title".into());
-    let reps = 100_000;
-    let a0 = allocs();
-    let t = Instant::now();
-    for _ in 0..reps {
-        std::hint::black_box(node.eval(&read).unwrap());
-    }
-    eprintln!(
-        "`media.title` in a plan's expression: {:.0} ns, {:.1} allocs (the title's 1)",
-        us(t.elapsed()) * 1e3 / reps as f64,
-        (allocs() - a0) as f64 / reps as f64
-    );
-
+    let (st, _) = with_playlist(2, 1);
+    let media_row = st.scan("media", &Scan::all())[0].clone();
+    let item_row = st.scan("playlist_item", &Scan::all())[0].clone();
+    row_cost::<Media>("media", 9, &media_row);
+    row_cost::<PlaylistItem>("playlist_item", 5, &item_row);
+    eprintln!("`media.title` in a plan's closure: a field of the struct built above; not timed alone");
     eprintln!(
         "{:<36} {:>7} {:>10} {:>12} {:>12} {:>14}",
         "read", "N", "time", "allocs", "rows out", "rows built"
     );
     for n in [500u64, 2000, 8000] {
-        let (st, pl) = h.with_playlist(n, n / 3);
-        let p = h.alone(st);
-        let q = &h.procs["library"].1;
-        let a = args([("playlist_id", pl.clone())]);
-        let c = Counting::new(&p.r.view);
-        let _ = q.query(&p.ctx, &a, &c).unwrap();
-        let rows_out = c.reads().rows + c.reads().gets;
+        let (st, pl) = with_playlist(n, n / 3);
+        let ctx = ctx_of(1);
+        let input = Library { playlist_id: Id::new(pl) }.to_bytes();
+        let (_, reads) = count(|| domain().ask(&st, &ctx, "library.library", &input).unwrap());
+        let rows_out = st.rows("media").count() + reads.rows + reads.gets;
         let a0 = allocs();
         let t = Instant::now();
-        let v = q.query(&p.ctx, &a, &p.r.view).unwrap();
+        let v = domain().ask(&st, &ctx, "library.library", &input).unwrap();
         let (dt, al) = (t.elapsed(), allocs() - a0);
-        assert_eq!(v.as_list().len(), n as usize);
-        // The store hands out each media row once and each item it finds
-        // once, at no allocation; each item found is built into its
-        // struct, the related plan's bare node.
-        let built = (rows_out as f64 - n as f64) * ki;
+        assert_eq!(harken_domain::LibraryEntry::list(&v).unwrap().len(), n as usize);
         eprintln!(
-            "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>13.0}%",
+            "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>14}",
             "library (read whole, as hydrate)",
             n,
             dt.as_secs_f64() * 1e3,
             al,
             rows_out,
-            100.0 * built / al as f64
+            "n/a"
         );
         eprintln!(
             "{:<36} {:>7} {:>8.2}ms {:>12.0} {:>12} {:>14}",
@@ -608,7 +545,7 @@ fn perf_row_keys() {
             ""
         );
         let t = Instant::now();
-        std::hint::black_box(p.r.view.scan("media"));
+        std::hint::black_box(st.scan("media", &Scan::all()));
         eprintln!(
             "{:<36} {:>7} {:>8.2}ms {:>12} {:>12}",
             "  … scan(\"media\") alone",
@@ -617,443 +554,58 @@ fn perf_row_keys() {
             "",
             n
         );
-        // A replay's apply: the next item of that playlist, as a rebase
-        // applies each pending intent.
-        let autos = h.autos("add_to_playlist", &mut 5_000_000);
-        let ap = args([("playlist_id", pl.clone()), ("media_id", Value::Id(idv(1, n - 1)))]);
+        let ap = on(pl, idv(1, n - 1));
+        let mut st = st;
         let a0 = allocs();
         let t = Instant::now();
-        let mut ov = Overlay::new(&p.r.view);
-        let out = h.procs["add_to_playlist"].1.apply(&p.ctx, &autos, &ap, &mut ov);
+        let (out, reads) = count(|| run(&mut st, &ctx, "playlists.add_to_playlist", &ap));
         let (dt, al) = (t.elapsed(), allocs() - a0);
-        assert!(matches!(out, Ok(Ok(_))));
-        let c = Counting::new(&p.r.view);
-        let mut ov = Overlay::new(&c);
-        let _ = h.procs["add_to_playlist"].1.apply(&p.ctx, &autos, &ap, &mut ov);
-        let rows_out = c.reads().rows + c.reads().gets;
+        assert!(out.is_ok_and(|cs| cs.len() == 1));
+        let rows_out = reads.rows + reads.gets;
         eprintln!(
-            "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>13.0}%",
+            "{:<36} {:>7} {:>8.2}ms {:>12} {:>12} {:>14}",
             "add_to_playlist applied (N/3 items)",
             n,
             dt.as_secs_f64() * 1e3,
             al,
             rows_out,
-            100.0 * rows_out as f64 * ki / al as f64
+            "n/a"
         );
     }
 }
 
-/// A row's costs: its clone (what a read hands out) and the struct it is
-/// built into, in allocations and time; the second is returned.
-fn row_cost(table: &str, row: &Row) -> f64 {
+/// A row's costs: its bytes copied (what a read hands out) and the struct
+/// it is built into, in allocations and time.
+fn row_cost<T: Encode>(table: &str, columns: usize, row: &[u8]) {
     let reps = 100_000usize;
     let a0 = allocs();
     let t = Instant::now();
     for _ in 0..reps {
-        std::hint::black_box(row.clone());
+        std::hint::black_box(row.to_vec());
     }
     let (clone_t, clone_a) = (t.elapsed(), allocs() - a0);
     let a0 = allocs();
     let t = Instant::now();
     for _ in 0..reps {
-        std::hint::black_box(row.to_value());
+        std::hint::black_box(T::from_bytes(row).unwrap());
     }
     let (built_t, built_a) = (t.elapsed(), allocs() - a0);
     let per = |d: Duration| d.as_secs_f64() * 1e9 / reps as f64;
-    let (clone_a, built_a) = (clone_a as f64 / reps as f64, built_a as f64 / reps as f64);
     eprintln!(
-        "a {table} row ({} columns): clone {:.0} ns / {:.1} allocs; built into its struct {:.0} ns / {:.1} allocs",
-        row.len(),
+        "a {table} row ({columns} columns): clone {:.0} ns / {:.1} allocs; built into its struct {:.0} ns / {:.1} allocs",
         per(clone_t),
-        clone_a,
+        clone_a as f64 / reps as f64,
         per(built_t),
-        built_a,
+        built_a as f64 / reps as f64,
     );
-    built_a
 }
 
-/// What the scanner does per look to decide which files it already has
-/// (`harken-server`'s `known_file`): since R4 one probe of `media (file)`
-/// per file the look names, where it was the whole media table read into a
-/// set once per look. Timed for a look at one new file (what the watch
-/// sends) and for a full rescan of every file the library has; the set,
-/// as it was, beside them.
+/// v4's other harken shapes, and why they have no line here.
 #[test]
 #[ignore]
-fn perf_scanner_known_files() {
-    let h = harken();
-    eprintln!("\n== the scanner's known_file: one probe per file the look names");
-    eprintln!(
-        "{:>7} {:>22} {:>22} {:>22}",
-        "files", "one new file, ms", "full rescan, ms", "the set (before), ms"
-    );
-    for n in [500u64, 2000, 8000] {
-        let st = h.library(n);
-        let known = |file: &str| {
-            let f = Value::text(file);
-            !st.scan_where_eq("media", &[("file", &f)], &[], &|r| r.get("file") == Some(&f)).is_empty()
-        };
-        let t = Instant::now();
-        assert!(!known("music/new/0.flac"));
-        let one = t.elapsed();
-        let files: Vec<String> = (0..n).map(|i| format!("music/a{}/t{i}.flac", i % 50)).collect();
-        let t = Instant::now();
-        assert!(files.iter().all(|f| known(f)));
-        let all = t.elapsed();
-        let t = Instant::now();
-        let set: std::collections::BTreeSet<String> = st
-            .scan("media")
-            .into_iter()
-            .filter_map(|r| match r.get("file") {
-                Some(Value::Text(f)) if !f.is_empty() => Some(f.to_string()),
-                _ => None,
-            })
-            .collect();
-        let before = t.elapsed();
-        assert_eq!(set.len(), n as usize);
-        eprintln!(
-            "{:>7} {:>22.4} {:>22.2} {:>22.2}",
-            n,
-            one.as_secs_f64() * 1e3,
-            all.as_secs_f64() * 1e3,
-            before.as_secs_f64() * 1e3
-        );
-    }
-}
-
-// (f) The views, engine-side --------------------------------------------------------
-
-/// A library of `n` songs written by `add_song` itself, straight onto a
-/// store: a quarter of them Bach's, catalogued, in fifty works — so one
-/// artist, one composer and their works are groups that grow with the
-/// library — and the rest spread over fifty artists and two hundred albums.
-fn seeded(h: &Harken, n: u64) -> MemoryStore {
-    let mut st = MemoryStore::empty(h.schema.clone());
-    let ctx = Ctx::new("library", "scan").with_roles([harken_domain::schema::LIBRARY]);
-    let mut next = 0;
-    for i in 0..n {
-        let a = seed_song(i);
-        let autos = h.autos("add_song", &mut next);
-        let out = h.procs["add_song"].1.apply(&ctx, &autos, &a, &mut st);
-        assert!(matches!(out, Ok(Ok(_))), "{out:?}");
-    }
-    st
-}
-
-fn seed_song(i: u64) -> Args {
-    let bach = i.is_multiple_of(4);
-    let mut a = song(i);
-    if bach {
-        let w = (i / 4) % 50;
-        for (k, v) in [
-            ("artist", Value::text("Johann Sebastian Bach")),
-            ("album", Value::text(format!("Bach {}", w % 10))),
-            ("catalogue", Value::text(format!("BWV {w}"))),
-            ("work_title", Value::text(format!("Work {w}"))),
-            ("movement_no", Value::int((i / 200) as i64 + 1)),
-            ("performer", Value::text(format!("Ensemble {}", i % 3))),
-        ] {
-            a.insert(k.into(), v);
-        }
-    }
-    a
-}
-
-/// Every query the desktop holds open, hydrated over the library `n` songs
-/// long, and then two changes pushed through each: a playlist toggle and a
-/// new song by the library's largest artist (Bach, a quarter of it). The
-/// medians of five of each. What `harken-iced`'s `bench_views` measures
-/// through `ark_client::View`, here through `ark::view` directly and over
-/// a library whose groups grow with it.
-#[test]
-#[ignore]
-fn perf_f_views() {
-    let h = harken();
-    for n in [500u64, 2000] {
-        let t0 = Instant::now();
-        let mut st = seeded(&h, n);
-        let seed = t0.elapsed();
-        let me = Ctx::new("alice", "s").with_roles([harken_domain::schema::LIBRARY]);
-        let mut next = 50_000_000;
-        let mut run = |st: &mut MemoryStore, name: &str, a: Args| -> Vec<Change> {
-            let autos = h.autos(name, &mut next);
-            match h.procs[name].1.apply(&me, &autos, &a, st) {
-                Ok(Ok(chs)) => chs,
-                o => panic!("{name}: {o:?}"),
-            }
-        };
-        run(&mut st, "create_playlist", args([("name", Value::text("Favorites"))]));
-        let pl = newest_playlist(&st);
-        let bach: Vec<Value> = st
-            .scan("media")
-            .into_iter()
-            .filter(|r| r["creator"] == Value::text("Johann Sebastian Bach"))
-            .map(|r| r["id"].clone())
-            .collect();
-        for m in bach.iter().step_by(3) {
-            run(&mut st, "add_to_playlist", args([("playlist_id", pl.clone()), ("media_id", m.clone())]));
-        }
-        let query = |name: &str, a: Args| h.procs[name].1.query(&me, &a, &st).unwrap().as_list();
-        let t = Value::text;
-        let work = query("works", args([("composer", t("Johann Sebastian Bach"))]))[0].field("id");
-        let recording = query("recordings", args([("work_id", work.clone())]))[0].field("id");
-        let on = |k: &str, v: Value| args([("playlist_id", pl.clone()), (k, v)]);
-        let queries: Vec<(&str, Args)> = vec![
-            ("library", args([("playlist_id", pl.clone())])),
-            ("playlists", args([])),
-            ("albums", args([])),
-            ("artists", args([])),
-            ("composers", args([])),
-            ("track_details", args([])),
-            ("album", on("name", t("Bach 0"))),
-            ("artist", on("name", t("Johann Sebastian Bach"))),
-            ("works", args([("composer", t("Johann Sebastian Bach"))])),
-            ("work", args([("id", work.clone())])),
-            ("recordings", args([("work_id", work)])),
-            ("credits", args([("recording_id", recording.clone())])),
-            ("recording", on("id", recording)),
-            ("playlist", args([("playlist_id", pl.clone())])),
-            ("playlists_of", args([("media_id", bach[0].clone())])),
-        ];
-        let mut views: Vec<(&str, ark::view::View, Duration)> = queries
-            .into_iter()
-            .map(|(name, a)| {
-                let c = &h.bodies[&h.procs[name].0];
-                let t = Instant::now();
-                let (args, provided) = ark::eval::middleware(&h.schema, c, &me, &a, &st).unwrap();
-                let env = ark::view::Env {
-                    helpers: c.helpers.clone(),
-                    ctx: me.clone(),
-                    args,
-                    provided,
-                };
-                let v = ark::view::hydrate(&h.schema, c.function.plan.as_ref().unwrap(), env, &st).unwrap();
-                (name, v, t.elapsed())
-            })
-            .collect();
-        let mut toggle: Vec<Vec<Duration>> = vec![vec![]; views.len()];
-        let mut added: Vec<Vec<Duration>> = vec![vec![]; views.len()];
-        for round in 0..5u64 {
-            let m = bach[1 + round as usize * 3].clone();
-            let chs = run(&mut st, "add_to_playlist", args([("playlist_id", pl.clone()), ("media_id", m)]));
-            for (i, (_, v, _)) in views.iter_mut().enumerate() {
-                let t = Instant::now();
-                ark::view::push_all(&h.schema, &st, &chs, v).unwrap();
-                toggle[i].push(t.elapsed());
-            }
-            let chs = run(&mut st, "add_song", seed_song(4 * (1_000_000 + round)));
-            for (i, (_, v, _)) in views.iter_mut().enumerate() {
-                let t = Instant::now();
-                ark::view::push_all(&h.schema, &st, &chs, v).unwrap();
-                added[i].push(t.elapsed());
-            }
-        }
-        let med = |xs: &mut Vec<Duration>| {
-            xs.sort();
-            xs[xs.len() / 2]
-        };
-        eprintln!(
-            "\n== (f) harken's views over {n} songs (seeded in {:.1?}): hydrate, then one change each",
-            seed
-        );
-        eprintln!("{:>14} {:>7} {:>10} {:>12} {:>14}", "query", "rows", "hydrate", "toggle", "add Bach song");
-        for (i, (name, v, hy)) in views.iter().enumerate() {
-            eprintln!(
-                "{:>14} {:>7} {:>8.2}ms {:>10.1}µs {:>12.1}µs",
-                name,
-                v.rows().len(),
-                hy.as_secs_f64() * 1e3,
-                us(med(&mut toggle[i])),
-                us(med(&mut added[i]))
-            );
-        }
-    }
-}
-
-/// The same entry applied natively and through the interpreter, over the
-/// same store: `create_playlist` for somebody who has P playlists already,
-/// and `add_song` into an empty library with short names and with long
-/// ones. The two must agree on what they write (the agreement tests hold
-/// that); what they cost need not be the same, and where native is the
-/// slower it is doing work the interpreter skips.
-#[test]
-#[ignore]
-fn perf_native_vs_interpreted() {
-    let h = harken();
-    let me = Ctx::new("alice", "s").with_roles([harken_domain::schema::LIBRARY]);
+fn perf_not_ported() {
     eprintln!("\n== one apply, native against interpreted");
-    eprintln!("{:<52} {:>12} {:>14}", "entry", "native", "interpreted");
-    let both = |label: &str, st: &MemoryStore, name: &str, a: &Args| {
-        let autos = h.autos(name, &mut 77_000_000);
-        let (p, c) = (&h.procs[name].1, &h.bodies[&h.procs[name].0]);
-        let reps = 5;
-        let t = Instant::now();
-        for _ in 0..reps {
-            let mut ov = Overlay::new(st);
-            assert!(matches!(p.apply(&me, &autos, a, &mut ov), Ok(Ok(_))));
-        }
-        let native = t.elapsed() / reps;
-        let t = Instant::now();
-        for _ in 0..reps {
-            let mut ov = Overlay::new(st);
-            assert!(matches!(ark::eval::apply_closure(&h.schema, c, &me, &autos, a, &mut ov), Ok(Ok(_))));
-        }
-        let interp = t.elapsed() / reps;
-        eprintln!("{:<52} {:>10.1}µs {:>12.1}µs", label, us(native), us(interp));
-    };
-    for p in [50u64, 200, 800] {
-        let mut st = MemoryStore::empty(h.schema.clone());
-        for j in 0..p {
-            let row: Row = [
-                ("id", Value::Id(idv(3, j))),
-                ("name", Value::text(format!("List {j}"))),
-                ("pos", Value::int(j as i64 + 1)),
-                ("created_ms", Value::int(1)),
-                ("user_id", Value::text("alice")),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-            st.apply_change(&Change::Add("playlist".into(), row));
-        }
-        both(
-            &format!("create_playlist, a new name, P={p}"),
-            &st,
-            "create_playlist",
-            &args([("name", Value::text("Fresh"))]),
-        );
-        both(
-            &format!("create_playlist, a taken name, P={p}"),
-            &st,
-            "create_playlist",
-            &args([("name", Value::text("List 7"))]),
-        );
-    }
-    let st = MemoryStore::empty(h.schema.clone());
-    both("add_song, empty library, short names", &st, "add_song", &song(1));
-    let mut long = song(2);
-    for k in ["title", "artist", "album", "performer"] {
-        long.insert(
-            k.into(),
-            Value::text(format!("{k} {}", "Lorem ipsum dolor sit amet consectetur ".repeat(2))),
-        );
-    }
-    both("add_song, empty library, 80-character names", &st, "add_song", &long);
-    let mut classical = seed_song(0);
-    classical.insert("file".into(), Value::text("music/x.flac"));
-    both("add_song, empty library, a catalogued work", &st, "add_song", &classical);
-}
-
-// (g) Search -----------------------------------------------------------------------
-
-/// `docs/plan-db.md` D4: `search` over a library of 8,000 media, as the
-/// desktop's search box asks it — a view opened for each keystroke of
-/// "artist 12", the last one dropped. Per prefix: how many rows answer, how
-/// many the read examined (the counting store: the text indexes' postings'
-/// intersection, or the scan for a prefix under three characters), and the
-/// hydrate's median of five. Beside it, what the client did before: every
-/// title and creator lower-cased and searched, on every keystroke. And what
-/// the two text indexes cost a row: the postings it adds (its title's and
-/// its creator's trigrams) and the time to put the library with and
-/// without them.
-#[test]
-#[ignore]
-fn perf_search() {
-    let h = harken();
-    let n = 8000u64;
-    let st = h.library(n);
-    let mut plain = h.schema.clone();
-    for t in &mut plain.tables {
-        t.text.clear();
-    }
-    let put = |sch: &Schema| {
-        let mut ts: Vec<Duration> = (0..5)
-            .map(|_| {
-                let t = Instant::now();
-                let mut st = MemoryStore::empty(sch.clone());
-                for i in 0..n {
-                    st.apply_change(&Change::Add("media".into(), media(i)));
-                }
-                let d = t.elapsed();
-                drop(st);
-                d
-            })
-            .collect();
-        ts.sort();
-        ts[2]
-    };
-    let (with, without) = (put(&h.schema), put(&plain));
-    let grams = |c: &str| -> usize {
-        st.scan("media")
-            .iter()
-            .map(|r| ark::store::trigrams(&ark::store::fold(r[c].as_text())).len())
-            .sum()
-    };
-    let postings = grams("title") + grams("creator");
-    eprintln!(
-        "\n== (g) the text indexes on media.title and media.creator, {n} rows: {:.2} postings a row; put {:.2}µs a row with them, {:.2}µs without",
-        postings as f64 / n as f64,
-        us(with) / n as f64,
-        us(without) / n as f64
-    );
-    let me = Ctx::new("alice", "s").with_roles([harken_domain::schema::LIBRARY]);
-    let (hash, _) = &h.procs["search"];
-    let c = &h.bodies[hash];
-    let plan = c.function.plan.as_ref().unwrap();
-    eprintln!("\n== (g) search over {n} media: a view opened per keystroke");
-    eprintln!(
-        "{:>12} {:>8} {:>10} {:>12} {:>14}",
-        "needle", "answer", "examined", "hydrate", "client scan"
-    );
-    let full = "artist 12";
-    for k in 1..=full.len() {
-        let needle = &full[..k];
-        let a = args([("playlist_id", Value::Id([0; 16])), ("needle", Value::text(needle))]);
-        let (args, provided) = ark::eval::middleware(&h.schema, c, &me, &a, &st).unwrap();
-        let env = ark::view::Env {
-            helpers: c.helpers.clone(),
-            ctx: me.clone(),
-            args,
-            provided,
-        };
-        let counted = Counting::new(&st);
-        let v = ark::view::hydrate(&h.schema, plan, env.clone(), &counted).unwrap();
-        let examined = counted.reads().rows;
-        let mut times: Vec<Duration> = (0..5)
-            .map(|_| {
-                let t = Instant::now();
-                let v = ark::view::hydrate(&h.schema, plan, env.clone(), &st).unwrap();
-                let d = t.elapsed();
-                drop(v);
-                d
-            })
-            .collect();
-        times.sort();
-        let lower = needle.to_lowercase();
-        let mut scans: Vec<Duration> = (0..5)
-            .map(|_| {
-                let t = Instant::now();
-                let hits = st
-                    .scan("media")
-                    .iter()
-                    .filter(|r| {
-                        format!("{} {}", r["title"].as_text(), r["creator"].as_text())
-                            .to_lowercase()
-                            .contains(&lower)
-                    })
-                    .count();
-                std::hint::black_box(hits);
-                t.elapsed()
-            })
-            .collect();
-        scans.sort();
-        eprintln!(
-            "{:>12} {:>8} {:>10} {:>10.1}µs {:>12.1}µs",
-            format!("{needle:?}"),
-            v.rows().len(),
-            examined,
-            us(times[2]),
-            us(scans[2])
-        );
-    }
+    eprintln!("n/a: one execution path, the domain in Rust (§1.16); its figures are add_song's and create_playlist's above");
+    eprintln!("\n== (f) harken's views, the scanner's known_file, (g) search");
+    eprintln!("not measured by M1: Part 3 asks for add_song, playlists, playlist_name, rows examined and allocations; the views shape is rust/ark/tests/perf.rs's");
 }

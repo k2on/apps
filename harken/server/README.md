@@ -1,14 +1,16 @@
 # harken-server
 
-harken's server, on `ark-server` and `ark-auth`. The log (hosted with
-harken's procedures native), the sync socket at `/sync`, `/healthz`, the
-sign-in routes under `/auth`, `/media` and the browser client's validator
-are the shared crates'; what is here is what only harken has:
+harken's server, an `ark-peer` that listens, with `ark-auth`, hosting
+`harken-domain`. The log and the listening session's volatile space on
+the hub, the sync socket at `/sync`, the sign-in routes under `/auth`, the
+browser client's validator and the admin page's listener are the shared
+crates'; what is here is what only harken has:
 
 - **`library.rs`** — the media directory as a peer. `music/` under the root
   is walked at start and the whole root is watched after; each audio file
-  is read with lofty and authored as `add_song` by an `ark_client::Peer` in
-  this process, dialling the hub (no socket), signed in as the account
+  is read with lofty and authored as `library.add_song` by an
+  `ark_peer::Peer` in this process, dialling the hub (no socket),
+  signed in as the account
   `library`. `add_song` is an upsert by `file`: a file the library already
   has is that song said again — retagged, or with a cover it lacked — and
   keeps its id, so a playlist holding it still does; the same file saying
@@ -46,12 +48,13 @@ are the shared crates'; what is here is what only harken has:
   so no client changed; `/media/.art` and `/media/.cover` are reserved, and
   `ServeDir` refuses a `..` in either, written or encoded.
 - **The listening session is not here.** It is the domain's live state
-  (`harken_domain::listening`, `docs/plan-live.md`): one instance per
-  account on `/sync`, sequenced by the engine's own server
-  (`ark::live::state::Desk` inside the hub), its transitions written once
-  and run natively here and interpreted wherever the module is loaded,
-  kept in `live-states.cbor` and restored paused with no output. This crate
-  holds no rule of it.
+  (`harken_domain::listening`, `docs/plan-v5.md` §1.9): volatile tables
+  on `/sync`, sequenced by the hub's volatile authority, a connection's
+  device said in its volatile `Hello` (`device`), `on_join`, `on_leave`
+  and `on_restore` the domain's; kept in `log/live` when the hub closes
+  and restored by `on_restore`. This crate holds no rule of it.
+- **`hosted.rs`** — the domain the hub runs: harken's, as this build
+  compiled it, its functions by name (§1.16).
 - **`assistant.rs`** — Home Assistant's media players as devices of that
   session. A pure `Bridge`, handed the session and what the house said:
   who holds a speaker, what a change of the session becomes (a hand-off of
@@ -93,7 +96,8 @@ are the shared crates'; what is here is what only harken has:
   place (`play_media` with `enqueue: next`, last first, and `enqueue:
   add`), so nothing stops; a track taken out or moved is a fresh hand-off
   from where the track playing is. And `ha`, the thread: each speaker a
-  participant (`HubHandle::participate`) in each session a client is in;
+  device — a connection to the hub in this process — in each session a client
+  is in;
   where no client is, the speakers making the sound — the output and
   whoever follows it — go on standing, reconciled and reporting, while it
   sounds and for `IDLE` (ten minutes) after it stops, and then go, pausing
@@ -107,7 +111,10 @@ are the shared crates'; what is here is what only harken has:
   queue's first track and its seek go at once and the rest `ha::PUSH` at a
   time between polls; and with `HARKEN_BRIDGE_TRACE=1` each poll of each
   speaker is a line (below).
-- **`lib.rs`** — `Config` from the environment and `start`.
+- **`lib.rs`** — `Config` from the environment, `start`, and `/healthz`
+  in front of the hub's: `ok`, the connections, the log's `head` and
+  `horizon`, `module <hash> current` and each module held, and a `room`
+  line per account connected.
 
 ## Running
 
@@ -124,12 +131,13 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_REDIRECTS` | comma-separated prefixes a login may return to, besides loopback, `harken://` and the public URL |
 | `HARKEN_MEDIA` | the media root: `music/` is scanned, all of it served at `/media`, **unauthenticated** |
 | `HARKEN_WEB`, `HARKEN_WEB_MODULE` | the browser client, with the build as its validator; the module names the file whose change is a rebuild off the store |
-| `HARKEN_MODULE` | an `.ark` to host instead of harken's own |
+| `HARKEN_RETAIN_ENTRIES` | entries the log keeps above its snapshot (10000); `HARKEN_RETAIN_DAYS` is read and keeps nothing on v5 |
+| `HARKEN_KEEPALIVE_MS` | how often the sync socket pings (20000); it closes after three unanswered |
 | `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |
 | `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
 | `HARKEN_BRIDGE_TRACE=1` | a line per poll per speaker: what the house said of it and what the bridge did (below) |
 | `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice` |
-| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4) |
+| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark_peer::admin`, its raw writes and mutations authored by the authority as itself |
 | `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
 
 What is in `HARKEN_DATA` (`/var/lib/harken` under the NixOS module), and
@@ -137,10 +145,9 @@ whose it is:
 
 | path | |
 |---|---|
-| `log.ark-log`, `log.ark-journal` | the log: the library, every playlist, every person's work. This *is* the database |
-| `modules.cbor` | the modules this server has run, so an older client's entry still applies |
-| `cursors.cbor` | how far each session has read, for what the log may forget |
-| `live-states.cbor` | each account's listening session as the engine keeps it — its ordered part, under the hash of its type (a queue, a place in it, the clock), restored paused with no output |
+| `log/snapshot`, `log/chain` | the log: the library, every playlist, every person's work — the snapshot it stands on and the chain above it. This *is* the database |
+| `log/journal` | each session's last intent and the intents refused, so a push after a restart is judged as before |
+| `log/live` | the listening sessions' volatile space as the hub last closed it, restored by `on_restore` |
 | `sessions.json` | the sign-ins: every login this server issued |
 | `library/` | the scanner's replica, a peer like any other |
 | `library-files.json` | the scanner's prints; local, never the log's |
@@ -150,19 +157,14 @@ A library scanned before covers were found needs nothing: the first start
 of a server that keeps prints has none, so it reads every file once and
 authors an entry for each record whose cover it finds. Dropping the
 database is never needed for covers. If it is wanted anyway — to start the
-library over — stop the service and delete `log.ark-log` and
-`log.ark-journal`, which is every song *and every playlist*; `library/`,
-`library-files.json`, `cursors.cbor` and `live-states.cbor` may go with them,
-and keeping `sessions.json` keeps everybody signed in. Nothing on a device
-needs clearing: a client's `Hello` names the log it was confirmed on, a
-server whose log is another answers with its snapshot, and the device
-re-bases what it had pending onto that (`fleet.rs`
-`a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has`) — so what
-the old log held is gone from every device, and its pending work is
-authored again on the new one, where an entry naming a song or a playlist
-the new log does not have does nothing or is refused, saying why. The scanner's replica is re-based the same
-way, and with no song for any file it reads and authors the whole library
-again.
+library over — stop the service and delete `log/`, which is every song *and every
+playlist*; `library/` and `library-files.json` may go with it,
+and keeping `sessions.json` keeps everybody signed in. On v5 a device
+that held the old log does **not** re-base onto the new one: a server
+whose log is empty serves it at sequence 0, which every replica takes for
+its own base, and nothing converges (`fleet.rs`
+`a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has`, a
+witness). Clear the devices' replicas with it.
 
 A server with neither a provider nor `HARKEN_DEV_AUTH=1` refuses to start.
 Nothing assumes a peer arrived signed in: a client used before anybody
@@ -239,10 +241,16 @@ over real WAV files, tags written and read by lofty, covers beside a
 record and inside its tracks fetched where the log says, a retagged file
 the same song, a rescan of nothing new reading nothing, and `/media` range
 requests and `..` (`tests/library.rs`); sign-in, signed-out and older-login work,
-restarts (`tests/server.rs`); the web validator through this server
-(`tests/web.rs`). Each was falsified once by breaking what it holds.
+restarts, `/healthz` and the admin page over its wire (`tests/server.rs`);
+the web validator through this server (`tests/web.rs`); the process fleet
+— the real binaries on loopback, the network taken away and given back,
+the admin page's raw write (`tests/fleet.rs`); and versions: which module
+may follow which, and the fleet across a moved function
+(`tests/versions.rs`). Each was falsified once by breaking what it holds;
+what v5 does not yet do is a test ignored as a witness, saying where.
 
-Not verified: a real Home Assistant or speaker (the stand-in is written from
+Not verified: a real network run of the fleet off loopback, a pinned
+previous v5 revision (`nix/versions.nix` pins none), a real Home Assistant or speaker (the stand-in is written from
 the REST API's documentation), a real OpenID Connect provider, the NixOS
 module on a machine (it is evaluated, never booted), covers in a real
 library's files (the tests write the tags, the pictures are a few bytes

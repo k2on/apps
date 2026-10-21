@@ -18,13 +18,11 @@ import androidx.media3.common.MediaItem
 import androidx.media3.session.MediaConstants
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
-import dev.arkdb.Value
-import dev.arkdb.android.ArkSession
-import dev.arkdb.client.Account
-import dev.arkdb.client.Login
-import dev.arkdb.client.Peer
-import dev.arkdb.ui.Art
-import dev.harken.android.listening.Output
+import dev.harken.android.gen.Harken
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.ffi.Hall
+import dev.harken.android.ui.Art
+import dev.harken.android.gen.Output
 import java.io.File
 import kotlin.random.Random
 import kotlinx.coroutines.runBlocking
@@ -44,15 +42,15 @@ class CarTests {
     private val server = "https://music.example.com"
 
     /** The fixture's library, read as the car reads it. */
-    private fun car(random: Random = Random(7)): Pair<Car, Peer> {
+    private fun car(random: Random = Random(7)): Pair<Car, Harken> {
         val peer = Fixture.peer()
-        val session = ArkSession.inline(peer, server, Login("t", "s", Account("library"), 0))
+        val session = ArkSession.inline(peer, server, testLogin("library", roles = listOf("library")))
         return Car(Kept.of(session, "Phone"), server, random) to peer
     }
 
     private fun titles(items: List<MediaItem>): List<String> = items.map { it.mediaMetadata.title.toString() }
 
-    private fun tracks(peer: Peer, query: String, args: Map<String, Value>): List<Track> = peer.query(query, args).asList().map(Track::of)
+    private fun tracks(of: () -> dev.arkdb.ffi.View<dev.harken.android.gen.LibraryEntry>): List<Track> = Phone.once(of, Track::of)
 
     /**
      * The root is four tabs, a fifth only for a car that draws five; Home ends with every song when
@@ -82,12 +80,12 @@ class CarTests {
 
             // The albums: every one, as the `albums` view has them, each a page.
             val albums = car.children(Car.ALBUMS, 0, 1000, Car.TABS)!!
-            assertEquals(peer.query("albums", emptyMap()).asList().map { Album.of(it).name }, titles(albums))
+            assertEquals(Phone.once({ peer.albums() }) { it.name }, titles(albums))
             val water = albums.first { it.mediaMetadata.title == "Water Music" }
             assertEquals(Page.ForAlbum("Water Music").route, water.mediaId)
 
             // An album's tracks: the domain's `album` query, in its order, playable.
-            val want = tracks(peer, "album", Phone.namedArgs("Water Music"))
+            val want = tracks { Phone.album(peer, "Water Music") }
             val all = car.children(water.mediaId, 0, 1000, Car.TABS)!!
             assertEquals(want.map { it.title }, titles(all))
             assertTrue(all.all { it.mediaMetadata.isPlayable == true && it.mediaMetadata.isBrowsable == false })
@@ -101,7 +99,7 @@ class CarTests {
             // A playlist's tracks: the domain's `playlist` query, thirty of them.
             val list = car.children(Car.PLAYLISTS, 0, 100, Car.TABS)!!.first { it.mediaMetadata.title == Fixture.playlists[0] }
             val onIt = car.children(list.mediaId, 0, 100, Car.TABS)!!
-            assertEquals(tracks(peer, "playlist", Phone.playlistArgs(Fixture.first!!)).map { it.title }, titles(onIt))
+            assertEquals(tracks { Phone.playlist(peer, Fixture.first!!) }.map { it.title }, titles(onIt))
             assertEquals(30, onIt.size)
 
             // Choosing the third track of Water Music plays Water Music from it.
@@ -111,7 +109,7 @@ class CarTests {
             assertEquals("#album/Water%20Music", pick.from)
             assertNull("an id that is not one of ours is nothing", car.children("nowhere", 0, 10, Car.TABS))
         }
-        peer.close()
+        peer.peer.close()
     }
 
     /**
@@ -166,7 +164,7 @@ class CarTests {
             val water = runBlocking { car.children(Car.ALBUMS, 0, 1000, Car.TABS)!! }.first { it.mediaMetadata.title == "Water Music" }
             assertEquals(CarArt.AUTHORITY, water.mediaMetadata.artworkUri!!.authority)
             assertEquals("Water Music", CarArt.parse(water.mediaMetadata.artworkUri!!)!!.seed)
-            peer.close()
+            peer.peer.close()
         } finally {
             file.delete()
             File(context.cacheDir, "car-art").deleteRecursively()
@@ -193,11 +191,11 @@ class CarTests {
             assertTrue(found.first().mediaMetadata.title == "Water Music")
 
             val album = car.voice("Water Music", null)!!
-            assertEquals("play <album>: that album, in its order", tracks(peer, "album", Phone.namedArgs("Water Music")).map { it.id }, album.queue.map { it.id })
+            assertEquals("play <album>: that album, in its order", tracks { Phone.album(peer, "Water Music") }.map { it.id }, album.queue.map { it.id })
             assertEquals(0, album.at)
             assertEquals("#album/Water%20Music", album.from)
 
-            val vivaldi = tracks(peer, "artist", Phone.namedArgs("Antonio Vivaldi"))
+            val vivaldi = tracks { Phone.artist(peer, "Antonio Vivaldi") }
             val artist = car.voice("antonio vivaldi", null)!!
             assertEquals("every track of the artist's", vivaldi.map { it.id }.toSet(), artist.queue.map { it.id }.toSet())
             assertEquals(vivaldi.size, artist.queue.size)
@@ -214,7 +212,7 @@ class CarTests {
             assertNull("nothing matches: nothing", car.voice("zzzz nothing like it", null))
             assertNotNull("nothing asked: carrying on", car.voice("", null))
         }
-        peer.close()
+        peer.peer.close()
     }
 
     /**
@@ -233,7 +231,7 @@ class CarTests {
             val hall = Hall()
             val phonePeer = hall.device("phone", true)
             val laptopPeer = hall.device("laptop", true, "computer")
-            val phone = Listen(ArkSession.inline(phonePeer, server, Login("t", "phone", Account("alice"), 0)), "Phone").also { hall.carry() }
+            val phone = Listen(ArkSession.inline(phonePeer, server, testLogin("alice", "phone")), "Phone").also { hall.carry() }
             val laptop = Remote("laptop", "Laptop")
             assertNull(laptop.press(laptopPeer, Press.Start(listOf(queuedTrack("a", 1), queuedTrack("b", 2)), 0, 0, ""), null))
             hall.carry()

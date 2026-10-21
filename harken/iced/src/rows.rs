@@ -1,67 +1,88 @@
 //! What the domain's queries answer, as plain Rust a screen can hold.
 //!
-//! A query answers an `ark::value::Value` — a list of structs — and a view
-//! function wants names, not lookups. Each type here is one query's row, read
-//! leniently: a field the domain has not got yet reads as empty rather than
-//! as a panic in the middle of a frame. The library row itself is the
-//! domain's own [`harken_domain::view::Item`].
-use ark_client::{Id, Value};
+//! A query answers a list of the domain's own records (the bindings'
+//! `…Entry` types, `crate::domain`), each row its bytes; a view function
+//! wants plain fields it can borrow and copy, and an id it can compare. Each
+//! type here is one query's row, read leniently: bytes that do not read as
+//! the record — a module this build was not made with — read as empty rather
+//! than as a panic in the middle of a frame.
 
-/// A struct's field, or `Null` when it has none.
-fn get(v: &Value, k: &str) -> Value {
-    match v {
-        Value::Struct(m) => m.get(k).cloned().unwrap_or(Value::Null),
-        _ => Value::Null,
+use crate::domain::{AlbumsEntry, ArtistsEntry, ComposersEntry, LibraryEntry, RecordingsEntry, TrackDetailsEntry, WorkSummary};
+use ark::format::Encode;
+
+/// A row's id: its sixteen bytes, whatever table it names.
+pub type Id = [u8; 16];
+
+/// One entry of the library as a list holds it (`library`, `search`,
+/// `album`, `artist`, `recording`, `playlist`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Item {
+    pub id: Id,
+    /// `"song"` today; the name of the table carrying the rest.
+    pub kind: String,
+    pub title: String,
+    /// Whoever made it: a song's artist, a sermon's speaker.
+    pub creator: String,
+    pub duration_ms: i64,
+    /// A path under the media root, or a whole URL.
+    pub file: String,
+    pub pos: i64,
+    pub added_ms: i64,
+    pub user_id: String,
+    /// Where it sits on the playlist it was read against, if it is on it.
+    pub playlist_pos: Option<i64>,
+}
+
+impl From<LibraryEntry> for Item {
+    fn from(e: LibraryEntry) -> Item {
+        Item {
+            id: e.id.0,
+            kind: e.kind,
+            title: e.title,
+            creator: e.creator,
+            duration_ms: e.duration_ms,
+            file: e.file,
+            pos: e.pos,
+            added_ms: e.added_ms,
+            user_id: e.user_id,
+            playlist_pos: e.playlist_pos,
+        }
     }
 }
 
-pub(crate) fn text(v: &Value, k: &str) -> String {
-    match get(v, k) {
-        Value::Text(t) => t.into_string(),
-        _ => String::new(),
+impl Item {
+    pub fn from_bytes(b: &[u8]) -> Item {
+        LibraryEntry::from_bytes(b).map_or_else(|_| Item::default(), Item::from)
+    }
+
+    /// On the playlist it was read against.
+    pub fn on_playlist(&self) -> bool {
+        self.playlist_pos.is_some()
     }
 }
 
-pub(crate) fn int(v: &Value, k: &str) -> i64 {
-    match get(v, k) {
-        Value::Int(n) => n,
-        _ => 0,
-    }
-}
-
-pub(crate) fn id(v: &Value, k: &str) -> Id {
-    match get(v, k) {
-        Value::Id(i) => i,
-        _ => [0; 16],
-    }
-}
-
-/// The rows of a list, each read by `f`; nothing when it is not a list.
-pub fn list<T>(v: &Value, f: impl Fn(&Value) -> T) -> Vec<T> {
-    match v {
-        Value::List(xs) => xs.iter().map(f).collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// A playlist of the caller's (`playlists`, `playlists_of`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A playlist of the caller's (`playlists`, `playlists_of`): the table's
+/// own row.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Playlist {
     pub id: Id,
     pub name: String,
 }
 
+impl From<crate::domain::Playlist> for Playlist {
+    fn from(p: crate::domain::Playlist) -> Playlist {
+        Playlist { id: p.id.0, name: p.name }
+    }
+}
+
 impl Playlist {
-    pub fn from_value(v: &Value) -> Playlist {
-        Playlist {
-            id: id(v, "id"),
-            name: text(v, "name"),
-        }
+    pub fn from_bytes(b: &[u8]) -> Playlist {
+        crate::domain::Playlist::from_bytes(b).map_or_else(|_| Playlist::default(), Playlist::from)
     }
 }
 
 /// A record, as the albums page lists it (`albums`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Album {
     pub name: String,
     /// Whoever made its first track.
@@ -71,37 +92,49 @@ pub struct Album {
     pub art: String,
 }
 
-impl Album {
-    pub fn from_value(v: &Value) -> Album {
+impl From<AlbumsEntry> for Album {
+    fn from(e: AlbumsEntry) -> Album {
         Album {
-            name: text(v, "name"),
-            creator: text(v, "creator"),
-            tracks: int(v, "tracks"),
-            art: text(v, "art"),
+            name: e.name,
+            creator: e.creator,
+            tracks: e.tracks,
+            art: e.art,
         }
     }
 }
 
+impl Album {
+    pub fn from_bytes(b: &[u8]) -> Album {
+        AlbumsEntry::from_bytes(b).map_or_else(|_| Album::default(), Album::from)
+    }
+}
+
 /// Whoever made something, as the artists page lists them (`artists`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Artist {
     pub name: String,
     pub tracks: i64,
     pub art: String,
 }
 
-impl Artist {
-    pub fn from_value(v: &Value) -> Artist {
+impl From<ArtistsEntry> for Artist {
+    fn from(e: ArtistsEntry) -> Artist {
         Artist {
-            name: text(v, "name"),
-            tracks: int(v, "tracks"),
-            art: text(v, "art"),
+            name: e.name,
+            tracks: e.tracks,
+            art: e.art,
         }
     }
 }
 
+impl Artist {
+    pub fn from_bytes(b: &[u8]) -> Artist {
+        ArtistsEntry::from_bytes(b).map_or_else(|_| Artist::default(), Artist::from)
+    }
+}
+
 /// Somebody some work is by (`composers`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Composer {
     pub name: String,
     pub sort_name: String,
@@ -112,22 +145,28 @@ pub struct Composer {
     pub art: String,
 }
 
-impl Composer {
-    pub fn from_value(v: &Value) -> Composer {
+impl From<ComposersEntry> for Composer {
+    fn from(e: ComposersEntry) -> Composer {
         Composer {
-            name: text(v, "name"),
-            sort_name: text(v, "sort_name"),
-            born: int(v, "born"),
-            died: int(v, "died"),
-            works: int(v, "works"),
-            tracks: int(v, "tracks"),
-            art: text(v, "art"),
+            name: e.name,
+            sort_name: e.sort_name,
+            born: e.born,
+            died: e.died,
+            works: e.works,
+            tracks: e.tracks,
+            art: e.art,
         }
     }
 }
 
+impl Composer {
+    pub fn from_bytes(b: &[u8]) -> Composer {
+        ComposersEntry::from_bytes(b).map_or_else(|_| Composer::default(), Composer::from)
+    }
+}
+
 /// A composition (`works`, `work`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Work {
     /// The derived key, `johann-sebastian-bach/bwv-988`.
     pub id: String,
@@ -141,24 +180,30 @@ pub struct Work {
     pub art: String,
 }
 
-impl Work {
-    pub fn from_value(v: &Value) -> Work {
+impl From<WorkSummary> for Work {
+    fn from(e: WorkSummary) -> Work {
         Work {
-            id: text(v, "id"),
-            title: text(v, "title"),
-            catalogue: text(v, "catalogue"),
-            composer: text(v, "composer"),
-            form: text(v, "form"),
-            period: text(v, "period"),
-            recordings: int(v, "recordings"),
-            tracks: int(v, "tracks"),
-            art: text(v, "art"),
+            id: e.id,
+            title: e.title,
+            catalogue: e.catalogue,
+            composer: e.composer,
+            form: e.form,
+            period: e.period,
+            recordings: e.recordings,
+            tracks: e.tracks,
+            art: e.art,
         }
     }
 }
 
+impl Work {
+    pub fn from_bytes(b: &[u8]) -> Work {
+        WorkSummary::from_bytes(b).map_or_else(|_| Work::default(), Work::from)
+    }
+}
+
 /// One performance of a work (`recordings`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Recording {
     /// The derived key: the work's, `@`, and who played it.
     pub id: String,
@@ -170,41 +215,23 @@ pub struct Recording {
     pub art: String,
 }
 
-impl Recording {
-    pub fn from_value(v: &Value) -> Recording {
+impl From<RecordingsEntry> for Recording {
+    fn from(e: RecordingsEntry) -> Recording {
         Recording {
-            id: text(v, "id"),
-            performers: text(v, "performers"),
-            recorded: int(v, "recorded"),
-            label: text(v, "label"),
-            licence: text(v, "licence"),
-            tracks: int(v, "tracks"),
-            art: text(v, "art"),
+            id: e.id,
+            performers: e.performers,
+            recorded: e.recorded,
+            label: e.label,
+            licence: e.licence,
+            tracks: e.tracks,
+            art: e.art,
         }
     }
 }
 
-/// One person on a recording (`credits`). No page draws credits yet — the
-/// recording's `performers` is what a header says — so only the tests read
-/// them.
-#[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Credit {
-    pub name: String,
-    pub role: String,
-    pub instrument: String,
-    pub pos: i64,
-}
-
-#[cfg(test)]
-impl Credit {
-    pub fn from_value(v: &Value) -> Credit {
-        Credit {
-            name: text(v, "name"),
-            role: text(v, "role"),
-            instrument: text(v, "instrument"),
-            pos: int(v, "pos"),
-        }
+impl Recording {
+    pub fn from_bytes(b: &[u8]) -> Recording {
+        RecordingsEntry::from_bytes(b).map_or_else(|_| Recording::default(), Recording::from)
     }
 }
 
@@ -224,18 +251,24 @@ pub struct TrackDetail {
     pub bpm: i64,
 }
 
-impl TrackDetail {
-    pub fn from_value(v: &Value) -> TrackDetail {
+impl From<TrackDetailsEntry> for TrackDetail {
+    fn from(e: TrackDetailsEntry) -> TrackDetail {
         TrackDetail {
-            media_id: id(v, "media_id"),
-            album: text(v, "album"),
-            track: int(v, "track"),
-            part: text(v, "part"),
-            catalogue: text(v, "catalogue"),
-            performer: text(v, "performer"),
-            licence: text(v, "licence"),
-            bpm: int(v, "bpm"),
+            media_id: e.media_id.0,
+            album: e.album,
+            track: e.track,
+            part: e.part,
+            catalogue: e.catalogue,
+            performer: e.performer,
+            licence: e.licence,
+            bpm: e.bpm,
         }
+    }
+}
+
+impl TrackDetail {
+    pub fn from_bytes(b: &[u8]) -> TrackDetail {
+        TrackDetailsEntry::from_bytes(b).map_or_else(|_| TrackDetail::default(), TrackDetail::from)
     }
 }
 
@@ -243,12 +276,18 @@ impl TrackDetail {
 mod tests {
     use super::*;
 
-    /// A row with a field missing reads as empty rather than panicking in a
-    /// frame. Falsified by reading with `Value::field`: it panics.
+    /// A row that does not read as its record reads as empty rather than
+    /// panicking in a frame. Falsified by reading with `unwrap`: it panics.
     #[test]
-    fn a_missing_field_is_empty() {
-        let v = Value::record(vec![("name", Value::text("Water Music"))]);
-        let a = Album::from_value(&v);
-        assert_eq!((a.name.as_str(), a.creator.as_str(), a.tracks), ("Water Music", "", 0));
+    fn a_row_that_does_not_read_is_empty() {
+        let a = Album::from_bytes(&[1, 2, 3]);
+        assert_eq!((a.name.as_str(), a.creator.as_str(), a.tracks), ("", "", 0));
+        let good = AlbumsEntry {
+            art: String::new(),
+            creator: "Handel".into(),
+            name: "Water Music".into(),
+            tracks: 3,
+        };
+        assert_eq!(Album::from_bytes(&good.to_bytes()).name, "Water Music");
     }
 }

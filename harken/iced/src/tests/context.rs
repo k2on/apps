@@ -20,7 +20,7 @@ fn app() -> App {
     app
 }
 
-fn row(app: &App, at: usize) -> ark_client::Id {
+fn row(app: &App, at: usize) -> crate::rows::Id {
     app.peer.rows()[at].id
 }
 

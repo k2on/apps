@@ -11,6 +11,8 @@
 // decode it once between them.
 package dev.harken.android
 
+import dev.harken.android.gen.AddSong
+import dev.harken.android.gen.CreatePlaylist
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
@@ -28,17 +30,9 @@ import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
-import dev.arkdb.Value
-import dev.arkdb.android.ArkSession
-import dev.arkdb.client.Account
-import dev.arkdb.client.Autos
-import dev.arkdb.client.Domain
-import dev.arkdb.client.Login
-import dev.arkdb.client.MemoryStorage
-import dev.arkdb.client.Options
-import dev.arkdb.client.Peer
-import dev.arkdb.ui.Art
-import dev.arkdb.ui.Recompositions
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.ui.Art
+import dev.harken.android.ui.Recompositions
 import java.io.File
 import java.lang.reflect.Proxy
 import java.util.concurrent.ConcurrentHashMap
@@ -64,33 +58,23 @@ class ScrollTests {
         override fun close() {}
     }
 
-    private fun harken(): ByteArray {
-        var dir: File? = File("").absoluteFile
-        while (dir != null) {
-            File(dir, "domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            File(dir, "harken/domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            dir = dir.parentFile
-        }
-        error("no harken.ark above ${File("").absolutePath}")
-    }
-
-    private fun song(i: Int): Map<String, Value> =
-        mapOf(
-            "title" to Value.text("Song $i"),
-            "artist" to Value.text("Artist ${i / 10}"),
-            "album" to Value.text("Album ${i / 5}"),
-            "duration_ms" to Value.int(180_000),
-            "file" to Value.text("music/$i.flac"),
-            "track" to Value.int((i % 5 + 1).toLong()),
-            "part" to Value.text(""),
-            "catalogue" to Value.text(""),
-            "performer" to Value.text(""),
-            "bpm" to Value.int(0),
-            "album_art" to Value.text(""),
-            "artist_art" to Value.text(""),
-            "disc" to Value.int(1),
-            "work_title" to Value.text(""),
-            "movement_no" to Value.int(0),
+    private fun song(i: Int): AddSong =
+        AddSong(
+            title = "Song $i",
+            artist = "Artist ${i / 10}",
+            album = "Album ${i / 5}",
+            durationMs = 180_000,
+            file = "music/$i.flac",
+            track = (i % 5 + 1).toLong(),
+            part = "",
+            catalogue = "",
+            performer = "",
+            bpm = 0,
+            albumArt = "",
+            artistArt = "",
+            disc = 1,
+            workTitle = "",
+            movementNo = 0,
         )
 
     private val counts = ConcurrentHashMap<String, Int>()
@@ -108,12 +92,11 @@ class ScrollTests {
 
     @Test
     fun thePositionTickingRecomposesNoRow() {
-        val peer = Peer.open(Domain.fromBytes(harken()), MemoryStorage(), Options.alone("library").copy(autos = Autos.Seeded(5)))
-        peer.setRoles(listOf("library"))
-        repeat(60) { peer.mutate("add_song", song(it)) }
+        val peer = alone()
+        repeat(60) { peer.addSong(song(it)) }
         // No thread of its own: the library is read on this one, as the screen composes, so the
         // peer and the frame clock cannot race.
-        val session = ArkSession.inline(peer, "https://music.example.com", Login("t", "s", Account("library"), 0))
+        val session = ArkSession.inline(peer, "https://music.example.com", testLogin("library", roles = listOf("library")))
         var playback: Playback? = null
         var rowsDrawn = -1
         var rowsDuring = -1
@@ -160,7 +143,7 @@ class ScrollTests {
         } finally {
             Recompositions.sink = null
             session.close()
-            peer.close()
+            peer.peer.close()
         }
         println("ticks: at rest for a second $atRest; over four position ticks $during")
         assertTrue("rows were drawn before the ticks: $rowsDrawn", rowsDrawn > 0)

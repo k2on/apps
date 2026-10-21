@@ -1,5 +1,5 @@
 {
-  description = "ArkDB: the specification and runtime in Rust, the Swift and Kotlin clients, and harken on them";
+  description = "ArkDB: the specification and runtime in Rust, and harken on it";
 
   # FlakeHub rather than github: for every input, because a machine that can
   # reach FlakeHub and cache.nixos.org but not api.github.com (this one, for
@@ -33,7 +33,8 @@
         f (import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
-          # The Android SDK is unfree, and its licence is accepted here once.
+          # The Android NDK and SDK are unfree, and their licence is
+          # accepted here once.
           config = { allowUnfree = true; android_sdk.accept_license = true; };
         }));
 
@@ -56,9 +57,14 @@
           !build && lib.any (d: under d || leadsTo d) dirs;
       };
 
-      # The Rust workspace is `rust/`, and harken's four crates join it from
+      # The Rust workspace is `rust/`, and harken's three crates join it from
       # `harken/` by path, so both trees are the source of every Rust build.
-      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/iced" ];
+      # The kernel's tests read `spec/vectors`, so a build that runs them
+      # adds it.
+      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/iced" "harken/ffi" ];
+      # The typed Kotlin and Swift `ark-dev gen` writes, which harken/ffi's
+      # tests hold to the domain (harken/ffi/tests/gen.rs).
+      genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
@@ -80,12 +86,6 @@
         let
           rust = pkgs.rust-bin.stable.latest.default;
           rustPlatform = pkgs.makeRustPlatform { cargo = rust; rustc = rust; };
-
-          # The formatter each language's sources are held to: Kotlin's is
-          # ktfmt in the kotlinlang style (kotlin/README.md).
-          fmt = {
-            kotlin = "ktfmt --kotlinlang-style";
-          };
 
           # One crate of the workspace, built from the whole of it.
           crate = { pname, flags ? [ "-p" pname ], ... }@args: rustPlatform.buildRustPackage ({
@@ -156,7 +156,7 @@
             files = "../harken/iced/web/index.html ../harken/iced/web/favicon.svg";
           };
           # The admin page: `ark-explorer`'s `ark-admin` over a server's
-          # authority, which ark-server serves on its admin listener
+          # authority, which ark-peer serves on its admin listener
           # (`services.harken.admin.page`).
           ark-admin = wasmPage {
             pname = "ark-admin";
@@ -181,184 +181,127 @@
             '';
           };
 
-          # The specification is `rust/ark` (spec/README.md), and its three
-          # binaries are one crate build: `ark-vectors` writes the vectors,
-          # `arkc` verifies, hashes and compares modules, `gen-unicode`
-          # writes the Unicode tables. `arkc` and `vectors` are that build
-          # under the names `nix run` takes.
-          ark = crate { pname = "ark"; };
-          arkc = pkgs.writeShellApplication {
-            name = "arkc";
-            runtimeInputs = [ ark ];
-            text = ''exec arkc "$@"'';
-          };
-          vectors = pkgs.writeShellApplication {
-            name = "ark-vectors";
-            runtimeInputs = [ ark ];
-            text = ''exec ark-vectors "$@"'';
-          };
-          # `nix run .#fuzz [SECONDS] [ARGS…]`: the differential fuzzer
-          # (docs/plan-db.md D2) for SECONDS, ten minutes by default, from a
-          # seed it prints; a finding is written under ./fuzz-out as a vector
-          # and the run exits 1.
+          # The specification is `rust/ark` (spec/README.md), and the tools
+          # over it are `rust/ark-dev`: one build of both, whose binary is
+          # `ark-fuzz`, the fuzzer; `fuzz` is that build under the name
+          # `nix run` takes.
+          ark = crate { pname = "ark"; flags = [ "-p" "ark" "-p" "ark-dev" ]; };
+          # `nix run .#fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]`: the
+          # fuzzer (rust/ark-dev/src/bin/ark-fuzz.rs), ten thousand sessions
+          # from seed 1 by default, each checked for convergence, replay
+          # from facts and every frame's bytes; `traces` replays every
+          # client's trace too and writes them under DIR. A failure prints
+          # its seed and the run exits 1.
           fuzz = pkgs.writeShellApplication {
             name = "ark-fuzz";
             runtimeInputs = [ ark ];
-            text = ''exec arkc fuzz --seconds "''${1:-600}" "''${@:2}"'';
+            text = ''exec ark-fuzz "$@"'';
+          };
+          # The vectors as the writer writes them now: the kernel's tests
+          # (hash/, views/) and ark-dev's
+          # (protocol/, trace/, rebase/) run with ARK_WRITE_VECTORS over an
+          # empty spec/vectors, which is then the output. checks.vectors
+          # holds the tree's to it; `nix build .#vectors` and a copy over
+          # spec/vectors is how they are written again without cargo.
+          vectors = crate {
+            pname = "ark-vectors";
+            flags = [ "-p" "ark" "-p" "ark-dev" ];
+            # ark-dev's tests also hold spec/README.md and AUTHORING.md.
+            src = only (rustDirs ++ [ "spec/README.md" "spec/AUTHORING.md" ]);
+            doCheck = true;
+            # stdenv makes only the source root (rust/) writable, and the
+            # writer writes beside it.
+            postUnpack = "chmod u+w source";
+            preCheck = ''
+              chmod -R u+w ../spec
+              rm -rf ../spec/vectors
+              export ARK_WRITE_VECTORS=1
+            '';
+            installPhase = "cp -r ../spec/vectors $out";
           };
 
-          # docs/plan-phones.md S2 Every client's life in every session of a
-          # fixed run of the fuzzer, as traces (spec/RUNNERS.md § trace): what
-          # every runtime's check replays beside spec/vectors/trace/. A
-          # function of the seed and the case count, so not checked in, and
-          # moving either is a deliberate edit; a run that finds anything
-          # exits 1 and there is no corpus, since a trace is of correct
-          # behaviour.
+          # Every client's life in every session of a fixed run of the
+          # fuzzer, as traces (spec/RUNNERS.md § trace): what checks.traces
+          # replays beside spec/vectors/trace/, and what a runtime in another
+          # language replays to be held to this one. A function of the seed
+          # and the session count, so not checked in, and moving either is a
+          # deliberate edit; a run that finds anything exits 1 and there is
+          # no corpus, since a trace is of correct behaviour.
           trace-corpus = pkgs.runCommand "trace-corpus" { nativeBuildInputs = [ ark ]; } ''
-            arkc fuzz --seed 2026 --cases 300 --out findings --traces $out
+            ark-fuzz 300 2026 traces $out
           '';
 
-          # The binary that writes harken.ark from the domain crate, and the
-          # module it writes, verified by the reference.
-          harken-domain-bin = crate { pname = "harken-domain"; };
-          harken-domain = pkgs.runCommand "harken-domain" { nativeBuildInputs = [ harken-domain-bin ark ]; } ''
-            mkdir -p $out
-            harken-domain $out/harken.ark
-            arkc verify $out/harken.ark
+          # The phones (docs/plan-v5.md §1.16, N3): the Rust kernel through
+          # UniFFI. `harken/ffi` is ark-ffi with harken's domain linked in, one
+          # library; UniFFI writes its Kotlin and Swift from the library built
+          # for the host (`uniffi-bindgen generate --library`), and beside
+          # them goes the bridge's typed half (rust/ark-ffi/{kotlin,swift}).
+          ffiBindings = { lib, language }: ''
+            cargo run --release --offline -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+              generate --library ${lib} --language ${language} --no-format --out-dir bindings/${language}
           '';
-
-          # The Swift runtime (swift/README.md, docs/plan-phones.md rounds
-          # 5–7): SwiftPM over nixpkgs' Swift 5.8, in release (the corpus is
-          # thousands of traces), its test runner an executable since there is
-          # no XCTest here. The Unicode tables are generated from rust/ark's
-          # before the build. The check runs the conformance runner over
-          # spec/vectors and every trace of `trace-corpus`, which names what
-          # it ran and skipped and fails on a failure and on a claimed kind
-          # with nothing run.
-          swiftBuild = { pname, check }: pkgs.swiftPackages.stdenv.mkDerivation {
-            inherit pname;
+          # The Android NDK nixpkgs packages from Google's zip (x86_64 Linux
+          # and macOS hosts), whose clang links each Android target and
+          # compiles ring's C.
+          ndk = (pkgs.androidenv.composeAndroidPackages {
+            includeNDK = true;
+            ndkVersions = [ "27.0.12077973" ];
+            platformVersions = [ ];
+            buildToolsVersions = [ ];
+            includeEmulator = false;
+            includeSources = false;
+          }).ndk-bundle;
+          # The ABIs the APK carries: a phone, an old phone, an emulator.
+          androidTargets = {
+            "aarch64-linux-android" = { abi = "arm64-v8a"; clang = "aarch64-linux-android"; };
+            "armv7-linux-androideabi" = { abi = "armeabi-v7a"; clang = "armv7a-linux-androideabi"; };
+            "x86_64-linux-android" = { abi = "x86_64"; clang = "x86_64-linux-android"; };
+          };
+          androidRust = rust.override { targets = lib.attrNames androidTargets; };
+          # `harken_ffi` for each Android ABI against API 26 (the app's
+          # minSdk), stripped, as `jniLibs/<abi>/libharken_ffi.so`; the
+          # Kotlin the app compiles with it, UniFFI's bindings and the typed
+          # half, under `kotlin/`; and the library built for this machine as
+          # `host/libharken_ffi.so`, which the app's JVM tests load. What
+          # `harken-apk` builds the app over.
+          harken-android-lib = (pkgs.makeRustPlatform { cargo = androidRust; rustc = androidRust; }).buildRustPackage {
+            pname = "harken-android-lib";
             version = "0.1.0";
-            # The storage fixture is round 3's, read where it was committed
-            # beside the Kotlin client rather than copied.
-            # The iOS app is type-checked by the check alone, so that a
-            # screen edit is not an input to the fleet's peer.
-            src = only ([ "swift" "spec/vectors" "rust/ark/src/unicode_tables.rs" "kotlin/ark-client/fixtures/rust-peer.json" "harken/domain/harken.ark" ] ++ lib.optionals check [ "harken/ios" ]);
-            sourceRoot = "source/swift";
-            nativeBuildInputs = [ pkgs.swift pkgs.swiftpm ];
-            # On Linux, Foundation and Dispatch are packages of their own and
-            # go in as build inputs so their rpath reaches every binary SwiftPM
-            # links — the manifest it compiles and runs included. On Darwin
-            # they are the system's and the attributes are null.
-            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
-            swiftpmBuildConfig = "release";
-            swiftpmFlags = lib.optionals (!check) [ "--product" "harken-peer-swift" ];
-            # What swift/tools/swift.sh sets in the devshell, Linux only: the
-            # target and header quirks of nixpkgs' Swift 5.8, and the manifest
-            # SwiftPM compiles and runs having no rpath for libdispatch.
-            preBuild = ''
-              patchShebangs tools
-              tools/gen-unicode.sh ../rust/ark/src/unicode_tables.rs Sources/ArkDB/UnicodeTables.swift
-            '' + lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-              export SWIFT_EXEC="$PWD/tools/nix-swiftc"
-              export ARKDB_SWIFTC_INCLUDE=
-              export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.swiftPackages.Dispatch pkgs.swiftPackages.Foundation ]}:${pkgs.swiftPackages.Foundation}/lib/swift/linux:${pkgs.swiftPackages.swift-unwrapped}/lib/swift/linux''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            src = only rustDirs;
+            sourceRoot = "source/rust";
+            cargoLock.lockFile = ./rust/Cargo.lock;
+            doCheck = false;
+            buildPhase = ''
+              runHook preBuild
+              ndkRoot=$(echo ${ndk}/libexec/android-sdk/ndk/*)
+              bin=$ndkRoot/toolchains/llvm/prebuilt/${if pkgs.stdenv.hostPlatform.isDarwin then "darwin" else "linux"}-x86_64/bin
+              export AR=$bin/llvm-ar
+              ${lib.concatStrings (lib.mapAttrsToList (t: a: let up = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); low = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
+                export CARGO_TARGET_${up}_LINKER=$bin/${a.clang}26-clang
+                export CC_${low}=$bin/${a.clang}26-clang AR_${low}=$bin/llvm-ar
+                cargo build --release --offline --frozen -p harken-ffi --lib --target ${t}
+                mkdir -p jniLibs/${a.abi}
+                $bin/llvm-strip -o jniLibs/${a.abi}/libharken_ffi.so target/${t}/release/libharken_ffi.so
+              '') androidTargets)}
+              cargo build --release --offline --frozen -p harken-ffi --lib
+              ${ffiBindings { lib = "target/release/libharken_ffi.so"; language = "kotlin"; }}
+              runHook postBuild
             '';
-            doCheck = check;
-            checkPhase = ''
-              runHook preCheck
-              "$(swiftpmBinPath)/ArkDBTests" ../spec/vectors ${trace-corpus} ../kotlin/ark-client/fixtures/rust-peer.json ../harken/domain/harken.ark
-              # What of the iOS app is not SwiftUI, type-checked against the
-              # modules just built (harken/ios/README.md).
-              SWIFT_BUILD="$(swiftpmBinPath)" bash ../harken/ios/tools/typecheck.sh
-              runHook postCheck
-            '';
-            installPhase = if check then ''
-              mkdir -p $out/bin
-              cp "$(swiftpmBinPath)"/ArkDBTests $out/bin/
-            '' else ''
-              mkdir -p $out/bin $out/share/harken-peer-swift
-              cp "$(swiftpmBinPath)"/harken-peer-swift $out/bin/
-              cp ../harken/domain/harken.ark $out/share/harken-peer-swift/
+            installPhase = ''
+              mkdir -p $out/kotlin/dev/arkdb/ffi
+              cp -r jniLibs $out/
+              cp -r bindings/kotlin/. $out/kotlin/
+              install -Dm755 target/release/libharken_ffi.so $out/host/libharken_ffi.so
+              cp ark-ffi/kotlin/Typed.kt $out/kotlin/dev/arkdb/ffi/
             '';
           };
-          swift = swiftBuild { pname = "arkdb-swift"; check = true; };
-          # `harken-peer-swift` (docs/plan-phones.md round 7): harken's
-          # headless peer on the Swift client, speaking harken-peer's lines,
-          # with the harken.ark it runs installed beside it — what
-          # checks.fleet-swift runs beside Rust peers.
-          harken-peer-swift = swiftBuild { pname = "harken-peer-swift"; check = false; };
 
-          # The Kotlin runtime and client (kotlin/README.md,
-          # docs/plan-phones.md): gradle over a recorded Maven graph
-          # (kotlin/deps.json), replayed offline the way nixpkgs builds every
-          # gradle project; `nix run .#kotlin-deps` re-records it. Its `build`
-          # runs the conformance runner over spec/vectors and every trace of
-          # `trace-corpus`, which fails on any failure and on a kind it claims
-          # with nothing run, the client's storage tests over a Rust peer's
-          # bytes and the same traces, and its driver's tests — the link, the
-          # dialect, the sign-in, views over harken.ark, which is a source
-          # too; so are the Unicode tables, generated from rust/ark's. The sources are
-          # held to ktfmt's kotlinlang style first, checked and never written.
-          kotlin = pkgs.stdenv.mkDerivation (final: {
-            pname = "arkdb-kotlin";
-            version = "0.1.0";
-            src = only [ "kotlin" "spec/vectors" "rust/ark/src/unicode_tables.rs" "harken/domain/harken.ark" ];
-            sourceRoot = "source/kotlin";
-            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 pkgs.ktfmt ];
-            mitmCache = pkgs.gradle.fetchDeps {
-              pkg = final.finalPackage;
-              data = ./kotlin/deps.json;
-            };
-            __darwinAllowLocalNetworking = true;
-            gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" "-ParkTraceCorpus=${trace-corpus}" ];
-            preBuild = ''
-              ${fmt.kotlin} --dry-run --set-exit-if-changed $(find ark-runtime ark-client ark-android ark-ui harken-peer -name '*.kt' -not -path '*/build/*' | sort)
-            '';
-            gradleBuildTask = "build";
-            doCheck = false;
-            installPhase = ''
-              mkdir -p $out/lib
-              cp ark-runtime/build/libs/*.jar ark-client/build/libs/*.jar $out/lib/
-            '';
-          });
-
-          # `harken-peer-kt` (docs/plan-phones.md round 4): harken's headless
-          # peer on the Kotlin client, speaking harken-peer's JSON lines, which
-          # the fleet runs beside Rust peers (checks.fleet-kotlin). Gradle's
-          # `installDist` over the same recorded Maven graph as the runtime,
-          # then a launcher naming the JDK and the jars — harken.ark is in the
-          # peer's own jar.
-          harken-peer-kt = pkgs.stdenv.mkDerivation (final: {
-            pname = "harken-peer-kt";
-            version = "0.1.0";
-            src = only [ "kotlin" "rust/ark/src/unicode_tables.rs" "harken/domain/harken.ark" ];
-            sourceRoot = "source/kotlin";
-            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 pkgs.makeWrapper ];
-            mitmCache = pkgs.gradle.fetchDeps {
-              pkg = final.finalPackage;
-              data = ./kotlin/deps.json;
-            };
-            __darwinAllowLocalNetworking = true;
-            gradleFlags = [ "-Dorg.gradle.java.home=${pkgs.jdk21}" ];
-            gradleBuildTask = ":harken-peer:installDist";
-            doCheck = false;
-            installPhase = ''
-              mkdir -p $out/lib $out/bin
-              cp harken-peer/build/install/harken-peer-kt/lib/*.jar $out/lib/
-              makeWrapper ${pkgs.jdk21}/bin/java $out/bin/harken-peer-kt \
-                --add-flags "-XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xmx512m" \
-                --add-flags "-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8" \
-                --add-flags "-cp '$out/lib/*' dev.harken.peer.HarkenPeerKt"
-            '';
-          });
-
-          # The Android SDK the APK is built with (`harken-apk`, below).
-          # Google ships one for
+          # The Android SDK the APK is built with. Google ships one for
           # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
           # instead (nix/android-sdk.nix) — the platform and build-tools jars
-          # from Google's zips, and aapt2, the one native tool AGP runs, from
-          # Debian's package for the host (nix/aapt2.nix) — so an ARM Linux
-          # builds the phone natively. macOS takes nixpkgs' androidenv.
+          # from Google's zips, and aapt2, the one native tool AGP runs,
+          # compiled for the host (nix/aapt2.nix) — so an ARM Linux builds the
+          # phone natively. macOS takes nixpkgs' androidenv.
           aapt2 = pkgs.callPackage ./nix/aapt2.nix { stdenv = pkgs.clangStdenv; };
           androidSdk = pkgs.callPackage ./nix/android-sdk.nix { inherit aapt2; };
           sdkRoot =
@@ -368,44 +311,26 @@
               buildToolsVersions = [ "35.0.0" ];
             }).androidsdk}/libexec/android-sdk";
 
-          # The phone (docs/plan-phones.md round 4, docs/plan-android.md): gradle
-          # over the SDK, the Kotlin runtime and client as a composite build,
-          # the shared onboarding (kotlin/ark-android) and the look and motion
-          # every Ark app shares (kotlin/ark-ui) as projects of the app's
-          # build, and harken.ark in the APK's assets — which the app
-          # loads, verifies and interprets — assembled offline from a
-          # recorded Maven graph (harken/android/deps.json; `nix run
-          # .#harken-apk-deps` re-records it, for this and for the
-          # screenshots below). ark-ui's and the onboarding's JVM tests run
-          # first, so an APK is not built over a library that fails them. The
-          # Kotlin build reads the Unicode tables out of rust/ark, so that file
-          # is a source too.
+          # The phone (harken/android/README.md): gradle over the SDK, the app
+          # — its onboarding and its look are its own code — over
+          # `harken-android-lib` (the kernel per ABI, and the Kotlin over it),
+          # assembled offline from a recorded Maven graph
+          # (harken/android/deps.json; `nix run .#harken-apk-deps` re-records
+          # it). The app's JVM tests run first, so an APK is not built over a
+          # screen or a rule that fails them.
           #
           # The release build, `harken.apk`: not debuggable, so ART compiles
-          # it as it would any app rather than holding back for a debugger,
-          # and with the baseline profiles Compose's libraries ship, which
-          # profileinstaller installs. Not minified: R8 is not in the
-          # recorded graph. Signed with one key rather than a new one per
-          # build: harken/android/debug.keystore, committed and public on
-          # purpose (app/build.gradle.kts says why), the key every APK built
-          # here since has carried, so that each installs over the last
-          # instead of failing with "App not installed". It installs anywhere
-          # and belongs nowhere public. And a version code that rises
-          # with each commit: the flake's own source time, in minutes since
-          # the epoch — about thirty million today, and Android's ceiling is
-          # 2,100,000,000 — so a newer build is never refused as a downgrade.
-          # The first install of this build over one made before it still
-          # needs one uninstall, because the APK already on the phone was
-          # signed with a key AGP made up for that build alone.
+          # it as it would any app, with the baseline profiles Compose's
+          # libraries ship. Not minified: R8 is not in the recorded graph.
+          # Signed with harken/android/debug.keystore, committed and public on
+          # purpose (app/build.gradle.kts says why), so each build installs
+          # over the last; and a version code that rises with each commit, the
+          # flake's own source time in minutes.
           harken-apk = pkgs.stdenv.mkDerivation (final: {
             pname = "harken-apk";
             version = "0.1.0";
-            src = only [ "harken/android" "harken/domain/harken.ark" "kotlin" "rust/ark/src/unicode_tables.rs" ];
+            src = only [ "harken/android" ];
             sourceRoot = "source/harken/android";
-            # stdenv makes only the source root writable, and gradle writes
-            # `.gradle/` and `build/` inside the included build at ../../kotlin
-            # too — a read-only one ends the build with no task run and no
-            # message. The whole unpacked tree is writable instead.
             postUnpack = "chmod -R u+w source";
             nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
             mitmCache = pkgs.gradle.fetchDeps {
@@ -417,34 +342,28 @@
             ANDROID_SDK_ROOT = sdkRoot;
             gradleFlags = [
               "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
-              # The Kotlin build asks for a JDK 21 toolchain; this is the one,
-              # and gradle is not to go looking for or downloading another.
               "-Porg.gradle.java.installations.auto-detect=false"
               "-Porg.gradle.java.installations.auto-download=false"
               "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
               # AGP would fetch its own aapt2 from Maven, an unpatched binary
               # that cannot run here; the SDK's is patched and can.
               "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+              "-PharkenLib=${harken-android-lib}"
             ] ++ final.versionFlags;
             # Read by app/build.gradle.kts; a local build falls back to 1.
             versionFlags = [
               "-PversionCode=${toString (self.lastModified / 60)}"
               "-PversionName=0.1.${self.lastModifiedDate}"
             ];
-            # AGP keeps its own state (analytics settings, and the debug keystore
-            # it would sign with were the build not given one) under
-            # ~/.android, and the builder has no home.
+            # AGP keeps its state under ~/.android, and the builder has no home.
             preBuild = ''
               export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
               mkdir -p "$ANDROID_USER_HOME"
             '';
-            gradleBuildTask = ":ark-ui:testDebugUnitTest :ark-android:testDebugUnitTest :app:assembleRelease";
-            # The recording runs the same tasks rather than resolving every
-            # configuration — AGP's androidTest classpaths cannot be resolved
-            # in isolation, and what the build fetches is the whole graph —
-            # and the screenshots' too, and the debug build a laptop makes, so
-            # that one recording serves all three.
-            gradleUpdateTask = ":ark-ui:testDebugUnitTest :ark-android:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
+            gradleBuildTask = ":app:testDebugUnitTest :app:assembleRelease";
+            # The recording runs the same tasks, and the screenshots' and a
+            # laptop's debug build, so that one recording serves all three.
+            gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
             doCheck = false;
             installPhase = ''
               mkdir -p $out
@@ -452,18 +371,13 @@
             '';
           });
 
-          # The phone's screens as images (docs/plan-android.md): every screen
-          # and state, light and dark, at a Pixel 5's size, rendered on the
-          # JVM by Paparazzi through layoutlib from a fixed library
-          # (harken/android/app/src/test) — the same build and the same
-          # recorded Maven graph as the APK, layoutlib included. The PNGs and
-          # an index.html laying them out, light beside dark: what a change
-          # to a screen is reviewed by, with no phone and no emulator.
+          # The phone's screens as images: every screen and state, light and
+          # dark, at a Pixel 5's size, rendered on the JVM by Paparazzi through
+          # layoutlib from a fixed library (harken/android/app/src/test), and
+          # an index.html laying them out light beside dark.
           harken-android-screens = harken-apk.overrideAttrs (old: {
             pname = "harken-android-screens";
             gradleBuildTask = ":app:recordPaparazziDebug";
-            # A screen does not draw the version, so the commit time is not an
-            # input here: a prose commit does not re-render every screen.
             versionFlags = [ ];
             installPhase = ''
               mkdir -p $out
@@ -476,6 +390,58 @@
             '';
           });
 
+          # The same library for iOS — `aarch64-apple-ios` for a phone and
+          # `aarch64-apple-ios-sim` for the simulator on an Apple-silicon Mac —
+          # as `HarkenFFI.xcframework`, with UniFFI's Swift and the typed half
+          # under `swift/`. Linking for iOS needs Apple's SDK, which only a
+          # macOS builder has: on Linux this derivation evaluates and is not
+          # built (meta.platforms), and it has not been built anywhere yet.
+          iosRust = rust.override { targets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ]; };
+          harken-ios-xcframework = (pkgs.makeRustPlatform { cargo = iosRust; rustc = iosRust; }).buildRustPackage {
+            pname = "harken-ios-xcframework";
+            version = "0.1.0";
+            src = only rustDirs;
+            sourceRoot = "source/rust";
+            cargoLock.lockFile = ./rust/Cargo.lock;
+            doCheck = false;
+            # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
+            # Xcode, outside the store.
+            __noChroot = true;
+            buildPhase = ''
+              runHook preBuild
+              export PATH=/usr/bin:$PATH DEVELOPER_DIR=''${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}
+              for t in aarch64-apple-ios aarch64-apple-ios-sim; do
+                cargo build --release --offline --frozen -p harken-ffi --lib --target $t
+              done
+              cargo build --release --offline --frozen -p harken-ffi --lib
+              ${ffiBindings { lib = "target/release/libharken_ffi.dylib"; language = "swift"; }}
+              mkdir -p headers
+              cp bindings/swift/*.h headers/
+              cat bindings/swift/*.modulemap > headers/module.modulemap
+              /usr/bin/xcodebuild -create-xcframework \
+                -library target/aarch64-apple-ios/release/libharken_ffi.a -headers headers \
+                -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers headers \
+                -output HarkenFFI.xcframework
+              runHook postBuild
+            '';
+            installPhase = ''
+              mkdir -p $out/swift
+              cp -r HarkenFFI.xcframework $out/
+              cp bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
+            '';
+            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+          };
+
+          # harken's domain (harken/domain: plain Rust, §1.16) built, and
+          # its schema's hash held to the one its tests pin.
+          harken-domain = crate {
+            pname = "harken-domain";
+            doCheck = true;
+            cargoTestFlags = [ "-p" "harken-domain" "--test" "port" ];
+            checkFlags = [ "the_schema_hash_is_pinned" ];
+            installPhase = "touch $out";
+          };
+
           # The pinned previous revisions (nix/versions.nix), each its
           # `harken-server` package as that revision's own flake builds it:
           # both binaries, the server and harken-peer. In order, which is
@@ -487,10 +453,6 @@
               "flake.nix: the input harken-${v.name} is locked at ${input.rev}, and nix/versions.nix says ${v.rev}";
             v // {
               server = input.packages.${system}.harken-server;
-              # The module that revision's peers author at, as its tree has
-              # it committed: what a fresh server of this build is told it
-              # ran before (`HARKEN_OLD_MODULES`, docs/plan-guards.md D1).
-              module = "${input}/harken/domain/harken.ark";
             })
             (import ./nix/versions.nix);
           # What the fleet reads to find them (harken/server/tests/support/fleet.rs).
@@ -502,16 +464,11 @@
             export HARKEN_OLD_${toString n}_NAME=${v.name}
             export HARKEN_OLD_${toString n}_SERVER=${v.server}/bin/harken-server
             export HARKEN_OLD_${toString n}_PEER=${v.server}/bin/harken-peer
-            export HARKEN_OLD_${toString n}_MODULE=${v.module}
           '') versions;
         in
         {
           packages = {
-            inherit ark arkc vectors fuzz harken-domain trace-corpus;
-            arkdb-swift = swift;
-            arkdb-kotlin = kotlin;
-            kotlin-deps = kotlin.mitmCache.updateScript;
-            inherit harken-peer-kt harken-peer-swift;
+            inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
@@ -520,13 +477,11 @@
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken-apk.mitmCache.updateScript;
-            # Its F-Droid repository, and a key for it (nix/fdroid.nix).
+            android-sdk = androidSdk;
+            # The APK's F-Droid repository, and a key for it (nix/fdroid.nix).
             inherit (import ./nix/fdroid.nix { inherit lib pkgs harken-apk; }) harken-fdroid-repo harken-fdroid fdroid-keygen;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            # The two pieces an ARM Linux needed, on their own.
-            inherit aapt2;
-            android-sdk = androidSdk;
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
             # interface down, the service restarted, the server crashed, the
             # scanner over a bound directory. A package and not a check: it
@@ -564,82 +519,37 @@
               preCheck = oldEnv;
               installPhase = "touch $out";
             };
-            # docs/plan-phones.md round 4 The fleet mixed across runtimes:
-            # harken/server/tests/fleet_kotlin.rs with FLEET_KOTLIN_PEER the
-            # Kotlin client's harken-peer-kt — two Rust peers and a Kotlin one
-            # through partitions and restarts, a Kotlin peer alone and
-            # joining, through a server restart and a lost log, in the version
-            # matrix's two shapes (so the pinned revisions are named as
-            # checks.versions names them), and partial under a scoped module.
-            # One scenario at a time, so the timings it prints are each its
-            # own. checks.rust and checks.versions run no Kotlin peer.
-            fleet-kotlin = crate {
-              pname = "harken-fleet-kotlin";
-              flags = [ "-p" "harken-server" "--test" "fleet_kotlin" ];
-              doCheck = true;
-              cargoBuildFlags = [ "-p" "harken-server" ];
-              checkFlags = [ "--nocapture" ];
-              dontUseCargoParallelTests = true;
-              preCheck = oldEnv + ''
-                export FLEET_KOTLIN_PEER=${harken-peer-kt}/bin/harken-peer-kt
-              '';
-              installPhase = "touch $out";
-            };
-            # docs/plan-phones.md round 7 The same six scenarios with the Swift
-            # client's harken-peer-swift (harken/server/tests/fleet_swift.rs
-            # over tests/support/mixed.rs, which fleet_kotlin.rs runs too), the
-            # pinned revisions set as for fleet-kotlin.
-            fleet-swift = crate {
-              pname = "harken-fleet-swift";
-              flags = [ "-p" "harken-server" "--test" "fleet_swift" ];
-              doCheck = true;
-              cargoBuildFlags = [ "-p" "harken-server" ];
-              checkFlags = [ "--nocapture" ];
-              dontUseCargoParallelTests = true;
-              preCheck = oldEnv + ''
-                export FLEET_SWIFT_PEER=${harken-peer-swift}/bin/harken-peer-swift
-              '';
-              installPhase = "touch $out";
-            };
-            # docs/plan-phones.md S3 The Kotlin runtime held to spec/vectors
-            # and packages.trace-corpus: every client vector and every trace,
-            # by its conformance runner, which names what it ran and skipped.
-            inherit kotlin;
-            # docs/plan-phones.md S3 The Swift runtime held to spec/vectors, by
-            # its conformance runner, which names what it ran and skipped.
-            inherit swift;
-            # The vectors in the tree are the ones the specification writes.
-            vectors = pkgs.runCommand "check-vectors" { nativeBuildInputs = [ ark ]; } ''
-              ark-vectors vectors
-              diff -r vectors ${./spec/vectors} && touch $out
+            # The vectors in the tree are the ones the writer writes.
+            vectors = pkgs.runCommand "check-vectors" { } ''
+              diff -r ${vectors} ${./spec/vectors} && touch $out
             '';
-            # docs/plan-phones.md S3 The Rust client replays every trace of the
-            # corpus and of spec/vectors/trace/ (rust/ark/tests/traces.rs):
-            # the check of this runtime that checks.kotlin and checks.swift
-            # are of theirs, over the same files. Its own check rather than
-            # part of checks.rust, so that the workspace's tests do not wait
-            # on a fuzz run and a trace that stops replaying is named as that.
+            # Every trace of the corpus and of spec/vectors/trace/ replays
+            # (rust/ark-dev/tests/vectors.rs, `traces` and `trace_corpus`).
+            # Its own check rather than part of checks.rust, so that the
+            # workspace's tests do not wait on a fuzz run and a trace that
+            # stops replaying is named as that.
             traces = crate {
               pname = "ark-traces";
-              flags = [ "-p" "ark" "--test" "traces" ];
-              cargoBuildFlags = [ "-p" "ark" ];
+              flags = [ "-p" "ark-dev" "--test" "vectors" ];
+              cargoBuildFlags = [ "-p" "ark-dev" ];
               src = only (rustDirs ++ [ "spec/vectors" ]);
               doCheck = true;
               preCheck = "export ARK_TRACE_CORPUS=${trace-corpus}";
               checkFlags = [ "--nocapture" ];
               installPhase = "touch $out";
             };
-            # The fuzzer still generates, verifies, runs and checks: a fixed
-            # seed and a few cases, so that the generator cannot rot.
+            # The fuzzer still runs and checks: a fixed seed and a few
+            # sessions, so that it cannot rot.
             fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
-              arkc fuzz --seed 1 --cases 25 --out findings
+              ark-fuzz 25 1 traces
               touch $out
             '';
-            # The Rust workspace: formatted, lint-clean, and its tests.
+            # The Rust workspace: formatted, lint-clean, and its tests (which
+            # hold spec/README.md's index and AUTHORING.md's examples too).
             rust = crate {
               pname = "arkdb-rust";
               flags = [ "--workspace" ];
-              src = only (rustDirs ++ [ "spec/vectors" ]);
+              src = only (rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ]);
               doCheck = true;
               preCheck = ''
                 cargo fmt --all --check
@@ -652,21 +562,61 @@
               '';
               installPhase = "touch $out";
             };
-            # harken.ark is what the domain crate emits, and the reference
-            # verifies it. And the phone's typed reading of the listening
-            # session (docs/plan-live.md phase 3) is what `arkc gen kotlin`
-            # prints of that module, byte for byte: a domain change that moves
-            # a field of the session moves harken.ark, and then this, rather
-            # than the phone reading a field that is no longer there.
-            harken-domain = pkgs.runCommand "check-harken-domain" { nativeBuildInputs = [ ark ]; } ''
-              diff ${harken-domain}/harken.ark ${./harken/domain/harken.ark}
-              arkc verify ${./harken/domain/harken.ark}
-              arkc gen kotlin ${./harken/domain/harken.ark} dev.harken.android.listening printed.kt
-              diff printed.kt ${./harken/android/app/src/main/kotlin/dev/harken/android/listening/Listening.kt} \
-                || { echo "harken/android's listening/Listening.kt is not what arkc gen kotlin prints of harken.ark: print it again"; exit 1; }
-              touch $out
-            '';
+            # harken's domain crate builds, and its schema's hash is the one
+            # pinned (harken/domain/tests/port.rs).
+            inherit harken-domain;
+            # The bridge (§1.16, N3): ark-ffi and harken/ffi build natively,
+            # their tests drive the whole surface in the process (a server in
+            # it, a mutate and its refusal, a view's patches, the live space,
+            # alone and joining, a hall of devices) and hold the generated
+            # Kotlin and Swift to the domain; and UniFFI writes the Kotlin and
+            # the Swift for the library.
+            ffi = crate {
+              pname = "arkdb-ffi";
+              flags = [ "-p" "ark-ffi" "-p" "harken-ffi" ];
+              src = only (rustDirs ++ genDirs);
+              doCheck = true;
+              postCheck = ''
+                lib=$(echo target/*/release/libharken_ffi.so)
+                for language in kotlin swift; do
+                  cargo run --release --offline --frozen -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+                    generate --library "$lib" --language $language --no-format --out-dir "$TMPDIR/bindings/$language"
+                done
+                grep -q 'fun `harkenOpen`' "$TMPDIR/bindings/kotlin/dev/harken/ffi/harken_ffi.kt"
+                grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
+                grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
+                ls "$TMPDIR/bindings/swift/"*FFI.h "$TMPDIR/bindings/swift/"*.modulemap
+              '';
+              # The bindings it wrote, which the iOS type-check reads.
+              installPhase = "cp -r $TMPDIR/bindings $out";
+            };
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            # What of the iOS app Linux can check (harken/ios/tools/typecheck.sh):
+            # Rows.swift, Bridge.swift and Model.swift with the generated types,
+            # UniFFI's Swift and the bridge's typed half, type-checked by
+            # nixpkgs' Swift against the library's headers and a stand-in for
+            # SwiftUI. The views are SwiftUI's and are not checked here.
+            harken-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
+              name = "harken-ios-typecheck";
+              src = only [ "harken/ios" "rust/ark-ffi/swift" ];
+              nativeBuildInputs = [ pkgs.swift ];
+              buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
+              # nixpkgs' Swift 5.8 on Linux reports x86_64-pc-linux-gnu where
+              # its standard library's modules are x86_64-unknown-linux-gnu. And
+              # it predates `nonisolated(unsafe)` (5.10), which UniFFI's Swift
+              # writes twice for Swift 6's checks: taken out of this copy only.
+              buildPhase = ''
+                mkdir -p bin bindings
+                printf '#!/bin/sh\nexec swiftc -target ${pkgs.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu "$@"\n' > bin/swiftc-here
+                chmod +x bin/swiftc-here
+                cp ${self.checks.${system}.ffi}/swift/* bindings/
+                chmod u+w bindings/*
+                sed -i 's/nonisolated(unsafe) //' bindings/*.swift
+                SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
+                  bash harken/ios/tools/typecheck.sh bindings
+              '';
+              installPhase = "touch $out";
+            };
             # The NixOS module, evaluated under the configurations that
             # matter and held to its assertions, its warning and its unit.
             harken-module = pkgs.callPackage ./harken/server/nix/module-test.nix {
@@ -683,17 +633,6 @@
             # the cached store holds the wasm-bindgen CLI it compiled.
             harken-web = pkgs.mkShell {
               packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
-            };
-            # The Swift runtime (swift/README.md): nixpkgs' Swift 5.8 and
-            # SwiftPM, with Foundation and Dispatch, which are packages of
-            # their own on Linux; `swift/tools/swift.sh` runs SwiftPM in it.
-            swift = pkgs.mkShell {
-              packages = [ pkgs.swift pkgs.swiftpm ] ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
-            };
-            # The Kotlin runtime (kotlin/README.md): gradle, the JDK it runs
-            # on, and ktfmt, whose kotlinlang style the tree is held to.
-            kotlin = pkgs.mkShell {
-              packages = [ pkgs.kotlin pkgs.gradle pkgs.jdk21 pkgs.ktfmt ];
             };
             default = pkgs.mkShell {
               packages = [ rust pkgs.pkg-config ];

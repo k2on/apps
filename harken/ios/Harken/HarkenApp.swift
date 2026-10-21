@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The iOS peer: SwiftUI over the Swift client at spec v4 (`ArkDB`,
-/// `ArkDBClient`), interpreting `harken.ark` — the module every harken peer
-/// runs — loaded from the app's bundle. One `Model` for the app's life;
-/// every screen reads it.
+/// The iOS peer: SwiftUI over harken's peer — the Rust kernel with
+/// harken's domain linked in (`HarkenFFI.xcframework`, `harken/ffi`), called
+/// through the generated types (`Gen/Harken.swift`). One `Model` for the
+/// app's life; every screen reads it.
 @main
 struct HarkenApp: App {
     @StateObject private var model = Model()

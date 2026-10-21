@@ -28,9 +28,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import dev.arkdb.ui.ArkTheme
-import dev.arkdb.ui.LocalArkTheme
-import dev.arkdb.ui.LocalMoreGlyph
+import dev.harken.android.ui.ArkTheme
+import dev.harken.android.ui.LocalArkTheme
+import dev.harken.android.ui.LocalMoreGlyph
 
 /** The palette, both sides. */
 object Palette {

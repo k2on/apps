@@ -1,7 +1,7 @@
 // What lives as long as the session does, whoever holds it: the library's
 // views and the listening session's reconciler.
 //
-// The session is the process's (`kotlin/ark-android`, Sessions.kt): the
+// The session is the process's (`onboarding/Sessions.kt`): the
 // activity holds it while it is there, and the media service holds it while
 // it lives — which is while something plays, or a controller is bound to it:
 // the app's own, a car, a headset, the lock screen. So swiping the app away
@@ -20,11 +20,11 @@
 package dev.harken.android
 
 import android.content.Context
-import dev.arkdb.DeviceDecl
-import dev.arkdb.android.ArkSession
-import dev.arkdb.android.ArkSessions
-import dev.arkdb.android.SessionSpec
-import dev.arkdb.android.Sessions
+import dev.harken.android.gen.Device as Declared
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.onboarding.ArkSessions
+import dev.harken.android.onboarding.SessionSpec
+import dev.harken.android.onboarding.Sessions
 
 class Kept private constructor(val session: ArkSession, name: String) : AutoCloseable {
     val library = Library(session)
@@ -50,22 +50,17 @@ class Kept private constructor(val session: ArkSession, name: String) : AutoClos
         /** Throw it away, as a process killed would: a test's. */
         internal fun drop(session: ArkSession) = session.drop(Kept::class)
 
-        /** harken's module, from the APK's assets. */
-        fun module(context: Context): () -> ByteArray {
-            val app = context.applicationContext ?: context
-            return { app.assets.open("harken.ark").use { it.readBytes() } }
-        }
-
         /**
-         * This phone at `hello`: a phone, which can play, named as its owner named it; its id is its
-         * login's session, so that a device is a login (docs/plan-live.md).
+         * This phone in the listening session: a phone, which can play, named as its owner named it;
+         * its id is its login's session — the server fills in an empty one — so that a device is a
+         * login (docs/plan-live.md).
          */
-        fun device(context: Context): DeviceDecl = DeviceDecl("", "phone", Device.name(context), true)
+        fun device(context: Context): Declared = Declared(canPlay = true, id = "", kind = "phone", name = Device.name(context), user = "")
 
-        /** The process's sessions, over harken's module: the activity's and the media service's. */
+        /** The process's sessions: the activity's and the media service's. */
         fun sessions(context: Context): Sessions {
             val app = context.applicationContext ?: context
-            return ArkSessions.of(app, SessionSpec(module(app), device(app)))
+            return ArkSessions.of(app, SessionSpec(device(app)))
         }
     }
 }

@@ -3,7 +3,7 @@ name = "ark-explorer"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "A database explorer for any ArkDB module: its tables and rows, a cell editor and row delete through a writer the host supplies, a read-only query console, and the log. One iced component, hosted by an app's client over its replica and by a server's admin page over the authority."
+description = "A database explorer for any ArkDB v5 module: its tables and rows, a cell editor and row delete through a writer the host supplies, a read-only query console, and the log. One iced component, hosted by an app's client over its replica and by a server's admin page over the authority."
 
 # Knows nothing about any domain: it is handed a store, a schema, a module, a
 # log view and a writer, and draws whatever they hold (`docs/plan-guards.md`
@@ -17,10 +17,12 @@ ui = ["dep:iced", "dep:arkui", "dep:ark-auth", "dep:ureq", "dep:wasm-bindgen", "
 
 [dependencies]
 ark = { path = "../ark" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 arkui = { path = "../arkui", optional = true }
 # Signing the admin page in when it is served wider than loopback: the page's
 # own address and the server's `/auth/login`, as the browser peer does.
-ark-auth = { path = "../ark-auth", features = ["client"], optional = true }
+ark-auth = { path = "../ark-auth", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"], optional = true }

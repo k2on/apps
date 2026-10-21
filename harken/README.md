@@ -2,26 +2,40 @@
 
 A self-hosted music system: a library a server scans from a directory,
 playlists, one listening session per account across every device, and the
-speakers in the house as devices in it. All of it runs on ArkDB: one log,
-one domain written once in Rust, applied natively by the server, the
-desktop and the browser, and every query a plan a client can keep up to
-date by the rows a change touched.
+speakers in the house as devices in it. All of it runs on ArkDB at spec v5
+(`docs/plan-v5.md`): one log, one domain written once in plain Rust and
+linked by the server, the desktop, the browser and the phones, and every
+query a view a client keeps up to date by the rows a change touched.
 
 ```
-domain/    the domain, in the vocabulary of spec/AUTHORING.md (src/); harken.ark,
-           what it emits; listening.rs, the listening session as a live state
-           (never the log) and the plays (the log)
-server/    ark-server with harken's own parts: the scanner, the Home Assistant
-           bridge, sign-in, /media, the web build; the NixOS module
-           (server/README.md)
-iced/      the desktop and browser client, on arkui and ark-client; the `demo`
+domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
+           types.rs, keys.rs, library.rs, browse.rs, playlists.rs;
+           listening.rs, queue.rs, devices.rs and groups.rs, the listening
+           session as volatile tables (never the log); plays.rs (the log);
+           host.rs, what an app knows of it beside its functions
+server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
+           bridge, sign-in, /media, the web build, the admin page's listener;
+           the NixOS module (server/README.md)
+iced/      the desktop and browser client, on arkui and ark-peer; the `demo`
            feature is the seeded library GitHub Pages publishes
-android/   the phone: Compose over the Kotlin client, loading harken.ark
-           from its assets and interpreting it (android/README.md,
-           kotlin/README.md, docs/plan-phones.md)
-ios/       the same app in SwiftUI over the Swift client, loading the same
-           harken.ark (ios/README.md); never built for iOS
+ffi/       the phones' library: ark-ffi (the kernel through UniFFI) with the
+           domain linked in — `harken_open`, the listening session as JSON,
+           and a Hall, a harken server in the process for the apps' tests
+android/   the phone: Compose over ffi/, through the Kotlin `ark-dev gen
+           kotlin` writes from the domain (android/README.md)
+ios/       SwiftUI over ffi/, through the Swift `ark-dev gen swift` writes
+           (ios/README.md); never built for iOS
 ```
+
+**What runs where.** The domain is Rust and runs everywhere as Rust: the
+server, the desktop and the browser (wasm) link it, and each phone loads
+it inside one native library, `libharken_ffi` (`ffi/`, `docs/plan-v5.md`
+§1.16) — the kernel, the link, the disk and the views are the same code on
+every device. A phone's own code is its screens, its player and its
+onboarding; it calls the domain by function name with JSON, typed by the
+data classes and structs `ark-dev gen` writes from the registered domain
+(`android/.../gen/Harken.kt`, `ios/Harken/Gen/Harken.swift`, held to the
+domain by `ffi/tests/gen.rs`).
 
 ## The domain
 
@@ -50,16 +64,20 @@ Four decisions that each show on screen:
 - **Every refused change says why.** A rejection carries the domain's own
   sentence, and each client shows it against the change it refused.
 
-Every query is a plan (`spec/AUTHORING.md` §1.5): `library`, `albums`,
+Every query is a view, a plan of typed operators (`spec/AUTHORING.md`;
+`domain/src/browse.rs` and `playlists.rs`): `library`, `albums`,
 `composers` and the rest say what they read and how it joins, so a client
-can hold any of them as an `ark_client::View` that a change moves by the
-rows it touched; the desktop's library is one. `domain/tests/agreement.rs`
-holds every mutator's native Rust to the interpreter over `harken.ark` and
-every mutator's hash to its v3 value, and fails while the committed module
-differs from what the source emits.
-When `domain/src` changes:
-
-    cd rust && cargo run -p harken-domain -- ../harken/domain/harken.ark
+holds any of them as a view (`ark_peer::Peer::view`) that a change moves
+by the rows it touched (`docs/plan-v5.md` §1.10); the desktop's lists are
+views. The
+domain's tests hold it to what v4's was: the read model, the listening
+session transition for transition, every query maintained against a fresh
+evaluation, and convergence over a simulated fleet (`domain/tests/`).
+The crate is the source of truth: the server and the client link it and
+call its types and functions as they are. It was ported from ArkLang in N1,
+and `domain/tests/port.rs` holds it to what the ArkLang text did: the
+schema's hash and, over seeded scripts of every function, the states and
+transcripts the two agreed on, pinned.
 
 ## The listening session
 
@@ -67,10 +85,11 @@ One per account, across every device of it: the queue, the track, whether
 it is playing and from where, and which device makes the sound. It is not
 the log — an afternoon of pauses and skips is worth nothing tomorrow — but
 the domain's live state (`domain/src/listening.rs`, `docs/plan-live.md`):
-written once beside the mutations, held by the server, sequenced per
-account on `/sync`, kept across a restart paused and with no output, and
-run natively by the server and the desktop and interpreted from
-`harken.ark` by anything else.
+volatile tables (`docs/plan-v5.md` §1.9) written once beside the
+mutations, sequenced by the hub's volatile authority on `/sync`, kept
+across a restart in `log/live` and restored by `on_restore` (paused, with
+no output), and run by the interpreter on the server, the desktop and the
+browser.
 
 **The state is the instruction.** Every button on every device is a
 transition — `start`, `play`, `pause`, `seek`, `skip`, `jump`,
@@ -165,32 +184,29 @@ It used to be none of this: a hand-written protocol over opaque frames, a
 
 Everything is `nix`, from the repository root:
 
-    nix build .#harken-server      # the server
+    nix build .#harken-server      # the server, and harken-peer beside it
     nix run .#harken-serve         # …in dev auth: anyone is whoever they say
     nix build .#harken-iced        # the desktop window
     nix build .#harken-web         # the browser demo, as a static directory (Pages)
     nix build .#harken-web-server  # the browser client harken-server serves
-    nix build .#harken-domain      # harken.ark, as the source emits it
-    nix flake check                # fmt, clippy and every Rust test; harken.ark
-                                   # is what the domain emits and it verifies;
-                                   # the vectors; the NixOS module
+    nix build .#ark-admin          # the admin page the server's admin listener serves
+    nix build .#harken-domain      # the domain crate, its schema hash held to its pin
+    nix flake check                # fmt, clippy and every Rust test; the domain
+                                   # builds, its schema hash pinned;
+                                   # the vectors and traces; the NixOS module
 
 `nixosModules.default` is `services.harken` (`server/README.md` has its
-options). The iOS app is Xcode over `ios/project.yml`, since only a Mac
-can build one.
+options). The phones:
 
-One workflow, `.github/workflows/build.yaml`, builds from `main`: it
-publishes `harken-web` at <https://k2on.github.io/apps/harken/>, builds
-`harken-apk`, the Android app over the Kotlin client (`nix build
-.#harken-apk`, `android/README.md`), and publishes that as the F-Droid
-repository (`android/fdroid/README.md`). Each build is skipped when its
-inputs have not moved.
+    nix build .#harken-android-lib # the kernel for three Android ABIs, and its Kotlin
+    nix build .#harken-apk         # the APK, its JVM tests run first (android/README.md)
+    nix build .#harken-ios-xcframework  # a Mac only: HarkenFFI.xcframework (ios/README.md)
 
-The Kotlin client has a headless peer too, `harken-peer-kt`
-(`nix build .#harken-peer-kt`): `harken-peer`'s lines on another runtime,
-which `checks.fleet-kotlin` runs beside Rust peers — through partitions and
-restarts, alone and joining, a lost log, the version matrix's two shapes
-and a scoped module (`docs/plan-fleet.md`).
+One workflow builds from `main` (`.github/workflows/build.yaml`): it
+publishes `harken-web` at <https://k2on.github.io/apps/harken/>; the
+F-Droid repository is `nix build .#harken-fdroid-repo` over the APK. That
+is the workflow once `.github/workflows/build.yaml` is updated for the native tree (its cache keys name files that no longer exist), and the
+patch predates the APK's return: its APK job is not in it.
 
 ## Running it
 
@@ -226,15 +242,13 @@ device's own replica in a fixed place — `local` under
 and it is not a demo: the peer is its own authority, every change is
 sequenced as it is made and kept, and the status line says `alone`. The
 line above the table has a server address and **connect**: that joins the
-server in place (`docs/plan-alone.md` §4). Everything done alone is handed
-to it — the replica goes back to where it last shared the server's log,
-which for a device that never had one is nothing, and every local change is
-pending again, in order — and that server's sign-in starts; once it
-finishes, the changes become the signer's and are pushed, landing after
-whatever the server already has. The lists on screen are patched through
+server in place (`docs/plan-alone.md` §4). The chain sequenced alone is
+handed to it whole — the server adopts it by its facts and answers with the
+sequences it assigned (`docs/plan-v5.md` §1.7) — and that server's sign-in
+starts; once it finishes, the changes become the signer's, keeping their
+ids, and land after whatever the server already has. The lists on screen are patched through
 the join, not rebuilt. The server is remembered for `local`, so the next
-start opens there. Leaving a server is `ark_client::Peer::leave`, an API
-and not yet a control.
+start opens there. Leaving a server is not yet a control.
 
 `harken-peer` does the same from a shell: `--alone` and later `--server
 URL` over one `--dir` is the join, and `join` and `leave` are commands.
@@ -243,59 +257,53 @@ URL` over one `--dir` is the join, and `join` and `leave` are commands.
 
 `E` on the desktop opens the explorer (`ark-explorer`, `docs/plan-guards.md`
 D4) over this device's own replica, beside `D`'s numbers: every table it
-holds, a page of rows at a time with every column; the log as a client
-knows it — its pending intents, where it is, how it is linked, its
-`Verify` answers; and a read-only console that runs a domain query by name
-or a plan in the IR's JSON form. `j`/`k`, `h`/`l`, `gg`/`G` and counts
-move; `<Enter>` opens a table or edits a cell, `x` deletes a row, `<Tab>`
-(or `1`, `2`, `3`) goes between the tables, the log and the console, and
-`<Esc>` goes back, and out from the top. A client writes only through the
-CRUD a domain exposes (`r.crud::<T>()`), as the signed-in person, and never
-raw — alone too. harken exposes none, so here it is read-only, and says so.
+holds, a page of rows at a time with every column, read under the module's
+types (an id labelled by its table, a field by its refinement's name); the
+log as this client knows it — its confirmed chain, its pending intents,
+where it is and how it is linked; a read-only console; and every query and
+mutation of the module as a form, whose checks are the module's own
+refinements run by `parse` with the module's words. `j`/`k`, `h`/`l`,
+`gg`/`G` and counts move; `<Enter>` opens a table or edits a cell, `x`
+deletes a row, `<Tab>` goes between the tables, the log, the console and
+the functions, and `<Esc>` goes back, and out from the top. A client
+writes only through the CRUD a domain exposes (`insert_<t>`,
+`update_<t>`, …), as the signed-in person, and never raw — alone too.
+harken exposes none, so here its tables are read-only, and it says so; its
+mutations are callable from their forms as a button would author them.
 
-The server's admin page is the same component compiled to wasm, served on
-a listener of its own (`HARKEN_ADMIN_BIND`; `services.harken.admin.bind`,
-`127.0.0.1:8788` by default) over the authority's store, its log with who
-pushed each entry, and every connection's cursor. It writes as the
+The server's admin page is the same component compiled to wasm, served by
+`ark_peer::admin` on a listener of its own (`HARKEN_ADMIN_BIND`;
+`services.harken.admin.bind`, `127.0.0.1:8788` by default) over the
+authority's store and its log, with who is connected. It writes as the
 authority: through a table's CRUD where the domain exposes one, unless `R`
-flips the switch, and raw otherwise — `ark.put_row`, `ark.delete_row`,
-judged by the constraints and served to every peer like any entry. harken
-exposes no CRUD, so every edit there is raw. On loopback it asks
-nothing (reach it from elsewhere through an SSH tunnel); bound wider it asks
-for a login holding the `admin` role (`services.harken.roles.admin`), signed
-in through this server's own `/auth`. `nix build .#ark-admin` is the page;
+flips the switch, and raw otherwise — a raw write is a function of no input
+the authority authors through the same door as any mutation, which checks
+the row it replaces is the one there, judged by the constraints and served
+to every peer like any entry. harken exposes no
+CRUD, so every edit there is raw. On loopback it asks nothing (reach it
+from elsewhere through an SSH tunnel); bound wider it asks for a login
+holding the `admin` role (`services.harken.roles.admin`), signed in
+through this server's own `/auth`. `nix build .#ark-admin` is the page;
 the NixOS module serves it by default.
 
-### Backing up, restoring, and asking a running server
+### Asking a running server, and backing it up
 
-    nix run .#arkc -- backup /var/lib/harken /srv/backup/harken   # while it runs
-    nix run .#arkc -- verify-log /srv/backup/harken harken/domain/harken.ark
-    nix run .#arkc -- restore /srv/backup/harken /var/lib/harken-new
-    curl -H 'Accept: application/json' http://127.0.0.1:8787/healthz
+    curl http://127.0.0.1:8787/healthz
 
-`backup` copies a running server's data directory without stopping it:
-the log's snapshot, then its journal as long as it was once the snapshot
-had been read, so what the server appends meanwhile is not in the copy
-and the copy is the log at one moment. Then the cursors, the sign-in
-sessions, the kept listening sessions and the modules run. The scanner's `library/`
-replica is not copied; it is a peer, and catches up from the log. Nor are
-its prints or the covers it took out of files: restored, it reads every
-file once and writes them again.
-`restore` refuses a directory with anything in it and writes the log
-**unnamed**, so the server started on it names the log afresh. Every
-device is then sent the snapshot once and rebases its pending work onto
-it. That is deliberate: a device that saw more of the old log than the
-backup holds would otherwise be handed the new history on top of the old
-one. `--same-log` keeps the name, for a backup of a stopped server
-moved elsewhere. `verify-log DIR` prints the head, the horizon, the
-log's id and the modules the server has run. Given the module, it also
-replays the log and prints the state hash at the head, which is what
-every device's `Verify` is compared with. `/healthz` asked for JSON
-answers one object: head, horizon, log id, the module and every module
-run, connections, rooms, and every session with its cursor, when it was
-last heard and how many connections it has open. The process fleet's
-`a_backup_taken_mid_stream_restores_to_its_moment` does all of it
-against a server being pushed to (`docs/plan-db.md` D6).
+answers in lines: `ok`; `connections N`; the log's `head` and `horizon`;
+`domain <schema hash> <version> current`; and a `room <account> peers N`
+line per account with a connection open. What the data directory holds,
+and whose each file is, is `server/README.md`'s table: the log is
+`log/snapshot` and `log/chain` (the chain of entries, each with its facts,
+the state after it and the hash of the chain to it), `log/journal`,
+`log/live`, `sessions.json`, and the scanner's `library/`,
+`library-files.json` and `art/`.
+
+v4's `arkc backup`, `restore` and `verify-log` are not ported. A stopped
+server's data directory is the backup: copy it whole. (On open a chain
+is truncated at the first entry whose hash does not check, so one cut
+short mid-append opens at its last whole entry; a copy of a running
+server's is not otherwise promised to be one moment.)
 
 ## harken-peer, and the fleet
 
@@ -305,8 +313,9 @@ signs in the way the desktop does in dev auth, dials the sync socket and
 pumps when the socket wakes it, after a command that asks something of it,
 and at the redial deadline — never on a clock, as the desktop does not
 (`docs/plan-reactive.md`), so a frame nobody was woken for is a fleet that
-does not converge; it reads commands as JSON lines on stdin and answers one line each,
-ids and rows in the vectors' dialect (`ark::json`):
+does not converge; it reads commands as JSON lines on stdin and answers one line each
+(an id `{"$id":"8-4-4-4-12"}`, an integer a JSON number, a sum
+`{"variant":"Name", …fields}`):
 
     harken-peer --dir /tmp/alice --server http://127.0.0.1:8787 --user alice
     {"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}
@@ -316,16 +325,20 @@ ids and rows in the vectors' dialect (`ark::json`):
 
 `mutate`, `status`, `hash`, `wait`, `settle`, `query`, `rejections`,
 `standing`, `disconnect`, `reconnect`, `sign_in`, `sign_out`, `join`,
-`leave`, `persist`, `quit`; the source's first page says what each answers. Without `--user` it
+`leave`, `call`, `live`, `live_refusals`, `persist`, `quit`; the source's
+first page says what each answers. `--device KIND,NAME,CAN_PLAY` makes it
+a device of its account's listening session, `--module FILE` runs a module
+file instead of harken's own, and `--alone` makes it its own authority. Without `--user` it
 opens signed out, authoring as nobody until `sign_in`. A sign-in waits on
 the server ten seconds to connect and twenty to read (ark-auth's bounds),
 or `--auth-patience-ms` for both; one that fails at start ends the
 process. Its session revoked (`/auth/logout` with its token), a peer is
 told at once on the socket it has — `denied`, "signed out: this login was
-revoked" — keeps its store and pending, and stops dialling until
-`sign_in`. A server restarted with less log than a peer has confirmed
-hands it its state as a snapshot, and the peer's pending intents land on
-that.
+revoked" (the hub closes it with 4401) — keeps its store and pending, and
+stops dialling until `sign_in`. A server restarted with less log than a
+peer has confirmed does not re-base it on v5: that is the fleet's one
+witness (`a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has`,
+ignored, saying where).
 
 `server/tests/fleet.rs` is the process fleet (`docs/plan-fleet.md`): the
 real server and real peers as child processes on loopback, each peer behind
@@ -336,7 +349,7 @@ hashes as the server's log does, and every accepted intent is in it once.
     cd rust && cargo test -p harken-server --test fleet -- --nocapture   # the timings
     FLEET_LONG=1 cargo test -p harken-server --test fleet the_seeded_fuzz -- --nocapture
     FLEET_SEED=12345 cargo test -p harken-server --test fleet the_seeded_fuzz
-    cargo test -p harken-server --test fleet -- --ignored                # witnesses, if any (none today)
+    cargo test -p harken-server --test fleet -- --ignored                # the witness
 
 The fuzz runs 20 steps on a fixed seed by default, and 2,000 on a seed from
 the clock under `FLEET_LONG=1`; `FLEET_SEED` names one either way, and a
@@ -372,7 +385,7 @@ binaries beside this build's (`docs/plan-db.md` D1); the older ones are
 `nix/versions.nix` and built by nix from each revision's own flake.
 **The matrix is empty until a shipped revision is pinned**: the two it held
 were development revisions nobody runs, and were dropped
-(`docs/plan-db.md` D1). Until one is, `checks.versions` runs the two
+(`docs/plan-db.md` D1). Until one is, `checks.versions` runs the
 scenarios that need no older binary and the rest say they are skipped.
 
     nix flake check                       # checks.versions: every pinned revision, every scenario
@@ -383,12 +396,11 @@ scenarios that need no older binary and the rest say they are skipped.
 
 `HARKEN_OLD_<n>_SERVER` and `HARKEN_OLD_<n>_PEER` (and `HARKEN_OLD_<n>_NAME`
 for what is printed), `n` counting from 1 in `nix/versions.nix`'s order, are
-what the scenarios read; without them, the five that need an older binary
-say they are skipped and pass, so `cargo test` on a laptop is unchanged.
-The two that need none run the grown domain — `harken_server::grown`, a
-nullable `playlist_item.note`, a table `tag`, and `create_playlist`'s body
-moved — as "the next release": `HARKEN_MODULE=FILE` for the server and
-`harken-peer --module FILE` for a peer, `FILE` what `grown::write` makes.
+what the scenarios read; without them, the three that need an older binary
+(1, 4 and 5) say they are skipped and pass, so `cargo test` on a laptop is
+unchanged. The rest need none: they hold §1.2's prefix check on the
+schema over next releases written in the test (a table appended, a column
+appended).
 
 **To add a release to the matrix**: append `{ name; rev; }` to
 `nix/versions.nix`, add the input `harken-<name>` to `flake.nix` with the
@@ -399,59 +411,44 @@ names. `packages.harken-server-<name>` appears, `checks.versions` runs every
 scenario once more against it, and `fleet-vm` runs its mixed machines on
 the last entry.
 
-What a peer says about versions, in `harken-peer`'s `status`:
+What versions mean on v5 (`docs/plan-v5.md` §1.5, and K2's rules):
 
-- **`held`**: intents the server answered `held` — it has run no module
-  that ships their function, so this peer is newer than it. They stay
-  pending, are pushed again on every connection, and land once the server
-  is upgraded; nothing is refused. A server from before holding says
-  `reject` with `unknown function <hash>` for the same thing, and this
-  build reads that as a hold too.
-- **`behind`**: the server's module (said on every page) is not this
-  peer's. Its facts are applied projected to this peer's schema — a column
-  or table this peer lacks dropped, a nullable column it has and they lack
-  `Null` — and no `Verify` is said, since two schemas' hashes cannot agree.
-  A peer behind stays usable on everything its schema can see.
+- **A server runs exactly the functions its build registered** (§1.16),
+  by name; `/healthz` says which domain: its schema's hash and version,
+  which every `Hello` carries too.
+- **No code crosses the wire.** An intent naming a function the server
+  does not run is answered `Held`: its device keeps it pending, and what
+  it pushed behind it waits on the server in order, until a server that
+  runs it; then all of it is judged. Nothing is refused for being newer.
+- **A grown schema keeps the log.** A server started on a module whose
+  schema appends to the old one opens its chain under the new schema,
+  checking each entry by its hash, never deriving a state again. A replica
+  on another schema takes the authority's states on faith and reads every
+  row by prefix; it stays usable on everything its schema can see.
+  `harken-peer`'s `status` still says `held` and `behind`, always 0 and
+  false on v5.
 
-A server keeps the closures of every module it has started with
-(`DATA/modules.cbor`; `/healthz` lists them, the current one marked), so an
-older client's intent at a hash this server once ran is applied rather than
-held; one from a module it never ran is held, which is the honest answer to
-a client older than the server's first deploy. Its first start with a new
-module re-hashes the log's snapshot under the new schema
-(`ark_server::persist::rehome`).
-
-None is pinned now (`nix/versions.nix` is empty, so the scenarios that
-need an older binary are skipped); one is added when a release is shipped
-that later builds must stay compatible with. A pinned revision must speak
-this one's protocol: its peer reads this server's frames, and this server
-reads theirs. Two
-revisions' state hashes are not comparable (a schema, or the hash's own
-definition, may differ between them), so the version scenarios compare
-what each peer reads, not what it hashes.
+No v5 revision is pinned yet; a revision from before R1 runs spec v4 and
+speaks nothing this server reads, so the matrix starts at the first
+shipped v5 revision.
 
 ## Not verified
 
-Nothing in the container this was written in can run a phone, a window or
-a speaker, so what is known of each beyond its tests is what was reported
-back. The Android app is installed from the F-Droid repository and used on
-a phone, and the browser build against a real server and a real Home
-Assistant; that is where the crashes, the scrolling and the speaker's
-position were reported, and each change since is tested on the JVM, in
-headless Chromium and against a stand-in house before it is seen there.
-The latest cast fixes (a speaker's position after a hand-off, kept within
-600 ms) have not yet met a real speaker; `server/README.md` says how to
-turn on the bridge's trace for that. The iOS app has never been built for
-iOS: only its non-SwiftUI half type-checks, on Linux. The desktop window has
-been driven only through its tests, and nothing has met a real OpenID
-Connect provider from here.
+No phone has run either app. The APK is assembled for three ABIs and its
+JVM tests drive the real kernel — the library built for the machine they
+run on, through the same UniFFI Kotlin — alone and in a Hall; it has not
+been installed. The iOS app has not been built: the xcframework needs a
+Mac, and its Swift has not met a compiler (android/README.md,
+ios/README.md say what was checked).
+No desktop window has been opened: the browser build was drawn in
+headless Chromium under v4 and has not been drawn on v5, and the desktop
+is only driven through its tests. Nothing
+here has met a real Home Assistant or a real OpenID Connect provider.
 The listening session has run between real sockets, peers and the bridge
 against a stand-in house, and the reconcilers against a stand-in player;
 no browser has played a track through it and no speaker has been handed
 one, nor had its volume set or been joined to another: the volume and the
 groups are held against a stand-in house's `volume_set`, `volume_mute`,
 `join`, `unjoin` and template API, written from Home Assistant's
-documentation. The Android app has not moved onto the live state yet
-(`docs/plan-live.md` phase 3), so a phone has no listening session against
-this server; and a speaker's plays are not recorded, since the bridge is
-not a peer of the account.
+documentation. A speaker's plays are not recorded, since the bridge is not
+a peer of the account.

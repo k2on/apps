@@ -1,5 +1,3 @@
-import ArkDB
-import ArkDBClient
 import SwiftUI
 
 /// Who is signed in, the server, and whether to work alone; what the peer
@@ -54,18 +52,14 @@ struct SettingsView: View {
                         row("Linked", st.linked ? "yes" : "no")
                         row("Cursor", "\(st.cursor)")
                         row("Not synced", "\(st.pending)")
-                        if st.held > 0 { row("Held", "\(st.held)") }
-                        if st.diverged > 0 { row("Diverged", "\(st.diverged)") }
-                        if st.joining > 0 { row("Joining", "\(st.joining)") }
-                        row("Connections", "\(st.opens)")
-                        if st.behind { row("Behind", "the server runs another module") }
-                        if let c = st.lastClose { row("Last close", c) }
+                        if st.joining { row("Joining", "yes") }
+                        row("Connections", "\(st.epoch)")
+                        if let f = st.failure { row("Disk", f) }
                         if let d = st.denied { row("Denied", d) }
                     } else {
                         Text("No peer").foregroundStyle(.secondary)
                     }
                     if let n = model.notice { row("Note", n) }
-                    Button("Verify against the authority") { model.verify() }
                 }
                 Section("Changes") {
                     if model.changes.isEmpty {

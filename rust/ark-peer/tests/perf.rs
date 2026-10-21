@@ -1,0 +1,1019 @@
+//! What a v5 device costs with its storage and the server in the loop, as
+//! the data grows, printed rather than asserted: `rust/ark-server/tests/
+//! perf.rs`'s shapes, as they were before the one peer crate, (`docs/plan-v5.md` Part 3), the same sizes, columns
+//! and labels, so the two outputs diff. Over the demo of `ark-dev`
+//! (`demo.create_playlist`, `demo.add_to_playlist`).
+//!
+//! The hub is the real one on its thread, reached in this process through
+//! `Handle::dialer` (no socket), and the client is an `ark_peer::Peer`
+//! driven by its link, as an app drives it — so waiting on its bell is in
+//! the round trip; a second line carries the in-process wire's frames by
+//! hand, without the link, to say how much. Then the
+//! storage shapes over harken's `media` table as `harken/domain`
+//! declares it (key `id`, indexes `file` and `pos`; written out here as a
+//! schema, since this crate does not depend on harken): live bytes per
+//! row by component, open time and resident memory, and a snapshot frame
+//! adopted — each in a process of its own.
+//!
+//! Ignored by default; run with
+//! `cargo test -p ark-peer --release --test perf -- --ignored --nocapture --test-threads=1`.
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::path::Path;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::mpsc::Receiver;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use ark::format::Encode;
+use ark::frames::Frame;
+use ark::hash::EntryHash;
+use ark::log::{Entry, EntryId, Logged, Origin, Record, Seq, Snapshot};
+use ark::peer::{Functions, Who};
+use ark::row::{Id, Type};
+use ark::schema::{Schema, Space, Table};
+use ark::store::{Change, Store, LOG};
+use ark_dev::demo::demo as domain;
+use ark_dev::demo::{AddToPlaylist, CreatePlaylist};
+use ark_peer::link::{bell, wait, Dial, Event, Wire};
+use ark_peer::{dev, now_ms as now, Config, Disk, Files, Handle, Memory, Module, Peer, Server};
+
+// Live bytes, counted, process-wide (v4's allocator, as it is) -----------------
+
+struct Live;
+
+static LIVE: AtomicI64 = AtomicI64::new(0);
+static PEAK: AtomicI64 = AtomicI64::new(0);
+
+fn grew(by: i64) {
+    let now = LIVE.fetch_add(by, Ordering::Relaxed) + by;
+    if now > PEAK.load(Ordering::Relaxed) {
+        PEAK.fetch_max(now, Ordering::Relaxed);
+    }
+}
+
+unsafe impl GlobalAlloc for Live {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        grew(l.size() as i64);
+        System.alloc(l)
+    }
+    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+        grew(l.size() as i64);
+        System.alloc_zeroed(l)
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        LIVE.fetch_sub(l.size() as i64, Ordering::Relaxed);
+        System.dealloc(p, l)
+    }
+    unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+        grew(n as i64 - l.size() as i64);
+        System.realloc(p, l, n)
+    }
+}
+
+#[global_allocator]
+static GLOBAL: Live = Live;
+
+fn live_bytes() -> i64 {
+    LIVE.load(Ordering::Relaxed)
+}
+
+fn peak_bytes() -> i64 {
+    PEAK.load(Ordering::Relaxed)
+}
+
+fn reset_peak() {
+    PEAK.store(live_bytes(), Ordering::Relaxed);
+}
+
+// Reporting ----------------------------------------------------------------------
+
+fn us(d: Duration) -> f64 {
+    d.as_secs_f64() * 1e6
+}
+
+fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1e3
+}
+
+fn mean(xs: &[Duration]) -> Duration {
+    if xs.is_empty() {
+        return Duration::ZERO;
+    }
+    xs.iter().sum::<Duration>() / xs.len() as u32
+}
+
+fn header(title: &str) {
+    eprintln!("\n== {title}");
+    eprintln!(
+        "{:<48} {:>7} {:>10} {:>10} {:>10} {:>10} {:>7}",
+        "path", "n", "total", "mean µs", "first100", "last100", "l/f"
+    );
+}
+
+fn note(s: &str) {
+    eprintln!("   v5: {s}");
+}
+
+fn line(label: &str, per: &[Duration]) {
+    let n = per.len();
+    let k = n.min(100);
+    let (f, l) = (mean(&per[..k]), mean(&per[n - k..]));
+    eprintln!(
+        "{:<48} {:>7} {:>9.1}ms {:>10.2} {:>10.2} {:>10.2} {:>7.2}",
+        label,
+        n,
+        per.iter().sum::<Duration>().as_secs_f64() * 1e3,
+        us(mean(per)),
+        us(f),
+        us(l),
+        us(l) / us(f).max(1e-9)
+    );
+}
+
+fn na(label: &str, n: usize, why: &str) {
+    eprintln!("{:<48} {:>7} {:>10} n/a: {why}", label, n, "");
+}
+
+// The demo, from a client --------------------------------------------------------
+
+fn config() -> Config {
+    Config::of(Arc::new(domain()))
+}
+
+/// A client of `token`'s login, its origin seeded by its session.
+fn client(token: &str, mut disk: Box<dyn Disk>) -> Peer {
+    let who = dev(token).unwrap();
+    if disk.get("origin").ok().flatten().is_none() {
+        disk.put("origin", &Origin::named(&who.session).to_bytes()).unwrap();
+    }
+    Peer::open(config(), who, disk, false)
+}
+
+/// `demo.create_playlist` and `demo.add_to_playlist`, by name.
+fn fns() -> (&'static str, &'static str) {
+    ("demo.create_playlist", "demo.add_to_playlist")
+}
+
+fn create(c: &mut Peer, j: u64) {
+    let _ = c.author(Space::Durable, fns().0, named(&format!("P{j:06}")), now());
+}
+
+/// The playlist the session's `local`-th entry made.
+fn pid(session: &str, local: u64) -> [u8; 16] {
+    EntryId::of(Origin::named(session), local as i64).draw(0)
+}
+
+fn add_input(pl: &[u8; 16], i: u64) -> Vec<u8> {
+    AddToPlaylist {
+        playlist_id: Id::new(*pl),
+        track_id: format!("t{i}"),
+    }
+    .to_bytes()
+}
+
+/// `create_playlist`'s input.
+fn named(name: &str) -> Vec<u8> {
+    CreatePlaylist { name: name.into() }.to_bytes()
+}
+
+fn add(c: &mut Peer, pl: &[u8; 16], i: u64) {
+    let _ = c.author(Space::Durable, fns().1, add_input(pl, i), now());
+}
+
+/// `token`'s peer dialling the server in this process, and its bell.
+fn linked(hub: &Handle, token: &str) -> (Peer, Receiver<()>) {
+    let mut c = client(token, Box::new(Memory::default()));
+    let (wake, rx) = bell();
+    c.set_waker(wake);
+    c.link.backoff = (5, 50);
+    c.set_token(Some(token.into()));
+    c.connect_with("", hub.dialer(Arc::new(dev)));
+    (c, rx)
+}
+
+/// Pumps until `done`, or panics after a minute.
+fn pump_until(c: &mut (Peer, Receiver<()>), done: impl Fn(&Peer) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !done(&c.0) {
+        wait(&c.0, &c.1, Duration::from_millis(1));
+        c.0.pump();
+        assert!(Instant::now() < deadline, "timed out");
+    }
+}
+
+/// The same, over the in-process wire carried by hand: the frames the peer
+/// has are sent, and what comes is received, here.
+fn drive_until(c: &mut Peer, wire: &mut (Box<dyn Wire>, Receiver<()>), done: impl Fn(&Peer) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        for f in c.take_frames() {
+            wire.0.send(f);
+        }
+        if done(c) {
+            return;
+        }
+        let _ = wire.1.recv_timeout(Duration::from_millis(1));
+        for e in wire.0.events() {
+            match e {
+                Event::Open => c.connected(),
+                Event::Frame(b) => c.receive(b),
+                Event::Closed(_) => {}
+            }
+        }
+        assert!(Instant::now() < deadline, "timed out");
+    }
+}
+
+fn hub_app(data: Option<&Path>) -> Handle {
+    let mut s = Server::new(Config::new(Module::of(&domain())));
+    s.data = data.map(Path::to_path_buf);
+    s.build().expect("the server builds").0
+}
+
+// (b) Against a server --------------------------------------------------------------
+
+/// One mutation at a time, each pumped until confirmed: authored, pushed,
+/// sequenced, written (with the log on disk, synced), acknowledged and
+/// confirmed here; with the hub keeping its log on disk, and without.
+#[test]
+#[ignore]
+fn perf_b_round_trip() {
+    header("(b) Peer::mutate + pump until confirmed, against the in-process hub");
+    note("Peer::author + Peer::pump through its link (frames sent from this thread; the hub's thread rings the bell);");
+    note("`no link thread` is the same over the in-process wire, carried by hand here");
+    for (n, keep) in [(500u64, false), (2000, false), (500, true), (2000, true)] {
+        for (shape, lists) in [("one playlist", 1u64), ("playlists of 10", n / 10)] {
+            let dir = tempfile::tempdir().unwrap();
+            let hub = hub_app(keep.then(|| dir.path()));
+            let token = "alice@perf";
+            let mut c = linked(&hub, token);
+            pump_until(&mut c, |c| c.linked);
+            for j in 0..lists {
+                create(&mut c.0, j);
+            }
+            c.0.pump();
+            pump_until(&mut c, |c| c.log.pending.is_empty() && c.log.log().head().0 >= lists as Seq);
+            let ls: Vec<[u8; 16]> = (1..=lists).map(|j| pid(token, j)).collect();
+            let (mut whole, mut authoring) = (vec![], vec![]);
+            for i in 0..n {
+                let t = Instant::now();
+                add(&mut c.0, &ls[(i % lists) as usize], i);
+                c.0.pump();
+                let t1 = Instant::now();
+                pump_until(&mut c, |c| c.log.pending.is_empty());
+                authoring.push(t1 - t);
+                whole.push(t.elapsed());
+            }
+            let c = c.0;
+            // The same again, a second session over a wire of its own.
+            let token2 = "alice@direct";
+            let mut d = client(token2, Box::new(Memory::default()));
+            let (wake, rx) = bell();
+            let mut conn = (hub.dialer(Arc::new(dev)).dial("", token2, Some(wake)), rx);
+            drive_until(&mut d, &mut conn, |d| d.log.log().head() == c.log.log().head());
+            let direct: Vec<Duration> = (0..n)
+                .map(|i| {
+                    let t = Instant::now();
+                    add(&mut d, &ls[(i % lists) as usize], 1_000_000 + i);
+                    drive_until(&mut d, &mut conn, |d| d.log.pending.is_empty());
+                    t.elapsed()
+                })
+                .collect();
+            let log = if keep { "log on disk" } else { "no log file" };
+            line(&format!("{shape}, {log}: round trip"), &whole);
+            line("  … Peer::mutate alone", &authoring);
+            line("  … round trip, no link thread", &direct);
+        }
+    }
+}
+
+/// A second client, linked throughout, while the first authors: what
+/// receiving another's entries one at a time costs it — a `Batch` of one
+/// per push, applied by its facts.
+#[test]
+#[ignore]
+fn perf_b_watcher() {
+    header("(b) a second peer receiving the first's entries as they land");
+    for n in [500u64, 2000] {
+        let hub = hub_app(None);
+        let (ta, tb) = ("alice@perf", "bob@perf");
+        let (mut author, mut watcher) = (linked(&hub, ta), linked(&hub, tb));
+        pump_until(&mut author, |c| c.linked);
+        pump_until(&mut watcher, |c| c.linked);
+        for j in 0..10 {
+            create(&mut author.0, j);
+        }
+        author.0.pump();
+        pump_until(&mut author, |c| c.log.pending.is_empty() && c.log.log().head().0 >= 10);
+        let head = author.0.log.log().head().0;
+        pump_until(&mut watcher, |c| c.log.log().head().0 >= head);
+        let ls: Vec<[u8; 16]> = (1..=10).map(|j| pid(ta, j)).collect();
+        let mut per = vec![];
+        for i in 0..n {
+            add(&mut author.0, &ls[(i % 10) as usize], i);
+            author.0.pump();
+            pump_until(&mut author, |c| c.log.pending.is_empty());
+            let want = author.0.log.log().head().0;
+            let t = Instant::now();
+            pump_until(&mut watcher, |c| c.log.log().head().0 >= want);
+            per.push(t.elapsed());
+        }
+        line("watcher, playlists of 10, nothing pending", &per);
+    }
+}
+
+// (c) Persistence ---------------------------------------------------------------
+
+fn disk_of(dir: Option<&Path>) -> Box<dyn Disk> {
+    match dir {
+        Some(d) => Box::new(Files::new(d).unwrap()),
+        None => Box::new(Memory::default()),
+    }
+}
+
+/// A client alone authoring: `mutate` is the authority's step, and what it
+/// makes durable — the logged entry appended to `chain`, and the `pending`
+/// blob (its last `local`) rewritten — is written inside it. There is no
+/// pump to persist with.
+#[test]
+#[ignore]
+fn perf_c_pump_alone() {
+    header("(c) a peer alone: mutate, then pump (persist), per mutation");
+    note("Peer::alone, then Peer::author: the record and the `pending` blob are written in the step itself");
+    for n in [500u64, 2000, 8000] {
+        for dir in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let token = "me@local";
+            let mut c = client(token, disk_of(dir.then(|| tmp.path())));
+            c.alone();
+            let lists = n / 10;
+            for j in 0..lists {
+                create(&mut c, j);
+            }
+            let ls: Vec<[u8; 16]> = (1..=lists).map(|j| pid(token, j)).collect();
+            let per: Vec<Duration> = (0..n)
+                .map(|i| {
+                    let t = Instant::now();
+                    add(&mut c, &ls[(i % lists) as usize], i);
+                    t.elapsed()
+                })
+                .collect();
+            assert_eq!(c.log.log().head().0 as u64, n + lists);
+            let st = if dir { "Dir" } else { "Memory" };
+            line(&format!("playlists of 10, {st}: mutate"), &per);
+            na(&format!("playlists of 10, {st}: pump"), n as usize, "persisted inside mutate's step");
+        }
+    }
+}
+
+/// A client with a server it cannot reach: every intent stays pending, and
+/// each `mutate` rewrites the whole `pending` blob (its intents not yet
+/// confirmed) — through a temporary file synced and renamed, on `Files`.
+/// The bytes are that blob's at the end.
+#[test]
+#[ignore]
+fn perf_c_offline_pending() {
+    header("(c) offline: mutate with N pending (one pending page per mutate)");
+    note("the `pending` journal: a record appended per mutate (its one entry), written whole when it holds twice what is pending");
+    for n in [500u64, 2000, 8000] {
+        for dir in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let token = "alice@perf";
+            let mut c = client(token, disk_of(dir.then(|| tmp.path())));
+            let lists = n / 10;
+            for j in 0..lists {
+                create(&mut c, j);
+            }
+            let ls: Vec<[u8; 16]> = (1..=lists).map(|j| pid(token, j)).collect();
+            let per: Vec<Duration> = (0..n)
+                .map(|i| {
+                    let t = Instant::now();
+                    add(&mut c, &ls[(i % lists) as usize], i);
+                    t.elapsed()
+                })
+                .collect();
+            assert_eq!(c.log.pending.len() as u64, n + lists);
+            let bytes = if dir {
+                std::fs::metadata(tmp.path().join("pending")).map_or(0, |m| m.len())
+            } else {
+                0
+            };
+            line(
+                &format!(
+                    "playlists of 10, {}: mutate{}",
+                    if dir { "Dir" } else { "Memory" },
+                    if dir { format!(" (pending {bytes} B)") } else { String::new() }
+                ),
+                &per,
+            );
+        }
+    }
+}
+
+// (g) through the hub: the fan-out as the hub routes it ------------------------------
+
+/// `rust/ark/tests/perf.rs`'s fan-out, through a real server `Peer` (sans-io, on
+/// this thread): C connections that said `Hello` at the head, one pushing
+/// a single entry. `Peer::frame` is the authority's step and the routing —
+/// a copy of the one `Batch` per connection fed whole.
+#[test]
+#[ignore]
+fn perf_g_hub_fanout() {
+    eprintln!("\n== (g) fan-out of one pushed entry to C connections, through Peer::frame (v5 only)");
+    eprintln!("{:<48} {:>7} {:>10} {:>10}", "shape", "C", "frame µs", "per conn");
+    let d = domain();
+    let (cr, ad) = fns();
+    for c in [10usize, 40, 160] {
+        for s in [500u64, 8000] {
+            let mut hub = Peer::serve(Config::new(Module::of(&d)), Box::new(Memory::default()), 0);
+            let author = dev("alice@dev").unwrap();
+            let a = hub.accept(author.clone());
+            let mut local = 0;
+            for j in 0..10u64 {
+                push(&mut hub, a, &author, &mut local, cr, named(&format!("P{j}")));
+            }
+            let ls: Vec<[u8; 16]> = (1..=10).map(|j| pid("alice@dev", j)).collect();
+            for i in 0..s {
+                push(&mut hub, a, &author, &mut local, ad, add_input(&ls[(i % 10) as usize], i));
+            }
+            let (head, hash) = hub.log.log().head();
+            let hello = Frame::Hello {
+                space: Space::Durable,
+                cursor: head,
+                hash: Some(hash),
+                device: None,
+                schema: Default::default(),
+                version: String::new(),
+            }
+            .enc();
+            let conns: Vec<u64> = (0..c).map(|k| hub.accept(dev(&format!("u{k}@x")).unwrap())).collect();
+            for k in &conns {
+                hub.frame(*k, hello.clone(), 0);
+            }
+            let w = dev("u0@x").unwrap();
+            let mut l0 = 0;
+            let reps = 20u64;
+            let mut spent = Duration::ZERO;
+            let mut bytes = 0;
+            for i in 0..reps {
+                let t = Instant::now();
+                let out = push(&mut hub, conns[0], &w, &mut l0, ad, add_input(&ls[(i % 10) as usize], 600_000 + i));
+                spent += t.elapsed();
+                bytes += out.iter().map(|(_, b)| b.len()).sum::<usize>();
+                // the author's connection is fed whole too, and said no Hello: it is sent the batch as well
+                assert!(out.len() > c, "an Ack and a Batch to each");
+            }
+            let per = spent / reps as u32;
+            eprintln!(
+                "{:<48} {:>7} {:>10.1} {:>10.2}",
+                format!("log of {s}; {} B per push", bytes / reps as usize),
+                c,
+                us(per),
+                us(per) / c as f64
+            );
+        }
+    }
+}
+
+/// A `Push` of the session's next entry, through the hub.
+fn push(hub: &mut Peer, conn: u64, w: &Who, local: &mut i64, func: &str, input: Vec<u8>) -> Vec<(u64, Vec<u8>)> {
+    *local += 1;
+    let entry = Entry {
+        id: EntryId::of(Origin::named(&w.session), *local),
+        actor: w.actor.clone(),
+        session: w.session.clone(),
+        origin: Origin::named(&w.session),
+        local: *local,
+        roles: vec![],
+        func: func.into(),
+        input,
+        now: *local,
+    };
+    let f = Frame::push(Space::Durable, [entry]);
+    hub.frame(conn, f.enc(), 0)
+}
+
+// (d) Storage over harken's media rows -----------------------------------------------
+
+/// harken's `media` table as `harken/domain/src/schema.rs` declares it,
+/// with its two indexes or without.
+fn media_schema(indexes: bool) -> Schema {
+    let mut t = Table::new("media")
+        .col("id", Type::Id("media".into()))
+        .col("kind", Type::Text)
+        .col("title", Type::Text)
+        .col("creator", Type::Text)
+        .col("duration_ms", Type::Int)
+        .col("file", Type::Text)
+        .col("pos", Type::Int)
+        .col("added_ms", Type::Int)
+        .col("user_id", Type::Text);
+    if indexes {
+        t = t.index(&["file"], false).index(&["pos"], false);
+    }
+    Schema { tables: vec![t] }
+}
+
+fn open_id(tag: u8, n: u64) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[0] = tag;
+    b[8..].copy_from_slice(&n.to_be_bytes());
+    b
+}
+
+/// A media row as `add_song` writes one: the nine columns of v4's.
+fn media(i: u64) -> Vec<u8> {
+    let row = serde_json::json!({
+        "id": ark::hash::hex(&open_id(1, i)),
+        "kind": "song",
+        "title": format!("Track {i}"),
+        "creator": format!("Artist {}", i % 50),
+        "duration_ms": 180_000,
+        "file": format!("music/a{}/t{i}.flac", i % 50),
+        "pos": i as i64 + 1,
+        "added_ms": 1_000 + i as i64,
+        "user_id": "library",
+    });
+    ark::dynamic::row_bytes(&media_schema(false).tables[0], &row).unwrap()
+}
+
+fn media_store(schema: &Schema, rows: std::ops::Range<u64>) -> Store {
+    Store::from_rows(Arc::new(schema.clone()), &[("media".into(), rows.map(media).collect())]).unwrap()
+}
+
+fn media_module() -> Module {
+    Module {
+        schema: Arc::new(media_schema(true)),
+        functions: Functions::default(),
+        domain: None,
+    }
+}
+
+fn snapshot(store: &Store, seq: Seq, hash: EntryHash) -> Snapshot {
+    Snapshot {
+        seq,
+        hash,
+        state: store.state_hash(),
+        rows: store.snapshot_rows(),
+    }
+}
+
+/// The chain that adds rows `from..to` to `store`, one `add_song` each,
+/// linked from `(seq, hash)`.
+fn chain(store: &mut Store, (mut seq, mut prev): (Seq, EntryHash), rows: std::ops::Range<u64>, session: &str) -> Vec<Logged> {
+    let func = "library.add_song";
+    rows.map(|i| {
+        let facts = vec![Change::Add {
+            table: "media".into(),
+            row: media(i),
+        }];
+        store.apply_all(&facts).unwrap();
+        seq += 1;
+        let local = seq;
+        let entry = Entry {
+            id: EntryId::of(Origin::named(session), local),
+            actor: "library".into(),
+            session: session.into(),
+            origin: Origin::named(session),
+            local,
+            roles: vec!["library".into()],
+            func: func.into(),
+            input: b"null".to_vec(),
+            now: 1_000 + i as i64,
+        };
+        let state = store.state_hash();
+        let hash = Logged::chain(&prev, seq, &entry, &facts, &state);
+        prev = hash;
+        Logged {
+            seq,
+            entry,
+            facts,
+            state,
+            hash,
+        }
+    })
+    .collect()
+}
+
+fn record(disk: &mut Files, r: Record) {
+    disk.record(&r.enc()).unwrap();
+}
+
+/// A logged entry as a peer makes it durable: its row of the log's table.
+fn writes(l: Logged) -> Record {
+    Record::Logged(l)
+}
+
+/// A client of a server, caught up: a snapshot of `n` rows at seq `n`,
+/// no chain, nothing pending.
+fn write_client(dir: &Path, n: u64) {
+    let st = media_store(&media_schema(true), 0..n);
+    let mut f = Files::new(dir).unwrap();
+    record(&mut f, Record::Rows(snapshot(&st, n as Seq, EntryHash([0x5a; 32])).kv_rows()));
+}
+
+/// A hub's log: a snapshot at the horizon `n - n/10` and a chain of the
+/// last tenth, each entry an `add_song` adding one row.
+fn write_server(dir: &Path, n: u64) {
+    let horizon = n - n / 10;
+    let mut st = media_store(&media_schema(true), 0..horizon);
+    let base = EntryHash([0x5a; 32]);
+    let mut f = Files::new(dir.join("log")).unwrap();
+    record(&mut f, Record::Rows(snapshot(&st, horizon as Seq, base).kv_rows()));
+    for l in chain(&mut st, (horizon as Seq, base), horizon..n, "scan") {
+        record(&mut f, writes(l));
+    }
+}
+
+/// A client alone that has authored `n` songs: its fork (the empty log)
+/// and the chain of `n` from it.
+fn write_alone(dir: &Path, n: u64) {
+    let mut st = Store::new(Arc::new(media_schema(true)));
+    let mut f = Files::new(dir).unwrap();
+    f.put("fork", &(0i64, EntryHash::default()).to_bytes()).unwrap();
+    for l in chain(&mut st, (0, EntryHash::default()), 0..n, "alice") {
+        record(&mut f, writes(l));
+    }
+}
+
+fn vm_rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("VmRSS:").and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok()))
+        })
+        .unwrap_or(0)
+}
+
+fn dir_bytes(dir: &Path) -> u64 {
+    walk(dir)
+}
+
+fn walk(p: &Path) -> u64 {
+    std::fs::read_dir(p)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| {
+                    let m = e.metadata().unwrap();
+                    if m.is_dir() {
+                        walk(&e.path())
+                    } else {
+                        m.len()
+                    }
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+fn child(test: &str, var: &str, val: String) -> String {
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([test, "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+        .env(var, val)
+        .output()
+        .expect("the child runs");
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+}
+
+const OPEN_SIZES: [u64; 3] = [10_000, 100_000, 400_000];
+
+/// What opening costs, in time and resident memory, at 10,000, 100,000 and
+/// 400,000 rows: a store alone (the snapshot file read, decoded and built),
+/// a client of a server from its snapshot (`Peer::open` over `Files`), a
+/// hub from its log's snapshot at the horizon and the chain above it
+/// (`Peer::serve`: every entry's facts applied and its state hash checked),
+/// and a client alone from its fork and its chain of `n`. Each open in a
+/// process of its own ([`perf_d_open_child`]). The split is the snapshot
+/// file read and decoded, and the chain read; "the rest" is building and
+/// checking.
+#[test]
+#[ignore]
+fn perf_d_open() {
+    let root = std::env::var_os("ARK_PERF_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    eprintln!("\n== (d) open time and resident memory (docs/plan-db.md D5), harken's schema, media rows");
+    note("harken's media table (key id; indexes file, pos) as a schema of its own; v4's opened harken.ark whole");
+    eprintln!(
+        "{:<8} {:>8} {:>9} {:>10} {:>9} {:>9} {:>9}   split (ms)",
+        "what", "rows", "on disk", "open ms", "rss MB", "base MB", "live MB"
+    );
+    // `ARK_OPEN_SIZES=8000,80000` opens other sizes.
+    let sizes: Vec<u64> = std::env::var("ARK_OPEN_SIZES")
+        .map(|s| s.split(',').map(|n| n.parse().expect("a size")).collect())
+        .unwrap_or(OPEN_SIZES.to_vec());
+    for n in sizes {
+        for kind in ["store", "client", "server", "alone"] {
+            let dir = tempfile::Builder::new().prefix("ark-open-").tempdir_in(&root).unwrap();
+            match kind {
+                "client" | "store" => write_client(dir.path(), n),
+                "server" => write_server(dir.path(), n),
+                _ => write_alone(dir.path(), n),
+            }
+            let bytes = dir_bytes(dir.path());
+            let text = child("perf_d_open_child", "ARK_OPEN", format!("{kind} {n} {}", dir.path().display()));
+            let line = text
+                .lines()
+                .find_map(|l| l.split_once("OPEN ").map(|(_, m)| m))
+                .unwrap_or_else(|| panic!("{kind} {n}: no measurement:\n{text}"));
+            let f: Vec<&str> = line.splitn(5, ' ').collect();
+            eprintln!(
+                "{kind:<8} {n:>8} {:>7.1}MB {:>10} {:>9} {:>9} {:>9}   {}",
+                bytes as f64 / 1e6,
+                f[0],
+                f[1],
+                f[2],
+                f[3],
+                f.get(4).unwrap_or(&"")
+            );
+        }
+    }
+}
+
+/// One open, in a process of its own. Prints `OPEN <ms> <rss MB>
+/// <baseline MB> <live MB> <split…>`. Does nothing unless `ARK_OPEN`
+/// says what to open.
+#[test]
+#[ignore]
+fn perf_d_open_child() {
+    let Ok(spec) = std::env::var("ARK_OPEN") else { return };
+    let mut it = spec.splitn(3, ' ');
+    let (kind, n, dir) = (
+        it.next().unwrap(),
+        it.next().unwrap().parse::<u64>().unwrap(),
+        std::path::PathBuf::from(it.next().unwrap()),
+    );
+    let mb = |kb: u64| format!("{:.1}", kb as f64 / 1024.0);
+    let base = vm_rss_kb();
+    let live0 = live_bytes();
+    let who = Who {
+        actor: "alice".into(),
+        session: "alice".into(),
+        roles: vec![],
+    };
+    let t = Instant::now();
+    let rows = match kind {
+        "store" => {
+            let b = std::fs::read(dir.join("kv")).unwrap();
+            let Record::Rows(mut rows) = Record::dec(&b).unwrap() else {
+                panic!("the store's rows")
+            };
+            rows.retain(|(t, _)| t != LOG);
+            let st = Store::from_rows(Arc::new(media_schema(true)), &rows).unwrap();
+            let r = st.rows("media").count();
+            std::mem::forget(st);
+            r
+        }
+        "server" => {
+            let disk = Box::new(Files::new(dir.join("log")).unwrap());
+            let hub = Peer::serve(Config::new(media_module()), disk, 0);
+            let r = hub.log.store.rows("media").count();
+            std::mem::forget(hub);
+            r
+        }
+        _ => {
+            let c = Peer::open(
+                Config {
+                    live: None,
+                    ..Config::new(media_module())
+                },
+                who,
+                Box::new(Files::new(&dir).unwrap()),
+                false,
+            );
+            let r = c.log.store.rows("media").count();
+            std::mem::forget(c);
+            r
+        }
+    };
+    let whole = t.elapsed();
+    let (rss, live) = (vm_rss_kb(), live_bytes() - live0);
+    assert_eq!(rows as u64, n, "every row opened");
+    // Where the time goes: the files read and decoded, timed again.
+    let time = |f: &mut dyn FnMut()| {
+        let t = Instant::now();
+        f();
+        t.elapsed()
+    };
+    let mut split = String::new();
+    let snap = if kind == "server" { dir.join("log/kv") } else { dir.join("kv") };
+    if snap.exists() {
+        let read = time(&mut || {
+            let b = std::fs::read(&snap).unwrap();
+            std::hint::black_box(Record::dec(&b).unwrap());
+        });
+        split.push_str(&format!("snapshot read {:.0}", ms(read)));
+    }
+    if kind == "server" || kind == "alone" {
+        let path = if kind == "server" { dir.join("log") } else { dir.clone() };
+        let mut records = 0;
+        let read = time(&mut || {
+            records = Files::new(&path).unwrap().load().unwrap().logged.len();
+        });
+        if !split.is_empty() {
+            split.push_str(", ");
+        }
+        split.push_str(&format!("chain {records} records read {:.0}", ms(read)));
+    }
+    println!("OPEN {:.0} {} {} {:.1} {split}", ms(whole), mb(rss), mb(base), live as f64 / 1048576.0);
+}
+
+const BYTES_SIZES: [u64; 2] = [10_000, 100_000];
+
+/// What a media row costs by component, in live bytes, each variant in a
+/// process of its own ([`perf_d_bytes_child`]): the rows alone (a
+/// `Vec<Vec<u8>>`), a store without indexes (the primary map), and with
+/// harken's two (the secondaries). v5 has no text indexes.
+#[test]
+#[ignore]
+fn perf_d_bytes() {
+    eprintln!("\n== (d) bytes by component (docs/plan-db.md D7.1), harken's schema, media rows");
+    eprintln!(
+        "{:<12} {:>8} {:>10} {:>10} {:>12} {:>12} {:>12}",
+        "variant", "rows", "live MB", "rss MB", "live B/row", "rss B/row", "component"
+    );
+    for n in BYTES_SIZES {
+        let mut prev: Option<f64> = None;
+        for variant in ["rows", "bare", "secondaries", "text"] {
+            if variant == "text" {
+                eprintln!("{variant:<12} {n:>8} {:>10} n/a: v5 has no text indexes (search scans)", "");
+                continue;
+            }
+            let text = child("perf_d_bytes_child", "ARK_BYTES", format!("{variant} {n}"));
+            let line = text
+                .lines()
+                .find_map(|l| l.split_once("BYTES ").map(|(_, m)| m))
+                .unwrap_or_else(|| panic!("{variant} {n}: no measurement:\n{text}"));
+            let f: Vec<f64> = line.split(' ').map(|x| x.parse().unwrap()).collect();
+            let (live, rss) = (f[0], f[1] * 1024.0);
+            let per = live / n as f64;
+            let what = match variant {
+                "rows" => "the rows",
+                "bare" => "primary map",
+                _ => "secondaries",
+            };
+            eprintln!(
+                "{variant:<12} {n:>8} {:>10.1} {:>10.1} {:>12.0} {:>12.0} {:>7.0} {what}",
+                live / 1048576.0,
+                rss / 1048576.0,
+                per,
+                rss / n as f64,
+                per - prev.unwrap_or(0.0)
+            );
+            prev = Some(per);
+        }
+    }
+    // An open as `perf_d_open` makes it, live against resident.
+    let root = std::env::var_os("ARK_PERF_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    eprintln!(
+        "\n{:<8} {:>8} {:>10} {:>10} {:>12} {:>12}",
+        "open", "rows", "live MB", "rss MB", "live B/row", "rss B/row"
+    );
+    for n in BYTES_SIZES {
+        for kind in ["store", "client"] {
+            let dir = tempfile::Builder::new().prefix("ark-bytes-").tempdir_in(&root).unwrap();
+            write_client(dir.path(), n);
+            let text = child("perf_d_open_child", "ARK_OPEN", format!("{kind} {n} {}", dir.path().display()));
+            let line = text
+                .lines()
+                .find_map(|l| l.split_once("OPEN ").map(|(_, m)| m))
+                .unwrap_or_else(|| panic!("{kind} {n}: no measurement:\n{text}"));
+            let f: Vec<&str> = line.splitn(5, ' ').collect();
+            let (rss, base, live): (f64, f64, f64) = (f[1].parse().unwrap(), f[2].parse().unwrap(), f[3].parse().unwrap());
+            eprintln!(
+                "{kind:<8} {n:>8} {live:>10.1} {:>10.1} {:>12.0} {:>12.0}",
+                rss - base,
+                live * 1048576.0 / n as f64,
+                (rss - base) * 1048576.0 / n as f64
+            );
+        }
+    }
+}
+
+/// One variant of [`perf_d_bytes`]. Prints `BYTES <live bytes> <rss KiB>`.
+#[test]
+#[ignore]
+fn perf_d_bytes_child() {
+    let Ok(spec) = std::env::var("ARK_BYTES") else { return };
+    let (variant, n) = spec.split_once(' ').unwrap();
+    let n: u64 = n.parse().unwrap();
+    let (rss0, live0) = (vm_rss_kb(), live_bytes());
+    let held: Box<dyn std::any::Any> = match variant {
+        "rows" => Box::new((0..n).map(media).collect::<Vec<_>>()),
+        "bare" => Box::new(build(&media_schema(false), n)),
+        _ => Box::new(build(&media_schema(true), n)),
+    };
+    let (rss, live) = (vm_rss_kb().saturating_sub(rss0), live_bytes() - live0);
+    println!("BYTES {live} {rss}");
+    drop(held);
+}
+
+/// A store of `n` media rows, put one at a time.
+fn build(schema: &Schema, n: u64) -> Store {
+    let mut st = Store::new(Arc::new(schema.clone()));
+    for i in 0..n {
+        st.put("media", media(i)).unwrap();
+    }
+    st
+}
+
+/// A disk that keeps nothing: the frame's measurement is the store it
+/// builds, not a copy of the snapshot kept for a reopen.
+struct Nowhere;
+
+impl Disk for Nowhere {
+    fn append(&mut self, _: &str, _: &[u8]) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn put(&mut self, _: &str, _: &[u8]) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn get(&mut self, _: &str) -> std::io::Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
+}
+
+const FRAME_SIZES: [u64; 2] = [10_000, 100_000];
+
+/// A `Snapshot` frame of `n` media rows — what a peer below the horizon is
+/// sent — received by a fresh client (`Peer::receive`: the frame decoded
+/// whole, its rows built into a store, the state hash checked), in a
+/// process of its own ([`perf_d_frame_child`]): the high-water mark of the
+/// live bytes, what is held after, resident memory. v5 has one way; v4's
+/// "tree" and "read" were two.
+#[test]
+#[ignore]
+fn perf_d_frame() {
+    let root = std::env::var_os("ARK_PERF_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    eprintln!("\n== (d) a snapshot frame decoded and adopted (docs/plan-db.md D7.4), harken's schema, media rows");
+    eprintln!(
+        "{:<8} {:>8} {:>9} {:>9} {:>11} {:>10} {:>9} {:>14}",
+        "way", "rows", "frame MB", "ms", "high MB", "held MB", "rss MB", "high B/row"
+    );
+    for n in FRAME_SIZES {
+        let dir = tempfile::Builder::new().prefix("ark-frame-").tempdir_in(&root).unwrap();
+        let path = dir.path().join("frame");
+        let st = media_store(&media_schema(true), 0..n);
+        let f = Frame::Snapshot {
+            space: Space::Durable,
+            snapshot: snapshot(&st, n as Seq, EntryHash([0x5a; 32])),
+        };
+        std::fs::write(&path, f.enc()).unwrap();
+        let size = std::fs::metadata(&path).unwrap().len();
+        eprintln!("{:<8} {n:>8} {:>9} n/a: v5 decodes a frame one way", "tree", "");
+        let text = child("perf_d_frame_child", "ARK_FRAME", format!("{n} {}", path.display()));
+        let line = text
+            .lines()
+            .find_map(|l| l.split_once("FRAME ").map(|(_, m)| m))
+            .unwrap_or_else(|| panic!("{n}: no measurement:\n{text}"));
+        let f: Vec<f64> = line.split(' ').map(|x| x.parse().unwrap()).collect();
+        let (ms, high, held, rss) = (f[0], f[1], f[2], f[3] * 1024.0);
+        eprintln!(
+            "{:<8} {n:>8} {:>9.1} {ms:>9.0} {:>11.1} {:>10.1} {:>9.1} {:>14.0}",
+            "read",
+            size as f64 / 1e6,
+            high / 1048576.0,
+            held / 1048576.0,
+            rss / 1048576.0,
+            high / n as f64
+        );
+    }
+}
+
+/// One frame received, in a process of its own. Prints `FRAME <ms>
+/// <high-water bytes> <held bytes> <rss KiB>`.
+#[test]
+#[ignore]
+fn perf_d_frame_child() {
+    let Ok(spec) = std::env::var("ARK_FRAME") else { return };
+    let (n, path) = spec.split_once(' ').unwrap();
+    let n: u64 = n.parse().unwrap();
+    let mut c = Peer::open(
+        Config {
+            live: None,
+            ..Config::new(media_module())
+        },
+        Who {
+            actor: "alice".into(),
+            session: "alice".into(),
+            roles: vec![],
+        },
+        Box::new(Nowhere),
+        false,
+    );
+    let bytes = std::fs::read(path).unwrap();
+    let (rss0, live0) = (vm_rss_kb(), live_bytes());
+    reset_peak();
+    let t = Instant::now();
+    c.receive(bytes);
+    let took = t.elapsed();
+    let (high, held, rss) = (peak_bytes() - live0, live_bytes() - live0, vm_rss_kb().saturating_sub(rss0));
+    assert_eq!(c.log.store.rows("media").count() as u64, n, "every row adopted");
+    println!("FRAME {} {high} {held} {rss}", ms(took));
+}

@@ -1,0 +1,29 @@
+[package]
+name = "ark-peer"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The ArkDB v5 peer (docs/plan-v5.md §1.7, §1.9, §1.11): the two machines with one disk, as a device that dials a server and as a server that listens — the link with redial, the hub's connections, the views a UI drives and the functions it calls by name, the sync socket, the admin page and sign-in."
+
+[dependencies]
+ark = { path = "../ark" }
+serde_json = { workspace = true }
+ark-auth = { path = "../ark-auth" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+# The admin page's wire (`admin`): the explorer without its window.
+ark-explorer = { path = "../ark-explorer", default-features = false }
+anyhow = "1"
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tower-http = { version = "0.5", features = ["fs"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "CloseEvent", "BinaryType", "Event", "Storage"] }
+
+[dev-dependencies]
+tempfile = "3"
+ark-dev = { path = "../ark-dev" }

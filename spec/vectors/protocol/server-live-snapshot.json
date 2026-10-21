@@ -1,4 +1,0 @@
-{
-  "frame": {"counters":{"phone-login":{"$int":"41"}},"key":"alice","live":"room","seq":{"$int":"6"},"t":"live_snapshot","value":{"count":{"$int":"2"},"pointer":{"phone-login":{"$int":"3"}}}},
-  "bytes": "a661746d6c6976655f736e617073686f74636b657965616c6963656373657106646c69766564726f6f6d6576616c7565a265636f756e740267706f696e746572a16b70686f6e652d6c6f67696e0368636f756e74657273a16b70686f6e652d6c6f67696e1829"
-}

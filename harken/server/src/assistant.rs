@@ -1,15 +1,16 @@
 //! Home Assistant's media players, as devices in the listening session.
 //!
-//! A Sonos is a *device*, not a client. The session (`harken_domain::
-//! listening`, a live state) already describes one — it stands in an
-//! account's session, is handed the sound, and says what happens to it —
-//! and nothing in that says the far end has to be somebody's screen. So
-//! nothing here extends the session; what is here is the thing that is a
-//! device on a speaker's behalf: a participant (`ark_server::HubHandle::
-//! participate`) standing in each account's instance for each configured
-//! speaker, reconciling the speaker against the state exactly as a phone
-//! reconciles its player, and reporting what the speaker does as the
-//! output's own transitions.
+//! A Sonos is a *device*, not a client. The session (`harken/domain`'s
+//! `listening.*`, live state over volatile tables) already describes one — it
+//! stands in an account's session, is handed the sound, and says what
+//! happens to it — and nothing in that says the far end has to be
+//! somebody's screen. So nothing here extends the session; what is here is
+//! the thing that is a device on a speaker's behalf: a connection to the
+//! hub in this process ([`ha`]), a volatile machine of its own saying in
+//! its `Hello` that it is a speaker, standing in each account's session for
+//! each configured speaker, reconciling the speaker against the state
+//! exactly as a phone reconciles its player, and reporting what the speaker
+//! does as the output's own transitions.
 //!
 //! **Home Assistant rather than Sonos directly**, and not for convenience: you
 //! do not get Sonos, you get every `media_player` entity in the house. A
@@ -47,9 +48,200 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ark::eval::Args;
-use harken_domain::listening::read::{input, Active, Clock, Listening, Output};
-use harken_domain::listening::url;
+use crate::domain::host::url;
+use crate::domain::host::{Kind, Listening};
+use crate::domain::{Active, Clock, Output};
+
+/// A transition's input, as its bytes ([`input`]).
+pub type Args = Vec<u8>;
+
+/// The inputs of the session's transitions, as the bridge and its tests
+/// say them: each the domain's input type, encoded.
+pub mod input {
+    use crate::domain::*;
+    use ark::format::Encode;
+
+    pub fn none() -> Vec<u8> {
+        ().to_bytes()
+    }
+
+    pub fn start(queue: &[Track], at: usize, position_ms: i64, from: &str) -> Vec<u8> {
+        Start {
+            at: at as i64,
+            from: from.into(),
+            position: position_ms,
+            queue: queue.to_vec(),
+        }
+        .to_bytes()
+    }
+
+    pub fn seek(ms: i64) -> Vec<u8> {
+        Seek { ms }.to_bytes()
+    }
+
+    pub fn skip(by: i64) -> Vec<u8> {
+        Skip { by }.to_bytes()
+    }
+
+    pub fn jump(index: usize) -> Vec<u8> {
+        Jump {
+            index: index as i64,
+        }
+        .to_bytes()
+    }
+
+    pub fn transfer(to: &str) -> Vec<u8> {
+        Transfer { to: to.into() }.to_bytes()
+    }
+
+    pub fn at(at_ms: i64) -> Vec<u8> {
+        At { at_ms }.to_bytes()
+    }
+
+    pub fn report_position(at_ms: i64, since: i64) -> Vec<u8> {
+        Report { at_ms, since }.to_bytes()
+    }
+
+    pub fn advance(from_track: usize) -> Vec<u8> {
+        Advance {
+            from_track: from_track as i64,
+        }
+        .to_bytes()
+    }
+
+    pub fn enqueue(tracks: &[Track], next: bool) -> Vec<u8> {
+        Enqueue {
+            next,
+            tracks: tracks.to_vec(),
+        }
+        .to_bytes()
+    }
+
+    pub fn remove(index: usize) -> Vec<u8> {
+        Remove {
+            index: index as i64,
+        }
+        .to_bytes()
+    }
+
+    pub fn move_track(from: usize, to: usize) -> Vec<u8> {
+        Move {
+            from: from as i64,
+            to: to as i64,
+        }
+        .to_bytes()
+    }
+
+    pub fn scrub(at_ms: Option<i64>) -> Vec<u8> {
+        Scrub { at_ms }.to_bytes()
+    }
+
+    pub fn equip(can_volume: bool, family: Option<&str>, volume: i64, muted: bool) -> Vec<u8> {
+        Equip {
+            can_volume,
+            family: family.map(|f| f.into()),
+            muted,
+            volume,
+        }
+        .to_bytes()
+    }
+
+    pub fn set_volume(device: &str, level: i64) -> Vec<u8> {
+        SetVolume {
+            device: device.into(),
+            level,
+        }
+        .to_bytes()
+    }
+
+    pub fn nudge_volume(device: &str, delta: i64) -> Vec<u8> {
+        NudgeVolume {
+            delta,
+            device: device.into(),
+        }
+        .to_bytes()
+    }
+
+    pub fn set_mute(device: &str, muted: bool) -> Vec<u8> {
+        SetMute {
+            device: device.into(),
+            muted,
+        }
+        .to_bytes()
+    }
+
+    pub fn report_volume(level: i64, muted: bool) -> Vec<u8> {
+        ReportVolume { level, muted }.to_bytes()
+    }
+
+    pub fn member(device: &str) -> Vec<u8> {
+        Member {
+            device: device.into(),
+        }
+        .to_bytes()
+    }
+
+    pub fn report_group(members: &[&str]) -> Vec<u8> {
+        ReportGroup {
+            members: members.iter().map(|m| m.to_string()).collect(),
+        }
+        .to_bytes()
+    }
+
+    pub fn set_group_volume(level: i64) -> Vec<u8> {
+        GroupVolume { level }.to_bytes()
+    }
+
+    pub fn nudge_group_volume(delta: i64) -> Vec<u8> {
+        GroupNudge { delta }.to_bytes()
+    }
+
+    pub fn set_group_mute(muted: bool) -> Vec<u8> {
+        GroupMute { muted }.to_bytes()
+    }
+
+    pub fn record_play(track: &Track, from: &str) -> Vec<u8> {
+        RecordPlay {
+            track: track.id,
+            title: track.title.clone(),
+            creator: track.creator.clone(),
+            album: track.album.clone(),
+            duration_ms: track.duration_ms,
+            file: track.file.clone(),
+            from: from.into(),
+        }
+        .to_bytes()
+    }
+
+    /// The position an input says — `started`'s and `stalled`'s `at_ms`,
+    /// `seek`'s `ms`, `report_position`'s `at_ms` — moved on by `by`.
+    pub fn later(transition: &str, input: &[u8], by: i64) -> Vec<u8> {
+        match transition {
+            "started" | "stalled" => {
+                At::from_bytes(input).map_or(input.to_vec(), |a| at(a.at_ms + by))
+            }
+            "seek" => Seek::from_bytes(input).map_or(input.to_vec(), |a| seek(a.ms + by)),
+            "report_position" => Report::from_bytes(input)
+                .map_or(input.to_vec(), |r| report_position(r.at_ms + by, r.since)),
+            _ => input.to_vec(),
+        }
+    }
+
+    /// The position an input says, as [`later`] reads it.
+    pub fn ms(transition: &str, input: &[u8]) -> Option<i64> {
+        match transition {
+            "started" | "stalled" => At::from_bytes(input).ok().map(|a| a.at_ms),
+            "seek" => Seek::from_bytes(input).ok().map(|a| a.ms),
+            "report_position" => Report::from_bytes(input).ok().map(|r| r.at_ms),
+            _ => None,
+        }
+    }
+}
+
+/// Where in the queue a session is, as an index.
+fn at(a: &Active) -> usize {
+    a.at.max(0) as usize
+}
 
 /// How many polls a freshly handed speaker may answer with something that is
 /// not what it was handed before the session stops claiming it.
@@ -90,7 +282,7 @@ pub const SEEKS: u8 = 3;
 /// told (`report_position`, said as the speaker, and nothing told to any
 /// player); and the session is right about where somebody asked it to be,
 /// so the speaker is told (`media_seek`) when it is the session that moved.
-pub use harken_domain::listening::read::SYNC_MS;
+pub use crate::domain::host::SYNC_MS;
 
 /// How far a playing speaker may be from the session before what moved it
 /// was somebody's hand on the speaker — a seek in the Sonos app — said as
@@ -553,9 +745,9 @@ impl Bridge {
                 key: key.to_string(),
                 addresses: urls.iter().map(|u| address(u)).collect(),
                 urls: urls.clone(),
-                handed_at: a.at,
+                handed_at: at(a),
                 started: false,
-                at: a.at,
+                at: at(a),
                 playing: a.clock.playing(),
                 clock: a.clock,
                 settling: SETTLE,
@@ -576,7 +768,7 @@ impl Bridge {
         Act::Start {
             entity: entity.to_string(),
             urls,
-            at: a.at,
+            at: at(a),
             position_ms,
             playing: a.clock.playing(),
         }
@@ -669,10 +861,10 @@ impl Bridge {
         // or at its end: the speaker's own queue gets them, and plays on.
         let edited = {
             let h = &self.held[entity];
-            a.at == h.at && urls != h.urls
+            at(a) == h.at && urls != h.urls
         };
         if edited {
-            if let Some(acts) = self.enqueued(entity, &urls, a.at) {
+            if let Some(acts) = self.enqueued(entity, &urls, at(a)) {
                 return acts;
             }
         }
@@ -682,7 +874,7 @@ impl Bridge {
         // it again from there — a track taken out, or moved, too: the house
         // has no call for either that a Sonos and a Chromecast both take, and
         // a hand-off from where the track is is right on every one.
-        if urls != h.urls || a.at != h.at {
+        if urls != h.urls || at(a) != h.at {
             return vec![self.hand(&key, entity, a, now)];
         }
         let mut acts = vec![];
@@ -1190,9 +1382,7 @@ impl Bridge {
         let caps = reading.caps();
         if (me.can_volume, me.family.clone()) != caps {
             if seen.equipped.as_ref() != Some(&caps) {
-                let volume = reading
-                    .volume
-                    .unwrap_or(harken_domain::listening::UNSAID_VOLUME);
+                let volume = reading.volume.unwrap_or(crate::domain::host::UNSAID_VOLUME);
                 seen.equipped = Some(caps.clone());
                 seen.volume = Some((volume, reading.muted));
                 acts.push(call(
@@ -1516,7 +1706,7 @@ pub fn listening(state: &Listening) -> bool {
     state
         .devices
         .iter()
-        .any(|d| d.kind != harken_domain::listening::read::Kind::Speaker)
+        .any(|d| Kind::parse(&d.kind) != Kind::Speaker)
 }
 
 /// Which of `entities` are making the session's sound: its output, here —
@@ -1542,17 +1732,35 @@ pub fn playing<'a>(state: &Listening, entities: impl IntoIterator<Item = &'a str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark::value::Id;
-    use harken_domain::listening::read::{Device, Kind, Track};
+    use crate::domain::host::Kind;
+    use crate::domain::Id;
+    use crate::domain::{Present as Device, Track};
+
+    /// A device as it declared itself, with nothing said of its volume or
+    /// its group: what `on_join` writes.
+    fn device(id: &str, name: &str, kind: Kind, can_play: bool) -> Device {
+        Device {
+            can_play,
+            can_volume: false,
+            family: None,
+            follows: None,
+            id: id.into(),
+            kind: kind.name().into(),
+            muted: false,
+            name: name.into(),
+            user: String::new(),
+            volume: crate::domain::host::UNSAID_VOLUME,
+        }
+    }
 
     const KITCHEN: &str = "media_player.kitchen";
     const NOW: i64 = 1_700_000_000_000;
 
     fn track(file: &str, n: u8) -> Track {
-        let mut id: Id = [0; 16];
+        let mut id = [0; 16];
         id[15] = n;
         Track {
-            id,
+            id: Id::new(id),
             title: file.into(),
             creator: "Bach".into(),
             album: String::new(),
@@ -1578,7 +1786,7 @@ mod tests {
     /// A session whose output is `output`, on `files` from `at`.
     fn session(files: &[&str], at: usize, clock: Clock, output: Output) -> Listening {
         Listening {
-            devices: vec![Device::new("phone", "Phone", Kind::Phone, true)],
+            devices: vec![device("phone", "Phone", Kind::Phone, true)],
             scrub: Default::default(),
             session: Some(Active {
                 queue: files
@@ -1586,7 +1794,7 @@ mod tests {
                     .enumerate()
                     .map(|(i, f)| track(f, i as u8))
                     .collect(),
-                at,
+                at: at as i64,
                 clock,
                 output,
                 from: String::new(),
@@ -2362,7 +2570,7 @@ mod tests {
     /// re-spelling was a different address.
     #[test]
     fn an_address_is_the_same_however_it_is_spelt() {
-        let ours = harken_domain::listening::url(
+        let ours = crate::domain::host::url(
             "http://10.0.0.2:8787",
             "music/Bach/Air (BWV 1068) & Café d'Été.mp3",
         );
@@ -2547,7 +2755,7 @@ mod tests {
             volume,
             family: Some("sonos".into()),
             follows: follows.map(str::to_string),
-            ..Device::new(id, id, Kind::Speaker, true)
+            ..device(id, id, Kind::Speaker, true)
         }
     }
 
@@ -2594,7 +2802,7 @@ mod tests {
     fn what_a_speaker_can_do_is_said_once_as_its_equip() {
         let mut b = bridge();
         let fresh = house_of(
-            vec![Device::new(KITCHEN, "Kitchen", Kind::Speaker, true)],
+            vec![device(KITCHEN, "Kitchen", Kind::Speaker, true)],
             "phone",
         );
         assert!(
@@ -2914,11 +3122,21 @@ mod tests {
 /// not a reason to start — a handful of small requests a second on a LAN is
 /// not a problem worth a runtime.
 ///
-/// **Each speaker is a participant**, one connection per session it stands
-/// in ([`ark_server::HubHandle::participate`]): a device and not a client,
-/// so it is in a live instance and has no replica, no log and no socket. It
-/// is told every frame of the instance, which is only a wake-up here: the
-/// thread reads the sessions whole from the hub, which is in this process.
+/// **Each speaker is a device**, one connection to the hub per session it
+/// stands in ([`ark_peer::Handle::connect`]): a volatile machine of its
+/// own, signed in as the session's account on a session of its own
+/// ([`speaker`]), which says in its `Hello` that it is a speaker — so the
+/// hub authors its `on_join`, and its `on_leave` when the connection
+/// closes. It has no log and no socket. The frames it is sent keep its
+/// machine current and wake the thread, which reads the sessions whole
+/// from the hub, which is in this process.
+///
+/// A device is a session (`harken/domain/devices.ark`), so a speaker's id
+/// in the session is its connection's session, `user@entity`, which two
+/// accounts' kitchens do not share; the bridge reads and says it as the
+/// entity ([`as_entities`]). A speaker's machine is kept for the life of
+/// the thread and connects again when it stands again, so the entries it
+/// authors go on from its last `local`.
 ///
 /// Every speaker stands in a session while a client is in it
 /// ([`listening`]), so the presence a person sees is theirs and the speakers
@@ -2937,14 +3155,18 @@ pub mod ha {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
-    use ark::live::state::{Call, DeviceDecl, Instance};
-    use ark::live::ConnId;
-    use ark::protocol::Identity;
-    use ark::value::Value;
-    use ark_server::HubHandle;
-    use harken_domain::listening::read::{Kind, Listening, STATE};
+    use crate::domain::host::{Kind, Listening};
+    use crate::domain::{Device, Output as Sound};
+    use crate::domain::{Listening as Row, ListeningDevice};
+    use ark::format::Encode;
+    use ark::peer::{Input, Output, Peer, Role, Who};
+    use ark::schema::Space;
+    use ark::store::{Read, Scan};
+    use ark_peer::Handle;
+    use ark_peer::{now_ms, ConnId};
 
-    use super::{listening, playing, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
+    use super::{input, listening, playing, Act, Bridge, Playing, Speaker, GROUPING, VOLUME_SET};
+    use crate::hosted::Hosted;
 
     /// How many of a handed queue's tracks are pushed at a speaker on one
     /// pass of the bridge. The first track goes at once, with its seek; the
@@ -3047,17 +3269,27 @@ pub mod ha {
     }
 
     /// Offer the house's players to every account somebody is listening as.
-    pub fn start(config: Config, hub: HubHandle) -> Assistant {
+    pub fn start(config: Config, hub: Handle, hosted: Hosted) -> Assistant {
         let stop = Arc::new(AtomicBool::new(false));
         let (wake, woken) = channel();
         let flag = stop.clone();
         let waker = wake.clone();
+        #[allow(clippy::let_and_return)]
         let thread = std::thread::Builder::new()
             .name("harken-house".into())
             .spawn(move || {
                 let mut bridge = Bridge::new(config.players.clone(), &config.media);
                 let house = House::new(&config);
-                run(&config, &house, &mut bridge, &hub, &woken, &waker, &flag);
+                let mut wires = Wires {
+                    hub,
+                    hosted,
+                    entities: config.players.iter().map(|(e, _)| e.clone()).collect(),
+                    machines: HashMap::new(),
+                    standing: HashMap::new(),
+                    frames: channel(),
+                    waker,
+                };
+                run(&config, &house, &mut bridge, &mut wires, &woken, &flag);
             })
             .ok();
         if thread.is_none() {
@@ -3066,39 +3298,216 @@ pub mod ha {
         Assistant { stop, wake, thread }
     }
 
-    fn now_ms() -> i64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0)
+    /// A speaker's session in `user`'s listening session: its connection's,
+    /// and so its id there.
+    pub fn speaker(user: &str, entity: &str) -> String {
+        format!("{user}@{entity}")
     }
 
-    /// Every session, as the hub holds it now.
-    fn sessions(hub: &HubHandle) -> Vec<(String, Listening)> {
-        hub.read_blocking(|h| {
-            h.live()
-                .instances
+    /// `user`'s session with each of `entities`' ids ([`speaker`]) read as
+    /// the entity, which is how the bridge names a speaker.
+    pub fn as_entities(mut s: Listening, user: &str, entities: &[String]) -> Listening {
+        let of = |id: &mut String| {
+            if let Some(e) = entities.iter().find(|e| *id == speaker(user, e)) {
+                *id = e.clone();
+            }
+        };
+        for d in &mut s.devices {
+            of(&mut d.id);
+            if let Some(f) = &mut d.follows {
+                of(f);
+            }
+        }
+        if let Some(a) = &mut s.session {
+            if let Sound::Device { id, .. } | Sound::Away { id, .. } = &mut a.output {
+                of(id);
+            }
+        }
+        s.scrub = std::mem::take(&mut s.scrub)
+            .into_iter()
+            .map(|(mut id, at)| {
+                of(&mut id);
+                (id, at)
+            })
+            .collect();
+        s
+    }
+
+    /// Every session, as the hub holds it now: each account with a row in
+    /// the session's tables, its speakers named by their entities.
+    fn sessions(hub: &Handle, entities: &[String]) -> Vec<(String, Listening)> {
+        let read = hub.with(|h| {
+            let store = &h.live.as_ref()?.store;
+            let mut users: Vec<String> = store
+                .scan("listening", &Scan::all())
                 .iter()
-                .filter(|(i, _)| i.state == STATE)
-                .filter_map(|(i, held)| Some((i.key.clone(), Listening::from_value(&held.value)?)))
-                .collect()
-        })
-        .unwrap_or_default()
+                .filter_map(|r| Row::from_bytes(r).ok())
+                .map(|r| r.user)
+                .chain(
+                    store
+                        .scan("listening_device", &Scan::all())
+                        .iter()
+                        .filter_map(|r| ListeningDevice::from_bytes(r).ok())
+                        .map(|r| r.user),
+                )
+                .collect();
+            users.dedup();
+            users.sort();
+            users.dedup();
+            Some(
+                users
+                    .into_iter()
+                    .map(|u| (u.clone(), Listening::of(store, &u)))
+                    .collect::<Vec<_>>(),
+            )
+        });
+        read.flatten()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(u, s)| {
+                let s = as_entities(s, &u, entities);
+                (u, s)
+            })
+            .collect()
+    }
+
+    /// A frame the hub sent the speaker at (account, entity).
+    type Framed = ((String, String), Vec<u8>);
+
+    /// The speakers' machines and their connections to the hub.
+    struct Wires {
+        hub: Handle,
+        hosted: Hosted,
+        /// The entities offered.
+        entities: Vec<String>,
+        /// Each speaker's volatile machine in each session it has stood
+        /// in, by (account, entity): kept, so its `local` goes on.
+        machines: HashMap<(String, String), Peer>,
+        /// The connections of those standing now.
+        standing: HashMap<(String, String), ConnId>,
+        /// Frames the hub sent a speaker, and the thread woken for them.
+        frames: (Sender<Framed>, Receiver<Framed>),
+        waker: Sender<()>,
+    }
+
+    impl Wires {
+        fn stands(&self, k: &(String, String)) -> bool {
+            self.standing.contains_key(k)
+        }
+
+        /// The speaker `entity`, called `name`, standing in `user`'s session.
+        fn stand(&mut self, user: &str, entity: &str, name: &str) {
+            let k = (user.to_string(), entity.to_string());
+            let who = Who {
+                actor: user.into(),
+                session: speaker(user, entity),
+                roles: vec![],
+            };
+            let module = &self.hosted.module;
+            let peer = self.machines.entry(k.clone()).or_insert_with(|| {
+                let mut p = Peer::new(
+                    module.schema.clone(),
+                    module.functions.clone(),
+                    Role::Replica,
+                    who.clone(),
+                )
+                .in_space(Space::Volatile);
+                let said = Device {
+                    can_play: true,
+                    id: entity.into(),
+                    kind: Kind::Speaker.name().into(),
+                    name: name.into(),
+                    user: user.into(),
+                };
+                p.device = Some(said.to_bytes());
+                p
+            });
+            let (to, wake, key) = (self.frames.0.clone(), self.waker.clone(), k.clone());
+            let c = self.hub.connect(
+                who,
+                Box::new(move |b| {
+                    let _ = wake.send(());
+                    to.send((key.clone(), b)).is_ok()
+                }),
+            );
+            let out = peer.step(Input::Connected);
+            self.standing.insert(k, c);
+            self.send(c, out);
+        }
+
+        /// The speaker out of the session: its connection closed, which is
+        /// its `on_leave`.
+        fn leave(&mut self, k: &(String, String)) {
+            if let Some(c) = self.standing.remove(k) {
+                self.hub.close(c);
+            }
+        }
+
+        /// A speaker's machine's frames to its connection; a refusal of
+        /// what it said, said out loud.
+        fn send(&self, c: ConnId, out: Vec<Output>) {
+            for o in out {
+                match o {
+                    Output::Send(b) => self.hub.frame(c, b),
+                    Output::Refused { why, .. } => {
+                        eprintln!("harken-server: house: a speaker's transition was refused: {why}")
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        /// What the hub sent each speaker, to its machine.
+        fn receive(&mut self) {
+            let got: Vec<_> = self.frames.1.try_iter().collect();
+            for (k, bytes) in got {
+                let (Some(peer), Some(c)) =
+                    (self.machines.get_mut(&k), self.standing.get(&k).copied())
+                else {
+                    continue;
+                };
+                let out = peer.step(Input::Frame { from: None, bytes });
+                self.send(c, out);
+            }
+        }
+
+        /// A transition of `user`'s session, called as the speaker `entity`.
+        fn call(&mut self, user: &str, entity: &str, transition: &str, input: Vec<u8>) {
+            let k = (user.to_string(), entity.to_string());
+            let Some(c) = self.standing.get(&k).copied() else {
+                return;
+            };
+            let Some(func) = self.hosted.get(&format!("listening.{transition}")) else {
+                return;
+            };
+            let Some(peer) = self.machines.get_mut(&k) else {
+                return;
+            };
+            let out = peer.step(Input::Mutate {
+                func,
+                input,
+                now: now_ms(),
+            });
+            self.send(c, out);
+        }
+
+        fn drain(&mut self) {
+            let all: Vec<_> = self.standing.keys().cloned().collect();
+            for k in all {
+                self.leave(&k);
+            }
+        }
     }
 
     fn run(
         config: &Config,
         house: &House,
         bridge: &mut Bridge,
-        hub: &HubHandle,
+        wires: &mut Wires,
         woken: &Receiver<()>,
-        waker: &Sender<()>,
         stop: &AtomicBool,
     ) {
-        // One participant per (session, speaker).
-        let mut wires: HashMap<(String, String), ConnId> = HashMap::new();
         let mut polled = Instant::now() - config.tick;
-        let mut autos = ark_client::autos::Autos::system();
         // Since when each session with nobody listening and a speaker
         // standing has been silent.
         let mut silent: HashMap<String, Instant> = HashMap::new();
@@ -3106,18 +3515,22 @@ pub mod ha {
         let mut pushing: HashMap<String, VecDeque<String>> = HashMap::new();
         loop {
             if stop.load(Ordering::Relaxed) {
-                for (_, c) in wires.drain() {
-                    let _ = hub.detach(c);
-                }
+                wires.drain();
                 return;
             }
             let now = now_ms();
             let mut acts = vec![];
-            let states = sessions(hub);
+            let entities: Vec<String> = bridge.players().iter().map(|(e, _)| e.clone()).collect();
+            let states = sessions(&wires.hub, &entities);
+            // Every frame the hub sent the speakers before it was read is in
+            // their channel by now (the hub delivers a step's frames before
+            // it takes the next job): each speaker's machine holds at least
+            // the state the bridge acts on, so what it says as the speaker
+            // is previewed over that and not refused for being behind.
+            wires.receive();
             // Where to stand, and which speakers: every one beside a client;
             // where no client is, the ones making the sound, until it has
             // been silent for `idle`.
-            let entities: Vec<String> = bridge.players().iter().map(|(e, _)| e.clone()).collect();
             let mut stood: Vec<(&String, &Listening, Vec<String>)> = vec![];
             for (key, s) in &states {
                 if listening(s) {
@@ -3151,7 +3564,7 @@ pub mod ha {
             for (key, _, es) in &stood {
                 for entity in es {
                     let k = ((*key).clone(), entity.clone());
-                    if wires.contains_key(&k) {
+                    if wires.stands(&k) {
                         continue;
                     }
                     let name = bridge
@@ -3160,37 +3573,20 @@ pub mod ha {
                         .find(|(e, _)| e == entity)
                         .map(|(_, n)| n.clone())
                         .unwrap_or_default();
-                    let tell = waker.clone();
-                    let who = Identity {
-                        user: (*key).clone(),
-                        session: format!("house:{entity}"),
-                        roles: Default::default(),
-                    };
-                    let device = DeviceDecl::new(entity.clone(), Kind::Speaker.name(), name, true);
-                    if let Ok(c) = hub.participate(
-                        who,
-                        device,
-                        vec![Instance::new(STATE, (*key).clone())],
-                        move |_| {
-                            let _ = tell.send(());
-                        },
-                    ) {
-                        wires.insert(k, c);
-                    }
+                    wires.stand(key, entity, &name);
                 }
             }
             // …and nowhere else: a speaker that is not making the sound does
             // not keep a session's presence open, and one silent where nobody
             // is listening for longer than `idle` goes, pausing what it held.
             let gone: Vec<(String, String)> = wires
+                .standing
                 .keys()
                 .filter(|(key, entity)| !wanted(key, entity))
                 .cloned()
                 .collect();
             for k in gone {
-                if let Some(c) = wires.remove(&k) {
-                    let _ = hub.detach(c);
-                }
+                wires.leave(&k);
                 for act in bridge.left(&k.0, &k.1) {
                     println!(
                         "harken-server: house: {}: nobody is listening as {} and it is not playing; paused",
@@ -3217,7 +3613,7 @@ pub mod ha {
             // says is always after what the house was told: a reading taken
             // before a hand-off was performed is the speaker's last queue.
             for act in acts {
-                perform(house, hub, &wires, &mut autos, &mut pushing, act);
+                perform(house, wires, &mut pushing, act);
             }
             push(house, &mut pushing);
             // …and, a tick at a time, what the standing ones are actually
@@ -3231,7 +3627,7 @@ pub mod ha {
                     .players()
                     .iter()
                     .map(|(e, _)| e.clone())
-                    .filter(|e| wires.keys().any(|(_, w)| w == e))
+                    .filter(|e| wires.standing.keys().any(|(_, w)| w == e))
                     .collect();
                 for entity in standing {
                     let reading = house.read(&entity);
@@ -3257,7 +3653,7 @@ pub mod ha {
                     }
                     // Said at once, each poll's: a position is as of the poll.
                     for act in heard {
-                        perform(house, hub, &wires, &mut autos, &mut pushing, act);
+                        perform(house, wires, &mut pushing, act);
                     }
                 }
             }
@@ -3286,9 +3682,9 @@ pub mod ha {
             .map(|a| match a {
                 Act::Call {
                     transition, input, ..
-                } => match input.get("at_ms").or(input.get("ms")) {
-                    Some(Value::Int(ms)) => format!("{transition} {ms} ms"),
-                    _ => transition.to_string(),
+                } => match input::ms(transition, input) {
+                    Some(ms) => format!("{transition} {ms} ms"),
+                    None => transition.to_string(),
                 },
                 Act::Seek { position_ms, .. } => format!("media_seek {position_ms} ms"),
                 Act::Verb { verb, .. } => verb.to_string(),
@@ -3316,9 +3712,7 @@ pub mod ha {
 
     fn perform(
         house: &House,
-        hub: &HubHandle,
-        wires: &HashMap<(String, String), ConnId>,
-        autos: &mut ark_client::autos::Autos,
+        wires: &mut Wires,
         pushing: &mut HashMap<String, VecDeque<String>>,
         act: Act,
     ) {
@@ -3334,12 +3728,7 @@ pub mod ha {
                 // A playing speaker's point, counted on from when it was
                 // measured to now, when it is said.
                 if let Some(at) = as_of {
-                    let gone = (now_ms() - at).max(0);
-                    for field in ["at_ms", "ms"] {
-                        if let Some(Value::Int(ms)) = input.get_mut(field) {
-                            *ms += gone;
-                        }
-                    }
+                    input = input::later(transition, &input, (now_ms() - at).max(0));
                 }
                 // A release is said out loud, because a speaker being let go
                 // looks exactly like one that stopped for no reason, and the
@@ -3347,19 +3736,19 @@ pub mod ha {
                 if transition == "release" {
                     println!("harken-server: house: {entity}: {why}; let go of {key}'s session");
                 }
-                let Some(c) = wires.get(&(key.clone(), entity.clone())) else {
-                    return;
-                };
-                let _ = hub.call(
-                    *c,
-                    Call {
-                        instance: Instance::new(STATE, key),
-                        transition: transition.into(),
-                        input,
-                        id: autos.new_id(),
-                        counter: None,
-                    },
-                );
+                // The members a speaker reports are speakers: by their ids in
+                // this session.
+                if transition == "report_group" {
+                    if let Ok(mut g) = crate::domain::ReportGroup::from_bytes(&input) {
+                        for m in &mut g.members {
+                            if wires.entities.contains(m) {
+                                *m = speaker(&key, m);
+                            }
+                        }
+                        input = g.to_bytes();
+                    }
+                }
+                wires.call(&key, &entity, transition, input);
             }
             Act::Enqueue { entity, urls, next } => {
                 // At the end of a queue still being pushed is after what is

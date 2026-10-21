@@ -1,3 +1,10 @@
+> **Superseded** (`docs/plan-v5.md` §1.16, N3): the phones no longer run a
+> port. They embed the Rust kernel through FFI — `harken/ffi`, the kernel
+> with harken's domain linked in, called from Kotlin and Swift through
+> UniFFI and the types `ark-dev gen` writes — and `kotlin/` and `swift/`,
+> the ports this document planned, are deleted (their last green commit is
+> `a983b3c`). What follows is the history.
+
 # The phones: Kotlin and Swift at v4, held to one suite
 
 **Status: rounds 1–7 landed** (each one's `## Landed` paragraph below).

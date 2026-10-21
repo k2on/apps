@@ -1,9 +1,9 @@
 // The session is the process's, not the activity's (Kept.kt,
-// `kotlin/ark-android`'s Sessions.kt): the activity going — its screens
+// `onboarding/Sessions.kt`): the activity going — its screens
 // disposed, its hold let go — while the phone is the account's output leaves
 // the phone in the session, as the output, playing, and another device sees
 // nothing move. Over the process's `Sessions` with a session that is a real
-// Kotlin peer in the test's server (`Hall`), whose socket goes when the
+// peer in a harken server in the process (`Hall`), whose socket goes when the
 // session closes, the real `HarkenApp` composed and disposed, and the media
 // service's player a stand-in.
 package dev.harken.android
@@ -22,11 +22,10 @@ import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
-import dev.arkdb.android.ArkSession
-import dev.arkdb.android.Sessions
-import dev.arkdb.client.Account
-import dev.arkdb.client.Login
-import dev.harken.android.listening.Output
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.onboarding.Sessions
+import dev.harken.android.gen.Output
+import dev.harken.ffi.Hall
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -68,7 +67,7 @@ class KeptTests {
         val hall = Hall()
         val phone = hall.device("phone", true)
         val laptop = hall.device("laptop", true, "computer")
-        val login = Login("t", "phone", Account("alice"), 0)
+        val login = testLogin("alice", "phone")
         var opened = 0
         // The process's sessions, opening the phone's peer: its socket goes when the session closes.
         val sessions =
@@ -141,7 +140,7 @@ class KeptTests {
         assertFalse("its socket went with it", phone.linked)
         val after = hall.state().active!!.output
         assertTrue("the laptop sees the phone away: $after", after is Output.Away)
-        phone.close()
-        laptop.close()
+        phone.peer.close()
+        laptop.peer.close()
     }
 }

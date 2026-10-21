@@ -38,15 +38,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import dev.arkdb.ui.Glyph
-import dev.arkdb.ui.LocalPageFrame
-import dev.arkdb.ui.MoreButton
-import dev.arkdb.ui.Origin
-import dev.arkdb.ui.Recompositions
-import dev.arkdb.ui.RowOrigin
-import dev.arkdb.ui.Space
-import dev.arkdb.ui.Tapped
-import dev.arkdb.ui.quiet
+import dev.harken.android.ui.Glyph
+import dev.harken.android.ui.LocalPageFrame
+import dev.harken.android.ui.MoreButton
+import dev.harken.android.ui.Origin
+import dev.harken.android.ui.Recompositions
+import dev.harken.android.ui.RowOrigin
+import dev.harken.android.ui.Space
+import dev.harken.android.ui.Tapped
+import dev.harken.android.ui.quiet
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {

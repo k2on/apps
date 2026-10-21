@@ -107,13 +107,13 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.google.common.util.concurrent.SettableFuture
-import dev.arkdb.Id
-import dev.arkdb.android.ArkSession
-import dev.arkdb.android.ArkSessions
-import dev.arkdb.android.Hold
-import dev.arkdb.android.Sessions
-import dev.harken.android.listening.Output
-import dev.harken.android.listening.Track as Queued
+import dev.arkdb.ffi.Id
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.onboarding.ArkSessions
+import dev.harken.android.onboarding.Hold
+import dev.harken.android.onboarding.Sessions
+import dev.harken.android.gen.Output
+import dev.harken.android.gen.Track as Queued
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -485,7 +485,7 @@ object Items {
 
     /** The track a media item carries, if it is one of ours. */
     fun queued(m: MediaItem): Queued? {
-        val id = runCatching { Id.ofHex(m.mediaId) }.getOrNull() ?: return null
+        val id = m.mediaId.takeIf { it.length == 32 }?.let { Id(it) } ?: return null
         val x = m.mediaMetadata.extras
         return Queued(
             album = m.mediaMetadata.albumTitle?.toString() ?: "",

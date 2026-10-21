@@ -1,5 +1,0 @@
-{
-  "value": {"$int":"1"},
-  "bytes": "02",
-  "expect": "fail"
-}

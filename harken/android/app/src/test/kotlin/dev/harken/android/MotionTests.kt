@@ -13,6 +13,9 @@
 // the way, the back gesture at 0.3 and 0.6, the player part-way up.
 package dev.harken.android
 
+import dev.harken.android.gen.AddSong
+import dev.harken.android.gen.Harken
+import dev.harken.android.gen.CreatePlaylist
 import android.view.MotionEvent
 import android.view.View
 import androidx.activity.BackEventCompat
@@ -48,18 +51,10 @@ import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
-import dev.arkdb.Value
-import dev.arkdb.android.ArkSession
-import dev.arkdb.client.Account
-import dev.arkdb.client.Autos
-import dev.arkdb.client.Domain
-import dev.arkdb.client.Login
-import dev.arkdb.client.MemoryStorage
-import dev.arkdb.client.Options
-import dev.arkdb.client.Peer
-import dev.arkdb.ui.Origin
-import dev.arkdb.ui.PageMotion
-import dev.arkdb.ui.Springs
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.ui.Origin
+import dev.harken.android.ui.PageMotion
+import dev.harken.android.ui.Springs
 import java.io.File
 import java.lang.reflect.Proxy
 import kotlin.math.abs
@@ -132,40 +127,28 @@ class MotionTests {
         override fun close() {}
     }
 
-    private fun harken(): ByteArray {
-        var dir: File? = File("").absoluteFile
-        while (dir != null) {
-            File(dir, "domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            File(dir, "harken/domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            dir = dir.parentFile
-        }
-        error("no harken.ark above ${File("").absolutePath}")
-    }
-
     /** The demo's songs, authored through `add_song` as the server's scanner would. */
-    private fun demo(): Peer {
-        val peer = Peer.open(Domain.fromBytes(harken()), MemoryStorage(), Options.alone("library").copy(autos = Autos.Seeded(5)))
-        peer.setRoles(listOf("library"))
+    private fun demo(): Harken {
+        val peer = alone()
         for (t in Demo.tracks) {
             val d = Demo.details.getValue(t.id)
-            peer.mutate(
-                "add_song",
-                mapOf(
-                    "title" to Value.text(t.title),
-                    "artist" to Value.text(t.creator),
-                    "album" to Value.text(d.album),
-                    "duration_ms" to Value.int(t.durationMs),
-                    "file" to Value.text(t.file),
-                    "track" to Value.int(d.track),
-                    "part" to Value.text(d.part),
-                    "catalogue" to Value.text(""),
-                    "performer" to Value.text(d.performer),
-                    "bpm" to Value.int(0),
-                    "album_art" to Value.text(""),
-                    "artist_art" to Value.text(""),
-                    "disc" to Value.int(1),
-                    "work_title" to Value.text(""),
-                    "movement_no" to Value.int(0),
+            peer.addSong(
+                AddSong(
+                    title = t.title,
+                    artist = t.creator,
+                    album = d.album,
+                    durationMs = t.durationMs,
+                    file = t.file,
+                    track = d.track,
+                    part = d.part,
+                    catalogue = "",
+                    performer = d.performer,
+                    bpm = 0,
+                    albumArt = "",
+                    artistArt = "",
+                    disc = 1,
+                    workTitle = "",
+                    movementNo = 0,
                 ),
             )
         }
@@ -255,7 +238,7 @@ class MotionTests {
      */
     private fun app(test: (ComposeView, PageMotion, OnBackPressedDispatcher) -> suspend () -> Unit, ms: Long, start: LibraryTab? = null, threaded: Boolean = false) {
         val peer = demo()
-        val login = Login("t", "s", Account("library"), 0)
+        val login = testLogin("library", roles = listOf("library"))
         val session = if (threaded) ArkSession.over(peer, "https://music.example.com", login) else ArkSession.inline(peer, "https://music.example.com", login)
         val motion = PageMotion(Tab.routes)
         val back = OnBackPressedDispatcher()
@@ -274,7 +257,7 @@ class MotionTests {
             paparazzi.gif(view, "motion", 0L, ms, FPS)
         } finally {
             session.close()
-            peer.close()
+            peer.peer.close()
         }
         assertTrue("the script ran to its end", done)
     }

@@ -4,7 +4,7 @@ workspace = "../../rust"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "harken's desktop and browser client: the library, the table, the menus and the listening session, on arkui, ark-client and the domain."
+description = "harken's desktop and browser client: the library, the table, the menus and the listening session, on arkui, ArkDB v5's client and the domain."
 
 [features]
 # A standalone demo: no server, no sign-in, a seeded library, its own
@@ -14,11 +14,12 @@ description = "harken's desktop and browser client: the library, the table, the 
 demo = []
 
 [dependencies]
+ark = { path = "../../rust/ark" }
 harken-domain = { path = "../domain" }
-ark-client = { path = "../../rust/ark-client" }
+ark-peer = { path = "../../rust/ark-peer" }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
-ark-auth = { path = "../../rust/ark-auth", features = ["client"] }
+ark-auth = { path = "../../rust/ark-auth" }
 arkui = { path = "../../rust/arkui" }
 # `E`: the database explorer over this device's replica (`docs/plan-guards.md`
 # D4), read-only but for the CRUD the domain exposes.
@@ -31,6 +32,9 @@ ark-explorer = { path = "../../rust/ark-explorer" }
 # on screen and the recipes `tests/wake.rs` runs.
 # `fira-sans` is the typeface (the port leaves the vendored Inter behind).
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+# The sync socket natively: the token first, then frames, and the server's
+# close code read (4401 is a login turned away).
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach: without it wgpu finds no backend and
@@ -38,6 +42,8 @@ iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira
 iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
 # `HtmlAudioElement` is the now-playing bar: handing a URL to the platform
 # buys streaming, buffering, range requests and seeking.
-web-sys = { version = "0.3", features = ["Window", "Location", "Document", "Element", "HtmlAudioElement", "HtmlMediaElement"] }
+# `WebSocket` is the sync socket in a browser.
+web-sys = { version = "0.3", features = ["Window", "Location", "Document", "Element", "HtmlAudioElement", "HtmlMediaElement", "WebSocket", "MessageEvent", "CloseEvent", "BinaryType", "Event"] }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
+

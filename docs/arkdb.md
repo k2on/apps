@@ -1,5 +1,12 @@
 # ArkDB
 
+> **Superseded by v5 native** (`docs/plan-v5.md` §1.16): one runtime,
+> Rust, with the domain a crate of plain Rust and the phones embedding the
+> kernel over FFI. Every language this document gives a runtime of its own
+> had to agree byte for byte with every other, and the domain had to become
+> data and be interpreted to cross between them; with the kernel itself
+> crossing to the phones, neither is needed. What follows is history.
+
 A design for the successor to Petros. Three parts: what Petros is and what
 harken does with it, what the compiled-domain-over-FFI approach costs now that
 the phone is becoming two native apps, and the architecture of a system in

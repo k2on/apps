@@ -18,39 +18,112 @@ mod demo;
 #[cfg(feature = "demo")]
 mod views;
 
-use ark_client::{args, Args, Domain, Options, Value};
+use crate::domain::AddSong;
+use ark::peer::Who;
 
-/// A replica in memory, opened with `opts`, wrapped as the window's peer.
-///
-/// Its device holds the `library` role (`docs/plan-guards.md` D1): these
-/// windows fill their own library with `add_song`, which `is_library` gives
-/// that role alone, as a server's scanner holds it.
-pub fn peer(opts: Options) -> crate::peer::Peer {
-    let mut client = ark_client::Peer::open_memory(Domain::new(&harken_domain::module()), opts).expect("a peer in memory opens");
-    client.set_roles([harken_domain::schema::LIBRARY]);
+use crate::client::Replica;
+use crate::listening::{Device, Kind};
+
+fn who(me: &str) -> Who {
+    Who {
+        actor: me.into(),
+        session: format!("{me}-device"),
+        roles: vec![],
+    }
+}
+
+/// A replica's lists, its device holding the `library` role
+/// (`docs/plan-guards.md` D1): these windows fill their own library with
+/// `add_song`, which `is_library` gives that role alone, as a server's
+/// scanner holds it.
+fn lists(mut client: Replica) -> crate::peer::Peer {
+    client.set_roles([crate::domain::LIBRARY]);
     crate::peer::Peer::open(client)
 }
 
-/// `add_song`'s arguments, for a track called `title` in `file`.
-pub fn song(title: &str, artist: &str, album: &str, file: &str) -> Args {
-    let t = |s: &str| Value::text(s);
-    args([
-        ("title", t(title)),
-        ("artist", t(artist)),
-        ("album", t(album)),
-        ("duration_ms", Value::Int(200_000)),
-        ("file", t(file)),
-        ("track", Value::Int(0)),
-        ("part", t("")),
-        ("catalogue", t("")),
-        ("performer", t("")),
-        ("bpm", Value::Int(0)),
-        ("album_art", t("")),
-        ("artist_art", t("")),
-        ("disc", Value::Int(0)),
-        ("work_title", t("")),
-        ("movement_no", Value::Int(0)),
-    ])
+/// A replica in memory, its own authority, as `me`.
+pub fn alone(me: &str) -> crate::peer::Peer {
+    let mut client = crate::client::memory(who(me), None);
+    client.alone();
+    lists(client)
+}
+
+/// A replica in memory, signed in as `me` with a token, reaching no server
+/// until it is given one.
+pub fn signed_in(me: &str) -> crate::peer::Peer {
+    lists(crate::client::memory(who(me), Some("dev")))
+}
+
+/// A replica in memory nobody has signed in on.
+pub fn signed_out() -> crate::peer::Peer {
+    lists(crate::client::memory(crate::client::nobody(), None))
+}
+
+/// `add_song`'s input, for a track called `title` in `file`.
+pub fn song(title: &str, artist: &str, album: &str, file: &str) -> AddSong {
+    AddSong {
+        title: title.into(),
+        artist: artist.into(),
+        album: album.into(),
+        duration_ms: 200_000,
+        file: file.into(),
+        ..AddSong::default()
+    }
+}
+
+/// A device standing in a session, as `on_join` makes one.
+pub fn device(id: &str, name: &str, kind: Kind, can_play: bool) -> Device {
+    Device {
+        can_play,
+        can_volume: false,
+        family: None,
+        follows: None,
+        id: id.into(),
+        kind: kind.name().into(),
+        muted: false,
+        name: name.into(),
+        user: "me".into(),
+        volume: crate::domain::host::UNSAID_VOLUME,
+    }
+}
+
+/// A connection made of two queues, for a test: what the test pushes is
+/// what the connection says; what the replica sends is kept.
+#[derive(Clone, Default)]
+pub struct Queues {
+    pub said: std::sync::Arc<std::sync::Mutex<Vec<ark_peer::Event>>>,
+    pub sent: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    pub wake: std::sync::Arc<std::sync::Mutex<Option<crate::client::Wake>>>,
+}
+
+impl Queues {
+    /// Something the connection says, and the wake rung.
+    pub fn push(&self, e: ark_peer::Event) {
+        self.said.lock().unwrap().push(e);
+        if let Some(w) = &*self.wake.lock().unwrap() {
+            w();
+        }
+    }
+
+    /// A dialer whose every connection is a fresh pair of queues, each
+    /// kept in `made`.
+    pub fn dialer(made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>>) -> impl ark_peer::link::Dial {
+        move |_url: &str, _token: &str, wake: Option<crate::client::Wake>| {
+            let q = Queues::default();
+            *q.wake.lock().unwrap() = wake;
+            made.lock().unwrap().push(q.clone());
+            Box::new(q) as Box<dyn ark_peer::link::Wire>
+        }
+    }
+}
+
+impl ark_peer::link::Wire for Queues {
+    fn send(&mut self, frame: Vec<u8>) {
+        self.sent.lock().unwrap().push(frame);
+    }
+    fn events(&mut self) -> Vec<ark_peer::Event> {
+        std::mem::take(&mut *self.said.lock().unwrap())
+    }
 }
 
 /// The demo, seeded once per test run and handed to each test as a replica
@@ -58,36 +131,14 @@ pub fn song(title: &str, artist: &str, album: &str, file: &str) -> Args {
 ///
 /// Seeding is seconds in a debug build, and every context test starts from
 /// the same library. So the first test to ask seeds it and keeps the
-/// replica's bytes, and every test opens its own peer from those bytes — the
+/// replica's records, and every test opens its own peer from those — the
 /// same library, nothing shared — and hydrates its own views, which is what
-/// a window opening does and is cheap now that every query is a plan.
+/// a window opening does.
 #[cfg(feature = "demo")]
 pub fn demo_app() -> crate::App {
     use std::sync::OnceLock;
 
-    use ark_client::storage::{Memory, ReplicaFile, Storage};
-
-    static TEMPLATE: OnceLock<Vec<u8>> = OnceLock::new();
-    let domain = Domain::new(&harken_domain::module());
-    let bytes = TEMPLATE.get_or_init(|| {
-        let client = crate::seed::seeded(domain.clone());
-        let r = client.replica();
-        ReplicaFile {
-            fork: Default::default(),
-            cursor: r.cursor,
-            confirmed: r.confirmed.clone(),
-            pending: r.pending.clone(),
-            user: crate::seed::DEMO.into(),
-            session: "local".into(),
-            partial: None,
-        }
-        .encode()
-    });
-    let mut disk = Memory::new();
-    disk.save(ReplicaFile::KEY, bytes).unwrap();
-    let mut client = ark_client::Peer::open(domain, Box::new(disk), Options::alone(crate::seed::DEMO)).unwrap();
-    // The demo authored its own library, as the scanner would: it holds the
-    // role the library's guard asks (`docs/plan-guards.md` D1).
-    client.set_roles([harken_domain::schema::LIBRARY]);
-    crate::App::with_peer(crate::peer::Peer::open(client), String::new(), None)
+    static TEMPLATE: OnceLock<ark_peer::Memory> = OnceLock::new();
+    let disk = TEMPLATE.get_or_init(|| crate::seed::seeded_disk(1)).clone();
+    crate::App::with_peer(crate::peer::Peer::open(crate::seed::open(disk)), String::new(), None)
 }

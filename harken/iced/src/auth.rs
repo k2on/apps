@@ -4,8 +4,8 @@
 //! **Nobody has to be.** A window opens on its own replica whether or not
 //! anybody has signed in, and works: the library it has is there, and what is
 //! done is kept pending on this device, authored as nobody. Signing in later
-//! moves that same replica on — `ark_client::Peer::sign_in` makes every
-//! pending intent the signer's, and dials — so everything done before is
+//! moves that same replica on — `Replica::sign_in` makes every pending
+//! intent the signer's, and dials — so everything done before is
 //! theirs, synced. That is why the replica is one per *server* and not one
 //! per person: it is the device's copy of that server's log, whoever is
 //! using it.
@@ -23,9 +23,11 @@
 //! one URL, get one code back — and differs between the targets only in where
 //! the code comes back to: a loopback port the desktop listens on, or this
 //! page's own address.
+use ark::peer::Who;
 use ark_auth::remember::Logins;
 use ark_auth::Login;
-use ark_client::{Domain, Error, Options};
+
+use crate::client::Replica;
 
 /// What the connect entry offers before anything is typed: a dev server
 /// on this machine.
@@ -190,52 +192,48 @@ pub fn remember_joined(server: &str) -> Result<(), String> {
 }
 
 /// This device's replica with no server: its own authority, authoring as
-/// nobody until somebody signs in at a server it joins
-/// (`ark_client::Options::alone_as_nobody`).
+/// nobody until somebody signs in at a server it joins.
 #[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn open_alone(domain: Domain) -> Result<ark_client::Peer, Error> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        ark_client::Peer::open_path(domain, data_dir(LOCAL), Options::alone_as_nobody())
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        ark_client::Peer::open_local(domain, &format!("harken:{LOCAL}"), Options::alone_as_nobody())
-    }
+pub fn open_alone() -> Result<Replica, String> {
+    let mut r = crate::client::open(disk(LOCAL)?, None, crate::listening::device());
+    r.alone();
+    Ok(r)
 }
 
-/// How the replica is opened: as the remembered login, or signed out.
-///
-/// The token is never on disk in the replica, so a remembered login hands it
-/// over here; signed out, the peer authors as whoever last used this replica
-/// (nobody, on a device where nobody ever signed in) and dials nothing.
-#[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn options(login: Option<&Login>) -> Options {
-    // A device of the account's listening session, as its login: what makes
-    // its peer hold the session (`listening`).
-    let opts = match login {
-        Some(l) => Options::server(l.user.id.clone(), l.session.clone(), Some(l.token.clone())),
-        None => Options::signed_out(),
-    };
-    opts.with_device(crate::listening::device())
+/// Who a login is, as the server verifies it and an entry carries it.
+pub fn who_of(l: &Login) -> Who {
+    ark_peer::who(l)
 }
 
 /// This server's replica on this device: a directory natively, the page's
 /// `localStorage` in a browser — the `local` one when that is what joined
-/// this server.
+/// this server — as the remembered login, or signed out. The token is never
+/// on disk in the replica: a remembered login hands it over here; signed
+/// out, the peer authors as whoever last used this replica (nobody, on a
+/// device where nobody ever signed in) and dials nothing.
 #[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn open(domain: Domain, server: &str, opts: Options) -> Result<ark_client::Peer, Error> {
+pub fn open(server: &str, login: Option<&Login>) -> Result<Replica, String> {
     let place = match joined().as_deref() == Some(server) {
         true => LOCAL.to_string(),
         false => server.to_string(),
     };
+    let login = login.map(|l| (who_of(l), l.token.clone()));
+    Ok(crate::client::open(disk(&place)?, login, crate::listening::device()))
+}
+
+/// Where a place's replica is kept.
+#[cfg_attr(feature = "demo", allow(dead_code))]
+fn disk(place: &str) -> Result<Box<dyn ark_peer::Disk>, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        ark_client::Peer::open_path(domain, data_dir(&place), opts)
+        let dir = data_dir(place);
+        ark_peer::Files::new(&dir)
+            .map(|f| Box::new(f) as Box<dyn ark_peer::Disk>)
+            .map_err(|e| format!("{}: {e}", dir.display()))
     }
     #[cfg(target_arch = "wasm32")]
     {
-        ark_client::Peer::open_local(domain, &format!("harken:{place}"), opts)
+        Ok(Box::new(ark_peer::disk::Local(format!("harken:{place}"))) as Box<dyn ark_peer::Disk>)
     }
 }
 

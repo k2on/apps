@@ -175,7 +175,7 @@ pkgs.testers.runNixOSTest {
     with subtest("files copied into the media directory become songs everywhere"):
         server.succeed("cp /etc/fleet-media/copied-*.wav /srv/media/music/")
         converged(8)
-        rows = run(alice, "alice", {"cmd": "query", "name": "library", "args": {"playlist_id": {"$id": "00000000-0000-0000-0000-000000000000"}}})[0]["rows"]
+        rows = run(alice, "alice", {"cmd": "query", "name": "library", "args": {"playlist_id": "00000000000000000000000000000000"}})[0]["rows"]
         files = sorted(r["file"] for r in rows)
         assert files == ["music/copied-one.wav", "music/copied-two.wav", "music/seeded-one.wav", "music/seeded-two.wav"], files
   '' + pkgs.lib.optionalString (old == null) ''
@@ -185,7 +185,7 @@ pkgs.testers.runNixOSTest {
 
     OLD = "${old}/bin/harken-peer"
     NEW = "harken-peer"
-    NOPL = {"$id": "00000000-0000-0000-0000-000000000000"}
+    NOPL = "00000000000000000000000000000000"
 
     def run_at(machine, binary, d, host, user, *cmds):
         lines = "\n".join(json.dumps(c) for c in cmds)
@@ -198,7 +198,7 @@ pkgs.testers.runNixOSTest {
         return answers
 
     def song(title):
-        i = lambda n: {"$int": str(n)}
+        i = lambda n: n
         return {"title": title, "artist": "The Fleet", "album": "Mixed", "duration_ms": i(1000),
                 "file": f"typed/{title}.wav", "track": i(0), "part": "", "catalogue": "",
                 "performer": "", "bpm": i(0), "album_art": "", "artist_art": "", "disc": i(0),

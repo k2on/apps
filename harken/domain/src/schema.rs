@@ -1,512 +1,220 @@
-//! The tables. This file is the schema: the table set is a struct of
-//! tables, a table is a row struct with its columns, key, indexes and
-//! references said once in `Row::columns`.
-//!
-//! harken's `schema.sql`, table for table and column for column, one log
-//! and one set of tables. The unique index on `(playlist.user_id,
-//! playlist.name)` is the one addition that means anything: it is what
-//! `create_playlist`'s insert matches on, so a person's second "Favorites"
-//! is no row at all — and, since R6, what that insert names the new one
-//! from: its columns are the person and the name, so the names from
-//! "Favorites" up to "Favorites )" are one range of it. The other indexes
-//! say nothing about the rows and are
-//! there for the mutations' reads (`docs/plan-perf.md` R1): each is the
-//! columns one read holds equal followed by the column it orders by, so
-//! the store hands back `MAX(pos)` or the row for a file by walking to it
-//! rather than by reading every candidate — `add_song`'s two reads,
-//! `create_playlist`'s two and `add_to_playlist`'s one. A non-unique index
-//! is additive under `compat`, changes no row and no mutator's closure,
-//! and a store loaded from before it builds it as the rows are put.
-use ark::authoring::*;
+//! The tables. The indexes are there for the mutations' reads.
 
-/// The library's role: the scanner's account holds it by
-/// construction (`harken_server::library`), and nobody else does unless the
-/// server's configuration grants it (`services.harken.roles`). harken
-/// declares nothing about who sees or writes a table — the row rules that
-/// did were deleted (`docs/plan-guards.md` G1) — and the library router's
-/// mutations are guarded by this role instead (`is_library`, D1).
-pub const LIBRARY: &str = "library";
+use ark::prelude::*;
 
-/// Every table harken has, in one set: the library (what the scanner
-/// authors and every peer reads) and the playlists (what people make of it).
-pub struct Harken {
-    pub media: Table<Media>,
-    pub album: Table<Album>,
-    pub person: Table<Person>,
-    pub work: Table<Work>,
-    pub movement: Table<Movement>,
-    pub recording: Table<Recording>,
-    pub credit: Table<Credit>,
-    pub song: Table<Song>,
-    pub playlist: Table<Playlist>,
-    pub playlist_item: Table<PlaylistItem>,
-    pub play: Table<Play>,
-}
-impl Tables for Harken {
-    fn open() -> Self {
-        Harken {
-            media: table(),
-            album: table(),
-            person: table(),
-            work: table(),
-            movement: table(),
-            recording: table(),
-            credit: table(),
-            song: table(),
-            playlist: table(),
-            playlist_item: table(),
-            play: table(),
-        }
-    }
-}
+use crate::types::{Present, Session};
 
+// The library: every playable thing, what only a song has, and the rows a
+// track belongs to, each keyed by what it is (`keys.rs`).
+
+/// Every playable thing.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(file), index(pos))]
 pub struct Media {
+    #[ark(key)]
     pub id: Id<Media>,
-    pub kind: Text,
-    pub title: Text,
-    pub creator: Text,
-    pub duration_ms: Int,
-    pub file: Text,
-    pub pos: Int,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Media {
-    const NAME: &str = "media";
-    type Key = (Id<Media>,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .id(Self::id)
-            .text(Self::kind)
-            .text(Self::title)
-            .text(Self::creator)
-            .int(Self::duration_ms)
-            .text(Self::file)
-            .int(Self::pos)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::id,))
-            // `add_song`: the row already holding a file, and the last.
-            .index((Self::file,))
-            .index((Self::pos,))
-            // `search`: the trigrams of each, folded (`docs/plan-db.md`
-            // D4). They move the module's hash and no mutator's.
-            .index_text(Self::title)
-            .index_text(Self::creator)
-    }
-}
-impl Media {
-    pub const id: Col<Self, Id<Self>> = col("id");
-    pub const kind: Col<Self, Text> = col("kind");
-    pub const title: Col<Self, Text> = col("title");
-    pub const creator: Col<Self, Text> = col("creator");
-    pub const duration_ms: Col<Self, Int> = col("duration_ms");
-    pub const file: Col<Self, Text> = col("file");
-    pub const pos: Col<Self, Int> = col("pos");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const song: Rel<Self, Song> = rel("song");
-    pub const playlist_item: Rel<Self, PlaylistItem> = rel("playlist_item");
+    pub kind: String,
+    pub title: String,
+    pub creator: String,
+    pub duration_ms: i64,
+    pub file: String,
+    pub pos: i64,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Album {
-    pub name: Text,
-    pub label: Text,
-    pub released: Int,
-    pub art: Text,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Album {
-    const NAME: &str = "album";
-    type Key = (Text,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .text(Self::name)
-            .text(Self::label)
-            .int(Self::released)
-            .text(Self::art)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::name,))
-    }
-}
-impl Album {
-    pub const name: Col<Self, Text> = col("name");
-    pub const label: Col<Self, Text> = col("label");
-    pub const released: Col<Self, Int> = col("released");
-    pub const art: Col<Self, Text> = col("art");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const song: Rel<Self, Song> = rel("song");
+    #[ark(key)]
+    pub name: String,
+    pub label: String,
+    pub released: i64,
+    pub art: String,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Person {
-    pub name: Text,
-    pub sort_name: Text,
-    pub born: Int,
-    pub died: Int,
-    pub art: Text,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Person {
-    const NAME: &str = "person";
-    type Key = (Text,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .text(Self::name)
-            .text(Self::sort_name)
-            .int(Self::born)
-            .int(Self::died)
-            .text(Self::art)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::name,))
-    }
-}
-impl Person {
-    pub const name: Col<Self, Text> = col("name");
-    pub const sort_name: Col<Self, Text> = col("sort_name");
-    pub const born: Col<Self, Int> = col("born");
-    pub const died: Col<Self, Int> = col("died");
-    pub const art: Col<Self, Text> = col("art");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const work: Rel<Self, Work> = rel("work");
-    pub const credit: Rel<Self, Credit> = rel("credit");
+    #[ark(key)]
+    pub name: String,
+    pub sort_name: String,
+    pub born: i64,
+    pub died: i64,
+    pub art: String,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Work {
-    pub id: Text,
-    pub composer: Text,
-    pub title: Text,
-    pub catalogue: Text,
-    pub opus: Text,
-    pub key_sig: Text,
-    pub form: Text,
-    pub period: Text,
-    pub composed: Int,
-    pub art: Text,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Work {
-    const NAME: &str = "work";
-    type Key = (Text,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .text(Self::id)
-            .text(Self::composer)
-            .refs::<Person>()
-            .text(Self::title)
-            .text(Self::catalogue)
-            .text(Self::opus)
-            .text(Self::key_sig)
-            .text(Self::form)
-            .text(Self::period)
-            .int(Self::composed)
-            .text(Self::art)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::id,))
-    }
-}
-impl Work {
-    pub const id: Col<Self, Text> = col("id");
-    pub const composer: Col<Self, Text> = col("composer");
-    pub const title: Col<Self, Text> = col("title");
-    pub const catalogue: Col<Self, Text> = col("catalogue");
-    pub const opus: Col<Self, Text> = col("opus");
-    pub const key_sig: Col<Self, Text> = col("key_sig");
-    pub const form: Col<Self, Text> = col("form");
-    pub const period: Col<Self, Text> = col("period");
-    pub const composed: Col<Self, Int> = col("composed");
-    pub const art: Col<Self, Text> = col("art");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const movement: Rel<Self, Movement> = rel("movement");
-    pub const recording: Rel<Self, Recording> = rel("recording");
+    #[ark(key)]
+    pub id: String,
+    #[ark(refs(Person))]
+    pub composer: String,
+    pub title: String,
+    pub catalogue: String,
+    pub opus: String,
+    pub key_sig: String,
+    pub form: String,
+    pub period: String,
+    pub composed: i64,
+    pub art: String,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Movement {
-    pub id: Text,
-    pub work_id: Text,
-    pub no: Int,
-    pub title: Text,
-    pub part: Text,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Movement {
-    const NAME: &str = "movement";
-    type Key = (Text,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .text(Self::id)
-            .text(Self::work_id)
-            .refs::<Work>()
-            .int(Self::no)
-            .text(Self::title)
-            .text(Self::part)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::id,))
-    }
-}
-impl Movement {
-    pub const id: Col<Self, Text> = col("id");
-    pub const work_id: Col<Self, Text> = col("work_id");
-    pub const no: Col<Self, Int> = col("no");
-    pub const title: Col<Self, Text> = col("title");
-    pub const part: Col<Self, Text> = col("part");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const song: Rel<Self, Song> = rel("song");
+    #[ark(key)]
+    pub id: String,
+    #[ark(refs(Work))]
+    pub work_id: String,
+    pub no: i64,
+    pub title: String,
+    pub part: String,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Recording {
-    pub id: Text,
-    pub work_id: Opt<Text>,
-    pub recorded: Int,
-    pub venue: Text,
-    pub label: Text,
-    pub licence: Text,
-    pub art: Text,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Recording {
-    const NAME: &str = "recording";
-    type Key = (Text,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .text(Self::id)
-            .text(Self::work_id)
-            .nullable()
-            .refs::<Work>()
-            .int(Self::recorded)
-            .text(Self::venue)
-            .text(Self::label)
-            .text(Self::licence)
-            .text(Self::art)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::id,))
-    }
-}
-impl Recording {
-    pub const id: Col<Self, Text> = col("id");
-    pub const work_id: Col<Self, Opt<Text>> = col("work_id");
-    pub const recorded: Col<Self, Int> = col("recorded");
-    pub const venue: Col<Self, Text> = col("venue");
-    pub const label: Col<Self, Text> = col("label");
-    pub const licence: Col<Self, Text> = col("licence");
-    pub const art: Col<Self, Text> = col("art");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const credit: Rel<Self, Credit> = rel("credit");
-    pub const song: Rel<Self, Song> = rel("song");
+    #[ark(key)]
+    pub id: String,
+    #[ark(refs(Work))]
+    pub work_id: Option<String>,
+    pub recorded: i64,
+    pub venue: String,
+    pub label: String,
+    pub licence: String,
+    pub art: String,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Credit {
-    pub recording_id: Text,
-    pub person_name: Text,
-    pub role: Text,
-    pub instrument: Text,
-    pub pos: Int,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Credit {
-    const NAME: &str = "credit";
-    type Key = (Text, Text, Text);
-    fn columns() -> Columns<Self> {
-        columns()
-            .text(Self::recording_id)
-            .refs::<Recording>()
-            .text(Self::person_name)
-            .refs::<Person>()
-            .text(Self::role)
-            .text(Self::instrument)
-            .int(Self::pos)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::recording_id, Self::person_name, Self::role))
-    }
-}
-impl Credit {
-    pub const recording_id: Col<Self, Text> = col("recording_id");
-    pub const person_name: Col<Self, Text> = col("person_name");
-    pub const role: Col<Self, Text> = col("role");
-    pub const instrument: Col<Self, Text> = col("instrument");
-    pub const pos: Col<Self, Int> = col("pos");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
+    #[ark(key, refs(Recording))]
+    pub recording_id: String,
+    #[ark(key, refs(Person))]
+    pub person_name: String,
+    #[ark(key)]
+    pub role: String,
+    pub instrument: String,
+    pub pos: i64,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Song {
+    #[ark(key, refs(Media))]
     pub media_id: Id<Media>,
-    pub album_name: Opt<Text>,
-    pub disc: Int,
-    pub track: Int,
-    pub recording_id: Text,
-    pub movement_id: Opt<Text>,
-    pub bpm: Int,
-}
-impl Row for Song {
-    const NAME: &str = "song";
-    type Key = (Id<Media>,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .id(Self::media_id)
-            .refs::<Media>()
-            .text(Self::album_name)
-            .nullable()
-            .refs::<Album>()
-            .int(Self::disc)
-            .int(Self::track)
-            .text(Self::recording_id)
-            .refs::<Recording>()
-            .text(Self::movement_id)
-            .nullable()
-            .refs::<Movement>()
-            .int(Self::bpm)
-            .key((Self::media_id,))
-    }
-}
-impl Song {
-    pub const media_id: Col<Self, Id<Media>> = col("media_id");
-    pub const album_name: Col<Self, Opt<Text>> = col("album_name");
-    pub const disc: Col<Self, Int> = col("disc");
-    pub const track: Col<Self, Int> = col("track");
-    pub const recording_id: Col<Self, Text> = col("recording_id");
-    pub const movement_id: Col<Self, Opt<Text>> = col("movement_id");
-    pub const bpm: Col<Self, Int> = col("bpm");
+    #[ark(refs(Album))]
+    pub album_name: Option<String>,
+    pub disc: i64,
+    pub track: i64,
+    #[ark(refs(Recording))]
+    pub recording_id: String,
+    #[ark(refs(Movement))]
+    pub movement_id: Option<String>,
+    pub bpm: i64,
 }
 
+// The playlists: each one person's, its name unique among theirs.
+
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+// One column in two indexes reads to clippy as an attribute said twice.
+#[allow(clippy::duplicated_attributes)]
+#[ark(unique(user_id, name), index(pos), index(user_id, pos))]
 pub struct Playlist {
+    #[ark(key)]
     pub id: Id<Playlist>,
-    pub name: Text,
-    pub pos: Int,
-    pub created_ms: Int,
-    pub user_id: Text,
-}
-impl Row for Playlist {
-    const NAME: &str = "playlist";
-    type Key = (Id<Playlist>,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .id(Self::id)
-            .text(Self::name)
-            .int(Self::pos)
-            .int(Self::created_ms)
-            .text(Self::user_id)
-            .key((Self::id,))
-            .unique((Self::user_id, Self::name))
-            // `create_playlist`: the last playlist anyone made. One
-            // person's names near the one asked for are a range of the
-            // unique index above (R6).
-            .index((Self::pos,))
-            .index((Self::user_id, Self::pos))
-    }
-}
-impl Playlist {
-    pub const id: Col<Self, Id<Self>> = col("id");
-    pub const name: Col<Self, Text> = col("name");
-    pub const pos: Col<Self, Int> = col("pos");
-    pub const created_ms: Col<Self, Int> = col("created_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const playlist_item: Rel<Self, PlaylistItem> = rel("playlist_item");
+    pub name: String,
+    pub pos: i64,
+    pub created_ms: i64,
+    pub user_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(playlist_id, pos))]
 pub struct PlaylistItem {
+    #[ark(key, refs(Playlist))]
     pub playlist_id: Id<Playlist>,
+    #[ark(key, refs(Media))]
     pub media_id: Id<Media>,
-    pub pos: Int,
-    pub added_ms: Int,
-    pub user_id: Text,
-}
-impl Row for PlaylistItem {
-    const NAME: &str = "playlist_item";
-    type Key = (Id<Playlist>, Id<Media>);
-    fn columns() -> Columns<Self> {
-        columns()
-            .id(Self::playlist_id)
-            .refs::<Playlist>()
-            .id(Self::media_id)
-            .refs::<Media>()
-            .int(Self::pos)
-            .int(Self::added_ms)
-            .text(Self::user_id)
-            .key((Self::playlist_id, Self::media_id))
-            // `add_to_playlist`: the last item of one playlist.
-            .index((Self::playlist_id, Self::pos))
-    }
-}
-impl PlaylistItem {
-    pub const playlist_id: Col<Self, Id<Playlist>> = col("playlist_id");
-    pub const media_id: Col<Self, Id<Media>> = col("media_id");
-    pub const pos: Col<Self, Int> = col("pos");
-    pub const added_ms: Col<Self, Int> = col("added_ms");
-    pub const user_id: Col<Self, Text> = col("user_id");
+    pub pos: i64,
+    pub added_ms: i64,
+    pub user_id: String,
 }
 
-/// A track that was played: one row per play, authored by the device that
-/// made the sound once it had played long enough to count
-/// (`listening::record_play`). The log's, because last played and recently
-/// played have to be there offline and the same on every device; tens a
-/// day, where the session's own changes are thousands.
-///
-/// A play carries the track as it was heard — its title, who made it, its
-/// record, its length and its file — and the media id as text, which
-/// references nothing, on purpose. A reference would refuse `remove_media`
-/// a track anybody had played (a parent with children is not deleted) and
-/// refuse a play of a track this replica has not got yet; a play is a fact
-/// about what was heard, not a hold on the library, and reading one needs
-/// no join.
+/// A track that was played: one row per play, carrying the track as it was
+/// heard and its media id as text, which references nothing, on purpose: a
+/// play is a fact about what was heard, not a hold on the library.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(user_id, played_ms))]
 pub struct Play {
+    #[ark(key)]
     pub id: Id<Play>,
-    pub user_id: Text,
-    pub track: Text,
-    pub title: Text,
-    pub creator: Text,
-    pub album: Text,
-    pub duration_ms: Int,
-    pub file: Text,
-    pub played_ms: Int,
-    pub from: Text,
+    pub user_id: String,
+    pub track: String,
+    pub title: String,
+    pub creator: String,
+    pub album: String,
+    pub duration_ms: i64,
+    pub file: String,
+    pub played_ms: i64,
+    pub from: String,
 }
-impl Row for Play {
-    const NAME: &str = "play";
-    type Key = (Id<Play>,);
-    fn columns() -> Columns<Self> {
-        columns()
-            .id(Self::id)
-            .text(Self::user_id)
-            .text(Self::track)
-            .text(Self::title)
-            .text(Self::creator)
-            .text(Self::album)
-            .int(Self::duration_ms)
-            .text(Self::file)
-            .int(Self::played_ms)
-            .text(Self::from)
-            .key((Self::id,))
-            // `last_played` and `recently_played`: one person's, newest
-            // first.
-            .index((Self::user_id, Self::played_ms))
-    }
+
+// The listening session, volatile: one row per account while it has a
+// session (no row is `Idle`), one per device standing in it — both ordered —
+// and one per device dragging a scrubber, which only its own device writes
+// and nothing ordered reads.
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(volatile)]
+pub struct Listening {
+    #[ark(key)]
+    pub user: String,
+    pub session: Session,
 }
-impl Play {
-    pub const id: Col<Self, Id<Self>> = col("id");
-    pub const user_id: Col<Self, Text> = col("user_id");
-    pub const track: Col<Self, Text> = col("track");
-    pub const title: Col<Self, Text> = col("title");
-    pub const creator: Col<Self, Text> = col("creator");
-    pub const album: Col<Self, Text> = col("album");
-    pub const duration_ms: Col<Self, Int> = col("duration_ms");
-    pub const file: Col<Self, Text> = col("file");
-    pub const played_ms: Col<Self, Int> = col("played_ms");
-    pub const from: Col<Self, Text> = col("from");
+
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(volatile)]
+pub struct ListeningDevice {
+    #[ark(key)]
+    pub user: String,
+    #[ark(key)]
+    pub device: String,
+    pub present: Present,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(volatile)]
+pub struct ListeningScrub {
+    #[ark(key)]
+    pub user: String,
+    #[ark(key)]
+    pub device: String,
+    pub at_ms: i64,
+}
+
+/// harken's tables, in the schema's order.
+#[derive(Schema)]
+pub struct Harken {
+    pub media: Media,
+    pub album: Album,
+    pub person: Person,
+    pub work: Work,
+    pub movement: Movement,
+    pub recording: Recording,
+    pub credit: Credit,
+    pub song: Song,
+    pub playlist: Playlist,
+    pub playlist_item: PlaylistItem,
+    pub play: Play,
+    pub listening: Listening,
+    pub listening_device: ListeningDevice,
+    pub listening_scrub: ListeningScrub,
 }

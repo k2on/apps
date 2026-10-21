@@ -33,16 +33,16 @@ fn a_dev_login_is_a_code_then_a_token_then_nothing() {
         Some(login.session.clone())
     );
     let who = auth.authenticator();
-    assert_eq!(who(Some(&login.token)).map(|i| i.user), Some("alice".to_string()));
+    assert_eq!(who(&login.token).map(|i| i.actor), Some("alice".to_string()));
     // Two logins by one person are two sessions: two devices.
     let again = ark_auth::client::login(&server, Some("alice"), |_| {}).unwrap();
     assert_ne!(again.session, login.session);
     // Signed out: the token proves nothing, and the session is still hers.
     ark_auth::client::logout(&server, &login.token).unwrap();
     assert_eq!(ark_auth::client::whoami(&server, &login.token).unwrap(), None);
-    assert!(who(Some(&login.token)).is_none());
+    assert!(who(&login.token).is_none());
     assert!(auth.owns("alice", &login.session));
-    assert!(who(Some(&again.token)).is_some(), "the other device is still signed in");
+    assert!(who(&again.token).is_some(), "the other device is still signed in");
 }
 
 #[test]

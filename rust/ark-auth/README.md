@@ -3,11 +3,12 @@
 Who an ArkDB peer is. `petros-auth`, on ArkDB.
 
 The engine asks one question about identity, once per connection: at
-`Hello`, what does this token prove (`ark::protocol::Authenticate`)? This
+`Hello`, what does this token prove (`server::Authenticate`, the `ark::peer::Who`
+it proves, as `ark-peer`'s server asks it)? This
 crate answers it for a server that signs people in with OpenID Connect, and
 gives the clients the other half — how to get a token to send.
 
-- **server** (feature `server`): the one relying party. `Auth` holds the
+- **server** (natively): the one relying party. `Auth` holds the
   mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the session store, the
   pending logins and the one-minute single-use codes; `server::router(auth)`
   is `/auth/login`, `/auth/callback`, `/auth/exchange`, `/auth/me`,
@@ -22,8 +23,7 @@ gives the clients the other half — how to get a token to send.
 - **dev auth**: `Mode::Dev` signs anyone in as the name they give — at once
   when the login URL carries `user=`, through a one-field form otherwise —
   and `name:role,role` as that name holding those roles (`alice:library`,
-  read as the engine's own dev auth reads a token,
-  `ark::protocol::dev_identity`). `Auth::announce()` is what a server prints
+  read by `server::dev_account`). `Auth::announce()` is what a server prints
   at startup, every time: the mode's sentence (dev auth's names the
   `name:role,role` form) and every role the configuration grants.
 - **roles** (`docs/plan-auth.md`): a claim about a person the log does not
@@ -37,19 +37,19 @@ gives the clients the other half — how to get a token to send.
   for every login at once. `Account.roles` carries them to the client in
   the exchange's and `/auth/me`'s answers (absent when none, so a login
   remembered before roles reads as one holding none); a client hands them
-  to its peer (`ark_client::Peer::set_roles`), whose `Ctx` carries them,
+  to its peer as the `Who` it authors as (`ark_peer::who`),
   and the server takes a connection's roles from what it asks here
   whatever the client says.
-  `auth.authenticator()` answers `Identity { user, session, roles }`. A
+  `auth.authenticator()` answers `Who { actor, session, roles }`. A
   provider's groups claim is not read.
-- **OIDC**: authorization code with PKCE, as a confidential client;
-  discovery from the issuer; the secret read from a file
-  (`oidc::read_secret`, `Provider::discover_with_secret_file`) — a systemd
-  credential, never an argument, an environment variable or a store path.
-  The ID token's signature is not checked, for the reason `oidc.rs` gives
-  (it arrives over TLS in the direct answer to this server's own request);
-  issuer, audience, expiry and nonce are.
-- **client** (feature `client`): natively, `client::login(server, user,
+- **OIDC** (the `openidconnect` crate, 4.x, over the same blocking `ureq`
+  agent — its `SyncHttpClient` — and never reqwest): authorization code with
+  PKCE (S256), as a confidential client; discovery from the issuer and its
+  key set; the secret read from a file (`oidc::read_secret`,
+  `Provider::discover_with_secret_file`) — a systemd credential, never an
+  argument, an environment variable or a store path. The crate checks the ID
+  token: signature, issuer, audience, expiry and nonce.
+- **client**: natively, `client::login(server, user,
   open)` listens on a loopback port, asks the server's login without
   following the redirect (a dev server answers with the code at once — no
   browser), otherwise opens the system browser with `open` and waits for the
@@ -82,7 +82,7 @@ let auth = Arc::new(
         // role → the account ids holding it: the provider's `sub`, or a dev name
         .with_roles([("library", vec!["scanner"]), ("admin", vec!["a1b2-sub"])]),
 );
-// ark-server: `.auth(auth.clone())` mounts the routes and asks
+// ark-peer: `Server::new(config).auth(auth.clone())` mounts the routes and asks
 // `auth.authenticator()` at every Hello.
 // A peer the server runs itself signs in like everyone else:
 let scanner_login = auth.issue(&ark_auth::Account {
@@ -98,8 +98,8 @@ let scanner_login = auth.issue(&ark_auth::Account {
 // desktop, off the UI thread (it blocks as long as the person takes)
 let login = ark_auth::client::login(&server, Some("alice"), ark_auth::client::open_browser)?;
 ark_auth::remember::Logins::new("myapp").remember(&server, &login);
-// then an ark-client peer, as that person on that device:
-let opts = ark_client::Options::server(login.user.id.clone(), login.session.clone(), Some(login.token.clone()));
+// then an ark-peer device, as that person on that device:
+peer.login(ark_peer::who(&login), login.token.clone());
 peer.connect(&ark_auth::socket_url(&server));
 
 // browser
@@ -120,9 +120,34 @@ if let Some(code) = ark_auth::web::take_code() {
 | iced's hand-written `remembered::{recall, remember, forget}` | `remember::Logins::new(app).{recall, remember, forget}` |
 | `session::SessionStore::open(petros::open_path(..))` (SQLite, Diesel) | `SessionStore::open(path)` (a JSON file) / `SessionStore::memory()` |
 | `SessionStore::issue(&account)` before `Auth::new` | `Auth::issue(&account)` after it, or the store's `issue` |
-| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `auth.authenticator()` → `ark::protocol::Authenticate`; `auth.owns(user, session)` / `auth.owns_fn()` → `Server::with_owns` (ark-server's `.auth` wires it) |
+| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `auth.authenticator()` → `server::Authenticate` (a token to an `ark::peer::Who`); `auth.owns(user, session)` |
 | `Mode::{Oidc, Dev}`, `Auth::new(..).allow_redirect(..)`, `server::router` | the same (axum 0.7) |
 | a secret passed in | `oidc::read_secret(path)`, `Provider::discover_with_secret_file` |
+
+## What the crate does differently from the hand-rolled client
+
+- **The ID token's signature is checked**, against the provider's key set
+  (or HS256 with the client secret, where the provider offers it). The key
+  set is fetched at discovery and again at every exchange, so a provider
+  rotating its keys is followed without a restart. Before, the signature
+  was not checked (it came over TLS in the answer to this server's own
+  request, which OpenID Connect Core 3.1.3.7 allows).
+- **The issuer is compared exactly**: the configured issuer must be what
+  the provider's discovery document says, trailing slash and all (before,
+  a trailing slash was trimmed on both sides). Auth0's issuer ends in `/`;
+  most others do not.
+- **The audience is stricter**: an ID token naming another audience beside
+  this client is refused (the crate trusts no other audience); before, any
+  `aud` containing the client was taken.
+- **The nonce is required**, as before: a token without one, or with
+  another login's, is refused. `iat` is not checked, as before.
+- **The client secret goes to the token endpoint as HTTP Basic**
+  (`client_secret_basic`, the spec's default every provider supports);
+  before, it was posted in the form body (`client_secret_post`).
+- **userinfo** is asked only when the ID token lacks a name or an email, as
+  before, and now must name the same subject.
+- A provider's error at the token endpoint is reported as its HTTP status
+  (the ureq client gives the crate no body for a 4xx).
 
 ## Tested, and not
 
@@ -130,14 +155,19 @@ if let Some(code) = ark_auth::web::take_code() {
 across a reopen holding no token), the redirect rules, a code redeemed once,
 the authenticator, roles (a login's own and the configured ones merged in
 the exchange and at `Hello`, the configuration moved under the same session
-store, dev auth's `name:role,role`), and the whole dev login over real HTTP: login with no
-browser, `whoami`, two logins as two sessions, logout, a code refused the
-second time and refused a foreign redirect, the dev form. ark-server's
-`tests/auth.rs` takes the token onto the sync socket.
+store, dev auth's `name:role,role`), the whole dev login over real HTTP
+(login with no browser, `whoami`, two logins as two sessions, logout, a code
+refused the second time and refused a foreign redirect, the dev form), and
+`tests/oidc.rs`: a login through a provider served in the test (discovery,
+the redirect with PKCE, state, nonce and scopes, the callback's exchange,
+the subject, name and email), and an ID token refused for another login's
+nonce, for a signature not made with the secret, and a state never started.
+ark-peer's `tests/serve.rs` takes the token onto the sync socket. The
+hand-rolled parsing's tests (base64url, a JWT's payload, the claims checks)
+went with it: the crate owns that.
 
-Not verified: an OpenID Connect provider — none is reachable from a test
-machine, so `Mode::Oidc` (discovery, the callback, the token exchange) is the
-petros-auth code ported, unit-tested on its claims checks and nothing more;
+Not verified: a real OpenID Connect provider (the test's is HS256 and a few
+routes; RS256 against a provider's key set is the crate's, untested here);
 the desktop's browser flow with a person in it (the loopback listener is only
 exercised by the dev path, which never opens a browser); and the wasm half in
 a browser — it compiles for `wasm32-unknown-unknown` and nobody has run it.

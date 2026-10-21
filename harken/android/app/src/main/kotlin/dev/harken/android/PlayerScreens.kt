@@ -65,13 +65,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.arkdb.ui.Cover
-import dev.arkdb.ui.Glyph
-import dev.arkdb.ui.Recompositions
-import dev.arkdb.ui.Space
-import dev.arkdb.ui.VolumeSlider
-import dev.arkdb.ui.quiet
-import dev.arkdb.ui.rememberTransientListState
+import dev.harken.android.ui.Cover
+import dev.harken.android.ui.Glyph
+import dev.harken.android.ui.Recompositions
+import dev.harken.android.ui.Space
+import dev.harken.android.ui.VolumeSlider
+import dev.harken.android.ui.quiet
+import dev.harken.android.ui.rememberTransientListState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 

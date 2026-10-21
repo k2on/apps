@@ -1442,6 +1442,11 @@
    "jar": "sha256-ns6ovysbOZY5OdGLcEZO72DFCP7Ygg+dyroMNVGOq/c=",
    "pom": "sha256-G+s1y0GE5skGp+Murr2FLdPaCiY5YumRNKuUWDI5Tig="
   },
+  "net/java/dev/jna#jna/5.17.0": {
+   "aar": "sha256-Tb7//6Zl2XrVqn7uKXUx08hBqGcWq393T9aVZCKzzzg=",
+   "jar": "sha256-s6lAjnxR4I7w47/MCPRD9uwPYZG6jNfBjVPSsi5b28A=",
+   "pom": "sha256-UBoP8F2EpK0Q9t4lvpT0k5i3CjG+jzoO2fTGtE++/uQ="
+  },
   "net/java/dev/jna#jna/5.6.0": {
    "jar": "sha256-VVfiNaiqL5dm1dxgnWeUjyqIMsLXls6p7x1svgs7fq8=",
    "pom": "sha256-X+gbAlWXjyRhbTexBgi3lJil8wc+HZsgONhzaoMfJgg="
@@ -1849,6 +1854,10 @@
   "org/jetbrains/kotlinx#kotlinx-serialization-core/1.6.3": {
    "module": "sha256-Nh6eMetylhdLdAhaxJ7dhKTzkAupQxpOQM0cI952oyg=",
    "pom": "sha256-0tv2/BU2TIlp1qq24+zMdROZU/LMBXtzDjUmdGWztX4="
+  },
+  "org/json#json/20240303": {
+   "jar": "sha256-PPbNaJLjLitMHDng9S9SSKL1s3ZG/fu3mma0a2GEFO0=",
+   "pom": "sha256-mUuvXYm/TKpc6WjkxOqxNcj5eD7PTSt7Dp0cik3fHk8="
   },
   "org/junit#junit-bom/5.9.2": {
    "module": "sha256-qxN7pajjLJsGa/kSahx23VYUtyS6XAsCVJdyten0zx8=",

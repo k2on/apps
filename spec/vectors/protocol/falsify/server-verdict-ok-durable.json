@@ -1,0 +1,6 @@
+{
+  "expect": "fail",
+  "bytes": "030010851234151743d65409f72ea19e17578f0004",
+  "frame": {"Verdict":{"id":"851234151743d65409f72ea19e17578f","space":"durable","verdict":{"Ok":{"seq":1}}}},
+  "name": "server-verdict-ok-durable"
+}

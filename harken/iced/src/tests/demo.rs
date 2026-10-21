@@ -306,7 +306,7 @@ fn the_whole_path_from_a_composer_to_a_movement() {
 #[test]
 fn a_work_link_resolves_by_its_key() {
     let peer = fresh();
-    let id = harken_domain::keys::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
+    let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
     assert!(id.contains('/'), "{id}");
     assert_eq!(peer.source_of(&Place::Work(id.clone())), Source::Work(id, "Goldberg Variations".into()));
     assert_eq!(peer.source_of(&Place::Work("nobody/nothing".into())), Source::Library);
@@ -323,7 +323,7 @@ fn the_sidebar_only_offers_what_there_is() {
     let lines: Vec<&str> = peer.choices.iter().map(|c| c.label.as_str()).collect();
     assert!(lines.contains(&"Composers") && lines.contains(&"Albums"), "{lines:?}");
 
-    let mut bare = super::peer(ark_client::Options::alone("demo"));
+    let mut bare = super::alone("demo");
     bare.ensure_playlist();
     let lines: Vec<&str> = bare.choices.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(lines, ["Songs", "Favorites"], "an empty library");

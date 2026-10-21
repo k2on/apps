@@ -33,23 +33,21 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
-import dev.arkdb.Id
-import dev.arkdb.android.AppIdentity
-import dev.arkdb.android.Opening
-import dev.arkdb.android.Permission
-import dev.arkdb.android.PermissionStep
-import dev.arkdb.android.ServerStep
-import dev.arkdb.android.SignInStep
-import dev.arkdb.android.Step
-import dev.arkdb.client.Account
-import dev.arkdb.client.Login
-import dev.arkdb.ui.Space
-import dev.harken.android.listening.Clock
-import dev.harken.android.listening.Listening
-import dev.harken.android.listening.ListeningDevices
-import dev.harken.android.listening.Output
-import dev.harken.android.listening.Session
-import dev.harken.android.listening.Track as Queued
+import dev.arkdb.ffi.Id
+import dev.arkdb.ffi.Status
+import dev.harken.android.onboarding.AppIdentity
+import dev.harken.android.onboarding.Opening
+import dev.harken.android.onboarding.Permission
+import dev.harken.android.onboarding.PermissionStep
+import dev.harken.android.onboarding.ServerStep
+import dev.harken.android.onboarding.SignInStep
+import dev.harken.android.onboarding.Step
+import dev.harken.android.ui.Space
+import dev.harken.android.gen.Active
+import dev.harken.android.gen.Clock
+import dev.harken.android.gen.Output
+import dev.harken.android.gen.Present
+import dev.harken.android.gen.Track as Queued
 import org.junit.Rule
 import org.junit.Test
 
@@ -76,11 +74,11 @@ class Screens {
             light = Palette.LightScheme,
             dark = Palette.DarkScheme,
             typography = HarkenType,
-            module = { ByteArray(0) },
+            device = declared(),
         )
 
     private val server = "https://music.example.com"
-    private val login = Login("t", "s", Account("ana", "Ana Lima", "ana@example.com"), 0)
+    private val login = testLogin("ana", "s", name = "Ana Lima", email = "ana@example.com")
     private val hornpipe = Demo.tracks[0]
     private val player =
         PlayerState(
@@ -239,7 +237,7 @@ class Screens {
         val p = Demo.playlists[1]
         shot("sunday") { tab(Tab.Library) { PlaylistPage(p.id, p, Demo.sunday, Demo::albumOf, null, Idle) } }
         shot("empty") { tab(Tab.Library, PlayerState()) { PlaylistPage(p.id, Demo.playlists[2], emptyList(), Demo::albumOf, null, Idle) } }
-        shot("gone") { tab(Tab.Library, PlayerState()) { PlaylistPage(Id.ofHex("ff".repeat(16)), null, emptyList(), Demo::albumOf, null, Idle) } }
+        shot("gone") { tab(Tab.Library, PlayerState()) { PlaylistPage(Id("ff".repeat(16)), null, emptyList(), Demo::albumOf, null, Idle) } }
     }
 
     // The player -------------------------------------------------------------
@@ -301,36 +299,26 @@ class Screens {
     @Test
     fun f2_diagnostics() {
         val status =
-            dev.arkdb.client.Status(
+            Status(
+                link = "online",
+                linked = true,
+                epoch = 3u,
+                cursor = 1287,
+                pending = 2u,
+                joining = false,
                 user = "ana",
                 session = "s-7f3a",
                 alone = false,
-                signedOut = false,
-                linked = true,
-                link = "open",
-                joining = 0,
-                fork = dev.arkdb.client.Fork(),
-                url = "wss://music.example.com/sync",
-                opens = 3,
-                epoch = 3,
-                cursor = 1287,
-                pending = 2,
-                held = 0,
-                behind = false,
-                diverged = 0,
+                failure = null,
                 denied = null,
-                lastClose = "the network went away",
-                heardFrames = 12,
-                badFrames = 0,
             )
         val d =
             Diagnostics(
                 status,
                 listOf("add Alla Hornpipe to Sunday morning" to "not synced yet", "make the playlist Sunday morning" to "saved"),
-                "at 1280 the server agrees",
             )
-        shot("numbers") { DiagnosticsScreen(d, {}, {}) }
-        shot("listening") { DiagnosticsScreen(d, {}, {}, heard(session(Output.Device("s-web", false), playing = false), scrub = mapOf("s-web" to 201_000L))) }
+        shot("numbers") { DiagnosticsScreen(d, {}) }
+        shot("listening") { DiagnosticsScreen(d, {}, heard(session(Output.Device("s-web", false), playing = false), scrub = mapOf("s-web" to 201_000L))) }
     }
 
     // The listening session --------------------------------------------------
@@ -340,21 +328,21 @@ class Screens {
 
     private val devices =
         listOf(
-                ListeningDevices(true, false, null, null, "s-phone", "phone", false, "Pixel 7", "ana", 100),
-                ListeningDevices(false, false, null, null, "s-desktop", "computer", false, "Desktop", "ana", 100),
-                ListeningDevices(true, false, null, null, "s-web", "computer", false, "Browser", "ana", 100),
-                ListeningDevices(true, false, null, null, "media_player.kitchen", "speaker", false, "Kitchen", "ana", 100),
+                Present(true, false, null, null, "s-phone", "phone", false, "Pixel 7", "ana", 100),
+                Present(false, false, null, null, "s-desktop", "computer", false, "Desktop", "ana", 100),
+                Present(true, false, null, null, "s-web", "computer", false, "Browser", "ana", 100),
+                Present(true, false, null, null, "media_player.kitchen", "speaker", false, "Kitchen", "ana", 100),
             )
             .associateBy { it.id }
 
-    private fun session(output: Output, playing: Boolean): Session.Active {
+    private fun session(output: Output, playing: Boolean): Active {
         val queue = Demo.album("Water Music").take(8).map { t -> Queued("Water Music", t.creator, t.durationMs, t.file, t.id, t.title) }
         val clock = if (playing) Clock.Playing(82_000, System.currentTimeMillis()) else Clock.Paused(82_000)
-        return Session.Active(0, clock, "#album/Water%20Music", output, queue)
+        return Active(0, clock, "#album/Water%20Music", output, queue)
     }
 
-    private fun heard(s: Session, scrub: Map<String, Long> = emptyMap()): Heard =
-        Heard(me = "s-phone", joined = true, listening = Listening(devices, scrub, s), linked = true, epoch = 3, status = dev.arkdb.client.LiveStatus(41, 0, true))
+    private fun heard(s: Active?, scrub: Map<String, Long> = emptyMap()): Heard =
+        Heard(me = "s-phone", joined = true, listening = Listening(devices, scrub, s), linked = true, epoch = 3)
 
     @Test
     fun g1_listening() {
@@ -382,7 +370,7 @@ class Screens {
             Sheet { DevicesSheet(rows, Picker.cursor(rows), object : PickerActions {}) }
         }
         shot("picker-nothing-playing") {
-            val rows = Picker.rows(heard(Session.Idle).listening!!, "s-phone")
+            val rows = Picker.rows(heard(null).listening!!, "s-phone")
             Sheet { DevicesSheet(rows, Picker.cursor(rows), object : PickerActions {}) }
         }
         shot("picker-not-answering") {
@@ -403,11 +391,11 @@ class Screens {
 
     private val house =
         listOf(
-                ListeningDevices(true, true, null, null, "s-phone", "phone", false, "Pixel 7", "ana", 60),
-                ListeningDevices(false, false, null, null, "s-desktop", "computer", false, "Desktop", "ana", 100),
-                ListeningDevices(true, true, "sonos", null, "media_player.kitchen", "speaker", false, "Kitchen", "ana", 40),
-                ListeningDevices(true, true, "sonos", "media_player.kitchen", "media_player.bedroom", "speaker", false, "Bedroom", "ana", 60),
-                ListeningDevices(true, true, "sonos", null, "media_player.study", "speaker", true, "Study", "ana", 20),
+                Present(true, true, null, null, "s-phone", "phone", false, "Pixel 7", "ana", 60),
+                Present(false, false, null, null, "s-desktop", "computer", false, "Desktop", "ana", 100),
+                Present(true, true, "sonos", null, "media_player.kitchen", "speaker", false, "Kitchen", "ana", 40),
+                Present(true, true, "sonos", "media_player.kitchen", "media_player.bedroom", "speaker", false, "Bedroom", "ana", 60),
+                Present(true, true, "sonos", null, "media_player.study", "speaker", true, "Study", "ana", 20),
             )
             .associateBy { it.id }
 

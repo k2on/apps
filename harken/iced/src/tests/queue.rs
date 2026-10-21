@@ -6,14 +6,16 @@
 //! domain's tests.
 use arkui::vim;
 
-use super::{peer, song};
-use crate::listening::{input, Active, Clock, Device, Kind, Listening, Output, Track};
+use crate::domain::Id;
+
+use super::{alone, device, song};
+use crate::listening::{input, Active, Clock, Kind, Listening, Output, Track};
 use crate::places::Focus;
 use crate::{App, Message};
 
 fn track(t: &str, n: u8) -> Track {
     Track {
-        id: [n; 16],
+        id: Id::new([n; 16]),
         title: t.into(),
         creator: "Bach".into(),
         album: String::new(),
@@ -24,10 +26,10 @@ fn track(t: &str, n: u8) -> Track {
 
 /// A window part of a session of four tracks, on the second.
 fn app() -> App {
-    let mut app = App::with_peer(peer(ark_client::Options::alone("me")), String::new(), None);
+    let mut app = App::with_peer(alone("me"), String::new(), None);
     app.listening.open("phone");
     app.session = Some(Listening {
-        devices: vec![Device::new("phone", "Phone", Kind::Phone, true)],
+        devices: vec![device("phone", "Phone", Kind::Phone, true)],
         scrub: Default::default(),
         session: Some(Active {
             queue: vec![track("a", 1), track("b", 2), track("c", 3), track("d", 4)],
@@ -95,9 +97,11 @@ fn the_keys_on_a_queue_row_take_it_out_move_it_or_play_it() {
 #[test]
 fn q_opens_the_queue_and_the_row_menu_puts_a_track_next_or_last() {
     // A window alone, with a library of three.
-    let mut p = peer(ark_client::Options::alone("me"));
+    let mut p = alone("me");
     for t in ["a", "b", "c"] {
-        p.client.mutate("add_song", song(t, "Bach", "Suites", &format!("music/{t}.mp3"))).unwrap();
+        p.client
+            .mutate("add_song", &song(t, "Bach", "Suites", &format!("music/{t}.mp3")))
+            .unwrap();
     }
     p.refresh();
     let mut app = App::with_peer(p, String::new(), None);

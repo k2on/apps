@@ -30,12 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import dev.arkdb.client.Status
-import dev.arkdb.ui.Glyph
-import dev.arkdb.ui.PageBar
-import dev.arkdb.ui.Space
-import dev.arkdb.ui.quiet
-import dev.arkdb.ui.rememberDestinationScrollState
+import dev.arkdb.ffi.Status
+import dev.harken.android.ui.Glyph
+import dev.harken.android.ui.PageBar
+import dev.harken.android.ui.Space
+import dev.harken.android.ui.quiet
+import dev.harken.android.ui.rememberDestinationScrollState
 
 /** What Settings draws. */
 data class SettingsData(
@@ -126,12 +126,12 @@ private fun Line(title: String, under: String, onClick: (() -> Unit)? = null, ch
 
 /**
  * Every number the old settings screen showed, every change this phone made with where it stands,
- * and every number this end of the listening session holds — the desktop's `D`: the instance's
- * sequence, what is pending and whether the server's snapshot has come, the server's clock against
- * this phone's, who is here, where the sound is, everybody's scrubber, and what was refused.
+ * and every number this end of the listening session holds — the desktop's `D`: whether this phone
+ * stands in it, who is here, where the sound is, everybody's scrubber, and what was refused. (A
+ * chain checks itself entry by entry, §1.6: there is no verify to ask for.)
  */
 @Composable
-fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, onVerify: () -> Unit, heard: Heard = Heard()) {
+fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, heard: Heard = Heard()) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Diagnostics", onBack)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("diagnostics")).padding(horizontal = Space.page)) {
@@ -140,9 +140,6 @@ fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, onVerify: () -> Unit,
                 if (s == null) Line("Opening", "…") else for ((k, v) in numbers(s)) Number(k, v)
             }
             Group("Listening") { for ((k, v) in listeningNumbers(heard)) Number(k, v) }
-            Group("Verify") {
-                Line("Ask the server whether it agrees", d?.verdict ?: "Not asked yet; the answer arrives on a later pump", onClick = onVerify)
-            }
             Group("Changes from this phone") {
                 val changes = d?.changes.orEmpty()
                 if (changes.isEmpty()) Line("None yet", "What you change here is listed with where it stands")
@@ -153,26 +150,20 @@ fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, onVerify: () -> Unit,
     }
 }
 
-/** The status's numbers, by name, in the order the old screen printed them. */
+/** The status's numbers, by name, as the peer says them. */
 fun numbers(s: Status): List<Pair<String, String>> =
     listOf(
         "user" to s.user,
         "session" to s.session,
         "link" to s.link,
         "linked" to s.linked.toString(),
-        "url" to (s.url ?: "—"),
-        "connections" to s.opens.toString(),
         "epoch" to s.epoch.toString(),
         "cursor" to s.cursor.toString(),
         "not synced" to s.pending.toString(),
         "joining" to s.joining.toString(),
-        "held" to s.held.toString(),
-        "server runs a newer module" to s.behind.toString(),
-        "diverged" to s.diverged.toString(),
-        "last close" to (s.lastClose ?: "—"),
+        "alone" to s.alone.toString(),
+        "disk" to (s.failure ?: "—"),
         "denied" to (s.denied ?: "—"),
-        "live frames" to s.heardFrames.toString(),
-        "bad frames" to s.badFrames.toString(),
     )
 
 /** The listening session's numbers, by name: what `D` draws on the desktop. */
@@ -185,10 +176,6 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
             "part of the session" to h.joined.toString(),
             "linked" to h.linked.toString(),
             "epoch" to h.epoch.toString(),
-            "seq" to (h.status?.seq?.toString() ?: "—"),
-            "pending" to (h.status?.pending?.toString() ?: "—"),
-            "synced" to (h.status?.synced?.toString() ?: "—"),
-            "server offset" to "${h.offsetMs} ms",
             "calls" to h.stats.calls.toString(),
             "refused" to h.stats.refused.toString(),
             "plays recorded" to h.stats.plays.toString(),
@@ -206,9 +193,9 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
         "output" to
             when (val o = a?.output) {
                 null -> "—"
-                is dev.harken.android.listening.Output.Device -> o.id + if (o.moving) " (moving)" else ""
-                is dev.harken.android.listening.Output.Away -> "${o.id} (away)"
-                dev.harken.android.listening.Output.Nowhere -> "nowhere"
+                is dev.harken.android.gen.Output.Device -> o.id + if (o.moving) " (moving)" else ""
+                is dev.harken.android.gen.Output.Away -> "${o.id} (away)"
+                dev.harken.android.gen.Output.Nowhere -> "nowhere"
             }
     for (d in s?.devices?.values.orEmpty()) {
         out += "device ${d.name}" to "${d.kind}, ${if (d.canPlay) "can play" else "cannot play"}, ${d.id}"

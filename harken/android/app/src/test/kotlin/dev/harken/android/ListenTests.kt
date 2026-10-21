@@ -4,8 +4,9 @@
 // the lock screen's player (`RemotePlayer`), whose every command is a
 // transition — its volume too, which is what the phone's buttons and the
 // system's volume panel reach while the sound is on a speaker — and the
-// picker's volumes and groups. The session is the module's, run by the test's server
-// (`Hall`), and the devices real Kotlin peers.
+// picker's volumes and groups. The session is the domain's, run by a harken
+// server in the process (`Hall`, `harken/ffi`), and the devices real peers of
+// the kernel.
 //
 // Each was falsified once by breaking what it holds; the comment beside
 // each says how, and what failed.
@@ -14,13 +15,12 @@ package dev.harken.android
 import android.os.Looper
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
-import dev.arkdb.android.ArkSession
-import dev.arkdb.client.Account
-import dev.arkdb.client.Login
-import dev.arkdb.client.Peer
-import dev.harken.android.listening.Clock
+import dev.harken.android.onboarding.ArkSession
 import androidx.media3.common.DeviceInfo
-import dev.harken.android.listening.Output
+import dev.harken.android.gen.Clock
+import dev.harken.android.gen.Harken
+import dev.harken.android.gen.Output
+import dev.harken.ffi.Hall
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,8 +36,8 @@ class ListenTests {
 
     // A device's end of the session, as the app has it: a `Listen` over a session with no thread
     // of its own, so a press is previewed and published before it returns.
-    private fun listen(hall: Hall, peer: Peer, session: String, name: String): Listen =
-        Listen(ArkSession.inline(peer, "https://music.example.com", Login("t", session, Account("alice"), 0)), name).also { hall.carry() }
+    private fun listen(hall: Hall, peer: Harken, session: String, name: String): Listen =
+        Listen(ArkSession.inline(peer, "https://music.example.com", testLogin("alice", session)), name).also { hall.carry() }
 
     /**
      * The picker, as the desktop's: while nothing plays, this phone is the default — ticked, the
@@ -128,8 +128,8 @@ class ListenTests {
 
     /**
      * A scrubber dragged on a tablet reaches this phone's `Listen` as the ephemeral slot it is —
-     * relayed, never sequenced — and is what the phone's scrubber shows; its own slot is not
-     * another's, and letting go empties it.
+     * relayed at most every fifty milliseconds — and is what the phone's scrubber shows; its own
+     * slot is not another's, and letting go empties it.
      *
      * Falsified by `Heard.scrubbing` reading every slot, this phone's own included: the phone's
      * own drag came back to it as somebody else's.
@@ -143,20 +143,17 @@ class ListenTests {
         val tablet = listen(hall, tabletPeer, "tablet", "Tablet")
         phone.press(Press.Start(queue, 0, 0, ""))
         hall.carry()
-        val seq = phonePeer.liveStatus(LISTENING)!!.seq
         tablet.press(Press.Scrub(61_000))
         hall.carry()
         phone.poke()
         assertEquals("the tablet's scrubber, here", 61_000L, phone.heard.value.scrubbing)
-        assertEquals("relayed, not sequenced", seq, phonePeer.liveStatus(LISTENING)!!.seq)
         phone.press(Press.Scrub(10_000))
         hall.carry()
         assertEquals("this phone's own slot is not another's", 61_000L, phone.heard.value.scrubbing)
         tablet.press(Press.Scrub(null))
-        // Within the throttle's window of the last: held, and sent by the pump at its deadline —
-        // the final value always goes.
-        Thread.sleep(dev.arkdb.client.THROTTLE_MS + 10)
-        tabletPeer.pump()
+        // Within the relay's window of the last: held, and sent by the next pump past it — the
+        // final value always goes.
+        Thread.sleep(THROTTLE_MS + 10)
         hall.carry()
         phone.press(Press.Scrub(null))
         hall.carry()
@@ -242,7 +239,7 @@ class ListenTests {
     private fun house(hall: Hall) {
         for ((id, level) in listOf("kitchen" to 40, "bedroom" to 60, "study" to 20)) {
             val p = hall.device(id, true, "speaker")
-            assertNull(Remote(id, id).call(p, "equip", Volumes.equip(true, "sonos", level, false)))
+            assertNull(Remote(id, id).call(p, "equip") { equip(Volumes.equip(true, "sonos", level, false)) })
             hall.carry()
         }
     }
@@ -266,7 +263,7 @@ class ListenTests {
         val phonePeer = hall.device("phone", true)
         val phone = listen(hall, phonePeer, "phone", "Phone")
         // The phone has a volume of its own, as it says once it joins.
-        assertNull(Remote("phone", "Phone").call(phonePeer, "equip", Volumes.equip(true, null, 50, false)))
+        assertNull(Remote("phone", "Phone").call(phonePeer, "equip") { equip(Volumes.equip(true, null, 50, false)) })
         house(hall)
         val player = RemotePlayer(Looper.myLooper() ?: Looper.getMainLooper())
         player.listen = phone
@@ -348,7 +345,7 @@ class ListenTests {
         val phonePeer = hall.device("phone", true)
         hall.device("laptop", true, "computer")
         val r = Remote("phone", "Phone")
-        assertNull(r.call(phonePeer, "equip", Volumes.equip(true, null, 50, false)))
+        assertNull(r.call(phonePeer, "equip") { equip(Volumes.equip(true, null, 50, false)) })
         hall.carry()
         house(hall)
         assertNull(r.press(phonePeer, Press.Start(queue, 0, 0, ""), null))

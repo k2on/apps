@@ -5,35 +5,38 @@ edition.workspace = true
 license.workspace = true
 description = "Who an ArkDB peer is: OpenID Connect on the server as the one relying party, the sessions it issues (a login on one device, revocable, kept in a file), dev auth, and how a desktop program or a page gets a login."
 
-[features]
-default = []
-# The relying party, the session store, the routes as an axum Router, and
-# what the sync server asks at every Hello.
-server = ["dep:ark", "dep:axum", "dep:tokio", "dep:tower-http", "dep:sha2", "dep:getrandom", "dep:ureq"]
-# Getting a login: a loopback listener and the system browser natively, the
-# page's own address in a browser; and remembering it.
-client = ["dep:ureq", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys"]
-
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
-ark = { path = "../ark", optional = true }
-axum = { version = "0.7", optional = true }
-tokio = { version = "1", features = ["rt", "sync"], optional = true }
-tower-http = { version = "0.5", features = ["cors"], optional = true }
-sha2 = { workspace = true, features = ["std"], optional = true }
-getrandom = { version = "0.2", optional = true }
+percent-encoding = "2"
+ark = { path = "../ark" }
 
+# Natively: the relying party, the session store, the routes as an axum
+# Router and what the sync server asks at every Hello; and getting a login
+# through a loopback listener and the system browser.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+axum = "0.7"
+tokio = { version = "1", features = ["rt", "sync"] }
+tower-http = { version = "0.5", features = ["cors"] }
+sha2 = { workspace = true, features = ["std"] }
+getrandom = "0.2"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# The relying party: discovery, the code exchange and the ID token's checks,
+# over the ureq agent above (its `SyncHttpClient`), never reqwest.
+openidconnect = { version = "4.0.1", default-features = false, features = ["ureq"] }
 
+# In a browser: the page's own address, fetch, and localStorage.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = { version = "0.3", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
-wasm-bindgen-futures = { version = "0.4", optional = true }
-web-sys = { version = "0.3", optional = true, features = ["Headers", "History", "Location", "Request", "RequestInit", "Response", "Storage", "Window"] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Headers", "History", "Location", "Request", "RequestInit", "Response", "Storage", "Window"] }
 
 [dev-dependencies]
-ark-auth = { path = ".", features = ["server", "client"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 ureq = { version = "2", default-features = false }
+# A provider in `tests/oidc.rs`: its ID tokens signed HS256 with the client secret.
+hmac = "0.12"
+sha2 = { workspace = true }
+base64 = "0.22"
+serde_json = { workspace = true }

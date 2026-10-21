@@ -1,33 +1,44 @@
-//! One library, one store, and every mutation held to the interpreter:
-//! each is applied natively and through `apply_closure` over copies of the
-//! store, compared, then applied. So every test in this directory is an
-//! agreement test too. A query has no native half to agree with (a query
-//! is its plan, and `ark::view::pull` is what it means), so it is asked
-//! once.
+//! One library, one store, every mutation run over it as the machine runs
+//! it, every query asked of it: v4's `tests/common`, over the domain in
+//! Rust (§1.16).
 
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
-use ark::authoring::Procedure;
-use ark::eval::{Args, Ctx, EvalFault};
-use ark::ir::Auto;
-use ark::store::{MemoryStore, Refusal};
-use ark::value::{Id, Value};
+use ark::domain::Domain;
+use ark::format::Encode;
+use ark::log::EntryId;
+use ark::peer::Ctx;
+use ark::store::{Change, Store};
+use harken_domain::CreatePlaylist;
+use harken_domain::Id;
+use harken_domain::Playlist;
+use harken_domain::LIBRARY;
+use harken_domain::{AddSong, LibraryEntry};
 
-pub fn args<const N: usize>(pairs: [(&str, Value); N]) -> Args {
-    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+/// The module, assembled once.
+pub fn domain() -> &'static Domain {
+    static D: OnceLock<Domain> = OnceLock::new();
+    D.get_or_init(harken_domain::domain)
+}
+
+/// A function's binding by its last name: `create_playlist` is
+/// `playlists.create_playlist`.
+pub fn full(name: &str) -> String {
+    let hit: Vec<&String> = domain().fns.keys().filter(|b| b.rsplit('.').next() == Some(name)).collect();
+    match hit[..] {
+        [b] => b.clone(),
+        _ => panic!("{name}: {hit:?}"),
+    }
 }
 
 pub struct Lib {
-    pub procs: BTreeMap<String, Procedure>,
-    /// Every procedure a test has run, by name.
-    pub called: std::cell::RefCell<std::collections::BTreeSet<String>>,
-    /// What the last mutation changed, as the store reports it.
-    pub last: Vec<ark::store::Change>,
-    pub store: MemoryStore,
-    /// The next fresh id's last byte pair, and the clock.
-    next: u16,
+    pub store: Store,
+    /// What the last mutation changed.
+    pub last: Vec<Change>,
+    /// The session's next entry, and the clock.
+    local: i64,
     now: i64,
 }
 
@@ -39,198 +50,134 @@ impl Default for Lib {
 
 impl Lib {
     pub fn new() -> Lib {
-        let m = harken_domain::module();
         Lib {
-            procs: m.procedures().into_iter().map(|(_, p)| (p.name().to_string(), p)).collect(),
-            called: Default::default(),
+            store: Store::new(domain().schema.clone()),
             last: vec![],
-            store: MemoryStore::empty(m.build().schema.clone()),
-            next: 0,
+            local: 0,
             now: 1_000,
         }
     }
 
-    /// Fresh autos for a procedure, as a peer draws them at the origin.
-    pub fn autos(&mut self, name: &str) -> Args {
-        let f = self.procs[name].function().clone();
-        f.autos
-            .iter()
-            .map(|(n, a)| {
-                let v = match a {
-                    Auto::NewId(_) => {
-                        self.next += 1;
-                        let mut b: Id = [0; 16];
-                        b[14..].copy_from_slice(&self.next.to_be_bytes());
-                        Value::Id(b)
-                    }
-                    Auto::Now => {
-                        self.now += 1;
-                        Value::int(self.now)
-                    }
-                };
-                (n.clone(), v)
-            })
-            .collect()
-    }
-
-    /// Author as `user`: the number of changes, or the refusal's text.
-    pub fn mutate(&mut self, user: &str, name: &str, a: Args) -> Result<usize, String> {
-        let autos = self.autos(name);
-        self.mutate_with(user, name, autos, a)
+    /// A fresh entry's context, as a peer authors one: its id from the
+    /// session and the next local number, the clock moved on.
+    pub fn ctx(&mut self, user: &str, roles: &[&str]) -> Ctx {
+        self.local += 1;
+        self.now += 1;
+        Ctx {
+            draws: Default::default(),
+            id: EntryId::of("s", self.local),
+            actor: user.into(),
+            session: "s".into(),
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+            now: self.now,
+        }
     }
 
     /// Author as `user` holding the library's role, as the scanner does:
-    /// these tests are of what the library's mutations do, and
-    /// `is_library` refuses anybody without it (`docs/plan-guards.md` D1;
-    /// [`Lib::mutate_holding`] for anybody else).
-    pub fn mutate_with(&mut self, user: &str, name: &str, autos: Args, a: Args) -> Result<usize, String> {
-        self.mutate_holding(user, &[harken_domain::schema::LIBRARY], name, autos, a)
+    /// the number of changes, or the refusal's text.
+    pub fn mutate(&mut self, user: &str, name: &str, input: &impl Encode) -> Result<usize, String> {
+        let ctx = self.ctx(user, &[LIBRARY]);
+        self.mutate_as(&ctx, name, input)
     }
 
-    /// Author as `user` holding exactly `roles`.
-    pub fn mutate_holding(&mut self, user: &str, roles: &[&str], name: &str, autos: Args, a: Args) -> Result<usize, String> {
-        let p = self.procs.get(name).unwrap_or_else(|| panic!("no procedure {name}")).clone();
-        let ctx = Ctx::new(user, "s").with_roles(roles.iter().copied());
-        let out = p.agrees(&ctx, &autos, &a, &self.store).unwrap_or_else(|e| panic!("{e}"));
-        let applied = p.apply(&ctx, &autos, &a, &mut self.store);
-        assert_eq!(applied, out, "{name}: applying again gave another answer");
-        self.called.borrow_mut().insert(name.into());
-        self.last = match &out {
-            Ok(Ok(chs)) => chs.clone(),
-            _ => vec![],
+    /// Author the entry `ctx`.
+    pub fn mutate_as(&mut self, ctx: &Ctx, name: &str, input: &impl Encode) -> Result<usize, String> {
+        self.mutate_bytes(ctx, name, &input.to_bytes())
+    }
+
+    /// Author the entry `ctx`, its input as bytes.
+    pub fn mutate_bytes(&mut self, ctx: &Ctx, name: &str, input: &[u8]) -> Result<usize, String> {
+        let f = domain()
+            .get(&full(name))
+            .and_then(|f| f.proc.clone())
+            .unwrap_or_else(|| panic!("{name} writes nothing"));
+        self.last = f.apply(&mut self.store, ctx, input).map_err(|r| r.0)?;
+        Ok(self.last.len())
+    }
+
+    /// Ask as `user`: the answer, or the refusal's text.
+    pub fn query<T: Encode>(&self, user: &str, name: &str, input: &impl Encode) -> Result<T, String> {
+        let ctx = Ctx {
+            draws: Default::default(),
+            id: EntryId::of("q", 0),
+            actor: user.into(),
+            session: "q".into(),
+            roles: vec![],
+            now: self.now,
         };
-        match out {
-            Ok(Ok(chs)) => Ok(chs.len()),
-            Ok(Err(Refusal::Refused(t))) => Err(t),
-            Ok(Err(other)) => Err(other.to_string()),
-            Err(bug) => panic!("{name}: bug {bug:?}"),
-        }
+        let b = domain().ask(&self.store, &ctx, &full(name), &input.to_bytes()).map_err(|r| r.0)?;
+        Ok(T::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))
     }
 
-    /// Ask as `user`: the value, or the refusal's text.
-    pub fn query(&self, user: &str, name: &str, a: Args) -> Result<Value, String> {
-        let p = self.procs.get(name).unwrap_or_else(|| panic!("no procedure {name}"));
-        self.called.borrow_mut().insert(name.into());
-        match p.query(&Ctx::new(user, "s"), &a, &self.store) {
-            Ok(v) => Ok(v),
-            Err(EvalFault::Verdict(Refusal::Refused(t))) => Err(t),
-            Err(other) => panic!("{name}: {other:?}"),
-        }
+    /// A query that must answer, as alice.
+    pub fn list<T: Encode>(&self, name: &str, input: &impl Encode) -> Vec<T> {
+        self.query("alice", name, input).unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 
-    /// A query that must answer: its list.
-    pub fn list(&self, name: &str, a: Args) -> Vec<Value> {
-        self.query("alice", name, a).unwrap_or_else(|e| panic!("{name}: {e}")).as_list()
-    }
-
-    /// Make a playlist as `user` and answer its id.
-    pub fn playlist(&mut self, user: &str, name: &str) -> Id {
-        self.mutate(user, "create_playlist", args([("name", Value::text(name))]))
+    /// Make a playlist as `user` and answer its id: the newest of theirs.
+    pub fn playlist(&mut self, user: &str, name: &str) -> Id<Playlist> {
+        self.mutate(user, "create_playlist", &CreatePlaylist { name: name.into() })
             .unwrap_or_else(|e| panic!("{e}"));
-        // The newest of theirs: a name they already had is numbered.
-        self.query(user, "playlists", args([]))
-            .unwrap()
-            .as_list()
-            .into_iter()
-            .max_by_key(|p| p.field("pos").as_int())
-            .expect("the playlist just made")
-            .field("id")
-            .as_id()
+        let mine: Vec<Playlist> = self.query(user, "playlists", &()).unwrap();
+        mine.into_iter().max_by_key(|p| p.pos).expect("the playlist just made").id
     }
 
     /// The library read against a playlist.
-    pub fn library(&self, playlist: Id) -> Vec<Value> {
-        self.list("library", args([("playlist_id", Value::Id(playlist))]))
+    pub fn library(&self, playlist: &Id<Playlist>) -> Vec<LibraryEntry> {
+        self.list("library", &harken_domain::Library { playlist_id: *playlist })
     }
 
-    /// Add a song as the scanner would, unwrapped: a refusal here is a bug.
-    pub fn add(&mut self, s: Song) {
-        self.mutate("alice", "add_song", s.args()).unwrap_or_else(|e| panic!("add_song: {e}"));
-    }
-}
-
-/// `add_song`'s fifteen arguments, with the defaults an entry that says
-/// nothing about them carries.
-#[derive(Clone, Debug, Default)]
-pub struct Song {
-    pub title: &'static str,
-    pub artist: &'static str,
-    pub album: &'static str,
-    pub duration_ms: i64,
-    pub file: String,
-    pub track: i64,
-    pub part: &'static str,
-    pub catalogue: &'static str,
-    pub performer: &'static str,
-    pub bpm: i64,
-    pub album_art: &'static str,
-    pub artist_art: &'static str,
-    pub disc: i64,
-    pub work_title: &'static str,
-    pub movement_no: i64,
-}
-
-impl Song {
-    pub fn new(title: &'static str, artist: &'static str, album: &'static str) -> Song {
-        Song {
-            title,
-            artist,
-            album,
-            ..Song::default()
-        }
+    /// Add a song as the scanner would: a refusal here is a bug.
+    pub fn add(&mut self, s: AddSong) {
+        self.mutate("alice", "add_song", &s).unwrap_or_else(|e| panic!("add_song: {e}"));
     }
 
-    pub fn args(&self) -> Args {
-        args([
-            ("title", Value::text(self.title)),
-            ("artist", Value::text(self.artist)),
-            ("album", Value::text(self.album)),
-            ("duration_ms", Value::int(self.duration_ms)),
-            ("file", Value::text(self.file.clone())),
-            ("track", Value::int(self.track)),
-            ("part", Value::text(self.part)),
-            ("catalogue", Value::text(self.catalogue)),
-            ("performer", Value::text(self.performer)),
-            ("bpm", Value::int(self.bpm)),
-            ("album_art", Value::text(self.album_art)),
-            ("artist_art", Value::text(self.artist_art)),
-            ("disc", Value::int(self.disc)),
-            ("work_title", Value::text(self.work_title)),
-            ("movement_no", Value::int(self.movement_no)),
-        ])
+    /// A table's rows, decoded.
+    pub fn rows<T: Encode>(&self, table: &str) -> Vec<T> {
+        self.store.rows(table).map(|r| T::from_bytes(r).unwrap()).collect()
     }
 }
 
-/// The classical chain's arguments, as the tests below read the music.
+/// A song with a title, an artist and an album, and nothing else said.
+pub fn song(title: &str, artist: &str, album: &str) -> AddSong {
+    AddSong {
+        title: title.into(),
+        artist: artist.into(),
+        album: album.into(),
+        ..AddSong::default()
+    }
+}
+
+/// The classical chain's arguments, as the tests read the music.
 #[allow(clippy::too_many_arguments)]
 pub fn track(
-    title: &'static str,
-    composer: &'static str,
-    album: &'static str,
-    catalogue: &'static str,
-    performer: &'static str,
+    title: &str,
+    composer: &str,
+    album: &str,
+    catalogue: &str,
+    performer: &str,
     file: &str,
     track_no: i64,
-    work_title: &'static str,
+    work_title: &str,
     movement_no: i64,
-) -> Song {
-    Song {
-        catalogue,
-        performer,
+) -> AddSong {
+    AddSong {
+        catalogue: catalogue.into(),
+        performer: performer.into(),
         file: file.into(),
         track: track_no,
-        work_title,
+        work_title: work_title.into(),
         movement_no,
-        ..Song::new(title, composer, album)
+        ..song(title, composer, album)
     }
 }
 
-/// A field of each row, as text.
-pub fn texts(rows: &[Value], field: &str) -> Vec<String> {
-    rows.iter().map(|r| r.field(field).as_text().to_string()).collect()
+/// `s` at `file`.
+pub fn with(file: &str, s: AddSong) -> AddSong {
+    AddSong { file: file.into(), ..s }
 }
 
-/// A field of each row, as an int.
-pub fn ints(rows: &[Value], field: &str) -> Vec<i64> {
-    rows.iter().map(|r| r.field(field).as_int()).collect()
+/// One field of each row.
+pub fn each<T, U>(rows: &[T], f: impl Fn(&T) -> U) -> Vec<U> {
+    rows.iter().map(f).collect()
 }

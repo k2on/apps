@@ -6,15 +6,17 @@
 
 use std::time::{Duration, Instant};
 
-use ark_client::link::{BoxTransport, Event, Queues};
-use ark_client::Options;
+use crate::domain::CreatePlaylist;
 use iced::advanced::subscription::{into_recipes, EventStream};
 use iced::futures::executor::block_on;
 use iced::futures::future::{self, Either};
 use iced::futures::stream::{self, StreamExt};
 
-use super::peer;
+use super::Queues;
+use super::{alone, signed_in};
+use crate::client::monotonic_ms;
 use crate::{App, Message};
+use ark_peer::Event;
 
 /// Every message the window's subscriptions produce in `d` of real time.
 fn heard_within(app: &App, d: Duration) -> Vec<Message> {
@@ -60,7 +62,7 @@ fn names(ms: &[Message]) -> Vec<&'static str> {
 /// `Some(50ms)`): thirty ticks.
 #[test]
 fn a_window_at_rest_is_never_updated() {
-    let mut app = App::with_peer(peer(Options::alone("me")), String::new(), None);
+    let mut app = App::with_peer(alone("me"), String::new(), None);
     app.peer.ensure_playlist();
     let _ = app.update(Message::Wake);
     assert_eq!((app.clock(), app.deadline()), (None, None), "nothing moves by itself");
@@ -68,24 +70,16 @@ fn a_window_at_rest_is_never_updated() {
     assert!(heard.is_empty(), "at rest: {:?}", names(&heard));
 }
 
-/// A frame on the socket is a wake, through the peer's waker to the window's
-/// bell to the subscription; the window answering it pumps once, and is
-/// then at rest again with no timer. A close arms the redial as the one
-/// timer, and it fires. Falsified by not handing the peer the bell
+/// A frame on the socket is a wake, through the replica's waker to the
+/// window's bell to the subscription; the window answering it pumps once,
+/// and is then at rest again with no timer. A close arms the redial as the
+/// one timer, and it fires. Falsified by not handing the replica the bell
 /// (`set_waker` out of `with_peer`): the open reaches nobody.
 #[test]
 fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
-    let mut app = App::with_peer(peer(Options::dev("alice")), "http://127.0.0.1:9".into(), None);
+    let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), None);
     let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
-    let m = made.clone();
-    app.peer.client.connect_with(
-        "queues",
-        Box::new(move |_: &str| {
-            let q = Queues::default();
-            m.lock().unwrap().push(q.clone());
-            Box::new(q) as BoxTransport
-        }),
-    );
+    app.peer.client.connect_with("ws://queues", Queues::dialer(made.clone()));
     assert!(app.deadline().is_some(), "a new link is due at once");
     let _ = app.update(Message::Due);
     assert_eq!(app.deadline(), None, "dialled: nothing to time");
@@ -94,14 +88,14 @@ fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
         let q = q.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
-            q.push(Event::Opened);
+            q.push(Event::Open);
         })
     };
     let heard = heard_within(&app, Duration::from_millis(600));
     pushed.join().unwrap();
     assert_eq!(names(&heard), ["wake"], "the open, once");
     let _ = app.update(Message::Wake);
-    assert!(app.peer.client.linked());
+    assert!(app.peer.client.linked);
     // Linked, the default playlist waits a second of quiet: the one timer.
     assert!(app.quiet.is_some() && app.deadline() == app.quiet);
     app.quiet = None;
@@ -124,7 +118,7 @@ fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
 /// Falsified by `clock` ignoring `fading()`: no tick while the row is lit.
 #[test]
 fn a_fading_highlight_runs_the_clock_until_it_has_faded() {
-    let mut app = App::with_peer(peer(Options::alone("alice")), String::new(), None);
+    let mut app = App::with_peer(alone("alice"), String::new(), None);
     app.peer.ensure_playlist();
     let _ = app.update(Message::Wake);
     let _ = app.update(Message::Key(
@@ -135,7 +129,7 @@ fn a_fading_highlight_runs_the_clock_until_it_has_faded() {
     assert_eq!(app.clock(), None, "open, and nothing lit");
     app.peer
         .client
-        .mutate("create_playlist", ark_client::args([("name", ark_client::Value::text("Lit"))]))
+        .mutate("create_playlist", &CreatePlaylist { name: "Lit".into() })
         .expect("made");
     let _ = app.update(Message::Wake);
     assert!(app.explore.as_ref().unwrap().ui.fading(), "the new row is lit");
@@ -148,7 +142,7 @@ fn a_fading_highlight_runs_the_clock_until_it_has_faded() {
         names(&heard),
         t.elapsed()
     );
-    app.observe_explorer_at(ark_client::autos::monotonic_ms() + 2_100);
+    app.observe_explorer_at(monotonic_ms() + 2_100);
     assert_eq!(app.clock(), None, "faded: the clock stops");
 }
 
