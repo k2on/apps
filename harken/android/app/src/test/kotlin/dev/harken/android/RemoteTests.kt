@@ -200,7 +200,8 @@ class RemoteTests {
      * Falsified by counting on every reconcile past the threshold: the second one authored a
      * second play. And by counting from the session's clock on every device part of it: the
      * laptop, watching, recorded one too. (Counting the laptop's own player first passed: a device
-     * that is not the output has nothing loaded to count, which is a reason, not the rule.)
+     * that is not the output has nothing loaded to count, which is a reason, not the rule.) Over the
+     * kernel, by `count` never calling `record_play`: "thirty seconds in: a play" failed.
      */
     @Test
     fun aPlayIsRecordedOnceByTheOutputAlone() {
