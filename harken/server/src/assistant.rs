@@ -1731,6 +1731,1096 @@ pub fn playing<'a>(state: &Listening, entities: impl IntoIterator<Item = &'a str
         .collect()
 }
 
+/// How the house is read, and what a speaker is told: the reading of Home
+/// Assistant's polls — a hand-off fetched and the seek it dropped said
+/// again, an undated position, a later track, a blink, a lapse, a URL spelt
+/// back another way, the speaker's own queue — and a command as the service
+/// calls it is, with which account holds a speaker. What the session makes
+/// of a speaker (its volume, its group, a move, a stall, a drift, losing
+/// it) is the reconciler's, and tested there (`harken/player/tests`).
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::host::Kind;
+    use crate::domain::{Active, Clock, Id, Present};
+
+    const KITCHEN: &str = "media_player.kitchen";
+    const NOW: i64 = 1_700_000_000_000;
+
+    /// A device as it declared itself, with nothing said of its volume or
+    /// its group: what `on_join` writes.
+    fn device(id: &str, kind: Kind, can_play: bool) -> Present {
+        Present {
+            can_play,
+            can_volume: false,
+            family: None,
+            follows: None,
+            id: id.into(),
+            kind: kind.name().into(),
+            muted: false,
+            name: id.into(),
+            user: String::new(),
+            volume: crate::domain::host::UNSAID_VOLUME,
+        }
+    }
+
+    fn track(file: &str, n: u8) -> Track {
+        let mut id = [0; 16];
+        id[15] = n;
+        Track {
+            id: Id::new(id),
+            title: file.into(),
+            creator: "Bach".into(),
+            album: String::new(),
+            duration_ms: 60_000,
+            file: file.into(),
+        }
+    }
+
+    fn bridge() -> Speakers {
+        Speakers::new(
+            vec![
+                (KITCHEN.into(), "Kitchen".into()),
+                ("media_player.study".into(), "Study".into()),
+            ],
+            "http://10.0.0.2:8787/",
+        )
+    }
+
+    fn url_of(file: &str) -> String {
+        format!("http://10.0.0.2:8787/media/{file}")
+    }
+
+    /// A session whose output is `output`, on `files` from `at`, with a
+    /// phone and the kitchen standing in it.
+    fn session(files: &[&str], at: usize, clock: Clock, output: Output) -> Listening {
+        Listening {
+            devices: vec![
+                device("phone", Kind::Phone, true),
+                device(KITCHEN, Kind::Speaker, true),
+            ],
+            scrub: Default::default(),
+            session: Some(Active {
+                queue: files
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| track(f, i as u8))
+                    .collect(),
+                at: at as i64,
+                clock,
+                output,
+                from: String::new(),
+            }),
+        }
+    }
+
+    fn kitchen(moving: bool) -> Output {
+        Output::Device {
+            id: KITCHEN.into(),
+            moving,
+        }
+    }
+
+    fn playing_at(at_ms: i64) -> Clock {
+        Clock::Playing { at_ms, since: NOW }
+    }
+
+    /// Playing `url`, at `position_ms` as of `NOW`.
+    fn playing(url: &str, position_ms: i64) -> Playing {
+        Playing {
+            state: "playing".into(),
+            url: url.into(),
+            position_ms,
+            updated_ms: Some(NOW),
+            duration_ms: None,
+            queue_position: None,
+            slack_ms: 0,
+        }
+    }
+
+    fn calls(acts: &[Act]) -> Vec<(&str, &'static str)> {
+        acts.iter()
+            .filter_map(|a| match a {
+                Act::Call {
+                    key, transition, ..
+                } => Some((key.as_str(), *transition)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn input_of(acts: &[Act], n: usize) -> &[u8] {
+        match &acts[n] {
+            Act::Call { input, .. } => input,
+            other => panic!("not a transition: {other:?}"),
+        }
+    }
+
+    /// A speaker handed the session, `files` from `at`, that has started.
+    fn started(b: &mut Speakers, key: &str, files: &[&str], at: usize) {
+        b.wants(
+            key,
+            KITCHEN,
+            &session(files, at, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        let acts = b.heard(KITCHEN, Some(&playing(&url_of(files[at]), 0)), NOW);
+        assert_eq!(calls(&acts), [(key, "started")]);
+    }
+
+    /// A hand-off is the whole queue as URLs the speaker can fetch —
+    /// resolved against the address the *speaker* can reach, which is not
+    /// the one a phone uses — from the track it was on, at the point in it
+    /// the session stands at: still, while the sound is on its way, so a
+    /// speaker that took a second and a half to be asked is not told to
+    /// start a second and a half past where the track stopped.
+    ///
+    /// Falsified by handing the clock counted on to now (the reconciler's
+    /// `want` as `a.clock.position`): the speaker was told 43 500 where
+    /// 42 000 was right.
+    #[test]
+    fn a_hand_off_is_the_whole_queue_as_urls_the_speaker_can_fetch() {
+        let mut b = bridge();
+        let acts = b.wants(
+            "alice",
+            KITCHEN,
+            &session(
+                &["music/a.mp3", "music/b.mp3"],
+                1,
+                playing_at(42_000),
+                kitchen(true),
+            ),
+            NOW + 1_500,
+        );
+        assert_eq!(
+            acts,
+            [Act::Start {
+                entity: KITCHEN.into(),
+                urls: vec![url_of("music/a.mp3"), url_of("music/b.mp3")],
+                at: 1,
+                position_ms: 42_000,
+                playing: true,
+            }]
+        );
+        assert_eq!(b.holder(KITCHEN), Some("alice"));
+    }
+
+    /// A speaker handed a track from half way that starts it from the
+    /// beginning — the seek after the enqueue reached it before it had
+    /// loaded, and a Sonos drops it — is told again where the track was,
+    /// once it has the track, and has not started until it is there. The
+    /// session hears `started` at the point it was handed from, never at 0.
+    /// One that will not go there after three tries is believed.
+    ///
+    /// Falsified by saying `started` at whatever the speaker first reports
+    /// (the `SEEKS` branch taken out): the session was told 0.
+    #[test]
+    fn a_speaker_that_starts_the_track_from_its_beginning_is_sent_where_it_was() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        let handed = session(&files, 0, playing_at(90_000), kitchen(true));
+        b.wants("alice", KITCHEN, &handed, NOW);
+        let seek = [Act::Seek {
+            entity: KITCHEN.into(),
+            position_ms: 90_000,
+        }];
+        let at_start = playing(&url_of(files[0]), 0);
+        assert_eq!(
+            b.heard(KITCHEN, Some(&at_start), NOW),
+            seek,
+            "told again, now it has the track"
+        );
+        for _ in 0..2 {
+            assert!(
+                b.heard(KITCHEN, Some(&at_start), NOW).is_empty(),
+                "a moment for it to get there"
+            );
+        }
+        assert_eq!(b.heard(KITCHEN, Some(&at_start), NOW), seek, "and again");
+        let there = playing(&url_of(files[0]), 90_200);
+        let acts = b.heard(KITCHEN, Some(&there), NOW);
+        assert_eq!(calls(&acts), [("alice", "started")]);
+        assert_eq!(
+            input_of(&acts, 0),
+            input::at(90_200),
+            "started where the track was"
+        );
+
+        // A speaker that never goes: believed after three tries.
+        let mut b = bridge();
+        b.wants("alice", KITCHEN, &handed, NOW);
+        let mut seeks = 0;
+        for _ in 0..20 {
+            let acts = b.heard(KITCHEN, Some(&at_start), NOW);
+            seeks += acts
+                .iter()
+                .filter(|a| matches!(a, Act::Seek { .. }))
+                .count();
+            if !calls(&acts).is_empty() {
+                assert_eq!(calls(&acts), [("alice", "started")]);
+                break;
+            }
+        }
+        assert_eq!(seeks, 3);
+        assert!(b.holds(KITCHEN), "and never let go while it was being told");
+
+        // From the beginning, nothing to seek: it starts at once.
+        let mut b = bridge();
+        started(&mut b, "alice", &files, 0);
+    }
+
+    /// An entity this server was not told to offer is not a device, so a
+    /// session naming one reaches nothing in the house — and a session whose
+    /// output is somebody else asks nothing of the speaker either.
+    ///
+    /// Falsified by dropping `has` from `wants`: the bedroom was handed a
+    /// queue.
+    #[test]
+    fn nothing_is_said_to_a_player_that_was_not_offered_or_not_the_output() {
+        let mut b = bridge();
+        let bedroom = Output::Device {
+            id: "media_player.bedroom".into(),
+            moving: true,
+        };
+        let mut s = session(&["music/a.mp3"], 0, playing_at(0), bedroom);
+        s.devices
+            .push(device("media_player.bedroom", Kind::Speaker, true));
+        assert!(b.wants("alice", "media_player.bedroom", &s, NOW).is_empty());
+        assert!(b
+            .heard("media_player.bedroom", Some(&playing("x", 0)), NOW)
+            .is_empty());
+        let phone = Output::Device {
+            id: "phone".into(),
+            moving: false,
+        };
+        assert!(b
+            .wants(
+                "alice",
+                KITCHEN,
+                &session(&["music/a.mp3"], 0, playing_at(0), phone),
+                NOW
+            )
+            .is_empty());
+        assert!(!b.holds(KITCHEN));
+    }
+
+    /// The speaker's first word about what it was handed ends the hand-off —
+    /// `started`, at where it is — and until then nothing it says is news,
+    /// not even another track of the same queue it was playing before.
+    ///
+    /// Falsified by taking any track of the queue as having started (`ours`
+    /// the index alone): the speaker still on the old track 0 was believed.
+    #[test]
+    fn a_speaker_has_started_when_it_says_what_it_was_handed() {
+        let mut b = bridge();
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(
+                &["music/a.mp3", "music/b.mp3"],
+                1,
+                playing_at(0),
+                kitchen(true),
+            ),
+            NOW,
+        );
+        assert!(b
+            .heard(KITCHEN, Some(&playing(&url_of("music/a.mp3"), 9_000)), NOW)
+            .is_empty());
+        let acts = b.heard(KITCHEN, Some(&playing(&url_of("music/b.mp3"), 1_200)), NOW);
+        assert_eq!(calls(&acts), [("alice", "started")]);
+        assert_eq!(input_of(&acts, 0), input::at(1_200));
+    }
+
+    /// The house says a speaker is playing before it says where: the Sonos
+    /// integration clears the position while a new stream's length is
+    /// unknown. That is no position at all, and the hand-off is not over:
+    /// it waits for one it can place, and that is where the hand-off ends.
+    ///
+    /// Falsified by reading an undated report as the point it was handed at
+    /// (`position_at` answering `from_ms` for no date): `started` at 90 000
+    /// on the first poll, with the speaker at the beginning.
+    #[test]
+    fn a_hand_off_is_not_over_until_the_house_says_where_the_speaker_is() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(90_000), kitchen(true)),
+            NOW,
+        );
+        let undated = Playing {
+            updated_ms: None,
+            ..playing(&url_of(files[0]), 0)
+        };
+        for poll in 0..3 {
+            assert!(
+                b.heard(KITCHEN, Some(&undated), NOW + 100 * poll)
+                    .is_empty(),
+                "playing, but nobody can say where: poll {poll}"
+            );
+        }
+        let buffering = Playing {
+            state: "buffering".into(),
+            ..playing(&url_of(files[0]), 0)
+        };
+        assert!(b.heard(KITCHEN, Some(&buffering), NOW + 300).is_empty());
+        // Dated at last, and at the beginning: told where the track was.
+        let at_start = Playing {
+            updated_ms: Some(NOW + 400),
+            ..playing(&url_of(files[0]), 0)
+        };
+        assert!(matches!(
+            &b.heard(KITCHEN, Some(&at_start), NOW + 500)[..],
+            [Act::Seek {
+                position_ms: 90_000,
+                ..
+            }]
+        ));
+        // The house goes on dating the beginning: the seek was dropped, so
+        // nothing moved to date again. A moment for it, and it is told again.
+        for poll in 0..2 {
+            assert!(b
+                .heard(KITCHEN, Some(&at_start), NOW + 1_000 + 100 * poll)
+                .is_empty());
+        }
+        assert!(matches!(
+            &b.heard(KITCHEN, Some(&at_start), NOW + 1_300)[..],
+            [Act::Seek {
+                position_ms: 90_000,
+                ..
+            }]
+        ));
+        let there = Playing {
+            updated_ms: Some(NOW + 2_000),
+            ..playing(&url_of(files[0]), 90_000)
+        };
+        let acts = b.heard(KITCHEN, Some(&there), NOW + 2_300);
+        assert_eq!(calls(&acts), [("alice", "started")]);
+        let Act::Call { input, as_of, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert_eq!(
+            input,
+            &input::at(90_300),
+            "where it measurably is, counted to the poll"
+        );
+        assert_eq!(
+            *as_of,
+            Some(NOW + 2_300),
+            "and on from there, to when it is said"
+        );
+    }
+
+    /// A short track can end before the bridge first hears of a hand-off,
+    /// and the speaker is then on the second track of what it was handed:
+    /// ours, followed (`advance`, then — once the session has followed —
+    /// `started` where it is in that track), never let go. A later track
+    /// reported from before the hand-off, though, may be what it was
+    /// playing before, so that waits for a report dated since; and two
+    /// tracks on is a `jump`.
+    ///
+    /// Falsified by taking only the track it was handed as having started
+    /// (`ours` matching `handed_at` alone): the second track was a lapse.
+    #[test]
+    fn a_speaker_already_on_a_later_track_is_followed_and_not_let_go() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3", "music/c.mp3"];
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        // The third track, dated before the hand-off: perhaps the last queue.
+        let old = Playing {
+            updated_ms: Some(NOW - 30_000),
+            ..playing(&url_of(files[2]), 0)
+        };
+        assert!(b.heard(KITCHEN, Some(&old), NOW + 100).is_empty());
+        assert!(b.holds(KITCHEN));
+        // The second, dated since: it got there by itself.
+        let on = Playing {
+            updated_ms: Some(NOW + 2_000),
+            ..playing(&url_of(files[1]), 0)
+        };
+        let acts = b.heard(KITCHEN, Some(&on), NOW + 2_500);
+        assert_eq!(calls(&acts), [("alice", "advance")]);
+        assert_eq!(input_of(&acts, 0), input::advance(0));
+        assert!(
+            b.heard(KITCHEN, Some(&on), NOW + 2_600).is_empty(),
+            "said once, while it lands"
+        );
+        // The session followed it, still on its way: the hand-off is over
+        // where the speaker is in that track.
+        let advanced = session(
+            &files,
+            1,
+            Clock::Playing {
+                at_ms: 0,
+                since: NOW + 2_700,
+            },
+            kitchen(true),
+        );
+        let acts = b.wants("alice", KITCHEN, &advanced, NOW + 2_700);
+        assert_eq!(calls(&acts), [("alice", "started")]);
+        assert_eq!(
+            input_of(&acts, 0),
+            input::at(700),
+            "where it is in that track"
+        );
+        // The session following it hands it nothing again.
+        let followed = session(
+            &files,
+            1,
+            Clock::Playing {
+                at_ms: 700,
+                since: NOW + 2_700,
+            },
+            kitchen(false),
+        );
+        assert!(b.wants("alice", KITCHEN, &followed, NOW + 2_800).is_empty());
+        for poll in 0..8 {
+            let on = Playing {
+                updated_ms: Some(NOW + 2_700),
+                ..playing(&url_of(files[1]), 700)
+            };
+            assert!(b
+                .heard(KITCHEN, Some(&on), NOW + 3_000 + 1_000 * poll)
+                .is_empty());
+        }
+        assert_eq!(b.holder(KITCHEN), Some("alice"));
+        // …and two tracks on is a jump.
+        let mut b = bridge();
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        let two_on = Playing {
+            updated_ms: Some(NOW + 1_000),
+            ..playing(&url_of(files[2]), 0)
+        };
+        let acts = b.heard(KITCHEN, Some(&two_on), NOW + 1_000);
+        assert_eq!(calls(&acts), [("alice", "jump")]);
+    }
+
+    /// One poll of `paused` or `idle` from a speaker playing on is a blink —
+    /// a Sonos between a seek and its stream, the house a moment behind — and
+    /// not a stall. Two in a row is a stall, at the point the house dated
+    /// since it was last told anything, and otherwise where it had been
+    /// counted to when it fell silent — never a stale date.
+    ///
+    /// Falsified by a stall on the first silent poll (`STALL` at 1):
+    /// `stalled` at 0.
+    #[test]
+    fn a_blink_is_not_a_stall_and_a_stall_is_never_a_stale_beginning() {
+        let mut b = bridge();
+        let files = ["music/a.mp3"];
+        started(&mut b, "alice", &files, 0);
+        let a = url_of(files[0]);
+        for poll in 0..2 {
+            b.heard(KITCHEN, Some(&playing(&a, 0)), NOW + 1_000 + poll);
+        }
+        let blink = Playing {
+            state: "idle".into(),
+            updated_ms: Some(NOW - 60_000),
+            ..playing(&a, 0)
+        };
+        assert!(b.heard(KITCHEN, Some(&blink), NOW + 4_000).is_empty());
+        assert!(b
+            .heard(KITCHEN, Some(&playing(&a, 0)), NOW + 5_000)
+            .is_empty());
+        // Stopped for real, the house still dating the beginning.
+        assert!(b.heard(KITCHEN, Some(&blink), NOW + 6_000).is_empty());
+        let acts = b.heard(KITCHEN, Some(&blink), NOW + 7_000);
+        assert_eq!(calls(&acts), [("alice", "stalled")]);
+        assert_eq!(
+            input_of(&acts, 0),
+            input::at(6_000),
+            "where it was counted to when it fell silent"
+        );
+    }
+
+    /// Where the speaker says it is, is where it is — including when nobody
+    /// asked it to move: the next track is `advance`, anywhere else `jump`
+    /// (as the reconciler says it, from what is read here), and a pause by
+    /// hand, read through a blink, `stalled` where the house says it stopped.
+    ///
+    /// Falsified by not moving `at` to where the speaker says (the `at !=
+    /// h.at` branch taken out): nothing was said of either move.
+    #[test]
+    fn what_the_speaker_says_it_is_playing_is_where_it_is_in_the_queue() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3", "music/c.mp3"];
+        started(&mut b, "alice", &files, 0);
+        let acts = b.heard(KITCHEN, Some(&playing(&url_of("music/b.mp3"), 100)), NOW);
+        assert_eq!(calls(&acts), [("alice", "advance")]);
+        let moved = session(
+            &files,
+            1,
+            Clock::Playing {
+                at_ms: 0,
+                since: NOW,
+            },
+            kitchen(false),
+        );
+        assert!(
+            b.wants("alice", KITCHEN, &moved, NOW).is_empty(),
+            "the session followed: nothing to tell it"
+        );
+        let acts = b.heard(KITCHEN, Some(&playing(&url_of("music/a.mp3"), 100)), NOW);
+        assert_eq!(calls(&acts), [("alice", "jump")]);
+        let back = session(
+            &files,
+            0,
+            Clock::Playing {
+                at_ms: 100,
+                since: NOW,
+            },
+            kitchen(false),
+        );
+        assert!(b.wants("alice", KITCHEN, &back, NOW).is_empty());
+        // Quiet for a moment after a move, then a pause by hand.
+        let paused = Playing {
+            state: "paused".into(),
+            ..playing(&url_of("music/a.mp3"), 4_200)
+        };
+        assert!(b.heard(KITCHEN, Some(&paused), NOW).is_empty());
+        assert!(b.heard(KITCHEN, Some(&paused), NOW).is_empty());
+        assert!(
+            b.heard(KITCHEN, Some(&paused), NOW).is_empty(),
+            "one poll of it is a blink"
+        );
+        let acts = b.heard(KITCHEN, Some(&paused), NOW);
+        assert_eq!(calls(&acts), [("alice", "stalled")]);
+        assert_eq!(
+            input_of(&acts, 0),
+            input::at(4_200),
+            "where the house says it stopped"
+        );
+    }
+
+    /// A session that moved is told to the speaker as Home Assistant's
+    /// service calls: a pause `media_pause`, a play `media_play`, a seek
+    /// `media_seek`, another place in the queue a fresh hand-off from there.
+    ///
+    /// Falsified by a `seek` that told the speaker nothing while it was
+    /// started (the `Act::Seek` taken out): no `media_seek`.
+    #[test]
+    fn a_session_that_moved_is_told_as_service_calls() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        started(&mut b, "alice", &files, 0);
+        let anchored = session(
+            &files,
+            0,
+            Clock::Playing {
+                at_ms: 0,
+                since: NOW,
+            },
+            kitchen(false),
+        );
+        assert!(b.wants("alice", KITCHEN, &anchored, NOW + 100).is_empty());
+        let paused = session(&files, 0, Clock::Paused { at_ms: 5_000 }, kitchen(false));
+        assert_eq!(
+            b.wants("alice", KITCHEN, &paused, NOW + 5_000),
+            [Act::Verb {
+                entity: KITCHEN.into(),
+                verb: "media_pause",
+                why: "the session paused"
+            }]
+        );
+        let sought = session(&files, 0, Clock::Paused { at_ms: 40_000 }, kitchen(false));
+        assert_eq!(
+            b.wants("alice", KITCHEN, &sought, NOW + 6_000),
+            [Act::Seek {
+                entity: KITCHEN.into(),
+                position_ms: 40_000
+            }]
+        );
+        let resumed = session(
+            &files,
+            0,
+            Clock::Playing {
+                at_ms: 40_000,
+                since: NOW + 7_000,
+            },
+            kitchen(false),
+        );
+        assert!(matches!(
+            &b.wants("alice", KITCHEN, &resumed, NOW + 7_000)[..],
+            [Act::Verb {
+                verb: "media_play",
+                ..
+            }]
+        ));
+        let jumped = session(
+            &files,
+            1,
+            Clock::Playing {
+                at_ms: 0,
+                since: NOW + 8_000,
+            },
+            kitchen(false),
+        );
+        assert!(matches!(
+            &b.wants("alice", KITCHEN, &jumped, NOW + 8_000)[..],
+            [Act::Start { at: 1, .. }]
+        ));
+    }
+
+    /// A speaker sent somewhere else entirely is no longer in this session:
+    /// once its grace is spent it lets the session go, as itself, said with
+    /// what it reported — and stays let go rather than being recovered by
+    /// the next report that happens to match.
+    ///
+    /// Falsified by `lapse` not removing the hold: the matching report after
+    /// the release was read as the speaker playing ours again.
+    #[test]
+    fn a_speaker_playing_something_that_is_not_ours_is_let_go() {
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        let radio = playing("http://radio.example/stream", 0);
+        for _ in 0..3 {
+            assert!(b.heard(KITCHEN, Some(&radio), NOW).is_empty());
+        }
+        let acts = b.heard(KITCHEN, Some(&radio), NOW);
+        assert_eq!(calls(&acts), [("alice", "release")]);
+        let Act::Call { why, .. } = &acts[0] else {
+            unreachable!()
+        };
+        assert!(
+            why.contains("radio.example"),
+            "said out loud with what it reported: {why}"
+        );
+        assert!(b
+            .heard(KITCHEN, Some(&playing(&url_of("music/a.mp3"), 0)), NOW)
+            .is_empty());
+        assert!(!b.holds(KITCHEN));
+        let still = session(&["music/a.mp3"], 0, playing_at(0), kitchen(false));
+        assert!(
+            b.wants("alice", KITCHEN, &still, NOW).is_empty(),
+            "not taken back while the release lands"
+        );
+    }
+
+    /// A speaker handed a queue does not play it that instant: it fetches the
+    /// first URL, reporting whatever it was playing before — fetching, not
+    /// "not ours". Having started, silence is a lapse: three polls of it and
+    /// the fourth lets it go; a poll that matched in between starts the
+    /// three again. (Literal counts, so that the test does not shrink with
+    /// the constants it holds.)
+    ///
+    /// Falsified by setting `WAIT` to 1: the first quiet poll of the
+    /// hand-off released it.
+    #[test]
+    fn a_speaker_is_given_a_moment_to_start_before_it_is_let_go() {
+        let mut b = bridge();
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&["music/a.mp3"], 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        let quiet = Playing {
+            state: "idle".into(),
+            url: String::new(),
+            position_ms: 0,
+            updated_ms: None,
+            duration_ms: None,
+            queue_position: None,
+            slack_ms: 0,
+        };
+        for tick in 0..3 {
+            assert!(
+                b.heard(KITCHEN, Some(&quiet), NOW).is_empty(),
+                "still fetching, {tick} ticks in"
+            );
+        }
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&playing(&url_of("music/a.mp3"), 0)), NOW)),
+            [("alice", "started")]
+        );
+        let landed = session(&["music/a.mp3"], 0, playing_at(0), kitchen(false));
+        assert!(b.wants("alice", KITCHEN, &landed, NOW).is_empty());
+        for tick in 0..3 {
+            assert!(
+                b.heard(KITCHEN, Some(&quiet), NOW).is_empty(),
+                "a lapse, {tick} ticks in"
+            );
+        }
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&quiet), NOW)),
+            [("alice", "release")],
+            "silent for three seconds, it is not ours any more"
+        );
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        b.wants("alice", KITCHEN, &landed, NOW);
+        for _ in 0..4 {
+            b.heard(KITCHEN, Some(&playing(&url_of("music/a.mp3"), 0)), NOW);
+            b.heard(KITCHEN, Some(&quiet), NOW);
+            b.heard(KITCHEN, Some(&quiet), NOW);
+        }
+        assert_eq!(b.holder(KITCHEN), Some("alice"));
+    }
+
+    /// A speaker that has stopped answering is let go too, and whoever had it
+    /// is told — not on the first poll it misses, though.
+    ///
+    /// Falsified by setting `LAPSE` to 0: the first unanswered poll released
+    /// it.
+    #[test]
+    fn a_speaker_that_stops_answering_is_let_go() {
+        let mut b = bridge();
+        assert!(b.heard(KITCHEN, None, NOW).is_empty());
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        for miss in 0..3 {
+            assert!(
+                b.heard(KITCHEN, None, NOW).is_empty(),
+                "still held after {miss} unanswered polls"
+            );
+        }
+        assert_eq!(calls(&b.heard(KITCHEN, None, NOW)), [("alice", "release")]);
+        assert_eq!(b.holder(KITCHEN), None);
+    }
+
+    /// One address, however the speaker spells it back.
+    ///
+    /// Falsified by an `address` that returned its argument: every
+    /// re-spelling was a different address.
+    #[test]
+    fn an_address_is_the_same_however_it_is_spelt() {
+        let ours = crate::domain::host::url(
+            "http://10.0.0.2:8787",
+            "music/Bach/Air (BWV 1068) & Café d'Été.mp3",
+        );
+        assert_eq!(
+            ours,
+            "http://10.0.0.2:8787/media/music/Bach/Air%20%28BWV%201068%29%20%26%20Caf%C3%A9%20d%27%C3%89t%C3%A9.mp3"
+        );
+        for spelt in [
+            "http://10.0.0.2:8787/media/music/Bach/Air (BWV 1068) & Café d'Été.mp3",
+            "http://10.0.0.2:8787/media/music/Bach/Air%20(BWV%201068)%20&amp;%20Caf%c3%a9%20d'%c3%89t%c3%a9.mp3",
+            "HTTP://10.0.0.2:8787/media/music/Bach/Air (BWV 1068) &amp;amp; Caf%C3%A9 d&#39;%C3%89t%C3%A9.mp3",
+            " http://10.0.0.2:8787/media/music/Bach/Air%20%28BWV%201068%29%20%26%20Caf%C3%A9%20d%27%C3%89t%C3%A9.mp3#t=0",
+        ] {
+            assert_eq!(address(spelt), address(&ours), "{spelt}");
+        }
+        assert_eq!(
+            address("x-sonos-http://Box.lan:80/media/a%20b.mp3"),
+            address("http://box.lan/media/a b.mp3")
+        );
+        assert_ne!(
+            address("http://10.0.0.2:8787/media/music/a.mp3"),
+            address("http://10.0.0.2:8787/media/music/b.mp3"),
+            "and two files are still two"
+        );
+        assert_ne!(
+            address("http://10.0.0.3:8787/media/music/a.mp3"),
+            address("http://10.0.0.2:8787/media/music/a.mp3"),
+            "nor is another host the same"
+        );
+    }
+
+    /// A speaker that spells back what it was handed its own way still
+    /// starts, and still moves through the queue — and a report that names
+    /// the speaker's own queue rather than a track is read by its
+    /// `queue_position`, counted from where it was handed.
+    ///
+    /// Falsified by matching the report byte for byte: the re-spelt first
+    /// track was not ours, and nothing was said.
+    #[test]
+    fn a_speaker_that_spells_its_queue_its_own_way_is_still_playing_it() {
+        let mut b = bridge();
+        let files = ["music/Air (1).mp3", "music/B & C.mp3", "music/D.mp3"];
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        let spelt = |f: &str| {
+            url_of(f)
+                .replace("%20", " ")
+                .replace("%28", "(")
+                .replace("%29", ")")
+                .replace("%26", "&amp;")
+        };
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&playing(&spelt(files[0]), 0)), NOW)),
+            [("alice", "started")]
+        );
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, playing_at(0), kitchen(false)),
+            NOW,
+        );
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&playing(&spelt(files[1]), 0)), NOW)),
+            [("alice", "advance")]
+        );
+        b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 1, playing_at(0), kitchen(false)),
+            NOW,
+        );
+        let queued = Playing {
+            queue_position: Some(3),
+            ..playing("x-rincon-queue:RINCON_000E58C0FFEE01400#0", 0)
+        };
+        assert_eq!(
+            calls(&b.heard(KITCHEN, Some(&queued), NOW)),
+            [("alice", "advance")],
+            "the third item of a queue handed from the first"
+        );
+        let past = Playing {
+            queue_position: Some(4),
+            ..queued
+        };
+        assert!(
+            b.heard(KITCHEN, Some(&past), NOW).is_empty(),
+            "past the end is not ours: a lapse"
+        );
+    }
+
+    /// The session's queue edited while the speaker plays it: tracks put
+    /// after the one playing are `enqueue: next`; tracks put at the end are
+    /// `enqueue: add`; both at once are both; and anything else — a track
+    /// taken out, one moved — is a fresh hand-off from where the track
+    /// playing is.
+    ///
+    /// Falsified by an `enqueued` that read only a pure append: putting one
+    /// next and one last at once was handed again.
+    #[test]
+    fn tracks_put_into_the_queue_reach_the_speakers_own_queue() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        started(&mut b, "alice", &files, 0);
+        let enq = |urls: &[&str], next: bool| Act::Enqueue {
+            entity: KITCHEN.into(),
+            urls: urls.iter().map(|f| url_of(f)).collect(),
+            next,
+        };
+        // The tracks a queue is made of are the session's: an inserted one
+        // shifts the ids of those after it, as `n` here says.
+        let at = |files: &[&str]| session(files, 0, playing_at(0), kitchen(false));
+        let edit = |s: &mut Listening, ids: &[u8]| {
+            for (t, n) in s.session.as_mut().unwrap().queue.iter_mut().zip(ids) {
+                t.id = track("", *n).id;
+            }
+        };
+        let mut one = at(&["music/a.mp3", "music/n.mp3", "music/b.mp3", "music/z.mp3"]);
+        edit(&mut one, &[0, 2, 1, 3]);
+        assert_eq!(
+            b.wants("alice", KITCHEN, &one, NOW),
+            [enq(&["music/n.mp3"], true), enq(&["music/z.mp3"], false)]
+        );
+        let mut two = at(&[
+            "music/a.mp3",
+            "music/n.mp3",
+            "music/b.mp3",
+            "music/z.mp3",
+            "music/y.mp3",
+        ]);
+        edit(&mut two, &[0, 2, 1, 3, 4]);
+        assert_eq!(
+            b.wants("alice", KITCHEN, &two, NOW),
+            [enq(&["music/y.mp3"], false)]
+        );
+        let mut out = at(&["music/a.mp3", "music/b.mp3", "music/z.mp3", "music/y.mp3"]);
+        edit(&mut out, &[0, 1, 3, 4]);
+        assert!(
+            matches!(
+                &b.wants("alice", KITCHEN, &out, NOW)[..],
+                [Act::Start { at: 0, .. }]
+            ),
+            "a track taken out is handed again"
+        );
+    }
+
+    /// Two people can both pick the kitchen, because a kitchen is one room.
+    /// The second gets it and the first is told — by the speaker, in the
+    /// first one's session — and told once, however often the first
+    /// session is read before the release lands.
+    ///
+    /// Falsified by a `wants` that took the speaker for a session that named
+    /// it settled while another held it: alice took the kitchen back from
+    /// bob on the next read.
+    #[test]
+    fn a_speaker_taken_by_somebody_else_releases_the_first() {
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        let acts = b.wants(
+            "bob",
+            KITCHEN,
+            &session(&["music/b.mp3"], 0, playing_at(0), kitchen(true)),
+            NOW,
+        );
+        assert_eq!(calls(&acts), [("alice", "release")]);
+        assert!(matches!(acts[1], Act::Start { .. }));
+        assert_eq!(b.holder(KITCHEN), Some("bob"));
+        // Alice's session still says the kitchen until her release lands.
+        let alice = session(&["music/a.mp3"], 0, playing_at(0), kitchen(false));
+        assert!(
+            b.wants("alice", KITCHEN, &alice, NOW).is_empty(),
+            "already told"
+        );
+        assert_eq!(b.holder(KITCHEN), Some("bob"));
+        let Some(Act::Call { why, .. }) = acts.first() else {
+            unreachable!()
+        };
+        assert!(why.contains("bob"));
+    }
+
+    /// A Sonos playing on through a track says the same `media_position`
+    /// the whole way — Home Assistant refreshes it on a change of state, and
+    /// dates it — so where it is, is that position counted on from its date.
+    /// Twenty seconds of polls of a speaker playing on are twenty seconds of
+    /// nothing to report.
+    ///
+    /// Falsified by reading `media_position` as now (`position_at` not
+    /// counting on): the fourth poll reported `seek`, to 0.
+    #[test]
+    fn a_speaker_playing_on_reports_no_seek_from_a_frozen_position() {
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        let anchored = session(&["music/a.mp3"], 0, playing_at(0), kitchen(false));
+        assert!(b.wants("alice", KITCHEN, &anchored, NOW).is_empty());
+        let frozen = playing(&url_of("music/a.mp3"), 0);
+        for second in 1..=20 {
+            let now = NOW + second * 1_000;
+            let acts = b.heard(KITCHEN, Some(&frozen), now);
+            assert!(calls(&acts).is_empty(), "{second} s in: {acts:?}");
+            assert!(b.wants("alice", KITCHEN, &anchored, now).is_empty());
+        }
+        assert_eq!(
+            frozen.position_at(NOW + 20_000),
+            Some(20_000),
+            "counted on, not stuck"
+        );
+        let undated = Playing {
+            updated_ms: None,
+            ..frozen.clone()
+        };
+        assert!(calls(&b.heard(KITCHEN, Some(&undated), NOW + 60_000)).is_empty());
+        let paused = Playing {
+            state: "paused".into(),
+            ..playing(&url_of("music/a.mp3"), 12_000)
+        };
+        assert_eq!(paused.position_at(NOW + 99_000), Some(12_000));
+        let short = Playing {
+            duration_ms: Some(5_000),
+            ..frozen
+        };
+        assert_eq!(short.position_at(NOW + 99_000), Some(5_000));
+    }
+
+    /// A volume told to the house is `volume_set` (and `volume_mute` only
+    /// where the mute moved), and for the polls the house takes to catch up
+    /// the speaker reads as what it was told: the house a poll behind is
+    /// not a hand on the knob, and after it a difference is one — a knob
+    /// turned, or a house that never took what it was told, said as it is.
+    ///
+    /// Falsified by a `volume` that read the house whatever the quiet: the
+    /// house that never took 60 went on saying 35, and nothing was said.
+    #[test]
+    fn a_volume_told_is_what_the_house_reads_until_it_catches_up() {
+        let stood = |volume: i64, muted: bool| Present {
+            can_volume: true,
+            volume,
+            muted,
+            family: Some("sonos".into()),
+            ..device(KITCHEN, Kind::Speaker, true)
+        };
+        let house = |v: i64, muted: bool| Speaker {
+            volume: Some(v),
+            muted,
+            can_volume: true,
+            family: Some("sonos".into()),
+            members: vec![],
+        };
+        let phone = Output::Device {
+            id: "phone".into(),
+            moving: false,
+        };
+        let with = |d: Present| {
+            let mut s = session(&["music/a.mp3"], 0, playing_at(0), phone.clone());
+            s.devices[1] = d;
+            s
+        };
+        let set = |b: &mut Speakers| {
+            b.polled(KITCHEN, Some(&house(35, false)));
+            assert!(b
+                .wants("alice", KITCHEN, &with(stood(35, false)), NOW)
+                .is_empty());
+            assert_eq!(
+                b.wants("alice", KITCHEN, &with(stood(60, false)), NOW),
+                [Act::Volume {
+                    entity: KITCHEN.into(),
+                    level: 60
+                }]
+            );
+            b.polled(KITCHEN, Some(&house(35, false)));
+            assert!(
+                b.wants("alice", KITCHEN, &with(stood(60, false)), NOW)
+                    .is_empty(),
+                "the house catching up"
+            );
+        };
+        let mut b = bridge();
+        set(&mut b);
+        b.polled(KITCHEN, Some(&house(60, false)));
+        assert!(b
+            .wants("alice", KITCHEN, &with(stood(60, false)), NOW)
+            .is_empty());
+        b.polled(KITCHEN, Some(&house(22, true)));
+        let acts = b.wants("alice", KITCHEN, &with(stood(60, false)), NOW);
+        assert_eq!(calls(&acts), [("alice", "report_volume")]);
+        assert_eq!(input_of(&acts, 0), input::report_volume(22, true));
+        assert_eq!(
+            b.wants("alice", KITCHEN, &with(stood(22, false)), NOW),
+            [Act::Mute {
+                entity: KITCHEN.into(),
+                muted: false
+            }],
+            "a mute moved is a mute, and nothing else"
+        );
+        // A house that never took it is where it is.
+        let mut b = bridge();
+        set(&mut b);
+        b.polled(KITCHEN, Some(&house(35, false)));
+        let acts = b.wants("alice", KITCHEN, &with(stood(60, false)), NOW);
+        assert_eq!(calls(&acts), [("alice", "report_volume")]);
+        assert_eq!(input_of(&acts, 0), input::report_volume(35, false));
+    }
+
+    /// A speaker that stops standing pauses what it holds for the session
+    /// that holds it, and only for that one.
+    ///
+    /// Falsified by `left` pausing whatever it was asked about: bob closing
+    /// his app paused alice's kitchen.
+    #[test]
+    fn a_speaker_left_pauses_only_its_holders_sound() {
+        let mut b = bridge();
+        started(&mut b, "alice", &["music/a.mp3"], 0);
+        assert!(b.left("bob", KITCHEN).is_empty(), "not bob's to pause");
+        assert!(matches!(
+            &b.left("alice", KITCHEN)[..],
+            [Act::Verb {
+                verb: "media_pause",
+                ..
+            }]
+        ));
+        assert!(!b.holds(KITCHEN));
+    }
+}
+
 /// The thread: Home Assistant's REST API, and the sessions.
 ///
 /// Blocking and polled, on a thread of its own, exactly as the scanner is.
