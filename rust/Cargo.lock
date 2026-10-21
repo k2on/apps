@@ -2204,6 +2204,7 @@ dependencies = [
  "ark-peer",
  "axum",
  "harken-domain",
+ "harken-player",
  "libc",
  "lofty",
  "notify",
