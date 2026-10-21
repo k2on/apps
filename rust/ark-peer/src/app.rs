@@ -2,8 +2,8 @@
 //! name, its views, and what became of what it did.
 //!
 //! An app authors and asks by a function's name (`create_playlist`, or its
-//! whole binding, `playlists.create_playlist`) — through the stubs `ark::gen`
-//! generates, which call [`ark::gen::Call`] on a peer — and holds the
+//! whole binding, `playlists.create_playlist`) — or calls the domain's own
+//! view functions ([`Peer::answer`]) — and holds the
 //! maintained views its lists are, each one's patches handed back as an
 //! [`Update`]. The peer keeps every intent's [`Standing`] and the refusals
 //! its server sent.
@@ -20,8 +20,8 @@
 
 use std::collections::BTreeMap;
 
-use ark::hash::{FnHash, StateHash};
-use ark::ir::Node;
+use ark::codec::Node;
+use ark::hash::StateHash;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
@@ -193,36 +193,20 @@ impl Peer {
         self.config.domain.as_deref().expect("a peer called by name has a domain")
     }
 
-    /// The domain in plain Rust its functions are called in, if it is one.
-    pub fn native(&self) -> Option<&ark::domain::Domain> {
-        self.config.native.as_deref()
-    }
-
     /// The binding a name means ([`Domain::binding`]).
     pub fn binding(&self, name: &str) -> Option<String> {
-        match self.native() {
-            Some(d) => d.binding(name).map(String::from),
-            None => self.domain().binding(name).map(String::from),
-        }
+        self.config.domain.as_deref()?.binding(name).map(String::from)
     }
 
-    fn func(&self, name: &str) -> Result<FnHash, String> {
-        let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
-        Ok(match self.native() {
-            Some(_) => ark::domain::Domain::hash_of(&b),
-            None => self.domain().get(&b),
-        })
+    fn func(&self, name: &str) -> Result<String, String> {
+        self.binding(name).ok_or_else(|| format!("no function {name}"))
     }
 
     /// A query's or a view's answer over the optimistic state, as this
     /// login reads it: its encoding.
     pub fn ask(&self, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
-        let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
-        let r = match self.native() {
-            Some(d) => d.ask(&self.log.store, &self.ctx(), &b, input),
-            None => self.domain().ask(&self.log.store, &self.ctx(), &b, input),
-        };
-        r.map_err(|r| r.0)
+        let b = self.func(name)?;
+        self.domain().ask(&self.log.store, &self.ctx(), &b, input).map_err(|r| r.0)
     }
 
     /// An intent: its id, or the refusal its preview — or, alone, its
@@ -233,7 +217,7 @@ impl Peer {
 
     pub fn mutate_bytes(&mut self, name: &str, input: Vec<u8>) -> Result<EntryId, String> {
         let (f, id) = (self.func(name)?, self.log.next_id());
-        if let Err(why) = self.author(Space::Durable, f, input, now_ms()) {
+        if let Err(why) = self.author(Space::Durable, &f, input, now_ms()) {
             self.told.rejections.retain(|(r, _)| *r != id);
             return Err(why);
         }
@@ -246,7 +230,7 @@ impl Peer {
     pub fn call(&mut self, name: &str, input: Vec<u8>) -> Result<(), String> {
         let f = self.func(name)?;
         let id = self.live.as_ref().ok_or("no live space here")?.next_id();
-        if let Err(why) = self.author(Space::Volatile, f, input, now_ms()) {
+        if let Err(why) = self.author(Space::Volatile, &f, input, now_ms()) {
             self.told.live_refused.retain(|(r, _)| *r != id);
             return Err(why);
         }
@@ -272,13 +256,8 @@ impl Peer {
     /// A maintained view of a query (§1.10) over the optimistic state, as
     /// this login reads it: its number, or the query's refusal.
     pub fn view(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
-        let ctx = self.ctx();
-        if self.native().is_some() {
-            let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
-            return self.watch_native(Space::Durable, &b, input, ctx).map_err(|r| r.0);
-        }
-        let f = self.func(name)?;
-        self.watch(Space::Durable, &f, input, ctx).map_err(|r| r.0)
+        let (ctx, b) = (self.ctx(), self.func(name)?);
+        self.watch(Space::Durable, &b, input, ctx).map_err(|r| r.0)
     }
 
     /// A view's rows as they stand, each its bytes.
@@ -347,21 +326,5 @@ impl Peer {
             user: self.me().actor.clone(),
             alone: self.is_alone(),
         }
-    }
-}
-
-/// The bindings' stubs call the domain through a peer: a mutator authored
-/// as an intent, a query asked of the optimistic state.
-impl ark::gen::Call for Peer {
-    type Authored = Result<EntryId, String>;
-
-    fn author(&mut self, name: &str, input: Vec<u8>) -> Result<EntryId, String> {
-        self.mutate_bytes(name, input)
-    }
-
-    fn ask(&self, name: &str, input: Vec<u8>, want: &ark::ty::Ty) -> Result<Vec<u8>, String> {
-        let b = self.binding(name).ok_or_else(|| format!("no function {name}"))?;
-        let bytes = self.domain().ask(&self.log.store, &self.ctx(), &b, &input).map_err(|r| r.0)?;
-        ark::gen::answer(self.domain(), &b, &bytes, want).map_err(|r| r.0)
     }
 }

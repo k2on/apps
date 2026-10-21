@@ -1,5 +1,5 @@
 {
-  "bytes": "000080000000000000000100ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff000000",
+  "bytes": "000080000000000000000100ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000031ebe717b274e80c0baa628a596579c9e3e79436cd41337682848a9166d6c5b700000000",
   "frame": {
     "fields": [
       {
@@ -16,7 +16,9 @@
       {
         "fields": [],
         "variant": 0
-      }
+      },
+      "31ebe717b274e80c0baa628a596579c9e3e79436cd41337682848a9166d6c5b7",
+      ""
     ],
     "variant": 0
   },

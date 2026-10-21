@@ -25,17 +25,16 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ark::codec::Node;
 use ark::codec::{bytes_enc, put_bytes, put_int};
 use ark::frames::Frame;
-use ark::hash::{EntryHash, FnHash};
-use ark::ir::Node;
+use ark::hash::EntryHash;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Seq, Snapshot};
-use ark::module::Lib;
-use ark::peer::{Cas, Who};
+use ark::peer::{Functions, Who};
 use ark::schema::{Schema, Space, Table};
 use ark::store::{Change, Store, LOG};
 use ark::ty::Ty;
-use ark_dev::demo::domain;
+use ark_dev::demo::demo as domain;
 use ark_peer::link::{bell, wait, Dial, Event, Wire};
 use ark_peer::{dev, now_ms as now, Config, Disk, Files, Handle, Memory, Module, Peer, Server};
 
@@ -139,10 +138,7 @@ fn na(label: &str, n: usize, why: &str) {
 // The demo, from a client --------------------------------------------------------
 
 fn config() -> Config {
-    Config {
-        live: None,
-        ..Config::new(Module::of(&domain()))
-    }
+    Config::of(Arc::new(domain()))
 }
 
 /// A client of `token`'s login, its origin seeded by its session.
@@ -154,14 +150,9 @@ fn client(token: &str, mut disk: Box<dyn Disk>) -> Peer {
     Peer::open(config(), who, disk, false)
 }
 
-/// `demo.create_playlist` and `demo.add_to_playlist`, by hash: the domain
-/// assembled once, not per mutation.
-fn fns() -> (FnHash, FnHash) {
-    static F: std::sync::OnceLock<(FnHash, FnHash)> = std::sync::OnceLock::new();
-    *F.get_or_init(|| {
-        let d = domain();
-        (d.get("demo.create_playlist"), d.get("demo.add_to_playlist"))
-    })
+/// `demo.create_playlist` and `demo.add_to_playlist`, by name.
+fn fns() -> (&'static str, &'static str) {
+    ("demo.create_playlist", "demo.add_to_playlist")
 }
 
 fn create(c: &mut Peer, j: u64) {
@@ -425,7 +416,7 @@ fn perf_g_hub_fanout() {
     eprintln!("\n== (g) fan-out of one pushed entry to C connections, through Peer::frame (v5 only)");
     eprintln!("{:<48} {:>7} {:>10} {:>10}", "shape", "C", "frame µs", "per conn");
     let d = domain();
-    let (cr, ad) = (d.get("demo.create_playlist"), d.get("demo.add_to_playlist"));
+    let (cr, ad) = fns();
     for c in [10usize, 40, 160] {
         for s in [500u64, 8000] {
             let mut hub = Peer::serve(Config::new(Module::of(&d)), Box::new(Memory::default()), 0);
@@ -445,6 +436,8 @@ fn perf_g_hub_fanout() {
                 cursor: head,
                 hash: Some(hash),
                 device: None,
+                schema: Default::default(),
+                version: String::new(),
             }
             .enc();
             let conns: Vec<u64> = (0..c).map(|k| hub.accept(dev(&format!("u{k}@x")).unwrap())).collect();
@@ -477,7 +470,7 @@ fn perf_g_hub_fanout() {
 }
 
 /// A `Push` of the session's next entry, through the hub.
-fn push(hub: &mut Peer, conn: u64, w: &Who, local: &mut i64, func: FnHash, input: Vec<u8>) -> Vec<(u64, Vec<u8>)> {
+fn push(hub: &mut Peer, conn: u64, w: &Who, local: &mut i64, func: &str, input: Vec<u8>) -> Vec<(u64, Vec<u8>)> {
     *local += 1;
     let entry = Entry {
         id: EntryId::of(Origin::named(&w.session), *local),
@@ -486,7 +479,7 @@ fn push(hub: &mut Peer, conn: u64, w: &Who, local: &mut i64, func: FnHash, input
         origin: Origin::named(&w.session),
         local: *local,
         roles: vec![],
-        func,
+        func: func.into(),
         input,
         now: *local,
     };
@@ -543,8 +536,8 @@ fn media_store(schema: &Schema, rows: std::ops::Range<u64>) -> Store {
 fn media_module() -> Module {
     Module {
         schema: Arc::new(media_schema(true)),
-        cas: Cas::default(),
-        lib: Lib::default(),
+        functions: Functions::default(),
+        domain: None,
     }
 }
 
@@ -560,7 +553,7 @@ fn snapshot(store: &Store, seq: Seq, hash: EntryHash) -> Snapshot {
 /// The chain that adds rows `from..to` to `store`, one `add_song` each,
 /// linked from `(seq, hash)`.
 fn chain(store: &mut Store, (mut seq, mut prev): (Seq, EntryHash), rows: std::ops::Range<u64>, session: &str) -> Vec<Logged> {
-    let func = FnHash::of(b"library.add_song");
+    let func = "library.add_song";
     rows.map(|i| {
         let facts = vec![Change::Add {
             table: "media".into(),
@@ -576,7 +569,7 @@ fn chain(store: &mut Store, (mut seq, mut prev): (Seq, EntryHash), rows: std::op
             origin: Origin::named(session),
             local,
             roles: vec!["library".into()],
-            func,
+            func: func.into(),
             input: vec![],
             now: 1_000 + i as i64,
         };

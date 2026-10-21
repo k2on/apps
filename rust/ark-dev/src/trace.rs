@@ -10,25 +10,27 @@
 //! in it: what they decided is (the frames received, the calls made, the
 //! durable state an open was given).
 //!
-//! The file is JSON: the modules (each space's schema and function bodies,
-//! hex), the device, and one step per line.
+//! The file is JSON: each space's domain (its name, its schema's bytes in
+//! hex and its functions' names — code is never in a trace), the device,
+//! and one step per line. A trace is replayed with the domains it names.
 
 use std::sync::Arc;
 
+use ark::codec::Node;
 use ark::hash::{hex, unhex};
-use ark::ir::Node;
 use ark::log::{Durable, EntryId, Logged, Origin};
-use ark::module::Lib;
-use ark::peer::{Cas, Input, Output, Peer, Role, Who};
+use ark::peer::{Input, Output, Peer, Role, Who};
 use ark::schema::{Schema, Space};
 use ark::store::Change;
 use ark_peer::{Act, At, Config, Live};
 use serde_json::{json, Value};
 
-/// A space's machine as a trace names it: its schema's bytes and every
-/// function body it holds.
-fn module(schema: &Schema, cas: &Cas) -> Value {
-    json!({"functions": cas.bodies().map(|b| hex(b)).collect::<Vec<_>>(), "schema": hex(&schema.to_bytes())})
+/// A space's machine as a trace names it: its domain's name, its schema's
+/// bytes and every function's name it holds.
+fn module(m: &ark_peer::Module) -> Value {
+    let functions: Vec<&str> = m.functions.names().collect();
+    let domain = m.domain.as_ref().map(|d| d.name.clone());
+    json!({"domain": domain, "functions": functions, "schema": hex(&m.schema.to_bytes())})
 }
 
 fn who(w: &Who) -> Value {
@@ -45,7 +47,7 @@ fn space(s: Space) -> &'static str {
 fn input(i: &Input) -> Value {
     match i {
         Input::Frame { bytes, .. } => json!({"t": "frame", "bytes": hex(bytes)}),
-        Input::Mutate { func, input, now } => json!({"t": "mutate", "fn": func.hex(), "input": hex(input), "now": now}),
+        Input::Mutate { func, input, now } => json!({"t": "mutate", "fn": func, "input": hex(input), "now": now}),
         Input::Connected => json!({"t": "connected"}),
         Input::Alone => json!({"t": "alone"}),
         Input::Join => json!({"t": "join"}),
@@ -82,8 +84,8 @@ pub fn record(from: &str, c: &ark_peer::Peer) -> String {
     let header = json!({
         "device": live.and_then(|l| l.device.as_ref()).map(|d| hex(d)),
         "from": from,
-        "live": live.map(|l| module(&l.module.schema, &l.module.cas)),
-        "log": module(&c.config.log.schema, &c.config.log.cas),
+        "live": live.map(|l| module(&l.module)),
+        "log": module(&c.config.log),
     });
     let steps: Vec<String> = c
         .record
@@ -130,7 +132,7 @@ impl Player {
             Space::Durable => &self.config.log,
             Space::Volatile => &self.config.live.as_ref()?.module,
         };
-        let mut p = Peer::new(m.schema.clone(), m.cas.clone(), Role::Replica, who.clone()).in_space(space);
+        let mut p = Peer::new(m.schema.clone(), m.functions.clone(), Role::Replica, who.clone()).in_space(space);
         p.origin = origin;
         p.device = self
             .config
@@ -198,14 +200,24 @@ fn origin_of(v: &Value) -> Result<Origin, String> {
     Ok(Origin(bytes(v)?.try_into().map_err(|_| "an origin is 16 bytes")?))
 }
 
+/// The domain a trace names, as the machine held it: its schema as
+/// recorded, and its functions by the names recorded, each the named
+/// domain's.
 fn module_of(v: &Value) -> Result<ark_peer::Module, String> {
     let schema = Arc::new(Schema::from_bytes(&bytes(&v["schema"])?).map_err(|r| r.0)?);
-    let lib = Lib::default();
-    let mut cas = Cas::default().with_loader(lib.loader(schema.clone()));
-    for b in v["functions"].as_array().ok_or("no functions")? {
-        cas.add_body(bytes(b)?);
+    let name = v["domain"].as_str().ok_or("no domain named")?;
+    let d = crate::demo::named(name).ok_or(format!("no domain {name} here"))?;
+    let all = d.functions();
+    let mut functions = ark::peer::Functions::default();
+    for f in v["functions"].as_array().ok_or("no functions")? {
+        let f = f.as_str().ok_or("a function is a name")?;
+        functions.insert(f, all.get(f).ok_or(format!("{name} has no {f}"))?.clone());
     }
-    Ok(ark_peer::Module { schema, cas, lib })
+    Ok(ark_peer::Module {
+        schema,
+        functions,
+        domain: Some(Arc::new(d)),
+    })
 }
 
 fn who_of(v: &Value) -> Who {
@@ -235,7 +247,7 @@ fn input_of(v: &Value) -> Result<Input, String> {
             bytes: bytes(&v["bytes"])?,
         },
         "mutate" => Input::Mutate {
-            func: hash(&v["fn"], ark::hash::FnHash)?,
+            func: v["fn"].as_str().ok_or("no fn")?.into(),
             input: bytes(&v["input"])?,
             now: n("now")?,
         },

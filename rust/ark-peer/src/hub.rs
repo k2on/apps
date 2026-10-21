@@ -33,9 +33,8 @@
 
 use std::collections::BTreeMap;
 
+use ark::codec::Node;
 use ark::frames::{Frame, Verdict};
-use ark::hash::FnHash;
-use ark::ir::Node;
 use ark::log::{Durable, EntryId, Origin, Snapshot};
 use ark::peer::{Feed, Input, Journal, Output, Peer as Machine, Role, Who};
 use ark::schema::Space;
@@ -137,8 +136,8 @@ impl Peer {
                 rows: snapshot.kv_rows(),
                 ..Durable::default()
             }));
-            if let Some(f) = p.config.live.as_ref().and_then(|l| l.on_restore) {
-                let _ = p.author(Space::Volatile, f, vec![], now);
+            if let Some(f) = p.config.live.as_ref().and_then(|l| l.on_restore.clone()) {
+                let _ = p.author(Space::Volatile, &f, vec![], now);
             }
         }
         p
@@ -170,7 +169,10 @@ impl Peer {
         self.hub.next = self.hub.next.max(c + 1);
         let feed = (self.config.feed)(&who);
         if let Feed::Scoped(_) = feed {
-            self.log.step(Input::Feed { who: who.clone(), feed });
+            self.log.step(Input::Feed {
+                who: who.clone(),
+                feed: feed.clone(),
+            });
         }
         let conn = Conn {
             who,
@@ -223,8 +225,8 @@ impl Peer {
             if *n == 0 {
                 let input = input.clone();
                 self.hub.devices.remove(&who.session);
-                if let Some(f) = self.config.live.as_ref().and_then(|l| l.on_leave) {
-                    let _ = self.author(Space::Volatile, f, input, now);
+                if let Some(f) = self.config.live.as_ref().and_then(|l| l.on_leave.clone()) {
+                    let _ = self.author(Space::Volatile, &f, input, now);
                 }
             }
         }
@@ -242,27 +244,8 @@ impl Peer {
         let n = &mut self.hub.devices.entry(conn.who.session.clone()).or_insert((0, input.clone())).0;
         *n += 1;
         if let (1, Some(f)) = (*n, live.on_join) {
-            let _ = self.author(Space::Volatile, f, input, now);
+            let _ = self.author(Space::Volatile, &f, input, now);
         }
-    }
-
-    /// Function bodies the operator loads into the log's authority while it
-    /// runs — a module's, checked by whoever read it — and what waits behind
-    /// an intent held for one of them judged (`Input::Loaded`): how many it
-    /// runs now that it did not.
-    pub fn load(&mut self, bodies: Vec<Vec<u8>>) -> usize {
-        let mut loaded = 0;
-        for _ in 0..bodies.len() {
-            for b in &bodies {
-                let h = FnHash::of(b);
-                if self.log.cas.get(&h).is_none() && self.log.cas.add_body(b.clone()) == h && self.log.cas.get(&h).is_some() {
-                    self.config.log.cas.add_body(b.clone());
-                    loaded += 1;
-                }
-            }
-        }
-        self.route(Space::Durable, None, Input::Loaded);
-        loaded
     }
 
     /// After a server's step: the horizon moved as `keep` says, and the

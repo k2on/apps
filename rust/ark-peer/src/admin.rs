@@ -31,14 +31,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark::hash::FnHash;
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::peer::{Ctx as Run, Procedure};
 use ark::schema::Space;
-use ark::store::{Change, Read};
+use ark::store::Change;
 use ark_explorer::wire::{self, Hello, State};
 pub use ark_explorer::Catalog;
-use ark_explorer::{crud_of, function_names, Connection, CrudVerbs, Line};
+use ark_explorer::{crud_of, Connection, CrudVerbs, Line};
 use axum::extract::State as With;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -111,16 +110,21 @@ pub fn router(admin: Admin, hub: Handle, authenticate: Authenticate) -> Router {
 pub struct Raw(pub Change);
 
 impl Procedure for Raw {
-    fn run(&self, _: &dyn Read, _: &Run, _: &[u8]) -> Result<Vec<Change>, ark::Refusal> {
+    fn apply(&self, store: &mut ark::store::Store, _: &Run, _: &[u8]) -> Result<Vec<Change>, ark::Refusal> {
+        store.apply(&self.0)?;
         Ok(vec![self.0.clone()])
     }
 }
 
-/// A raw write's function, and the hash its entry names: the change's, so
-/// it is called by no name a client knows.
-pub fn raw(c: &Change) -> (FnHash, Arc<dyn Procedure>) {
-    let h = FnHash::of(&[b"raw write: ".as_slice(), &c.to_bytes()].concat());
-    (h, Arc::new(Raw(c.clone())))
+/// What a raw write's entry names: the change's hash, under a prefix no
+/// domain's function has.
+pub const RAW: &str = "raw write ";
+
+/// A raw write's function, and the name its entry calls it by: the
+/// change's, so it is called by no name a client knows.
+pub fn raw(c: &Change) -> (String, Arc<dyn Procedure>) {
+    let h = ark::hash::hex(&ark::hash::sha256(&[&c.to_bytes()]));
+    (format!("{RAW}{h}"), Arc::new(Raw(c.clone())))
 }
 
 fn text(code: StatusCode, why: impl Into<String>) -> Response {
@@ -154,16 +158,15 @@ async fn hello(With(ctx): With<Ctx>) -> String {
 
 async fn state(With(ctx): With<Ctx>) -> Response {
     let admin = ctx.admin.clone();
-    let names = function_names(&admin.catalog);
     let exposed: Vec<(String, CrudVerbs)> = crud_of(&admin.catalog)
         .into_iter()
         .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
         .collect();
     let read = on_hub(&ctx.hub, move |h| {
         let head = h.log.log().head().0;
-        let name = |f| match names.get(f) {
-            Some(n) => n.clone(),
-            None => "raw write".into(),
+        let name = |f: &str| match f.starts_with(RAW) {
+            true => "raw write".to_string(),
+            false => f.to_string(),
         };
         let at = h.log.log().entries().len().saturating_sub(LINES);
         let lines = h.log.log().entries()[at..]
@@ -215,7 +218,7 @@ async fn raw_write(With(ctx): With<Ctx>, body: String) -> Response {
 
 async fn author(With(ctx): With<Ctx>, body: String) -> Response {
     match wire::author_from(&body) {
-        Ok((name, input)) if ctx.admin.catalog.get(&name).is_some() => answer(&ctx.hub, ark::domain::Domain::hash_of(&name), input, None).await,
+        Ok((name, input)) if ctx.admin.catalog.get(&name).is_some() => answer(&ctx.hub, name, input, None).await,
         Ok((name, _)) => text(StatusCode::BAD_REQUEST, format!("no function {name}")),
         Err(why) => text(StatusCode::BAD_REQUEST, why),
     }
@@ -223,7 +226,7 @@ async fn author(With(ctx): With<Ctx>, body: String) -> Response {
 
 // Authored as the authority, its deliveries delivered: the sequence once
 // written, or the refusal. A raw write's function is runnable for its entry only.
-async fn answer(hub: &Handle, func: FnHash, input: Vec<u8>, once: Option<Arc<dyn Procedure>>) -> Response {
+async fn answer(hub: &Handle, func: String, input: Vec<u8>, once: Option<Arc<dyn Procedure>>) -> Response {
     let hub = hub.clone();
     match tokio::task::spawn_blocking(move || hub.author(Space::Durable, func, input, once))
         .await

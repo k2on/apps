@@ -1,7 +1,0 @@
-{
-  "schema": [{"columns":[{"decl":"Id<playlist>","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"user_id","ty":{"t":"bytes"}}],"indexes":[{"columns":["user_id","name"],"unique":true}],"key":{"$int":"1"},"name":"playlist","refs":[],"space":"durable"},{"columns":[{"decl":"Id<playlist>","default":null,"name":"playlist_id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"track_id","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["playlist_id","pos"],"unique":true}],"key":{"$int":"2"},"name":"item","refs":[{"column":"playlist_id","table":"playlist"}],"space":"durable"}],
-  "functions": [{"bytes":"0149643c706c61796c6973743e00000101018000000000000010000000000103010549643c706c61796c6973743e0000010554657874000001055465787400000000040100010000000b1f0110706c61796c69737400000601050180000000000000008000000000000000000000","hash":"60173ffee48b493dbd419bb7210efa7184dcf604a550cc6f18d40515e15fb4f0","name":"scope.playlist"}],
-  "ark": null,
-  "verifies": false,
-  "why": "scope.playlist: the body's effect is Read, above Pure"
-}

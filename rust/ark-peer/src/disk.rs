@@ -37,7 +37,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::log::{Entry, Logged, Record, Rows};
 
 /// The store made durable, read back: its rows as last written whole, and

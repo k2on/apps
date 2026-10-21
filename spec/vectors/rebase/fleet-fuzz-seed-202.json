@@ -1,7 +1,7 @@
 {
   "found": "a push sequenced below a reopened horizon was answered by nobody",
-  "hash": "6006a15a2100e6e766501d7fc28859b6d3e9c4eb27e7c070f9e702f172661b91",
-  "head": 21,
+  "hash": "d0b43df389b2d7f7918fa8448426f0cfe0f61db4695168d12b48c63c27bd0c07",
+  "head": 5,
   "seed": 202,
-  "state": "1ed8af43ac463477264979ed801b31870a93d3f77ae42d6db04d00c6309001ef"
+  "state": "80de63c174a75c41316c43364af699b6a2f86168a7c0c74d747418c90136a685"
 }

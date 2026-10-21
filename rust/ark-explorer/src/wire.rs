@@ -17,8 +17,8 @@
 //! is shown is the authority's own state, a snapshot per request, and what
 //! it writes the server authors as itself.
 
-use ark::gen::Node;
 use ark::log::Seq;
+use ark::prelude::Node;
 use ark::store::Change;
 
 use crate::data::{Catalog, Connection, CrudVerbs, Line};

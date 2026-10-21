@@ -57,15 +57,14 @@ pub mod web;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use ark::codec::Node;
 use ark::frames::Frame;
-use ark::hash::{EntryHash, FnHash};
-use ark::ir::Node;
+use ark::hash::EntryHash;
 use ark::log::{Durable, Entry, EntryId, Logged, Origin, Seq};
-use ark::module::Lib;
-use ark::peer::{Cas, Ctx, Feed, Input, Journal, Output, Peer as Machine, Role, Who};
+use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Who};
+use ark::plan::Maintained;
 use ark::schema::{Schema, Space};
 use ark::store::Change;
-use ark::view::View;
 use ark::{Domain, Refusal};
 
 pub use app::{nobody, Standing, Status, Update};
@@ -75,32 +74,22 @@ pub use link::{Event, Pumped, Wake};
 #[cfg(not(target_arch = "wasm32"))]
 pub use serve::{dev, Authenticate, Handle, Running, Server};
 
-/// One space's module: its schema, the functions a peer runs, and the
-/// library its views are evaluated by.
+/// One space's module: its schema, the functions a peer runs by name, and
+/// the domain its views are made by.
 #[derive(Clone)]
 pub struct Module {
     pub schema: Arc<Schema>,
-    pub cas: Cas,
-    pub lib: Lib,
+    pub functions: Functions,
+    pub domain: Option<Arc<Domain>>,
 }
 
 impl Module {
-    /// A domain as a peer holds it.
+    /// A domain as a peer holds it (§1.16).
     pub fn of(d: &Domain) -> Module {
         Module {
             schema: d.schema.clone(),
-            cas: d.cas(),
-            lib: d.lib.clone(),
-        }
-    }
-
-    /// A domain in plain Rust as a peer holds it (§1.16): its functions by
-    /// their names' hashes.
-    pub fn native(d: &ark::domain::Domain) -> Module {
-        Module {
-            schema: d.schema.clone(),
-            cas: d.cas(),
-            lib: Lib::default(),
+            functions: d.functions(),
+            domain: Some(Arc::new(d.clone())),
         }
     }
 }
@@ -117,11 +106,11 @@ pub type Arrive = Arc<dyn Fn(&Who, &[u8]) -> Option<Vec<u8>> + Send + Sync>;
 pub struct Live {
     pub module: Module,
     pub device: Option<Vec<u8>>,
-    pub ephemeral: BTreeSet<FnHash>,
+    pub ephemeral: BTreeSet<String>,
     pub every_ms: i64,
-    pub on_join: Option<FnHash>,
-    pub on_leave: Option<FnHash>,
-    pub on_restore: Option<FnHash>,
+    pub on_join: Option<String>,
+    pub on_leave: Option<String>,
+    pub on_restore: Option<String>,
     pub arrive: Arrive,
     pub keep: Option<usize>,
 }
@@ -151,9 +140,6 @@ pub struct Config {
     pub log: Module,
     pub live: Option<Live>,
     pub domain: Option<Arc<Domain>>,
-    /// The domain in plain Rust its functions are called by name in, when
-    /// it is one (§1.16).
-    pub native: Option<Arc<ark::domain::Domain>>,
     pub feed: Arc<dyn Fn(&Who) -> Feed + Send + Sync>,
     pub keep: Option<usize>,
 }
@@ -164,7 +150,6 @@ impl Config {
             log,
             live: None,
             domain: None,
-            native: None,
             feed: Arc::new(|_| Feed::Whole),
             keep: None,
         }
@@ -177,49 +162,10 @@ impl Config {
             ..Config::new(Module::of(&domain))
         }
     }
-
-    /// A domain in plain Rust's: its functions for the log, by name.
-    pub fn native(domain: Arc<ark::domain::Domain>) -> Config {
-        Config {
-            native: Some(domain.clone()),
-            ..Config::new(Module::native(&domain))
-        }
-    }
-}
-
-/// A view a peer keeps: of a module's query, or of a plan (§1.16).
-pub enum Kept {
-    Lang(Box<View>),
-    Native(Box<dyn ark::plan::Maintained>),
-}
-
-impl Kept {
-    /// Its rows, each its bytes.
-    pub fn rows(&self) -> Vec<Vec<u8>> {
-        match self {
-            Kept::Lang(v) => v.rows().iter().map(|x| x.to_bytes()).collect(),
-            Kept::Native(v) => v.rows(),
-        }
-    }
-
-    fn push(&mut self, cs: &[Change], store: &ark::store::Store) -> Result<Vec<Patch>, Refusal> {
-        match self {
-            Kept::Lang(v) => Ok(v.push(cs, store)?.into_iter().map(patch_of).collect()),
-            Kept::Native(v) => v.push(cs, store),
-        }
-    }
 }
 
 /// A patch of a view's rows, each its bytes.
 pub type Patch = ark::plan::Patch<Vec<u8>>;
-
-fn patch_of(p: ark::view::Patch) -> Patch {
-    match p {
-        ark::view::Patch::Insert { at, node } => Patch::Insert { at, node: node.to_bytes() },
-        ark::view::Patch::Remove { at } => Patch::Remove { at },
-        ark::view::Patch::Update { at, node } => Patch::Update { at, node: node.to_bytes() },
-    }
-}
 
 /// What a joined peer hands over again until the server answers it.
 pub type Joining = (Seq, EntryHash, Vec<Logged>);
@@ -278,8 +224,8 @@ pub struct Peer {
     unwritten: Vec<Vec<u8>>,
     /// Frames for its server.
     frames: Vec<Vec<u8>>,
-    views: Vec<(Space, Option<Kept>)>,
-    relay: BTreeMap<FnHash, (Vec<u8>, i64)>,
+    views: Vec<(Space, Option<Box<dyn Maintained>>)>,
+    relay: BTreeMap<String, (Vec<u8>, i64)>,
     relayed: Option<i64>,
     /// What became of its own intents, and what its views did.
     told: app::Told,
@@ -298,7 +244,7 @@ pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
 }
 
 fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Machine {
-    let mut p = Machine::new(m.schema.clone(), m.cas.clone(), role, me.clone()).in_space(space);
+    let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone()).in_space(space);
     if let Some(o) = origin {
         p.origin = o;
     }
@@ -590,17 +536,25 @@ impl Peer {
     /// own entry (the server half of a mutator, a raw write, a device's
     /// arrival) — and the verdict it was given here and now: a preview's
     /// refusal, or the authority's.
-    pub fn author(&mut self, space: Space, func: FnHash, input: Vec<u8>, now: i64) -> Result<(), String> {
-        let ephemeral = self.config.live.as_ref().is_some_and(|l| l.ephemeral.contains(&func));
+    pub fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
+        let ephemeral = self.config.live.as_ref().is_some_and(|l| l.ephemeral.contains(func));
         if space == Space::Volatile && ephemeral {
-            self.relay.insert(func, (input, now));
+            self.relay.insert(func.into(), (input, now));
             self.tick(now);
             return Ok(());
         }
         if self.machine(space).is_none() {
             return Err(format!("no {space:?} machine here"));
         }
-        let said = self.route(space, None, Input::Mutate { func, input, now });
+        let said = self.route(
+            space,
+            None,
+            Input::Mutate {
+                func: func.into(),
+                input,
+                now,
+            },
+        );
         let verdict = said.into_iter().find_map(|o| match o {
             Output::Refused { why, .. } => Some(Err(why)),
             Output::Confirmed(_) => Some(Ok(())),
@@ -706,31 +660,23 @@ impl Peer {
         }
     }
 
-    /// A maintained view of query `f` on `input` over `space`'s optimistic
-    /// state, as `ctx` reads it; what it does comes as its [`Update`]s.
-    pub fn watch(&mut self, space: Space, f: &FnHash, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
-        let lib = match space {
-            Space::Durable => &self.config.log.lib,
-            Space::Volatile => &self.config.live.as_ref().ok_or_else(|| Refusal::new("no live module"))?.module.lib,
-        };
-        let store = &self.machine(space).expect("a module of that space").store;
-        let view = View::new(lib, f, input, ctx, store)?;
-        self.views.push((space, Some(Kept::Lang(Box::new(view)))));
-        Ok(self.views.len() - 1)
-    }
-
     /// A view's answer as it stands.
     pub fn values(&self, view: usize) -> Option<Vec<Vec<u8>>> {
-        self.views.get(view)?.1.as_ref().map(Kept::rows)
+        self.views.get(view)?.1.as_ref().map(|v| v.rows())
     }
 
-    /// A maintained view of the native domain's function `name` on `input`
-    /// over `space`'s optimistic state, as `ctx` reads it (§1.16).
-    pub fn watch_native(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
-        let d = self.config.native.clone().ok_or_else(|| Refusal::new("no domain in Rust here"))?;
+    /// A maintained view of the domain's function `name` on `input` over
+    /// `space`'s optimistic state, as `ctx` reads it (§1.16); what it does
+    /// comes as its [`Update`]s.
+    pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
+        let m = match space {
+            Space::Durable => Some(&self.config.log),
+            Space::Volatile => self.config.live.as_ref().map(|l| &l.module),
+        };
+        let d = m.and_then(|m| m.domain.clone()).ok_or_else(|| Refusal::new("no domain here"))?;
         let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;
         let view = d.watch(store, &ctx, name, input)?;
-        self.views.push((space, Some(Kept::Native(view))));
+        self.views.push((space, Some(view)));
         Ok(self.views.len() - 1)
     }
 

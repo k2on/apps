@@ -16,12 +16,11 @@ use ark::frames::{Frame, Verdict};
 use ark::log::{Entry, EntryId, Origin};
 use ark::peer::Who;
 use ark::schema::Space;
-use ark_dev::demo::domain;
 use ark_peer::link::{bell, socket, wait, Dial, Event, Pumped};
 use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
 
 fn config() -> Config {
-    Config::new(Module::of(&domain()))
+    Config::of(Arc::new(ark_dev::demo::demo()))
 }
 
 fn peer(who: Who) -> Peer {
@@ -52,7 +51,7 @@ fn until(c: &mut (Peer, Receiver<()>), what: &str, f: impl Fn(&Peer, &Pumped) ->
 }
 
 fn create(c: &mut Peer, name: &str) {
-    let _ = c.author(Space::Durable, domain().get("demo.create_playlist"), bytes_enc(name.as_bytes()), now_ms());
+    let _ = c.author(Space::Durable, "demo.create_playlist", bytes_enc(name.as_bytes()), now_ms());
     c.pump();
 }
 
@@ -111,12 +110,7 @@ fn a_linked_round_trip_waits_on_nothing() {
     let direct: Vec<Duration> = (0..100)
         .map(|i| {
             let t = std::time::Instant::now();
-            let _ = d.author(
-                Space::Durable,
-                domain().get("demo.create_playlist"),
-                bytes_enc(format!("D{i}").as_bytes()),
-                now_ms(),
-            );
+            let _ = d.author(Space::Durable, "demo.create_playlist", bytes_enc(format!("D{i}").as_bytes()), now_ms());
             loop {
                 for f in d.take_frames() {
                     wire.send(f);
@@ -197,15 +191,13 @@ fn the_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     for name in ["a", "b"] {
-        hub.author(Space::Durable, domain().get("demo.create_playlist"), bytes_enc(name.as_bytes()), 1)
-            .unwrap();
+        hub.author(Space::Durable, "demo.create_playlist", bytes_enc(name.as_bytes()), 1).unwrap();
     }
     let store = hub.log.store.clone();
     drop(hub);
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     assert_eq!((hub.log.log(), &hub.log.store), (store.log(), &store));
-    hub.author(Space::Durable, domain().get("demo.create_playlist"), bytes_enc(b"c"), 1)
-        .unwrap();
+    hub.author(Space::Durable, "demo.create_playlist", bytes_enc(b"c"), 1).unwrap();
     assert_eq!(hub.log.log().entries()[2].entry.local, 3, "its own count goes on");
 }
 
@@ -235,7 +227,7 @@ fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
         origin: Origin::named(&who.session),
         local,
         roles: vec![],
-        func: domain().get("demo.create_playlist"),
+        func: "demo.create_playlist".into(),
         input: bytes_enc(name.as_bytes()),
         now: 1,
     };
@@ -383,9 +375,9 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     let r = room();
     let mut config = config();
     config.live = Some(Live {
-        on_join: Some(r.get("room.on_join")),
-        on_leave: Some(r.get("room.on_leave")),
-        on_restore: Some(r.get("room.on_restore")),
+        on_join: Some("room.on_join".into()),
+        on_leave: Some("room.on_leave".into()),
+        on_restore: Some("room.on_restore".into()),
         arrive: Arc::new(arrival),
         keep: Some(8),
         ..Live::new(Module::of(&r))
@@ -398,9 +390,11 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         cursor: 0,
         hash: None,
         device: Some(b"phone".to_vec()),
+        schema: Default::default(),
+        version: String::new(),
     };
     hub.frame(c, hello.enc(), 1);
-    hub.author(Space::Volatile, r.get("room.point"), ark::codec::int_enc(7).to_vec(), 2)
+    hub.author(Space::Volatile, "room.point", ark::codec::int_enc(7).to_vec(), 2)
         .unwrap();
     let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(

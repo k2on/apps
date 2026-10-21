@@ -531,7 +531,7 @@ fn the_admin_wire_reads_back() {
         origin: Default::default(),
         local: 1,
         roles: vec![],
-        func: Domain::hash_of("teams.make_team"),
+        func: "teams.make_team".into(),
         input: vec![],
         now: 5,
     };

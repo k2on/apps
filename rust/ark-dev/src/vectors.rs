@@ -16,7 +16,7 @@ use ark::ty::Ty;
 use ark_peer::{Config, Live, Module};
 use serde_json::{json, Value};
 
-use crate::demo::{arrival, domain, live, room};
+use crate::demo::{arrival, live, room};
 use crate::sim::{who, Net, Op};
 
 /// A value of `ty` as JSON: an `Int` a number, `Bytes` hex, a list or a
@@ -101,10 +101,7 @@ pub fn on_disk(d: &str) -> Vec<(String, String)> {
 // * The scripted sessions
 
 fn demo() -> Config {
-    Config {
-        live: None,
-        ..Config::new(Module::of(&domain()))
-    }
+    Config::of(Arc::new(crate::demo::demo()))
 }
 
 fn pair(id: &[u8], t: &str) -> Vec<u8> {
@@ -112,15 +109,11 @@ fn pair(id: &[u8], t: &str) -> Vec<u8> {
 }
 
 fn create(i: i64, name: &str) -> Op {
-    Op::Mutate(i, domain().get("demo.create_playlist"), bytes_enc(name.as_bytes()))
+    Op::Mutate(i, "demo.create_playlist".into(), bytes_enc(name.as_bytes()))
 }
 
 fn add(i: i64, owner: &str, t: &str) -> Op {
-    Op::Mutate(
-        i,
-        domain().get("demo.add_to_playlist"),
-        pair(&EntryId::of(Origin::named(owner), 1).draw(0), t),
-    )
+    Op::Mutate(i, "demo.add_to_playlist".into(), pair(&EntryId::of(Origin::named(owner), 1).draw(0), t))
 }
 
 /// `fleet-seed-7`'s script after its playlist (v4's, move for move).
@@ -144,34 +137,11 @@ pub fn fleet_script() -> Vec<Op> {
 /// `fleet-seed-7` (or another seed) run: the playlist, settled, the
 /// script, settled.
 pub fn fleet(seed: u64) -> Net {
-    let mut net = Net::new(Config::new(Module::of(&domain())), |_| demo(), 3, seed);
+    let mut net = Net::new(demo(), |_| demo(), 3, seed);
     net.run(&create(0, "Fleet"));
     net.settle().expect("the playlist settles");
     for op in fleet_script() {
         net.run(&op);
-    }
-    net.settle().expect("the fleet settles");
-    net
-}
-
-/// [`fleet`] over the demo in plain Rust (§1.16): the same script, each
-/// function called by its name's hash.
-pub fn fleet_native(seed: u64) -> Net {
-    let d = crate::native::demo();
-    let config = || Config::new(Module::native(&d));
-    let lang = domain();
-    let rename = |op: Op| match op {
-        Op::Mutate(i, f, input) => {
-            let (name, _) = lang.module.bindings.iter().find(|(_, h)| *h == f).expect("a demo function");
-            Op::Mutate(i, ark::domain::Domain::hash_of(name), input)
-        }
-        op => op,
-    };
-    let mut net = Net::new(config(), |_| config(), 3, seed);
-    net.run(&rename(create(0, "Fleet")));
-    net.settle().expect("the playlist settles");
-    for op in fleet_script() {
-        net.run(&rename(op));
     }
     net.settle().expect("the fleet settles");
     net
@@ -188,8 +158,8 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         net.settle().expect("a scripted session settles");
         net
     };
-    let two = |seed| Net::new(Config::new(Module::of(&domain())), |_| demo(), 2, seed);
-    let mut keep = Config::new(Module::of(&domain()));
+    let two = |seed| Net::new(demo(), |_| demo(), 2, seed);
+    let mut keep = demo();
     keep.keep = Some(1);
     let anon = Who {
         actor: String::new(),
@@ -201,19 +171,19 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         session: "alice-session".into(),
         roles: vec!["listener".into()],
     };
-    let mut hub = Config::new(Module::of(&domain()));
+    let mut hub = demo();
     hub.live = Some(Live {
-        on_join: Some(room.get("room.on_join")),
-        on_leave: Some(room.get("room.on_leave")),
+        on_join: Some("room.on_join".into()),
+        on_leave: Some("room.on_leave".into()),
         arrive: Arc::new(arrival),
         keep: Some(4),
         ..Live::new(Module::of(&room))
     });
     let device = |name: &str| Config {
         live: Some(live(name, 100)),
-        ..Config::new(Module::of(&domain()))
+        ..demo()
     };
-    let point = |i, x| Op::Call(i, room.get("room.point"), int_enc(x).to_vec());
+    let point = |i, x| Op::Call(i, "room.point".into(), int_enc(x).to_vec());
     let steps = |n: usize| vec![Op::Step; n];
     vec![
         (
@@ -242,7 +212,7 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         (
             "a-sign-in",
             run(
-                Net::of(Config::new(Module::of(&domain())), vec![(anon, demo()), (who(1), demo())], 4),
+                Net::of(demo(), vec![(anon, demo()), (who(1), demo())], 4),
                 vec![Op::Partition(0), create(0, "Mine"), Op::SignIn(0, alice)],
             ),
         ),
@@ -259,7 +229,7 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
                 Net::of(hub, vec![(who(0), device("phone")), (who(1), device("laptop"))], 6),
                 [
                     vec![
-                        Op::Call(0, room.get("room.rename"), bytes_enc(b"kitchen")),
+                        Op::Call(0, "room.rename".into(), bytes_enc(b"kitchen")),
                         point(0, 1),
                         point(0, 2),
                         point(0, 3),
@@ -278,7 +248,7 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
 /// An op as the rebase vector writes it.
 pub fn op_json(op: &Op) -> Value {
     match op {
-        Op::Mutate(i, f, input) => json!({"client": i, "fn": f.hex(), "input": hex(input), "t": "mutate"}),
+        Op::Mutate(i, f, input) => json!({"client": i, "fn": f, "input": hex(input), "t": "mutate"}),
         Op::Partition(i) => json!({"client": i, "t": "partition"}),
         Op::Heal(i) => json!({"client": i, "t": "heal"}),
         Op::Step => json!({"t": "step"}),

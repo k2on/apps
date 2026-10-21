@@ -4,13 +4,10 @@
 //! window is needed for any of it, so a server can speak these without
 //! linking iced.
 
-use std::collections::BTreeMap;
-
 use ark::domain::{Domain, Kind};
-use ark::gen::Node;
-use ark::hash::FnHash;
 use ark::log::{Entry, Seq};
 use ark::peer::Ctx;
+use ark::prelude::Node;
 use ark::row::Type;
 use ark::schema::Schema;
 use ark::store::{Change, Store};
@@ -273,12 +270,6 @@ pub fn crud_of(catalog: &Catalog) -> Vec<(String, CrudVerbs)> {
         }
     }
     out
-}
-
-/// Every function a log may name, by the hash it is called by: the
-/// domain's.
-pub fn function_names(catalog: &Catalog) -> BTreeMap<FnHash, String> {
-    catalog.functions.iter().map(|f| (Domain::hash_of(&f.name), f.name.clone())).collect()
 }
 
 /// Whether a function is a live transition (§1.9), which the log's

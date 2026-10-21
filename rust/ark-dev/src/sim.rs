@@ -16,13 +16,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ark::codec::Node;
 use ark::frames::Frame;
-use ark::hash::FnHash;
-use ark::ir::Node;
 use ark::peer::{Ctx, Who};
 use ark::plan::splice;
 use ark::schema::Space;
-use ark::view::query;
 use ark_peer::{Config, ConnId, Deliver, Disk, Memory, Peer, Update};
 
 /// Knuth's MMIX constants: the whole of the simulation's randomness.
@@ -41,8 +39,8 @@ pub fn who(i: i64) -> Who {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
-    Mutate(i64, FnHash, Vec<u8>),
-    Call(i64, FnHash, Vec<u8>),
+    Mutate(i64, String, Vec<u8>),
+    Call(i64, String, Vec<u8>),
     Partition(i64),
     Heal(i64),
     Restart,
@@ -81,17 +79,9 @@ pub struct Net {
     pub views: BTreeMap<(i64, usize), Watched>,
 }
 
-/// A view a client keeps: its space, its query and input, who reads it,
-/// and the list its patches made.
-pub type Watched = (Space, Of, Vec<u8>, Ctx, Vec<Vec<u8>>);
-
-/// What a view is of: a module's query by its hash, or a domain in Rust's
-/// view by its name.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Of {
-    Lang(FnHash),
-    Native(String),
-}
+/// A view a client keeps: its space, its view's name and input, who
+/// reads it, and the list its patches made.
+pub type Watched = (Space, String, Vec<u8>, Ctx, Vec<Vec<u8>>);
 
 impl Net {
     /// A hub and `n` clients, each opened as [`who`] with `config`, linked.
@@ -188,12 +178,12 @@ impl Net {
         match op.clone() {
             Op::Mutate(i, f, input) => {
                 let now = self.now;
-                let _ = self.client(i).author(Space::Durable, f, input, now);
+                let _ = self.client(i).author(Space::Durable, &f, input, now);
                 self.told_by_client(i);
             }
             Op::Call(i, f, input) => {
                 let now = self.now;
-                let _ = self.client(i).author(Space::Volatile, f, input, now);
+                let _ = self.client(i).author(Space::Volatile, &f, input, now);
                 self.told_by_client(i);
             }
             Op::Partition(i) => self.partition(i),
@@ -332,21 +322,13 @@ impl Net {
         }
     }
 
-    /// A view client `i` keeps, mirrored here by its patches.
-    pub fn watch(&mut self, i: i64, space: Space, f: FnHash, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
+    /// A view client `i` keeps of its domain's `name`, mirrored here by
+    /// its patches.
+    pub fn watch(&mut self, i: i64, space: Space, name: &str, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
         let c = self.client(i);
-        let v = c.watch(space, &f, &input, ctx.clone()).map_err(|r| r.0)?;
+        let v = c.watch(space, name, &input, ctx.clone()).map_err(|r| r.0)?;
         let rows = c.values(v).unwrap_or_default();
-        self.views.insert((i, v), (space, Of::Lang(f), input, ctx, rows));
-        Ok(v)
-    }
-
-    /// Client `i` keeps a view of the domain in Rust's `name` (§1.16).
-    pub fn watch_native(&mut self, i: i64, space: Space, name: &str, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
-        let c = self.client(i);
-        let v = c.watch_native(space, name, &input, ctx.clone()).map_err(|r| r.0)?;
-        let rows = c.values(v).unwrap_or_default();
-        self.views.insert((i, v), (space, Of::Native(name.into()), input, ctx, rows));
+        self.views.insert((i, v), (space, name.into(), input, ctx, rows));
         Ok(v)
     }
 
@@ -355,18 +337,12 @@ impl Net {
     pub fn views_hold(&self) -> Result<(), String> {
         for ((i, v), (space, f, input, ctx, mirror)) in &self.views {
             let c = &self.clients[i];
-            let lib = match space {
-                Space::Durable => &c.config.log.lib,
-                Space::Volatile => &c.config.live.as_ref().unwrap().module.lib,
+            let d = match space {
+                Space::Durable => c.config.log.domain.as_ref(),
+                Space::Volatile => c.config.live.as_ref().and_then(|l| l.module.domain.as_ref()),
             };
             let store = &c.machine(*space).unwrap().store;
-            let fresh: Vec<Vec<u8>> = match f {
-                Of::Lang(f) => query(lib, f, input, ctx, store).map_err(|r| r.0)?.iter().map(|v| v.to_bytes()).collect(),
-                Of::Native(name) => {
-                    let d = c.config.native.as_ref().expect("a domain in Rust");
-                    d.watch(store, ctx, name, input).map_err(|r| r.0)?.rows()
-                }
-            };
+            let fresh = d.expect("a domain").watch(store, ctx, f, input).map_err(|r| r.0)?.rows();
             if c.values(*v).as_ref() != Some(&fresh) || *mirror != fresh {
                 return Err(format!("client {i}'s view {v} is not a fresh evaluation"));
             }

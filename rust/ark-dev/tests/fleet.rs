@@ -49,20 +49,3 @@ fn fleets_of_other_seeds_converge_and_every_client_replays() {
     }
     assert_eq!(traces, 123);
 }
-
-/// The demo in plain Rust (§1.16) is the ArkLang demo: its schema hashes
-/// as `demo.ark`'s, and seed 7 and forty other seeds reach the very states
-/// the ArkLang fleet reaches, entry for entry. Falsified by stepping
-/// `add_to_playlist`'s place by two: seed 7's state moved.
-#[test]
-fn the_demo_in_rust_reaches_the_states_the_arklang_demo_does() {
-    assert_eq!(ark_dev::native::demo().schema_hash(), ark_dev::demo::domain().schema.hash());
-    for seed in [7, 0, 1, 2, 3, 11, 29, 40] {
-        let (lang, native) = (fleet(seed), ark_dev::vectors::fleet_native(seed));
-        native.converged().unwrap_or_else(|e| panic!("seed {seed}: {e}"));
-        assert!(native.refused.is_empty(), "seed {seed}: {:?}", native.refused);
-        let states = |n: &ark_dev::sim::Net| n.hub.log.log().entries().iter().map(|l| l.state).collect::<Vec<_>>();
-        assert_eq!(states(&native), states(&lang), "seed {seed}");
-    }
-    assert_eq!(ark_dev::vectors::fleet_native(7).hub.log.store.state_hash().hex(), HASH);
-}

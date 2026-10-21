@@ -33,7 +33,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use ark::hash::FnHash;
 use ark::log::Seq;
 use ark::peer::Who;
 use ark::schema::Space;
@@ -181,18 +180,18 @@ impl Handle {
     pub fn author(
         &self,
         space: Space,
-        func: FnHash,
+        func: String,
         input: Vec<u8>,
         once: Option<std::sync::Arc<dyn ark::peer::Procedure>>,
     ) -> Option<Result<Seq, String>> {
         self.with(move |p| {
             let raw = once.is_some();
             if let Some(f) = once {
-                p.log.cas.insert(func, f);
+                p.log.functions.insert(func.clone(), f);
             }
-            let r = p.author(space, func, input, now_ms());
-            if raw && p.config.log.cas.get(&func).is_none() {
-                p.log.cas.forget(&func);
+            let r = p.author(space, &func, input, now_ms());
+            if raw && p.config.log.functions.get(&func).is_none() {
+                p.log.functions.forget(&func);
             }
             r.map(|_| p.machine(space).map_or(0, |m| m.log().head().0))
         })

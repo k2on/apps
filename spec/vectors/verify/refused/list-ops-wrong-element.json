@@ -1,7 +1,0 @@
-{
-  "schema": [{"columns":[{"decl":"Text","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"text","ty":{"t":"bytes"}}],"indexes":[],"key":{"$int":"1"},"name":"joined","refs":[],"space":"durable"}],
-  "functions": [{"bytes":"0001020554657874000000030002176a6f696e65640000060100055465787400007800ff00ff0000010b02010b1b010180000000000000000100008000ff00ff00ff00ff00ff00ff00ff00000100008000ff00ff00ff00ff00ff00ff01000000000000","hash":"629d3c046f6987d66cc2c684ff434ff7136f6cb450efe203fd91a82378b01c37","name":"f"}],
-  "ark": null,
-  "verifies": false,
-  "why": "f: Insert: argument 2 is Int, not Named(\"Text\")"
-}

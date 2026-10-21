@@ -1,7 +1,0 @@
-{
-  "schema": [{"columns":[{"decl":"Text","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"text","ty":{"t":"bytes"}}],"indexes":[],"key":{"$int":"1"},"name":"joined","refs":[],"space":"durable"}],
-  "functions": [{"bytes":"00010554657874000000030001176a6f696e656400000601018000000000000000010180000000000000000000","hash":"b8ddeaefe6583474a2b73b532a25d38f630b3ad2a7b9fc95ad63cf5db9bccab7","name":"f"}],
-  "ark": null,
-  "verifies": false,
-  "why": "f: the body's effect is Write, above Read"
-}

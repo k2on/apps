@@ -13,23 +13,20 @@ use ark::codec::bytes_enc;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
-use ark_dev::demo::{arrival, domain, live, room};
+use ark_dev::demo::{arrival, live, room};
 use ark_dev::sim::{who, Net, Op};
 use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
 
 fn demo() -> Config {
-    Config {
-        live: None,
-        ..Config::new(Module::of(&domain()))
-    }
+    Config::of(Arc::new(ark_dev::demo::demo()))
 }
 
 fn net(n: i64) -> Net {
-    Net::new(Config::new(Module::of(&domain())), |_| demo(), n, 3)
+    Net::new(demo(), |_| demo(), n, 3)
 }
 
 fn create(name: &str) -> Op {
-    Op::Mutate(0, domain().get("demo.create_playlist"), bytes_enc(name.as_bytes()))
+    Op::Mutate(0, "demo.create_playlist".into(), bytes_enc(name.as_bytes()))
 }
 
 /// An intent authored offline survives a reopen: its entry, as it was,
@@ -61,7 +58,7 @@ fn a_sign_in_authors_what_was_pending_as_the_login() {
         session: "anon".into(),
         roles: vec![],
     };
-    let mut n = Net::of(Config::new(Module::of(&domain())), vec![(anon, demo()), (who(1), demo())], 5);
+    let mut n = Net::of(demo(), vec![(anon, demo()), (who(1), demo())], 5);
     n.run(&Op::Partition(0));
     n.run(&create("Road"));
     let alice = Who {
@@ -98,14 +95,8 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
         roles: vec![],
         now: 0,
     };
-    n.watch(0, Space::Durable, domain().get("demo.items"), bytes_enc(&pid), ctx).unwrap();
-    let add = |i: i64, t: &str| {
-        Op::Mutate(
-            i,
-            domain().get("demo.add_to_playlist"),
-            [bytes_enc(&pid), bytes_enc(t.as_bytes())].concat(),
-        )
-    };
+    n.watch(0, Space::Durable, "demo.items", bytes_enc(&pid), ctx).unwrap();
+    let add = |i: i64, t: &str| Op::Mutate(i, "demo.add_to_playlist".into(), [bytes_enc(&pid), bytes_enc(t.as_bytes())].concat());
     for op in [Op::Partition(0), add(0, "a"), add(1, "b"), add(1, "c"), Op::Step, Op::Step, Op::Heal(0)] {
         n.run(&op);
         n.views_hold().unwrap();
@@ -127,17 +118,17 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
 #[test]
 fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     let r = room();
-    let mut hub = Config::new(Module::of(&domain()));
+    let mut hub = demo();
     hub.live = Some(Live {
-        on_join: Some(r.get("room.on_join")),
-        on_leave: Some(r.get("room.on_leave")),
+        on_join: Some("room.on_join".into()),
+        on_leave: Some("room.on_leave".into()),
         arrive: std::sync::Arc::new(arrival),
         keep: Some(8),
         ..Live::new(Module::of(&r))
     });
     let config = |name: &str| Config {
         live: Some(live(name, 100)),
-        ..Config::new(Module::of(&domain()))
+        ..demo()
     };
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);
     n.deliver();
@@ -149,11 +140,11 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
         roles: vec![],
         now: 0,
     };
-    n.watch(1, Space::Volatile, r.get("room.present"), vec![], ctx).unwrap();
+    n.watch(1, Space::Volatile, "room.present", vec![], ctx).unwrap();
     assert_eq!(n.clients[&1].values(0).unwrap().len(), 2, "both here");
-    n.run(&Op::Call(0, r.get("room.rename"), bytes_enc(b"kitchen")));
+    n.run(&Op::Call(0, "room.rename".into(), bytes_enc(b"kitchen")));
     for x in [1, 2, 3] {
-        n.run(&Op::Call(0, r.get("room.point"), ark::codec::int_enc(x).to_vec()));
+        n.run(&Op::Call(0, "room.point".into(), ark::codec::int_enc(x).to_vec()));
     }
     n.run(&Op::Wait(100));
     n.deliver();
@@ -166,7 +157,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
         .log()
         .entries()
         .iter()
-        .filter(|l| l.entry.func == r.get("room.point"))
+        .filter(|l| l.entry.func == "room.point")
         .count();
     assert_eq!(moves, 2, "the second and third coalesced");
     n.converged().unwrap();
@@ -205,7 +196,7 @@ impl Disk for Tally {
 fn a_mutate_writes_one_pending_record() {
     let written = Arc::new(AtomicUsize::new(0));
     let mut c = Peer::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())), false);
-    let create = domain().get("demo.create_playlist");
+    let create = "demo.create_playlist";
     let mut last = 0;
     for i in 0..=8000 {
         let before = written.load(Ordering::Relaxed);

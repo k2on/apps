@@ -1,13 +1,14 @@
-//! The demo in plain Rust (§1.16) as a domain: its functions by name, an
+//! The demo (§1.16) as a domain: its functions by name, an
 //! input's refinements as the form's validation and the intent's refusal,
 //! and a scope by table.
 
+use ark::codec::Node;
 use ark::domain::Kind;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::row::Input;
 use ark::store::Store;
-use ark_dev::native::{demo, CreatePlaylist};
+use ark_dev::demo::{demo, CreatePlaylist};
 
 fn ctx() -> Ctx {
     Ctx {
@@ -37,8 +38,8 @@ fn the_demo_registers_its_functions_and_refines_its_inputs() {
     assert_eq!(named.name, "Mix");
     let mut store = Store::new(d.schema.clone());
     let f = d.get("demo.create_playlist").unwrap().proc.clone().unwrap();
-    let refused = f.apply(&mut store, &ctx(), &ark::ir::Node::to_bytes(&blank));
+    let refused = f.apply(&mut store, &ctx(), &blank.to_bytes());
     assert_eq!(refused.unwrap_err().0, "a playlist needs a name");
-    let made = f.apply(&mut store, &ctx(), &ark::ir::Node::to_bytes(&named)).unwrap();
+    let made = f.apply(&mut store, &ctx(), &named.to_bytes()).unwrap();
     assert_eq!(made.len(), 1);
 }

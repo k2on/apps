@@ -1,7 +1,0 @@
-{
-  "schema": [{"columns":[{"decl":"Id<playlist>","default":null,"name":"id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"name","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"user_id","ty":{"t":"bytes"}}],"indexes":[{"columns":["user_id","name"],"unique":true}],"key":{"$int":"1"},"name":"playlist","refs":[],"space":"durable"},{"columns":[{"decl":"Id<playlist>","default":null,"name":"playlist_id","ty":{"t":"bytes"}},{"decl":"Text","default":null,"name":"track_id","ty":{"t":"bytes"}},{"decl":"Int","default":null,"name":"pos","ty":{"t":"int"}}],"indexes":[{"columns":["playlist_id","pos"],"unique":true}],"key":{"$int":"2"},"name":"item","refs":[{"column":"playlist_id","table":"playlist"}],"space":"durable"}],
-  "functions": [{"bytes":"000004010001000000090500008000ff00ff00ff00ff00ff00ff01000000055465787400003100ff00ff000000","hash":"fecee56587f09b483b50d404f49a4d1ab2d85cc6578ea74380cf9dee435686bb","name":"f"}],
-  "ark": null,
-  "verifies": false,
-  "why": "f: Int compared with Named(\"Text\")"
-}
