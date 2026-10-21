@@ -493,6 +493,63 @@ counted; else head and first argument (an atom, or one that fits) on the
 first line, the rest one per line two spaces in. `print(build(t)) == t`
 for every file of `harken/domain`, comments aside.
 
+### 1.16 Native: one runtime, the domain in Rust
+
+The owner's decision, which supersedes §1.4, §1.5, §1.12 and §1.15: **there
+is one runtime, Rust, and a domain is plain Rust.** Phones embed the Rust
+kernel through FFI (N3); ArkLang, the checker and the interpreter go.
+
+1. **A domain is a crate.** Rows are structs with `#[derive(Row)]`
+   (`#[ark(key)]`, `#[ark(index(..))]`, `#[ark(unique(..))]`,
+   `#[ark(refs(T))]`, `#[ark(volatile)]`); inputs `#[derive(Input)]`, whose
+   field attributes (`#[ark(trim, len = "1..=80", why = "…")]`, `range`,
+   `non_empty`, `check`) generate the check that is the form's validation;
+   sums are ordinary enums (`#[derive(Describe)]`); `#[derive(Schema)]` on
+   the struct of tables. A **mutator** is `fn(&Ctx, &mut Db<S>, I) ->
+   Result<(), Refusal>`; a helper or guard takes `&Db<S>`, so it cannot
+   write — effects are the borrow checker's; a **scope** is `fn(&Ctx, &R)
+   -> bool` per table; a **live transition** is a mutator over volatile
+   tables; a **view** returns a `Plan<R>` built by `plan::scan::<R>()
+   .filter(..).sort(..).take(n)`, `group`, `join`, because maintenance must
+   see the plan. `#[mutator("playlists.add_to_playlist")]` (and `live`,
+   `query`, `view`, `scope`) only registers the function by name in a
+   `Domain`: name → function and its input's type description.
+2. **Reads are typed handles.** `db.playlist.get(id)`, `db.playlist_item
+   .by(PlaylistItem::PLAYLIST_POS).from(id).last()`, `scan`, `range`: the
+   author names the index, a wrong column is a compile error, and nothing
+   routes a mutator's reads at run time. `insert`/`update`/`put`/`delete`
+   judge the store's constraints and report `Change`s, typed, stored as
+   bytes. A run reads its own writes; a refusal undoes them.
+3. **Determinism is an API rule.** `ctx.now` and `ctx.new_id()` (the n-th
+   draw of the entry's id, §1.6) are a function's only non-determinism;
+   nothing else a mutator may consult varies between runs. A replica that
+   disagrees anyway is healed as now: the authority's facts win.
+4. **serde everywhere.** Rows, inputs, entries, `Logged`, frames, snapshots
+   and journal records are serde values written as compact **JSON** (no
+   floats; maps as `BTreeMap`; struct fields in declaration order), the
+   canonical form hashed. Keys — a row's, an index entry's — are
+   `memcomparable` bytes, so the store stays one `memcmp`-ordered map. A
+   grown row reads under an older struct by ignoring what it lacks and
+   under a newer by `#[serde(default)]` on appended fields (§1.2's rule).
+   The state hash is `sha256(table ‖ row_json)` summed per table; the
+   chain hash is over the JSON bytes. `codec.rs`, `ty.rs`, `Node` go.
+5. **Functions by name.** `Entry.func` is the function's name; `Hello`
+   carries the domain's schema hash and version string; an unknown name is
+   `Held`. The CAS, closures by hash and the module go. The schema stays
+   data, derived from the structs, hashed, prefix-compat-checked, and what
+   the explorer reads; forms come from each input's type description.
+6. **Views are generic.** `view.rs` is `impl<R>` operators over typed rows
+   and deltas (derived `Ord`/`Hash`, order keys the sort keys' key bytes),
+   monomorphised per declared view; a closure's reads through `&Db` are
+   recorded and a change to what it read re-runs that element only. One
+   `DynRow` (a JSON row under its table) puts the explorer and the
+   `views/` vectors — plans carried as JSON — on the same engine.
+
+Kept: the store, the chain, the one machine, the rebase, partial sync as a
+view, live state as a second machine, every `rebase/`, `protocol/`,
+`trace/`, `views/` and `hash/` family (re-derived). Gone: `eval/`,
+`verify/`, `module/`, `text/`, `codec/`, `arkc`, the source pane.
+
 ---
 
 ## Part 2 — The work
