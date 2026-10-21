@@ -988,6 +988,72 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**S3b** (`93d03a5`…): **one reconciler, two adapters.** What a phone did
+in `Remote.kt` and the server did for a Home Assistant speaker in
+`assistant.rs`'s `Bridge` — make a player agree with the listening session
+and say what happened to it — is one crate, `harken/player`
+(`harken-player`, over `harken-domain` and `ark-peer`). Its `Reconciler`
+looks at a `View { me, joined, epoch, listening, now }` (the domain's
+`host::Listening`) and drives a **`Sound`**: commands `load(queue, at, ms,
+playing, from)`, `jump`, `resume`, `pause`, `seek`, `let_go(follows)`,
+`wake_in`, `set_volume`, `join`/`unjoin`; readings `heard() -> Heard {
+queue (ids), at, playing (asked to), ready (has the hand-off), place:
+Unknown | Believed(ms) | Measured{ms, at}, ended, from }`, `take() ->
+Event { Stalled{at_ms} | Resumed | Lost{why} }`, `tracks`, `caps`,
+`volume`, `followers`. It answers through a `Say` (`call(transition,
+input, as_of, why)`, `play(RecordPlay)`). One code path, in order: `equip`
+once a connection where the entry differs from what the player can do; the
+rule for coming back; volume (read against what the player read after its
+own last write) and group, both ways; then output — load the session's whole
+queue, jump where the session moved, a move of the player's own said as
+`advance`/`jump` and waited for, `started` once ready, the queue's end once,
+a stall/resume said and not fought, play/pause, a seek where the session
+moved, a drift said (`report_position`, past `DRIFT_MS` its own `seek`) —
+or silent, let go once (no pause for a member of the new leader's group),
+or released and not taken back; plays counted once per load. Its **memory is
+rows**: `Mind` (volatile, an `Instance::ephemeral::<Minds>()`), each column a
+sum — `Alone{Quiet|Playing}`, `Role{Silent|Output|Released}`,
+`Handoff{None|Started{here}|Advanced{here}}`, `Expect{Nowhere|At}`,
+`Against{Nothing|Clock{here,clock}}`, `Waiting{Nothing|On{clock}}`,
+`Equipped{Not|Said{epoch,can_volume,family}}`,
+`Tuned{Untold|Told{wanted}|Settled{wanted,seen}}`, `Grouped{Untold|Told}` —
+and `Count { loaded: Nothing | Track{here, counted} }`, durable
+(`Instance::open::<Counts>`, the phone's under its replica's directory).
+`Player` drives one over a device's own peer: its calls, its plays in the
+log, a `Press` (the press → transition mapping, moved from Kotlin) and one
+view, `{me, joined, linked, epoch, listening, active, stats, refused}`,
+whose `active` is the session's while joined and the player's own alone.
+*Adapter 1*, `harken-server`'s `Speakers`: Home Assistant's polls read into
+`Heard`/`Event` (the hand-off fetched and its dropped seek said again, the
+blink, the stale date, the lapse, the URL spelt back, the speaker's own
+queue), commands as service calls (`Act`), which account holds a speaker;
+the `Bridge`'s decisions and its `Seen`/`released`-per-rule memory go, and
+all 14 HTTP tests (`tests/bridge.rs`) pass unchanged. *Adapter 2*, the
+phone: `harken/ffi`'s `Player` (UniFFI object) over a callback interface
+`PhoneSound` (UniFFI's `with_foreign`, as `Listener` already is), which
+`ExoSound` implements; `Remote.kt` and `Volumes` go, `Listen.kt` steps the
+Rust player, `Playback.kt`'s state layer draws `Heard.active` in both modes
+(its alone `read()` path goes; shuffle alone is the queue reordered, not a
+mode), and `Session.kt` keeps what the screens read (`Listening`, `Press`,
+`Picker`). iOS has the interface and a silent stand-in (`Player.swift`).
+Not done: subscribing with `peer.reconcile` — a speaker's machines are
+kernel machines on the hub, not `ark_peer::Peer`s, and the session is three
+volatile tables read whole, so both drivers call the reconciler on every
+change instead. Source: `harken-player` 884 (+405 tests), `harken-server`
+4,787 → 4,517 (its in-file tests 1,095 → 887 lines; the shipped adapter
+1,936 → ~1,875: the speaker's reading is most of what the bridge was),
+`harken/ffi` 123 → 274 (+523 tests), domain, `ark-peer`, `ark-ffi`
+unchanged; hand-written Kotlin main 12,269 → 11,800 (`Remote.kt`'s 757 gone, `Session.kt` 319 in), tests
+5,699 → 5,265; so the default Rust grows by 765 and Kotlin falls by 903,
+for one reconciler where there were two (three with the desktop's, which
+is `harken-iced`'s and untouched). Tests: Rust 445 passed (`RemoteTests`'s
+ten in `harken/ffi/tests/player.rs`, one more for a step told of its own
+change; the bridge's session rules as eight in `harken/player/tests`; its
+reading of the house as nineteen beside it), each new one falsified once;
+the app's JVM tests 99 (one skipped), run over a host-only library. Not
+verified: a phone or an iPhone running it (`Player.swift` not
+type-checked here), a real Home Assistant and Sonos.
+
 **S3a** (`dd26e71`…): **a peer is three instances wired; an effect is a
 row.** *Instances.* `ark_peer::Instance` (`instance.rs`) is one machine and
 what keeps it — a disk or none, the open from it (`stored`), every
