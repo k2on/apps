@@ -1142,7 +1142,7 @@ packages and `ark-admin`; checks `rust`, `vectors`, `traces`,
 `fuzz-smoke`, `versions`, `harken-domain`, `harken-module`; Kotlin's,
 Swift's and the phone's outputs removed (`kotlin/FROZEN.md`,
 `swift/FROZEN.md`: frozen at v4, last recorded green `a983b3c`); the CI
-change is `docs/build-workflow-v5.patch`, to be applied by hand. The
+change is applied by hand to `.github/workflows/build.yaml` (the owner's credentials; this session cannot push workflow files). The
 flake's toolchain (1.98) found one lint 1.97 does not
 (`result_large_err` in `ark-server::admin`), fixed. Sizes after
 (`docs/perf/loc-r1.txt`): `ark` 7,790 source (5,447 less the Unicode
