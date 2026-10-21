@@ -4,7 +4,7 @@
 //! exposes no CRUD and a client has no raw write.
 
 use crate::domain::CreatePlaylist;
-use ark::ir::Node;
+use ark::codec::Node;
 use ark_explorer::value::Value;
 use iced::keyboard::{key::Named, Key, Modifiers};
 

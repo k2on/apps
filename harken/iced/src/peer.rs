@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use crate::domain::Id as Key;
 use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
 use crate::domain::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, Works};
-use ark::ir::Node;
+use ark::codec::Node;
 use ark_peer::Patch;
 
 use crate::client::{Replica, Update};
@@ -152,7 +152,7 @@ pub enum Moved {
     Reset,
 }
 
-/// The patches, in order, onto the decoded list: `ark::view::splice` with
+/// The patches, in order, onto the decoded list: `ark::plan::splice` with
 /// the decoding said, because a row here is a type of this crate's.
 fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&[u8]) -> T) {
     for p in patches {
@@ -882,7 +882,7 @@ mod tests {
         assert_eq!(peer.client.pending_len(), 5);
 
         let d = crate::client::domain();
-        let mut hub = Hub::serve(Config::new(Module::native(d)), Box::new(ark_peer::Memory::default()), 0);
+        let mut hub = Hub::serve(Config::new(Module::of(d)), Box::new(ark_peer::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles of the login.
         let alice = Who {

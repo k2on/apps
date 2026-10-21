@@ -456,7 +456,7 @@ fn device_name() -> String {
 pub mod input {
     use crate::domain::Id;
     use crate::domain::*;
-    use ark::ir::Node;
+    use ark::codec::Node;
 
     /// A transition that takes nothing.
     pub fn none() -> Vec<u8> {
@@ -682,9 +682,9 @@ mod tests {
     impl Net {
         fn new() -> Net {
             let d = crate::client::domain();
-            let m = ark_peer::Module::native(d);
+            let m = ark_peer::Module::of(d);
             let mut c = Config::new(m.clone());
-            let get = |n: &str| Some(ark::domain::Domain::hash_of(&format!("listening.{n}")));
+            let get = |n: &str| Some(format!("listening.{n}"));
             c.live = Some(Live {
                 on_join: get("on_join"),
                 on_leave: get("on_leave"),

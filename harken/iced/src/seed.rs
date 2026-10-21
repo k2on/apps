@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use crate::domain::host as keys;
 use crate::domain::{AddSong, CreditRecording, DescribePerson, DescribeRecording, DescribeWork, Library, LibraryEntry};
 use crate::domain::{AddToPlaylist, CreatePlaylist};
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::log::{EntryId, Record, Snapshot};
 use ark::peer::Ctx;
 use ark::store::Store;

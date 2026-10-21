@@ -13,9 +13,6 @@
 //! authored like any other, and its standing — pending, in the log, refused
 //! — is what [`Replica::standing`] says of its id.
 
-use std::collections::BTreeMap;
-
-use ark::hash::FnHash;
 use ark::log::EntryId;
 use ark::store::{Change, Store};
 use ark_explorer::{Catalog, Connection, CrudVerbs, Explorer, Line, LogView, Source, Ticket, Verdict, Writer};
@@ -26,12 +23,10 @@ use crate::client::{domain, Replica, Standing};
 use crate::{App, Edit, Message};
 
 /// The explorer while it is open, and what it needs that does not move:
-/// the domain described, the names of the functions an entry may name, and
-/// the CRUD exposed.
+/// the domain described and the CRUD exposed.
 pub struct Explore {
     pub ui: Explorer,
     catalog: Catalog,
-    names: BTreeMap<FnHash, String>,
     exposed: Vec<(String, CrudVerbs)>,
 }
 
@@ -42,7 +37,6 @@ impl Explore {
         let catalog = Catalog::of(domain());
         Explore {
             ui: Explorer::new(),
-            names: ark_explorer::function_names(&catalog),
             exposed: ark_explorer::crud_of(&catalog)
                 .into_iter()
                 .map(|(t, v)| (t, CrudVerbs { may_author: true, ..v }))
@@ -138,7 +132,6 @@ impl Writer for Shown<'_> {
 /// of them in the log yet); and where it is and how it is linked.
 struct Seen<'a> {
     client: &'a Replica,
-    names: &'a BTreeMap<FnHash, String>,
 }
 
 impl LogView for Seen<'_> {
@@ -146,7 +139,7 @@ impl LogView for Seen<'_> {
         self.client.cursor()
     }
     fn lines(&self) -> Vec<Line> {
-        let name = |f: &FnHash| self.names.get(f).cloned().unwrap_or_else(|| f.hex());
+        let name = |f: &String| f.clone();
         let log = &self.client.log;
         let confirmed = log.log().entries().into_iter().map(|l| Line {
             seq: Some(l.seq),
@@ -200,7 +193,7 @@ impl App {
         let client = &mut self.peer.client;
         let store: Store = client.log.store.clone();
         let ctx = client.ctx();
-        let log = Owned::of(client, &x.names);
+        let log = Owned::of(client);
         let src = Source {
             store: &store,
             catalog: &x.catalog,
@@ -231,7 +224,7 @@ impl App {
     pub fn observe_explorer_at(&mut self, now: u64) {
         let Some(x) = self.explore.as_mut() else { return };
         let client = &self.peer.client;
-        let log = Seen { client, names: &x.names };
+        let log = Seen { client };
         let src = Source {
             store: &client.log.store,
             catalog: &x.catalog,
@@ -246,7 +239,7 @@ impl App {
     pub fn view_explorer(&self) -> Option<iced::Element<'_, Message>> {
         let x = self.explore.as_ref()?;
         let client = &self.peer.client;
-        let log = Seen { client, names: &x.names };
+        let log = Seen { client };
         let src = Source {
             store: &client.log.store,
             catalog: &x.catalog,
@@ -269,8 +262,8 @@ struct Owned {
 }
 
 impl Owned {
-    fn of(client: &Replica, names: &BTreeMap<FnHash, String>) -> Owned {
-        let seen = Seen { client, names };
+    fn of(client: &Replica) -> Owned {
+        let seen = Seen { client };
         Owned {
             head: seen.head(),
             lines: seen.lines(),

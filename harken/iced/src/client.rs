@@ -13,8 +13,8 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::domain::Device;
+use ark::codec::Node;
 use ark::domain::Domain;
-use ark::ir::Node;
 use ark::peer::Who;
 pub use ark_peer::link::Wake;
 #[cfg_attr(all(feature = "demo", not(test)), allow(unused_imports))]
@@ -51,13 +51,13 @@ pub fn config(device: Vec<u8>) -> Config {
     let d = domain();
     let live = Live {
         device: Some(device),
-        ephemeral: [Domain::hash_of("listening.scrub")].into(),
+        ephemeral: ["listening.scrub".to_string()].into(),
         every_ms: THROTTLE_MS as i64,
-        ..Live::new(ark_peer::Module::native(d))
+        ..Live::new(ark_peer::Module::of(d))
     };
     Config {
         live: Some(live),
-        ..Config::native(d.clone())
+        ..Config::of(d.clone())
     }
 }
 
