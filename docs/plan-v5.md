@@ -992,6 +992,20 @@ and re-runs the pending once, 48.8 µs/entry under 400 against v4's 64.6 (was
 (was 1,990.8; v4 31.3). Link: frames go out from the caller's thread, a
 linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
+### Landed: crane
+
+The Rust builds in `flake.nix` are crane's, in layers per target: on the
+host the dependencies (over a dummy of the manifests), the workspace once
+over them, its test targets once over that; the checks only run tests, and
+`clippy` and `fmt` are checks of their own. Features resolve once for the
+whole workspace on the host (cargo's `feature-unification`), so `-p` runs
+reuse the layers. The wasm pages share one dependency layer; each Android
+ABI has its own, and the iOS targets one. Measured on this machine with
+`--max-jobs 1`, `nix build` of `checks.{rust,ffi,traces,versions}` after a
+comment added to `harken/domain/src/lib.rs`, dependencies already built:
+`Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
+→ 399 s. From nothing but the fetched crates the new layers take 1,006 s.
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
