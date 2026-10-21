@@ -2,8 +2,8 @@
 //! input's refinements as the form's validation and the intent's refusal,
 //! and a scope by table.
 
-use ark::codec::Node;
 use ark::domain::Kind;
+use ark::json::Json;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::row::Input;

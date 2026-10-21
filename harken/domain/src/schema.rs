@@ -8,7 +8,7 @@ use crate::types::{Present, Session};
 // track belongs to, each keyed by what it is (`keys.rs`).
 
 /// Every playable thing.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(index(file), index(pos))]
 pub struct Media {
     #[ark(key)]
@@ -23,7 +23,7 @@ pub struct Media {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Album {
     #[ark(key)]
     pub name: String,
@@ -34,7 +34,7 @@ pub struct Album {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Person {
     #[ark(key)]
     pub name: String,
@@ -46,7 +46,7 @@ pub struct Person {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Work {
     #[ark(key)]
     pub id: String,
@@ -64,7 +64,7 @@ pub struct Work {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Movement {
     #[ark(key)]
     pub id: String,
@@ -77,7 +77,7 @@ pub struct Movement {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Recording {
     #[ark(key)]
     pub id: String,
@@ -92,7 +92,7 @@ pub struct Recording {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Credit {
     #[ark(key, refs(Recording))]
     pub recording_id: String,
@@ -106,7 +106,7 @@ pub struct Credit {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Song {
     #[ark(key, refs(Media))]
     pub media_id: Id<Media>,
@@ -123,7 +123,7 @@ pub struct Song {
 
 // The playlists: each one person's, its name unique among theirs.
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 // One column in two indexes reads to clippy as an attribute said twice.
 #[allow(clippy::duplicated_attributes)]
 #[ark(unique(user_id, name), index(pos), index(user_id, pos))]
@@ -136,7 +136,7 @@ pub struct Playlist {
     pub user_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(index(playlist_id, pos))]
 pub struct PlaylistItem {
     #[ark(key, refs(Playlist))]
@@ -151,7 +151,7 @@ pub struct PlaylistItem {
 /// A track that was played: one row per play, carrying the track as it was
 /// heard and its media id as text, which references nothing, on purpose: a
 /// play is a fact about what was heard, not a hold on the library.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(index(user_id, played_ms))]
 pub struct Play {
     #[ark(key)]
@@ -172,7 +172,7 @@ pub struct Play {
 // and one per device dragging a scrubber, which only its own device writes
 // and nothing ordered reads.
 
-#[derive(Clone, Debug, PartialEq, Eq, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[ark(volatile)]
 pub struct Listening {
     #[ark(key)]
@@ -180,7 +180,7 @@ pub struct Listening {
     pub session: Session,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(volatile)]
 pub struct ListeningDevice {
     #[ark(key)]
@@ -190,7 +190,7 @@ pub struct ListeningDevice {
     pub present: Present,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(volatile)]
 pub struct ListeningScrub {
     #[ark(key)]

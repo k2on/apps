@@ -10,9 +10,10 @@ use ark_dev::trace::{record, replay};
 use ark_dev::vectors::fleet;
 
 /// K1's pin (`rust/ark/tests/fleet.rs`, now moved here): twenty entries,
-/// this state.
+/// this state. N1 moved the state (`ff04f56d…` before): rows are their
+/// JSON and ids drawn without the codec; the twenty entries are as they were.
 const HEAD: i64 = 20;
-const HASH: &str = "ff04f56d613ee73dad721e02cb6ebe125fa93fe801b2f1713499038f55475e95";
+const HASH: &str = "8316d1f4900f9d9e6605671960aef8fc72900a80be59e01168a090250ba005bf";
 
 /// Seed 7 converges to K1's pin through the hub: every client's log is the
 /// hub's, entry for entry and hash for hash, every store is its store,

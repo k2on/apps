@@ -8,4 +8,5 @@ description = "ArkDB v5's development tools (docs/plan-v5.md D1): the simulator 
 [dependencies]
 ark = { path = "../ark" }
 ark-peer = { path = "../ark-peer" }
+serde = { workspace = true }
 serde_json = { workspace = true }

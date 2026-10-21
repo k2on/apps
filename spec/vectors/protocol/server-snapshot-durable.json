@@ -1,34 +1,4 @@
 {
-  "bytes": "02008000000000000004d0a6e4ae65d62a37ea396e42dccadab0464ddd86aed34050d6c4413cc3d36ad50000ff9cfdc6c65a1c1b6684582c1e11ced5dabbeba6ff8d7256e1702b9b66b0b9aa000001706c61796c6973740000014a17b92a4fad6f31fa83e63b4136d9b000ff00ff4d697800ff00ff706565722d3000ff00ff000000016974656d0000014a17b92a4fad6f31fa83e63b4136d9b000ff00ff743100ff00ff8000ff00ff00ff00ff00ff00ff010000014a17b92a4fad6f31fa83e63b4136d9b000ff00ff743200ff00ff8000ff00ff00ff00ff00ff00ff020000014a17b92a4fad6f31fa83e63b4136d9b000ff00ff743300ff00ff8000ff00ff00ff00ff00ff00ff0300000000",
-  "frame": {
-    "fields": [
-      {
-        "fields": [],
-        "variant": 0
-      },
-      [
-        4,
-        "d0a6e4ae65d62a37ea396e42dccadab0464ddd86aed34050d6c4413cc3d36ad5",
-        "ff9cfdc6c65a1c1b6684582c1e11ced5dabbeba6ff8d7256e1702b9b66b0b9aa",
-        [
-          [
-            "706c61796c697374",
-            [
-              "4a17b92a4fad6f31fa83e63b4136d9b000004d69780000706565722d300000"
-            ]
-          ],
-          [
-            "6974656d",
-            [
-              "4a17b92a4fad6f31fa83e63b4136d9b00000743100008000000000000001",
-              "4a17b92a4fad6f31fa83e63b4136d9b00000743200008000000000000002",
-              "4a17b92a4fad6f31fa83e63b4136d9b00000743300008000000000000003"
-            ]
-          ]
-        ]
-      ]
-    ],
-    "variant": 2
-  },
+  "frame": {"Snapshot":{"space":"durable","snapshot":{"seq":4,"hash":"5a2d516d3529faac9a366e9fc9e22cb9563c46c8642608a45dd4428c1ccaf4c6","state":"882f0bf1dfb4c019b9c8210642b9b8145eb77f2cd64dbb43386167af22f49729","rows":[["playlist",[{"id":"ff553eb2adcf202aa3512111bd8d5b94","name":"Mix","user_id":"peer-0"}]],["item",[{"playlist_id":"ff553eb2adcf202aa3512111bd8d5b94","track_id":"t1","pos":1},{"playlist_id":"ff553eb2adcf202aa3512111bd8d5b94","track_id":"t2","pos":2},{"playlist_id":"ff553eb2adcf202aa3512111bd8d5b94","track_id":"t3","pos":3}]]]}}},
   "name": "server-snapshot-durable"
 }

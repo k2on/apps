@@ -7,15 +7,15 @@
 use ark::domain::{Domain, Kind};
 use ark::log::{Entry, Seq};
 use ark::peer::Ctx;
-use ark::prelude::Node;
 use ark::row::Type;
 use ark::schema::Schema;
 use ark::store::{Change, Store};
+use serde::{Deserialize, Serialize};
 
 /// `docs/plan-guards.md` D4 Which of a table's four CRUD mutations a module
 /// exposes — `insert_<t>`, `update_<t>`, `delete_<t>`, `put_<t>`, bound
 /// under any router — and whether this host may author them at all.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Node)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrudVerbs {
     pub insert: bool,
     pub update: bool,
@@ -121,7 +121,7 @@ impl Verdict {
 /// One line of the log, as a host shows it: where it is (none while it is
 /// pending), the entry — who pushed it is its actor and its login — the
 /// function's name, its facts where they are known, and where it stands.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Line {
     pub seq: Option<Seq>,
     pub entry: Entry,
@@ -132,7 +132,7 @@ pub struct Line {
 
 /// One connection, or this device: who, where in the log, and how many of
 /// its intents are pending where that is known.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     pub who: String,
     pub cursor: Seq,
@@ -153,14 +153,14 @@ pub trait LogView {
 /// What the explorer knows of a domain (§1.16): its schema, and per
 /// function its name, its kind, and the descriptions of its input, of what
 /// it answers and of its input's refinements — what a form is drawn from.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Catalog {
     pub schema: Schema,
     pub functions: Vec<Described>,
 }
 
 /// One function, described.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Described {
     pub name: String,
     pub kind: Kind,
@@ -250,7 +250,7 @@ pub fn record_fields(t: &Type) -> Option<&[(String, Type)]> {
 pub fn crud_of(catalog: &Catalog) -> Vec<(String, CrudVerbs)> {
     let mut out = Vec::new();
     for t in &catalog.schema.tables {
-        let said = |cs: &[ark::schema::Column]| cs.iter().map(|c| c.decl.clone()).collect::<Vec<_>>();
+        let said = |cs: &[ark::schema::Column]| cs.iter().map(|c| c.ty.decl()).collect::<Vec<_>>();
         let takes = |verb: &str, want: Vec<String>| {
             catalog
                 .functions

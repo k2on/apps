@@ -1,20 +1,4 @@
 {
-  "bytes": "0301d0152e895b86daf3e5412a5a87a25d0a0000008000000000000006",
-  "frame": {
-    "fields": [
-      {
-        "fields": [],
-        "variant": 1
-      },
-      "d0152e895b86daf3e5412a5a87a25d0a",
-      {
-        "fields": [
-          6
-        ],
-        "variant": 0
-      }
-    ],
-    "variant": 3
-  },
+  "frame": {"Verdict":{"space":"volatile","id":"851234151743d65409f72ea19e17578f","verdict":{"Ok":{"seq":6}}}},
   "name": "server-verdict-ok-volatile"
 }

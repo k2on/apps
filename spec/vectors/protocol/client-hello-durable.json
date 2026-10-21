@@ -1,26 +1,4 @@
 {
-  "bytes": "000080000000000000000100ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000031ebe717b274e80c0baa628a596579c9e3e79436cd41337682848a9166d6c5b700000000",
-  "frame": {
-    "fields": [
-      {
-        "fields": [],
-        "variant": 0
-      },
-      0,
-      {
-        "fields": [
-          "0000000000000000000000000000000000000000000000000000000000000000"
-        ],
-        "variant": 1
-      },
-      {
-        "fields": [],
-        "variant": 0
-      },
-      "31ebe717b274e80c0baa628a596579c9e3e79436cd41337682848a9166d6c5b7",
-      ""
-    ],
-    "variant": 0
-  },
+  "frame": {"Hello":{"space":"durable","cursor":0,"hash":"0000000000000000000000000000000000000000000000000000000000000000","device":null,"schema":"66c044a990fb9c97f15ed8aae9bdcd45be333210bad00a2864297b919ced3ab0","version":""}},
   "name": "client-hello-durable"
 }

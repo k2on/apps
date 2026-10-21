@@ -9,11 +9,13 @@ use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use ark::codec::bytes_enc;
+use ark::json::Json;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
+use ark::row::Id;
 use ark::schema::Space;
 use ark_dev::demo::{arrival, live, room};
+use ark_dev::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
 use ark_dev::sim::{who, Net, Op};
 use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
 
@@ -25,8 +27,13 @@ fn net(n: i64) -> Net {
     Net::new(demo(), |_| demo(), n, 3)
 }
 
+/// `create_playlist`'s input.
+fn named(name: &str) -> Vec<u8> {
+    CreatePlaylist { name: name.into() }.to_bytes()
+}
+
 fn create(name: &str) -> Op {
-    Op::Mutate(0, "demo.create_playlist".into(), bytes_enc(name.as_bytes()))
+    Op::Mutate(0, "demo.create_playlist".into(), named(name))
 }
 
 /// An intent authored offline survives a reopen: its entry, as it was,
@@ -95,8 +102,15 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
         roles: vec![],
         now: 0,
     };
-    n.watch(0, Space::Durable, "demo.items", bytes_enc(&pid), ctx).unwrap();
-    let add = |i: i64, t: &str| Op::Mutate(i, "demo.add_to_playlist".into(), [bytes_enc(&pid), bytes_enc(t.as_bytes())].concat());
+    n.watch(0, Space::Durable, "demo.items", Items { playlist_id: Id::new(pid) }.to_bytes(), ctx)
+        .unwrap();
+    let add = |i: i64, t: &str| {
+        let input = AddToPlaylist {
+            playlist_id: Id::new(pid),
+            track_id: t.into(),
+        };
+        Op::Mutate(i, "demo.add_to_playlist".into(), input.to_bytes())
+    };
     for op in [Op::Partition(0), add(0, "a"), add(1, "b"), add(1, "c"), Op::Step, Op::Step, Op::Heal(0)] {
         n.run(&op);
         n.views_hold().unwrap();
@@ -142,9 +156,9 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     };
     n.watch(1, Space::Volatile, "room.present", vec![], ctx).unwrap();
     assert_eq!(n.clients[&1].values(0).unwrap().len(), 2, "both here");
-    n.run(&Op::Call(0, "room.rename".into(), bytes_enc(b"kitchen")));
+    n.run(&Op::Call(0, "room.rename".into(), Rename { name: "kitchen".into() }.to_bytes()));
     for x in [1, 2, 3] {
-        n.run(&Op::Call(0, "room.point".into(), ark::codec::int_enc(x).to_vec()));
+        n.run(&Op::Call(0, "room.point".into(), Point { x }.to_bytes()));
     }
     n.run(&Op::Wait(100));
     n.deliver();
@@ -200,7 +214,7 @@ fn a_mutate_writes_one_pending_record() {
     let mut last = 0;
     for i in 0..=8000 {
         let before = written.load(Ordering::Relaxed);
-        let _ = c.author(Space::Durable, create, bytes_enc(format!("List {i}").as_bytes()), i);
+        let _ = c.author(Space::Durable, create, named(&format!("List {i}")), i);
         last = written.load(Ordering::Relaxed) - before;
     }
     assert_eq!(c.log.pending.len(), 8001);
@@ -209,11 +223,11 @@ fn a_mutate_writes_one_pending_record() {
     let mut c = c.reopen();
     assert_eq!(c.log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
     let before = written.load(Ordering::Relaxed);
-    let _ = c.author(Space::Durable, create, bytes_enc(b"One more"), 9000);
+    let _ = c.author(Space::Durable, create, named("One more"), 9000);
     assert!(written.load(Ordering::Relaxed) - before < 512);
     let mut c = c.reopen();
     assert_eq!(c.log.pending.len(), 8002);
     assert_eq!(c.log.pending[8001].entry.local, 8002);
-    let _ = c.author(Space::Durable, create, bytes_enc(b"And one"), 9001);
+    let _ = c.author(Space::Durable, create, named("And one"), 9001);
     assert_eq!(c.log.pending.last().unwrap().entry.local, 8003, "the session's local read back");
 }

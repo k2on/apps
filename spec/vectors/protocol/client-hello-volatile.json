@@ -1,28 +1,4 @@
 {
-  "bytes": "000180000000000000000100ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00000170686f6e65000092925f802ed9680270a7f95d43812cc34a4ec9d94c23b13e4f5735ca0929110500000000",
-  "frame": {
-    "fields": [
-      {
-        "fields": [],
-        "variant": 1
-      },
-      0,
-      {
-        "fields": [
-          "0000000000000000000000000000000000000000000000000000000000000000"
-        ],
-        "variant": 1
-      },
-      {
-        "fields": [
-          "70686f6e65"
-        ],
-        "variant": 1
-      },
-      "92925f802ed9680270a7f95d43812cc34a4ec9d94c23b13e4f5735ca09291105",
-      ""
-    ],
-    "variant": 0
-  },
+  "frame": {"Hello":{"space":"volatile","cursor":0,"hash":"0000000000000000000000000000000000000000000000000000000000000000","device":[112,104,111,110,101],"schema":"3cba4cdd41aa7112874b77030260e4b0a7aa2c07363b39a67a7ef8277f4b4787","version":""}},
   "name": "client-hello-volatile"
 }

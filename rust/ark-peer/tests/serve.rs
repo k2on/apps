@@ -11,13 +11,18 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark::codec::bytes_enc;
 use ark::frames::{Frame, Verdict};
+use ark::json::Json;
 use ark::log::{Entry, EntryId, Origin};
 use ark::peer::Who;
 use ark::schema::Space;
 use ark_peer::link::{bell, socket, wait, Dial, Event, Pumped};
 use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
+
+/// `create_playlist`'s input.
+fn named(name: &str) -> Vec<u8> {
+    ark_dev::demo::CreatePlaylist { name: name.into() }.to_bytes()
+}
 
 fn config() -> Config {
     Config::of(Arc::new(ark_dev::demo::demo()))
@@ -51,7 +56,7 @@ fn until(c: &mut (Peer, Receiver<()>), what: &str, f: impl Fn(&Peer, &Pumped) ->
 }
 
 fn create(c: &mut Peer, name: &str) {
-    let _ = c.author(Space::Durable, "demo.create_playlist", bytes_enc(name.as_bytes()), now_ms());
+    let _ = c.author(Space::Durable, "demo.create_playlist", named(name), now_ms());
     c.pump();
 }
 
@@ -110,7 +115,7 @@ fn a_linked_round_trip_waits_on_nothing() {
     let direct: Vec<Duration> = (0..100)
         .map(|i| {
             let t = std::time::Instant::now();
-            let _ = d.author(Space::Durable, "demo.create_playlist", bytes_enc(format!("D{i}").as_bytes()), now_ms());
+            let _ = d.author(Space::Durable, "demo.create_playlist", named(&format!("D{i}")), now_ms());
             loop {
                 for f in d.take_frames() {
                     wire.send(f);
@@ -191,13 +196,13 @@ fn the_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     for name in ["a", "b"] {
-        hub.author(Space::Durable, "demo.create_playlist", bytes_enc(name.as_bytes()), 1).unwrap();
+        hub.author(Space::Durable, "demo.create_playlist", named(name), 1).unwrap();
     }
     let store = hub.log.store.clone();
     drop(hub);
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     assert_eq!((hub.log.log(), &hub.log.store), (store.log(), &store));
-    hub.author(Space::Durable, "demo.create_playlist", bytes_enc(b"c"), 1).unwrap();
+    hub.author(Space::Durable, "demo.create_playlist", named("c"), 1).unwrap();
     assert_eq!(hub.log.log().entries()[2].entry.local, 3, "its own count goes on");
 }
 
@@ -228,7 +233,7 @@ fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
         local,
         roles: vec![],
         func: "demo.create_playlist".into(),
-        input: bytes_enc(name.as_bytes()),
+        input: named(name),
         now: 1,
     };
     Frame::push(Space::Durable, [entry]).enc()
@@ -394,7 +399,8 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         version: String::new(),
     };
     hub.frame(c, hello.enc(), 1);
-    hub.author(Space::Volatile, "room.point", ark::codec::int_enc(7).to_vec(), 2).unwrap();
+    hub.author(Space::Volatile, "room.point", ark_dev::demo::Point { x: 7 }.to_bytes(), 2)
+        .unwrap();
     let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),

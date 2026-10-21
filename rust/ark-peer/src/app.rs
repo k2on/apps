@@ -20,8 +20,8 @@
 
 use std::collections::BTreeMap;
 
-use ark::codec::Node;
 use ark::hash::StateHash;
+use ark::json::Json;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
@@ -211,7 +211,7 @@ impl Peer {
 
     /// An intent: its id, or the refusal its preview — or, alone, its
     /// sequencing — gave it here and now.
-    pub fn mutate(&mut self, name: &str, input: &impl Node) -> Result<EntryId, String> {
+    pub fn mutate(&mut self, name: &str, input: &impl Json) -> Result<EntryId, String> {
         self.mutate_bytes(name, input.to_bytes())
     }
 
@@ -239,7 +239,7 @@ impl Peer {
     }
 
     /// A query's answer over the optimistic state, as this login reads it.
-    pub fn query<T: Node>(&self, name: &str, input: &impl Node) -> Result<T, String> {
+    pub fn query<T: Json>(&self, name: &str, input: &impl Json) -> Result<T, String> {
         let bytes = self.ask(name, &input.to_bytes())?;
         T::from_bytes(&bytes).map_err(|r| format!("{name}: {r}"))
     }

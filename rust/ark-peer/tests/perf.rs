@@ -25,16 +25,16 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ark::codec::Node;
-use ark::codec::{bytes_enc, put_bytes, put_int};
 use ark::frames::Frame;
 use ark::hash::EntryHash;
+use ark::json::Json;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Seq, Snapshot};
 use ark::peer::{Functions, Who};
+use ark::row::{Id, Type};
 use ark::schema::{Schema, Space, Table};
 use ark::store::{Change, Store, LOG};
-use ark::ty::Ty;
 use ark_dev::demo::demo as domain;
+use ark_dev::demo::{AddToPlaylist, CreatePlaylist};
 use ark_peer::link::{bell, wait, Dial, Event, Wire};
 use ark_peer::{dev, now_ms as now, Config, Disk, Files, Handle, Memory, Module, Peer, Server};
 
@@ -156,7 +156,7 @@ fn fns() -> (&'static str, &'static str) {
 }
 
 fn create(c: &mut Peer, j: u64) {
-    let _ = c.author(Space::Durable, fns().0, bytes_enc(format!("P{j:06}").as_bytes()), now());
+    let _ = c.author(Space::Durable, fns().0, named(&format!("P{j:06}")), now());
 }
 
 /// The playlist the session's `local`-th entry made.
@@ -165,9 +165,16 @@ fn pid(session: &str, local: u64) -> [u8; 16] {
 }
 
 fn add_input(pl: &[u8; 16], i: u64) -> Vec<u8> {
-    let mut b = bytes_enc(pl);
-    put_bytes(&mut b, format!("t{i}").as_bytes());
-    b
+    AddToPlaylist {
+        playlist_id: Id::new(*pl),
+        track_id: format!("t{i}"),
+    }
+    .to_bytes()
+}
+
+/// `create_playlist`'s input.
+fn named(name: &str) -> Vec<u8> {
+    CreatePlaylist { name: name.into() }.to_bytes()
 }
 
 fn add(c: &mut Peer, pl: &[u8; 16], i: u64) {
@@ -424,7 +431,7 @@ fn perf_g_hub_fanout() {
             let a = hub.accept(author.clone());
             let mut local = 0;
             for j in 0..10u64 {
-                push(&mut hub, a, &author, &mut local, cr, bytes_enc(format!("P{j}").as_bytes()));
+                push(&mut hub, a, &author, &mut local, cr, named(&format!("P{j}")));
             }
             let ls: Vec<[u8; 16]> = (1..=10).map(|j| pid("alice@dev", j)).collect();
             for i in 0..s {
@@ -493,15 +500,15 @@ fn push(hub: &mut Peer, conn: u64, w: &Who, local: &mut i64, func: &str, input: 
 /// with its two indexes or without.
 fn media_schema(indexes: bool) -> Schema {
     let mut t = Table::new("media")
-        .col("id", "Id<Media>", Ty::Bytes)
-        .col("kind", "Text", Ty::Bytes)
-        .col("title", "Text", Ty::Bytes)
-        .col("creator", "Text", Ty::Bytes)
-        .col("duration_ms", "Int", Ty::Int)
-        .col("file", "Text", Ty::Bytes)
-        .col("pos", "Int", Ty::Int)
-        .col("added_ms", "Int", Ty::Int)
-        .col("user_id", "Text", Ty::Bytes);
+        .col("id", Type::Id("media".into()))
+        .col("kind", Type::Text)
+        .col("title", Type::Text)
+        .col("creator", Type::Text)
+        .col("duration_ms", Type::Int)
+        .col("file", Type::Text)
+        .col("pos", Type::Int)
+        .col("added_ms", Type::Int)
+        .col("user_id", Type::Text);
     if indexes {
         t = t.index(&["file"], false).index(&["pos"], false);
     }
@@ -517,16 +524,18 @@ fn open_id(tag: u8, n: u64) -> [u8; 16] {
 
 /// A media row as `add_song` writes one: the nine columns of v4's.
 fn media(i: u64) -> Vec<u8> {
-    let mut b = bytes_enc(&open_id(1, i));
-    put_bytes(&mut b, b"song");
-    put_bytes(&mut b, format!("Track {i}").as_bytes());
-    put_bytes(&mut b, format!("Artist {}", i % 50).as_bytes());
-    put_int(&mut b, 180_000);
-    put_bytes(&mut b, format!("music/a{}/t{i}.flac", i % 50).as_bytes());
-    put_int(&mut b, i as i64 + 1);
-    put_int(&mut b, 1_000 + i as i64);
-    put_bytes(&mut b, b"library");
-    b
+    let row = serde_json::json!({
+        "id": ark::hash::hex(&open_id(1, i)),
+        "kind": "song",
+        "title": format!("Track {i}"),
+        "creator": format!("Artist {}", i % 50),
+        "duration_ms": 180_000,
+        "file": format!("music/a{}/t{i}.flac", i % 50),
+        "pos": i as i64 + 1,
+        "added_ms": 1_000 + i as i64,
+        "user_id": "library",
+    });
+    ark::dynamic::row_bytes(&media_schema(false).tables[0], &row).unwrap()
 }
 
 fn media_store(schema: &Schema, rows: std::ops::Range<u64>) -> Store {

@@ -7,14 +7,13 @@
 
 use std::collections::BTreeSet;
 
-use ark::codec::bytes_enc;
 use ark::prelude::*;
 use ark_peer::{Live, Module};
 
 // * The demo
 
 /// A playlist, one person's, its name unique among theirs.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(unique(user_id, name))]
 pub struct Playlist {
     #[ark(key)]
@@ -24,7 +23,7 @@ pub struct Playlist {
 }
 
 /// A track on a playlist, at a place unique on it.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(unique(playlist_id, pos))]
 pub struct Item {
     #[ark(key, refs(Playlist))]
@@ -41,33 +40,33 @@ pub struct Demo {
 }
 
 /// A playlist's name: trimmed, and something.
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct CreatePlaylist {
     #[ark(trim, non_empty, why = "a playlist needs a name")]
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct AddToPlaylist {
     pub playlist_id: Id<Playlist>,
     #[ark(len = "1..")]
     pub track_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct RenamePlaylist {
     pub playlist_id: Id<Playlist>,
     #[ark(trim, non_empty, why = "a playlist needs a name")]
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct RemoveFromPlaylist {
     pub playlist_id: Id<Playlist>,
     pub track_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Items {
     pub playlist_id: Id<Playlist>,
 }
@@ -136,7 +135,7 @@ pub fn demo() -> Domain {
 // * The room
 
 /// Who is here: what `on_join` writes and `on_leave` takes away.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(volatile)]
 pub struct Here {
     #[ark(key)]
@@ -146,7 +145,7 @@ pub struct Here {
 }
 
 /// A pointer a device moves, relayed as ephemeral.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Node, Row)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[ark(volatile)]
 pub struct Pointer {
     #[ark(key)]
@@ -161,18 +160,18 @@ pub struct Room {
 }
 
 /// A device as `on_join` and `on_leave` are told of it.
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Arrival {
     pub session: String,
     pub name: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Point {
     pub x: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Node, Input)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Rename {
     pub name: String,
 }
@@ -242,7 +241,13 @@ pub fn live(name: &str, every_ms: i64) -> Live {
 /// is the login's, whatever it says; its name is what it says.
 pub fn arrival(who: &ark::peer::Who, said: &[u8]) -> Option<Vec<u8>> {
     let name = String::from_utf8(said.to_vec()).ok()?;
-    Some([bytes_enc(who.session.as_bytes()), bytes_enc(name.as_bytes())].concat())
+    Some(
+        Arrival {
+            session: who.session.clone(),
+            name,
+        }
+        .to_bytes(),
+    )
 }
 
 /// A domain of this crate's by its name: what a trace is replayed with.

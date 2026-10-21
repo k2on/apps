@@ -31,7 +31,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark::codec::Node;
+use ark::json::Json;
 use ark::peer::{Ctx as Run, Procedure};
 use ark::schema::Space;
 use ark::store::Change;

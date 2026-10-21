@@ -5,15 +5,14 @@
 
 use std::collections::BTreeSet;
 
-use ark::codec::Reader;
-use ark::frames::{frame_ty, Frame, Verdict};
-use ark::hash::{hex, EntryHash, StateHash};
+use ark::frames::{Frame, Verdict};
+use ark::hash::{EntryHash, StateHash};
 use ark::log::EntryId;
 use ark::peer::{Input, Output};
 use ark::schema::Space;
 use ark_dev::fuzz::session;
 use ark_dev::trace::{record, replay};
-use ark_dev::vectors::{bytes_of, fleet, fleet_script, json_of, on_disk, op_json, sessions, vector};
+use ark_dev::vectors::{fleet, fleet_script, on_disk, op_json, sessions, vector};
 use ark_peer::Act;
 use serde_json::{json, Value};
 
@@ -40,23 +39,26 @@ fn name(f: &Frame, client: bool) -> String {
     format!("{}-{kind}-{}", if client { "client" } else { "server" }, space(f.space()))
 }
 
-/// The protocol runner: the JSON written under the frame type is the
-/// bytes, and the bytes decode to a frame that encodes to them.
-fn run_protocol(v: &Value) -> Result<(), String> {
-    let bytes = v["bytes"].as_str().and_then(ark::hash::unhex).ok_or("no bytes")?;
-    let mut b = vec![];
-    bytes_of(&frame_ty(), &v["frame"], &mut b)?;
-    let f = Frame::dec(&bytes).map_err(|r| r.0)?;
-    let read = json_of(&frame_ty(), &mut Reader::new(&bytes))?;
-    (b == bytes && f.enc() == bytes && read == v["frame"])
-        .then_some(())
-        .ok_or("the frame is not its bytes".into())
+/// A protocol vector: the frame, its JSON as it is, and its name.
+#[derive(serde::Deserialize)]
+struct Protocol {
+    frame: Box<serde_json::value::RawValue>,
+}
+
+/// The protocol runner: the frame's JSON, as it is, reads as a frame that
+/// writes it again byte for byte.
+fn run_protocol(text: &str) -> Result<(), String> {
+    let v: Protocol = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let bytes = v.frame.get().as_bytes();
+    let f = Frame::dec(bytes).map_err(|r| r.0)?;
+    (f.enc() == bytes).then_some(()).ok_or("the frame is not its JSON".into())
 }
 
 /// `protocol/`: one of every frame each side writes, in each space it
 /// names, from the scripted sessions, and those no session sent built from
-/// their entries. Falsified by `bytes_of` writing a sum's index after its
-/// fields: no frame's JSON was its bytes.
+/// their entries; each its JSON. The falsified one, a space put in its
+/// JSON, is not a frame's one encoding. Falsified by the runner comparing
+/// the frames read rather than the bytes: the falsified one passed.
 #[test]
 fn protocol() {
     let mut frames: Vec<(String, Frame)> = vec![];
@@ -108,10 +110,10 @@ fn protocol() {
     }
     let mut written = BTreeSet::new();
     for (n, f) in &frames {
-        let b = f.enc();
-        let v = json!({"bytes": hex(&b), "frame": json_of(&frame_ty(), &mut Reader::new(&b)).unwrap(), "name": n});
-        run_protocol(&v).unwrap();
-        vector("protocol", &format!("{n}.json"), &format!("{v:#}\n")).unwrap();
+        let b = String::from_utf8(f.enc()).unwrap();
+        let text = format!("{{\n  \"frame\": {b},\n  \"name\": \"{n}\"\n}}\n");
+        run_protocol(&text).unwrap();
+        vector("protocol", &format!("{n}.json"), &text).unwrap();
         written.insert(format!("{n}.json"));
     }
     only("protocol", &written);
@@ -129,13 +131,13 @@ fn protocol() {
         .into_iter()
         .find(|(n, _)| n == "server-verdict-ok-durable.json")
         .unwrap();
-    let mut wrong: Value = serde_json::from_str(&ack).unwrap();
-    let b = wrong["bytes"].as_str().unwrap().to_string();
-    wrong["bytes"] = json!(format!("{}{}", &b[..b.len() - 2], if b.ends_with('0') { "1" } else { "0" }));
-    wrong["expect"] = json!("fail");
-    vector("protocol/falsify", "server-verdict-ok-durable.json", &format!("{wrong:#}\n")).unwrap();
+    let wrong = ack
+        .replacen("\"seq\":", "\"seq\" :", 1)
+        .replacen("{\n", "{\n  \"expect\": \"fail\",\n", 1);
+    assert_ne!(wrong, ack, "the falsified verdict is the verdict");
+    vector("protocol/falsify", "server-verdict-ok-durable.json", &wrong).unwrap();
     for (n, text) in on_disk("protocol/falsify") {
-        assert!(run_protocol(&serde_json::from_str(&text).unwrap()).is_err(), "{n} passed");
+        assert!(run_protocol(&text).is_err(), "{n} passed");
     }
 }
 
@@ -213,7 +215,11 @@ fn fleet_vector(seed: u64, head: i64, hash: StateHash) -> Value {
 fn rebase() {
     let net = fleet(7);
     let (head, hash) = (net.hub.log.log().head().0, net.hub.log.store.state_hash());
-    assert_eq!(hash.hex(), "ff04f56d613ee73dad721e02cb6ebe125fa93fe801b2f1713499038f55475e95", "K1's pin");
+    assert_eq!(
+        hash.hex(),
+        "8316d1f4900f9d9e6605671960aef8fc72900a80be59e01168a090250ba005bf",
+        "K1's pin, as N1 re-derived it"
+    );
     let right = fleet_vector(7, head, hash);
     vector("rebase", "fleet-seed-7.json", &format!("{right:#}\n")).unwrap();
     let mut written = BTreeSet::from(["fleet-seed-7.json".to_string()]);

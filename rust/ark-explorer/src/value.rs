@@ -1,24 +1,24 @@
 //! A value as the explorer shows and edits it (`docs/plan-v5.md` §1.16):
-//! bytes read under a type, the type said the way a person reads it.
+//! a value's JSON read under its type, the type said the way a person reads
+//! it.
 //!
 //! [`of_type`] turns a domain's type description into a [`Ty`] a form and a
 //! cell can draw — a record by its fields' names, an enum by its variants'
-//! places — and [`column_ty`] a table's column, from its declared name
-//! (`Text`, `Id<playlist>`, `Option<Text>`) or else its structure. A list
-//! of records whose fields are a table's columns is labelled by the table's
-//! column names ([`columns_of`]).
+//! — and [`column_ty`] a table's column. A list of records whose fields are
+//! a table's columns is labelled by the table's column names
+//! ([`columns_of`]).
 //!
-//! [`Value`] is a value of a [`Ty`], read from bytes by [`decode`] and
-//! written back by [`encode`] — the codec's own encoding, so what a form
-//! sends is what `parse` reads — and said as one line of text by
-//! [`text_of`], which [`parse_cell`] reads back: what a cell shows, its
-//! editor starts with, and a form's field is typed as.
+//! [`Value`] is a value of a [`Ty`], read from its JSON by [`decode`] and
+//! written back by [`encode`] — the store's own encoding (`ark::json`), so
+//! what a form sends is what a function reads — and said as one line of
+//! text by [`text_of`], which [`parse_cell`] reads back: what a cell shows,
+//! its editor starts with, and a form's field is typed as.
 
-use ark::codec::{put_bytes, put_int, put_variant, Reader};
+use ark::json::typed_json;
 use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
-use ark::ty::Ty as Structure;
 use ark::Refusal;
+use serde_json::Value as J;
 
 /// A type as the explorer draws it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,9 +33,10 @@ pub enum Ty {
     List(Box<Ty>),
     /// A record: its fields, labelled.
     Struct(Vec<(String, Ty)>),
-    /// An enum, its variants by place, or a sum with fields.
-    Enum(usize),
-    Sum(Vec<Vec<Ty>>),
+    /// An enum, its variants' names in order.
+    Enum(Vec<String>),
+    /// A sum with fields: each variant's name and fields.
+    Sum(Vec<(String, Vec<(String, Ty)>)>),
 }
 
 /// A value of a [`Ty`]. An option holds `Null` or its value itself.
@@ -58,10 +59,6 @@ impl Value {
     }
 }
 
-fn is_bool(vs: &[Vec<Structure>]) -> bool {
-    vs.len() == 2 && vs.iter().all(Vec::is_empty)
-}
-
 /// A domain's type as the explorer draws it. An enum of no fields is an
 /// enum, whatever its size.
 pub fn of_type(t: &Type) -> Ty {
@@ -75,39 +72,29 @@ pub fn of_type(t: &Type) -> Ty {
         Type::Id(t) => Ty::Id(t.clone()),
         Type::Option(t) => Ty::Option(Box::new(of_type(t))),
         Type::List(t) => Ty::List(Box::new(of_type(t))),
-        Type::Tuple(ts) => Ty::Struct(ts.iter().enumerate().map(|(i, t)| ((i + 1).to_string(), of_type(t))).collect()),
+        Type::Tuple(ts) => Ty::Struct(ts.iter().enumerate().map(|(i, t)| (i.to_string(), of_type(t))).collect()),
         Type::Record(_, fs) => Ty::Struct(fields(fs)),
-        Type::Sum(_, vs) if vs.iter().all(|(_, fs)| fs.is_empty()) => Ty::Enum(vs.len()),
-        Type::Sum(_, vs) => Ty::Sum(vs.iter().map(|(_, fs)| fs.iter().map(|(_, t)| of_type(t)).collect()).collect()),
+        Type::Sum(_, vs) if vs.iter().all(|(_, fs)| fs.is_empty()) => Ty::Enum(vs.iter().map(|(n, _)| n.clone()).collect()),
+        Type::Sum(_, vs) => Ty::Sum(vs.iter().map(|(n, fs)| (n.clone(), fields(fs))).collect()),
     }
 }
 
-/// A structure as the explorer draws it, where nothing names its parts.
-pub fn of_structure(t: &Structure) -> Ty {
+/// The type a [`Ty`] draws: what its JSON is written under.
+pub fn to_type(t: &Ty) -> Type {
+    let fields = |fs: &[(String, Ty)]| fs.iter().map(|(n, t)| (n.clone(), to_type(t))).collect();
     match t {
-        Structure::Int => Ty::Int,
-        Structure::Bytes | Structure::Named(_) => Ty::Bytes,
-        Structure::List(t) => Ty::List(Box::new(of_structure(t))),
-        Structure::Tuple(ts) => Ty::Struct(ts.iter().enumerate().map(|(i, t)| ((i + 1).to_string(), of_structure(t))).collect()),
-        Structure::Sum(vs) if is_bool(vs) => Ty::Bool,
-        Structure::Sum(vs) if vs.len() == 2 && vs[0].is_empty() && vs[1].len() == 1 => Ty::Option(Box::new(of_structure(&vs[1][0]))),
-        Structure::Sum(vs) if vs.iter().all(Vec::is_empty) => Ty::Enum(vs.len()),
-        Structure::Sum(vs) => Ty::Sum(vs.iter().map(|f| f.iter().map(of_structure).collect()).collect()),
-    }
-}
-
-/// A type by its declared name and its structure: `Text`, `Int`, `Bool`,
-/// `Id<t>`, `Option<…>` by name, anything else by its structure.
-fn of_decl(decl: &str, ty: &Structure) -> Ty {
-    match (decl, ty) {
-        ("Int", _) => Ty::Int,
-        ("Text", _) => Ty::Text,
-        ("Bool", _) => Ty::Bool,
-        (d, _) if d.starts_with("Id<") && d.ends_with('>') => Ty::Id(d[3..d.len() - 1].to_string()),
-        (d, Structure::Sum(vs)) if d.starts_with("Option<") && d.ends_with('>') && vs.len() == 2 && vs[1].len() == 1 => {
-            Ty::Option(Box::new(of_decl(&d[7..d.len() - 1], &vs[1][0])))
-        }
-        _ => of_structure(ty),
+        Ty::Int => Type::Int,
+        Ty::Text => Type::Text,
+        Ty::Bool => Type::Bool,
+        Ty::Bytes => Type::Bytes,
+        Ty::Id(t) => Type::Id(t.clone()),
+        Ty::Option(t) => Type::Option(Box::new(to_type(t))),
+        Ty::List(t) => Type::List(Box::new(to_type(t))),
+        Ty::Struct(fs) if fs.is_empty() => Type::Unit,
+        Ty::Struct(fs) if fs[0].0 == "0" => Type::Tuple(fs.iter().map(|(_, t)| to_type(t)).collect()),
+        Ty::Struct(fs) => Type::Record(String::new(), fields(fs)),
+        Ty::Enum(vs) => Type::Sum(String::new(), vs.iter().map(|n| (n.clone(), vec![])).collect()),
+        Ty::Sum(vs) => Type::Sum(String::new(), vs.iter().map(|(n, fs)| (n.clone(), fields(fs))).collect()),
     }
 }
 
@@ -116,93 +103,128 @@ pub fn row_ty(t: &Table) -> Ty {
     Ty::Struct(t.columns.iter().map(|c| (c.name.clone(), column_ty(c))).collect())
 }
 
-/// A column's type: its declaration, else its structure.
+/// A column's type.
 pub fn column_ty(c: &Column) -> Ty {
-    of_decl(&c.decl, &c.ty)
+    of_type(&c.ty)
 }
 
-/// When these fields' declared types are some table's columns', in order,
-/// the table's column names.
+/// When these fields' types are some table's columns', in order, the
+/// table's column names.
 pub fn columns_of(schema: &Schema, fields: &[(String, Type)]) -> Option<Vec<String>> {
-    let said: Vec<String> = fields.iter().map(|(_, t)| t.decl()).collect();
-    let t = schema.tables.iter().find(|t| t.columns.iter().map(|c| &c.decl).eq(said.iter()))?;
+    let t = schema
+        .tables
+        .iter()
+        .find(|t| t.columns.iter().map(|c| &c.ty).eq(fields.iter().map(|(_, t)| t)))?;
     Some(t.columns.iter().map(|c| c.name.clone()).collect())
 }
 
-/// A value of `ty` from canonical bytes of it.
+/// A value of `ty` from its JSON.
 pub fn decode(ty: &Ty, bytes: &[u8]) -> Result<Value, Refusal> {
-    decode_all(std::slice::from_ref(ty), bytes).map(|mut vs| vs.remove(0))
+    let j: J = serde_json::from_slice(bytes).map_err(|e| Refusal(e.to_string()))?;
+    from_json(ty, &j).ok_or_else(|| Refusal(format!("{j} is not a value of {}", ty_name(ty))))
 }
 
-/// The values of a run of types, read one after another: a row's columns.
-pub fn decode_all(tys: &[Ty], bytes: &[u8]) -> Result<Vec<Value>, Refusal> {
-    fn take(ty: &Ty, r: &mut Reader) -> Result<Value, Refusal> {
-        let all = |ts: &[Ty], r: &mut Reader| ts.iter().map(|t| take(t, r)).collect::<Result<Vec<_>, _>>();
-        Ok(match ty {
-            Ty::Int => Value::Int(r.int()?),
-            Ty::Text => Value::Text(r.text()?),
-            Ty::Bytes => Value::Bytes(r.bytes()?),
-            Ty::Id(_) => r.bytes().map(|b| <[u8; 16]>::try_from(b.as_slice()).map_or(Value::Bytes(b), Value::Id))?,
-            Ty::Bool => Value::Bool(r.variant(2)? == 1),
-            Ty::Option(t) => match r.variant(2)? {
-                0 => Value::Null,
-                _ => take(t, r)?,
-            },
-            Ty::List(t) => Value::List(r.list(|r| take(t, r))?),
-            Ty::Struct(fs) => Value::Struct(fs.iter().map(|(_, t)| take(t, r)).collect::<Result<_, _>>()?),
-            Ty::Enum(n) => Value::Variant(r.variant(*n)?, vec![]),
-            Ty::Sum(vs) => {
-                let i = r.variant(vs.len())?;
-                Value::Variant(i, all(&vs[i as usize], r)?)
-            }
-        })
+/// The values of a row's columns, from the row's JSON.
+pub fn decode_all(t: &Table, bytes: &[u8]) -> Result<Vec<Value>, Refusal> {
+    match decode(&row_ty(t), bytes)? {
+        Value::Struct(vs) => Ok(vs),
+        _ => unreachable!("a record reads as a record"),
     }
-    let mut r = Reader::new(bytes);
-    let vs = tys.iter().map(|t| take(t, &mut r)).collect::<Result<Vec<_>, _>>()?;
-    r.end()?;
-    Ok(vs)
 }
 
-/// A value's bytes under `ty`, or why it is not one.
-pub fn encode(ty: &Ty, v: &Value) -> Result<Vec<u8>, String> {
-    fn put(ty: &Ty, v: &Value, out: &mut Vec<u8>) -> Result<(), String> {
-        match (ty, v) {
-            (Ty::Int, Value::Int(n)) => put_int(out, *n),
-            (Ty::Text, Value::Text(t)) => put_bytes(out, t.as_bytes()),
-            (Ty::Bytes | Ty::Id(_), Value::Bytes(b)) => put_bytes(out, b),
-            (Ty::Id(_), Value::Id(id)) => put_bytes(out, id),
-            (Ty::Bool, Value::Bool(b)) => put_variant(out, *b as u8),
-            (Ty::Option(_), Value::Null) => put_variant(out, 0),
-            (Ty::Option(t), v) => {
-                put_variant(out, 1);
-                put(t, v, out)?;
-            }
-            (Ty::List(t), Value::List(xs)) => {
-                for x in xs {
-                    out.push(1);
-                    put(t, x, out)?;
-                }
-                out.push(0);
-            }
-            (Ty::Struct(fs), Value::Struct(xs)) if fs.len() == xs.len() => {
-                for ((_, t), x) in fs.iter().zip(xs) {
-                    put(t, x, out)?;
-                }
-            }
-            (Ty::Enum(n), Value::Variant(i, _)) if (*i as usize) < *n => put_variant(out, *i),
-            (Ty::Sum(vs), Value::Variant(i, xs)) if vs.get(*i as usize).is_some_and(|f| f.len() == xs.len()) => {
-                put_variant(out, *i);
-                for (t, x) in vs[*i as usize].iter().zip(xs) {
-                    put(t, x, out)?;
-                }
-            }
-            (t, v) => return Err(format!("{} is not a value of {}", text_of(v), ty_name(t))),
+/// A row's key columns, as the record a `delete_<t>` takes: its JSON.
+pub fn key_input(t: &Table, row: &[u8]) -> Result<Vec<u8>, String> {
+    let vs = decode_all(t, row).map_err(|e| e.0)?;
+    let fs = t.columns[..t.key].iter().map(|c| (c.name.clone(), column_ty(c))).collect();
+    encode(&Ty::Struct(fs), &Value::Struct(vs[..t.key].to_vec()))
+}
+
+fn from_json(ty: &Ty, j: &J) -> Option<Value> {
+    Some(match (ty, j) {
+        (Ty::Int, J::Number(n)) => Value::Int(n.as_i64()?),
+        (Ty::Text, J::String(t)) => Value::Text(t.clone()),
+        (Ty::Bytes, J::Array(xs)) => Value::Bytes(xs.iter().map(|x| x.as_u64().and_then(|n| u8::try_from(n).ok())).collect::<Option<_>>()?),
+        (Ty::Id(_), J::String(h)) => Value::Id(parse_id(h)?),
+        (Ty::Bool, J::Bool(b)) => Value::Bool(*b),
+        (Ty::Option(_), J::Null) => Value::Null,
+        (Ty::Option(t), j) => from_json(t, j)?,
+        (Ty::List(t), J::Array(xs)) => Value::List(xs.iter().map(|x| from_json(t, x)).collect::<Option<_>>()?),
+        (Ty::Struct(fs), J::Null) if fs.is_empty() => Value::Struct(vec![]),
+        (Ty::Struct(fs), J::Array(xs)) if fs.len() == xs.len() => {
+            Value::Struct(fs.iter().zip(xs).map(|((_, t), x)| from_json(t, x)).collect::<Option<_>>()?)
         }
-        Ok(())
-    }
-    let mut out = vec![];
-    put(ty, v, &mut out)?;
-    Ok(out)
+        (Ty::Struct(fs), J::Object(m)) => Value::Struct(
+            fs.iter()
+                .map(|(n, t)| from_json(t, m.get(n).unwrap_or(&J::Null)))
+                .collect::<Option<_>>()?,
+        ),
+        (Ty::Enum(vs), J::String(n)) => Value::Variant(vs.iter().position(|v| v == n)? as u8, vec![]),
+        (Ty::Sum(vs), J::String(n)) => Value::Variant(vs.iter().position(|(v, fs)| v == n && fs.is_empty())? as u8, vec![]),
+        (Ty::Sum(vs), J::Object(m)) if m.len() == 1 => {
+            let (n, p) = m.iter().next()?;
+            let i = vs.iter().position(|(v, _)| v == n)?;
+            let fs = &vs[i].1;
+            let xs = match (fs.len(), p) {
+                (1, p) if fs[0].0 == "0" => vec![from_json(&fs[0].1, p)?],
+                (_, J::Array(xs)) if fs.len() == xs.len() => fs.iter().zip(xs).map(|((_, t), x)| from_json(t, x)).collect::<Option<_>>()?,
+                (_, J::Object(o)) => fs
+                    .iter()
+                    .map(|(f, t)| from_json(t, o.get(f).unwrap_or(&J::Null)))
+                    .collect::<Option<_>>()?,
+                _ => return None,
+            };
+            Value::Variant(i as u8, xs)
+        }
+        _ => return None,
+    })
+}
+
+fn to_json(ty: &Ty, v: &Value) -> Option<J> {
+    let fields = |fs: &[(String, Ty)], xs: &[Value]| -> Option<J> {
+        if fs.len() != xs.len() {
+            return None;
+        }
+        Some(match fs.first() {
+            None => J::Null,
+            Some((n, _)) if n == "0" && fs.len() == 1 => to_json(&fs[0].1, &xs[0])?,
+            Some((n, _)) if n == "0" => J::Array(fs.iter().zip(xs).map(|((_, t), x)| to_json(t, x)).collect::<Option<_>>()?),
+            _ => J::Object(
+                fs.iter()
+                    .zip(xs)
+                    .map(|((n, t), x)| Some((n.clone(), to_json(t, x)?)))
+                    .collect::<Option<_>>()?,
+            ),
+        })
+    };
+    Some(match (ty, v) {
+        (Ty::Int, Value::Int(n)) => J::from(*n),
+        (Ty::Text, Value::Text(t)) => J::from(t.clone()),
+        (Ty::Bytes, Value::Bytes(b)) => J::from(b.clone()),
+        (Ty::Id(_), Value::Id(id)) => J::from(ark::hash::hex(id)),
+        (Ty::Bool, Value::Bool(b)) => J::from(*b),
+        (Ty::Option(_), Value::Null) => J::Null,
+        (Ty::Option(t), v) => to_json(t, v)?,
+        (Ty::List(t), Value::List(xs)) => J::Array(xs.iter().map(|x| to_json(t, x)).collect::<Option<_>>()?),
+        (Ty::Struct(fs), Value::Struct(xs)) if fs.first().is_some_and(|(n, _)| n == "0") => {
+            J::Array(fs.iter().zip(xs).map(|((_, t), x)| to_json(t, x)).collect::<Option<_>>()?)
+        }
+        (Ty::Struct(fs), Value::Struct(xs)) => fields(fs, xs)?,
+        (Ty::Enum(vs), Value::Variant(i, _)) => J::from(vs.get(*i as usize)?.clone()),
+        (Ty::Sum(vs), Value::Variant(i, xs)) => {
+            let (n, fs) = vs.get(*i as usize)?;
+            match fs.is_empty() {
+                true => J::from(n.clone()),
+                false => J::Object([(n.clone(), fields(fs, xs)?)].into_iter().collect()),
+            }
+        }
+        _ => return None,
+    })
+}
+
+/// A value's JSON under `ty`, or why it is not one.
+pub fn encode(ty: &Ty, v: &Value) -> Result<Vec<u8>, String> {
+    let j = to_json(ty, v).ok_or_else(|| format!("{} is not a value of {}", text_of(v), ty_name(ty)))?;
+    typed_json(&to_type(ty), &j).map_err(|e| e.0)
 }
 
 /// A type as a person reads it: `text`, `id(playlist)`, `option(int)`,
@@ -217,8 +239,14 @@ pub fn ty_name(t: &Ty) -> String {
             "{{{}}}",
             fs.iter().map(|(n, t)| format!("{n}: {}", ty_name(t))).collect::<Vec<_>>().join(", ")
         ),
-        Ty::Enum(n) => format!("enum({n})"),
-        Ty::Sum(vs) => format!("sum({})", vs.iter().map(|f| format!("({})", join(f))).collect::<Vec<_>>().join(" | ")),
+        Ty::Enum(vs) => format!("enum({})", vs.join(" | ")),
+        Ty::Sum(vs) => format!(
+            "sum({})",
+            vs.iter()
+                .map(|(n, f)| format!("{n}({})", join(&f.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>())))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ),
         t => format!("{t:?}").to_lowercase(),
     }
 }
@@ -301,9 +329,10 @@ pub fn parse_cell(name: &str, ty: &Ty, text: &str) -> Result<Value, String> {
         Ty::Bool => Err(bad("true or false")),
         Ty::Id(_) => parse_id(t).map(Value::Id).ok_or_else(|| bad("an id, 32 hex digits")),
         Ty::Bytes => ark::hash::unhex(t).map(Value::Bytes).ok_or_else(|| bad("hex digits")),
-        Ty::Enum(n) => match t.trim_start_matches('#').parse::<u8>() {
-            Ok(i) if (i as usize) < *n => Ok(Value::Variant(i, vec![])),
-            _ => Err(bad(&format!("#0 to #{}", n.saturating_sub(1)))),
+        Ty::Enum(vs) => match (vs.iter().position(|v| v == t), t.trim_start_matches('#').parse::<u8>()) {
+            (Some(i), _) => Ok(Value::Variant(i as u8, vec![])),
+            (None, Ok(i)) if (i as usize) < vs.len() => Ok(Value::Variant(i, vec![])),
+            _ => Err(bad(&format!("#0 to #{}", vs.len().saturating_sub(1)))),
         },
         Ty::List(_) if t.is_empty() => Ok(Value::List(vec![])),
         Ty::List(e) => {
@@ -323,7 +352,11 @@ pub fn parse_cell(name: &str, ty: &Ty, text: &str) -> Result<Value, String> {
             let (i, rest) = t.split_once('(').map_or((t, String::new()), |(i, r)| (i, format!("({r}")));
             let i = i.trim().parse::<usize>().ok().filter(|i| *i < vs.len());
             let i = i.ok_or_else(|| bad(&format!("#0 to #{}, its values in parentheses", vs.len().saturating_sub(1))))?;
-            each(&vs[i].iter().collect::<Vec<_>>(), parts(&rest, '(', ')').unwrap_or_default()).map(|xs| Value::Variant(i as u8, xs))
+            each(
+                &vs[i].1.iter().map(|(_, t)| t).collect::<Vec<_>>(),
+                parts(&rest, '(', ')').unwrap_or_default(),
+            )
+            .map(|xs| Value::Variant(i as u8, xs))
         }
     }
 }

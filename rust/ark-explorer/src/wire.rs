@@ -1,7 +1,7 @@
 //! The admin page's wire, between a server and the explorer it serves
 //! compiled to wasm (`docs/plan-guards.md` D4): four requests over HTTP,
-//! each body a value of §1.1's codec — derived, so the page and the server
-//! read one definition of them — written as hex, so it travels as text.
+//! each body a value's JSON — derived, so the page and the server read one
+//! definition of them.
 //!
 //! ```text
 //! GET  <admin>/api/hello    → Hello: whether the page is open, where to sign in
@@ -17,25 +17,27 @@
 //! is shown is the authority's own state, a snapshot per request, and what
 //! it writes the server authors as itself.
 
+use ark::json::Json;
 use ark::log::Seq;
-use ark::prelude::Node;
 use ark::store::Change;
+use serde::{Deserialize, Serialize};
 
 use crate::data::{Catalog, Connection, CrudVerbs, Line};
 
 /// What `GET <admin>/api/hello` answers.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub open: bool,
     pub server: Option<String>,
 }
 
 /// What `GET <admin>/api/state` answers.
-#[derive(Clone, Debug, PartialEq, Eq, Node)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     /// The server's domain: its schema and its functions described.
     pub catalog: Catalog,
     /// Every durable table's rows, as a snapshot carries them.
+    #[serde(with = "ark::json::raw_tables")]
     pub rows: Vec<(String, Vec<Vec<u8>>)>,
     pub head: Seq,
     pub lines: Vec<Line>,
@@ -47,16 +49,19 @@ pub struct State {
     pub who: String,
 }
 
-/// A value as a body: its bytes, in hex.
-pub fn body<T: Node>(v: &T) -> String {
-    ark::hash::hex(&v.to_bytes())
+/// A value as a body: its JSON.
+pub fn body<T: Json>(v: &T) -> String {
+    String::from_utf8(v.to_bytes()).expect("JSON is text")
 }
 
 /// A body read back.
-pub fn read<T: Node>(text: &str) -> Result<T, String> {
-    let b = ark::hash::unhex(text.trim()).ok_or("the body is not hex")?;
-    T::from_bytes(&b).map_err(|e| e.0)
+pub fn read<T: Json>(text: &str) -> Result<T, String> {
+    T::from_bytes(text.trim().as_bytes()).map_err(|e| e.0)
 }
+
+/// An authored input: the binding and its input's JSON.
+#[derive(Serialize, Deserialize)]
+struct Authored(String, #[serde(with = "ark::json::raw")] Vec<u8>);
 
 impl State {
     pub fn to_body(&self) -> String {
@@ -80,10 +85,10 @@ pub fn raw_from(text: &str) -> Result<Change, String> {
 
 /// `POST <admin>/api/author`'s body: the binding and its input's bytes.
 pub fn author_body(function: &str, input: &[u8]) -> String {
-    body(&(function.to_string(), input.to_vec()))
+    body(&Authored(function.to_string(), input.to_vec()))
 }
 
 /// [`author_body`], read back.
 pub fn author_from(text: &str) -> Result<(String, Vec<u8>), String> {
-    read(text)
+    read(text).map(|Authored(f, i)| (f, i))
 }

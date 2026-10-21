@@ -295,8 +295,7 @@ impl Explorer {
     /// values: in the store's key order, or as the sort says.
     pub fn rows(&self, src: &Source, table: &str) -> Vec<(Vec<u8>, Vec<u8>, Vec<Value>)> {
         let Some((_, t)) = src.schema().table(table) else { return vec![] };
-        let tys: Vec<Ty> = t.columns.iter().map(value::column_ty).collect();
-        let read = |r: &[u8]| Some((r[..t.key_len(r).ok()?].to_vec(), r.to_vec(), value::decode_all(&tys, r).ok()?));
+        let read = |r: &[u8]| Some((t.parse(r).ok()?.key, r.to_vec(), value::decode_all(t, r).ok()?));
         let mut rows: Vec<_> = src.store.rows(table).filter_map(read).collect();
         if let Some((_, c, down)) = self.sort.as_ref().filter(|(s, ..)| s == table) {
             rows.sort_by(|a, b| a.2.get(*c).cmp(&b.2.get(*c)));
@@ -764,7 +763,7 @@ impl Explorer {
         let tys: Vec<Ty> = tbl.columns.iter().map(value::column_ty).collect();
         let value = value::parse_cell(&e.column, &tys[c], &e.text)?;
         let old = ark::store::Read::get(src.store, &e.table, &e.key).ok_or_else(|| format!("the row of {} is gone", e.table))?;
-        let same = value::decode_all(&tys, &old).ok().and_then(|vs| vs.get(c).cloned()) == Some(value.clone());
+        let same = value::decode_all(tbl, &old).ok().and_then(|vs| vs.get(c).cloned()) == Some(value.clone());
         Ok((old, value, same))
     }
 

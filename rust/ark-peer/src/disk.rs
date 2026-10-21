@@ -37,7 +37,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use ark::codec::Node;
+use ark::json::Json;
 use ark::log::{Entry, Logged, Record, Rows};
 
 /// The store made durable, read back: its rows as last written whole, and
@@ -89,7 +89,7 @@ pub trait Disk: Send {
 
     /// One `Persist`: the store's rows whole, or one of the log's appended.
     fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if matches!(bytes.first(), Some(1)) {
+        if bytes.starts_with(br#"{"Rows""#) {
             self.put("kv", bytes)?;
             return self.put("log", &[]);
         }
@@ -115,7 +115,7 @@ pub fn pending(bytes: &[u8]) -> (i64, Vec<Entry>) {
 
 /// Length-framed records read up to the first that does not read; and the
 /// bytes they take.
-fn framed<T: Node>(bytes: &[u8]) -> (Vec<T>, usize) {
+fn framed<T: Json>(bytes: &[u8]) -> (Vec<T>, usize) {
     let (mut out, mut at) = (vec![], 0);
     while let Some(len) = bytes.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()) as usize) {
         let Some(Ok(x)) = bytes.get(at + 4..at + 4 + len).map(T::from_bytes) else {

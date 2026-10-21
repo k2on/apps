@@ -22,14 +22,14 @@ use crate::value::{self, parse_cell, text_of as cell_text, Ty, Value};
 // A user table with its CRUD exposed, a team table with none, one query,
 // and two mutations of the domain's own on a second router.
 
-#[derive(Node, Row, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Row, Clone, Debug, PartialEq, Eq)]
 pub struct Team {
     #[ark(key)]
     pub name: String,
     pub size: i64,
 }
 
-#[derive(Node, Row, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Row, Clone, Debug, PartialEq, Eq)]
 pub struct User {
     #[ark(key)]
     pub id: Id<User>,
@@ -47,17 +47,17 @@ pub struct People {
     pub user: User,
 }
 
-#[derive(Node, Input, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
 pub struct UserKey {
     pub id: Id<User>,
 }
 
-#[derive(Node, Input, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
 pub struct OfTeam {
     pub team: String,
 }
 
-#[derive(Node, Input, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
 pub struct NewTeam {
     #[ark(trim, non_empty, why = "a team needs a name")]
     #[ark(len = "0..=12")]
@@ -66,14 +66,14 @@ pub struct NewTeam {
     pub size: i64,
 }
 
-#[derive(Node, Describe, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Describe, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
     Low,
     High,
 }
 
 /// A mutation over every kind of field a form draws.
-#[derive(Node, Input, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Input, Clone, Debug, PartialEq)]
 pub struct Kick {
     pub user: Id<User>,
     pub why: Option<String>,
@@ -242,7 +242,7 @@ fn named(n: Named) -> Msg {
 }
 
 /// What a mutation was authored with, read as its input.
-fn input<T: Node>(w: &Recorder) -> (String, T) {
+fn input<T: ark::json::Json>(w: &Recorder) -> (String, T) {
     let (f, b) = w.authored.last().expect("authored");
     (f.clone(), T::from_bytes(b).unwrap_or_else(|e| panic!("{f}: {e}")))
 }
@@ -532,7 +532,7 @@ fn the_admin_wire_reads_back() {
         local: 1,
         roles: vec![],
         func: "teams.make_team".into(),
-        input: vec![],
+        input: b"null".to_vec(),
         now: 5,
     };
     let row = st.rows("team").next().unwrap().to_vec();
@@ -748,7 +748,7 @@ fn a_change_in_the_store_is_lit_by_key_and_fades() {
     };
     moved.apply(&rename).unwrap();
     moved.put("user", user(0, "dan", "red").to_bytes()).unwrap();
-    moved.delete("user", &id(3).to_bytes()).unwrap();
+    moved.delete("user", &key_of(id(3))).unwrap();
     ex.observe(&source(&moved), 1, 500);
     assert!(!ex.fading(), "the same generation is not a move: nothing is diffed");
     ex.observe(&source(&moved), 2, 1000);
@@ -824,7 +824,13 @@ fn every_query_and_mutation_is_listed_by_router() {
         .collect();
     assert_eq!(
         said,
-        ["user: id(user)", "why: option(text)", "tags: list(text)", "level: enum(2)", "loud: bool"]
+        [
+            "user: id(user)",
+            "why: option(text)",
+            "tags: list(text)",
+            "level: enum(Low | High)",
+            "loud: bool"
+        ]
     );
     let make = &all[at("make_team")];
     assert_eq!(
@@ -845,12 +851,15 @@ fn every_query_and_mutation_is_listed_by_router() {
 fn every_type_reads_from_its_text() {
     let fs = |pairs: &[(&str, Ty)]| Ty::Struct(pairs.iter().map(|(k, t)| (k.to_string(), t.clone())).collect());
     let at = fs(&[("x", Ty::Int), ("label", Ty::Text)]);
-    let sum = Ty::Sum(vec![vec![], vec![Ty::Int, Ty::Text]]);
+    let sum = Ty::Sum(vec![
+        ("Dot".into(), vec![]),
+        ("Line".into(), vec![("0".into(), Ty::Int), ("1".into(), Ty::Text)]),
+    ]);
     let fields = [
         ("title", Ty::Text),
         ("count", Ty::Int),
         ("on", Ty::Bool),
-        ("level", Ty::Enum(2)),
+        ("level", Ty::Enum(vec!["Low".into(), "High".into()])),
         ("note", Ty::Option(Box::new(Ty::Text))),
         ("tags", Ty::List(Box::new(at.clone()))),
         ("at", at),
@@ -1263,4 +1272,11 @@ fn a_click_outside_the_table_ends_the_edit() {
     assert_eq!(ex.screen, Screen::Table("user".into()), "the explorer stays where it was");
     assert_eq!(authored_name(&w).1, "anne");
     assert_eq!(w.authored.len(), 2);
+}
+
+/// A one-column key's bytes.
+fn key_of<T: serde::Serialize>(k: T) -> Vec<u8> {
+    let mut out = vec![];
+    ark::json::put_key(&(k,), &mut out);
+    out
 }

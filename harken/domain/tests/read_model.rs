@@ -323,7 +323,7 @@ fn a_retagged_file_is_the_same_song_saying_the_new_tags() {
     let playlist: Vec<LibraryEntry> = c.list("playlist", &PlaylistInput { playlist_id: favs });
     assert_eq!(titles(&playlist), ["Glue (Remastered)"], "the playlist holds it still");
     let details: Vec<TrackDetailsEntry> = c.list("track_details", &());
-    assert_eq!(details[0].track, 3);
+    assert_eq!(details.iter().find(|d| d.media_id == glue).map(|d| d.track), Some(3));
     assert_eq!(
         c.rows::<Recording>("recording").len(),
         2,

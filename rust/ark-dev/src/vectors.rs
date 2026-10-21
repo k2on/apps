@@ -8,60 +8,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark::codec::{bytes_enc, int_enc, put_bytes, put_int, put_list, Reader};
-use ark::hash::{hex, unhex};
+use ark::hash::hex;
+use ark::json::Json;
 use ark::log::{EntryId, Origin};
 use ark::peer::Who;
-use ark::ty::Ty;
+use ark::row::Id;
 use ark_peer::{Config, Live, Module};
 use serde_json::{json, Value};
 
-use crate::demo::{arrival, live, room};
+use crate::demo::{arrival, live, room, AddToPlaylist, CreatePlaylist, Point, Rename};
 use crate::sim::{who, Net, Op};
-
-/// A value of `ty` as JSON: an `Int` a number, `Bytes` hex, a list or a
-/// tuple an array, a sum `{"variant", "fields"}`.
-pub fn json_of(ty: &Ty, r: &mut Reader) -> Result<Value, String> {
-    Ok(match ty {
-        Ty::Int => json!(r.int().map_err(|e| e.0)?),
-        Ty::Bytes => json!(hex(&r.bytes().map_err(|e| e.0)?)),
-        Ty::List(t) => Value::Array(r.list(|r| json_of(t, r).map_err(ark::Refusal)).map_err(|e| e.0)?),
-        Ty::Tuple(ts) => Value::Array(ts.iter().map(|t| json_of(t, r)).collect::<Result<_, _>>()?),
-        Ty::Sum(vs) => {
-            let i = r.variant(vs.len()).map_err(|e| e.0)?;
-            let fields: Vec<Value> = vs[i as usize].iter().map(|t| json_of(t, r)).collect::<Result<_, _>>()?;
-            json!({"fields": fields, "variant": i})
-        }
-        Ty::Named(n) => return Err(format!("{n}: a frame's type is structural")),
-    })
-}
-
-/// The bytes of a value of `ty` written as [`json_of`] writes it.
-pub fn bytes_of(ty: &Ty, v: &Value, out: &mut Vec<u8>) -> Result<(), String> {
-    let bad = || format!("not a value of {ty:?}: {v}");
-    match ty {
-        Ty::Int => put_int(out, v.as_i64().ok_or_else(bad)?),
-        Ty::Bytes => put_bytes(out, &v.as_str().and_then(unhex).ok_or_else(bad)?),
-        Ty::List(t) => {
-            let xs = v.as_array().ok_or_else(bad)?;
-            let mut err = Ok(());
-            put_list(out, xs, |o, x| err = err.clone().and(bytes_of(t, x, o)));
-            err?
-        }
-        Ty::Tuple(ts) => {
-            let xs = v.as_array().filter(|xs| xs.len() == ts.len()).ok_or_else(bad)?;
-            ts.iter().zip(xs).try_for_each(|(t, x)| bytes_of(t, x, out))?
-        }
-        Ty::Sum(vs) => {
-            let i = v["variant"].as_u64().filter(|i| (*i as usize) < vs.len()).ok_or_else(bad)? as usize;
-            out.push(i as u8);
-            let xs = v["fields"].as_array().filter(|xs| xs.len() == vs[i].len()).ok_or_else(bad)?;
-            vs[i].iter().zip(xs).try_for_each(|(t, x)| bytes_of(t, x, out))?
-        }
-        Ty::Named(_) => return Err(bad()),
-    }
-    Ok(())
-}
 
 fn dir(d: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors").join(d)
@@ -104,16 +60,16 @@ fn demo() -> Config {
     Config::of(Arc::new(crate::demo::demo()))
 }
 
-fn pair(id: &[u8], t: &str) -> Vec<u8> {
-    [bytes_enc(id), bytes_enc(t.as_bytes())].concat()
-}
-
 fn create(i: i64, name: &str) -> Op {
-    Op::Mutate(i, "demo.create_playlist".into(), bytes_enc(name.as_bytes()))
+    Op::Mutate(i, "demo.create_playlist".into(), CreatePlaylist { name: name.into() }.to_bytes())
 }
 
 fn add(i: i64, owner: &str, t: &str) -> Op {
-    Op::Mutate(i, "demo.add_to_playlist".into(), pair(&EntryId::of(Origin::named(owner), 1).draw(0), t))
+    let input = AddToPlaylist {
+        playlist_id: Id::new(EntryId::of(Origin::named(owner), 1).draw(0)),
+        track_id: t.into(),
+    };
+    Op::Mutate(i, "demo.add_to_playlist".into(), input.to_bytes())
 }
 
 /// `fleet-seed-7`'s script after its playlist (v4's, move for move).
@@ -183,7 +139,7 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         live: Some(live(name, 100)),
         ..demo()
     };
-    let point = |i, x| Op::Call(i, "room.point".into(), int_enc(x).to_vec());
+    let point = |i, x| Op::Call(i, "room.point".into(), Point { x }.to_bytes());
     let steps = |n: usize| vec![Op::Step; n];
     vec![
         (
@@ -229,7 +185,7 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
                 Net::of(hub, vec![(who(0), device("phone")), (who(1), device("laptop"))], 6),
                 [
                     vec![
-                        Op::Call(0, "room.rename".into(), bytes_enc(b"kitchen")),
+                        Op::Call(0, "room.rename".into(), Rename { name: "kitchen".into() }.to_bytes()),
                         point(0, 1),
                         point(0, 2),
                         point(0, 3),

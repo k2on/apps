@@ -655,7 +655,8 @@ impl Peer {
             local,
             roles: self.me.roles.clone(),
             func,
-            input,
+            // An input is its JSON; no bytes are `null`.
+            input: if input.is_empty() { b"null".to_vec() } else { input },
             now,
         };
         let id = entry.id;

@@ -17,6 +17,8 @@ ui = ["dep:iced", "dep:arkui", "dep:ark-auth", "dep:ureq", "dep:wasm-bindgen", "
 
 [dependencies]
 ark = { path = "../ark" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 arkui = { path = "../arkui", optional = true }
 # Signing the admin page in when it is served wider than loopback: the page's
 # own address and the server's `/auth/login`, as the browser peer does.

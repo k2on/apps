@@ -6,12 +6,14 @@
 //! did. With the text gone, what the two agreed on is pinned: the schema's
 //! hash and, per seed, the state the script ends at and a hash of its
 //! whole transcript — every step's refusal or how many changes it made,
-//! the state after it, and every view's answer at every fiftieth step.
+//! the state after it, and every view's answer at every fiftieth step. The
+//! values became JSON after the text went (N1, step e), which moved every
+//! pin: these are the JSON run's, the scripts and the code as they were.
 //! Falsified by numbering a playlist "Favorites [1]"
 //! (`playlists::numbered`): seed 1's pins moved.
 
-use ark::codec::Node;
 use ark::hash::sha256;
+use ark::json::Json;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::Store;
@@ -332,70 +334,70 @@ fn step(r: &mut Rng, s: &Store) -> Step {
     }
 }
 
-/// The schema's hash, as the ArkLang text's was.
-const SCHEMA: &str = "d9900c967063c82175edd94123cb7d785852656375e91be7bf49a97e3b24c3e9";
+/// The schema's hash (its JSON's).
+const SCHEMA: &str = "fbdcea7645d34b98244421fa578679a5cbeda8a634b8c7603758526ee1f588f5";
 
 /// Per seed, the state after 400 steps and the transcript's hash.
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,
-        "5f9221c52c7fce766be36b9264000a9b31b65b0b9a34091b2fef0c8bcc077825",
-        "97505f7c639b8ba729ae4250271f2be9b8d778c9dfea9fb8da7ec42669cf1867",
+        "c6aa0ef46756ee5bbdbae3a64b3b59d6c6c67941af54b5da8ab0f6153942fac3",
+        "ff9fd31e95a887683f370f90606fc7936a6bbe0925898e8de1cbb1c61d2dd575",
     ),
     (
         2,
-        "8467c96aa0fb8e3634f00730ee349cb1650299dbac7e95dc9b94749b2da7a182",
-        "850717b03b32a32177582e3f842eeadd60c8cdf63552f0f168fba2c9308571d9",
+        "80608d27a4590dcdccfd6db7407ae7874b23a579777d8e06fe4797ee6f16dbf8",
+        "a8153a060bc192010fd6525de41a5bb47a4fb6546252dc08fdc460d89a49c2f2",
     ),
     (
         3,
-        "f36f7f9af883cf404f1a5ef64c6434efd4f981e0a7d2802a7dbeeda294569e81",
-        "0a1d254b52e40ed2dac5788a0d04e5544eafaf9e20cac647ddda07925aba14b5",
+        "ce91dbeb4bd24f0475f0ed45658333364b045e21edffa865728dd17e94849863",
+        "89d42d4fce7c2aef0794a3e4481373ef96cbc746da68c630663ee8c95f5308af",
     ),
     (
         4,
-        "7a6d337e10635c3bbd74fe7d01afd20ed7d1d79cdc009e42b2201df87befe0fc",
-        "20572b4c3caaf4d78ced14fc215609ce7336c81da84440e96de9aaabde873591",
+        "e55f9994058f58681be4dd86de0a160ff337c3055c12ae3635facb96a3d7ed98",
+        "52c2d2466e15ec0a9dc56d2551088235580e5e8abe9615550099c7d7a0fb41d5",
     ),
     (
         5,
-        "865f99af4c73ae399ccd120c6754188c4baacf666be8275dcfaa398c4c0b5d05",
-        "7ee0e294a2aa98db58099f509cdeeb810586bb5aaaee6ae2df77bb51e7646a39",
+        "01470a8ec0168017150f6766fde85c1909c0b828a028fbe8a3cf00fca575f576",
+        "18baaa3bf358a4419d6186ebaf77d323f3d5fb55ee4049de27ec94bb4e90f4f4",
     ),
     (
         6,
-        "84c1f92adfc3b3c9e2699e53587d5016969d6b01b5c419f6f8f9fee614d1da41",
-        "aa1287a4aa11f64cceaf0082f591106dc35d605db939105a8b77192292bb7313",
+        "9a1111ba4b269d56c31883d599aff4a3377edb3158c92e1e7e1b68d42153e786",
+        "9da2bff9728280a57cd087b4a3cbf60edb760390a981adc2b48ce1bf79e2eacb",
     ),
     (
         7,
-        "1b4ddea79c2284e9bb05d7d054b098f9601466793b876d79a7f4af08db83ca53",
-        "50bf855538fb711f9407225c3f361926109c6adcb518964089f818826aa734f5",
+        "8b776b6420cad465b9ca4832cb65afb6494b90ddbab2506ab09cf38ec312984a",
+        "5ccef2fa8054600ef4ddf70f1f9c0202ffacd2c746ded00b73ff3bc9b33a1b93",
     ),
     (
         8,
-        "50e9ed1cba5dc32473521a3d00975fd178c78db37f65097e54e8e0f9486835c7",
-        "e6ee354dc97b6cf33ec706b02d1eee31c02844b91a08b47c46aa67ef3f2619be",
+        "f825cfa7f0fadd7b1b3a443fcfab6316a0d7eb2a705de5673f8fd7b036965a2e",
+        "c5dd6760bf4762de8a1e364889686e9e7158d879ec9f911429902bf9df4bcd8e",
     ),
     (
         9,
-        "f80441f07580fe5e511399b1b6d9ce1f11d7dfb47a73cc5d6b95f4d9dd96710a",
-        "26808001f8ab8abb53921e0617496887d39f3164856de593086c88dd4b3ad663",
+        "edef7b8d32bf9a376d9863d6255ce14ce39760db83b4d56d5116eab02284a300",
+        "6ed0244c73fa51dee9bb5d087f83e77b74374bbe5738e4ba92711fc1df67ae0f",
     ),
     (
         10,
-        "0a831c7a60b4f6ad64d9422a7868f879d8d0ee3aaa3dbab203bfdfacc7825137",
-        "2e565e860e4b1aa280df40a3ecfb8e5f7f5a0341474b790da4768cc0dbdf18be",
+        "bd3751b2d3cc8e94bcdd072d2a2ab6209e0ba84dfd7c8924cf844ec0075f9f62",
+        "f8311cea5f3ae0993ddfe12550d3308d0c31fdaf9e7df187e4e06a7695a73332",
     ),
     (
         11,
-        "64ad2af1b2f78b78251d65e9fdd9aef07f5d604b0f67b8d9e304067210497cfc",
-        "eaf522f01f649f0296a0664de19316f77bb1a79f7eaa9475451e2da2a0aa5d0e",
+        "c4a22775aa9e746214c265eadfb957acf06a1cc494cc4da9b9c43abe893547ec",
+        "fdd42ef1d3cb122cc2617f23ee75b4b44c03ac5e7319e76ad2a204431ed961ad",
     ),
     (
         12,
-        "ad45845319ff8b0bc07c38110c6c7f8a44644f27d51334f2a1490a02aa6f42f8",
-        "bb9f95def54af526e3332b38fa33f6e1fa9bd5d1176c3f8eed0fd2700094f565",
+        "3f1aba5612c8510ddc2d3d3770975d924032e134c03105419f518c45f4608074",
+        "6abe7c24b5e1b521201d8084ad69bff9ed5ac2726c9a19f2f0af12d9aa2e3f01",
     ),
 ];
 

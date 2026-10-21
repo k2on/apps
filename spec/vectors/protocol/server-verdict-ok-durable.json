@@ -1,20 +1,4 @@
 {
-  "bytes": "0300d0152e895b86daf3e5412a5a87a25d0a0000008000000000000001",
-  "frame": {
-    "fields": [
-      {
-        "fields": [],
-        "variant": 0
-      },
-      "d0152e895b86daf3e5412a5a87a25d0a",
-      {
-        "fields": [
-          1
-        ],
-        "variant": 0
-      }
-    ],
-    "variant": 3
-  },
+  "frame": {"Verdict":{"space":"durable","id":"851234151743d65409f72ea19e17578f","verdict":{"Ok":{"seq":1}}}},
   "name": "server-verdict-ok-durable"
 }

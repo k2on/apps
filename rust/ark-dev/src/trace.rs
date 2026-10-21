@@ -16,8 +16,8 @@
 
 use std::sync::Arc;
 
-use ark::codec::Node;
 use ark::hash::{hex, unhex};
+use ark::json::Json;
 use ark::log::{Durable, EntryId, Logged, Origin};
 use ark::peer::{Input, Output, Peer, Role, Who};
 use ark::schema::{Schema, Space};

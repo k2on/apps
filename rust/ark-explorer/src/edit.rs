@@ -99,7 +99,7 @@ pub fn route_delete(catalog: &Catalog, via: Via, table: &str, row: &[u8]) -> Res
     let (_, t) = catalog.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
     match (via.verbs.filter(|v| v.may_author && v.delete && !via.force_raw), via.can_raw) {
         (Some(_), _) => {
-            let input = row[..t.key_len(row).map_err(|e| e.0)?].to_vec();
+            let input = value::key_input(t, row)?;
             Ok(Route::Author {
                 function: bound(catalog, "delete", table),
                 input,

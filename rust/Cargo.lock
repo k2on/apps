@@ -161,6 +161,7 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-peer",
+ "serde",
  "serde_json",
 ]
 
@@ -173,6 +174,8 @@ dependencies = [
  "arkui",
  "iced",
  "js-sys",
+ "serde",
+ "serde_json",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -199,6 +202,8 @@ dependencies = [
  "ark-explorer",
  "axum",
  "js-sys",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tower-http",
@@ -1935,6 +1940,8 @@ dependencies = [
  "ark",
  "ark-dev",
  "ark-peer",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1949,6 +1956,8 @@ dependencies = [
  "harken-domain",
  "iced",
  "js-sys",
+ "serde",
+ "serde_json",
  "tungstenite",
  "wasm-bindgen",
  "web-sys",
@@ -1969,6 +1978,7 @@ dependencies = [
  "libc",
  "lofty",
  "notify",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",
