@@ -93,7 +93,6 @@
 //! how long `settle` waits with nothing new before it counts the cursor as
 //! still.
 
-use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
@@ -102,10 +101,10 @@ use std::time::{Duration, Instant};
 use ark::format::Encode as Bytes;
 use ark::hash::hex;
 use ark::log::EntryId;
-use ark::peer::{Ctx, Journal, Role, Who};
+use ark::peer::{Journal, Role, Who};
 use ark_auth::client::Patience;
 use ark_auth::Login;
-use ark_peer::{now_ms, Config, Files, Live, Peer};
+use ark_peer::{Config, Files, Live, Peer, Standing};
 use harken_server::domain::host::Listening;
 use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
@@ -247,15 +246,6 @@ fn flags(args: &[String]) -> Result<Flags, String> {
 /// own).
 fn logins(dir: &Path) -> ark_peer::Logins {
     ark_peer::Logins::at(&dir.join("logins"))
-}
-
-fn recall(dir: &Path, server: &str) -> Option<Login> {
-    logins(dir).recall(server)
-}
-
-fn remember(dir: &Path, server: &str, login: &Login) -> Result<(), String> {
-    logins(dir).remember(server, login);
-    Ok(())
 }
 
 /// Sign `user` in at `server` the desktop's way. A dev server answers with
@@ -491,8 +481,6 @@ struct Headless {
     unasked: Vec<Value>,
     /// The server's refusals of the volatile machine's intents.
     live_refusals: Vec<String>,
-    /// Every verdict this run has heard, for `standing`.
-    rejected: BTreeMap<EntryId, String>,
     /// `--roles`: what this device's entries carry beside its login's.
     roles: Vec<String>,
     /// Whether the last connection opened and has heard nothing yet (a
@@ -512,14 +500,15 @@ impl Headless {
         std::fs::create_dir_all(&f.dir).map_err(|e| format!("{}: {e}", f.dir.display()))?;
         let login = match (&f.server, f.alone) {
             (Some(server), false) => {
-                let remembered = recall(&f.dir, server)
+                let remembered = logins(&f.dir)
+                    .recall(server)
                     .filter(|l| f.user.as_ref().is_none_or(|u| *u == l.user.id));
                 match (remembered, &f.user) {
                     (Some(l), _) => Some(l),
                     (None, Some(user)) => {
                         let l = log_in(server, user, f.patience)
                             .map_err(|e| format!("signing {user} in at {server}: {e}"))?;
-                        remember(&f.dir, server, &l)?;
+                        logins(&f.dir).remember(server, &l);
                         Some(l)
                     }
                     (None, None) => None,
@@ -584,13 +573,12 @@ impl Headless {
             held: vec![],
             unasked: vec![],
             live_refusals: vec![],
-            rejected: BTreeMap::new(),
             roles: f.roles.clone(),
             quiet_open: false,
             denied: None,
             synced: false,
         };
-        match (f.alone, h.is_alone()) {
+        match (f.alone, h.client.is_alone()) {
             (true, false) => h.client.alone(),
             (false, true) => h.client.join(),
             _ => {}
@@ -618,17 +606,15 @@ impl Headless {
 
     /// Whether the link is up or being dialled.
     fn dialling(&self) -> bool {
-        self.client.link.token.is_some()
-    }
-
-    fn is_alone(&self) -> bool {
-        self.client.is_alone()
+        !self.client.is_signed_out()
     }
 
     /// The link up, when there is a server and a login.
     fn dial(&mut self) {
         self.drop_link();
-        if let (Some(server), Some(token), false) = (&self.server, &self.token, self.is_alone()) {
+        if let (Some(server), Some(token), false) =
+            (&self.server, &self.token, self.client.is_alone())
+        {
             let url = ark_auth::socket_url(server);
             self.client.set_token(Some(token.clone()));
             self.client.connect(&url);
@@ -684,7 +670,6 @@ impl Headless {
         let mut fresh = vec![];
         for (id, why) in self.client.take_rejections() {
             fresh.push(json!({ "id": hex(&id.0), "reason": why }));
-            self.rejected.insert(id, why);
         }
         self.live_refusals.extend(self.client.take_live_refusals());
         if fresh.is_empty() {
@@ -769,18 +754,6 @@ impl Headless {
         }
     }
 
-    fn cursor(&self) -> i64 {
-        self.client.log.log().head().0
-    }
-
-    fn pending(&self) -> usize {
-        self.client.log.pending.len()
-    }
-
-    fn linked(&self) -> bool {
-        self.client.linked
-    }
-
     fn fork(&self) -> i64 {
         match &self.client.log.role {
             Role::Authority {
@@ -794,7 +767,7 @@ impl Headless {
 
     fn status(&self) -> Answer {
         let me = &self.client.log.me;
-        let link = match (self.is_alone(), self.dialling(), self.linked()) {
+        let link = match (self.client.is_alone(), self.dialling(), self.client.linked) {
             (true, _, _) => "alone",
             (_, false, _) if self.token.is_none() => "signed out",
             (_, false, _) => "offline",
@@ -802,11 +775,11 @@ impl Headless {
             (_, true, false) => "dialling",
         };
         Answer::default()
-            .set("cursor", json!(self.cursor()))
-            .set("pending", json!(self.pending()))
+            .set("cursor", json!(self.client.cursor()))
+            .set("pending", json!(self.client.pending_len()))
             .set("held", json!(0))
             .set("behind", json!(false))
-            .set("linked", json!(self.linked()))
+            .set("linked", json!(self.client.linked))
             .set(
                 "denied",
                 self.denied.as_ref().map_or(Value::Null, |d| json!(d)),
@@ -815,7 +788,7 @@ impl Headless {
             .set("session", json!(me.session))
             .set(
                 "signed_out",
-                json!(self.token.is_none() && !self.is_alone()),
+                json!(self.token.is_none() && !self.client.is_alone()),
             )
             .set("epoch", json!(self.client.link.epoch))
             .set("link", json!(link))
@@ -826,24 +799,6 @@ impl Headless {
                 json!(self.client.log.joining.as_ref().map_or(0, |j| j.2.len())),
             )
             .set("fork", json!(self.fork()))
-    }
-
-    /// A bare name, `create_playlist`, as its binding,
-    /// `playlists.create_playlist`, when exactly one binding ends so.
-    fn binding(&self, name: &str) -> Result<String, String> {
-        let d = &self.hosted.domain;
-        if d.get(name).is_some() {
-            return Ok(name.into());
-        }
-        let hit: Vec<&String> = d
-            .fns
-            .keys()
-            .filter(|b| b.rsplit('.').next() == Some(name))
-            .collect();
-        match hit[..] {
-            [b] => Ok(b.clone()),
-            _ => Err(format!("no function {name}")),
-        }
     }
 
     fn session(&self) -> Option<Listening> {
@@ -890,9 +845,8 @@ impl Headless {
     fn handle(&mut self, cmd: Cmd) -> Answer {
         match cmd {
             Cmd::Mutate { name, args } => {
-                let name = match self.binding(&name) {
-                    Ok(n) => n,
-                    Err(e) => return Answer::refused(e),
+                let Some(name) = self.client.binding(&name) else {
+                    return Answer::refused(format!("no function {name}"));
                 };
                 let bytes = match input(&self.hosted, &name, &args) {
                     Ok(b) => b,
@@ -905,12 +859,12 @@ impl Headless {
             }
             Cmd::Status => self.status(),
             Cmd::Hash => Answer::default()
-                .set("cursor", json!(self.cursor()))
+                .set("cursor", json!(self.client.cursor()))
                 .set("hash", json!(self.client.log.confirmed_hash().hex()))
                 .set("view", json!(self.client.log.store.state_hash().hex())),
             Cmd::Wait { cursor, timeout } => {
-                let ok = self.pump_until(timeout, None, |h| h.cursor() >= cursor);
-                Answer::ok(ok).set("cursor", json!(self.cursor()))
+                let ok = self.pump_until(timeout, None, |h| h.client.cursor() >= cursor);
+                Answer::ok(ok).set("cursor", json!(self.client.cursor()))
             }
             Cmd::Settle { timeout } => {
                 // Linked (or alone), nothing pending, and the cursor still
@@ -920,39 +874,26 @@ impl Headless {
                 let (mut last, mut still) = (-1, 0);
                 let step = self.still;
                 let ok = self.pump_until(timeout, Some(step), |h| {
-                    if h.cursor() == last {
+                    if h.client.cursor() == last {
                         still += 1;
                     } else {
-                        (last, still) = (h.cursor(), 0);
+                        (last, still) = (h.client.cursor(), 0);
                     }
-                    (h.linked() || h.is_alone()) && h.pending() == 0 && still >= 2
+                    (h.client.linked || h.client.is_alone())
+                        && h.client.pending_len() == 0
+                        && still >= 2
                 });
                 Answer::ok(ok)
-                    .set("cursor", json!(self.cursor()))
-                    .set("pending", json!(self.pending()))
+                    .set("cursor", json!(self.client.cursor()))
+                    .set("pending", json!(self.client.pending_len()))
             }
             Cmd::Query { name, args } => {
-                let name = match self.binding(&name) {
-                    Ok(n) => n,
-                    Err(e) => return Answer::refused(e),
-                };
-                let me = &self.client.log.me;
-                let ctx = Ctx {
-                    draws: Default::default(),
-                    id: EntryId::of("query", 0),
-                    actor: me.actor.clone(),
-                    session: me.session.clone(),
-                    roles: me.roles.clone(),
-                    now: now_ms(),
+                let Some(name) = self.client.binding(&name) else {
+                    return Answer::refused(format!("no function {name}"));
                 };
                 let answer = input(&self.hosted, &name, &args)
-                    .and_then(|b| {
-                        self.hosted
-                            .domain
-                            .ask(&self.client.log.store, &ctx, &name, &b)
-                            .map_err(|r| r.0)
-                    })
-                    .and_then(|b| self.hosted.domain.answer_json(&name, &b).map_err(|r| r.0))
+                    .and_then(|b| self.client.ask(&name, &b))
+                    .and_then(|b| self.client.answer_json(&name, &b))
                     .and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string()));
                 match answer {
                     Ok(v) => Answer::default().set("rows", v),
@@ -974,24 +915,29 @@ impl Headless {
                 Answer::default().set("rejections", Value::Array(items))
             }
             Cmd::Standing { id } => {
+                // The kit's standing, and what is in the log: a confirmed
+                // entry stays so across a restart.
                 let id = EntryId(id);
-                if self.client.log.pending.iter().any(|p| p.entry.id == id) {
-                    Answer::default().set("standing", json!("pending"))
-                } else if self
-                    .client
-                    .log
-                    .log()
-                    .entries()
-                    .iter()
-                    .any(|l| l.entry.id == id)
-                {
-                    Answer::default().set("standing", json!("confirmed"))
-                } else if let Some(why) = self.rejected.get(&id) {
-                    Answer::default()
-                        .set("standing", json!("rejected"))
-                        .set("why", json!(why))
-                } else {
-                    Answer::default().set("standing", json!("unknown"))
+                let logged = || {
+                    self.client
+                        .log
+                        .log()
+                        .entries()
+                        .iter()
+                        .any(|l| l.entry.id == id)
+                };
+                let (standing, why) = match self.client.standing(&id) {
+                    Standing::Pending => ("pending", None),
+                    Standing::Rejected(why) => ("rejected", Some(why)),
+                    Standing::Confirmed => ("confirmed", None),
+                    Standing::Unknown if logged() => ("confirmed", None),
+                    Standing::Unknown => ("unknown", None),
+                };
+                match why {
+                    Some(why) => Answer::default()
+                        .set("standing", json!(standing))
+                        .set("why", json!(why)),
+                    None => Answer::default().set("standing", json!(standing)),
                 }
             }
             Cmd::Disconnect => {
@@ -1012,9 +958,7 @@ impl Headless {
                         return Answer::refused(format!("signing {user} in at {server}: {e}"))
                     }
                 };
-                if let Err(e) = remember(&self.dir, &server, &login) {
-                    eprintln!("harken-peer: the login is not remembered: {e}");
-                }
+                logins(&self.dir).remember(&server, &login);
                 self.signed_in(&login);
                 Answer::ok(true)
                     .set("user", json!(login.user.id))
@@ -1036,9 +980,11 @@ impl Headless {
                 // person, when it has one: the chain it made alone is its
                 // session's, and a server adopts it from that session as it
                 // is. Another login authors it again, with ids of its own.
-                let remembered = user
-                    .as_ref()
-                    .and_then(|u| recall(&self.dir, &server).filter(|l| l.user.id == *u));
+                let remembered = user.as_ref().and_then(|u| {
+                    logins(&self.dir)
+                        .recall(&server)
+                        .filter(|l| l.user.id == *u)
+                });
                 let login = match (&user, remembered) {
                     (None, _) => None,
                     (Some(_), Some(l)) => Some(l),
@@ -1050,15 +996,13 @@ impl Headless {
                     },
                 };
                 let took = Instant::now();
-                if self.is_alone() {
+                if self.client.is_alone() {
                     self.client.join();
                 }
                 self.server = Some(server.clone());
                 match &login {
                     Some(l) => {
-                        if let Err(e) = remember(&self.dir, &server, l) {
-                            eprintln!("harken-peer: the login is not remembered: {e}");
-                        }
+                        logins(&self.dir).remember(&server, l);
                         self.signed_in(l);
                     }
                     None => {
@@ -1072,18 +1016,18 @@ impl Headless {
                     took.elapsed()
                 );
                 Answer::ok(true)
-                    .set("pending", json!(self.pending()))
-                    .set("cursor", json!(self.cursor()))
+                    .set("pending", json!(self.client.pending_len()))
+                    .set("cursor", json!(self.client.cursor()))
             }
             Cmd::Leave => {
-                if self.is_alone() {
+                if self.client.is_alone() {
                     return Answer::refused("already alone");
                 }
                 self.drop_link();
                 self.client.alone();
                 self.server = None;
                 self.pump();
-                Answer::ok(true).set("cursor", json!(self.cursor()))
+                Answer::ok(true).set("cursor", json!(self.client.cursor()))
             }
             Cmd::Call {
                 live,
@@ -1132,7 +1076,7 @@ impl Headless {
                     .set("device", json!(self.client.log.me.session))
                     .set("seq", json!(seq))
                     .set("pending", json!(pending))
-                    .set("synced", json!(self.linked() && self.synced))
+                    .set("synced", json!(self.client.linked && self.synced))
             }
             Cmd::LiveRefusals => {
                 Answer::default().set("refusals", json!(std::mem::take(&mut self.live_refusals)))
@@ -1572,6 +1516,6 @@ mod tests {
         assert_eq!(status["pending"], json!(1));
         drop(h);
         let h = Headless::open(&f, harken()).unwrap();
-        assert_eq!(h.pending(), 1, "the intent was on disk");
+        assert_eq!(h.client.pending_len(), 1, "the intent was on disk");
     }
 }
