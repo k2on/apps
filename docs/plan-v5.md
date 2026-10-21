@@ -837,6 +837,7 @@ counted the same way; Unicode tables excluded)
 | library source (`ark` + `ark-macros` + `ark-ffi`) | 25,537 | 6,526 | 6,125 | 0.24 |
 | peer (`ark-peer`; v4 and v5 client + server) | 6,843 | 1,465 | 2,041 | 0.30 |
 | tooling (`ark-dev`, `ark-explorer`, `arkui`, `ark-auth`) | 19,498† | 7,515† | 7,907 | 0.41 |
+| of it `ark-auth` (S1: 1,051, carrying the sign-in tables and the hub's side) | 1,422 | 1,410 | 999 | 0.70 |
 | harken: domain | 3,711 | 2,583 | 2,373 | 0.64 |
 | harken: server (+ bins) | 4,923 (+1,720) | 4,808† (+1,618) | 4,735 (+1,360) | 0.96 |
 | harken: iced (+ bins) | 8,838 (+1,659) | 8,171† (+1,660) | 8,161 (+1,660) | 0.92 |
@@ -985,6 +986,41 @@ and re-runs the pending once, 48.8 µs/entry under 400 against v4's 64.6 (was
 linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
+
+**S1** (`17fe168`…): **who is signed in is rows of the app's log.**
+`ark-auth` owns them: `SignIn` and `Role`, `Revoke`/`Grant`, the
+functions `session.revoke` (its owner's only), `session.current`,
+`session.mine`, `role.grant`/`role.revoke` (an `ADMIN`'s only), written
+once over any schema that is `AuthTables` (`ark_auth::install!(App)` for a
+schema whose `sign_in` and `role` fields are the two tables;
+`.with(ark_auth::register::<App>)`), and `feed(scope)` holding a
+connection's own person's sign-ins and roles. The token is the row's id
+and the server's HMAC of it, the key `session.key` in the data directory
+`Auth::open` is handed; `Auth::authenticate` judges a token by the HMAC and
+the row (live, its roles merged with the role table's and the
+configuration's), `Auth::watcher` names the connections the hub closes (a
+session revoked, gone or expired at the clock's tick, a person whose roles
+changed), `Auth::issue` writes the row through `server::Hub` (which
+`ark-peer`'s `Handle` is), `Auth::own` keeps a server's own peer's session
+across restarts. `ark-peer` plugs them in (`Server::auth`,
+`Handle::watched`) and reads them on a device (`Peer::current`,
+`Peer::sign_out`, the preview's roles joined by the session's); `ark-ffi`
+says `signed_in`, and `logout` revokes. Gone: `sessions.json` and
+`SessionStore`, `/auth/whoami`, `/auth/logout`, `issue/redeem/whoami/owns/
+revoke/on_revoke` of the store, `HARKEN_SESSION_KEY_FILE`. harken keeps
+two fields, the install line, the registration and its scope's table list
+(`session.feed`, fed with `HARKEN_SCOPED=1`). The dependency stays
+`ark-peer` → `ark-auth`: `ark-explorer`'s page links `ark-auth`, so the
+other way is a cycle; `ark-auth` speaks to the hub through `server::Hub`
+and the kernel's `Store`. Source: `ark-auth` 999 → 1,051 (the domain
+fragment 120, the hub's side; the 550–700 aimed at would mean cutting
+OIDC or the clients), `ark-peer` 2,041 → 2,123, harken's domain 2,373 →
+2,399, server 4,735 → 4,742, `ark-ffi` 469 → 473; `ark-auth`'s tests over
+a schema of their own (`tests/rows.rs`, 12, each falsified once). Not
+verified: a real OpenID Connect provider (the callback's row is written in
+`tests/oidc.rs` against the test's provider only); the phones (the
+generated types unmoved, the JVM and iOS builds not run here); the web
+client signing out in a browser.
 
 **N4** (`9907e0f`…): **the value format is postcard; the docs are the
 tree's.** `ark::format` writes rows, inputs, entries, frames, journal
