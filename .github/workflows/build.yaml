@@ -10,12 +10,13 @@
 #
 # A build is skipped when its inputs have not moved. Each job hashes the files
 # its nix derivation reads (the flake's source filters: `rustDirs` for the
-# page, the `harken-apk` list for the APK) and asks the actions cache whether
-# that hash was built before. The page's output is the cache entry, so a hit
-# restores it in seconds. The APK's version code is the commit time, so its
-# derivation moves on every commit even when nothing in it did: a hit there
-# means "this APK was already published", and the repository keeps offering
-# it rather than gaining a copy under a new number.
+# page; the Rust workspace, harken's domain and ffi crates and the Android
+# app for the APK, which embeds the kernel through harken/ffi) and asks the
+# actions cache whether that hash was built before. The page's output is the
+# cache entry, so a hit restores it in seconds. The APK's version code is the
+# commit time, so its derivation moves on every commit even when nothing in
+# it did: a hit there means "this APK was already published", and the
+# repository keeps offering it rather than gaining a copy under a new number.
 #
 # The nix store comes from Cachix when the repository variable CACHIX_NAME is
 # set (with the secret CACHIX_AUTH_TOKEN to push): every path is pushed once by
@@ -101,19 +102,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The APK's inputs: the flake's `harken-apk` source filter, the flake,
-      # and nix/ (aapt2, the SDK, the F-Droid tooling). Only looked up here;
-      # the entry is written after a successful build, below.
+      # The APK's inputs: the kernel and harken's domain and ffi crates (the
+      # app embeds them through harken-android-lib), the Android app, the
+      # flake, and nix/ (aapt2, the SDK, the F-Droid tooling). Only looked
+      # up here; the entry is written after a successful build, below.
       - id: seen
         if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/cache/restore@v4
         with:
           path: apk-seen
-          key: harken-apk-${{ hashFiles('harken/android/**', 'kotlin/**', 'harken/domain/harken.ark', 'rust/ark/src/unicode_tables.rs', 'flake.nix', 'flake.lock', 'nix/**') }}
+          key: harken-apk-${{ hashFiles('rust/**', 'harken/domain/**', 'harken/ffi/**', 'harken/android/**', 'flake.nix', 'flake.lock', 'nix/**') }}
           lookup-only: true
 
       # The hosted image carries ~30 GB of toolchains this build never uses;
-      # the nix store, a JDK, gradle's state and the aapt2 build want the room.
+      # the nix store, a JDK, gradle's state, the Android NDK targets and the
+      # aapt2 build want the room.
       - name: Free disk space
         if: steps.seen.outputs.cache-hit != 'true'
         run: |
@@ -135,7 +138,7 @@ jobs:
       - if: steps.seen.outputs.cache-hit != 'true'
         uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-apk-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'harken/android/deps.json', 'kotlin/deps.json') }}
+          primary-key: nix-apk-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'rust/Cargo.lock', 'harken/android/deps.json') }}
           restore-prefixes-first-match: nix-apk-${{ runner.os }}-
           gc-max-store-size-linux: 6G
           purge: true
@@ -146,6 +149,11 @@ jobs:
       - name: Build aapt2 and the SDK (kept as gc roots)
         if: steps.seen.outputs.cache-hit != 'true'
         run: nix build .#aapt2 .#android-sdk --out-link "$RUNNER_TEMP/android" --print-build-logs
+
+      # The kernel for every ABI first, so its failure reads on its own.
+      - name: Build the kernel for Android
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: nix build .#harken-android-lib --out-link "$RUNNER_TEMP/android-lib" --print-build-logs
 
       - name: Build the APK
         id: build
@@ -263,13 +271,12 @@ jobs:
           <style>body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:4em auto;padding:0 1em;color-scheme:light dark}</style></head>
           <body>
           <h1>apps</h1>
-          <p>ArkDB is a local-first sync engine whose domain is written once and
-          runs natively in Rust, Swift and Kotlin; harken, a music library with
-          playlists, is the first app on it. <a href="harken/">harken/</a> is its
-          browser peer — the same engine compiled to wasm, applying every entry
-          through the interpreter over the module it embeds. Open it
-          <em>alone</em> to run it entirely in this tab, or point it at a harken
-          server. The source is at
+          <p>ArkDB is a local-first sync engine: one runtime in Rust, a domain
+          written in plain Rust, and the phones embedding the same kernel.
+          harken, a music library with playlists, is the first app on it.
+          <a href="harken/">harken/</a> is its browser peer — the same engine
+          compiled to wasm. Open it <em>alone</em> to run it entirely in this
+          tab, or point it at a harken server. The source is at
           <a href="https://github.com/k2on/apps">github.com/k2on/apps</a>.</p>
           </body>
           </html>
