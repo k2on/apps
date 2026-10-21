@@ -2158,6 +2158,7 @@ dependencies = [
  "ark-ffi",
  "ark-peer",
  "harken-domain",
+ "harken-player",
  "serde_json",
  "tempfile",
  "uniffi",
@@ -2178,6 +2179,17 @@ dependencies = [
  "tungstenite",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "harken-player"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-peer",
+ "harken-domain",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

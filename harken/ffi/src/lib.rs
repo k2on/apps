@@ -18,6 +18,9 @@ use serde_json::json;
 
 uniffi::setup_scaffolding!();
 
+mod player;
+pub use player::{Loudness, PhoneSound, Player, SoundState};
+
 /// The milliseconds between two ephemeral calls the relay sends — a
 /// scrubber dragged — twenty a second; the last always goes.
 pub const THROTTLE_MS: i64 = 50;
