@@ -477,6 +477,8 @@
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken-apk.mitmCache.updateScript;
+            # The workflow builds these first and keeps them as gc roots.
+            inherit aapt2;
             android-sdk = androidSdk;
             # The APK's F-Droid repository, and a key for it (nix/fdroid.nix).
             inherit (import ./nix/fdroid.nix { inherit lib pkgs harken-apk; }) harken-fdroid-repo harken-fdroid fdroid-keygen;
