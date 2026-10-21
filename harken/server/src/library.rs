@@ -330,7 +330,7 @@ pub struct HarkenLocal {
 /// it. Lost or unreadable, they are empty: every file is read once more,
 /// and the procedure keeps the library right.
 pub struct Prints {
-    local: Instance<HarkenLocal>,
+    local: Instance,
     moved: BTreeMap<String, Print>,
 }
 
@@ -346,7 +346,7 @@ impl Prints {
                 Box::new(ark_peer::Memory::default())
             }
         };
-        let local = Instance::open(disk);
+        let local = Instance::open::<HarkenLocal>(disk);
         if let Some(e) = &local.failure {
             eprintln!(
                 "harken-server: library: {} is not readable ({e}); every file is read again",
@@ -361,7 +361,7 @@ impl Prints {
 
     pub fn get(&self, file: &str) -> Option<Print> {
         let moved = self.moved.get(file).cloned();
-        moved.or_else(|| self.local.read(|db| db.print.get(file)))
+        moved.or_else(|| self.local.read::<HarkenLocal, _>(|db| db.print.get(file)))
     }
 
     fn set(&mut self, print: Print) {
@@ -373,7 +373,7 @@ impl Prints {
     /// The pictures already taken out of files.
     fn art(&self) -> BTreeSet<String> {
         self.local
-            .read(|db| db.art.scan())
+            .read::<HarkenLocal, _>(|db| db.art.scan())
             .into_iter()
             .map(|a| a.name)
             .collect()
@@ -382,7 +382,7 @@ impl Prints {
     /// What moved, and the pictures `written` the index does not have yet.
     fn save(&mut self, written: &BTreeSet<String>) {
         let moved = std::mem::take(&mut self.moved);
-        let kept = self.local.write(|db| {
+        let kept = self.local.write::<HarkenLocal, ark::db::Durable, _>(|db| {
             for p in moved.into_values() {
                 db.print.put(p)?;
             }

@@ -477,7 +477,7 @@ impl Peer {
             user: st.user,
             session: s.peer.me().session.clone(),
             alone: st.alone,
-            failure: s.peer.failure.clone(),
+            failure: s.peer.failure().map(Into::into),
             denied: s.denied.clone(),
         }
     }

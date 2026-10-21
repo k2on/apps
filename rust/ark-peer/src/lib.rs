@@ -81,7 +81,7 @@ pub use app::{nobody, Standing, Status, Update};
 pub use disk::{Disk, Files, Memory};
 pub use hub::{ConnId, Deliver};
 pub use link::{Event, Pumped, Wake};
-pub use local::{Bytes, Instance, Local, Logins, Shared};
+pub use local::{Fold, Instance, Local, Logins, Shared};
 #[cfg(not(target_arch = "wasm32"))]
 pub use serve::{dev, Authenticate, Handle, Running, Server};
 
@@ -215,15 +215,14 @@ impl At {
 /// One recorded act, what it said, and where its machine stood after.
 pub type Recorded = (Act, Vec<Output>, Option<At>);
 
+/// Three instances wired: the log's machine on the disk, the live one, and
+/// the local instance beside them on the same disk; and what wires them.
 pub struct Peer {
     pub config: Config,
-    pub log: Machine,
-    pub live: Option<Machine>,
-    pub disk: Box<dyn Disk>,
+    pub log: Instance,
+    pub live: Option<Instance>,
     /// Every input given, when recording.
     pub record: Option<Vec<Recorded>>,
-    /// The disk's last refusal, while it lasts.
-    pub failure: Option<String>,
     /// Whether a connection to its server is up.
     pub linked: bool,
     /// The link: the server, the login's token, the connection and when it
@@ -231,8 +230,6 @@ pub struct Peer {
     pub link: link::Link,
     /// The connections it serves.
     hub: hub::Hub,
-    /// Records not yet written: everything delivered waits for them.
-    unwritten: Vec<Vec<u8>>,
     /// Frames for its server.
     frames: Vec<Vec<u8>>,
     views: Vec<(Space, Option<Box<dyn Maintained>>)>,
@@ -241,7 +238,7 @@ pub struct Peer {
     /// What became of its own intents, and what its views did.
     told: app::Told,
     /// What it keeps beside its log, on the same disk.
-    pub local: Instance<Local>,
+    pub local: Instance,
     /// The `local` and the pending intents (each its `local` and id) its
     /// local instance holds, and whether it holds a chain to hand over.
     saved: (i64, Vec<(i64, EntryId)>),
@@ -255,16 +252,16 @@ pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
     }
 }
 
-fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Machine {
+fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
     let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone()).in_space(space);
     if let Some(o) = origin {
         p.origin = o;
     }
-    p
+    Instance::new(p, None)
 }
 
 /// A device's live machine as `me`.
-fn live_of(config: &Config, me: &Who, origin: Origin) -> Option<Machine> {
+fn live_of(config: &Config, me: &Who, origin: Origin) -> Option<Instance> {
     let l = config.live.as_ref()?;
     let mut p = machine(&l.module, Role::Replica, me, Some(origin), Space::Volatile);
     p.device = l.device.clone();
@@ -320,18 +317,15 @@ pub fn who(l: &ark_auth::Login) -> Who {
 }
 
 impl Peer {
-    fn with(config: Config, log: Machine, live: Option<Machine>, disk: Box<dyn Disk>, local: Instance<Local>) -> Peer {
+    fn with(config: Config, log: Instance, live: Option<Instance>, local: Instance) -> Peer {
         Peer {
             config,
             log,
             live,
-            disk,
             record: None,
-            failure: None,
             linked: false,
             link: link::Link::default(),
             hub: hub::Hub::default(),
-            unwritten: vec![],
             frames: vec![],
             views: vec![],
             relay: BTreeMap::new(),
@@ -353,48 +347,34 @@ impl Peer {
         config: Config,
         me: Who,
         disk: Box<dyn Disk>,
-        mut local: Instance<Local>,
+        mut local: Instance,
         mut record: Option<Vec<Recorded>>,
         link: link::Link,
     ) -> Peer {
-        let (r, intents) = local.read(|db| (local::replica(db).unwrap_or_default(), db.pending.scan()));
-        let fork = r.fork.as_ref().and_then(Bytes::read::<(Seq, EntryHash)>);
-        let joining = r.joining.as_ref().and_then(Bytes::read::<((Seq, EntryHash), Vec<Logged>)>);
-        let joining = joining.map(|((n, h), c)| (n, h, c));
-        let origin = match r.origin.read::<Origin>() {
-            Some(o) => o,
-            None => {
-                let o = draw_origin();
-                let _ = local.write(|db| {
-                    db.replica.put(local::Replica {
-                        origin: Bytes::of(&o),
-                        ..r.clone()
-                    })
-                });
-                o
+        let (r, intents) = local.read::<Local, _>(|db| (local::replica(db).unwrap_or_default(), db.pending.scan()));
+        let origin = match r.origin {
+            o if o != Origin::default() => o,
+            _ => {
+                let origin = draw_origin();
+                let _ = local.write::<Local, ark::db::Durable, _>(|db| db.replica.put(local::Replica { origin, ..r.clone() }));
+                origin
             }
         };
-        let pending: Vec<Entry> = intents.iter().filter_map(|i| i.entry.read()).collect();
-        if let Some(r) = &mut record {
-            r.push((Act::Open(me.clone(), origin, fork, joining.clone()), vec![], None));
+        let pending: Vec<Entry> = intents.into_iter().map(|i| i.entry).collect();
+        if let Some(rec) = &mut record {
+            rec.push((Act::Open(me.clone(), origin, r.fork, r.joining.clone()), vec![], None));
         }
-        let role = if fork.is_some() { alone_at(fork) } else { Role::Replica };
+        let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
         let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
-        log.joining = joining;
+        (log.disk, log.joining) = (Some(disk), r.joining);
         let live = live_of(&config, &me, origin);
-        let mut p = Peer::with(config, log, live, disk, local);
+        let mut p = Peer::with(config, log, live, local);
         (p.record, p.link, p.joined) = (record, link, p.log.joining.is_some());
         p.saved = (r.local, pending.iter().map(|e| (e.local, e.id)).collect());
-        let (stored, error) = match p.disk.load() {
-            Ok(s) => (s, p.local.failure.clone()),
-            Err(e) => (Default::default(), Some(e.to_string())),
-        };
-        p.failure = error;
         let durable = Durable {
-            rows: stored.rows.unwrap_or_else(|| p.log.confirmed_rows()),
-            logged: stored.logged,
             pending,
             local: r.local,
+            ..p.log.stored()
         };
         p.step(Space::Durable, Input::Open(durable));
         p
@@ -406,18 +386,24 @@ impl Peer {
         let me = self.log.me.clone();
         let mut link = self.link;
         link.wire = None;
-        let local = Instance::open(self.local.into_disk());
-        Peer::opened(self.config, me, self.disk, local, self.record, link)
+        let local = Instance::open::<Local>(self.local.into_disk());
+        Peer::opened(self.config, me, self.log.into_disk(), local, self.record, link)
     }
 
     pub fn machine(&self, space: Space) -> Option<&Machine> {
         match space {
             Space::Durable => Some(&self.log),
-            Space::Volatile => self.live.as_ref(),
+            Space::Volatile => self.live.as_deref(),
         }
     }
 
-    fn machine_mut(&mut self, space: Space) -> Option<&mut Machine> {
+    /// What keeps a disk from being written, while it lasts: the log's, or
+    /// its local instance's.
+    pub fn failure(&self) -> Option<&str> {
+        self.log.failure.as_deref().or(self.local.failure.as_deref())
+    }
+
+    fn instance(&mut self, space: Space) -> Option<&mut Instance> {
         match space {
             Space::Durable => Some(&mut self.log),
             Space::Volatile => self.live.as_mut(),
@@ -435,7 +421,7 @@ impl Peer {
     /// record to the disk; changes to the views; verdicts kept.
     fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Vec<Output> {
         let rec = self.record.is_some().then(|| input.clone());
-        let Some(m) = self.machine_mut(space) else { return vec![] };
+        let Some(m) = self.instance(space) else { return vec![] };
         let out = m.step(input);
         for o in &out {
             match o {
@@ -446,10 +432,6 @@ impl Peer {
                 },
                 Output::Fanout(b) => self.hub.fanout(space, b),
                 Output::To { session, bytes } => self.hub.to(session, bytes),
-                Output::Persist(b) => {
-                    self.unwritten.push(b.clone());
-                    self.write();
-                }
                 Output::Changes(cs) => {
                     self.changed(space, cs);
                     if space == Space::Durable {
@@ -472,36 +454,26 @@ impl Peer {
                 .push((Act::Step(space, i), out.clone(), Some(at)));
         }
         match (self.hub.serving, space) {
-            (true, _) => self.kept(space),
+            (true, Space::Durable) => self.kept(),
             (false, Space::Durable) => self.keep_pending(),
             _ => {}
         }
         out
     }
 
-    /// What is unwritten, written in order, up to the first write that
-    /// fails: whether all of it is.
-    fn write(&mut self) -> bool {
-        while let Some(r) = self.unwritten.first() {
-            if let Err(e) = self.disk.record(r) {
-                self.failure = Some(format!("the log cannot be written: {e}"));
-                return false;
-            }
-            self.unwritten.remove(0);
-        }
-        self.failure = None;
-        true
-    }
-
     /// Its replica row, changed by `f`, kept.
     pub(crate) fn replica(&mut self, f: impl FnOnce(&mut local::Replica)) {
-        let wrote = self.local.write(|db| {
+        self.keep(|db| {
             let mut r = local::replica(db).unwrap_or_default();
             f(&mut r);
             db.replica.put(r)
         });
-        if let Some(e) = wrote.err().map(|r| r.0).or_else(|| self.local.failure.clone()) {
-            self.failure = Some(e);
+    }
+
+    /// `f` written to its local instance; a refusal kept as its failure.
+    pub(crate) fn keep(&mut self, f: impl for<'t> FnOnce(&mut ark::db::Db<'t, Local>) -> Result<(), Refusal>) {
+        if let Err(e) = self.local.write::<Local, ark::db::Durable, _>(f) {
+            self.local.failure = Some(e.0);
         }
     }
 
@@ -519,17 +491,15 @@ impl Peer {
         let was = std::mem::take(&mut self.saved.1);
         let gone = (0..=was.len()).find(|d| ids.starts_with(&was[*d..]));
         let (gone, kept) = gone.map_or((was.len(), 0), |d| (d, was.len() - d));
-        let chain = (joined != self.joined).then(|| self.log.joining.clone().map(|(n, h, c)| Bytes::of(&((n, h), c))));
-        let (local, pending) = (self.log.local, &self.log.pending);
-        let wrote = self.local.write(|db| {
+        let chain = (joined != self.joined).then(|| self.log.joining.clone());
+        let local = self.log.local;
+        let fresh: Vec<Entry> = self.log.pending[kept..].iter().map(|p| p.entry.clone()).collect();
+        self.keep(|db| {
             for (l, _) in &was[..gone] {
                 db.pending.delete(*l)?;
             }
-            for p in &pending[kept..] {
-                db.pending.put(local::Intent {
-                    local: p.entry.local,
-                    entry: Bytes::of(&p.entry),
-                })?;
+            for entry in fresh {
+                db.pending.put(local::Intent { local: entry.local, entry })?;
             }
             let mut r = local::replica(db).unwrap_or_default();
             r.local = local;
@@ -538,9 +508,6 @@ impl Peer {
             }
             db.replica.put(r)
         });
-        if let Some(e) = wrote.err().map(|r| r.0).or_else(|| self.local.failure.clone()) {
-            self.failure = Some(e);
-        }
         (self.saved, self.joined) = ((local, ids), joined);
     }
 
@@ -573,18 +540,23 @@ impl Peer {
             self.tick(now);
             return Ok(());
         }
+        let func = func.into();
+        self.verdict(space, Input::Mutate { func, input, now })
+    }
+
+    /// Facts the authority writes itself, raw: an entry naming no function
+    /// (`Input::Write`), judged by the store as any write is.
+    pub fn write(&mut self, facts: Vec<Change>, now: i64) -> Result<(), String> {
+        self.verdict(Space::Durable, Input::Write { facts, now })
+    }
+
+    /// One input of this peer's own, routed, and the verdict it was given
+    /// here and now.
+    fn verdict(&mut self, space: Space, input: Input) -> Result<(), String> {
         if self.machine(space).is_none() {
             return Err(format!("no {space:?} machine here"));
         }
-        let said = self.route(
-            space,
-            None,
-            Input::Mutate {
-                func: func.into(),
-                input,
-                now,
-            },
-        );
+        let said = self.route(space, None, input);
         let verdict = said.into_iter().find_map(|o| match o {
             Output::Refused { why, .. } => Some(Err(why)),
             Output::Confirmed(_) => Some(Ok(())),
@@ -633,7 +605,7 @@ impl Peer {
             journal: Journal { fork: Some(f), .. },
         } = &self.log.role
         {
-            let f = Bytes::of(f);
+            let f = *f;
             self.replica(|r| r.fork = Some(f));
         }
     }
@@ -658,7 +630,7 @@ impl Peer {
         if other {
             self.log.origin = Origin::named([&self.log.origin.0[..], who.session.as_bytes()].concat());
             self.log.local = 0;
-            let o = Bytes::of(&self.log.origin);
+            let o = self.log.origin;
             self.replica(|r| r.origin = o);
         }
         let origin = self.log.origin;

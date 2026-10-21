@@ -55,7 +55,7 @@ fn input(i: &Input) -> Value {
         Input::Open(d) => json!({"t": "open", "durable": hex(&d.to_bytes())}),
         Input::Tick(n) => json!({"t": "tick", "now": n}),
         Input::Persisted(n) => json!({"t": "persisted", "seq": n}),
-        Input::Feed { .. } | Input::Loaded => unreachable!("a client is never told a feed or a load"),
+        Input::Feed { .. } | Input::Loaded | Input::Write { .. } => unreachable!("a client is never told a feed, a load or a write"),
     }
 }
 

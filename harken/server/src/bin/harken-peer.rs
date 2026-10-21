@@ -1139,7 +1139,7 @@ impl Headless {
             }
             Cmd::Persist | Cmd::Quit => {
                 self.pump();
-                match self.client.failure.clone() {
+                match self.client.failure().map(String::from) {
                     None => Answer::ok(true),
                     Some(e) => Answer::refused(e),
                 }

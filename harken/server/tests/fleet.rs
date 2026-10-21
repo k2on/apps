@@ -1873,7 +1873,7 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
 /// peers — two of alice's devices and bob's — and alice's playlist; one of
 /// her devices goes behind a black hole and makes a playlist there. The
 /// server's admin page renames hers raw (a function of the change, authored
-/// by the authority as itself, `ark_peer::admin::raw`) and is refused
+/// by the authority as itself, `Input::Write`) and is refused
 /// one the store refuses — a playlist entry naming no playlist — which is
 /// logged nowhere. The device comes back: every peer converges on the log,
 /// the rename in each one's own `playlists`, the black-holed playlist after

@@ -1,68 +1,48 @@
-//! What a peer keeps beside its log, as rows (§1.3, §1.7, §1.9): an
-//! **instance** of a schema that is not wired, and the schema a peer keeps
-//! its own state in ([`Local`]).
+//! Instances, and what a peer keeps beside its log (§1.3, §1.7, §1.9).
 //!
-//! Two concepts make every kind of instance. A table is durable or
-//! volatile (§1.3). An instance is wired — a [`Peer`](crate::Peer), linked
-//! to its server or serving one — or it is not: an [`Instance`], a machine
-//! in the authority role that is never offered a link. So a schema's
-//! tables are durable and synced (the app's log), volatile and synced (its
-//! live state), durable and **local** ([`Instance::open`]: the log's own
-//! format on a disk, `kv` and `log`, one entry appended per write, folded
-//! into the rows whole once the entries outnumber the rows), or volatile
-//! and **ephemeral** ([`Instance::ephemeral`]: no journal at all). Nothing
-//! is added to the kernel for it: a local table is a table of another
-//! `#[derive(Schema)]` struct, read and written through its `Db<S>`.
+//! An [`Instance`] is one machine and what keeps it: a disk or none, the
+//! open from it, every record written in order, the log folded by one
+//! rule ([`Fold`]). Two concepts make every kind of instance. A table is
+//! durable or volatile (§1.3). An instance is wired — one of a
+//! [`Peer`](crate::Peer)'s, linked to its server or serving one — or it is
+//! not: a machine in the authority role never offered a link. So a
+//! schema's tables are durable and synced (the app's log), volatile and
+//! synced (its live state), durable and **local** ([`Instance::open`]: the
+//! log's own format on a disk, `kv` and `log`), or volatile and
+//! **ephemeral** ([`Instance::ephemeral`]: no disk). A local table is a
+//! table of another `#[derive(Schema)]` struct, read and written through
+//! its `Db<S>`.
 //!
-//! A write is a typed run, `Db<S, P>` as a function's (§1.16); its changes
-//! are the one entry the machine sequences, logs and makes durable, by a
-//! function of the instance's own (`write`) that applies them — the run is
-//! not done again, since a local instance is never rebased.
+//! Only an unwired instance is written by a closure: a typed run, `Db<S,
+//! P>` as a function's (§1.16), whose changes are the input of the one
+//! entry the machine sequences — a function of the instance's own
+//! (`write`) that makes them. A synced entry names a domain's function.
 //!
-//! A peer's own state is [`Local`]'s rows, its journal under the `local.`
-//! names of the peer's disk ([`Shared`]): a server's journal — each
-//! origin's last `local` and actor (`origin`), the intents it refused
-//! (`verdict`), those waiting behind a held one (`waiting`) — and its
-//! volatile space as it last closed (`volatile`); a device's replica
-//! (`replica`: its origin, the last `local` drawn, who last signed in,
-//! its fork and the chain it hands over) and its pending intents
-//! (`pending`).
+//! A peer's own state is [`Local`]'s rows, under the `local.` names of the
+//! peer's disk ([`Shared`]): a server's journal — each origin's last
+//! `local` and actor (`origin`), the intents it refused (`verdict`), those
+//! waiting behind a held one (`waiting`) — and its volatile space as it
+//! last closed (`volatile`); a device's replica (`replica`: its origin,
+//! the last `local` drawn, who last signed in, its fork and the chain it
+//! hands over) and its pending intents (`pending`).
 
 use std::io;
-use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
-use ark::db::{Db, Durable as DurableRun, Tables, Volatile, Writes};
-use ark::format::Encode;
-use ark::log::{Durable, Origin};
-use ark::peer::{Ctx, Functions, Input, Output, Peer as Machine, Procedure, Who};
+use ark::db::{Db, Durable as Run, Tables, Writes};
+use ark::hash::EntryHash;
+use ark::log::{Durable, Entry, EntryId, Origin, Seq};
+use ark::peer::{Functions, Input, Output, Peer as Machine, Who};
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
-use ark::row::{Describe, Type};
-use ark::store::{Change, Store};
+use ark::row::Bytes;
+use ark::schema::Space;
+use ark::store::{Change, LOG};
 use ark::Refusal;
 
-use crate::{alone_at, draw_origin, now_ms, Disk};
+use ark_auth::remember::Remembered;
 
-/// A value of the kernel's kept in a column: its bytes in the value
-/// format.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct Bytes(pub Vec<u8>);
-
-impl Describe for Bytes {
-    fn describe() -> Type {
-        Type::Bytes
-    }
-}
-
-impl Bytes {
-    pub fn of(v: &impl Encode) -> Bytes {
-        Bytes(v.to_bytes())
-    }
-
-    pub fn read<T: Encode>(&self) -> Option<T> {
-        T::from_bytes(&self.0).ok()
-    }
-}
+use crate::{alone_at, draw_origin, now_ms, Disk, Joining};
 
 /// A server's: an origin's last `local` judged, and the actor it is bound
 /// to.
@@ -70,7 +50,7 @@ impl Bytes {
 #[ark(table = "origin")]
 pub struct Last {
     #[ark(key)]
-    pub origin: Bytes,
+    pub origin: Origin,
     pub actor: String,
     pub last: i64,
 }
@@ -80,7 +60,7 @@ pub struct Last {
 #[ark(table = "verdict")]
 pub struct Refused {
     #[ark(key)]
-    pub entry: Bytes,
+    pub entry: EntryId,
     pub why: String,
 }
 
@@ -90,13 +70,13 @@ pub struct Refused {
 #[ark(table = "waiting")]
 pub struct Waits {
     #[ark(key)]
-    pub origin: Bytes,
+    pub origin: Origin,
     #[ark(key)]
     pub local: i64,
     pub actor: String,
     pub session: String,
     pub roles: Vec<String>,
-    pub entry: Bytes,
+    pub entry: Entry,
 }
 
 /// A server's: a row of its volatile space (its log's row among them) as
@@ -119,12 +99,13 @@ pub struct Replica {
     /// Always 0: a disk is one replica.
     #[ark(key)]
     pub n: i64,
-    pub origin: Bytes,
+    /// Drawn at the first open; the default until then.
+    pub origin: Origin,
     pub local: i64,
     pub actor: Option<String>,
     pub session: String,
-    pub fork: Option<Bytes>,
-    pub joining: Option<Bytes>,
+    pub fork: Option<(Seq, EntryHash)>,
+    pub joining: Option<Joining>,
 }
 
 /// A device's: one of its own intents not yet confirmed, by its `local`.
@@ -133,7 +114,7 @@ pub struct Replica {
 pub struct Intent {
     #[ark(key)]
     pub local: i64,
-    pub entry: Bytes,
+    pub entry: Entry,
 }
 
 /// What a peer keeps beside its log.
@@ -150,126 +131,195 @@ pub struct Local {
 /// The names a peer's local instance journals under on its disk.
 pub const LOCAL: &str = "local.";
 
-/// The one function an instance runs: the changes its run made, which
-/// were undone from this store a moment before.
-struct Apply(Arc<Mutex<Vec<Change>>>);
+/// When an instance folds its log into its rows, the one rule: once the
+/// entries above its snapshot outnumber `keep` and `slack` (and the rows it
+/// holds, when `rows`), all but the last `keep` are folded. A server keeps
+/// `keep` entries and folds at twice that; a local instance keeps none and
+/// folds once its entries outnumber its rows (and 64), so a fold, which
+/// writes every row, is paid for by as many writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fold {
+    pub keep: usize,
+    pub slack: usize,
+    pub rows: bool,
+}
 
-impl Procedure for Apply {
-    fn apply(&self, store: &mut Store, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
-        let cs = std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()));
-        cs.iter().for_each(|c| store.apply(c).expect("a run's changes apply again"));
-        Ok(cs)
+impl Fold {
+    /// A server's: `keep` entries above the horizon.
+    pub fn keep(keep: usize) -> Fold {
+        Fold {
+            keep,
+            slack: keep,
+            rows: false,
+        }
     }
 }
 
-/// A schema's tables on a machine that is never linked: local over a disk
-/// (`P` durable), or ephemeral (volatile, no disk).
-pub struct Instance<S: Tables, P: Writes = DurableRun> {
-    machine: Machine,
-    disk: Option<Box<dyn Disk>>,
-    run: Arc<Mutex<Vec<Change>>>,
-    /// The rows it holds, which its journal is folded into once it holds
-    /// more entries than that.
+/// One machine and what keeps it (§1.7): its disk, when it has one —
+/// opened from what the disk holds, every `Persist` written in order (and,
+/// while a write fails, kept to write again, the failure said), its log
+/// folded as its [`Fold`] says. A [`Peer`](crate::Peer) is three of these
+/// wired together; one alone is a schema's tables on a machine never
+/// linked, read and written through a `Db<S>` of its schema's struct.
+pub struct Instance {
+    pub machine: Machine,
+    pub disk: Option<Box<dyn Disk>>,
+    pub fold: Option<Fold>,
+    /// Records not yet written.
+    unwritten: Vec<Vec<u8>>,
+    /// The rows it holds, which a fold by rows is measured against.
     rows: usize,
     /// The disk's last refusal, while it lasts.
     pub failure: Option<String>,
-    _s: PhantomData<fn() -> (S, P)>,
 }
 
-impl<S: Tables> Instance<S> {
-    /// `S`'s tables as `disk` last kept them; empty, saying why in
-    /// [`Instance::failure`], when it does not read.
-    pub fn open(mut disk: Box<dyn Disk>) -> Instance<S> {
-        let stored = disk.load();
-        let mut i = Instance::made(Some(disk));
-        match stored {
-            Ok(s) => {
-                let rows = s.rows.unwrap_or_else(|| i.machine.confirmed_rows());
-                let out = i.machine.step(Input::Open(Durable {
-                    rows,
-                    logged: s.logged,
-                    ..Durable::default()
-                }));
-                i.persist(out);
-            }
-            Err(e) => i.failure = Some(e.to_string()),
+impl Deref for Instance {
+    type Target = Machine;
+    fn deref(&self) -> &Machine {
+        &self.machine
+    }
+}
+
+impl DerefMut for Instance {
+    fn deref_mut(&mut self) -> &mut Machine {
+        &mut self.machine
+    }
+}
+
+impl Instance {
+    pub fn new(machine: Machine, disk: Option<Box<dyn Disk>>) -> Instance {
+        Instance {
+            machine,
+            disk,
+            fold: None,
+            unwritten: vec![],
+            rows: 0,
+            failure: None,
         }
-        i.rows = i.machine.store.snapshot_rows().iter().map(|(_, r)| r.len()).sum();
+    }
+
+    /// `S`'s tables as `disk` last kept them, on an unwired machine; empty,
+    /// saying why in [`Instance::failure`], when it does not read.
+    pub fn open<S: Tables>(disk: Box<dyn Disk>) -> Instance {
+        let mut i = Instance::unwired::<S>(Space::Durable, Some(disk));
+        i.fold = Some(Fold {
+            keep: 0,
+            slack: 64,
+            rows: true,
+        });
+        let stored = i.stored();
+        i.step(Input::Open(stored));
         i
+    }
+
+    /// `S`'s volatile tables, empty, kept nowhere.
+    pub fn ephemeral<S: Tables>() -> Instance {
+        Instance::unwired::<S>(Space::Volatile, None)
+    }
+
+    fn unwired<S: Tables>(space: Space, disk: Option<Box<dyn Disk>>) -> Instance {
+        let schema = Arc::new(S::schema());
+        let mut machine = Machine::new(schema, Functions::default(), alone_at(None), Who::default()).in_space(space);
+        // Its own ids, drawn afresh at each open: the log it folds keeps none.
+        machine.origin = draw_origin();
+        Instance::new(machine, disk)
+    }
+
+    /// What its disk holds, to open from: empty, the failure said, when it
+    /// does not read.
+    pub fn stored(&mut self) -> Durable {
+        let stored = self.disk.as_mut().map_or(Ok(Default::default()), |d| d.load());
+        let s = stored.unwrap_or_else(|e| {
+            self.failure = Some(e.to_string());
+            Default::default()
+        });
+        let rows = s.rows.unwrap_or_else(|| self.machine.confirmed_rows());
+        Durable {
+            rows,
+            logged: s.logged,
+            ..Durable::default()
+        }
+    }
+
+    /// One input to its machine, what it made durable written, its log
+    /// folded when its rule says; what the machine said.
+    pub fn step(&mut self, input: Input) -> Vec<Output> {
+        let out = self.machine.step(input);
+        self.took(&out);
+        let (head, base) = (self.machine.log().head().0, self.machine.log().base_seq());
+        if let Some(f) = self
+            .fold
+            .filter(|f| head - base > (f.keep + f.slack + f.rows as usize * self.rows) as i64)
+        {
+            let folded = self.machine.step(Input::Compact(head - f.keep as i64));
+            self.took(&folded);
+        }
+        self.flush();
+        out
+    }
+
+    fn took(&mut self, out: &[Output]) {
+        for o in out {
+            match o {
+                Output::Persist(b) => self.unwritten.push(b.clone()),
+                Output::Changes(cs) => {
+                    let n = |c: &Change| match c {
+                        Change::Add { .. } => 1,
+                        Change::Remove { .. } => -1,
+                        Change::Edit { .. } => 0,
+                    };
+                    self.rows = self.rows.saturating_add_signed(cs.iter().filter(|c| c.table() != LOG).map(n).sum());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// What is unwritten, written in order up to the first write that
+    /// fails: whether all of it is.
+    pub fn flush(&mut self) -> bool {
+        let Some(d) = &mut self.disk else {
+            self.unwritten.clear();
+            return true;
+        };
+        while let Some(r) = self.unwritten.first() {
+            if let Err(e) = d.record(r) {
+                self.failure = Some(format!("the log cannot be written: {e}"));
+                return false;
+            }
+            self.unwritten.remove(0);
+        }
+        self.failure = None;
+        true
     }
 
     /// Its disk, to open it again from.
     pub fn into_disk(self) -> Box<dyn Disk> {
-        self.disk.expect("a local instance has a disk")
-    }
-}
-
-impl<S: Tables> Instance<S, Volatile> {
-    /// `S`'s volatile tables, empty, kept nowhere.
-    pub fn ephemeral() -> Instance<S, Volatile> {
-        Instance::made(None)
-    }
-}
-
-impl<S: Tables, P: Writes> Instance<S, P> {
-    fn made(disk: Option<Box<dyn Disk>>) -> Instance<S, P> {
-        let run = Arc::new(Mutex::new(vec![]));
-        let mut functions = Functions::default();
-        functions.insert("write", Arc::new(Apply(run.clone())));
-        let mut machine = Machine::new(Arc::new(S::schema()), functions, alone_at(None), Who::default()).in_space(P::SPACE);
-        // Its own ids, drawn afresh at each open: the log it folds keeps none.
-        machine.origin = draw_origin();
-        Instance {
-            machine,
-            disk,
-            run,
-            rows: 0,
-            failure: None,
-            _s: PhantomData,
-        }
+        self.disk.expect("an instance with a disk")
     }
 
-    /// `f` over its tables.
-    pub fn read<T>(&self, f: impl for<'t> FnOnce(&Db<'t, S>) -> T) -> T {
+    /// `f` over its tables, as `S`'s.
+    pub fn read<S: Tables, T>(&self, f: impl for<'t> FnOnce(&Db<'t, S>) -> T) -> T {
         ark::db::read::<S, T>(&self.machine.store, f)
     }
 
-    /// `f` over its tables, writing: what it made is kept, all or none,
-    /// and its answer.
-    pub fn write<T>(&mut self, f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, Refusal>) -> Result<T, Refusal> {
-        let (t, changes) = ark::db::write_in::<S, P, T>(&mut self.machine.store, f)?;
-        if changes.is_empty() {
+    /// `f` over its tables as `S`'s, writing `P`'s: what it made is the
+    /// facts of one entry (`Input::Write`), all or none, and its answer.
+    pub fn write<S: Tables, P: Writes, T>(&mut self, f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, Refusal>) -> Result<T, Refusal> {
+        let (t, facts) = ark::db::write_in::<S, P, T>(&mut self.machine.store, f)?;
+        if facts.is_empty() {
             return Ok(t);
         }
-        for c in changes.iter().rev() {
-            self.machine.store.apply(&c.inverse()).expect("an inverse applies");
-        }
-        let moved: isize = changes
-            .iter()
-            .map(|c| matches!(c, Change::Add { .. }) as isize - matches!(c, Change::Remove { .. }) as isize)
-            .sum();
-        self.rows = self.rows.saturating_add_signed(moved);
-        *self.run.lock().unwrap_or_else(|e| e.into_inner()) = changes;
-        let out = self.machine.step(Input::Mutate {
-            func: "write".into(),
-            input: vec![],
-            now: now_ms(),
-        });
-        self.persist(out);
-        let (head, base) = (self.machine.log().head().0, self.machine.log().base_seq());
-        if head - base > 64 + self.rows as i64 {
-            let out = self.machine.step(Input::Compact(head));
-            self.persist(out);
-        }
-        Ok(t)
-    }
-
-    fn persist(&mut self, out: Vec<Output>) {
-        let Some(d) = &mut self.disk else { return };
-        for o in out {
-            if let Output::Persist(b) = o {
-                self.failure = d.record(&b).err().map(|e| e.to_string());
-            }
+        self.machine
+            .store
+            .apply_all(&facts.iter().rev().map(Change::inverse).collect::<Vec<_>>())?;
+        let said = self.step(Input::Write { facts, now: now_ms() });
+        match said.into_iter().find_map(|o| match o {
+            Output::Refused { why, .. } => Some(why),
+            _ => None,
+        }) {
+            Some(why) => Err(Refusal::new(why)),
+            None => Ok(t),
         }
     }
 }
@@ -319,9 +369,9 @@ impl Disk for Shared {
 }
 
 /// A peer's disk, shared with its local instance.
-pub(crate) fn beside(disk: Box<dyn Disk>) -> (Box<dyn Disk>, Instance<Local>) {
+pub(crate) fn beside(disk: Box<dyn Disk>) -> (Box<dyn Disk>, Instance) {
     let shared = Shared::new(disk);
-    let local = Instance::open(Box::new(shared.under(LOCAL)));
+    let local = Instance::open::<Local>(Box::new(shared.under(LOCAL)));
     (Box::new(shared), local)
 }
 
@@ -340,13 +390,13 @@ pub fn preset(disk: &mut dyn Disk, f: impl FnOnce(&mut Replica)) -> io::Result<(
             held.put(n, &b)?;
         }
     }
-    let mut local = Instance::<Local>::open(Box::new(held));
+    let mut local = Instance::open::<Local>(Box::new(held));
     local
-        .write(|db| {
+        .write::<Local, Run, _>(|db| {
             let mut r = replica(db).unwrap_or_default();
             f(&mut r);
-            if r.origin.read::<Origin>().is_none() {
-                r.origin = Bytes::of(&draw_origin());
+            if r.origin == Origin::default() {
+                r.origin = draw_origin();
             }
             db.replica.put(r)
         })
@@ -387,29 +437,29 @@ impl Logins {
         }
     }
 
-    fn open(&self) -> Option<Instance<ark_auth::remember::Remembered>> {
+    fn open(&self) -> Option<Instance> {
         let at = self.at.clone()?;
         #[cfg(not(target_arch = "wasm32"))]
         let disk: Box<dyn Disk> = Box::new(crate::Files::new(at).ok()?);
         #[cfg(target_arch = "wasm32")]
         let disk: Box<dyn Disk> = Box::new(crate::disk::Local(at));
-        Some(Instance::open(disk))
+        Some(Instance::open::<Remembered>(disk))
     }
 
     /// The login remembered for `server`.
     pub fn recall(&self, server: &str) -> Option<ark_auth::Login> {
-        self.open()?.read(|db| ark_auth::remember::recall(db, server))
+        self.open()?.read::<Remembered, _>(|db| ark_auth::remember::recall(db, server))
     }
 
     pub fn remember(&self, server: &str, login: &ark_auth::Login) {
         if let Some(mut i) = self.open() {
-            let _ = i.write(|db| ark_auth::remember::remember(db, server, login));
+            let _ = i.write::<Remembered, Run, _>(|db| ark_auth::remember::remember(db, server, login));
         }
     }
 
     pub fn forget(&self, server: &str) {
         if let Some(mut i) = self.open() {
-            let _ = i.write(|db| ark_auth::remember::forget(db, server));
+            let _ = i.write::<Remembered, Run, _>(|db| ark_auth::remember::forget(db, server));
         }
     }
 }

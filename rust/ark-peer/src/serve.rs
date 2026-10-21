@@ -190,26 +190,17 @@ impl Handle {
 
     /// An entry the authority of `space` authors itself
     /// ([`Peer::author`]): the head it was sequenced at, or the refusal.
-    /// With `once`, `func` is that function (a raw write), runnable for
-    /// this entry only: never one a client's intent may name.
-    pub fn author(
-        &self,
-        space: Space,
-        func: String,
-        input: Vec<u8>,
-        once: Option<std::sync::Arc<dyn ark::peer::Procedure>>,
-    ) -> Option<Result<Seq, String>> {
-        self.with(move |p| {
-            let raw = once.is_some();
-            if let Some(f) = once {
-                p.log.functions.insert(func.clone(), f);
-            }
-            let r = p.author(space, &func, input, now_ms());
-            if raw && p.config.log.functions.get(&func).is_none() {
-                p.log.functions.forget(&func);
-            }
-            r.map(|_| p.machine(space).map_or(0, |m| m.log().head().0))
-        })
+    pub fn author(&self, space: Space, func: String, input: Vec<u8>) -> Option<Result<Seq, String>> {
+        self.sequenced(space, move |p| p.author(space, &func, input, now_ms()))
+    }
+
+    /// Facts the authority writes raw ([`Peer::write`]): as `author`.
+    pub fn write(&self, facts: Vec<ark::store::Change>) -> Option<Result<Seq, String>> {
+        self.sequenced(Space::Durable, move |p| p.write(facts, now_ms()))
+    }
+
+    fn sequenced(&self, space: Space, f: impl FnOnce(&mut Peer) -> Result<(), String> + Send + 'static) -> Option<Result<Seq, String>> {
+        self.with(move |p| f(p).map(|_| p.machine(space).map_or(0, |m| m.log().head().0)))
     }
 
     /// The in-process transport: a device's link dialling this server in
@@ -387,8 +378,7 @@ impl ark_auth::server::Hub for Handle {
     }
 
     fn write(&self, c: ark::store::Change) -> std::result::Result<(), String> {
-        let (name, f) = admin::raw(&c);
-        self.author(Space::Durable, name, vec![], Some(f)).ok_or("the hub is gone")?.map(|_| ())
+        Handle::write(self, vec![c]).ok_or("the hub is gone")?.map(|_| ())
     }
 }
 

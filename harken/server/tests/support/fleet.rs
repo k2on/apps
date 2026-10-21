@@ -173,7 +173,7 @@ pub fn function(e: &Logged) -> String {
 /// Whether an entry is a sign-in: the hub's own raw write of a `sign_in`
 /// row (`docs/plan-v5.md` S1), which every login now is.
 pub fn is_sign_in(e: &Logged) -> bool {
-    e.entry.func.starts_with(ark_peer::admin::RAW) && e.facts.iter().all(|c| c.table() == "sign_in")
+    e.entry.func.is_empty() && e.facts.iter().all(|c| c.table() == "sign_in")
 }
 
 impl Log {
@@ -823,11 +823,11 @@ impl PeerProc {
 
     /// The token the remembered login proves, from `DIR/logins`.
     pub fn token(&self) -> String {
-        let logins = ark_peer::Instance::<ark_auth::remember::Remembered>::open(Box::new(
+        let logins = ark_peer::Instance::open::<ark_auth::remember::Remembered>(Box::new(
             ark_peer::Files::new(self.dir.join("logins")).unwrap(),
         ));
         logins
-            .read(|db| db.login.scan())
+            .read::<ark_auth::remember::Remembered, _>(|db| db.login.scan())
             .pop()
             .expect("a login remembered")
             .token

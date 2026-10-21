@@ -119,7 +119,7 @@ impl Net {
         self.logins.insert(who.session.clone(), who.clone());
         // The origin a device draws once, seeded: its first session's.
         let mut disk = Memory::default();
-        let origin = ark_peer::Bytes::of(&ark::log::Origin::named(&who.session));
+        let origin = ark::log::Origin::named(&who.session);
         let _ = ark_peer::local::preset(&mut disk, |r| r.origin = origin);
         self.clients.insert(i, Peer::open(config, who, Box::new(disk), true));
         self.heal(i);
@@ -263,7 +263,7 @@ impl Net {
             self.partition(i);
         }
         self.hub.close();
-        let disk = std::mem::replace(&mut self.hub.disk, Box::new(Memory::default()));
+        let disk = self.hub.log.disk.take().expect("a server's disk");
         self.hub = Peer::serve(self.hub_config.clone(), disk, self.now);
     }
 

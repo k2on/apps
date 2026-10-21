@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use ark::db::Volatile;
+use ark::db::{Durable, Volatile};
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::log::{Entry, EntryId, Origin};
@@ -54,16 +54,16 @@ fn note(n: i64) -> Note {
 fn an_instance_reads_back_what_it_wrote() {
     let dir = tempfile::tempdir().unwrap();
     let files = || Box::new(ark_peer::Files::new(dir.path()).unwrap()) as Box<dyn Disk>;
-    let mut i = Instance::<Notes>::open(files());
+    let mut i = Instance::open::<Notes>(files());
     for n in 0..3 {
-        i.write(|db| db.note.insert(note(n))).unwrap();
+        i.write::<Notes, Durable, _>(|db| db.note.insert(note(n))).unwrap();
     }
-    assert!(i.write(|db| db.note.insert(note(1))).is_err(), "a key taken");
-    let i = Instance::<Notes>::open(i.into_disk());
-    assert_eq!(i.read(|db| db.note.scan()), (0..3).map(note).collect::<Vec<_>>());
-    let mut i = Instance::<Notes>::open(files());
+    assert!(i.write::<Notes, Durable, _>(|db| db.note.insert(note(1))).is_err(), "a key taken");
+    let i = Instance::open::<Notes>(i.into_disk());
+    assert_eq!(i.read::<Notes, _>(|db| db.note.scan()), (0..3).map(note).collect::<Vec<_>>());
+    let mut i = Instance::open::<Notes>(files());
     for n in 0..200 {
-        i.write(|db| {
+        i.write::<Notes, Durable, _>(|db| {
             db.note.put(Note {
                 n: n % 5,
                 text: format!("{n}"),
@@ -73,14 +73,14 @@ fn an_instance_reads_back_what_it_wrote() {
     }
     let log = std::fs::metadata(dir.path().join("log")).unwrap().len();
     assert!(log < 64 * 200, "folded: the journal holds {log} bytes");
-    let i = Instance::<Notes>::open(files());
+    let i = Instance::open::<Notes>(files());
     let want: Vec<Note> = (195..200)
         .map(|n| Note {
             n: n % 5,
             text: format!("{n}"),
         })
         .collect();
-    assert_eq!(i.read(|db| db.note.scan()), want);
+    assert_eq!(i.read::<Notes, _>(|db| db.note.scan()), want);
     assert!(i.failure.is_none());
 }
 
@@ -89,9 +89,9 @@ fn an_instance_reads_back_what_it_wrote() {
 /// volatile row ("not in this space").
 #[test]
 fn an_ephemeral_instance_holds_volatile_rows() {
-    let mut i = Instance::<Room, Volatile>::ephemeral();
-    i.write(|db| db.seen.insert(Seen { who: "alice".into() })).unwrap();
-    assert_eq!(i.read(|db| db.seen.scan()).len(), 1);
+    let mut i = Instance::ephemeral::<Room>();
+    i.write::<Room, Volatile, _>(|db| db.seen.insert(Seen { who: "alice".into() })).unwrap();
+    assert_eq!(i.read::<Room, _>(|db| db.seen.scan()).len(), 1);
 }
 
 fn config() -> Config {
@@ -129,7 +129,7 @@ fn verdicts(out: &[(u64, Vec<u8>)]) -> Vec<Verdict> {
 }
 
 fn restarted(mut hub: Peer) -> Peer {
-    let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
+    let disk = hub.log.disk.take().unwrap();
     Peer::serve(config(), disk, 0)
 }
 
@@ -194,7 +194,7 @@ fn a_device_reopens_as_its_replica_row() {
     let mut d = d.reopen();
     assert!(d.is_alone(), "alone still");
     assert_eq!((d.log.origin, d.log.me.session.clone(), d.log.local), (origin, me.session.clone(), local));
-    let disk = std::mem::replace(&mut d.disk, Box::new(Memory::default()));
+    let disk = d.log.disk.take().unwrap();
     let d = Peer::open_as(config, disk, None);
     assert_eq!((d.log.origin, &d.log.me.session), (origin, &me.session), "who last signed in, read back");
 }

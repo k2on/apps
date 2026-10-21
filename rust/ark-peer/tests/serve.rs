@@ -250,7 +250,7 @@ fn nothing_is_delivered_before_it_is_written() {
     let alice = dev("alice@laptop").unwrap();
     let c = hub.accept(alice.clone());
     assert!(hub.frame(c, push(&alice, 1, "Road"), 1).is_empty());
-    assert!(hub.failure.as_deref().is_some_and(|f| f.contains("the disk is full")));
+    assert!(hub.failure().is_some_and(|f| f.contains("the disk is full")));
     fail.store(false, Ordering::Relaxed);
     let out = hub.release();
     let frames: Vec<Frame> = out.iter().map(|(_, b)| Frame::dec(b).unwrap()).collect();
@@ -267,7 +267,7 @@ fn nothing_is_delivered_before_it_is_written() {
         ),
         "{frames:?}"
     );
-    assert!(hub.failure.is_none());
+    assert!(hub.failure().is_none());
 }
 
 /// A refusal is kept beside the log: after a restart the session's next
@@ -292,7 +292,7 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
         })
     };
     assert!(refused(&hub.frame(c, push(&alice, 1, " "), 1)), "a playlist needs a name");
-    let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
+    let disk = hub.log.disk.take().unwrap();
     let mut hub = Peer::serve(config(), disk, 0);
     let c = hub.accept(alice.clone());
     let out = hub.frame(c, push(&alice, 2, "Road"), 1);
@@ -370,7 +370,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         "here, and a pointer"
     );
     hub.close();
-    let disk = std::mem::replace(&mut hub.disk, Box::new(Memory::default()));
+    let disk = hub.log.disk.take().unwrap();
     let hub = Peer::serve(config, disk, 3);
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),

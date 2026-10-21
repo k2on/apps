@@ -20,21 +20,18 @@
 //! [`ROLE`]. The page signs in through the server's own `/auth/login`.
 //!
 //! **No second door** (§1.7). A mutation is an entry the authority authors
-//! through `Input::Mutate`, as the server half of a mutator is; so is a raw
-//! write: [`raw`] makes the change a function of no input — the store
-//! judging it as any write, the row it replaces the one there — runnable
-//! for its own entry only, under a name no client's intent can carry.
-//! Replicas apply its facts like any entry's. Both are answered once the
+//! through `Input::Mutate`, as the server half of a mutator is; a raw
+//! write is an entry it writes through `Input::Write` — the store judging
+//! the change as any write, the row it replaces the one there — naming no
+//! function, so no client's intent can carry it (an authority holds what
+//! names no function it has). Replicas apply its facts like any entry's. Both are answered once the
 //! entry is written, as an acknowledgement is. A domain's functions are
 //! the ones its build registered (§1.16): nothing is loaded at run time.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark::format::Encode;
-use ark::peer::{Ctx as Run, Procedure};
 use ark::schema::Space;
-use ark::store::Change;
 use ark_explorer::wire::{self, Hello, State};
 pub use ark_explorer::Catalog;
 use ark_explorer::{crud_of, Connection, CrudVerbs, Line};
@@ -105,27 +102,8 @@ pub fn router(admin: Admin, hub: Handle, authenticate: Authenticate) -> Router {
     r
 }
 
-/// A raw write as a function the authority authors: no input, its one
-/// change judged by the store as any write is.
-pub struct Raw(pub Change);
-
-impl Procedure for Raw {
-    fn apply(&self, store: &mut ark::store::Store, _: &Run, _: &[u8]) -> Result<Vec<Change>, ark::Refusal> {
-        store.apply(&self.0)?;
-        Ok(vec![self.0.clone()])
-    }
-}
-
-/// What a raw write's entry names: the change's hash, under a prefix no
-/// domain's function has.
-pub const RAW: &str = "raw write ";
-
-/// A raw write's function, and the name its entry calls it by: the
-/// change's, so it is called by no name a client knows.
-pub fn raw(c: &Change) -> (String, Arc<dyn Procedure>) {
-    let h = ark::hash::hex(&ark::hash::sha256(&[&c.to_bytes()]));
-    (format!("{RAW}{h}"), Arc::new(Raw(c.clone())))
-}
+/// What the page calls an entry naming no function: a raw write.
+pub const RAW: &str = "raw write";
 
 fn text(code: StatusCode, why: impl Into<String>) -> Response {
     (code, why.into()).into_response()
@@ -165,10 +143,7 @@ async fn state(With(ctx): With<Ctx>) -> Response {
         .collect();
     let read = on_hub(&ctx.hub, move |h| {
         let head = h.log.log().head().0;
-        let name = |f: &str| match f.starts_with(RAW) {
-            true => "raw write".to_string(),
-            false => f.to_string(),
-        };
+        let name = |f: &str| if f.is_empty() { RAW } else { f }.to_string();
         let at = h.log.log().entries().len().saturating_sub(LINES);
         let lines = h.log.log().entries()[at..]
             .iter()
@@ -209,31 +184,24 @@ async fn state(With(ctx): With<Ctx>) -> Response {
 
 async fn raw_write(With(ctx): With<Ctx>, body: String) -> Response {
     match wire::raw_from(&body) {
-        Ok(c) => {
-            let (h, f) = raw(&c);
-            answer(&ctx.hub, h, vec![], Some(f)).await
-        }
+        Ok(c) => answer(&ctx.hub, move |h| h.write(vec![c])).await,
         Err(why) => text(StatusCode::BAD_REQUEST, why),
     }
 }
 
 async fn author(With(ctx): With<Ctx>, body: String) -> Response {
     match wire::author_from(&body) {
-        Ok((name, input)) if ctx.admin.catalog.get(&name).is_some() => answer(&ctx.hub, name, input, None).await,
+        Ok((name, input)) if ctx.admin.catalog.get(&name).is_some() => answer(&ctx.hub, move |h| h.author(Space::Durable, name, input)).await,
         Ok((name, _)) => text(StatusCode::BAD_REQUEST, format!("no function {name}")),
         Err(why) => text(StatusCode::BAD_REQUEST, why),
     }
 }
 
 // Authored as the authority, its deliveries delivered: the sequence once
-// written, or the refusal. A raw write's function is runnable for its entry only.
-async fn answer(hub: &Handle, func: String, input: Vec<u8>, once: Option<Arc<dyn Procedure>>) -> Response {
+// written, or the refusal.
+async fn answer(hub: &Handle, f: impl FnOnce(&Handle) -> Option<Result<i64, String>> + Send + 'static) -> Response {
     let hub = hub.clone();
-    match tokio::task::spawn_blocking(move || hub.author(Space::Durable, func, input, once))
-        .await
-        .ok()
-        .flatten()
-    {
+    match tokio::task::spawn_blocking(move || f(&hub)).await.ok().flatten() {
         Some(Ok(n)) => n.to_string().into_response(),
         Some(Err(why)) => text(StatusCode::CONFLICT, why),
         None => text(StatusCode::SERVICE_UNAVAILABLE, "the hub is gone"),

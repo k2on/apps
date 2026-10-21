@@ -144,7 +144,7 @@ fn config() -> Config {
 /// A client of `token`'s login, its origin seeded by its session.
 fn client(token: &str, mut disk: Box<dyn Disk>) -> Peer {
     let who = dev(token).unwrap();
-    let origin = ark_peer::Bytes::of(&Origin::named(&who.session));
+    let origin = Origin::named(&who.session);
     ark_peer::local::preset(&mut *disk, |r| r.origin = origin).unwrap();
     Peer::open(config(), who, disk, false)
 }
@@ -633,7 +633,7 @@ fn write_server(dir: &Path, n: u64) {
 fn write_alone(dir: &Path, n: u64) {
     let mut st = Store::new(Arc::new(media_schema(true)));
     let mut f = Files::new(dir).unwrap();
-    let fork = ark_peer::Bytes::of(&(0i64, EntryHash::default()));
+    let fork = (0i64, EntryHash::default());
     ark_peer::local::preset(&mut f, |r| r.fork = Some(fork)).unwrap();
     for l in chain(&mut st, (0, EntryHash::default()), 0..n, "alice") {
         record(&mut f, writes(l));

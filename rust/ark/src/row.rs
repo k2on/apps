@@ -27,7 +27,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
+use crate::hash::{EntryHash, StateHash};
+use crate::log::{Entry, EntryId, Logged, Origin};
 use crate::schema::{Column, Table};
+use crate::store::Change;
 use crate::Refusal;
 
 /// A value a domain stores, takes or answers: its bytes in the value
@@ -148,6 +151,79 @@ macro_rules! tuples {
     )*};
 }
 tuples!((A)(A, B)(A, B, C)(A, B, C, D));
+
+/// Bytes as a column, `Type::Bytes`: a row's encoding kept as it is.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Bytes(pub Vec<u8>);
+
+// The log's own values as columns (what a peer keeps beside its log): an
+// origin and an entry's id are sixteen bytes as an `Id` is (hex in JSON and
+// in a key); a hash is bytes, hex in JSON, which `json`'s `Bytes` does not
+// read: no schema holding one is read through JSON.
+leaf!(Bytes => Type::Bytes, Origin => Type::Id("origin".into()), EntryId => Type::Id("entry".into()), EntryHash => Type::Bytes, StateHash => Type::Bytes);
+
+fn record(name: &str, fs: Vec<(&str, Type)>) -> Type {
+    Type::Record(name.into(), fs.into_iter().map(|(n, t)| (n.into(), t)).collect())
+}
+
+impl Describe for Entry {
+    fn describe() -> Type {
+        use Type::{Bytes as B, Int, Text};
+        let roles = Vec::<String>::describe();
+        let (id, origin) = (EntryId::describe(), Origin::describe());
+        record(
+            "Entry",
+            vec![
+                ("id", id),
+                ("actor", Text),
+                ("session", Text),
+                ("origin", origin),
+                ("local", Int),
+                ("roles", roles),
+                ("func", Text),
+                ("input", B),
+                ("now", Int),
+            ],
+        )
+    }
+}
+
+impl Describe for Change {
+    fn describe() -> Type {
+        let row = |f: &[&str]| {
+            [&["table"][..], f]
+                .concat()
+                .into_iter()
+                .map(|n| (n.to_string(), if n == "table" { Type::Text } else { Type::Bytes }))
+                .collect()
+        };
+        Type::Sum(
+            "Change".into(),
+            vec![
+                ("add".into(), row(&["row"])),
+                ("remove".into(), row(&["row"])),
+                ("edit".into(), row(&["old", "new"])),
+            ],
+        )
+    }
+}
+
+impl Describe for Logged {
+    fn describe() -> Type {
+        let (entry, facts) = (Entry::describe(), Vec::<Change>::describe());
+        record(
+            "Logged",
+            vec![
+                ("seq", Type::Int),
+                ("entry", entry),
+                ("facts", facts),
+                ("state", Type::Bytes),
+                ("hash", Type::Bytes),
+            ],
+        )
+    }
+}
 
 // * Ids
 

@@ -435,7 +435,20 @@ fn a_clients_raw_write_is_refused() {
         old: mine.to_bytes(),
         new: hijacked.to_bytes(),
     };
-    let (h, raw) = ark_peer::admin::raw(&edit);
+    // The authority's raw write before S3a, a function of no input.
+    struct Raw(Change);
+    impl ark::peer::Procedure for Raw {
+        fn apply(
+            &self,
+            store: &mut ark::store::Store,
+            _: &ark::peer::Ctx,
+            _: &[u8],
+        ) -> Result<Vec<Change>, ark::Refusal> {
+            store.apply(&self.0)?;
+            Ok(vec![self.0.clone()])
+        }
+    }
+    let (h, raw) = ("raw write".to_string(), std::sync::Arc::new(Raw(edit)));
     let mut bob = signed_in(&server, "bob");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == head(&server));
     bob.client.log.functions.insert(h.clone(), raw);
