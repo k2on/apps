@@ -237,6 +237,31 @@ impl<S: Tables, R: Row> Op<S, R> for ScanOp<R> {
     }
 }
 
+/// A row of a table named at run time, read by `decode`.
+type Decode<T> = Box<dyn Fn(&Store, &[u8]) -> T + Send>;
+
+struct ScanRaw<T> {
+    table: String,
+    decode: Decode<T>,
+}
+
+impl<S: Tables, T: Elem> Op<S, T> for ScanRaw<T> {
+    fn hydrate(&mut self, cx: &Cx, _: bool) -> Vec<(Okey, T)> {
+        cx.store
+            .rows(&self.table)
+            .map(|b| (cx.store.key_of(&self.table, b).expect("a row's key"), (self.decode)(cx.store, b)))
+            .collect()
+    }
+
+    fn push(&mut self, cx: &Cx, p: &Pushed) -> Delta<T> {
+        let dec = |b: &Option<Vec<u8>>| b.as_ref().map(|b| (self.decode)(cx.store, b));
+        p.net
+            .get(&self.table)
+            .map(|t| t.iter().map(|(k, (a, b))| (k.clone(), (dec(a), dec(b)))).collect())
+            .unwrap_or_default()
+    }
+}
+
 struct FilterOp<S: Tables, T> {
     input: Box<dyn Op<S, T>>,
     f: F<S, T, bool>,
@@ -651,6 +676,17 @@ pub fn scan<S: Tables, R: Row>() -> Plan<S, R> {
     Plan {
         op: Box::new(ScanOp::<R> {
             _p: std::marker::PhantomData,
+        }),
+    }
+}
+
+/// Every row of the table named `table`, in key order, each as `decode`
+/// reads it: a plan over rows without a Rust type ([`crate::dynamic`]).
+pub fn scan_raw<S: Tables, T: Elem>(table: &str, decode: impl Fn(&Store, &[u8]) -> T + Send + 'static) -> Plan<S, T> {
+    Plan {
+        op: Box::new(ScanRaw {
+            table: table.into(),
+            decode: Box::new(decode),
         }),
     }
 }

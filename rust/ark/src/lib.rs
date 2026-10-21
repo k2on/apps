@@ -26,6 +26,7 @@ pub mod check;
 pub mod codec;
 pub mod db;
 pub mod domain;
+pub mod dynamic;
 pub mod frames;
 pub mod gen;
 pub mod hash;

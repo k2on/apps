@@ -129,6 +129,51 @@ impl<'t, S: Tables> Db<'t, S> {
     pub fn changed(&self) -> usize {
         self.txn.borrow().changes.len()
     }
+
+    /// The schema the store holds: what a row without a Rust type is read
+    /// under ([`crate::dynamic`]).
+    pub fn schema(&self) -> std::sync::Arc<Schema> {
+        self.txn.borrow().store().schema_arc().clone()
+    }
+
+    /// The row of `table` with these key bytes, by name: the read a
+    /// [`Tab`] makes, for a table without a Rust type.
+    pub fn get_raw(&self, table: &str, key: Vec<u8>) -> Option<Vec<u8>> {
+        let table = intern(table);
+        let mut t = self.txn.borrow_mut();
+        let row = t.store().get(table, &key);
+        t.note((table, None, key));
+        tally(1, 0);
+        row
+    }
+
+    /// The rows of `table` whose key (`None`) or index entries start with
+    /// `prefix`, in its order.
+    pub fn scan_raw(&self, table: &str, index: Option<usize>, prefix: Vec<u8>) -> Vec<Vec<u8>> {
+        let table = intern(table);
+        let mut t = self.txn.borrow_mut();
+        let rows = t.store().scan(table, &Scan::prefix(index, &prefix, Dir::Asc, usize::MAX));
+        t.note((table, index, prefix));
+        tally(0, rows.len());
+        rows
+    }
+}
+
+/// A table's name as a read records it: a [`Row`]'s is `'static` already;
+/// a name read from a schema is kept once per name.
+fn intern(name: &str) -> &'static str {
+    use std::collections::BTreeSet;
+    use std::sync::Mutex;
+    static NAMES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    match names.get(name) {
+        Some(n) => n,
+        None => {
+            let n: &'static str = Box::leak(name.to_owned().into_boxed_str());
+            names.insert(n);
+            n
+        }
+    }
 }
 
 impl<'t, S: Tables> Deref for Db<'t, S> {

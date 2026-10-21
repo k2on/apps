@@ -22,6 +22,7 @@ mod demo;
 mod support {
     pub mod counting;
     pub mod json;
+    pub mod plans;
     pub mod vectors;
 }
 
@@ -753,6 +754,82 @@ fn holds((lib, h, input, ctx): (&Lib, &FnHash, &[u8], &Ctx), v: &View, store: &d
     assert_eq!(splice(patches, before), fresh, "the patches splice");
 }
 
+// * The migration to JSON plans: the old engine's answers, read under
+// the types the JSON answers guide, are the dynamic view's.
+
+fn type_from(ty: &Ty, g: &serde_json::Value, schema: &Schema) -> ark::row::Type {
+    use ark::row::Type;
+    use serde_json::Value as J;
+    match ty {
+        Ty::Named(n) if n == "Text" => Type::Text,
+        Ty::Named(n) if n.starts_with("Id<") => Type::Id(n.clone()),
+        Ty::Named(n) if n.starts_with("Option<") => {
+            let inner = &n["Option<".len()..n.len() - 1];
+            Type::Option(Box::new(type_from(&Ty::Named(inner.into()), g, schema)))
+        }
+        Ty::Bytes if g.is_string() => Type::Text,
+        Ty::Bytes => Type::Bytes,
+        Ty::Int => Type::Int,
+        Ty::Tuple(ts) => match g {
+            J::Object(m) => {
+                let t = schema
+                    .tables
+                    .iter()
+                    .find(|t| t.columns.len() == m.len() && t.columns.iter().all(|c| m.contains_key(&c.name)))
+                    .expect("a row's table");
+                Type::Record(
+                    t.name.clone(),
+                    t.columns.iter().map(|c| (c.name.clone(), ark::dynamic::column_type(c))).collect(),
+                )
+            }
+            J::Array(xs) if xs.len() == ts.len() => Type::Tuple(ts.iter().zip(xs).map(|(t, x)| type_from(t, x, schema)).collect()),
+            _ => Type::Tuple(ts.iter().map(|t| type_from(t, &J::Null, schema)).collect()),
+        },
+        Ty::List(t) => Type::List(Box::new(type_from(t, g.get(0).unwrap_or(&J::Null), schema))),
+        Ty::Sum(vs) if ty.is_option() => Type::Option(Box::new(type_from(&vs[1][0], g, schema))),
+        t => ark::dynamic::type_of("", t),
+    }
+}
+
+fn as_json(ty: &Ty, guide: &serde_json::Value, schema: &Schema, bytes: &[u8]) -> serde_json::Value {
+    let t = type_from(ty, guide, schema);
+    let mut r = ark::codec::Reader::new(bytes);
+    let v = ark::dynamic::decode(&t, &mut r).unwrap_or_else(|e| panic!("{e} under {t:?}"));
+    r.end().unwrap();
+    v
+}
+
+fn migrated_arg(name: &str) -> serde_json::Value {
+    match name {
+        "top-two-by-pos" => serde_json::json!({ "playlist_id": ark::hash::hex(&pid(1)) }),
+        "has-search" => serde_json::json!({ "needle": "ari" }),
+        "a-maintained-sum-overflows-where-the-fold-answers" => serde_json::json!({ "f_p0": "a" }),
+        _ => serde_json::json!({}),
+    }
+}
+
+fn same(name: &str, at: &str, t: &Ty, schema: &Schema, old: &[V], new: &[serde_json::Value]) {
+    assert_eq!(old.len(), new.len(), "{name} {at}: as many rows");
+    for (o, n) in old.iter().zip(new) {
+        assert_eq!(&as_json(t, n, schema, &o.to_bytes()), n, "{name} {at}");
+    }
+}
+
+fn same_patches(name: &str, at: &str, t: &Ty, schema: &Schema, old: &[Patch], new: &[ark::plan::Patch<serde_json::Value>]) {
+    use ark::plan::Patch as P;
+    assert_eq!(old.len(), new.len(), "{name} {at}: as many patches: {new:?}");
+    for (o, n) in old.iter().zip(new) {
+        match (o, n) {
+            (Patch::Insert { at: a, node }, P::Insert { at: b, node: m }) | (Patch::Update { at: a, node }, P::Update { at: b, node: m }) => {
+                assert_eq!(a, b, "{name} {at}");
+                assert_eq!(&as_json(t, m, schema, &node.to_bytes()), m, "{name} {at}");
+            }
+            (Patch::Remove { at: a }, P::Remove { at: b }) => assert_eq!(a, b, "{name} {at}"),
+            _ => panic!("{name} {at}: {o:?} against {n:?}"),
+        }
+    }
+}
+
 /// The case run: hydrated over its store, then each batch applied whole
 /// and pushed as one, the contract held after each; the vector's parts.
 fn run(name: &str, c: &Case) -> Vec<(&'static str, String)> {
@@ -771,11 +848,17 @@ fn run(name: &str, c: &Case) -> Vec<(&'static str, String)> {
     );
     let rows = |v: &View| array(v.rows().iter().map(|x| val(&cx, &t, x)));
     let rows_before = rows(&v);
+    let make = ark::dynamic::make(&support::plans::plan(name), migrated_arg(name)).unwrap();
+    let mut dv = ark::plan::View::<ark::dynamic::Dynamic, serde_json::Value>::new(make, c.ctx.clone(), &store).unwrap();
+    same(name, "hydrated", &t, &c.schema, &v.rows(), &dv.rows());
     let mut steps = vec![];
     for (i, batch) in c.batches.iter().enumerate() {
         let was = v.rows();
         store.apply_all(batch).unwrap_or_else(|e| panic!("{name} batch {i}: {e}"));
         let patches = v.push(batch, &store).unwrap_or_else(|e| panic!("{name} batch {i}: {e}"));
+        let dps = dv.push(batch, &store).unwrap();
+        same_patches(name, &format!("batch {i}"), &t, &c.schema, &patches, &dps);
+        same(name, &format!("batch {i}"), &t, &c.schema, &v.rows(), &dv.rows());
         holds((&lib, &h, &c.input, &c.ctx), &v, &store, &was, &patches);
         let ps = array(patches.iter().map(|p| patch_json(&cx, &t, p)));
         steps.push(object(&[("patches", ps), ("rows", rows(&v))]));
