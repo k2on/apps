@@ -558,6 +558,30 @@
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;
+            # The bridge (§1.16, N3): ark-ffi and harken/ffi build natively,
+            # their tests drive the whole surface in the process (a server in
+            # it, a mutate and its refusal, a view's patches, the live space,
+            # alone and joining, a hall of devices) and hold the generated
+            # Kotlin and Swift to the domain; and UniFFI writes the Kotlin and
+            # the Swift for the library.
+            ffi = crate {
+              pname = "arkdb-ffi";
+              flags = [ "-p" "ark-ffi" "-p" "harken-ffi" ];
+              src = only (rustDirs ++ [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ]);
+              doCheck = true;
+              postCheck = ''
+                lib=$(echo target/*/release/libharken_ffi.so)
+                for language in kotlin swift; do
+                  cargo run --release --offline --frozen -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+                    generate --library "$lib" --language $language --no-format --out-dir "$TMPDIR/bindings/$language"
+                done
+                grep -q "fun harkenOpen" "$TMPDIR/bindings/kotlin/dev/harken/ffi/harken_ffi.kt"
+                grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
+                grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
+                ls "$TMPDIR/bindings/swift/"*FFI.h "$TMPDIR/bindings/swift/"*.modulemap
+              '';
+              installPhase = "touch $out";
+            };
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The NixOS module, evaluated under the configurations that
             # matter and held to its assertions, its warning and its unit.

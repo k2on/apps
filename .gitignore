@@ -1,3 +1,7 @@
 result
 result-*
 docs/perf/
+# What `nix build .#harken-android-lib -o harken/ffi/android` and
+# `.#harken-ios-xcframework -o harken/ffi/ios` leave for a local build.
+/harken/ffi/android
+/harken/ffi/ios

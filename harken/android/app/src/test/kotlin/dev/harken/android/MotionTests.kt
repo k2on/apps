@@ -14,6 +14,7 @@
 package dev.harken.android
 
 import dev.harken.android.gen.AddSong
+import dev.harken.android.gen.Harken
 import dev.harken.android.gen.CreatePlaylist
 import android.view.MotionEvent
 import android.view.View
@@ -127,7 +128,7 @@ class MotionTests {
     }
 
     /** The demo's songs, authored through `add_song` as the server's scanner would. */
-    private fun demo(): Peer {
+    private fun demo(): Harken {
         val peer = alone()
         for (t in Demo.tracks) {
             val d = Demo.details.getValue(t.id)

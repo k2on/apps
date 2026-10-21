@@ -74,7 +74,7 @@ class Screens {
             light = Palette.LightScheme,
             dark = Palette.DarkScheme,
             typography = HarkenType,
-            module = { ByteArray(0) },
+            device = declared(),
         )
 
     private val server = "https://music.example.com"

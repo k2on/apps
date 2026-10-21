@@ -1,6 +1,6 @@
-// Nothing makes a scroll state but `ark-ui`'s helpers (docs/plan-android.md,
-// "Where a destination's state lives"). A scan of the sources, not a lint
-// rule: every Kotlin file under harken's app and under ark-ui, read as text.
+// Nothing makes a scroll state but the look's helpers (`ui/Destination.kt`,
+// docs/plan-android.md, "Where a destination's state lives"). A scan of the
+// sources, not a lint rule: every Kotlin file of the app, read as text.
 //
 // - No `rememberLazyListState(`, `rememberLazyGridState(`,
 //   `rememberLazyStaggeredGridState(` or `rememberScrollState(`: those keep a
@@ -8,7 +8,7 @@
 //   closes. A destination's container takes `rememberDestination…State`; a
 //   sheet's, `rememberTransient…State`.
 // - No state made by hand (`LazyListState(`, `ScrollState(` …), outside
-//   ark-ui's Destination.kt, which is where the helpers make theirs.
+//   `ui/Destination.kt`, which is where the helpers make theirs.
 // - No lazy list or grid without a `state =`: its default is
 //   `rememberLazyListState()`, the same bug with nothing to scan for.
 //
@@ -24,7 +24,7 @@ class SourceTests {
     private fun repo(): File {
         var dir: File? = File("").absoluteFile
         while (dir != null) {
-            if (File(dir, "kotlin/ark-ui").isDirectory && File(dir, "harken/android/app").isDirectory) return dir
+            if (File(dir, "harken/android/app").isDirectory) return dir
             dir = dir.parentFile
         }
         error("no repository above ${File("").absolutePath}")
@@ -33,7 +33,7 @@ class SourceTests {
     /** Every file the rule holds. */
     private fun sources(): List<File> {
         val r = repo()
-        return listOf("harken/android/app/src/main", "kotlin/ark-ui/src/main").flatMap { d ->
+        return listOf("harken/android/app/src/main").flatMap { d ->
             File(r, d).walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
         }
     }
@@ -51,7 +51,7 @@ class SourceTests {
         for (call in listOf("rememberLazyListState(", "rememberLazyGridState(", "rememberLazyStaggeredGridState(", "rememberScrollState(")) {
             if (Regex("(?<![A-Za-z0-9_])" + Regex.escape(call)).containsMatchIn(text)) out += "$name calls $call"
         }
-        if (!name.endsWith("ark-ui/src/main/kotlin/dev/arkdb/ui/Destination.kt")) {
+        if (!name.endsWith("dev/harken/android/ui/Destination.kt")) {
             for (made in listOf("LazyListState(", "LazyGridState(", "LazyStaggeredGridState(", "ScrollState(")) {
                 if (Regex("(?<![A-Za-z0-9_.])" + Regex.escape(made)).containsMatchIn(text)) out += "$name makes a $made…)"
             }
