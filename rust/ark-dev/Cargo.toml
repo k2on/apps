@@ -3,10 +3,12 @@ name = "ark-dev"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "ArkDB v5's development tools (docs/plan-v5.md D1): the simulator over the real hub and client, the trace recorder and player, the fuzzer and the vector writer."
+description = "ArkDB v5's development tools (docs/plan-v5.md D1): the simulator over the real hub and client, the trace recorder and player, the fuzzer, the vector writer, and the typed Kotlin and Swift of a domain (`ark-dev gen`)."
 
 [dependencies]
 ark = { path = "../ark" }
 ark-peer = { path = "../ark-peer" }
+# A domain as the admin page describes it (`Catalog`): what `ark-dev gen` reads.
+ark-explorer = { path = "../ark-explorer", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }

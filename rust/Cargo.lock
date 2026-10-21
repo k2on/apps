@@ -166,6 +166,7 @@ name = "ark-dev"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-explorer",
  "ark-peer",
  "serde",
  "serde_json",
@@ -2127,6 +2128,8 @@ name = "harken-ffi"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-dev",
+ "ark-explorer",
  "ark-ffi",
  "ark-peer",
  "harken-domain",
