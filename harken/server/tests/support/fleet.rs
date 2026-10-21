@@ -821,11 +821,16 @@ impl PeerProc {
             .unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 
-    /// The token the remembered login proves, from `DIR/login.json`.
+    /// The token the remembered login proves, from `DIR/logins`.
     pub fn token(&self) -> String {
-        let body = std::fs::read_to_string(self.dir.join("login.json")).unwrap();
-        let v: Value = serde_json::from_str(&body).unwrap();
-        text(&v["login"]["token"])
+        let logins = ark_peer::Instance::<ark_auth::remember::Remembered>::open(Box::new(
+            ark_peer::Files::new(self.dir.join("logins")).unwrap(),
+        ));
+        logins
+            .read(|db| db.login.scan())
+            .pop()
+            .expect("a login remembered")
+            .token
     }
 
     /// `kill -9`: whatever was not written is gone; the directory stays.

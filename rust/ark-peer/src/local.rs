@@ -384,24 +384,37 @@ pub fn preset(disk: &mut dyn Disk, f: impl FnOnce(&mut Replica)) -> io::Result<(
 
 /// Where one app's logins are remembered, one per server: `ark-auth`'s
 /// [`ark_auth::remember::Remembered`], a local instance of the app's own —
-/// natively under its configuration directory, in a browser its page's
-/// `localStorage`.
+/// natively under its configuration directory (or a directory of the
+/// caller's, [`Logins::at`]), in a browser its page's `localStorage`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Logins {
-    app: String,
+    /// The directory natively, the key prefix in a browser.
+    at: Option<String>,
 }
 
 impl Logins {
     /// `app` names the directory, or the key prefix: `"harken"`.
     pub fn new(app: &str) -> Logins {
-        Logins { app: app.into() }
+        #[cfg(not(target_arch = "wasm32"))]
+        let at = ark_auth::remember::dir(app).map(|d| d.to_string_lossy().into_owned());
+        #[cfg(target_arch = "wasm32")]
+        let at = Some(format!("{app}.logins"));
+        Logins { at }
+    }
+
+    /// Kept in `dir`: one device's of several on a machine.
+    pub fn at(dir: &std::path::Path) -> Logins {
+        Logins {
+            at: Some(dir.to_string_lossy().into_owned()),
+        }
     }
 
     fn open(&self) -> Option<Instance<ark_auth::remember::Remembered>> {
+        let at = self.at.clone()?;
         #[cfg(not(target_arch = "wasm32"))]
-        let disk: Box<dyn Disk> = Box::new(crate::Files::new(ark_auth::remember::dir(&self.app)?).ok()?);
+        let disk: Box<dyn Disk> = Box::new(crate::Files::new(at).ok()?);
         #[cfg(target_arch = "wasm32")]
-        let disk: Box<dyn Disk> = Box::new(crate::disk::Local(format!("{}.logins", self.app)));
+        let disk: Box<dyn Disk> = Box::new(crate::disk::Local(at));
         Some(Instance::open(disk))
     }
 

@@ -12,7 +12,7 @@
 //! window: the replica in `DIR/replica` (the chain on disk), signed in the
 //! way the desktop signs in under dev auth (`ark_auth::client::login` with a
 //! name, which a dev server answers with a code and no browser), the login
-//! remembered in `DIR/login.json` so a restart reuses it. Without `--user`
+//! remembered in `DIR/logins` so a restart reuses it. Without `--user`
 //! it opens signed out, authoring as nobody and dialling nothing, until
 //! `sign_in`.
 //!
@@ -241,32 +241,21 @@ fn flags(args: &[String]) -> Result<Flags, String> {
 
 // -- the login, remembered under DIR ------------------------------------------
 
-/// `DIR/login.json`: the login for one server. Not `ark_auth::remember`,
-/// which keeps one file per user account in `$XDG_CONFIG_HOME` — a fleet
-/// of peers on one machine is several devices, and each keeps its own.
-fn login_file(dir: &Path) -> PathBuf {
-    dir.join("login.json")
+/// `DIR/logins`: the logins of this directory's device, one per server
+/// (`ark_peer::Logins` at a directory of its own, not the app's — a
+/// fleet of peers on one machine is several devices, and each keeps its
+/// own).
+fn logins(dir: &Path) -> ark_peer::Logins {
+    ark_peer::Logins::at(&dir.join("logins"))
 }
 
 fn recall(dir: &Path, server: &str) -> Option<Login> {
-    let text = std::fs::read_to_string(login_file(dir)).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    if v.get("server")?.as_str()? != server {
-        return None;
-    }
-    serde_json::from_value(v.get("login")?.clone()).ok()
+    logins(dir).recall(server)
 }
 
 fn remember(dir: &Path, server: &str, login: &Login) -> Result<(), String> {
-    let body = json!({ "server": server, "login": login });
-    let tmp = dir.join(".login.json.tmp");
-    std::fs::write(&tmp, body.to_string()).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, login_file(dir))
-        .map_err(|e| format!("{}: {e}", login_file(dir).display()))
-}
-
-fn forget(dir: &Path) {
-    let _ = std::fs::remove_file(login_file(dir));
+    logins(dir).remember(server, login);
+    Ok(())
 }
 
 /// Sign `user` in at `server` the desktop's way. A dev server answers with
@@ -1037,7 +1026,9 @@ impl Headless {
                 self.token = None;
                 self.client.sign_in(nobody(""));
                 self.dial();
-                forget(&self.dir);
+                if let Some(server) = &self.server {
+                    logins(&self.dir).forget(server);
+                }
                 Answer::ok(true)
             }
             Cmd::Join { server, user } => {
