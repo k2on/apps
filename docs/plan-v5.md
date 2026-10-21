@@ -29,6 +29,14 @@ document disagree, this one is newer.
 
 ### 1.1 Types, and bytes under them
 
+> *Superseded (history).* §1.16 replaced this codec with serde: a value
+> is its bytes in the value format (`ark::format`, postcard or JSON by a
+> feature), a key the same value memcomparable, and there is no `Ty`, no
+> `parse` and no hand-written encoding; refinements are an input's
+> `#[derive(Input)]` checks. The order-preserving key and the distinct
+> hash spaces survive.
+
+
 There is no runtime value type. A value is bytes, and a **type** says how
 to read them. The type grammar has five constructors:
 
@@ -143,6 +151,11 @@ authority's memory. §1.9 is what it is for.
 
 ### 1.4 One language
 
+> *Superseded (history).* §1.16: the domain is plain Rust, so there is no
+> `Expr`, checker or interpreter; effects are the borrow checker's (`&Db`
+> reads, `&mut Db` writes) and a view is a typed `Plan`.
+
+
 The domain — every mutator, query, helper, guard, provider, scope and
 live transition — is one typed expression language. The relational
 subset is what a query is.
@@ -204,6 +217,11 @@ Alpha-normalisation is De Bruijn indices for `sym`, so a function's bytes
 do not depend on names.
 
 ### 1.5 Functions by hash; a module is a binding map
+
+> *Superseded (history).* §1.16: an entry names its function by name, a
+> `Domain` maps names to Rust functions, and the CAS, `FnHash` and the
+> module are gone; the schema stays data, hashed and prefix-checked.
+
 
 `FnHash = sha256(enc(function))`, where the function's encoding names the
 hashes of what it calls. Function bodies live in a **content store**
@@ -376,6 +394,11 @@ the OpenID Connect client; a session is what `Hello` carries.
 
 ### 1.12 Authoring
 
+> *Superseded (history).* §1.16: the attributes only register plain Rust
+> functions by name; nothing is lowered. `spec/AUTHORING.md` is "Writing a
+> domain".
+
+
 Attribute macros over restricted Rust, producing §1.4's `Expr`:
 
 ```rust
@@ -442,6 +465,10 @@ that it is a parser; §1.14 says how that is kept small.
   nothing here needs anything wasm lacks. Not verified until D1.
 
 ### 1.15 Authoring: the domain is written in ArkLang
+
+> *Superseded (history).* §1.16: ArkLang, `arkc`, `ark::gen`'s module
+> bindings and the binary module are gone; a domain is a crate.
+
 
 **The module** (§1.5) is what runtimes load, check, hash and call by name.
 **ArkLang** (`ark::sexp`, `spec/AUTHORING.md`) is the language a domain is
@@ -525,14 +552,19 @@ kernel through FFI (N3); ArkLang, the checker and the interpreter go.
    nothing else a mutator may consult varies between runs. A replica that
    disagrees anyway is healed as now: the authority's facts win.
 4. **serde everywhere.** Rows, inputs, entries, `Logged`, frames, snapshots
-   and journal records are serde values written as compact **JSON** (no
-   floats; maps as `BTreeMap`; struct fields in declaration order), the
-   canonical form hashed. Keys — a row's, an index entry's — are
-   `memcomparable` bytes, so the store stays one `memcmp`-ordered map. A
-   grown row reads under an older struct by ignoring what it lacks and
-   under a newer by `#[serde(default)]` on appended fields (§1.2's rule).
-   The state hash is `sha256(table ‖ row_json)` summed per table; the
-   chain hash is over the JSON bytes. `codec.rs`, `ty.rs`, `Node` go.
+   and journal records are serde values written in one **value format**
+   (`ark::format`): **postcard** by default since N4 (a struct its fields
+   in declaration order, integers varints, an enum its variant's index),
+   or compact **JSON** with the `values-json` feature — no floats, maps as
+   `BTreeMap`, one encoding per value, the canonical form hashed. JSON is
+   the human form under both: what the explorer, the phones' bridge and
+   the vectors read, a value of a `Type` read back from either
+   (`ark::json`). Keys — a row's, an index entry's — are `memcomparable`
+   bytes, so the store stays one `memcmp`-ordered map. A grown row is read
+   under this schema by `Table::fit`: completed with its appended columns'
+   defaults, or cut to its prefix (§1.2's rule). The state hash is
+   `sha256(table ‖ row bytes)` summed per table; the chain hash is over the
+   entry's bytes. `codec.rs`, `ty.rs`, `Node` go.
 5. **Functions by name.** `Entry.func` is the function's name; `Hello`
    carries the domain's schema hash and version string; an unknown name is
    `Held`. The CAS, closures by hash and the module go. The schema stays
@@ -559,16 +591,25 @@ its vectors keep passing, and Part 3 can run both. Nothing under
 `rust/ark`, `rust/ark-client`, `rust/ark-server` or `spec/vectors` is
 edited until R1. The crates:
 
+The crates as they are now (the list as first planned, `ark5*` beside v4, is
+in the history):
+
 ```
-rust/ark5/          the library: §1.1–§1.11, one crate, no dependencies but sha2
-rust/ark5-macros/   §1.12, a proc-macro crate; also the Node derive (L1)
-rust/ark5-dev/      the simulator, the trace player, the fuzzer, the vector writer (dev only)
-rust/ark5-server/   the hub, persistence, the web build, auth glue (thin; drivers)
-rust/ark5-client/   the client driver: link, storage, views for a UI (thin)
-                    — since K3b one crate, rust/ark-peer: the peer that dials
-                    and listens, its storage, link, hub, app kit and server
-harken/domain5/     harken's domain on §1.12
-spec5/              AUTHORING.md, README.md, RUNNERS.md and vectors/ for v5
+rust/ark/           the kernel: §1.1–§1.11 and §1.16 — format, json, hash, schema,
+                    store, log, peer, frames, row, db, domain, plan, dynamic
+rust/ark-macros/    the derives (Row, Input, Describe, Schema) and the attributes
+                    that register a function by name
+rust/ark-peer/      the one peer that dials and listens: storage, link, hub, the
+                    app kit, the server's socket, admin listener and web build
+rust/ark-ffi/       ark-peer's app kit through UniFFI, for the phones
+rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer, and
+                    `gen kotlin|swift` (a domain's types for the phones)
+rust/ark-auth/      dev sign-in and OpenID Connect
+rust/ark-explorer/  the admin page and the explorer over a replica
+rust/arkui/         the iced components
+harken/domain/      harken's domain, a crate of plain Rust
+harken/server/, harken/iced/, harken/ffi/ (with android/ and ios/)
+spec/               README.md, RUNNERS.md, AUTHORING.md and vectors/
 ```
 
 All code is written by implementation agents; the coordinator writes this

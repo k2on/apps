@@ -1,14 +1,11 @@
 # ArkDB
 
-> **v5.** Spec version 5 (`docs/plan-v5.md`) is the current one and is
-> newer than everything below where they disagree: a value is bytes under a
-> type, the domain is one typed language written with `#[ark::*]` and run
-> by one interpreter, the log is a chain whose entries carry their facts,
-> one sans-io machine is replica or authority by role, and views are
-> maintained per operator. `rust/ark` is v5 and the specification; v4 is
-> deleted. Since §1.16 the domain is plain Rust and runs only as Rust, and
-> the phones embed the kernel through FFI (`harken/ffi`, N3): the Kotlin and
-> Swift runtimes this document plans are deleted (last green at `a983b3c`).
+> **Superseded by v5 native** (`docs/plan-v5.md` §1.16): one runtime,
+> Rust, with the domain a crate of plain Rust and the phones embedding the
+> kernel over FFI. Every language this document gives a runtime of its own
+> had to agree byte for byte with every other, and the domain had to become
+> data and be interpreted to cross between them; with the kernel itself
+> crossing to the phones, neither is needed. What follows is history.
 
 A design for the successor to Petros. Three parts: what Petros is and what
 harken does with it, what the compiled-domain-over-FFI approach costs now that
