@@ -35,6 +35,7 @@ struct Every {
 impl Row for Every {
     const TABLE: &'static str = "every";
     type Key = (i64,);
+    type Space = ark::db::Durable;
     fn key(&self) -> (i64,) {
         (self.n,)
     }

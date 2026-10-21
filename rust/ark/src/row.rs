@@ -231,6 +231,9 @@ pub trait Row: Value + Describe {
     const TABLE: &'static str;
     /// The key's fields, as a tuple (one field: a one-tuple).
     type Key: Value;
+    /// Its space as a type (`#[ark(volatile)]`): which runs write it
+    /// ([`crate::db`]).
+    type Space: crate::db::Writes;
     fn key(&self) -> Self::Key;
     /// The table: its columns (the fields, in order), key, indexes,
     /// references and space.

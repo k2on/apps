@@ -177,7 +177,7 @@ pub struct Rename {
 }
 
 #[live("room.on_join")]
-pub fn on_join(ctx: &Ctx, db: &mut Db<Room>, a: Arrival) -> Result<(), Refusal> {
+pub fn on_join(ctx: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), Refusal> {
     db.here.delete(&a.session)?;
     db.here.insert(Here {
         session: a.session,
@@ -187,14 +187,14 @@ pub fn on_join(ctx: &Ctx, db: &mut Db<Room>, a: Arrival) -> Result<(), Refusal> 
 }
 
 #[live("room.on_leave")]
-pub fn on_leave(_: &Ctx, db: &mut Db<Room>, a: Arrival) -> Result<(), Refusal> {
+pub fn on_leave(_: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), Refusal> {
     db.pointer.delete(&a.session)?;
     db.here.delete(&a.session)
 }
 
 /// After a restart: who was here is kept, every pointer let go.
 #[live("room.on_restore")]
-pub fn on_restore(_: &Ctx, db: &mut Db<Room>, _: ()) -> Result<(), Refusal> {
+pub fn on_restore(_: &Ctx, db: &mut Db<Room, Volatile>, _: ()) -> Result<(), Refusal> {
     for p in db.pointer.scan() {
         db.pointer.remove(&p)?;
     }
@@ -202,7 +202,7 @@ pub fn on_restore(_: &Ctx, db: &mut Db<Room>, _: ()) -> Result<(), Refusal> {
 }
 
 #[live("room.point")]
-pub fn point(ctx: &Ctx, db: &mut Db<Room>, input: Point) -> Result<(), Refusal> {
+pub fn point(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Point) -> Result<(), Refusal> {
     db.pointer.delete(ctx.device())?;
     db.pointer.insert(Pointer {
         session: ctx.device().into(),
@@ -211,7 +211,7 @@ pub fn point(ctx: &Ctx, db: &mut Db<Room>, input: Point) -> Result<(), Refusal> 
 }
 
 #[live("room.rename")]
-pub fn rename(ctx: &Ctx, db: &mut Db<Room>, input: Rename) -> Result<(), Refusal> {
+pub fn rename(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Rename) -> Result<(), Refusal> {
     let one = db.here.get(ctx.device()).ok_or_else(|| Refusal::new("not here"))?;
     db.here.update(Here { name: input.name, ..one })
 }

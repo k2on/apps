@@ -58,7 +58,7 @@ impl fmt::Display for Refusal {
 /// attributes that register a function by name, the context, the typed
 /// store, plans, ids and indexes.
 pub mod prelude {
-    pub use crate::db::{Db, Tables};
+    pub use crate::db::{Db, Tables, Volatile};
     pub use crate::domain::{Domain, Scope};
     pub use crate::format::Encode;
     pub use crate::peer::Ctx;

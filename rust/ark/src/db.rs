@@ -14,6 +14,48 @@
 //! is a [`Change`] applied at once, so a function reads what it wrote; a
 //! run that refuses has every change it made undone ([`write`]).
 //!
+//! **A run writes its own space's tables only, and rustc says so** (§1.9).
+//! A [`Db<S, P>`] is a durable run's (`P` = [`Durable`], the default) or a
+//! live transition's ([`Volatile`]); every table's [`Row::Space`] is the
+//! marker `#[derive(Row)]` writes from `#[ark(volatile)]`, and `insert`,
+//! `update`, `put`, `delete` and `remove` exist only on a handle whose
+//! row's space is the run's. Reads are any table's. So a mutator that
+//! writes a volatile table, or a live transition a durable one, does not
+//! compile:
+//!
+//! ```compile_fail
+//! use ark::prelude::*;
+//! #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+//! #[ark(volatile)]
+//! pub struct Here { #[ark(key)] pub who: String }
+//! #[derive(Schema)]
+//! pub struct Room { pub here: Here }
+//! // A durable mutator: `Db<Room>` is `Db<Room, Durable>`.
+//! fn arrive(_: &Ctx, db: &mut Db<Room>, h: Here) -> Result<(), Refusal> {
+//!     db.here.insert(h)
+//! }
+//! ```
+//!
+//! and the same body as a live transition does:
+//!
+//! ```
+//! use ark::prelude::*;
+//! use ark::db::Volatile;
+//! #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+//! #[ark(volatile)]
+//! pub struct Here { #[ark(key)] pub who: String }
+//! #[derive(Schema)]
+//! pub struct Room { pub here: Here }
+//! fn arrive(_: &Ctx, db: &mut Db<Room, Volatile>, h: Here) -> Result<(), Refusal> {
+//!     db.here.insert(h)
+//! }
+//! ```
+//!
+//! (Falsified by dropping `Space = P` from the writes' bound: the first
+//! compiled.) The machine's own check (`Peer::attempt` refusing a change to a table of
+//! the other space) stays for what rustc cannot see: a function run on the
+//! other space's machine, and rows without a Rust type ([`crate::dynamic`]).
+//!
 //! A read through a handle made by [`recorded`] is remembered as what it
 //! covered — a key, or a prefix of an index's entries — which is how a
 //! view knows which of its elements a change touches (§1.10).
@@ -23,7 +65,7 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Deref, DerefMut};
 
 use crate::row::{Index, Lead, Row};
-use crate::schema::Schema;
+use crate::schema::{Schema, Space};
 use crate::store::{Change, Dir, Read, Scan, Store};
 use crate::Refusal;
 
@@ -103,22 +145,41 @@ impl<'t> Txn<'t> {
     }
 }
 
+/// The space a run writes, and a table is in, as a type: [`Durable`] or
+/// [`Volatile`].
+pub trait Writes: 'static {
+    const SPACE: Space;
+}
+
+/// A durable run's, and a durable table's.
+pub struct Durable;
+/// A live transition's, and a volatile table's.
+pub struct Volatile;
+
+impl Writes for Durable {
+    const SPACE: Space = Space::Durable;
+}
+impl Writes for Volatile {
+    const SPACE: Space = Space::Volatile;
+}
+
 /// The handles of a schema's tables (`#[derive(Schema)]`): its table
-/// struct's fields, each a [`Tab`], and the schema they are.
+/// struct's fields, each a [`Tab`] of a run writing `P`, and the schema
+/// they are.
 pub trait Tables: 'static {
-    type Db<'t>;
-    fn handles<'t>(txn: &'t RefCell<Txn<'t>>) -> Self::Db<'t>;
+    type Db<'t, P: Writes>;
+    fn handles<'t, P: Writes>(txn: &'t RefCell<Txn<'t>>) -> Self::Db<'t, P>;
     fn schema() -> Schema;
 }
 
-/// The store as `S`'s tables.
-pub struct Db<'t, S: Tables> {
-    tables: S::Db<'t>,
+/// The store as `S`'s tables, in a run writing `P`'s.
+pub struct Db<'t, S: Tables, P: Writes = Durable> {
+    tables: S::Db<'t, P>,
     txn: &'t RefCell<Txn<'t>>,
 }
 
-impl<'t, S: Tables> Db<'t, S> {
-    fn new(txn: &'t RefCell<Txn<'t>>) -> Db<'t, S> {
+impl<'t, S: Tables, P: Writes> Db<'t, S, P> {
+    fn new(txn: &'t RefCell<Txn<'t>>) -> Db<'t, S, P> {
         Db {
             tables: S::handles(txn),
             txn,
@@ -176,22 +237,30 @@ fn intern(name: &str) -> &'static str {
     }
 }
 
-impl<'t, S: Tables> Deref for Db<'t, S> {
-    type Target = S::Db<'t>;
-    fn deref(&self) -> &S::Db<'t> {
+impl<'t, S: Tables, P: Writes> Deref for Db<'t, S, P> {
+    type Target = S::Db<'t, P>;
+    fn deref(&self) -> &S::Db<'t, P> {
         &self.tables
     }
 }
 
-impl<'t, S: Tables> DerefMut for Db<'t, S> {
-    fn deref_mut(&mut self) -> &mut S::Db<'t> {
+impl<'t, S: Tables, P: Writes> DerefMut for Db<'t, S, P> {
+    fn deref_mut(&mut self) -> &mut S::Db<'t, P> {
         &mut self.tables
     }
 }
 
-/// `f` over `store`, writing: its answer and the changes it made, left
-/// applied — or, when it refuses, none of them.
+/// `f` over `store`, writing durable tables: its answer and the changes it
+/// made, left applied — or, when it refuses, none of them.
 pub fn write<S: Tables, T>(store: &mut Store, f: impl for<'t> FnOnce(&mut Db<'t, S>) -> Result<T, Refusal>) -> Result<(T, Vec<Change>), Refusal> {
+    write_in::<S, Durable, T>(store, f)
+}
+
+/// [`write`], in a run writing `P`'s tables.
+pub fn write_in<S: Tables, P: Writes, T>(
+    store: &mut Store,
+    f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, Refusal>,
+) -> Result<(T, Vec<Change>), Refusal> {
     let cell = RefCell::new(Txn {
         store: Backing::Write(store),
         changes: vec![],
@@ -236,10 +305,10 @@ pub fn recorded<S: Tables, T>(store: &Store, f: impl for<'t> FnOnce(&Db<'t, S>) 
     (t, deps)
 }
 
-/// One table of a [`Db`].
-pub struct Tab<'t, R> {
+/// One table of a [`Db`] in a run writing `P`'s tables.
+pub struct Tab<'t, R, P = Durable> {
     txn: &'t RefCell<Txn<'t>>,
-    _p: PhantomData<fn() -> R>,
+    _p: PhantomData<fn() -> (R, P)>,
 }
 
 fn decode<R: Row>(b: &[u8]) -> R {
@@ -279,8 +348,8 @@ where
     }
 }
 
-impl<'t, R: Row> Tab<'t, R> {
-    pub fn new(txn: &'t RefCell<Txn<'t>>) -> Tab<'t, R> {
+impl<'t, R: Row, P> Tab<'t, R, P> {
+    pub fn new(txn: &'t RefCell<Txn<'t>>) -> Tab<'t, R, P> {
         Tab { txn, _p: PhantomData }
     }
 
@@ -323,7 +392,10 @@ impl<'t, R: Row> Tab<'t, R> {
             _p: PhantomData,
         }
     }
+}
 
+/// A table's writes: only in a run of its own space.
+impl<'t, R: Row<Space = P>, P: Writes> Tab<'t, R, P> {
     /// A new row; refused when its key is taken.
     pub fn insert(&mut self, row: R) -> Result<(), Refusal> {
         let c = Change::Add {

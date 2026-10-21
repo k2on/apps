@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::db::{read, write, Db, Tables};
+use crate::db::{read, write_in, Db, Tables, Volatile, Writes};
 use crate::hash::SchemaHash;
 use crate::peer::{Ctx, Functions, Procedure};
 use crate::plan::{answer, Maintained, Plan, View};
@@ -95,17 +95,17 @@ fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
     }
 }
 
-struct Mutate<S: Tables, I> {
-    f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>,
+struct Mutate<S: Tables, P: Writes, I> {
+    f: fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>,
 }
 
-impl<S: Tables, I: Input> Procedure for Mutate<S, I> {
+impl<S: Tables, P: Writes, I: Input> Procedure for Mutate<S, P, I> {
     fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
         let input = input_of::<I>(input)?;
         // Every run draws from the entry's first id: a run again is the
         // same run (§1.6).
         ctx.draws.set(0);
-        write::<S, _>(store, |db| (self.f)(ctx, db, input)).map(|(_, cs)| cs)
+        write_in::<S, P, _>(store, |db| (self.f)(ctx, db, input)).map(|(_, cs)| cs)
     }
 }
 
@@ -180,7 +180,7 @@ impl Domain {
         self
     }
 
-    fn writer<S: Tables, I: Input>(self, name: &str, kind: Kind, f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>) -> Domain {
+    fn writer<S: Tables, P: Writes, I: Input>(self, name: &str, kind: Kind, f: fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>) -> Domain {
         self.add(Function {
             name: name.into(),
             kind,
@@ -198,8 +198,9 @@ impl Domain {
         self.writer(name, Kind::Mutator, f)
     }
 
-    /// A transition of live state: a mutator over volatile tables (§1.9).
-    pub fn live<S: Tables, I: Input>(self, name: &str, f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>) -> Domain {
+    /// A transition of live state: a mutator over volatile tables (§1.9),
+    /// which writes none other ([`crate::db`]).
+    pub fn live<S: Tables, I: Input>(self, name: &str, f: fn(&Ctx, &mut Db<S, Volatile>, I) -> Result<(), Refusal>) -> Domain {
         self.writer(name, Kind::Live, f)
     }
 

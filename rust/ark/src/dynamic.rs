@@ -60,8 +60,8 @@ use crate::Refusal;
 pub struct Dynamic;
 
 impl Tables for Dynamic {
-    type Db<'t> = ();
-    fn handles<'t>(_: &'t std::cell::RefCell<crate::db::Txn<'t>>) {}
+    type Db<'t, P: crate::db::Writes> = ();
+    fn handles<'t, P: crate::db::Writes>(_: &'t std::cell::RefCell<crate::db::Txn<'t>>) {}
     fn schema() -> Schema {
         Schema::default()
     }

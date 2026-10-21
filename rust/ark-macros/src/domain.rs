@@ -185,10 +185,10 @@ pub fn row(input: DeriveInput) -> TokenStream {
             false => quote!(::ark::row::column::<#t>(#n)),
         }
     });
-    let space = if volatile {
-        quote!(::ark::schema::Space::Volatile)
+    let (space, marker) = if volatile {
+        (quote!(::ark::schema::Space::Volatile), quote!(::ark::db::Volatile))
     } else {
-        quote!(::ark::schema::Space::Durable)
+        (quote!(::ark::schema::Space::Durable), quote!(::ark::db::Durable))
     };
     let mut ix_defs = vec![];
     let mut ix_consts = vec![];
@@ -223,6 +223,7 @@ pub fn row(input: DeriveInput) -> TokenStream {
         impl ::ark::row::Row for #name {
             const TABLE: &'static str = #table;
             type Key = (#(#key_tys,)*);
+            type Space = #marker;
             fn key(&self) -> Self::Key {
                 (#(::std::clone::Clone::clone(&self.#key_names),)*)
             }
@@ -457,13 +458,13 @@ pub fn schema(input: DeriveInput) -> TokenStream {
     let doc = format!("The tables of [`{name}`], each a handle (§1.16).");
     quote! {
         #[doc = #doc]
-        #vis struct #db<'t> {
-            #(pub #names: ::ark::db::Tab<'t, #tys>,)*
+        #vis struct #db<'t, P = ::ark::db::Durable> {
+            #(pub #names: ::ark::db::Tab<'t, #tys, P>,)*
         }
 
         impl ::ark::db::Tables for #name {
-            type Db<'t> = #db<'t>;
-            fn handles<'t>(txn: &'t ::std::cell::RefCell<::ark::db::Txn<'t>>) -> #db<'t> {
+            type Db<'t, P: ::ark::db::Writes> = #db<'t, P>;
+            fn handles<'t, P: ::ark::db::Writes>(txn: &'t ::std::cell::RefCell<::ark::db::Txn<'t>>) -> #db<'t, P> {
                 #db { #(#names: ::ark::db::Tab::new(txn),)* }
             }
             fn schema() -> ::ark::schema::Schema {
