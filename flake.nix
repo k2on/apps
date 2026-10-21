@@ -575,14 +575,36 @@
                   cargo run --release --offline --frozen -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
                     generate --library "$lib" --language $language --no-format --out-dir "$TMPDIR/bindings/$language"
                 done
-                grep -q "fun harkenOpen" "$TMPDIR/bindings/kotlin/dev/harken/ffi/harken_ffi.kt"
+                grep -q 'fun `harkenOpen`' "$TMPDIR/bindings/kotlin/dev/harken/ffi/harken_ffi.kt"
                 grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
                 grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                 ls "$TMPDIR/bindings/swift/"*FFI.h "$TMPDIR/bindings/swift/"*.modulemap
               '';
-              installPhase = "touch $out";
+              # The bindings it wrote, which the iOS type-check reads.
+              installPhase = "cp -r $TMPDIR/bindings $out";
             };
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            # What of the iOS app Linux can check (harken/ios/tools/typecheck.sh):
+            # Rows.swift, Bridge.swift and Model.swift with the generated types,
+            # UniFFI's Swift and the bridge's typed half, type-checked by
+            # nixpkgs' Swift against the library's headers and a stand-in for
+            # SwiftUI. The views are SwiftUI's and are not checked here.
+            harken-ios-typecheck = pkgs.stdenv.mkDerivation {
+              name = "harken-ios-typecheck";
+              src = only [ "harken/ios" "rust/ark-ffi/swift" ];
+              nativeBuildInputs = [ pkgs.swift ];
+              buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
+              # nixpkgs' Swift 5.8 on Linux reports x86_64-pc-linux-gnu where
+              # its standard library's modules are x86_64-unknown-linux-gnu.
+              buildPhase = ''
+                mkdir -p bin
+                printf '#!/bin/sh\nexec swiftc -target ${pkgs.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu "$@"\n' > bin/swiftc-here
+                chmod +x bin/swiftc-here
+                SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
+                  bash harken/ios/tools/typecheck.sh ${self.checks.${system}.ffi}/swift
+              '';
+              installPhase = "touch $out";
+            };
             # The NixOS module, evaluated under the configurations that
             # matter and held to its assertions, its warning and its unit.
             harken-module = pkgs.callPackage ./harken/server/nix/module-test.nix {
