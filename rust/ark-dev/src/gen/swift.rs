@@ -8,54 +8,12 @@ use std::fmt::Write;
 use ark::domain::Kind;
 use ark::row::Type;
 
-use super::{camel, Walked};
+use super::{camel, ident, Walked};
 
-const KEYWORDS: &[&str] = &[
-    "as",
-    "case",
-    "class",
-    "default",
-    "defer",
-    "do",
-    "else",
-    "enum",
-    "extension",
-    "false",
-    "for",
-    "func",
-    "guard",
-    "if",
-    "import",
-    "in",
-    "init",
-    "is",
-    "let",
-    "nil",
-    "operator",
-    "protocol",
-    "repeat",
-    "return",
-    "self",
-    "static",
-    "struct",
-    "subscript",
-    "super",
-    "switch",
-    "throw",
-    "true",
-    "try",
-    "var",
-    "where",
-    "while",
-];
+const KEYWORDS: &str = "as case class default defer do else enum extension false for func guard if import in init is let nil operator protocol repeat return self static struct subscript super switch throw true try var where while";
 
 fn field(n: &str) -> String {
-    let c = camel(n, false);
-    if KEYWORDS.contains(&c.as_str()) {
-        format!("`{c}`")
-    } else {
-        c
-    }
+    ident(n, KEYWORDS)
 }
 
 fn ty(t: &Type) -> String {

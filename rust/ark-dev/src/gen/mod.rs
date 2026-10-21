@@ -57,6 +57,16 @@ pub fn camel(s: &str, upper: bool) -> String {
     out
 }
 
+/// A field's or a case's name: `camelCase`, quoted in backticks when it is
+/// one of `keywords`.
+pub fn ident(n: &str, keywords: &str) -> String {
+    let c = camel(n, false);
+    match keywords.split(' ').any(|k| k == c) {
+        true => format!("`{c}`"),
+        false => c,
+    }
+}
+
 /// Every record and sum `t` names, by name; one name meaning two types is
 /// refused.
 fn named(t: &Type, into: &mut BTreeMap<String, Type>) {

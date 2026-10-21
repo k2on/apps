@@ -7,46 +7,12 @@ use std::fmt::Write;
 use ark::domain::Kind;
 use ark::row::Type;
 
-use super::{camel, Walked};
+use super::{camel, ident, Walked};
 
-const KEYWORDS: &[&str] = &[
-    "as",
-    "break",
-    "class",
-    "continue",
-    "do",
-    "else",
-    "false",
-    "for",
-    "fun",
-    "if",
-    "in",
-    "interface",
-    "is",
-    "null",
-    "object",
-    "package",
-    "return",
-    "super",
-    "this",
-    "throw",
-    "true",
-    "try",
-    "typealias",
-    "typeof",
-    "val",
-    "var",
-    "when",
-    "while",
-];
+const KEYWORDS: &str = "as break class continue do else false for fun if in interface is null object package return super this throw true try typealias typeof val var when while";
 
 fn field(n: &str) -> String {
-    let c = camel(n, false);
-    if KEYWORDS.contains(&c.as_str()) {
-        format!("`{c}`")
-    } else {
-        c
-    }
+    ident(n, KEYWORDS)
 }
 
 /// `t` as a Kotlin type, a named one under `q` (the package, where a
