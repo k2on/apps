@@ -62,6 +62,9 @@
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
       rustDirs = [ "rust" "harken/domain" "harken/server" "harken/iced" "harken/ffi" ];
+      # The typed Kotlin and Swift `ark-dev gen` writes, which harken/ffi's
+      # tests hold to the domain (harken/ffi/tests/gen.rs).
+      genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
@@ -542,7 +545,7 @@
             rust = crate {
               pname = "arkdb-rust";
               flags = [ "--workspace" ];
-              src = only (rustDirs ++ [ "spec/vectors" ]);
+              src = only (rustDirs ++ genDirs ++ [ "spec/vectors" ]);
               doCheck = true;
               preCheck = ''
                 cargo fmt --all --check
@@ -567,7 +570,7 @@
             ffi = crate {
               pname = "arkdb-ffi";
               flags = [ "-p" "ark-ffi" "-p" "harken-ffi" ];
-              src = only (rustDirs ++ [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ]);
+              src = only (rustDirs ++ genDirs);
               doCheck = true;
               postCheck = ''
                 lib=$(echo target/*/release/libharken_ffi.so)
