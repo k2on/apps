@@ -815,6 +815,22 @@ linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
 
+**K3b** (`e60c1b2`…): **one peer crate.** `ark-client` and `ark-server` are
+`rust/ark-peer`: one `Peer` over one disk that dials (`link`: a `Wire` a
+`Dial` makes, redial with backoff, close 4401 a denial that stops it, the
+waker) and listens (`hub`: identity and feed per connection, `Send`/`Fanout`/
+`To`, written before delivered, the journal; `serve`: the thread, the socket,
+the admin listener, web, auth glue); the storage format is written once over
+named blobs (`Files`, `Memory`, a page's `Local`). The app kit (`app`):
+`mutate`/`call`/`query`/`view` by name, the stubs through `gen::Call`,
+standing, `Update`s; iced's `client.rs` 971 → 119. `ark-auth` is one build.
+Converge and the fleet's seeder run on `ark-dev`'s simulator. Source:
+`ark-peer` 2,064 against 1,826 for the two and 1,300 asked — over: it holds
+the app kit (236) and the browser's socket and disk; iced 8,860 → 8,171,
+server 4,874 → 4,808; all-in 32,854 → 32,320. No vector moved; fuzz 1,000, 0
+failed; a/b/c/`add_song` ≤1.04×. A refused device write is retried, not lost.
+Not verified: the browser build drawn (it compiles again); wss.
+
 **A4** (`dc97b35`…): **the domain is written in ArkLang; the builders go.**
 `harken/domain` is eleven hand-written files, 1,834 lines of ArkLang (311
 of comments) against the builders' 3,149 of Rust; all 127 functions hold
