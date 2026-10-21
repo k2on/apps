@@ -137,7 +137,8 @@ pub struct Covers {
     art: PathBuf,
     dirs: BTreeMap<PathBuf, Dir>,
     images: BTreeMap<PathBuf, Vec<PathBuf>>,
-    /// The pictures this look has already written or found written.
+    /// The pictures written, by this look or before it (the index the
+    /// scanner keeps, `library::Art`).
     written: BTreeSet<String>,
 }
 
@@ -161,15 +162,20 @@ impl Found {
 }
 
 impl Covers {
-    pub fn new(root: &Path, music: &Path, art: &Path) -> Covers {
+    pub fn new(root: &Path, music: &Path, art: &Path, written: BTreeSet<String>) -> Covers {
         Covers {
             root: root.into(),
             music: music.into(),
             art: art.into(),
             dirs: BTreeMap::new(),
             images: BTreeMap::new(),
-            written: BTreeSet::new(),
+            written,
         }
+    }
+
+    /// The pictures written, by this look or before it.
+    pub fn written(&self) -> &BTreeSet<String> {
+        &self.written
     }
 
     /// The pictures a directory holds, sorted, read once.
@@ -404,7 +410,7 @@ mod tests {
         touch(&two.join("a.jpg"));
         touch(&two.join("b.jpg"));
 
-        let mut c = Covers::new(root, &music, &art);
+        let mut c = Covers::new(root, &music, &art, Default::default());
         let rel = |i: Option<Image>| i.map(|i| i.rel);
         let bach = c.beside(&album, "Johann Sebastian Bach");
         assert_eq!(
@@ -458,7 +464,12 @@ mod tests {
     fn a_picture_inside_a_file_is_written_once_by_its_hash() {
         let root = tempfile::tempdir().unwrap();
         let art = root.path().join("data/art");
-        let mut c = Covers::new(root.path(), &root.path().join("music"), &art);
+        let mut c = Covers::new(
+            root.path(),
+            &root.path().join("music"),
+            &art,
+            Default::default(),
+        );
         let png = b"\x89PNG\r\n\x1a\none picture".to_vec();
         let v = c.extract(&png).unwrap();
         assert_eq!(v, format!(".art/{}.png", hex(&Sha256::digest(&png))));
@@ -467,7 +478,12 @@ mod tests {
             png
         );
         assert_eq!(c.extract(&png).unwrap(), v);
-        let mut again = Covers::new(root.path(), &root.path().join("music"), &art);
+        let mut again = Covers::new(
+            root.path(),
+            &root.path().join("music"),
+            &art,
+            Default::default(),
+        );
         assert_eq!(
             again.extract(&png).unwrap(),
             v,

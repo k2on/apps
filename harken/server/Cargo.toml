@@ -20,6 +20,7 @@ path = "src/bin/harken-peer.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
+serde = { workspace = true }
 harken-domain = { path = "../domain" }
 # The server is a peer that listens; the scanner and the house's speakers
 # are peers in this process that reach it through its handle, never a socket.

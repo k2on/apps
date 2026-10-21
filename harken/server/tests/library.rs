@@ -349,7 +349,8 @@ fn fetch(server: &Server, art: &str) -> (String, Vec<u8>) {
 /// an extracted picture without its extension, which is all that tells
 /// `/media` its type: the value had none; and by keeping the pictures in
 /// the data directory itself rather than in its `art`:
-/// `/media/.art/library-files.json` answered 200.
+/// `/media/.art/library-files.json` answered 200 (the prints were a
+/// file of the data directory then).
 #[test]
 fn a_record_takes_its_cover_from_beside_it_or_from_inside_its_tracks() {
     let rt = runtime();
@@ -436,13 +437,13 @@ fn a_record_takes_its_cover_from_beside_it_or_from_inside_its_tracks() {
         "the probe reaches the server"
     );
     for path in [
-        "/media/.art/library-files.json",
-        "/media/.art/../library-files.json",
-        "/media/.art/%2e%2e/library-files.json",
-        "/media/.art/..%2flibrary-files.json",
-        "/media/.cover/x/../../data/library-files.json",
-        "/media/.cover/x/%2e%2e/data/library-files.json",
-        "/media/%2e%2e/data/library-files.json",
+        "/media/.art/library-files/log",
+        "/media/.art/../library-files/log",
+        "/media/.art/%2e%2e/library-files/log",
+        "/media/.art/..%2flibrary-files/log",
+        "/media/.cover/x/../../data/library-files/log",
+        "/media/.cover/x/%2e%2e/data/library-files/log",
+        "/media/%2e%2e/data/library-files/log",
     ] {
         assert_ne!(raw_status(&server, path), 200, "{path}");
     }
@@ -628,7 +629,7 @@ fn a_rescan_of_nothing_new_reads_nothing() {
     // A library from before covers were found: the cover is there now, and
     // no file of prints says what was offered.
     picture(&album.join("folder.jpg"), JPEG);
-    std::fs::remove_file(data.join("library-files.json")).unwrap();
+    std::fs::remove_dir_all(data.join("library-files")).unwrap();
     let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
     let got = eventually(10, || {
         art(&server, "album", "Gymnopedies").filter(|a| !a.is_empty())
@@ -648,7 +649,8 @@ fn a_rescan_of_nothing_new_reads_nothing() {
     let after = head(&server);
     rt.block_on(server.stop());
 
-    std::fs::write(data.join("library-files.json"), b"{ not json").unwrap();
+    std::fs::write(data.join("library-files/log"), b"{ not a record").unwrap();
+    let _ = std::fs::remove_file(data.join("library-files/kv"));
     let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
     let scanner = server.scanner.as_ref().unwrap();
     eventually(10, || (scanner.read() == 3).then_some(()));
