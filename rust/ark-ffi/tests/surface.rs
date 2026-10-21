@@ -181,8 +181,14 @@ fn a_denied_login_is_said() {
     let hub = server();
     let d = tempfile::tempdir().unwrap();
     let p = device(&d, "phone", Some(login("alice@phone")));
+    // Pumped by hand, so the next denial is not taken in before the
+    // status is read.
+    p.by_hand();
     p.connect_with("", hub.dialer(Arc::new(|_: &str| None)));
-    until("denied", || p.status().denied.is_some());
+    until("denied", || {
+        p.pump();
+        p.status().denied.is_some()
+    });
     let s = p.status();
     assert_eq!((s.link.as_str(), s.denied.as_deref()), ("signed out", Some("not signed in")));
     p.login(login("alice@phone"));

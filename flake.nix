@@ -206,11 +206,14 @@
           vectors = crate {
             pname = "ark-vectors";
             flags = [ "-p" "ark" "-p" "ark-dev" ];
+            # ark-dev's tests also hold spec/README.md and AUTHORING.md.
+            src = only (rustDirs ++ [ "spec/README.md" "spec/AUTHORING.md" ]);
             doCheck = true;
             # stdenv makes only the source root (rust/) writable, and the
             # writer writes beside it.
             postUnpack = "chmod u+w source";
             preCheck = ''
+              chmod -R u+w ../spec
               rm -rf ../spec/vectors
               export ARK_WRITE_VECTORS=1
             '';
@@ -541,11 +544,12 @@
               ark-fuzz 25 1 traces
               touch $out
             '';
-            # The Rust workspace: formatted, lint-clean, and its tests.
+            # The Rust workspace: formatted, lint-clean, and its tests (which
+            # hold spec/README.md's index and AUTHORING.md's examples too).
             rust = crate {
               pname = "arkdb-rust";
               flags = [ "--workspace" ];
-              src = only (rustDirs ++ genDirs ++ [ "spec/vectors" ]);
+              src = only (rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ]);
               doCheck = true;
               preCheck = ''
                 cargo fmt --all --check

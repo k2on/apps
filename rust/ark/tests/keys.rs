@@ -1,4 +1,4 @@
-//! §1.1 held: a value's JSON and key are one, whichever side made them. A
+//! §1.1 held: a value's bytes and key are one, whichever side made them. A
 //! Rust value of every shape a column may have — ints, text, bools, bytes,
 //! ids, options, lists, tuples, records, sums of every kind of variant —
 //! serializes to the same JSON and the same key as its JSON read under its
@@ -7,7 +7,7 @@
 //! a `Desc` key orders last first.
 
 use ark::format::{put_key, Encode};
-use ark::json::{typed_bytes, typed_key};
+use ark::json::{typed_bytes, typed_key, typed_value};
 use ark::plan::Desc;
 use ark::prelude::*;
 
@@ -93,9 +93,11 @@ fn key<T: Serialize>(v: &T) -> Vec<u8> {
 }
 
 /// 2,000 generated values: the JSON and the key the Rust value makes are
-/// the JSON and the key its JSON makes read under `Every::describe()`, and
-/// the JSON reads back as the value. Falsified by `Typed` writing a record
-/// variant's fields as a tuple's: no `Box` shape's JSON was the derive's.
+/// the JSON and the key its JSON makes read under `Every::describe()`, the
+/// bytes read back under it as the JSON (`Seed`), and as the value.
+/// Falsified by `Typed` writing a record variant's fields as a tuple's: no
+/// `Box` shape's JSON was the derive's; and by `Seed` reading a sum's
+/// variants as unit ones: no `Line` read back.
 #[test]
 fn a_value_and_its_json_under_its_type_are_one() {
     let mut r = Rng(1);
@@ -107,6 +109,7 @@ fn a_value_and_its_json_under_its_type_are_one() {
         let mut k = vec![];
         typed_key(&ty, &json, &mut k).unwrap();
         assert_eq!(k, key(&v), "{v:?}");
+        assert_eq!(typed_value(&ty, &v.to_bytes()).unwrap(), json, "{v:?}");
         assert_eq!(Every::from_bytes(&v.to_bytes()), Ok(v));
     }
 }

@@ -829,7 +829,101 @@ diff. Where v5 has no counterpart to a v4 shape (the inbox, the
 Numbers are from the same-hour runs described above. Notes under the
 table say what each row counts.
 
-**Size** (`loc-v5.txt`, after P1 `loc-p1.txt`; non-blank, non-comment; Unicode tables excluded)
+**Size** (`tools/loc.sh`: non-blank, non-comment Rust lines; Kotlin and Swift
+counted the same way; Unicode tables excluded)
+
+| | v4 | v5 | native (N4) | N4 / v4 |
+|---|---:|---:|---:|---:|
+| library source (`ark` + `ark-macros` + `ark-ffi`) | 25,537 | 6,526 | 6,125 | 0.24 |
+| peer (`ark-peer`; v4 and v5 client + server) | 6,843 | 1,465 | 2,041 | 0.30 |
+| tooling (`ark-dev`, `ark-explorer`, `arkui`, `ark-auth`) | 19,498† | 7,515† | 7,907 | 0.41 |
+| harken: domain | 3,711 | 2,583 | 2,373 | 0.64 |
+| harken: server (+ bins) | 4,923 (+1,720) | 4,808† (+1,618) | 4,735 (+1,360) | 0.96 |
+| harken: iced (+ bins) | 8,838 (+1,659) | 8,171† (+1,660) | 8,161 (+1,660) | 0.92 |
+| harken: android, ios (the apps' own) | 10,998, 821 | 10,998, 821 | 14,992, 779 | 1.36 |
+| phones: the runtime under them | 40,224 (`kotlin/` 24,674, `swift/` 15,550) | 40,224 | 2,394 | 0.06 |
+| tests (every crate) | 18,916 | 11,257 | 20,169 | 1.07 |
+
+**Speed** (release, `--test-threads=1`; v4 and v5 alternating; N4 within
+one hour, postcard alternating with JSON: `rust/ark`'s shapes the median of
+three runs each, `ark-peer`'s and harken's one run each)
+
+| shape | v4 | v5 | v5 / v4 | v5 after P1 | after / v4 | native (N4) | N4 / v4 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| a: local mutation, linked (µs, 8,000 entries, playlists of 10) | 28.2 | 37.6 | 1.33 | 39.0 | 1.42 | 29.8 | 1.06 |
+| a: local mutation, alone (µs) | 28.2 | 16.2 | 0.57 | 17.2 | 0.62 | 10.3 | 0.37 |
+| b: linked round trip (µs, 2,000, playlists of 10, no log file) | 192.5 | 5,520.1 | 29 | 182.2 | 0.85 | 140.9 | 0.73 |
+| c: offline mutate at 8,000 pending (µs, Memory) | 30.4 | 1,990.8 | 65 | 28.0 | 0.89 | 18.4 | 0.60 |
+| d: initial sync, time (µs / entry, 8,010 entries) | 26.4 | 9.6 | 0.36 | 9.7 | 0.39 | 7.5 | 0.28 |
+| d: initial sync, size (bytes / entry) | 161.7 | 250.0 | 1.55 | 250.0 | 1.55 | 200.6 | 1.24 |
+| e: rebase, one page under 400 pending (µs / entry) | 62.0 | 3,974.9 | 64 | 48.8 | 0.76 | 29.3 | 0.47 |
+| e: rebase, a pump per entry under 400 pending (µs / entry) | 8,498.6 | 3,779.5 | 0.44 | 4,104.8 | 0.45 | 2,898.3 | 0.34 |
+| g: fan-out (µs / connection, 160 connections, log of 8,000) | 4.62 | 0.41 | 0.09 | 0.13 | 0.02 | 0.10 | 0.02 |
+| h: decoding a `Batch` of 256 with facts (allocations) | 12,559 | 2,567 | 0.20 | 2,567 | 0.20 | 2,817 | 0.22 |
+| h: decoding a `Batch` of 256 with facts (µs) | 1,091 | 381 | 0.35 | 236 | 0.22 | 141.1 | 0.13 |
+| harken `add_song` (µs, library of 8,000) | 326.7 | 31,440 | 96 | 225.7 | 0.67 | 80.5 | 0.25 |
+| harken `add_song`, rows read | 1 | 8,000 | — | 1 | 1 | 1 | 1 |
+| harken `add_to_playlist` onto N−1, rows read | 1 | 7,999 | — | 1 | 1 | 1 | 1 |
+| harken `create_playlist`, the 102nd "Favorites", rows read | 102 | 3,000 | — | 102 | 1 | 102 | 1 |
+| views: a change on `playlist-with-items` at 16k (µs) | 11.06 | 16.10 | 1.46 | 10.57 | 0.88 | 10.58 | 0.96 |
+| views: a change on `top-two-by-pos` at 16k (µs) | 77 | 5.6 | 0.07 | 4.5 | 0.07 | 5.66 | 0.07 |
+| storage: live bytes per media row | 726 | 426 | 0.59 | 426 | 0.59 | 485 | 0.67 |
+
+**The value format, measured** (N4, the same runs; JSON is `--features
+ark/values-json`)
+
+| shape | JSON | postcard | postcard / JSON |
+|---|---:|---:|---:|
+| d: bytes per entry on the wire | 557.3 | 200.6 | 0.36 |
+| d: receive by facts (µs / entry, 8,010) | 16.3 | 7.5 | 0.46 |
+| h: a `Batch` of 256: bytes; encode µs; decode µs; decode allocations | 140,784; 182; 784; 5,895 | 50,314; 18; 141; 2,817 | 0.36; 0.10; 0.18; 0.48 |
+| a: linked (µs, playlists of 10); alone (µs, one playlist) | 46.5; 20.7 | 29.8; 10.3 | 0.64; 0.50 |
+| b: round trip, no log file / log on disk (µs, 2,000) | 161.3 / 566.3 | 140.9 / 461.4 | 0.87 / 0.81 |
+| c: offline at 8,000 pending, Memory / Dir (µs) | 34.9 / 359.9 | 18.4 / 346.5 | 0.53 / 0.96 |
+| e: one page / a pump per entry under 400 (µs / entry) | 32.3 / 3,754.0 | 29.3 / 2,898.3 | 0.91 / 0.77 |
+| g: sequence (µs); fan-out per connection, 160 (µs) | 21.5; 0.15 | 12.9; 0.10 | 0.60; 0.67 |
+| i: scoped fan-out per connection, 160, log of 8,000 (µs) | 13.9 | 11.5 | 0.83 |
+| open: client of 100,000; server of 400,000; alone chain of 400,000 (ms) | 1,057; 5,368; 10,345 | 898; 3,602; 5,841 | 0.85; 0.67; 0.56 |
+| on disk: client of 100,000; alone chain of 400,000 (MB) | 20.0; 255.9 | 8.3; 100.8 | 0.42; 0.39 |
+| storage: rows alone; with indexes (live B / media row, 100,000) | 280; 602 | 160; 485 | 0.57; 0.81 |
+| views at 16k: `playlist-with-items`, `top-two-by-pos`, `group-source` (µs) | 12.2, 6.3, 7.8 | 10.6, 5.7, 6.2 | 0.87, 0.90, 0.79 |
+| harken `add_song` (µs, 8,000), whole; alone | 144.5; 63.2 | 80.5; 36.9 | 0.56; 0.58 |
+
+N4 notes. † from the tree at `8ee5380` (K3b, the last v5 interpreted), the
+v5 column's other rows are the M1 table's. *Library* N4 is `ark` 5,154,
+`ark-macros` 502, `ark-ffi` 469 (v4's `ark` held its simulator, trace
+player and binaries, 11,769, counted under tooling). *Phones* N4 is
+`ark-ffi`'s source and its `Typed.kt`/`Typed.swift` (153), `harken/ffi`
+(123) and the types `ark-dev gen` writes (688 Kotlin, 958 Swift), against
+the v4 runtimes the phones ran on; the apps' own lines grew (android
+10,998 → 14,992) as onboarding and the look moved into them (N3). *Tests*
+N4 counts every crate's, harken's included. *Storage* is `perf_d_bytes`'
+live bytes per row with harken's two indexes at 100,000. *e, one page*
+and the views are within run-to-run noise of each other between the
+formats (each moved by 20–50% across the three runs).
+
+**Measured, native.** Smaller: the library is 0.24× v4's (6,125 lines
+with the FFI bridge in it, against 25,537) and the phones' runtime 0.06×
+(2,394 lines of bridge and generated types against 40,224 of Kotlin and
+Swift); the peer is 0.30× v4's client and server, the tooling 0.41×,
+harken's domain 0.64×. Larger: tests (1.07×, harken's and the bridge's
+included) and the phone apps' own code (1.36×, what moved into them).
+Faster than v4: everything Part 3 times but the linked mutation, which is
+at par (1.06×) because it encodes and decodes the frames; a peer alone
+0.37×, `add_song` 0.25×, a rebase page 0.47×, a `Batch` decoded in 0.13×,
+initial sync 0.28× per entry. Postcard is why N4 beats N1: against JSON
+it carries 0.36× the bytes, decodes a page in 0.18× the time with half the
+allocations, opens a 400,000-entry chain in 0.56× (5.8 s; N1 measured
+32 s, before each entry was read once), and halves `add_song` and a local
+mutation. Slower or larger than v4: initial sync still carries 1.24× the
+bytes (facts always, §1.6), and a `Batch` decode allocates more than v5
+interpreted did (2,817 against 2,567: a row is a `Vec` per fact). Not
+verified: the runs are one machine's, noisy at 20–50% for the smallest
+shapes; the browser and phones run the same kernel but none was timed;
+harken's views, scanner and search shapes are not measured; v4 and v5 are
+the recorded numbers, not re-run this hour.
+
+**Size at M1**, v4 against v5 interpreted (`loc-v5.txt`, after P1 `loc-p1.txt`; non-blank, non-comment; Unicode tables excluded)
 
 | | v4 | v5 | v5 / v4 |
 |---|---:|---:|---:|
@@ -841,28 +935,7 @@ table say what each row counts.
 | tests | 18,916 | 11,257 | 0.60 |
 | concepts a port carries | 5 sub-languages, 2 execution paths, the lifecycle in 5 places | 1 language, 1 path, 1 machine | — |
 
-**Speed** (release, `--test-threads=1`, v4 and v5 alternating)
-
-| shape | v4 | v5 | v5 / v4 | v5 after P1 | after / v4 |
-|---|---:|---:|---:|---:|---:|
-| a: local mutation, linked (µs, 8,000 entries, playlists of 10) | 28.2 | 37.6 | 1.33 | 39.0 | 1.42 |
-| a: local mutation, alone (µs) | 28.2 | 16.2 | 0.57 | 17.2 | 0.62 |
-| b: linked round trip (µs, 2,000, playlists of 10, no log file) | 192.5 | 5,520.1 | 29 | 182.2 | 0.85 |
-| c: offline mutate at 8,000 pending (µs, Memory) | 30.4 | 1,990.8 | 65 | 28.0 | 0.89 |
-| d: initial sync, time (µs / entry, 8,010 entries) | 26.4 | 9.6 | 0.36 | 9.7 | 0.39 |
-| d: initial sync, size (bytes / entry) | 161.7 | 250.0 | 1.55 | 250.0 | 1.55 |
-| e: rebase, one page under 400 pending (µs / entry) | 62.0 | 3,974.9 | 64 | 48.8 | 0.76 |
-| e: rebase, a pump per entry under 400 pending (µs / entry) | 8,498.6 | 3,779.5 | 0.44 | 4,104.8 | 0.45 |
-| g: fan-out (µs / connection, 160 connections, log of 8,000) | 4.62 | 0.41 | 0.09 | 0.13 | 0.02 |
-| h: decoding a `Batch` of 256 with facts (allocations) | 12,559 | 2,567 | 0.20 | 2,567 | 0.20 |
-| h: decoding a `Batch` of 256 with facts (µs) | 1,091 | 381 | 0.35 | 236 | 0.22 |
-| harken `add_song` (µs, library of 8,000) | 326.7 | 31,440 | 96 | 225.7 | 0.67 |
-| harken `add_song`, rows read | 1 | 8,000 | — | 1 | 1 |
-| harken `add_to_playlist` onto N−1, rows read | 1 | 7,999 | — | 1 | 1 |
-| harken `create_playlist`, the 102nd "Favorites", rows read | 102 | 3,000 | — | 102 | 1 |
-| views: a change on `playlist-with-items` at 16k (µs) | 11.06 | 16.10 | 1.46 | 10.57 | 0.88 |
-| views: a change on `top-two-by-pos` at 16k (µs) | 77 | 5.6 | 0.07 | 4.5 | 0.07 |
-| storage: live bytes per media row | 726 | 426 | 0.59 | 426 | 0.59 |
+(The M1 speed table is the one above without its N4 columns.)
 
 Notes. *Library source* is `ark` (27,880 less 2,343 Unicode) against
 `ark5` (7,522 less 2,343) plus `ark5-macros` (1,238). *All-in* adds
@@ -912,6 +985,36 @@ and re-runs the pending once, 48.8 µs/entry under 400 against v4's 64.6 (was
 linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
+
+**N4** (`9907e0f`…): **the value format is postcard; the docs are the
+tree's.** `ark::format` writes rows, inputs, entries, frames, journal
+records and the hashed bytes in postcard by default (`values-postcard`) or
+JSON (`values-json`, which wins when on); keys stay memcomparable; JSON is
+the human form under both, `ark::json::Seed` reading a value of a `Type`
+back from either, and the FFI, `harken-peer` and the explorer cross JSON
+through the function's types. Measured the same hour, alternating
+(Part 3, *The value format*): postcard carries 0.36× the bytes, receives
+in 0.46× the time, decodes a page in 0.18×, and halves a local mutation
+and `add_song`, with nothing slower outside noise — so it is the default.
+Open reads each entry once (rows fitted only when not this schema's, the
+foreign entry found by the digests): an alone chain of 400,000 opens in
+5.8 s (N1 32 s; JSON now 10.3 s). Re-derived: `hash/`, `protocol/` (each
+frame its bytes and its JSON), `trace/`, `rebase/` (`fleet-seed-7`
+`54e6f160…`, the scenario `bde6d903…`, harken's schema `02372c9b…`),
+the JSON pins kept beside them; `views/` unmoved. Docs: `spec/README.md`
+indexes every module (a test holds it), `RUNNERS.md` trimmed to
+`ark-dev`'s runner, `AUTHORING.md` is "Writing a domain" (145 lines, each
+example held to its source by a test), the root README, `docs/arkdb.md`'s
+note, Part 1's superseded sections noted. Source: `ark` 4,752 → 5,154
+(`format.rs`, `Seed`, the JSON boundary), `ark-ffi` 453 → 469; tests
+472 in `checks.rust`, 0 failed (`ark-ffi`'s denied-login test, which raced its
+own driver in the sandbox, pumps by hand); fuzz 1,000 sessions with traces,
+0 failed. Not verified: a build
+of `values-json` is not held to the vectors (its tests skip them, saying
+so); a non-canonical postcard frame decodes (only rows are held to their
+one encoding, by re-encoding); the phones' JSON crossing on a device
+(the JVM tests and the iOS type-check only); the perf numbers are one
+machine's, noisy at 20–50% on the smallest shapes.
 
 **N1** (`1e60dda`…`b3da7f4`): **one runtime; the domain is Rust** (§1.16).
 ArkLang, its checker, interpreter, std and Unicode tables, the CAS and the
