@@ -381,3 +381,44 @@ pub fn preset(disk: &mut dyn Disk, f: impl FnOnce(&mut Replica)) -> io::Result<(
     }
     Ok(())
 }
+
+/// Where one app's logins are remembered, one per server: `ark-auth`'s
+/// [`ark_auth::remember::Remembered`], a local instance of the app's own —
+/// natively under its configuration directory, in a browser its page's
+/// `localStorage`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Logins {
+    app: String,
+}
+
+impl Logins {
+    /// `app` names the directory, or the key prefix: `"harken"`.
+    pub fn new(app: &str) -> Logins {
+        Logins { app: app.into() }
+    }
+
+    fn open(&self) -> Option<Instance<ark_auth::remember::Remembered>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let disk: Box<dyn Disk> = Box::new(crate::Files::new(ark_auth::remember::dir(&self.app)?).ok()?);
+        #[cfg(target_arch = "wasm32")]
+        let disk: Box<dyn Disk> = Box::new(crate::disk::Local(format!("{}.logins", self.app)));
+        Some(Instance::open(disk))
+    }
+
+    /// The login remembered for `server`.
+    pub fn recall(&self, server: &str) -> Option<ark_auth::Login> {
+        self.open()?.read(|db| ark_auth::remember::recall(db, server))
+    }
+
+    pub fn remember(&self, server: &str, login: &ark_auth::Login) {
+        if let Some(mut i) = self.open() {
+            let _ = i.write(|db| ark_auth::remember::remember(db, server, login));
+        }
+    }
+
+    pub fn forget(&self, server: &str) {
+        if let Some(mut i) = self.open() {
+            let _ = i.write(|db| ark_auth::remember::forget(db, server));
+        }
+    }
+}

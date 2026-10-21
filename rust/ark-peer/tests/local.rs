@@ -198,3 +198,29 @@ fn a_device_reopens_as_its_replica_row() {
     let d = Peer::open_as(config, disk, None);
     assert_eq!((d.log.origin, &d.log.me.session), (origin, &me.session), "who last signed in, read back");
 }
+
+/// A login remembered is recalled by the next run of the app, from its
+/// row; forgotten, it is gone. Falsified by `remember::remember` writing
+/// nothing (its `put` dropped): the next run recalled no login.
+#[test]
+fn a_login_is_remembered_across_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("XDG_CONFIG_HOME", dir.path());
+    let login = ark_auth::Login {
+        token: "t0k".into(),
+        session: "s1".into(),
+        user: ark_auth::Account {
+            id: "alice".into(),
+            name: "Alice".into(),
+            email: String::new(),
+            roles: vec!["library".into()],
+        },
+        expires_ms: 42,
+    };
+    ark_peer::Logins::new("app").remember("http://a", &login);
+    assert_eq!(ark_peer::Logins::new("app").recall("http://a"), Some(login));
+    assert_eq!(ark_peer::Logins::new("app").recall("http://b"), None);
+    ark_peer::Logins::new("app").forget("http://a");
+    assert_eq!(ark_peer::Logins::new("app").recall("http://a"), None);
+    assert!(dir.path().join("app/logins/log").exists());
+}

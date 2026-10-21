@@ -1,94 +1,78 @@
-//! The logins a device has, one per server, kept between runs.
-//!
-//! Natively a JSON file, `$XDG_CONFIG_HOME/<app>/logins.json` (or
-//! `~/.config/…`); in a browser `localStorage`, under `<app>.login.<server>`.
-//! The token is a secret, and the file is the user's own.
+//! The logins a device has, one per server, kept between runs: a row each
+//! of the `login` table of a local schema of this crate's own
+//! ([`Remembered`]), which every app's peer opens as a local instance
+//! (`ark_peer::Logins`: natively under `$XDG_CONFIG_HOME/<app>/logins/`, or
+//! `~/.config/…`; in a browser `localStorage`, under `<app>.logins`). The
+//! token is the user's own secret, on the user's own disk; a server's
+//! secrets stay in its configuration.
 
-use crate::Login;
+use ark::db::Db;
+use ark::prelude::{Deserialize, Row, Schema, Serialize};
+use ark::Refusal;
 
-/// Where one app's logins are remembered.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Logins {
-    app: String,
+use crate::{Account, Login};
+
+/// One server's login.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(table = "login")]
+pub struct Remember {
+    #[ark(key)]
+    pub server: String,
+    pub user: String,
+    pub name: String,
+    pub email: String,
+    pub roles: Vec<String>,
+    pub session: String,
+    pub token: String,
+    pub expires_ms: i64,
 }
 
-impl Logins {
-    /// `app` names the directory, or the key prefix: `"harken"`.
-    pub fn new(app: &str) -> Logins {
-        Logins { app: app.into() }
-    }
+/// The logins a device remembers.
+#[derive(Schema)]
+pub struct Remembered {
+    pub login: Remember,
 }
 
+/// The login remembered for `server`.
+pub fn recall(db: &Db<Remembered>, server: &str) -> Option<Login> {
+    let r = db.login.get(server)?;
+    Some(Login {
+        token: r.token,
+        session: r.session,
+        user: Account {
+            id: r.user,
+            name: r.name,
+            email: r.email,
+            roles: r.roles,
+        },
+        expires_ms: r.expires_ms,
+    })
+}
+
+pub fn remember(db: &mut Db<Remembered>, server: &str, l: &Login) -> Result<(), Refusal> {
+    db.login.put(Remember {
+        server: server.into(),
+        user: l.user.id.clone(),
+        name: l.user.name.clone(),
+        email: l.user.email.clone(),
+        roles: l.user.roles.clone(),
+        session: l.session.clone(),
+        token: l.token.clone(),
+        expires_ms: l.expires_ms,
+    })
+}
+
+pub fn forget(db: &mut Db<Remembered>, server: &str) -> Result<(), Refusal> {
+    db.login.delete(server)
+}
+
+/// Where `app`'s logins are kept natively: `$XDG_CONFIG_HOME/<app>/logins`
+/// (or `~/.config/…`).
 #[cfg(not(target_arch = "wasm32"))]
-impl Logins {
-    fn file(&self) -> Option<std::path::PathBuf> {
-        use std::path::PathBuf;
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-        Some(base.join(&self.app).join("logins.json"))
-    }
-
-    fn all(&self) -> std::collections::BTreeMap<String, Login> {
-        self.file()
-            .and_then(|f| std::fs::read_to_string(f).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-
-    fn write(&self, all: &std::collections::BTreeMap<String, Login>) {
-        let Some(file) = self.file() else { return };
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(all) {
-            let tmp = file.with_extension("tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, &file);
-            }
-        }
-    }
-
-    /// The login remembered for `server`.
-    pub fn recall(&self, server: &str) -> Option<Login> {
-        self.all().remove(server)
-    }
-
-    pub fn remember(&self, server: &str, login: &Login) {
-        let mut all = self.all();
-        all.insert(server.to_string(), login.clone());
-        self.write(&all);
-    }
-
-    pub fn forget(&self, server: &str) {
-        let mut all = self.all();
-        if all.remove(server).is_some() {
-            self.write(&all);
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Logins {
-    fn key(&self, server: &str) -> String {
-        format!("{}.login.{server}", self.app)
-    }
-
-    /// The login remembered for `server`.
-    pub fn recall(&self, server: &str) -> Option<Login> {
-        let json = crate::web::storage()?.get_item(&self.key(server)).ok()??;
-        serde_json::from_str(&json).ok()
-    }
-
-    pub fn remember(&self, server: &str, login: &Login) {
-        if let (Some(storage), Ok(json)) = (crate::web::storage(), serde_json::to_string(login)) {
-            let _ = storage.set_item(&self.key(server), &json);
-        }
-    }
-
-    pub fn forget(&self, server: &str) {
-        if let Some(storage) = crate::web::storage() {
-            let _ = storage.remove_item(&self.key(server));
-        }
-    }
+pub fn dir(app: &str) -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join(app).join("logins"))
 }

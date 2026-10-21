@@ -81,7 +81,7 @@ pub use app::{nobody, Standing, Status, Update};
 pub use disk::{Disk, Files, Memory};
 pub use hub::{ConnId, Deliver};
 pub use link::{Event, Pumped, Wake};
-pub use local::{Bytes, Instance, Local, Shared};
+pub use local::{Bytes, Instance, Local, Logins, Shared};
 #[cfg(not(target_arch = "wasm32"))]
 pub use serve::{dev, Authenticate, Handle, Running, Server};
 

@@ -492,7 +492,7 @@ pub struct App {
     pub login: Option<Login>,
     /// Where logins are remembered — `None` in a test, which must not write
     /// into the config directory of whoever runs it.
-    pub logins: Option<ark_auth::remember::Logins>,
+    pub logins: Option<ark_peer::Logins>,
     /// A sign-in is in flight.
     pub signing_in: bool,
     /// What the connect entry holds, while this window is alone.
