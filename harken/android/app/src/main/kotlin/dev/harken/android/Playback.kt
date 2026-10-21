@@ -33,18 +33,19 @@
 // lock screen is a remote for the session when the sound is on the laptop,
 // and the same remote when it is here; with nothing queued anywhere it is
 // empty and there is no notification. The ExoPlayer is then the
-// reconciler's alone (Remote.kt, through [ExoSound]): it plays exactly when
-// the session names this phone its output. Unlinked — no session, or the
+// reconciler's alone (harken's one reconciler, `harken/player`, through
+// [ExoSound]): it plays exactly when the session names this phone its output. Unlinked — no session, or the
 // socket down — the media session's player is the ExoPlayer itself, this
 // phone's own, as it always was.
 //
-// The screens never touch the ExoPlayer. [Playback] is their end: while the
-// phone is part of the session it draws the session ([Heard]) and every
-// button is a press of it (`Listen.press`); alone it connects a controller,
-// hands it a queue — the list a track was started from, snapshotted, so
-// somebody else's edit arriving does not redirect what is playing — and
-// reads back what the player says. One [PlayerState] either way, which the
-// mini player and the full player both draw.
+// The screens never touch the ExoPlayer. [Playback] is their end: it draws
+// one view of what plays ([Heard.active]) — the session's while the phone is
+// part of it, its own player's alone, as the reconciler says it — and every
+// button is a press of the session (`Listen.press`), or, alone, of a
+// controller it connects, handed a queue — the list a track was started
+// from, snapshotted, so somebody else's edit arriving does not redirect what
+// is playing. One [PlayerState] either way, which the mini player and the
+// full player both draw.
 //
 // **The position is its own flow** ([Playback.position]), apart from the
 // state: it is the one thing that moves while nothing else does, twice a
@@ -67,7 +68,7 @@
 // `set_volume`, its mute `set_mute`. While the sound is here, or nowhere, it
 // plays locally and the buttons move the phone's media stream, as they
 // always did — which the phone, a device of the session with a volume, says
-// as `report_volume` (Remote.kt). A car's own knob is the car's: a volume a
+// as `report_volume` (the reconciler). A car's own knob is the car's: a volume a
 // car's controller asks for is never sent to a speaker.
 package dev.harken.android
 
@@ -114,6 +115,9 @@ import dev.harken.android.onboarding.Hold
 import dev.harken.android.onboarding.Sessions
 import dev.harken.android.gen.Output
 import dev.harken.android.gen.Track as Queued
+import dev.harken.ffi.Loudness
+import dev.harken.ffi.PhoneSound
+import dev.harken.ffi.SoundState
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -128,6 +132,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 
 /** The service: one ExoPlayer, the session's player beside it, and the media library session around them. */
 @OptIn(UnstableApi::class)
@@ -506,12 +511,13 @@ object Items {
 }
 
 /**
- * The ExoPlayer as the reconciler sees it ([Sound]): what it last said of itself, kept on the main
- * thread as one value and read from the session's, and what it is told, posted back to the main
- * thread — and written into that value at once, so the next reconcile sees what it has just asked.
+ * The ExoPlayer as harken's reconciler drives it ([PhoneSound], called from Rust on the session's
+ * thread): what it last said of itself, kept on the main thread as one value and read from the
+ * session's, and what it is told, posted back to the main thread — and written into that value at
+ * once, so the next look sees what it has just asked.
  */
 @OptIn(UnstableApi::class)
-class ExoSound(private val exo: ExoPlayer, private val main: Handler) : Sound {
+class ExoSound(private val exo: ExoPlayer, private val main: Handler) : PhoneSound {
     private data class Said(
         val queue: List<Queued> = emptyList(),
         val index: Int = -1,
@@ -594,46 +600,36 @@ class ExoSound(private val exo: ExoPlayer, private val main: Handler) : Sound {
             )
     }
 
-    override val queue: List<Queued>
-        get() = said.queue
-
-    override val index: Int
-        get() = said.index
-
-    override val playing: Boolean
-        get() = said.playing
-
-    override val buffering: Boolean
-        get() = said.buffering
-
-    override val positionMs: Long
+    private val positionMs: Long
         get() = said.let { if (it.moving) it.positionMs + (SystemClock.elapsedRealtime() - it.readAt) else it.positionMs }
 
-    override val ended: Boolean
-        get() = said.ended
-
-    override val from: String
-        get() = said.from
+    override fun state(): SoundState =
+        said.let { SoundState(it.queue.map { t -> t.id.hex }, it.index.toLong(), it.playing, it.buffering, positionMs, it.ended, it.from) }
 
     override fun takeStalled(): Boolean = stalled.getAndSet(false)
 
+    override fun tracks(): String = said.queue.joinToString(",", "[", "]") { it.json() }
+
     private fun now(): Long = SystemClock.elapsedRealtime()
 
-    override fun load(queue: List<Queued>, at: Int, positionMs: Long, playing: Boolean, from: String) {
+    override fun load(queue: String, at: Long, positionMs: Long, playing: Boolean, from: String) {
         val l = listen
         val server = l?.server ?: return
-        val items = queue.map { Items.of(it, server, l.art(it.album), from) }
-        said = said.copy(queue = queue, index = at, playing = playing, positionMs = positionMs, readAt = now(), moving = false, ended = false, from = from, buffering = true)
+        val tracks = JSONArray(queue).let { a -> List(a.length()) { Queued.of(a.get(it)) } }
+        val items = tracks.map { Items.of(it, server, l.art(it.album), from) }
+        val index = at.toInt()
+        said = said.copy(queue = tracks, index = index, playing = playing, positionMs = positionMs, readAt = now(), moving = false, ended = false, from = from, buffering = true)
         command {
-            exo.setMediaItems(items, at, positionMs)
+            exo.setMediaItems(items, index, positionMs)
             exo.prepare()
             exo.playWhenReady = playing
         }
     }
 
-    override fun jump(at: Int, positionMs: Long) {
-        said = said.copy(index = at, positionMs = positionMs, readAt = now(), moving = false, ended = false)
-        command { exo.seekTo(at, positionMs) }
+    override fun jump(at: Long, positionMs: Long) {
+        val index = at.toInt()
+        said = said.copy(index = index, positionMs = positionMs, readAt = now(), moving = false, ended = false)
+        command { exo.seekTo(index, positionMs) }
     }
 
     override fun resume() {
@@ -661,10 +657,10 @@ class ExoSound(private val exo: ExoPlayer, private val main: Handler) : Sound {
 
     // AudioManager's calls are the system's and safe from any thread: read and written here, on the
     // session's, so the reconciler reads back what it has just set.
-    override fun volume(): Pair<Int, Boolean>? = stream?.read()
+    override fun volume(): Loudness? = stream?.read()?.let { (level, muted) -> Loudness(level.toLong(), muted) }
 
-    override fun setVolume(level: Int, muted: Boolean) {
-        stream?.apply(level, muted)
+    override fun setVolume(level: Long, muted: Boolean) {
+        stream?.apply(level.toInt(), muted)
     }
 }
 
@@ -1016,7 +1012,11 @@ data class PlayerState(
     val volume: Volume? = null,
 )
 
-/** The screens' end: the session while this phone is part of it, a controller of the service's player otherwise. */
+/**
+ * The screens' end: what plays, drawn from one view ([Heard.active]) — the session's while this phone
+ * is part of it, this phone's own player's alone — and every button a press of the session, or, alone,
+ * of the player through a controller of the service.
+ */
 class Playback(
     private val context: Context,
     private val server: String,
@@ -1049,6 +1049,11 @@ class Playback(
     private var listen: Listen? = null
     private var heard = Heard()
     private var following: Job? = null
+
+    // What only this phone's own player has, and the session has not: read from the controller.
+    private var shuffled = false
+    private var repeat = Repeat.Off
+    private var buffering = false
 
     private val future: ListenableFuture<MediaController>? =
         if (!connect) null
@@ -1084,23 +1089,22 @@ class Playback(
                 controller = c
                 c.addListener(
                     object : Player.Listener {
-                        override fun onEvents(player: Player, events: Player.Events) = read()
+                        override fun onEvents(player: Player, events: Player.Events) = extras()
                     })
-                read()
+                extras()
             },
             MoreExecutors.directExecutor())
     }
 
-    /** Follow the account's listening session: drawn while this phone is part of it, and pressed. */
+    /** Follow the account's listening session: what plays drawn from it, alone or joined, and pressed. */
     fun follow(l: Listen) {
         listen = l
         following?.cancel()
         following = scope.launch {
             l.heard.collect { h ->
-                val was = heard.joined
                 heard = h
                 _scrubbing.value = if (h.joined) h.scrubbing else null
-                if (h.joined) drawSession() else if (was) read()
+                draw()
             }
         }
     }
@@ -1108,27 +1112,45 @@ class Playback(
     private val joined: Boolean
         get() = listen != null && heard.joined
 
-    // The session, as one value; and while it plays anywhere — and only then — the position counted
-    // on from its clock twice a second.
-    private fun drawSession() {
+    // What the controller has that the view has not — buffering, repeat — read, and drawn if alone.
+    private fun extras() {
+        val c = controller ?: return
+        buffering = c.playbackState == Player.STATE_BUFFERING
+        repeat =
+            when (c.repeatMode) {
+                Player.REPEAT_MODE_ALL -> Repeat.All
+                Player.REPEAT_MODE_ONE -> Repeat.One
+                else -> Repeat.Off
+            }
+        if (!joined) draw()
+    }
+
+    // What plays, as one value — the session's while joined, this phone's own player's alone, both
+    // the one view — and while it plays, and only then, the position counted on from its clock twice
+    // a second.
+    private fun draw() {
         val l = listen ?: return
         val h = heard
-        val s = h.listening
-        val a = s?.active
-        if (s == null || a == null) {
-            _state.value = PlayerState(on = where(h), volume = s?.volume(h.me))
+        val a = h.active
+        val volume = if (h.joined) h.listening?.volume(h.me) else local()
+        val on = if (h.joined) where(h) else null
+        if (a == null || a.queue.isEmpty()) {
+            _state.value = PlayerState(on = on, volume = volume, repeat = if (h.joined) Repeat.Off else repeat)
             stopTicking()
             return
         }
-        val at = a.at.toInt()
+        val at = a.at.toInt().coerceIn(0, a.queue.size - 1)
         _state.value =
             PlayerState(
                 now = playing(a.now, l),
                 playing = a.clock.playing,
+                buffering = !h.joined && buffering,
                 durationMs = a.now.durationMs,
+                shuffle = !h.joined && shuffled,
+                repeat = if (h.joined) Repeat.Off else repeat,
                 upNext = a.queue.drop(at + 1).take(UP_NEXT).map { playing(it, l) },
-                on = where(h),
-                volume = s.volume(h.me),
+                on = on,
+                volume = volume,
             )
         _position.value = a.position(h.serverNow())
         if (!a.counting) stopTicking()
@@ -1137,8 +1159,8 @@ class Playback(
                 scope.launch {
                     while (isActive) {
                         delay(TICK_MS)
-                        val active = heard.listening?.active ?: break
-                        if (!heard.joined || !active.counting) break
+                        val active = heard.active ?: break
+                        if (!active.counting) break
                         _position.value = active.position(heard.serverNow())
                     }
                 }
@@ -1171,61 +1193,6 @@ class Playback(
         }
     }
 
-    // What the player says, as one value; and while it plays — and only then — the position twice a
-    // second, since nothing else moves the scrubber. Alone only: while joined the session is drawn.
-    private fun read() {
-        if (joined) return
-        val c = controller ?: return
-        val tl = c.currentTimeline
-        val next = ArrayList<Playing>()
-        if (!tl.isEmpty && c.currentMediaItemIndex != C.INDEX_UNSET) {
-            var i = tl.getNextWindowIndex(c.currentMediaItemIndex, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
-            while (i != C.INDEX_UNSET && next.size < UP_NEXT) {
-                next.add(playing(c.getMediaItemAt(i)))
-                i = tl.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
-            }
-        }
-        _state.value =
-            PlayerState(
-                now = c.currentMediaItem?.let(::playing),
-                playing = c.isPlaying,
-                buffering = c.playbackState == Player.STATE_BUFFERING,
-                durationMs = c.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
-                shuffle = c.shuffleModeEnabled,
-                repeat =
-                    when (c.repeatMode) {
-                        Player.REPEAT_MODE_ALL -> Repeat.All
-                        Player.REPEAT_MODE_ONE -> Repeat.One
-                        else -> Repeat.Off
-                    },
-                upNext = next,
-                volume = local(),
-            )
-        _position.value = c.currentPosition.coerceAtLeast(0)
-        if (!c.isPlaying) stopTicking()
-        else if (ticking?.isActive != true) {
-            ticking =
-                scope.launch {
-                    while (isActive) {
-                        delay(TICK_MS)
-                        if (joined) break
-                        val now = controller ?: break
-                        _position.value = now.currentPosition.coerceAtLeast(0)
-                        if (!now.isPlaying) break
-                    }
-                }
-        }
-    }
-
-    private fun playing(m: MediaItem): Playing =
-        Playing(
-            id = m.mediaId,
-            title = m.mediaMetadata.title?.toString() ?: "",
-            artist = m.mediaMetadata.artist?.toString() ?: "",
-            album = m.mediaMetadata.albumTitle?.toString() ?: "",
-            art = m.mediaMetadata.artworkUri?.toString() ?: "",
-        )
-
     // A press of the session while this phone is part of it, or — alone, or refused because the
     // link went since — `alone`, to the player.
     private fun press(p: Press, alone: () -> Unit) {
@@ -1239,17 +1206,19 @@ class Playback(
 
     /**
      * Play `queue` from `at`: the list the track was started from, with each track's album, and the
-     * page it was on (`from`, a route as `Page.place` spells it).
+     * page it was on (`from`, a route as `Page.place` spells it). Shuffled is a queue in another
+     * order, this track first — the session's way and the player's alike, so what is drawn is what
+     * plays.
      */
     fun play(queue: List<Track>, at: Int, albumOf: (Track) -> Album?, shuffled: Boolean = false, from: String = "") {
         if (queue.isEmpty()) return
         val start = at.coerceIn(0, queue.size - 1)
-        // The session has no shuffle: a shuffled queue is a queue in another order, this track first.
-        val list = if (shuffled && joined) listOf(queue[start]) + (queue.take(start) + queue.drop(start + 1)).shuffled() else queue
-        press(Press.Start(list.map { queued(it, albumOf) }, if (shuffled && joined) 0 else start, 0, from)) {
+        val list = if (shuffled) listOf(queue[start]) + (queue.take(start) + queue.drop(start + 1)).shuffled() else queue
+        val first = if (shuffled) 0 else start
+        press(Press.Start(list.map { queued(it, albumOf) }, first, 0, from)) {
             val c = controller ?: return@press
-            c.shuffleModeEnabled = shuffled
-            c.setMediaItems(queue.map { t -> Items.of(queued(t, albumOf), server, albumOf(t)?.art ?: "", from) }, start, 0)
+            this.shuffled = shuffled
+            c.setMediaItems(list.map { t -> Items.of(queued(t, albumOf), server, albumOf(t)?.art ?: "", from) }, first, 0)
             c.prepare()
             c.play()
         }
@@ -1305,10 +1274,18 @@ class Playback(
         if (joined) listen?.press(Press.Transfer(to))
     }
 
+    /**
+     * Alone, what is still to come shuffled — in the player's own queue, so that what is drawn is
+     * what plays; the session has no shuffle.
+     */
     fun shuffle() {
         if (joined) return
         val c = controller ?: return
-        c.shuffleModeEnabled = !c.shuffleModeEnabled
+        shuffled = !shuffled
+        val from = c.currentMediaItemIndex + 1
+        if (shuffled && c.mediaItemCount - from > 1)
+            c.replaceMediaItems(from, c.mediaItemCount, (from until c.mediaItemCount).map { c.getMediaItemAt(it) }.shuffled())
+        draw()
     }
 
     /** Off, all, one, off. */
@@ -1325,15 +1302,9 @@ class Playback(
 
     /** Jump to the `n`th of [PlayerState.upNext]. */
     fun skipAhead(n: Int) {
-        val a = heard.listening?.active
-        if (joined && a != null) return press(Press.Jump(a.at.toInt() + 1 + n)) {}
-        val c = controller ?: return
-        var i = c.currentMediaItemIndex
-        for (step in 0..n) {
-            if (i == C.INDEX_UNSET) break
-            i = c.currentTimeline.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
-        }
-        if (i != C.INDEX_UNSET) c.seekTo(i, 0)
+        val a = heard.active ?: return
+        val to = a.at.toInt() + 1 + n
+        press(Press.Jump(to)) { controller?.takeIf { to < it.mediaItemCount }?.seekTo(to, 0) }
     }
 
     // This phone's own stream as the slider draws it, alone.

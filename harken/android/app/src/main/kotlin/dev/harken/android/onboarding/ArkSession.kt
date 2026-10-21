@@ -71,6 +71,10 @@ private constructor(
     // Every post, run and drain at once on the caller's thread: a test's (`inline`).
     private val inline: Boolean = false,
 ) {
+    /** The replica's directory, when the session opened it: what else this device keeps goes beside it. */
+    @Volatile var dir: String? = null
+        private set
+
     private val thread = Executors.newSingleThreadExecutor { r -> Thread(r, "harken-session").apply { isDaemon = true } }
     private val listeners = CopyOnWriteArrayList<(Harken) -> Unit>()
     private val _status = MutableStateFlow(SessionStatus())
@@ -258,6 +262,7 @@ private constructor(
             s.thread.execute {
                 try {
                     val dir = directory(root, server).apply { mkdirs() }
+                    s.dir = dir.path
                     val peer = harkenOpen(dir.path, login, device.json())
                     peer.connect(socketUrl(server))
                     s.start(Harken(peer))

@@ -9,6 +9,7 @@ import dev.harken.android.gen.AddSong
 import dev.harken.android.gen.Device as Declared
 import dev.harken.android.gen.Harken
 import dev.harken.ffi.Hall
+import dev.harken.ffi.Player
 import dev.harken.ffi.harkenOpen
 import java.nio.file.Files
 
@@ -71,3 +72,21 @@ fun song(i: Int, album: String = "Album ${i / 7}", artist: String = "Artist ${i 
         workTitle = "",
         movementNo = 0,
     )
+
+/**
+ * A device's controls over the session — its presses and what it reads, through harken's player
+ * (`dev.harken.ffi.Player`) with no player of its own attached: what a test presses with.
+ */
+class Presser(val me: String) {
+    private val players = HashMap<Harken, Player>()
+
+    private fun of(h: Harken): Player = players.getOrPut(h) { Player(h.peer, me, null) }
+
+    /** A press: null when it was taken, else why not. */
+    fun press(h: Harken, p: Press): String? = of(h).press(p.json())
+
+    /** The session, while this device is part of it. */
+    fun session(h: Harken): Listening? = Heard.of(of(h).view()).listening
+
+    fun joined(h: Harken): Boolean = Heard.of(of(h).view()).joined
+}

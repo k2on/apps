@@ -7,23 +7,16 @@
 // test reads every rule with real peers and a stand-in stream.
 //
 // What is in this file is what the phone reads of it — the output's volume
-// (the group's while the output leads one), the transitions a control calls,
-// and the phone's own media stream as the session's 0 to 100 — and the
-// throttle a dragged slider sends through. What the reconciler does with the
-// phone's own entry is Remote.kt's; the picker's rows are there too.
+// (the group's while the output leads one), what a control moves, and the
+// phone's own media stream as the session's 0 to 100 — and the throttle a
+// dragged slider sends through. What becomes of the phone's own entry —
+// `equip`, the stream followed, a hand on the buttons said — is harken's one
+// reconciler's (`harken/player`); a control's transition is its [Press];
+// the picker's rows are Session.kt's.
 package dev.harken.android
 
-import dev.harken.android.gen.Equip
-import dev.harken.android.gen.GroupMute
-import dev.harken.android.gen.GroupNudge
-import dev.harken.android.gen.GroupVolume
-import dev.harken.android.gen.Harken
-import dev.harken.android.gen.NudgeVolume
 import dev.harken.android.gen.Output
 import dev.harken.android.gen.Present
-import dev.harken.android.gen.ReportVolume
-import dev.harken.android.gen.SetMute
-import dev.harken.android.gen.SetVolume
 import kotlin.math.roundToInt
 
 /** How far a volume button moves a volume: one press, five of a hundred, as the desktop's `+` and `-`. */
@@ -112,36 +105,6 @@ fun Listening.volume(me: String): Volume? {
         return devices[out]?.takeIf { it.canVolume }?.let { Volume(Level.Device(out), it.volume.toInt(), it.muted, remote) }
     }
     return devices[me]?.takeIf { it.canVolume }?.let { Volume(Level.Device(me), it.volume.toInt(), it.muted, remote = false) }
-}
-
-/** The transitions a volume control calls. */
-object Volumes {
-    fun equip(canVolume: Boolean, family: String?, level: Int, muted: Boolean): Equip =
-        Equip(canVolume, family, muted, level.coerceIn(0, 100).toLong())
-
-    fun report(level: Int, muted: Boolean): ReportVolume = ReportVolume(level.coerceIn(0, 100).toLong(), muted)
-
-    /** The transition `change` of `level` is, by name, and the call: none for this phone's own stream. */
-    fun call(level: Level, change: Change): Pair<String, Harken.() -> Unit>? {
-        fun to(l: Int) = l.coerceIn(0, 100).toLong()
-        fun by(d: Int) = d.coerceIn(-100, 100).toLong()
-        fun t(name: String, f: Harken.() -> Unit) = name to f
-        return when (level) {
-            Level.Here -> null
-            Level.Group ->
-                when (change) {
-                    is Change.To -> t("set_group_volume") { setGroupVolume(GroupVolume(to(change.level))) }
-                    is Change.By -> t("nudge_group_volume") { nudgeGroupVolume(GroupNudge(by(change.delta))) }
-                    is Change.Mute -> t("set_group_mute") { setGroupMute(GroupMute(change.muted)) }
-                }
-            is Level.Device ->
-                when (change) {
-                    is Change.To -> t("set_volume") { setVolume(SetVolume(level.id, to(change.level))) }
-                    is Change.By -> t("nudge_volume") { nudgeVolume(NudgeVolume(by(change.delta), level.id)) }
-                    is Change.Mute -> t("set_mute") { setMute(SetMute(level.id, change.muted)) }
-                }
-        }
-    }
 }
 
 /**
