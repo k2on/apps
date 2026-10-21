@@ -170,3 +170,19 @@ fn a_device_reopens_from_its_disk() {
     assert_eq!(playlists(&p).len(), 1);
     assert_eq!(p.status().pending, 1, "pending, signed out");
 }
+
+/// A login the server turns away stops the link and says why until the
+/// next login. Falsified by the driver dropping `Pumped::denied`: the
+/// status never said it.
+#[test]
+fn a_denied_login_is_said() {
+    let hub = server();
+    let d = tempfile::tempdir().unwrap();
+    let p = device(&d, "phone", Some(login("alice@phone")));
+    p.connect_with("", hub.dialer(Arc::new(|_: &str| None)));
+    until("denied", || p.status().denied.is_some());
+    let s = p.status();
+    assert_eq!((s.link.as_str(), s.denied.as_deref()), ("signed out", Some("not signed in")));
+    p.login(login("alice@phone"));
+    assert_eq!(p.status().denied, None);
+}

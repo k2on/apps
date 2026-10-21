@@ -144,6 +144,9 @@ pub struct Status {
     pub alone: bool,
     /// The disk's last refusal, while it lasts.
     pub failure: Option<String>,
+    /// Why the server last turned this login away (close 4401), until the
+    /// next login: the link has stopped dialling.
+    pub denied: Option<String>,
 }
 
 /// An intent the server refused: its id and why.
@@ -174,6 +177,8 @@ struct State {
     next: u64,
     /// Until when the driver wakes often: a live call's relay is due.
     hurry: u64,
+    /// Why the server last turned the login away.
+    denied: Option<String>,
 }
 
 impl State {
@@ -255,6 +260,9 @@ impl Shared {
         let moved = {
             let mut s = self.lock();
             let p = s.peer.pump();
+            if p.denied.is_some() {
+                s.denied = p.denied;
+            }
             s.settle() | p.moved
         };
         if moved {
@@ -321,6 +329,7 @@ impl Peer {
             views: BTreeMap::new(),
             next: 0,
             hurry: 0,
+            denied: None,
         };
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
@@ -440,6 +449,7 @@ impl Peer {
             session: s.peer.me().session.clone(),
             alone: st.alone,
             failure: s.peer.failure.clone(),
+            denied: s.denied.clone(),
         }
     }
 
@@ -476,7 +486,10 @@ impl Peer {
 
     /// Somebody signed in: every pending intent theirs, dialled as them.
     pub fn login(&self, login: Login) {
-        self.shared.act(|s| s.peer.login(login.who(), login.token));
+        self.shared.act(|s| {
+            s.denied = None;
+            s.peer.login(login.who(), login.token)
+        });
     }
 
     /// Signed out: nothing dialled, what is pending kept for the next

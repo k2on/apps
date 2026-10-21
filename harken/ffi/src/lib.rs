@@ -54,6 +54,14 @@ pub fn harken_listening(peer: Arc<Peer>) -> String {
     json!({ "devices": l.devices, "scrub": l.scrub, "session": l.session }).to_string()
 }
 
+/// The domain this library carries as a server's `/healthz` names it:
+/// its schema's hash and its version (`harken-server`'s `domain` line).
+#[uniffi::export]
+pub fn harken_domain() -> String {
+    let d = harken_domain::shared();
+    format!("{} {}", d.schema_hash(), d.version)
+}
+
 /// Where a track's file is, from where its server is.
 #[uniffi::export]
 pub fn harken_media_url(server: String, file: String) -> String {
