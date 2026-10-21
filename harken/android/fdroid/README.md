@@ -10,19 +10,11 @@ the server it signs in to.
 
 ## Setting it up
 
-The workflow that publishes it is a patch rather than a change to
-`.github/workflows/`, because the change was written somewhere that could
-not push one. From the repository root, on a machine whose credentials may
-push workflow files:
-
-    git apply harken/android/fdroid/pages-workflow.patch
-    git commit -m "pages: the F-Droid repository" -- .github/workflows/pages.yml
-    git push
-
-If `pages.yml` has moved since the patch was written, `git apply --3way`
-merges it. Then wait for two runs: `apk` builds the APK, and `pages`, which
-now also runs when `apk` finishes, deploys it. The landing page at
-https://k2on.github.io/apps/ links the repository once there is one.
+`.github/workflows/build.yaml` publishes it: on a push to `main` its `apk`
+job builds the APK (skipped when the APK's inputs have not moved) and its
+`deploy` job lays out the repository beside the browser build and deploys
+both to Pages at once. The landing page at https://k2on.github.io/apps/
+links the repository.
 
 On the phone: F-Droid → Settings → Repositories → **+**, and paste the
 address above, or open it in the phone's browser and let F-Droid take it.
@@ -50,7 +42,7 @@ the v1 indexes, signed. The build ends by checking what the client checks —
 every APK's hash in the index — so a repository that would be refused is
 not a package. `nix/fdroid.nix` is all of it.
 
-What `pages.yml` runs is the same layout with one difference. Pages deploys
+What `build.yaml`'s deploy runs is the same layout with one difference. Pages deploys
 the site whole, so a repository built from the newest APK alone would
 offer nothing to go back to: `harken-fdroid repo --keep` fetches the APKs
 the live repository already lists, checks each against the hash the index
