@@ -4,8 +4,8 @@ A self-hosted music system: a library a server scans from a directory,
 playlists, one listening session per account across every device, and the
 speakers in the house as devices in it. All of it runs on ArkDB at spec v5
 (`docs/plan-v5.md`): one log, one domain written once in plain Rust and
-linked by the server, the desktop and the browser, and every query a view
-a client keeps up to date by the rows a change touched.
+linked by the server, the desktop, the browser and the phones, and every
+query a view a client keeps up to date by the rows a change touched.
 
 ```
 domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
@@ -18,16 +18,24 @@ server/    an ark-peer that listens, with harken's own parts: the scanner, the H
            the NixOS module (server/README.md)
 iced/      the desktop and browser client, on arkui and ark-peer; the `demo`
            feature is the seeded library GitHub Pages publishes
+ffi/       the phones' library: ark-ffi (the kernel through UniFFI) with the
+           domain linked in — `harken_open`, the listening session as JSON,
+           and a Hall, a harken server in the process for the apps' tests
+android/   the phone: Compose over ffi/, through the Kotlin `ark-dev gen
+           kotlin` writes from the domain (android/README.md)
+ios/       SwiftUI over ffi/, through the Swift `ark-dev gen swift` writes
+           (ios/README.md); never built for iOS
 ```
 
-Frozen at spec v4 with the runtimes they are built on (`kotlin/FROZEN.md`,
-`swift/FROZEN.md`), out of the flake, and not following the domain since:
-
-```
-android/   the phone: Compose over the Kotlin client, loading v4's harken.ark
-           from its assets (android/README.md)
-ios/       SwiftUI over ArkDBClient (ios/README.md); never built for iOS
-```
+**What runs where.** The domain is Rust and runs everywhere as Rust: the
+server, the desktop and the browser (wasm) link it, and each phone loads
+it inside one native library, `libharken_ffi` (`ffi/`, `docs/plan-v5.md`
+§1.16) — the kernel, the link, the disk and the views are the same code on
+every device. A phone's own code is its screens, its player and its
+onboarding; it calls the domain by function name with JSON, typed by the
+data classes and structs `ark-dev gen` writes from the registered domain
+(`android/.../gen/Harken.kt`, `ios/Harken/Gen/Harken.swift`, held to the
+domain by `ffi/tests/gen.rs`).
 
 ## The domain
 
@@ -188,16 +196,17 @@ Everything is `nix`, from the repository root:
                                    # the vectors and traces; the NixOS module
 
 `nixosModules.default` is `services.harken` (`server/README.md` has its
-options). The frozen iOS app is Xcode over `ios/project.yml`, since only a
-Mac can build one.
+options). The phones:
+
+    nix build .#harken-android-lib # the kernel for three Android ABIs, and its Kotlin
+    nix build .#harken-apk         # the APK, its JVM tests run first (android/README.md)
+    nix build .#harken-ios-xcframework  # a Mac only: HarkenFFI.xcframework (ios/README.md)
 
 One workflow builds from `main` (`.github/workflows/build.yaml`): it
-publishes `harken-web` at <https://k2on.github.io/apps/harken/>. The
-Android app is frozen at spec v4: no APK is built, and the F-Droid
-repository keeps offering the last one (`kotlin/FROZEN.md` says how to
-build it at its revision). That is the workflow once
-`docs/build-workflow-v5.patch` is applied; until then its APK job fails,
-which does not hold the page back.
+publishes `harken-web` at <https://k2on.github.io/apps/harken/>; the
+F-Droid repository is `nix build .#harken-fdroid-repo` over the APK. That
+is the workflow once `docs/build-workflow-v5.patch` is applied, and the
+patch predates the APK's return: its APK job is not in it.
 
 ## Running it
 
@@ -425,9 +434,12 @@ shipped v5 revision.
 
 ## Not verified
 
-The phones are frozen at spec v4 (`kotlin/FROZEN.md`, `swift/FROZEN.md`)
-and speak nothing this server reads: no APK is built, and the iOS app has
-not met a compiler.
+No phone has run either app. The APK is assembled for three ABIs and its
+JVM tests drive the real kernel — the library built for the machine they
+run on, through the same UniFFI Kotlin — alone and in a Hall; it has not
+been installed. The iOS app has not been built: the xcframework needs a
+Mac, and its Swift has not met a compiler (android/README.md,
+ios/README.md say what was checked).
 No desktop window has been opened: the browser build was drawn in
 headless Chromium under v4 and has not been drawn on v5, and the desktop
 is only driven through its tests. Nothing

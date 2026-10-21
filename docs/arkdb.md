@@ -6,8 +6,9 @@
 > by one interpreter, the log is a chain whose entries carry their facts,
 > one sans-io machine is replica or authority by role, and views are
 > maintained per operator. `rust/ark` is v5 and the specification; v4 is
-> deleted, and Kotlin and Swift are frozen at v4 (`kotlin/FROZEN.md`,
-> `swift/FROZEN.md`).
+> deleted. Since §1.16 the domain is plain Rust and runs only as Rust, and
+> the phones embed the kernel through FFI (`harken/ffi`, N3): the Kotlin and
+> Swift runtimes this document plans are deleted (last green at `a983b3c`).
 
 A design for the successor to Petros. Three parts: what Petros is and what
 harken does with it, what the compiled-domain-over-FFI approach costs now that

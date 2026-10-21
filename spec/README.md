@@ -14,7 +14,7 @@ index; `RUNNERS.md` says what a runner does with the vectors
 `rust/ark-dev` writes, and `AUTHORING.md` is writing a domain in Rust.
 `docs/plan-v5.md` is the design; where a module and this file disagree,
 the module is right. v5 replaced v4 here (R1); v4's specification is in
-the history, at the commits `kotlin/FROZEN.md` names.
+the history, at `8bda5c3`, the last commit with v4 in the tree.
 
 ## §1 Types and bytes
 

@@ -1,31 +1,33 @@
 # harken for Android
 
-> **Frozen at spec v4** with the runtime it is built on (`kotlin/FROZEN.md`): it
-> speaks nothing a v5 server reads, and the flake no longer builds it.
-> What follows describes it as it was at its last change, `973c27d`.
+Compose over harken's library (`../ffi`, `docs/plan-v5.md` §1.16): the Rust
+kernel with harken's domain linked in, `libharken_ffi.so`, the same code
+the server, the desktop and the browser run. The phone is a **client** of
+it: the kernel keeps the replica on the phone's disk, dials the server,
+rebases, keeps the views, and holds the listening session; the app's own
+code is its screens, its player, its car and its onboarding. It calls the
+domain by name through the Kotlin `ark-dev gen kotlin` writes from the
+registered domain — data classes for every record, row and sum, and a stub
+per function (`app/src/main/kotlin/dev/harken/android/gen/Harken.kt`, never
+edited: `ARK_WRITE_GEN=1 cargo test -p harken-ffi --test gen` writes it,
+and the same test fails when it is not what the domain generates) — over
+UniFFI's bindings and the bridge's typed half (`dev.arkdb.ffi`).
+What it looks like and how it behaves is `docs/plan-android.md`.
 
-Compose over the Kotlin client at spec v4 (`kotlin/ark-runtime`,
-`kotlin/ark-client`, `kotlin/README.md`), inside the onboarding every Ark
-app on Android shares (`kotlin/ark-android`). The phone is a **client**: it
-loads `harken.ark` — the module the domain crate writes, the one the
-server, the desktop and the browser run — from its own assets, verifies
-it, and interprets every function of it. Nothing of the domain is written
-in Kotlin, and nothing is generated into the app: what the screens call is
-a mutation or a query of the module, by name (`docs/plan-phones.md`). What
-it looks like and how it behaves is `docs/plan-android.md`.
-
-**Assembled and rendered, not run.** `nix build .#harken-apk` compiles
-every Kotlin file here and runs the onboarding's JVM tests before it
-produces the APK; `nix build .#harken-android-screens` renders every
-screen, light and dark, on the JVM (below). Nothing in the container this
-was written in can install or run an APK, and no phone has run this one.
-What *has* been exercised is everything under it on the JVM: the runtime
-and the client against every client vector and trace (`checks.kotlin`),
-`harken-peer-kt` in the process fleet beside Rust peers
-(`checks.fleet-kotlin`), the onboarding's machine, and the screens drawn
-by layoutlib. Expect the first run on a real phone to want small fixes —
-the media session, the Custom Tab's redirect and the notification
-permission are the parts only a phone can say anything about.
+**Assembled and tested on the JVM, not run.** `nix build .#harken-apk`
+compiles every Kotlin file here, runs the app's JVM tests, and assembles
+the release APK with the kernel for `arm64-v8a`, `armeabi-v7a` and
+`x86_64`. The tests are the app's own over the **real kernel**: the
+library built for the machine they run on (`harken-android-lib`'s
+`host/`), loaded through the same UniFFI Kotlin and JNA the phone uses —
+a library seeded through `add_song` and read by the screens' `Library`,
+the reconciler and the lock screen's player against a listening session
+in a `Hall` (a harken server in the process, `../ffi`), the onboarding's
+machine, and the screens drawn by layoutlib. Nothing in the container this
+was written in can install or run an APK, and no phone has run this one:
+the media session, the Custom Tab's redirect, JNA's loading on a device and
+the notification permission are the parts only a phone can say anything
+about.
 
 ## Building
 
@@ -35,137 +37,72 @@ From the repository root, with nothing but nix:
     adb install result/harken.apk
     nix build .#harken-android-screens  # result/index.html and the PNGs
 
-That is gradle over an SDK the flake assembles itself (`nix/android-sdk.nix`):
-the platform 35 and build-tools 35.0.0 zips from Google, which are jars and
-scripts, and `aapt2` — the one native program AGP runs to assemble an APK
-(d8, apksigner and the rest are Java) — compiled from the Android sources
-for whatever machine is building (`nix/aapt2.nix`). The app's whole Maven
-graph — AGP, Compose, the Kotlin plugins, OkHttp, Media3, the browser
-library, Paparazzi and the layoutlib it renders with — is recorded in
-`deps.json` and replayed offline, the way nixpkgs builds every gradle
-project; the Kotlin runtime and client come in through the composite build
-as they do on a laptop. One recording serves the APK, the screenshots and
-a laptop's debug build: it runs the onboarding's tests,
-`recordPaparazziDebug`, `assembleDebug` and `assembleRelease`. A new
+`harken-apk` is gradle over two things the flake builds. **The kernel**,
+`harken-android-lib`: `harken/ffi` compiled by cargo for each ABI against
+API 26 with the NDK nixpkgs packages (`aarch64-linux-android`,
+`armv7-linux-androideabi`, `x86_64-linux-android`, linked by the NDK's
+clang, which also compiles ring's C), stripped, as `jniLibs/<abi>/`;
+UniFFI's Kotlin for it and the typed half as `kotlin/`; and the library
+for the build machine as `host/`, which the JVM tests load
+(`jna.library.path`). **An SDK** the flake assembles itself
+(`nix/android-sdk.nix`): the platform 35 and build-tools 35.0.0 zips from
+Google, which are jars and scripts, and `aapt2` — the one native program
+AGP runs to assemble an APK — compiled from the Android sources for
+whatever machine is building (`nix/aapt2.nix`). The app's whole Maven graph
+— AGP, Compose, the Kotlin plugins, Media3, the browser library, JNA,
+Paparazzi and the layoutlib it renders with — is recorded in `deps.json`
+and replayed offline, the way nixpkgs builds every gradle project. A new
 dependency moves that file:
 
     $(nix build .#harken-apk-deps --print-out-paths)   # from the repository root; needs the network
 
-(`nix run .#harken-apk-deps` is the same script, on a nix whose `run`
-takes a bare file; some want a `bin/`.) The script runs `nix-shell` inside
-bubblewrap, so it needs a nix daemon to talk to. Maven Central rate-limits
-a cold fetch of the graph (HTTP 429), both while recording and when the
-build fetches what was recorded; either is retried after a pause, and the
-artifacts already fetched stay in the store.
+(JNA 5.17.0 and `org.json` were added to it by hand, their hashes those of
+Maven Central's files.) Maven Central rate-limits a cold fetch of the graph
+(HTTP 429); a fetch that fails is retried after a pause, and the artifacts
+already fetched stay in the store.
+
+On a laptop, with Android Studio or a command-line SDK with platform 35
+and build-tools 35.0.0 plus JDK 21, the kernel built once and gradle
+pointed at it:
+
+    nix build .#harken-android-lib -o harken/ffi/android   # what -PharkenLib defaults to
+    cd harken/android
+    gradle assembleDebug
+    gradle :app:testDebugUnitTest
+    adb install app/build/outputs/apk/debug/app-debug.apk
 
 **Why aapt2 is compiled here, and how.** Google ships the SDK's native tools
 for x86_64 Linux and macOS only, so an ARM Linux machine has no `aapt2` to
 run — and the newest one anybody else prebuilds for aarch64 glibc, Debian's,
 is Android 14's and cannot read platform 35's `android.jar`, whose resource
 table is in Android 15's format. `nix/aapt2.nix` builds it at the
-`platform-tools-35.0.2` tag: sparse checkouts of `frameworks/base`
-(tools/aapt2, libs/androidfw) and `system/core` from GitHub's aosp-mirror,
-Debian's source tarball of the same release for the libraries whose
-repositories the mirror lacks (libbase, liblog, libziparchive, incfs's
-`map_ptr`, the native headers, fmtlib), and nixpkgs' protobuf 3.21, libpng,
-expat and zlib. `nix/aapt2/CMakeLists.txt` compiles the host source lists
-the Android build files name, with clang: Android's own toolchain, and the
-one that accepts C11 `atomic_int` in C++ where gcc needs Debian's patch.
-Two things glibc's libstdc++ wanted that Android's libc++ did not: a
-prelude that includes `<cstring>`, `<cstdint>` and `<limits>` ahead of
-androidfw and aapt2, and Debian's one-hunk patch giving incfs's `map_ptr`
-iterator the decrement `std::lower_bound` uses. About two hundred files,
-a few minutes, once. The same recipe is what the x86_64 build uses, which
-is where it was tested; the aarch64 build differs by nothing but the
-compiler's target.
+`platform-tools-35.0.2` tag from sparse checkouts of the AOSP mirror,
+Debian's source tarball of the same release for the libraries the mirror
+lacks, and nixpkgs' protobuf, libpng, expat and zlib, compiled with clang
+(`nix/aapt2/CMakeLists.txt`). About two hundred files, a few minutes, once.
 
 Three more things the derivation says so that AGP stays inside the store:
 `buildToolsVersion = "35.0.0"` in `app/build.gradle.kts`, because AGP 8.7
 otherwise asks for its own default 34.0.0 and tries to *install* it;
 `android.aapt2FromMavenOverride`, pointing at the aapt2 above rather than
-the x86_64 one AGP would fetch from Maven; the whole unpacked tree made
-writable, because stdenv unlocks only the source root and gradle writes
-`.gradle/` and `build/` inside the included build at `../../kotlin` too —
-read-only, the build *ends* after loading settings with no task run and no
-message; and a writable `HOME`, because AGP keeps its state and the debug
-keystore under `~/.android`.
+the x86_64 one AGP would fetch from Maven; and a writable `HOME`, because
+AGP keeps its state under `~/.android`.
 
 **The APK is a release build.** `harken-apk` runs `assembleRelease`, not
 `assembleDebug`: a debuggable app runs on ART with its compiler held back
-for a debugger, and Compose is several times slower for it — a fling
-through the songs most of all. A release build is not debuggable, and it
-carries the baseline profiles Compose's own libraries ship, compiled by AGP
-into `assets/dexopt/baseline.prof`, which profileinstaller hands to ART on
-install. It is not minified: R8 is not in the recorded graph, and a fling
-does not need shrinking. Lint's release check is off for the same reason,
-since it would fetch lint. The debug build stays what a laptop builds and
-what the screenshots and the tests run against.
+for a debugger, and Compose is several times slower for it. A release
+build carries the baseline profiles Compose's own libraries ship. It is not
+minified: R8 is not in the recorded graph. Lint's release check is off for
+the same reason.
 
-**One key, committed, and public on purpose.** That keystore was
-random: AGP makes one on first use, so every machine had its own, and the
-nix builder — a new home each time — had a new one on every build. Android
-refuses an update signed by anybody but the installed app's signer, so each
-new APK failed with "App not installed" and had to replace the old one by
-uninstalling it. `debug.keystore`, beside this file, is the key every build
-signs with now, debug and release (`signingConfigs` in
-`app/build.gradle.kts`, the usual `android` / `androiddebugkey` /
-`android`), nix or local, so one installs over the last. Its name is AGP's
-convention; what matters is that it is the key the APKs already installed
-carry, certificate SHA-256 `1a8859fb…df431139`. The cost is the one a debug
-key's build pays, stated rather than inherited: anyone can sign an APK as
-this app, so it installs anywhere and belongs nowhere public. A real release key belongs outside the
-nix store, which is world-readable, and is applied after the build.
-
-The version code rises with each commit: `harken-apk` passes the flake's
-source time in minutes as `-PversionCode` and `0.1.<date>` as
-`-PversionName`, which CI's and a tag's APKs get too, since both are this
-same `nix build`. A local gradle build passes neither and is `1`, `0.1`.
-
-**The first install of this build still needs one uninstall.** The APK
-already on a phone carries the random key of the build that made it; from
-this one on, updates install over each other.
-
-With Android Studio (Ladybug or later) or a command-line SDK with platform 35
-and build-tools 35.0.0, plus JDK 21, the same project builds directly:
-
-    cd harken/android
-    gradle assembleDebug          # or open the directory in Android Studio
-    gradle :ark-ui:testDebugUnitTest :ark-android:testDebugUnitTest :app:testDebugUnitTest
-    gradle :app:recordPaparazziDebug   # app/src/test/snapshots/images, gitignored
-    adb install app/build/outputs/apk/debug/app-debug.apk
-
-The flake's SDK works for that too: `nix develop .#kotlin`, then
-`ANDROID_HOME` set to `$(nix build .#android-sdk --print-out-paths)/libexec/android-sdk`
-and gradle given the flags `harken-apk` gives it (the JDK, and
-`android.aapt2FromMavenOverride` pointing at that SDK's aapt2).
-
-**The module is an asset.** `app/build.gradle.kts` copies
-`harken/domain/harken.ark` into `build/generated/ark-assets` before every
-build (`copyArk`) and adds that directory to the app's assets; the app reads
-`assets/harken.ark` at start and hands the bytes to `Domain.fromBytes`, which
-decodes and verifies it. A new release of the domain is a new `harken.ark`
-and a rebuild; nothing in the app's sources moves with it.
-
-### How the runtime gets in
-
-`settings.gradle.kts` says `includeBuild("../../kotlin")`: a composite build.
-Gradle substitutes the app's `implementation("dev.arkdb:ark-runtime")` and
-`implementation("dev.arkdb:ark-client")` with the modules of that build, which
-keeps its own settings, plugin versions and toolchain. The onboarding,
-`kotlin/ark-android`, is an Android library and so cannot be a project of
-that JVM-only build: it is a project of this one, included by path
-(`include(":ark-android")`, its `projectDir` set to `../../kotlin/ark-android`),
-under this build's plugin versions. So is `kotlin/ark-ui`, the look and the
-motion `ark-android` and the app are drawn with (`include(":ark-ui")`), on
-Compose alone.
-
-- The Kotlin build sets `jvmToolchain(21)`, so the libraries arrive as Java
-  21 class files; AGP 8.7's D8 accepts them, and the app is built for 21 too.
-- The composite needs the same Kotlin plugin version on both sides; both say
-  2.0.21.
-- The client is written for API 26, the app's `minSdk`: `java.nio.file` only
-  where 26 has it (a directory synced after a rename), no `java.net.http`;
-  its HTTP is `HttpURLConnection` and its WebSocket OkHttp's.
+**One key, committed, and public on purpose.** `debug.keystore`, beside
+this file, is the key every build signs with, debug and release
+(`signingConfigs` in `app/build.gradle.kts`), so one APK installs over the
+last; its certificate's SHA-256 is `1a8859fb…df431139`. Anyone can read
+this file, so anyone can sign an APK as this app: it installs anywhere and
+belongs nowhere public. A real release key belongs outside the nix store,
+and is applied after the build. The version code rises with each commit:
+`harken-apk` passes the flake's source time in minutes as `-PversionCode`.
 
 ## Through F-Droid
 
@@ -187,47 +124,45 @@ carries its own build's random key and needs one uninstall, as above.
 
 ## What it does
 
-`MainActivity` is one line of harken and the rest is the shared onboarding:
+`MainActivity` is one line of harken and the rest is the onboarding
+(`onboarding/`, drawn with `ui/`, both the app's own code now):
 
 ```kotlin
 ArkApp(identity, listOf(Permission.Notifications(why = WHY_NOTIFY))) { session -> HarkenApp(session) }
 ```
 
 **There is no alone mode.** harken is never used without a server: the
-onboarding (`kotlin/ark-android`, `kotlin/README.md`) asks for the server's
-address and checks its `/healthz` is an Ark server serving `harken.ark`,
-signs in on the server's own page in a Custom Tab
-(`/auth/login?redirect=harken://auth`; the manifest takes `harken://auth`
-on a `singleTask` activity, and harken's server allows `harken://`),
-exchanges the code, asks for notifications once, and remembers the server
-and the login. Only then is there a session: the Kotlin `Peer` over a
-replica directory per server, signed in, linked to `/sync`, on a thread of
-its own that runs only when the socket wakes it, when the app asks for
-something, and at the redial after a close (`docs/plan-reactive.md`); the
-library splices what each change moved, and the player's position ticks
-only while a track plays, read by the mini player's hairline and the full
-player's scrubber alone. A server's `Denied` and
+onboarding asks for the server's address and checks its `/healthz` is a
+harken server (its `domain` line against this library's, `harken_domain`),
+signs in on the server's own page in a Custom Tab (`login_url`, the
+manifest taking `harken://auth` on a `singleTask` activity, which harken's
+server allows), exchanges the code through the kernel (`exchange`), asks
+for notifications once, and remembers the server and the login. Only then
+is there a session (`onboarding/ArkSession.kt`): the kernel's peer over a
+replica directory per server, signed in, dialling `/sync`. The peer drives
+itself — its link, its redial and its views run on a thread of the
+kernel's — and tells the session when anything moved; the session then runs
+one drain on its own thread, where the library splices what moved, and
+nothing runs on a clock. A server's denial (the status's `denied`) and
 *Sign out* both come back to *Sign in* with the server and the replica
 kept, so whatever was pending goes when the same person signs in again.
 
 **The lists are spliced, not re-read.** `Library` holds the library, the
-playlists, the albums, the artists and the songs' details as maintained
-views (`Peer.view`, `ClientView`): hydrated once on the session's thread,
-then handed every `Changes` the peer reports — a rebase's included — and
-the patches each answers with are spliced into the list the screens hold
-(`ClientView.splice`). Only a `Reset` reads one again. A page — an album,
-an artist, a playlist — is a view too, held while a screen shows it and
-dropped when the last one leaves. Search is one read per needle of the
-module's `search`, over its text index. Every write is a mutation of the
-module by name:
+playlists, the albums, the artists and the songs' details as the kernel's
+maintained views, typed (`gen.View<T>`): read once on the session's thread,
+then asked after every change what they did — a rebase's included — and
+their patches spliced into the list the screens hold. Only a reset reads
+one again. A page — an album, an artist, a playlist — is a view too, held
+while a screen shows it and let go when the last one leaves. Every write is
+one of the domain's functions, typed:
 
 ```kotlin
-peer.mutate("add_to_playlist", mapOf("playlist_id" to Value.id(pid), "media_id" to Value.id(mid)))
-peer.view("album", mapOf("playlist_id" to Value.id(Id.nil), "name" to Value.text("Water Music")))
+h.addToPlaylist(AddToPlaylist(playlistId, mediaId))           // its intent's id
+h.album(AlbumInput(Id.nil, "Water Music")).rows()               // List<LibraryEntry>
 ```
 
-and what the phone records is byte-identical to what any other peer
-records for the same intent.
+and the input the phone records is the JSON the domain's serde writes, the
+same bytes any other peer records for the same intent.
 
 The screens, each a function of plain values (so the screenshots draw
 exactly what the app draws):
@@ -271,13 +206,14 @@ exactly what the app draws):
   pulled down from its top. A page opened from no cover rises. Each tab
   keeps its own stack and switches to it at once; the tab already shown
   goes back to its root, or scrolls its root to the top; back at Search's
-  or the Library's root goes Home, previewed like a page. How is `kotlin/ark-ui` (`Motion.kt`, `ExpandingCard.kt`,
-  `Springs.kt`), which every Ark app on Android shares; `PlayerSheet.kt`
+  or the Library's root goes Home, previewed like a page. How is `ui/` (`Motion.kt`, `ExpandingCard.kt`,
+  `Springs.kt`), what was ark-ui and is the app's own now; `PlayerSheet.kt`
   here says which faces the player's card has, and `docs/plan-android.md`
   why.
 - **Settings** — the account, the server and whether it is reached, sign
-  out, about. **Diagnostics** — every number the old settings screen had,
-  each change this phone made with where it stands, and verify — are
+  out, about. **Diagnostics** — every number the peer's status has, the
+  listening session's, and each change this phone made with where it
+  stands — are
   behind the version, tapped seven times, and listed under About once
   found.
 
