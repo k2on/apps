@@ -132,11 +132,17 @@ impl Sound for Phone<'_> {
 }
 
 /// A phone's end of the account's listening session.
+///
+/// A step calls into the peer, which tells the app that something moved —
+/// at once, on this thread, where the app drains its session inline (its
+/// tests) — and the app steps again: that step, inside this one, answers the
+/// view this one last made rather than waiting on itself.
 #[derive(uniffi::Object)]
 pub struct Player {
     peer: Arc<Peer>,
     inner: Mutex<harken_player::Player>,
     sound: Mutex<Option<Arc<dyn PhoneSound>>>,
+    last: Mutex<String>,
 }
 
 #[uniffi::export]
@@ -153,6 +159,7 @@ impl Player {
             peer,
             inner: Mutex::new(harken_player::Player::new(&me, Some(counts))),
             sound: Mutex::default(),
+            last: Mutex::new("{}".into()),
         })
     }
 
@@ -165,7 +172,7 @@ impl Player {
     /// what plays, as [`Player::view`] says it.
     pub fn step(&self) -> String {
         let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut inner) = self.busy() else { return self.last() };
         self.peer.with(|p| match &sound {
             Some(s) => inner.step(p, &mut Phone(&**s)),
             None => drop(inner.refusals(p)),
@@ -191,14 +198,29 @@ impl Player {
     /// stats, refused}` (`harken_player::Player::view`).
     pub fn view(&self) -> String {
         let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(inner) = self.busy() else { return self.last() };
         self.view_of(&inner, sound.as_deref())
     }
 }
 
 impl Player {
+    /// The player, unless a step is under way on this thread (or another).
+    fn busy(&self) -> Option<std::sync::MutexGuard<'_, harken_player::Player>> {
+        match self.inner.try_lock() {
+            Ok(g) => Some(g),
+            Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    }
+
+    fn last(&self) -> String {
+        self.last.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     fn view_of(&self, inner: &harken_player::Player, sound: Option<&dyn PhoneSound>) -> String {
         let local = sound.map(Phone);
-        self.peer.with(|p| inner.view(p, local.as_ref().map(|l| l as &dyn Sound))).to_string()
+        let v = self.peer.with(|p| inner.view(p, local.as_ref().map(|l| l as &dyn Sound))).to_string();
+        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = v.clone();
+        v
     }
 }

@@ -690,3 +690,40 @@ fn the_phones_volume_is_its_entry_and_only_a_hand_is_said() {
     assert_eq!(phone.me("phone").volume, 80);
     assert_eq!(phone.calls(), calls + 2);
 }
+
+/// The peer tells the app that something moved at once, on the thread that
+/// moved it, and an app that drains inline (its tests do) steps again from
+/// inside the step that moved it: that step answers the view last made, and
+/// nothing waits on itself.
+///
+/// Falsified by a step that took its lock by waiting (`lock` for
+/// `try_lock`): the nested step never returned.
+#[test]
+fn a_step_told_of_its_own_change_does_not_wait_on_itself() {
+    struct Again(Mutex<Option<Arc<Player>>>);
+    impl ark_ffi::Listener for Again {
+        fn changed(&self) {
+            let p = self.0.lock().unwrap().clone();
+            if let Some(p) = p {
+                p.step();
+            }
+        }
+    }
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let hall = Hall::new();
+        let phone = on(&hall, "phone", true, "phone", None);
+        let again = Arc::new(Again(Mutex::new(Some(phone.player.clone()))));
+        // A play recorded is a change of the log, which a view the app keeps sees.
+        let _plays = phone.peer.view("recently_played".into(), "null".into()).unwrap();
+        phone.peer.set_listener(Some(again.clone()));
+        phone.call("start", start(&queue(), 0, 31_000, ""));
+        phone.player.step();
+        *again.0.lock().unwrap() = None;
+        let _ = done.send(phone.sound.s().loads);
+    });
+    let loads = finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("a step waited on itself");
+    assert_eq!(loads, 1);
+}
