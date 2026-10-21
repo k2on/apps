@@ -163,64 +163,36 @@ pub struct Bytes(pub Vec<u8>);
 // read: no schema holding one is read through JSON.
 leaf!(Bytes => Type::Bytes, Origin => Type::Id("origin".into()), EntryId => Type::Id("entry".into()), EntryHash => Type::Bytes, StateHash => Type::Bytes);
 
-fn record(name: &str, fs: Vec<(&str, Type)>) -> Type {
-    Type::Record(name.into(), fs.into_iter().map(|(n, t)| (n.into(), t)).collect())
+macro_rules! fields {
+    ($($f:ident: $t:expr),*) => { vec![$((stringify!($f).to_string(), $t)),*] };
 }
 
 impl Describe for Entry {
     fn describe() -> Type {
         use Type::{Bytes as B, Int, Text};
-        let roles = Vec::<String>::describe();
-        let (id, origin) = (EntryId::describe(), Origin::describe());
-        record(
-            "Entry",
-            vec![
-                ("id", id),
-                ("actor", Text),
-                ("session", Text),
-                ("origin", origin),
-                ("local", Int),
-                ("roles", roles),
-                ("func", Text),
-                ("input", B),
-                ("now", Int),
-            ],
-        )
+        let (id, origin, roles) = (EntryId::describe(), Origin::describe(), Vec::<String>::describe());
+        let fs = fields! { id: id, actor: Text, session: Text, origin: origin, local: Int, roles: roles, func: Text, input: B, now: Int };
+        Type::Record("Entry".into(), fs)
     }
 }
 
 impl Describe for Change {
     fn describe() -> Type {
-        let row = |f: &[&str]| {
-            [&["table"][..], f]
-                .concat()
-                .into_iter()
-                .map(|n| (n.to_string(), if n == "table" { Type::Text } else { Type::Bytes }))
-                .collect()
-        };
+        use Type::{Bytes as B, Text};
+        let (one, two) = (fields! { table: Text, row: B }, fields! { table: Text, old: B, new: B });
         Type::Sum(
             "Change".into(),
-            vec![
-                ("add".into(), row(&["row"])),
-                ("remove".into(), row(&["row"])),
-                ("edit".into(), row(&["old", "new"])),
-            ],
+            vec![("add".into(), one.clone()), ("remove".into(), one), ("edit".into(), two)],
         )
     }
 }
 
 impl Describe for Logged {
     fn describe() -> Type {
-        let (entry, facts) = (Entry::describe(), Vec::<Change>::describe());
-        record(
-            "Logged",
-            vec![
-                ("seq", Type::Int),
-                ("entry", entry),
-                ("facts", facts),
-                ("state", Type::Bytes),
-                ("hash", Type::Bytes),
-            ],
+        let (entry, facts, b) = (Entry::describe(), Vec::<Change>::describe(), Type::Bytes);
+        Type::Record(
+            "Logged".into(),
+            fields! { seq: Type::Int, entry: entry, facts: facts, state: b.clone(), hash: b },
         )
     }
 }
