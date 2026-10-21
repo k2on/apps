@@ -7,8 +7,8 @@
 //! bridge a [`Peer`] is called by function name with JSON — `mutate`,
 //! `query`, `view`, the live space's `call` — and says where it stands
 //! (`status`), what became of each intent (`standing`, `take_rejections`),
-//! who it is (`login`, `logout`; `session.current` by `query`) and whether
-//! it is alone (`alone`, `join`).
+//! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
+//! and whether it is alone (`alone`, `join`).
 //! The typed Kotlin and Swift over these names is generated from the domain
 //! (`ark-dev gen`), types only.
 //!
@@ -521,10 +521,25 @@ impl Peer {
         });
     }
 
-    /// Signed out: the session revoked through the domain's
-    /// `session.revoke` (pushed while linked, pending for the next sign-in
-    /// otherwise), nothing dialled after it, what is pending kept. Who is
-    /// signed in is the domain's `session.current`, asked with `query`.
+    /// Who this device is signed in as, as its replica holds its session
+    /// row (`ark_auth::rows::current`): its person, roles granted merged,
+    /// and no token. Nobody signed out, or before the session has synced.
+    pub fn signed_in(&self) -> Option<Login> {
+        let s = self.shared.lock().peer.current()?;
+        Some(Login {
+            token: String::new(),
+            session: s.id,
+            user: s.user,
+            name: s.name,
+            email: s.email,
+            roles: s.roles,
+            expires_ms: s.expires_ms,
+        })
+    }
+
+    /// Signed out: the session revoked through `session.revoke` (pushed
+    /// while linked, pending for the next sign-in otherwise), nothing
+    /// dialled after it, what is pending kept.
     pub fn logout(&self) {
         self.shared.act(|s| drop(s.peer.sign_out()));
     }

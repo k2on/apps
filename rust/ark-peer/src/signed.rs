@@ -30,7 +30,10 @@ impl Peer {
     /// linked (and otherwise pending, for the next sign-in), and nothing
     /// dialled after it.
     pub fn sign_out(&mut self) -> Result<EntryId, String> {
-        let input = Revoke { id: self.me().session.clone() }.to_bytes();
+        let input = Revoke {
+            id: self.me().session.clone(),
+        }
+        .to_bytes();
         let r = self.mutate_bytes(REVOKE, input);
         self.set_token(None);
         r

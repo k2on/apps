@@ -118,8 +118,17 @@ struct Reads {
 fn reads<S: AuthTables>() -> Reads {
     Reads {
         current: |store, ctx| read::<S, _>(store, |db| current::<S>(ctx, db, ())).ok().flatten(),
-        get: |store, id| read::<S, _>(store, |db| Ok::<_, ark::Refusal>(S::sign_in(db).get(id.to_string()))).ok().flatten(),
-        of: |store, user| read::<S, _>(store, |db| Ok::<_, ark::Refusal>(S::sign_in(db).by(SignIn::USER).from(user.to_string()).all())).unwrap_or_default(),
+        get: |store, id| {
+            read::<S, _>(store, |db| Ok::<_, ark::Refusal>(S::sign_in(db).get(id.to_string())))
+                .ok()
+                .flatten()
+        },
+        of: |store, user| {
+            read::<S, _>(store, |db| {
+                Ok::<_, ark::Refusal>(S::sign_in(db).by(SignIn::USER).from(user.to_string()).all())
+            })
+            .unwrap_or_default()
+        },
     }
 }
 
@@ -399,7 +408,9 @@ fn at(id: &str, now: i64) -> Ctx {
 pub fn key_file(path: &Path) -> std::io::Result<Vec<u8>> {
     use std::io::{Error, ErrorKind, Write};
     match std::fs::read_to_string(path) {
-        Ok(text) => unhex(text.trim()).filter(|k| !k.is_empty()).ok_or_else(|| Error::other(format!("{}: not a hex key", path.display()))),
+        Ok(text) => unhex(text.trim())
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| Error::other(format!("{}: not a hex key", path.display()))),
         Err(e) if e.kind() == ErrorKind::NotFound => {
             let key = random_token();
             std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
@@ -604,7 +615,7 @@ pub fn unhex(s: &str) -> Option<Vec<u8>> {
     let pairs = (0..s.len())
         .step_by(2)
         .map(|i| s.get(i..i + 2).and_then(|p| u8::from_str_radix(p, 16).ok()));
-    (s.len() % 2 == 0).then(|| pairs.collect()).flatten()
+    (s.len() & 1 == 0).then(|| pairs.collect()).flatten()
 }
 
 pub(crate) fn now_ms() -> i64 {

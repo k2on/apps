@@ -11,12 +11,12 @@ use std::sync::{Arc, Mutex};
 
 use ark_auth::oidc::Provider;
 use ark_auth::server::{router, Auth, Mode};
-use common::{App, Memory};
 use axum::extract::{Form, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use base64::Engine;
+use common::{App, Memory};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 

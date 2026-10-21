@@ -5,22 +5,33 @@ Who an ArkDB peer is. `petros-auth`, on ArkDB.
 The engine asks one question about identity, once per connection: at
 `Hello`, what does this token prove? This crate signs people in for a
 server — OpenID Connect, or dev auth by name — and mints the token; the
-session it stands for is a row of the log (`docs/plan-v5.md` S1), which
-`ark-peer`'s hub writes as its authority and judges every token by.
+session it stands for is a row of the app's log (`docs/plan-v5.md` S1),
+which the hub writes as its authority and judges every token by. The tables,
+the functions over them and the hub's side are this crate's; an app takes
+them in with two fields, one line and one registration.
 
-- **server** (natively): the one relying party. `Auth::new(mode, public_url,
-  key)` holds the mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the pending
+- **rows** (everywhere): `SignIn` (id, person, name, email, device, issued
+  and expiry times, revoked, roles) and `Role` (person, role); `Revoke`,
+  `Grant`; the functions `session.revoke` (its owner's only),
+  `session.current` (the caller's live session, granted roles merged),
+  `session.mine` (a view), `role.grant` and `role.revoke` (an `ADMIN`'s
+  only), written once over any schema that is `AuthTables`; `feed(scope)`
+  adds that a connection holds its person's sign-ins and roles only.
+- **server** (natively): the one relying party. `Auth::open::<App>(mode,
+  public_url, data)` (or `Auth::new::<App>(.., key)`) holds the mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the pending
   logins and the one-minute single-use codes; `server::router(auth)` is
   `/auth/login`, `/auth/callback`, `/auth/exchange` as an axum 0.7 `Router`.
-- **sessions**: a session is one login on one device, and a row of the
-  domain's `sign_in` table (`server::Opened`: id, person, name, email,
-  device, issued and expiry times, revoked, roles) that `Auth::on_sign_in`
-  hands the hub to write before the token goes out. The token is
-  `id.hmac_sha256(key, id)` in hex (`Auth::mint`, `Auth::verify`): the row
-  holds no secret, and the server keeps only its key (`server::key_file`,
-  made at first start). Who is signed in and signing out are the domain's
-  `session.current` and `session.revoke`; the hub closes the connections of
-  a session revoked or expired.
+- **sessions**: a session is one login on one device, and a `SignIn` row
+  the hub writes (`server::Hub`, which `ark-peer`'s `Handle` is) before the
+  token goes out (`Auth::issue`; a server's own peer, `Auth::own`, keeps
+  its session across restarts). The token is `id.hmac_sha256(key, id)` in
+  hex (`Auth::mint`, `Auth::verify`): the row holds no secret, and the
+  server keeps only its key (`server::key_file`, `session.key` in the data
+  directory, made at first start). `Auth::authenticate` judges a token by
+  its signature and the row (`Auth::judge`: live, its roles merged with the
+  granted and the configured), and `Auth::watcher` names the connections
+  the hub closes: a session revoked, gone or expired, a person whose roles
+  changed.
 - **dev auth**: `Mode::Dev` signs anyone in as the name they give — at once
   when the login URL carries `user=`, through a one-field form otherwise —
   and `name:role,role` as that name holding those roles (`alice:library`,
@@ -65,25 +76,28 @@ session it stands for is a row of the log (`docs/plan-v5.md` S1), which
 ## A server
 
 ```rust
+// the app's schema: `sign_in: ark_auth::SignIn, role: ark_auth::Role`, then
+ark_auth::install!(App);
+// and its domain: `.with(ark_auth::register::<App>)`.
+
 use std::sync::Arc;
-use ark_auth::server::{key_file, Auth, Mode};
+use ark_auth::server::{Auth, Mode};
 use ark_auth::oidc::Provider;
 
-let key = key_file(&data.join("session.key"))?;
 let mode = match issuer {
     Some(iss) => Mode::Oidc(Provider::discover_with_secret_file(&iss, &client_id, &secret_file, &["openid", "profile", "email"])?),
     None => Mode::Dev, // only when asked for, and said loudly
 };
 let auth = Arc::new(
-    Auth::new(mode, &public_url, &key)
+    Auth::open::<App>(mode, &public_url, &data)?
         .allow_redirect("myapp://")
         // role → the account ids holding it: the provider's `sub`, or a dev name
         .with_roles([("library", vec!["scanner"]), ("admin", vec!["a1b2-sub"])]),
 );
-// ark-peer: `Server::new(config).auth(auth.clone())` mounts the routes,
-// writes each sign-in's row and judges every token by it. After `build`,
-// a peer the server runs itself signs in like everyone else:
-let scanner_login = auth.issue(&ark_auth::Account {
+// ark-peer: `Server::new(config).auth(auth.clone())` mounts the routes and
+// plugs the hub in, the authenticator and the watcher. After `build`, a
+// peer the server runs itself signs in like everyone else:
+let scanner_login = auth.own(&ark_auth::Account {
     id: "library".into(),
     roles: vec!["library".into()], // by construction: kept on its session
     ..Default::default()
@@ -113,12 +127,12 @@ if let Some(code) = ark_auth::web::take_code() {
 | petros-auth | ark-auth |
 |---|---|
 | `Login`, `Account`, `socket_url`, `query_value`, `login_url` | the same |
-| `client::{login, exchange, open_browser}` | the same; `whoami`, `logout` are the domain's `session.current`, `session.revoke` |
+| `client::{login, exchange, open_browser}` | the same; `whoami`, `logout` are `session.current`, `session.revoke` (`ark_peer::Peer::{current, sign_out}`) |
 | `web::{go_sign_in, take_code, exchange, storage}` | the same |
 | iced's hand-written `remembered::{recall, remember, forget}` | `remember::Logins::new(app).{recall, remember, forget}` |
-| `session::SessionStore::open(petros::open_path(..))` (SQLite, Diesel) | a row of the domain's `sign_in` table, written by the hub |
+| `session::SessionStore::open(petros::open_path(..))` (SQLite, Diesel) | a `SignIn` row of the app's log, written by the hub |
 | `SessionStore::issue(&account)` before `Auth::new` | `Auth::issue(&account, device)` once the hub is built |
-| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `ark_peer::serve::judging(auth, hub)` (a token to an `ark::peer::Who`) |
+| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `Auth::authenticate` (a token to an `ark::peer::Who`), `Auth::watcher` |
 | `Mode::{Oidc, Dev}`, `Auth::new(..).allow_redirect(..)`, `server::router` | the same (axum 0.7) |
 | a secret passed in | `oidc::read_secret(path)`, `Provider::discover_with_secret_file` |
 
@@ -149,8 +163,11 @@ if let Some(code) = ark_auth::web::take_code() {
 
 ## Tested, and not
 
-`cargo test -p ark-auth` runs the redirect rules, a code redeemed once for
-the row written, the tokens (another key's signature, another id, a changed
+`cargo test -p ark-auth` runs the rows over a schema of its own
+(`tests/rows.rs`: a session its person's to end, a grant an admin's, the
+feed holding nobody else's, a token proving a live session only, the
+watch, a server's own peer keeping its session), the redirect rules, a
+code redeemed once for the row written, the tokens (another key's signature, another id, a changed
 signature refused), the key file, roles (a login's own and the configured
 ones; dev auth's `name:role,role`), the whole dev login over real HTTP (no
 browser, the row and its device, two logins as two sessions, a code refused
@@ -159,8 +176,9 @@ the second time and a foreign redirect refused, the dev form), and
 the redirect with PKCE, state, nonce and scopes, the callback's exchange,
 the subject, name and email, the row written), and an ID token refused for
 another login's nonce, for a signature not made with the secret, and a
-state never started. Judging at the hub — revoked, expired, a token naming
-no row — is `harken/server/tests/sessions.rs`.
+state never started. The same over real sockets and a hub — a sign-out
+closing the session's other connection, expiry, a grant — is
+`harken/server/tests/sessions.rs`.
 
 Not verified: a real OpenID Connect provider (the test's is HS256 and a few
 routes; RS256 against a provider's key set is the crate's, untested here);

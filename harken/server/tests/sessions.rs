@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ark_auth::server::{Auth, Mode};
-use common::*;
 use ark_auth::{Grant, SignIn};
+use common::*;
 use harken_server::domain::{CreatePlaylist, Playlist};
 use harken_server::hosted::Hosted;
 
@@ -90,7 +90,10 @@ fn a_login_is_a_row_and_its_token_is_judged_by_it() {
 #[test]
 fn an_expired_session_is_closed_and_turned_away() {
     let rt = runtime();
-    let auth = Arc::new(Auth::new::<harken_server::domain::Harken>(Mode::Dev, "http://127.0.0.1", b"key").with_ttl(1_500));
+    let auth = Arc::new(
+        Auth::new::<harken_server::domain::Harken>(Mode::Dev, "http://127.0.0.1", b"key")
+            .with_ttl(1_500),
+    );
     let config = harken_server::hub_config(&Hosted::harken(), 100);
     let running = rt
         .block_on(

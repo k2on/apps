@@ -147,9 +147,21 @@ fn nobody_else_s_sessions_are_held_or_listed() {
         .map(|s| s.id)
         .collect();
     assert_eq!(held, ["a1", "a2"]);
-    let role = |user: &str| tagged("role", Role { user: user.into(), role: "x".into() }.to_bytes());
+    let role = |user: &str| {
+        tagged(
+            "role",
+            Role {
+                user: user.into(),
+                role: "x".into(),
+            }
+            .to_bytes(),
+        )
+    };
     assert!(feed.holds(&alice, &role("alice")).unwrap() && !feed.holds(&alice, &role("bob")).unwrap());
-    assert!(feed.holds(&alice, &tagged("note", common::Note::default().to_bytes())).unwrap(), "the app's own");
+    assert!(
+        feed.holds(&alice, &tagged("note", common::Note::default().to_bytes())).unwrap(),
+        "the app's own"
+    );
     let b = domain().ask(&hub.0.lock().unwrap(), &alice, "session.mine", &[]).unwrap();
     let mine = Vec::<SignIn>::from_bytes(&b).unwrap();
     assert_eq!(mine.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);
@@ -243,7 +255,11 @@ fn the_watch_names_what_to_close() {
         .to_bytes(),
     };
     assert_eq!(watch(&store.lock().unwrap(), Some(&[granted]), &open, 2_000), ["b1"]);
-    assert_eq!(watch(&store.lock().unwrap(), Some(&[]), &open, 6_000), Vec::<String>::new(), "an entry of nothing");
+    assert_eq!(
+        watch(&store.lock().unwrap(), Some(&[]), &open, 6_000),
+        Vec::<String>::new(),
+        "an entry of nothing"
+    );
     assert_eq!(watch(&store.lock().unwrap(), None, &open, 6_000), ["a1", "a2"], "a2 expired by the tick");
 }
 
@@ -334,7 +350,11 @@ fn the_key_is_kept() {
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
     let a = Auth::open::<App>(Mode::Dev, "http://x", &dir).unwrap();
-    assert_eq!(a.verify(&Auth::new::<App>(Mode::Dev, "http://x", &key).mint("s")), Some("s"), "opened with the kept key");
+    assert_eq!(
+        a.verify(&Auth::new::<App>(Mode::Dev, "http://x", &key).mint("s")),
+        Some("s"),
+        "opened with the kept key"
+    );
     std::fs::write(&path, "not hex").unwrap();
     assert!(ark_auth::server::key_file(&path).is_err());
     let _ = std::fs::remove_dir_all(&dir);
