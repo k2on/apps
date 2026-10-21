@@ -600,7 +600,8 @@ rust/ark/           the kernel: §1.1–§1.11 and §1.16 — format, json, hash
 rust/ark-macros/    the derives (Row, Input, Describe, Schema) and the attributes
                     that register a function by name
 rust/ark-peer/      the one peer that dials and listens: storage, link, hub, the
-                    app kit, the server's socket, admin listener and web build
+                    app kit, the server's socket, admin listener and web build;
+                    local instances and the peer's own schema (`local`)
 rust/ark-ffi/       ark-peer's app kit through UniFFI, for the phones
 rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer, and
                     `gen kotlin|swift` (a domain's types for the phones)
@@ -986,6 +987,53 @@ and re-runs the pending once, 48.8 µs/entry under 400 against v4's 64.6 (was
 linked round trip 182.2 µs (was 5,520.1; v4 215.1). Source +186 lines.
 
 ## Landed
+
+**S2** (`338333a`…`d9ec095`): **what a peer keeps beside its log is rows,
+by two concepts.** A table is `Durable` or `Volatile` (§1.3), nothing new; an
+instance is wired — a `Peer`, linked or serving — or not: an
+`ark_peer::Instance<S, P>`, a machine in the authority role never offered a
+link. So four combinations: durable synced (the app's log), volatile synced
+(its live state), **durable local** (`Instance::open(disk)`: the log's own
+`kv`/`log` format, one entry per write, folded into the rows whole once the
+entries outnumber the rows) and **ephemeral local** (`Instance::ephemeral()`:
+volatile tables, no journal). A write is a typed run over `Db<S, P>` whose
+changes are the one entry the machine sequences; a local table is a table of
+another `#[derive(Schema)]` struct, no attribute. `ark_peer::Local` holds the
+hub's journal (`origin` {origin, actor, last}, `verdict` {entry, why},
+`waiting` {origin, local, who, entry} — new: what waits behind a held intent
+now survives a restart), its volatile space as it closed (`volatile`, the
+space's rows and its log's row), a device's `replica` row (origin, last
+`local`, who last signed in, fork, joining) and `pending` {local, entry},
+under the `local.` names of the peer's disk (`Shared`); `ark_auth::remember`
+is the `login` table {server, user, name, email, roles, session, token,
+expiry} that `ark_peer::Logins` opens per app (or `Logins::at(dir)`, which
+harken-peer uses); harken-server's `HarkenLocal` (`print` {path, size, mtime,
+artist, covers}, `art` {name}: the pictures stay files) is the server's, not
+the domain's — the domain is what every peer links, phones too, and none of
+these rows reaches a log. Gone: the `journal`, `live`, `pending` (and its
+record format), `origin`, `fork`, `joining` and `who` blobs (a disk holding
+any is refused), `logins.json` and the per-server `localStorage` keys,
+`library-files.json`, harken-peer's `login.json`. **A run writes its own
+space's tables, and rustc says so**: `Row::Space` is `ark::db::Durable` or
+`Volatile` (the derive writes it from `#[ark(volatile)]`), `Db<S, P>` and
+`Tab<R, P>` carry the run's (`P = Durable` by default, `Domain::live` takes
+`Db<S, Volatile>`), and `insert`/`update`/`put`/`delete`/`remove` exist only
+where `R::Space = P` — a `compile_fail` doc-test in `db.rs` holds it; the
+machine's refusal stays for a function run on the other space's machine and
+for `Dynamic` rows. Source: `ark` 5,154 → 5,175, `ark-macros` 502 → 503,
+`ark-peer` 2,123 → 2,518 (`local.rs`, the instance, the schema, `Shared`,
+`Logins`, `preset`), `ark-auth` 1,051 → 1,037, harken's domain 2,399 (its 32
+live transitions take `Db<Harken, Volatile>`), server 4,742 → 4,767 and bins
+1,361 → 1,352; the default `tools/loc.sh` set 18,610 → 19,013 source — **up
+403, not the 700 down asked**: the nine formats were small (about 230 lines
+of codecs, file handling and blob names went), and rows cost a schema, a
+diff against what is kept and the instance. Tests 421 passed (10 new, each
+falsified once), no vector moved (the side blobs were never in one). Not
+verified: an old data directory is refused, not migrated (a device's pending
+intents, a server's refusals, a login, the prints — the last only a full
+read); the browser's `localStorage` path built, not run; the perf numbers
+not re-run (a mutate's local write is one entry, under 512 bytes at 8,000
+pending, as `a_mutate_writes_one_pending_record` holds).
 
 **S1** (`17fe168`…): **who is signed in is rows of the app's log.**
 `ark-auth` owns them: `SignIn` and `Role`, `Revoke`/`Grant`, the

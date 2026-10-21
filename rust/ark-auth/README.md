@@ -66,9 +66,12 @@ them in with two fields, one line and one registration.
   code; `exchange`, `open_browser`. In a browser,
   `web::go_sign_in` sends the page to sign in and back to itself,
   `web::take_code` takes `?code=` out of the address bar, and
-  `web::exchange` trades it (fetch). `remember::Logins::new("app")` keeps a
-  login per server — `~/.config/app/logins.json`, or `localStorage` under
-  `app.login.<server>`.
+  `web::exchange` trades it (fetch). `remember` is a local schema of this
+  crate's (`Remembered`: the `login` table, one row per server — its
+  account, session and token) and `recall`/`remember`/`forget` over it;
+  `ark_peer::Logins::new("app")` opens it as a local instance, under
+  `~/.config/app/logins/` or the page's `localStorage` under `app.logins`
+  (`Logins::at(dir)` for a device of its own directory).
 - **everywhere**: `Login { token, session, user: Account, expires_ms }`,
   `login_url`, `socket_url` (the sync socket from the server's base URL,
   scheme to match), `query_value`, `percent_encode`/`decode`, `with_code`.
@@ -109,7 +112,7 @@ let scanner_login = auth.own(&ark_auth::Account {
 ```rust
 // desktop, off the UI thread (it blocks as long as the person takes)
 let login = ark_auth::client::login(&server, Some("alice"), ark_auth::client::open_browser)?;
-ark_auth::remember::Logins::new("myapp").remember(&server, &login);
+ark_peer::Logins::new("myapp").remember(&server, &login);
 // then an ark-peer device, as that person on that device:
 peer.login(ark_peer::who(&login), login.token.clone());
 peer.connect(&ark_auth::socket_url(&server));
@@ -129,7 +132,7 @@ if let Some(code) = ark_auth::web::take_code() {
 | `Login`, `Account`, `socket_url`, `query_value`, `login_url` | the same |
 | `client::{login, exchange, open_browser}` | the same; `whoami`, `logout` are `session.current`, `session.revoke` (`ark_peer::Peer::{current, sign_out}`) |
 | `web::{go_sign_in, take_code, exchange, storage}` | the same |
-| iced's hand-written `remembered::{recall, remember, forget}` | `remember::Logins::new(app).{recall, remember, forget}` |
+| iced's hand-written `remembered::{recall, remember, forget}` | `ark_peer::Logins::new(app).{recall, remember, forget}`, rows of `remember::Remembered` |
 | `session::SessionStore::open(petros::open_path(..))` (SQLite, Diesel) | a `SignIn` row of the app's log, written by the hub |
 | `SessionStore::issue(&account)` before `Auth::new` | `Auth::issue(&account, device)` once the hub is built |
 | `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `Auth::authenticate` (a token to an `ark::peer::Who`), `Auth::watcher` |

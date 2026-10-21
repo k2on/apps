@@ -16,11 +16,12 @@ crates'; what is here is what only harken has:
   keeps its id, so a playlist holding it still does; the same file saying
   nothing new writes nothing. What a file was when it was last offered —
   its size, its modification time, and the same of the covers beside it —
-  is kept in `DATA/library-files.json`, and a file whose print has not
+  is kept as rows of the scanner's own local schema (`HarkenLocal`'s
+  `print`, in `DATA/library-files/`), and a file whose print has not
   moved is not read at all; one that has moved is authored only if the
   entry would change what the replica holds. So a restart over an
   untouched library reads no tags and authors nothing, and a missing or
-  unreadable `library-files.json` is one full read and nothing worse. A
+  unreadable `library-files/` is one full read and nothing worse. A
   new *directory* is walked (its tracks land before a watch on it exists);
   a picture added, replaced or removed offers the tracks under its
   directory again; audio outside `music/` is not a track; a removed track
@@ -146,12 +147,11 @@ whose it is:
 
 | path | |
 |---|---|
-| `log/snapshot`, `log/chain` | the log: the library, every playlist, every person's work, every sign-in (a `sign_in` row) and granted role — the snapshot it stands on and the chain above it. This *is* the database |
-| `log/journal` | each session's last intent and the intents refused, so a push after a restart is judged as before |
-| `log/live` | the listening sessions' volatile space as the hub last closed it, restored by `on_restore` |
+| `log/kv`, `log/log` | the log: the library, every playlist, every person's work, every sign-in (a `sign_in` row) and granted role — the rows it stands on and the entries above them. This *is* the database |
+| `log/local.kv`, `log/local.log` | the hub's own rows (`ark_peer::Local`), in the log's format: each origin's last intent and its actor, the intents refused and those waiting behind a held one, so a push after a restart is judged as before; and the listening sessions' volatile space as the hub last closed it, restored by `on_restore` |
 | `session.key` | the key every token is signed with (`ark-auth`); made at first start, never leaves the machine |
 | `library/` | the scanner's replica, a peer like any other |
-| `library-files.json` | the scanner's prints; local, never the log's |
+| `library-files/` | the scanner's prints and the index of the pictures it took out of files (`HarkenLocal`, a local instance); never the log's |
 | `art/` | the pictures taken out of files, by hash |
 
 A library scanned before covers were found needs nothing: the first start
@@ -159,7 +159,7 @@ of a server that keeps prints has none, so it reads every file once and
 authors an entry for each record whose cover it finds. Dropping the
 database is never needed for covers. If it is wanted anyway — to start the
 library over — stop the service and delete `log/`, which is every song *and every
-playlist*; `library/` and `library-files.json` may go with it,
+playlist*; `library/` and `library-files/` may go with it,
 and with the log every sign-in goes: everybody signs in again. On v5 a device
 that held the old log does **not** re-base onto the new one: a server
 whose log is empty serves it at sequence 0, which every replica takes for
