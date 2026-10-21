@@ -176,10 +176,20 @@ pub fn is_sign_in(e: &Logged) -> bool {
     e.entry.func.is_empty() && e.facts.iter().all(|c| c.table() == "sign_in")
 }
 
+/// Whether an entry is the scanner's own bookkeeping of a look: asking for
+/// one, claiming it, finishing it (`docs/plan-v5.md` S3a).
+pub fn is_look(e: &Logged) -> bool {
+    e.entry.func == "library.look" || e.entry.func.starts_with("look.")
+}
+
 impl Log {
-    /// How many of its entries are not sign-ins: the work in it.
+    /// How many of its entries are neither sign-ins nor looks: the work in
+    /// it.
     pub fn work(&self) -> i64 {
-        self.entries.iter().filter(|e| !is_sign_in(e)).count() as i64
+        self.entries
+            .iter()
+            .filter(|e| !is_sign_in(e) && !is_look(e))
+            .count() as i64
     }
 }
 

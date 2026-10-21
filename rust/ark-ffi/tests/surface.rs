@@ -195,7 +195,7 @@ fn a_denied_login_is_said() {
     assert_eq!(p.status().denied, None);
 }
 
-mod jobs {
+pub mod jobs {
     use ark::effect::Job;
     use ark::prelude::*;
 

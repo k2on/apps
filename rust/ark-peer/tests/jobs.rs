@@ -114,9 +114,9 @@ impl Net {
     }
 }
 
-fn counting(n: &Arc<AtomicUsize>) -> impl FnMut(&Fetch) -> Result<String, String> + Send + 'static {
+fn counting(n: &Arc<AtomicUsize>) -> impl FnMut(&mut Peer, &Fetch) -> Result<String, String> + Send + 'static {
     let n = n.clone();
-    move |f: &Fetch| {
+    move |_: &mut Peer, f: &Fetch| {
         n.fetch_add(1, Ordering::Relaxed);
         Ok(format!("body of {}", f.url))
     }
@@ -149,7 +149,7 @@ fn a_claim_and_a_cancel_race_in_the_servers_order() {
         net.d(0).handle::<Fetch>(counting(&n));
         asked(&mut net, 1);
         net.d(0).jobs(now_ms());
-        net.d(1).mutate("fetch.cancel", &Cancel { id: ("a".to_string(),) }).unwrap();
+        net.d(1).mutate("fetch.cancel", &Cancel::<Fetch> { id: "a".into() }).unwrap();
         let order = if claim_first { [0, 1] } else { [1, 0] };
         order.into_iter().for_each(|i| net.carry_from(i));
         net.carry();
@@ -173,7 +173,7 @@ fn a_handler_runs_once_across_a_restart() {
     let mut net = Net::new(1);
     let n = Arc::new(AtomicUsize::new(0));
     net.d(0)
-        .handle::<Fetch>(|_: &Fetch| -> Result<String, String> { panic!("this process stopped before it ran") });
+        .handle::<Fetch>(|_: &mut Peer, _: &Fetch| -> Result<String, String> { panic!("this process stopped before it ran") });
     asked(&mut net, 0);
     net.d(0).jobs(now_ms());
     net.carry();
@@ -232,7 +232,7 @@ fn a_reconciler_is_told_every_change() {
     let s = seen.clone();
     let tell = move |rows: Vec<Fetch>| s.lock().unwrap().push(rows.into_iter().map(|f| f.state).collect());
     net.d(1).reconcile::<Fetch>(Space::Durable, "fetch.all", &().to_bytes(), tell).unwrap();
-    net.d(0).handle::<Fetch>(|f: &Fetch| Ok(f.url.clone()));
+    net.d(0).handle::<Fetch>(|_: &mut Peer, f: &Fetch| Ok(f.url.clone()));
     asked(&mut net, 0);
     for _ in 0..2 {
         net.d(0).jobs(now_ms());

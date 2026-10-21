@@ -151,6 +151,12 @@ pub fn effect(input: DeriveInput) -> TokenStream {
     let Some(outcome) = outcome else {
         return err(name.span(), "a job is a row with a `state: Job<T>` field");
     };
+    let keyed = |f: &&syn::Field| matches!(items(&f.attrs), Ok(i) if i.iter().flatten().any(|i| matches!(i, Item::Flag(k) if k == "key")));
+    let keys: Vec<&syn::Field> = fields.named.iter().filter(keyed).collect();
+    let [key] = keys[..] else {
+        return err(name.span(), "a job is keyed by one column");
+    };
+    let (key, key_ty) = (key.ident.as_ref().unwrap(), &key.ty);
     let (mut lease, mut retry, mut role, mut owner) = (quote!(60_000), quote!(60_000), quote!(None), quote!());
     let its = match items_of(&input.attrs, "effect") {
         Ok(i) => i,
@@ -178,6 +184,13 @@ pub fn effect(input: DeriveInput) -> TokenStream {
                 &mut self.state
             }
             #owner
+            type Id = #key_ty;
+            fn key_of(id: #key_ty) -> Self::Key {
+                (id,)
+            }
+            fn id(&self) -> #key_ty {
+                self.#key.clone()
+            }
         }
     }
 }

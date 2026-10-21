@@ -43,7 +43,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn domain() -> Domain {
     ark::register!(Domain::new::<Harken>("harken", VERSION);
         library::add_song, library::describe_work, library::describe_recording, library::describe_person,
-        library::credit_recording, library::remove_media,
+        library::credit_recording, library::remove_media, library::look,
         browse::library, browse::search, browse::albums, browse::artists, browse::track_details, browse::album,
         browse::artist, browse::composers, browse::works, browse::work, browse::recordings, browse::credits,
         browse::recording,
@@ -59,6 +59,7 @@ pub fn domain() -> Domain {
         groups::join, groups::unjoin, groups::report_group, groups::set_group_volume, groups::nudge_group_volume,
         groups::set_group_mute, feed)
     .with(ark_auth::register::<Harken>)
+    .with(<Look as ark::effect::Effect>::register::<Harken>)
 }
 
 /// What a connection fed by scope holds (§1.8): every durable table whole

@@ -37,8 +37,12 @@ fn songs(server: &Server) -> Vec<(String, String)> {
     out
 }
 
+/// The entries in the hub's log but the scanner's looks (asked, claimed,
+/// finished: `docs/plan-v5.md` S3a), which a rescan is.
 fn head(server: &Server) -> i64 {
-    server.running.hub.with(|h| h.log.log().head().0).unwrap()
+    let entries = server.running.hub.with(|h| h.log.log().entries()).unwrap();
+    let look = |f: &str| f == "library.look" || f.starts_with("look.");
+    entries.iter().filter(|l| !look(&l.entry.func)).count() as i64
 }
 
 /// Wait until there are `want` songs, then a little longer, so that a
@@ -661,5 +665,53 @@ fn a_rescan_of_nothing_new_reads_nothing() {
         "an unreadable file of prints is one full read"
     );
     assert_eq!(head(&server), after);
+    rt.block_on(server.stop());
+}
+
+/// A look is a job (`docs/plan-v5.md` S3a): the scanner asks for one at
+/// boot and on a rescan, its handler claims and does it, and the row is
+/// done with what it read and authored. Falsified by the scanner
+/// registering no handler: the looks stayed pending and no song came.
+#[test]
+fn a_look_is_a_job_the_scanner_does() {
+    use ark::effect::Job;
+    use harken_server::domain::{Look, Looked};
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    for n in 1..=2 {
+        let file = media.join(format!("music/Satie/{n}.wav"));
+        put(
+            root.path(),
+            &file,
+            &format!("Gnossienne {n}"),
+            "Satie",
+            "Gnossiennes",
+            None,
+        );
+    }
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    settle(&server, 2);
+    server.scanner.as_ref().unwrap().rescan();
+    let done = |n: usize| {
+        eventually(20, || {
+            let looks = hub_rows::<Look>(&server, "look");
+            let done: Vec<Job<Looked>> = looks
+                .into_iter()
+                .map(|l| l.state)
+                .filter(|s| matches!(s, Job::Done(_)))
+                .collect();
+            (done.len() >= n).then_some(done)
+        })
+        .expect("the looks done")
+    };
+    let read = |l: &Job<Looked>| match l {
+        Job::Done(l) => (l.read, l.authored),
+        _ => (0, 0),
+    };
+    let looks = done(2);
+    let mut looked: Vec<(i64, i64)> = looks.iter().map(read).collect();
+    looked.sort();
+    assert_eq!(looked, [(0, 0), (2, 2)], "the rescan's, and the boot's");
     rt.block_on(server.stop());
 }

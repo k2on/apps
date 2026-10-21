@@ -981,8 +981,8 @@ fn the_scanner_authors_while_a_peer_is_away() {
     for name in ["one", "two", "three"] {
         common::wav(&music.join(format!("Fleet/{name}.wav")), 300);
     }
-    let head = done.head;
-    let moved = || f.server.log_on_disk().map_or(0, |l| l.head_seq()) != head;
+    let work = done.work();
+    let moved = || f.server.log_on_disk().map_or(0, |l| l.work()) != work;
     assert!(
         !eventually(Duration::from_secs(2), moved),
         "rewriting a file is not a new song"
@@ -993,12 +993,12 @@ fn the_scanner_authors_while_a_peer_is_away() {
         !eventually(Duration::from_secs(2), || f
             .server
             .log_on_disk()
-            .map_or(0, |l| l.head_seq())
-            != head),
+            .map_or(0, |l| l.work())
+            != work),
         "a rescan authors nothing"
     );
     let done = f.converged(&mut [&mut p]);
-    assert_eq!(done.head, head);
+    assert_eq!(done.work(), work);
 
     // Under new names they are new songs: the path is the identity.
     for name in ["one", "two", "three"] {
@@ -1081,7 +1081,9 @@ fn a_replayed_push_or_hello_changes_nothing() {
 
     let once = p.author("create_playlist", named("Once"));
     assert!(p.settle(PATIENCE));
-    let head = p.status().cursor;
+    // The work in the log, the scanner's looks apart (they land when
+    // they land).
+    let work = f.server.log_on_disk().map_or(0, |l| l.work());
     let frame = p
         .proxy
         .last_payload_where(is_push)
@@ -1097,8 +1099,8 @@ fn a_replayed_push_or_hello_changes_nothing() {
     p.author("create_playlist", named("After the replay"));
     let done = f.converged(&mut [&mut p, &mut q]);
     assert_eq!(
-        done.head,
-        head + 1,
+        done.work(),
+        work + 1,
         "the replayed push is not a second entry"
     );
     let names: BTreeSet<String> = done
@@ -1522,7 +1524,7 @@ fn alone_then_a_fresh_server() {
     let fns: Vec<String> = done
         .entries
         .iter()
-        .filter(|(_, e)| !is_sign_in(e))
+        .filter(|(_, e)| !is_sign_in(e) && !is_look(e))
         .map(|(_, e)| function(e))
         .collect();
     assert!(
@@ -1534,7 +1536,7 @@ fn alone_then_a_fresh_server() {
     assert!(done
         .entries
         .iter()
-        .filter(|(_, e)| !is_sign_in(e))
+        .filter(|(_, e)| !is_sign_in(e) && !is_look(e))
         .all(|(_, e)| e.entry.actor == "alice"));
     assert_eq!(on_playlist(&f, list).len(), 10);
 }

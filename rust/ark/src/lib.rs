@@ -21,12 +21,11 @@ use ::std::fmt;
 
 extern crate self as ark;
 
-pub use domain::Domain;
+pub use domain::{effect, Domain};
 
 pub mod db;
 pub mod domain;
 pub mod dynamic;
-pub mod effect;
 pub mod format;
 pub mod frames;
 pub mod hash;

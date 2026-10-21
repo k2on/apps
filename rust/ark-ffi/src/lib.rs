@@ -440,10 +440,11 @@ impl Peer {
     /// `<kind>.finish`. A view's rows stream through `view` already.
     pub fn due(&self, kind: String) -> Result<Due, Refusal> {
         let answer = self.query(format!("{kind}.due"), "null".into())?;
-        let (rows, next_ms): (Vec<serde_json::Value>, Option<i64>) = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+        let a: serde_json::Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+        let rows = a["rows"].as_array().into_iter().flatten();
         Ok(Due {
-            rows: rows.iter().map(|r| r.to_string()).collect(),
-            next_ms,
+            rows: rows.map(|r| r.to_string()).collect(),
+            next_ms: a["next_ms"].as_i64(),
         })
     }
 

@@ -7,8 +7,8 @@
 //! ([`Peer::deadline`] wakes the driver for it). Each due row is claimed
 //! (`<table>.claim`, by this registration's own name); once the claim is
 //! confirmed — the authority's order decided it — the handler runs with
-//! the row, whose key is its idempotency key, and its answer is the
-//! `<table>.finish`. Nothing runs during a replay or an open: rows only
+//! the row, whose key is its idempotency key, and the peer, to author
+//! what it found; its answer is the `<table>.finish`. Nothing runs during a replay or an open: rows only
 //! move what is kept, and a handler runs when its driver pumps the peer
 //! ([`Peer::jobs`]), never on a peer that did not register it. A claim
 //! from before a restart is another's: its row is due again only when its
@@ -48,7 +48,7 @@ struct Handler<R: Effect, F> {
     claims: BTreeMap<Vec<u8>, EntryId>,
 }
 
-impl<R: Effect, F: FnMut(&R) -> Result<R::Outcome, String> + Sendable> Runner for Handler<R, F> {
+impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable> Runner for Handler<R, F> {
     fn changed(&mut self, cs: &[Change]) {
         for c in cs.iter().filter(|c| c.table() == R::TABLE) {
             let row = match c {
@@ -76,9 +76,9 @@ impl<R: Effect, F: FnMut(&R) -> Result<R::Outcome, String> + Sendable> Runner fo
 
     fn run(&mut self, p: &mut Peer, now: i64) {
         let due = self.open.iter().filter(|(k, (_, d))| *d <= now && !self.claims.contains_key(*k));
-        let due: Vec<(Vec<u8>, R::Key)> = due.map(|(k, (r, _))| (k.clone(), r.key())).collect();
+        let due: Vec<(Vec<u8>, R::Id)> = due.map(|(k, (r, _))| (k.clone(), r.id())).collect();
         for (k, id) in due {
-            if let Ok(e) = p.mutate(&format!("{}.claim", R::TABLE), &Claim { id, by: self.by.clone() }) {
+            if let Ok(e) = p.mutate(&format!("{}.claim", R::TABLE), &Claim::<R> { id, by: self.by.clone() }) {
                 self.claims.insert(k, e);
             }
         }
@@ -88,10 +88,10 @@ impl<R: Effect, F: FnMut(&R) -> Result<R::Outcome, String> + Sendable> Runner fo
                 Standing::Pending => drop(self.claims.insert(k, e)),
                 Standing::Confirmed => {
                     let Some((r, _)) = self.open.get(&k) else { continue };
-                    let finish = Finish {
-                        id: r.key(),
+                    let finish = Finish::<R> {
+                        id: r.id(),
                         by: self.by.clone(),
-                        outcome: (self.f)(r),
+                        outcome: (self.f)(p, r),
                     };
                     let _ = p.mutate(&format!("{}.finish", R::TABLE), &finish);
                 }
@@ -106,9 +106,10 @@ impl<R: Effect, F: FnMut(&R) -> Result<R::Outcome, String> + Sendable> Runner fo
 pub(crate) type Reconciler = Box<dyn FnMut(&[Vec<u8>]) + Send>;
 
 impl Peer {
-    /// `f` handles the jobs of `R`: each due row claimed, `f` run with it
-    /// once the claim is confirmed, its answer the row's finish.
-    pub fn handle<R: Effect>(&mut self, f: impl FnMut(&R) -> Result<R::Outcome, String> + Sendable + 'static) {
+    /// `f` handles the jobs of `R`: each due row claimed, `f` run with this
+    /// peer and the row once the claim is confirmed, its answer the row's
+    /// finish.
+    pub fn handle<R: Effect>(&mut self, f: impl FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable + 'static) {
         let by = format!("{}:{}", self.me().session, ark::hash::hex(&crate::draw_origin().0[..6]));
         let mut h = Handler::<R, _> {
             f,

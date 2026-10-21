@@ -476,6 +476,37 @@ public struct GroupVolume: Equatable {
     public var json: String { J.obj(["\"level\":" + String(level)]) }
 }
 
+/// The sum `JobLooked`.
+public indirect enum JobLooked: Equatable {
+    case pending(dueMs: Int64)
+    case claimed(by: String, atMs: Int64)
+    case done(value: Looked)
+    case failed(why: String, retryMs: Int64)
+    case cancelled
+
+    public init(json j: Any?) {
+        let (t, o) = J.sum(j)
+        switch t {
+        case "Pending": self = .pending(dueMs: J.int(o!["due_ms"]))
+        case "Claimed": self = .claimed(by: J.text(o!["by"]), atMs: J.int(o!["at_ms"]))
+        case "Done": self = .done(value: Looked(json: o!["value"]))
+        case "Failed": self = .failed(why: J.text(o!["why"]), retryMs: J.int(o!["retry_ms"]))
+        case "Cancelled": self = .cancelled
+        default: fatalError("JobLooked: no variant \(t)")
+        }
+    }
+
+    public var json: String {
+        switch self {
+        case let .pending(dueMs): return "{\"Pending\":" + J.obj(["\"due_ms\":" + String(dueMs)]) + "}"
+        case let .claimed(by, atMs): return "{\"Claimed\":" + J.obj(["\"by\":" + J.q(by), "\"at_ms\":" + String(atMs)]) + "}"
+        case let .done(value): return "{\"Done\":" + J.obj(["\"value\":" + value.json]) + "}"
+        case let .failed(why, retryMs): return "{\"Failed\":" + J.obj(["\"why\":" + J.q(why), "\"retry_ms\":" + String(retryMs)]) + "}"
+        case .cancelled: return "\"Cancelled\""
+        }
+    }
+}
+
 /// The record `Jump`.
 public struct Jump: Equatable {
     public var index: Int64
@@ -572,6 +603,133 @@ public struct ListeningScrub: Equatable {
     }
 
     public var json: String { J.obj(["\"user\":" + J.q(user), "\"device\":" + J.q(device), "\"at_ms\":" + String(atMs)]) }
+}
+
+/// The record `Look`.
+public struct Look: Equatable {
+    public var id: Id
+    public var paths: [String]
+    public var state: JobLooked
+
+    public init(id: Id, paths: [String], state: JobLooked) { self.id = id; self.paths = paths; self.state = state; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), paths: J.list(o["paths"]) { v0 in J.text(v0) }, state: JobLooked(json: o["state"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"paths\":" + J.wlist(paths) { v0 in J.q(v0) }, "\"state\":" + state.json]) }
+}
+
+/// The record `LookAt`.
+public struct LookAt: Equatable {
+    public var paths: [String]
+
+    public init(paths: [String]) { self.paths = paths; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(paths: J.list(o["paths"]) { v0 in J.text(v0) })
+    }
+
+    public var json: String { J.obj(["\"paths\":" + J.wlist(paths) { v0 in J.q(v0) }]) }
+}
+
+/// The record `LookCancel`.
+public struct LookCancel: Equatable {
+    public var id: Id
+
+    public init(id: Id) { self.id = id; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex)]) }
+}
+
+/// The record `LookClaim`.
+public struct LookClaim: Equatable {
+    public var id: Id
+    public var by: String
+
+    public init(id: Id, by: String) { self.id = id; self.by = by; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), by: J.text(o["by"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by)]) }
+}
+
+/// The record `LookDue`.
+public struct LookDue: Equatable {
+    public var rows: [Look]
+    public var nextMs: Int64?
+
+    public init(rows: [Look], nextMs: Int64?) { self.rows = rows; self.nextMs = nextMs; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(rows: J.list(o["rows"]) { v0 in Look(json: v0) }, nextMs: J.opt(o["next_ms"]) { v0 in J.int(v0) })
+    }
+
+    public var json: String { J.obj(["\"rows\":" + J.wlist(rows) { v0 in v0.json }, "\"next_ms\":" + J.wopt(nextMs) { v0 in String(v0) }]) }
+}
+
+/// The record `LookFinish`.
+public struct LookFinish: Equatable {
+    public var id: Id
+    public var by: String
+    public var outcome: LookOutcome
+
+    public init(id: Id, by: String, outcome: LookOutcome) { self.id = id; self.by = by; self.outcome = outcome; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), by: J.text(o["by"]), outcome: LookOutcome(json: o["outcome"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by), "\"outcome\":" + outcome.json]) }
+}
+
+/// The sum `LookOutcome`.
+public indirect enum LookOutcome: Equatable {
+    case ok(value: Looked)
+    case err(why: String)
+
+    public init(json j: Any?) {
+        let (t, o) = J.sum(j)
+        switch t {
+        case "Ok": self = .ok(value: Looked(json: o!["value"]))
+        case "Err": self = .err(why: J.text(o!["why"]))
+        default: fatalError("LookOutcome: no variant \(t)")
+        }
+    }
+
+    public var json: String {
+        switch self {
+        case let .ok(value): return "{\"Ok\":" + J.obj(["\"value\":" + value.json]) + "}"
+        case let .err(why): return "{\"Err\":" + J.obj(["\"why\":" + J.q(why)]) + "}"
+        }
+    }
+}
+
+/// The record `Looked`.
+public struct Looked: Equatable {
+    public var read: Int64
+    public var authored: Int64
+
+    public init(read: Int64, authored: Int64) { self.read = read; self.authored = authored; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(read: J.int(o["read"]), authored: J.int(o["authored"]))
+    }
+
+    public var json: String { J.obj(["\"read\":" + String(read), "\"authored\":" + String(authored)]) }
 }
 
 /// The record `Media`.
@@ -1361,6 +1519,9 @@ public struct Harken {
     /// `library.library`, kept.
     public func library(_ input: Library) throws -> View<LibraryEntry> { View(try peer.view(name: "library.library", input: input.json)) { j in LibraryEntry(json: j) } }
 
+    /// `library.look`: its intent's id.
+    @discardableResult public func look(_ input: LookAt) throws -> String { try peer.mutate(name: "library.look", input: input.json) }
+
     /// `library.recording`, kept.
     public func recording(_ input: RecordingInput) throws -> View<LibraryEntry> { View(try peer.view(name: "library.recording", input: input.json)) { j in LibraryEntry(json: j) } }
 
@@ -1486,6 +1647,18 @@ public struct Harken {
 
     /// `listening.unjoin`, on the live space.
     public func unjoin(_ input: Member) throws { try peer.call(name: "listening.unjoin", input: input.json) }
+
+    /// `look.cancel`: its intent's id.
+    @discardableResult public func cancel(_ input: LookCancel) throws -> String { try peer.mutate(name: "look.cancel", input: input.json) }
+
+    /// `look.claim`: its intent's id.
+    @discardableResult public func claim(_ input: LookClaim) throws -> String { try peer.mutate(name: "look.claim", input: input.json) }
+
+    /// `look.due`.
+    public func due() throws -> LookDue { LookDue(json: J.parse(try peer.query(name: "look.due", input: "null"))) }
+
+    /// `look.finish`: its intent's id.
+    @discardableResult public func finish(_ input: LookFinish) throws -> String { try peer.mutate(name: "look.finish", input: input.json) }
 
     /// `playlists.add_all_to_playlist`: its intent's id.
     @discardableResult public func addAllToPlaylist(_ input: AddAllToPlaylist) throws -> String { try peer.mutate(name: "playlists.add_all_to_playlist", input: input.json) }

@@ -21,6 +21,14 @@
 //! the same file saying nothing new writes nothing — for every peer
 //! replaying the log, not only for the scanner that authored it.
 //!
+//! **A look is a job** (`ark::effect`, `docs/plan-v5.md` S3a). What the
+//! scanner is told to look at — everything at boot or on a rescan, the
+//! paths a watch saw settle — is asked for as a [`Look`] row
+//! (`library.look`), and the scanner's handler, registered on its own peer
+//! and on no other, claims it, does it, and finishes it with what it read
+//! and authored. A look asked and not done before a stop is done after the
+//! next start, once its claim's lease has run out.
+//!
 //! What this file adds is not asking. It keeps, beside its replica, what
 //! each file was when it was last offered — its size, when it was modified,
 //! and the same of the covers it was offered with ([`Prints`]). A file whose
@@ -43,7 +51,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::domain::AddSong;
+use crate::domain::{AddSong, Look, LookAt, Looked};
 use anyhow::{Context, Result};
 use ark::format::Encode;
 use ark::peer::{Ctx, Who};
@@ -79,6 +87,9 @@ pub const ACCOUNT: &str = "library";
 
 /// The mutation a file is offered as.
 const ADD_SONG: &str = "library.add_song";
+
+/// The mutation a look is asked with.
+const LOOK: &str = "library.look";
 
 /// How long a watched path is left to settle before it is read: a file is
 /// usually still being written when its create arrives, so the tags are not
@@ -200,7 +211,6 @@ impl Scanner {
         let dial = hub.dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));
         client.set_token(Some(login.token.clone()));
         client.connect_with("", dial);
-        let peer = Peer { client, hosted };
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let counts = Arc::new(Counts::default());
@@ -214,7 +224,7 @@ impl Scanner {
             };
             std::thread::Builder::new()
                 .name("harken-scanner".into())
-                .spawn(move || run(scan, peer, hub, rx, &stop, &counts))
+                .spawn(move || run(scan, client, hub, rx, &stop, counts))
                 .context("starting the scanner")?
         };
         tx.send(Nudge::All)
@@ -405,35 +415,47 @@ struct Scan {
     prints: Prints,
 }
 
-/// The scanner's peer: its client, the link to the hub, and the module.
-struct Peer {
-    client: ark_peer::Peer,
-    hosted: Hosted,
-}
-
-impl Peer {
-    /// What the link said, given to the client, and what it says back:
-    /// a refused entry said out loud.
-    fn pump(&mut self) {
-        self.client.pump();
-        for (_, why) in self.client.take_rejections() {
-            eprintln!("harken-server: library: an entry was refused: {why}");
-        }
+/// The scanner's peer pumped — what the link said given to it, what it
+/// says back, and the looks its handler does — and a refused entry said
+/// out loud.
+fn pump(peer: &mut ark_peer::Peer) {
+    peer.pump();
+    for (_, why) in peer.take_rejections() {
+        eprintln!("harken-server: library: an entry was refused: {why}");
     }
 }
 
-/// The scanner's whole life: a peer, and a loop over what it is told to
-/// look at.
+/// The scanner's whole life: a peer whose handler does each look asked of
+/// the library (a [`Look`] row, `docs/plan-v5.md` S3a), and a loop turning
+/// what it is told to look at into looks asked.
 fn run(
     mut scan: Scan,
-    mut peer: Peer,
+    mut peer: ark_peer::Peer,
     hub: Handle,
     rx: Receiver<Nudge>,
     stop: &AtomicBool,
-    counts: &Counts,
+    counts: Arc<Counts>,
 ) {
     catch_up(&mut peer, &hub, stop);
-
+    let root = scan.root.clone();
+    peer.handle::<Look>(move |p, job| {
+        let nudges = match job.paths.is_empty() {
+            true => vec![Nudge::All],
+            false => job
+                .paths
+                .iter()
+                .map(|r| Nudge::One(scan.root.join(r)))
+                .collect(),
+        };
+        let (authored, read) = look(p, &mut scan, nudges);
+        counts.read.fetch_add(read, Ordering::Relaxed);
+        if authored > 0 {
+            counts.authored.fetch_add(authored, Ordering::Relaxed);
+            println!("harken-server: library +{authored}");
+        }
+        let (read, authored) = (read as i64, authored as i64);
+        Ok(Looked { read, authored })
+    });
     while !stop.load(Ordering::Relaxed) {
         let first = match rx.recv_timeout(IDLE) {
             Ok(n) => Some(n),
@@ -448,34 +470,44 @@ fn run(
                 std::thread::sleep(SETTLE);
             }
             nudges.extend(rx.try_iter());
-            let (authored, read) = look(&mut peer, &mut scan, nudges);
-            counts.read.fetch_add(read, Ordering::Relaxed);
-            if authored > 0 {
-                counts.authored.fetch_add(authored, Ordering::Relaxed);
-                println!("harken-server: library +{authored}");
-            }
+            ask(&mut peer, &root, nudges);
         }
-        // Whatever that produced, and whatever the log has for us. Not
-        // conditional on a nudge: a quiet scanner still has to take the
-        // entries other peers wrote.
-        peer.pump();
+        // Whatever that produced, and whatever the log has for us — the
+        // looks asked among it. Not conditional on a nudge: a quiet
+        // scanner still has to take the entries other peers wrote.
+        pump(&mut peer);
     }
     // Off the hub, with what is pending written down for the next start (the
     // client writes its pending intents as they change).
-    peer.pump();
+    pump(&mut peer);
+}
+
+/// A look asked for: at the paths the nudges name, under the media root,
+/// or at everything.
+fn ask(peer: &mut ark_peer::Peer, root: &Path, nudges: Vec<Nudge>) {
+    let all = nudges.iter().any(|n| matches!(n, Nudge::All));
+    let paths = nudges.into_iter().filter_map(|n| match n {
+        Nudge::One(p) if !all => relative(root, &p),
+        _ => None,
+    });
+    let paths: Vec<String> = paths.collect::<BTreeSet<_>>().into_iter().collect();
+    if all || !paths.is_empty() {
+        if let Err(why) = peer.mutate(LOOK, &LookAt { paths }) {
+            eprintln!("harken-server: library: a look was refused: {why}");
+        }
+    }
 }
 
 /// Pump until the replica has what the log had when it started, so that
 /// "already a song" means the library and not an empty replica. Bounded: a
 /// scanner that cannot catch up still scans, and the procedure keeps the
 /// library right.
-fn catch_up(peer: &mut Peer, hub: &Handle, stop: &AtomicBool) {
+fn catch_up(peer: &mut ark_peer::Peer, hub: &Handle, stop: &AtomicBool) {
     let head = hub.with(|h| h.log.log().head().0).unwrap_or(0);
     let deadline = Instant::now() + Duration::from_secs(30);
     while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
-        peer.pump();
-        let c = &peer.client;
-        if c.linked && c.log.log().head().0 >= head && c.log.pending.is_empty() {
+        pump(peer);
+        if peer.linked && peer.log.log().head().0 >= head && peer.log.pending.is_empty() {
             return;
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -487,7 +519,7 @@ fn catch_up(peer: &mut Peer, hub: &Handle, stop: &AtomicBool) {
 
 /// One look at whatever the nudges name. Says how many entries it authored
 /// and how many files it read.
-fn look(peer: &mut Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usize, usize) {
+fn look(peer: &mut ark_peer::Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usize, usize) {
     let mut paths = BTreeSet::new();
     for n in nudges {
         match n {
@@ -554,20 +586,20 @@ fn known_file(store: &Store, file: &str) -> bool {
 /// mutation run over it, its changes looked at and thrown away. What the
 /// procedure does with an entry saying nothing new is write nothing, so
 /// not authoring one is the same library with one entry fewer in the log.
-fn would_change(peer: &Peer, name: &str, input: &[u8]) -> bool {
-    let me = &peer.client.log.me;
+fn would_change(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> bool {
+    let me = &peer.log.me;
     let ctx = Ctx {
         draws: Default::default(),
-        id: peer.client.log.next_id(),
+        id: peer.log.next_id(),
         actor: me.actor.clone(),
         session: me.session.clone(),
         roles: me.roles.clone(),
         now: ark_peer::now_ms(),
     };
-    let Some(f) = peer.hosted.domain.get(name).and_then(|f| f.proc.clone()) else {
+    let Some(f) = peer.domain().get(name).and_then(|f| f.proc.clone()) else {
         return true;
     };
-    let mut store = peer.client.log.store.clone();
+    let mut store = peer.log.store.clone();
     !matches!(f.apply(&mut store, &ctx, input), Ok(changes) if changes.is_empty())
 }
 
@@ -618,7 +650,7 @@ enum Offered {
 }
 
 /// Offer one path to the log.
-fn offer(peer: &mut Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> Offered {
+fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> Offered {
     if !is_track(&scan.music, path) {
         return Offered::Not;
     }
@@ -641,7 +673,7 @@ fn offer(peer: &mut Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> 
             artist: was.artist.clone(),
             covers: covers.beside(dir, &was.artist).print(),
         };
-        if was == now && known_file(&peer.client.log.store, &rel) {
+        if was == now && known_file(&peer.log.store, &rel) {
             return Offered::Not;
         }
     }
@@ -698,7 +730,7 @@ fn offer(peer: &mut Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> 
         scan.prints.set(print);
         return Offered::Read;
     }
-    match peer.client.mutate_bytes(ADD_SONG, call) {
+    match peer.mutate_bytes(ADD_SONG, call) {
         Ok(_) => {
             scan.prints.set(print);
             Offered::Authored

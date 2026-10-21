@@ -91,6 +91,21 @@ pub struct CreditRecording {
     pub pos: i64,
 }
 
+/// A look at the media directory asked for: these paths under it, or the
+/// whole of it when there are none.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct LookAt {
+    pub paths: Vec<String>,
+}
+
+/// What a look came to: the files whose tags it read, the entries it
+/// authored.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+pub struct Looked {
+    pub read: i64,
+    pub authored: i64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct RemoveMedia {
     pub id: Id<Media>,

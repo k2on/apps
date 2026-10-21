@@ -56,8 +56,8 @@ fn run(d: &Domain, s: &mut Store, f: &str, c: &Ctx, input: Vec<u8>) -> Result<()
 }
 
 fn claim(by: &str) -> Vec<u8> {
-    Claim {
-        id: ("a".to_string(),),
+    Claim::<Fetch> {
+        id: "a".into(),
         by: by.into(),
     }
     .to_bytes()
@@ -68,7 +68,7 @@ fn state(s: &Store) -> Job<i64> {
     Fetch::from_bytes(&rows[0]).unwrap().state
 }
 
-const CANCEL: fn() -> Vec<u8> = || Cancel { id: ("a".to_string(),) }.to_bytes();
+const CANCEL: fn() -> Vec<u8> = || Cancel::<Fetch> { id: "a".into() }.to_bytes();
 
 /// Of a claim and a cancel of one pending job, the first in the log wins
 /// and the second is refused, whichever it is. Falsified by `cancel` not
@@ -114,8 +114,8 @@ fn a_finish_by_the_wrong_claimant_is_refused() {
     let d = domain();
     let w = |now| ctx("w", &["worker"], now);
     let fin = |by: &str, outcome: Result<i64, String>| {
-        Finish {
-            id: ("a".to_string(),),
+        Finish::<Fetch> {
+            id: "a".into(),
             by: by.into(),
             outcome,
         }
@@ -138,4 +138,26 @@ fn a_finish_by_the_wrong_claimant_is_refused() {
     assert_eq!(run(&d, &mut s, "finish", &w(253), fin("w3", Ok(7))), Ok(()));
     assert_eq!(state(&s), Job::Done(7));
     assert!(run(&d, &mut s, "claim", &w(9999), claim("w4")).is_err(), "done is over");
+}
+
+/// A job's and a finish's bytes read as their described types say, and
+/// back: a done job and a failure each a record of one field. Falsified by
+/// describing `Done` by its position (`0`): its bytes did not read.
+#[test]
+fn a_job_reads_as_its_type_says() {
+    let done = Fetch {
+        id: "a".into(),
+        owner: "alice".into(),
+        state: Job::Done(7),
+    };
+    let text = ark::json::to_text(&Fetch::describe(), &done.to_bytes()).unwrap();
+    assert!(text.contains(r#""Done":{"value":7}"#), "{text}");
+    assert_eq!(ark::json::from_text(&Fetch::describe(), &text).unwrap(), done.to_bytes());
+    let failed = Finish::<Fetch> {
+        id: "a".into(),
+        by: "w".into(),
+        outcome: Err("down".into()),
+    };
+    let text = ark::json::to_text(&Finish::<Fetch>::describe(), &failed.to_bytes()).unwrap();
+    assert!(text.contains(r#""Err":{"why":"down"}"#), "{text}");
 }
