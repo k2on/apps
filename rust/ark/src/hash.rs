@@ -1,6 +1,5 @@
-//! §1.1 Hash spaces, each its own type: [`FnHash`] (a function's bytes),
-//! [`StateHash`] (a store's rows under its schema), [`ModuleHash`],
-//! [`TypeHash`] (a [`crate::ty::Ty`]'s bytes), [`EntryHash`] (the chain to
+//! §1.1 Hash spaces, each its own type: [`StateHash`] (a store's rows
+//! under its schema), [`TypeHash`] (a [`crate::ty::Ty`]'s bytes), [`EntryHash`] (the chain to
 //! a logged entry, §1.6) and [`SchemaHash`] (a schema's bytes, which every
 //! state hash starts from, §1.3). Each is SHA-256, thirty-two bytes, and
 //! comparing two of different spaces does not compile.
@@ -63,12 +62,8 @@ macro_rules! spaces {
 }
 
 spaces! {
-    /// `sha256(enc(function))`: what a function is called by (§1.5).
-    FnHash,
     /// `sha256(schema_hash ‖ the space's tables' digests in schema order)` (§1.3).
     StateHash,
-    /// `sha256(enc(Module))` (§1.5).
-    ModuleHash,
     /// `sha256(enc(ty))`.
     TypeHash,
     /// `sha256(prev ‖ enc(seq, entry, facts, state))` (§1.6); the chain's

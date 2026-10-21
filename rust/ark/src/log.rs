@@ -41,9 +41,9 @@
 
 use ark_macros::Node;
 
+use crate::codec::Node;
 use crate::codec::{put_bytes, put_int, Reader};
-use crate::hash::{sha256, EntryHash, FnHash, StateHash};
-use crate::ir::Node;
+use crate::hash::{sha256, EntryHash, StateHash};
 use crate::store::Change;
 use crate::Refusal;
 
@@ -118,7 +118,7 @@ pub struct Entry {
     pub origin: Origin,
     pub local: i64,
     pub roles: Vec<String>,
-    pub func: FnHash,
+    pub func: String,
     pub input: Vec<u8>,
     pub now: i64,
 }

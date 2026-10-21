@@ -8,14 +8,14 @@
 //! header says what is in the number.
 //!
 //! Over the demo of `tests/demo.rs` (the v4 demo's tables and its
-//! `create_playlist` and `add_to_playlist`, run by the interpreter — v5 has
-//! one execution path), driven through [`Peer::step`] with frames as bytes:
+//! `create_playlist` and `add_to_playlist`, in plain Rust), driven through [`Peer::step`] with frames as bytes:
 //! every number includes the frame's encoding or decoding, which v4's
 //! engine-level calls did not.
 //!
 //! Beside v4's shapes, the views shape Part 3 adds: one change against
 //! `playlist-with-items`, `top-two-by-pos` and `group-source` at 1k, 4k and
-//! 16k rows, timed, with the entries the push read (a counting store);
+//! 16k rows, timed, with the entries the push read (`ark::db::count`), the
+//! views typed plans (§1.16);
 //! `rust/ark/tests/perf_views.rs` is the same over v4.
 //!
 //! Ignored by default; run with
@@ -23,27 +23,21 @@
 
 #[path = "demo.rs"]
 mod demo;
-mod support {
-    pub mod counting;
-}
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-use ark::codec::{bytes_enc, put_bytes, put_int, put_option};
+use std::sync::Arc;
+
+use ark::codec::{put_bytes, put_int, put_option};
 use ark::frames::{Frame, Verdict};
-use ark::hash::FnHash;
-use ark::ir::{CtxField, Effect, Expr, Function, Node, Op, Std};
 use ark::log::{Entry, EntryId, Logged, Origin, Seq};
-use ark::module::Lib;
-use ark::peer::{Cas, Ctx, Feed, Input, Journal, Output, Peer, Role, Who, PAGE};
-use ark::schema::{Schema, Space, Table};
-use ark::store::{Change, Dir, Read, Scan, Store};
-use ark::ty::Ty;
-use ark::view::View;
+use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer, Role, Who, PAGE};
+use ark::prelude::*;
+use ark::schema::{Schema, Space};
+use ark::store::{Change, Read, Scan, Store};
 use demo::*;
-use support::counting::Counting;
 
 // Counting allocations, on this thread ------------------------------------------
 //
@@ -94,16 +88,9 @@ fn live_bytes() -> isize {
 
 // The demo, driven -----------------------------------------------------------------
 
-/// A demo function's hash, computed once: `demo::h` builds and encodes
-/// the function each time, which is not what a mutation costs.
-fn hash(name: &str) -> FnHash {
-    static H: std::sync::OnceLock<[FnHash; 2]> = std::sync::OnceLock::new();
-    let [c, a] = H.get_or_init(|| [h(CREATE), h(ADD)]);
-    match name {
-        CREATE => *c,
-        ADD => *a,
-        _ => h(name),
-    }
+/// What an entry calls a demo function by: its name.
+fn hash(name: &str) -> String {
+    name.to_string()
 }
 
 fn who(actor: &str, session: &str) -> Who {
@@ -114,7 +101,7 @@ fn who(actor: &str, session: &str) -> Who {
     }
 }
 
-fn authority_with(cas: Cas) -> Peer {
+fn authority_with(cas: Functions) -> Peer {
     Peer::new(shared(), cas, Role::Authority { journal: Journal::default() }, who("server", "server"))
 }
 
@@ -467,6 +454,8 @@ fn perf_d_initial_sync() {
                 cursor: 0,
                 hash: None,
                 device: None,
+                schema: Default::default(),
+                version: String::new(),
             },
         );
         let t = Instant::now();
@@ -735,6 +724,8 @@ fn perf_g_authority_and_fanout() {
                 cursor,
                 hash: Some(hash),
                 device: None,
+                schema: Default::default(),
+                version: String::new(),
             },
         ));
         let dt = t.elapsed();
@@ -745,25 +736,11 @@ fn perf_g_authority_and_fanout() {
 
 // (i) Connections fed by a scope ----------------------------------------------------------
 
-/// The scope of the partial shape: every playlist, and the items whose
-/// track is the reader's — named `actor:…` (the views test's fleet scope).
-/// v4's scope held a person's playlists and every item without its
-/// position; v5 has no projection, and a union must hold the rows its rows
-/// reference, so the playlists are everyone's.
-fn scope() -> Function {
-    let item = Ty::Tuple(vec![named("Id<playlist>"), text_ty(), Ty::Int]);
-    let pl = Ty::Tuple(vec![named("Id<playlist>"), text_ty(), text_ty()]);
-    let row = Ty::Sum(vec![vec![pl], vec![item]]);
-    func(vec![id_decl()], &[("row", row)], Ty::bool(), Effect::Pure, |b| {
-        let all = b.with(&["p"], |_| Expr::Variant(Ty::bool(), 1, vec![]));
-        let mine = b.with(&["i"], |b| {
-            let prefix = std(Std::Concat, vec![Expr::List(text_ty(), vec![Expr::Ctx(CtxField::User), text(":")])]);
-            std(Std::StartsWith, vec![field(b.v("i"), 1), prefix])
-        });
-        Expr::Match(Box::new(b.v("row")), vec![all, mine])
-    })
-}
-
+/// The scope of the partial shape (`demo.mine`): every playlist, and the
+/// items whose track is the reader's — named `actor:…`. v4's scope held a
+/// person's playlists and every item without its position; v5 has no
+/// projection, and a union must hold the rows its rows reference, so the
+/// playlists are everyone's.
 /// The fan-out of one `add_to_playlist` to C connections fed by the scope:
 /// half of them alice (the author, whose union holds every item, its
 /// tracks being `alice:…`), half strangers (who hold the playlists and
@@ -775,9 +752,9 @@ fn scope() -> Function {
 #[test]
 #[ignore]
 fn perf_i_partial_fanout() {
-    let mut cas = demo::cas();
-    let scope_h = cas.add_body(scope().to_bytes());
-    assert!(cas.get(&scope_h).is_some(), "the scope loads");
+    let cas = demo::cas();
+    let scope_h = "demo.mine";
+    assert!(cas.get(scope_h).is_some(), "the scope is there");
     header("(i) fan-out of one pushed entry to C partial connections (Server::recv + encode)");
     note("recv = Authority.step(Push) including each scoped connection's filter, union, hash, chain and encode; encode = the copies routed");
     eprintln!(
@@ -795,7 +772,7 @@ fn perf_i_partial_fanout() {
                     if partial {
                         b.a.step(Input::Feed {
                             who: w.clone(),
-                            feed: Feed::Scoped(scope_h),
+                            feed: Feed::Scoped(scope_h.into()),
                         });
                         let o = b.a.step(up(
                             &w,
@@ -804,6 +781,8 @@ fn perf_i_partial_fanout() {
                                 cursor: head.0,
                                 hash: Some(head.1),
                                 device: None,
+                                schema: Default::default(),
+                                version: String::new(),
                             },
                         ));
                         assert!(matches!(o[..], [Output::To { .. }]), "a union is served: {o:?}");
@@ -1004,35 +983,28 @@ fn perf_ids_below_the_horizon() {
 // The scenarios of `tests/views.rs`'s work contract, timed: the library's
 // schema, its playlists and items, and its songs.
 
+/// A song, as the library's `song` table has it.
+#[derive(Clone, Debug, PartialEq, Eq, Node, Row)]
+#[ark(index(creator), index(movement_id))]
+pub struct Song {
+    #[ark(key)]
+    pub id: String,
+    pub title: String,
+    pub creator: String,
+    pub movement_id: Option<String>,
+    pub pos: i64,
+}
+
+/// The playlists, their items, and songs.
+#[derive(Schema)]
+pub struct Lib {
+    pub playlist: Playlist,
+    pub item: Item,
+    pub song: Song,
+}
+
 fn library() -> Schema {
-    let mut s = demo::schema();
-    let text = || Ty::Bytes;
-    s.tables.extend([
-        Table::new("person").col("name", "Text", text()).col("born", "Int", Ty::Int),
-        Table::new("work")
-            .col("id", "Text", text())
-            .col("composer", "Text", text())
-            .col("title", "Text", text())
-            .index(&["composer"], false)
-            .refs("composer", "person"),
-        Table::new("movement")
-            .col("id", "Text", text())
-            .col("work_id", "Text", text())
-            .col("no", "Int", Ty::Int)
-            .col("part", "Text", text())
-            .index(&["work_id"], false)
-            .refs("work_id", "work"),
-        Table::new("song")
-            .col("id", "Text", text())
-            .col("title", "Text", text())
-            .col("creator", "Text", text())
-            .col("movement_id", "Option<Text>", Ty::option(text()))
-            .col("pos", "Int", Ty::Int)
-            .index(&["creator"], false)
-            .index(&["movement_id"], false)
-            .refs("movement_id", "movement"),
-    ]);
-    s
+    <Lib as Tables>::schema()
 }
 
 fn vpid(n: u32) -> Vec<u8> {
@@ -1074,63 +1046,37 @@ fn store_of(rows: &[Change]) -> Store {
     Store::from_rows(schema.into(), &by).unwrap()
 }
 
-fn item_ty() -> Ty {
-    Ty::Tuple(vec![named("Id<playlist>"), text_ty(), Ty::Int])
-}
-
-fn query_fn(params: &[(&str, Ty)], ret: Ty, body: impl FnOnce(&mut B) -> Expr) -> Function {
-    func(vec![id_decl()], params, Ty::list(ret), Effect::Read, body)
-}
-
-fn fields(b: &B, v: &str, ns: &[u32]) -> Expr {
-    Expr::Tuple(ns.iter().map(|n| field(b.v(v), *n)).collect())
-}
-
-fn sort(l: Expr, keys: Expr, dirs: &[Dir]) -> Expr {
-    Expr::Sort(Box::new(l), Box::new(keys), dirs.to_vec())
-}
-
-fn take(l: Expr, n: i64) -> Expr {
-    Expr::Take(Box::new(l), Box::new(int(n)))
-}
-
-fn related(b: &mut B, table: &str, c: u32, e: impl Fn(&B) -> Expr) -> Expr {
-    let on = b.lam(&["r"], |b| op(Op::Eq, field(b.v("r"), c), e(b)));
-    filter(scan(table), on)
-}
+type Made<T> = ark::plan::Make<Lib, T>;
 
 /// `top-two-by-pos(playlist_id)`: the playlist's items by `pos`, the first two.
-fn top_two_by_pos() -> Function {
-    query_fn(&[("playlist_id", named("Id<playlist>"))], item_ty(), |b| {
-        let mine = related(b, "item", 0, |b| b.v("playlist_id"));
-        let by = b.lam(&["i"], |b| fields(b, "i", &[2, 0, 1]));
-        take(sort(mine, by, &[Dir::Asc; 3]), 2)
+fn top_two_by_pos(pid: Id<Playlist>) -> Made<Item> {
+    Arc::new(move |_, _| {
+        Ok(ark::plan::scan::<Lib, Item>()
+            .filter(move |i| i.playlist_id == pid)
+            .sort(|i| (i.pos, i.playlist_id, i.track_id.clone()))
+            .take(2))
     })
 }
 
+type WithItems = (Id<Playlist>, String, String, Vec<Item>);
+
 /// `playlist-with-items`: playlists by name, each with its last three items.
-fn playlist_with_items() -> Function {
-    let ret = Ty::Tuple(vec![named("Id<playlist>"), text_ty(), text_ty(), Ty::list(item_ty())]);
-    query_fn(&[], ret, |b| {
-        let by = b.lam(&["p"], |b| fields(b, "p", &[1, 0]));
-        let each = b.lam(&["p"], |b| {
-            let items = related(b, "item", 0, |b| field(b.v("p"), 0));
-            let by = b.lam(&["i"], |b| fields(b, "i", &[2, 0, 1]));
-            let last = take(sort(items, by, &[Dir::Desc, Dir::Asc, Dir::Asc]), 3);
-            Expr::Tuple(vec![field(b.v("p"), 0), field(b.v("p"), 1), field(b.v("p"), 2), last])
-        });
-        Expr::Map(Box::new(sort(scan("playlist"), by, &[Dir::Asc; 2])), Box::new(each))
+fn playlist_with_items() -> Made<WithItems> {
+    Arc::new(|_, _| {
+        Ok(ark::plan::scan::<Lib, Playlist>().sort(|p| (p.name.clone(), p.id)).map_with(|db, p| {
+            let last = db.item.by(Item::PLAYLIST_ID_POS).from(p.id).rev().take(3);
+            (p.id, p.name.clone(), p.user_id.clone(), last)
+        }))
     })
 }
 
 /// `group-source`: songs grouped by creator, each with how many, in the
 /// creator's order.
-fn group_source() -> Function {
-    query_fn(&[], Ty::Tuple(vec![text_ty(), Ty::Int]), |b| {
-        let by = b.lam(&["s"], |b| field(b.v("s"), 2));
-        let n = b.lam(&["k", "ms"], |b| std(Std::Len, vec![b.v("ms")]));
-        let key = b.lam(&["g"], |b| field(b.v("g"), 0));
-        sort(Expr::Group(Box::new(scan("song")), Box::new(by), Box::new(n)), key, &[Dir::Asc])
+fn group_source() -> Made<(String, i64)> {
+    Arc::new(|_, _| {
+        Ok(ark::plan::scan::<Lib, Song>()
+            .group(|s| s.creator.clone(), |_, k, ms| (k.clone(), ms.len() as i64))
+            .sort(|g| g.0.clone()))
     })
 }
 
@@ -1145,20 +1091,21 @@ fn vctx() -> Ctx {
     }
 }
 
-/// One view of `f` over `store`: hydrated, then `ops` applied to the store
-/// and pushed one at a time, `rounds` times over — the mean per push; and
-/// the reads one push of the first op makes, counted.
-fn time_view(f: Function, input: &[u8], mut store: Store, ops: &[Change], rounds: usize) -> (Duration, f64, support::counting::Reads) {
-    let lib = Lib::default();
-    let h: FnHash = lib.install(&library(), f).unwrap();
+/// One view of `make` over `store`: hydrated, then `ops` applied to the
+/// store and pushed one at a time, `rounds` times over — the mean per
+/// push; and the reads one push of the first op makes, counted.
+fn time_view<T: ark::plan::Elem + std::fmt::Debug>(
+    make: Made<T>,
+    mut store: Store,
+    ops: &[Change],
+    rounds: usize,
+) -> (Duration, f64, ark::db::Reads) {
     let t = Instant::now();
-    let mut v = View::new(&lib, &h, input, vctx(), &store).unwrap();
+    let mut v = ark::plan::View::new(make.clone(), vctx(), &store).unwrap();
     let hydrate = t.elapsed();
     // The first op, counted.
     store.apply(&ops[0]).unwrap();
-    let counting = Counting::new(&store);
-    v.push(std::slice::from_ref(&ops[0]), &counting).unwrap();
-    let reads = counting.reads();
+    let (_, reads) = ark::db::count(|| v.push(std::slice::from_ref(&ops[0]), &store).unwrap());
     for c in &ops[1..] {
         store.apply(c).unwrap();
         v.push(std::slice::from_ref(c), &store).unwrap();
@@ -1174,7 +1121,7 @@ fn time_view(f: Function, input: &[u8], mut store: Store, ops: &[Change], rounds
     }
     assert_eq!(
         v.rows(),
-        ark::view::query(&lib, &h, input, &vctx(), &store).unwrap(),
+        ark::plan::answer(&make, &vctx(), &store).unwrap(),
         "the view is a fresh evaluation"
     );
     (hydrate, us(spent) / (rounds * ops.len()) as f64, reads)
@@ -1204,7 +1151,7 @@ fn perf_views() {
         }
         let fresh = add("item", it_row(n / 8, "t5", 5));
         let ops = [fresh.clone(), fresh.inverse()];
-        let (hy, push, r) = time_view(playlist_with_items(), &[], store_of(&rows), &ops, rounds);
+        let (hy, push, r) = time_view(playlist_with_items(), store_of(&rows), &ops, rounds);
         eprintln!(
             "{:<24} {:>7} {:>12.2} {:>12.2} {:>8} {:>8}",
             "playlist-with-items",
@@ -1218,7 +1165,7 @@ fn perf_views() {
         rows.extend((0..n).map(|i| add("item", it_row(1, &format!("t{i}"), i as i64 + 1))));
         let first = add("item", it_row(1, "t0", 1));
         let ops = [first.inverse(), first];
-        let (hy, push, r) = time_view(top_two_by_pos(), &bytes_enc(&vpid(1)), store_of(&rows), &ops, rounds);
+        let (hy, push, r) = time_view(top_two_by_pos(Id::new(vpid(1).try_into().unwrap())), store_of(&rows), &ops, rounds);
         eprintln!(
             "{:<24} {:>7} {:>12.2} {:>12.2} {:>8} {:>8}",
             "top-two-by-pos",
@@ -1244,7 +1191,7 @@ fn perf_views() {
                 new: c0,
             },
         ];
-        let (hy, push, r) = time_view(group_source(), &[], store_of(&rows), &ops, rounds);
+        let (hy, push, r) = time_view(group_source(), store_of(&rows), &ops, rounds);
         eprintln!(
             "{:<24} {:>7} {:>12.2} {:>12.2} {:>8} {:>8}",
             "group-source",

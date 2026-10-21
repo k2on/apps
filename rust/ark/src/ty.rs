@@ -12,8 +12,8 @@
 
 use ark_macros::Node;
 
+use crate::codec::Node;
 use crate::hash::TypeHash;
-use crate::ir::Node;
 
 /// A type (§1.1): how to read a value's bytes.
 ///

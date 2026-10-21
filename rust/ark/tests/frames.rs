@@ -4,10 +4,10 @@
 #[path = "demo.rs"]
 mod demo;
 
+use ark::codec::Node;
 use ark::codec::{parse, Reader};
 use ark::frames::{frame_ty, ty, Frame, Verdict};
-use ark::hash::{EntryHash, FnHash, StateHash};
-use ark::ir::Node;
+use ark::hash::{EntryHash, SchemaHash, StateHash};
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
 use ark::schema::Space;
 use ark::store::Change;
@@ -59,12 +59,16 @@ fn every_frame() -> Vec<Frame> {
             cursor: 0,
             hash: None,
             device: None,
+            schema: SchemaHash([0; 32]),
+            version: String::new(),
         },
         Frame::Hello {
             space: Space::Volatile,
             cursor: 4,
             hash: Some(EntryHash([0xFF; 32])),
             device: Some(b"phone\0".to_vec()),
+            schema: SchemaHash([2; 32]),
+            version: "1.2".into(),
         },
         Frame::push(Space::Volatile, [entry.clone()]),
         Frame::push(Space::Durable, [entry.clone(), entry]),
@@ -83,7 +87,7 @@ fn every_frame() -> Vec<Frame> {
         Frame::Verdict {
             space: Space::Durable,
             id,
-            verdict: Verdict::Held { func: FnHash([3; 32]) },
+            verdict: Verdict::Held { func: "demo.gone".into() },
         },
         Frame::Page {
             space: Space::Durable,

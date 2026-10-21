@@ -102,16 +102,13 @@ fn a_chain_whose_facts_differ_is_refused() {
 }
 
 /// A chain naming a function the server does not run is refused whole,
-/// never held and never run from a body: the server's content store is
-/// what its operator loaded. Falsified by `adopt` pushing an entry whose
+/// never held: the server runs the functions it was built with. Falsified by `adopt` pushing an entry whose
 /// function it lacks as an intent: the server sent `Held` and nothing was
 /// refused.
 #[test]
 fn a_chain_naming_a_function_the_server_lacks_is_refused() {
     let mut eve = eve_alone();
-    let mut lacking = ark::peer::Cas::default().with_loader(demo::loader());
-    lacking.add_body(demo::body(CREATE));
-    let mut server = authority(lacking);
+    let mut server = authority(demo::only(&[CREATE]));
     let back = join(&mut eve, &mut server, |_| {});
     let rejects: Vec<&String> = back
         .iter()

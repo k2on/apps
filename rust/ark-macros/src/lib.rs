@@ -10,7 +10,7 @@ mod derive;
 mod domain;
 
 /// `#[derive(Node)]`: the type of a Rust struct or enum as a §1.1 `Ty`, and
-/// its encoder and decoder by the codec (`ark::ir::Node`).
+/// its encoder and decoder by the codec (`ark::codec::Node`).
 #[proc_macro_derive(Node)]
 pub fn node(input: TokenStream) -> TokenStream {
     derive::node(syn::parse_macro_input!(input as syn::DeriveInput)).into()

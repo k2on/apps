@@ -265,8 +265,8 @@ fn compat_is_a_prefix_extension() {
 /// middle entry came out.
 #[test]
 fn the_log_is_a_table_whose_rows_are_a_chain() {
+    use ark::codec::Node;
     use ark::hash::{EntryHash, StateHash};
-    use ark::ir::Node;
     use ark::log::{Entry, Logged};
     use ark::store::LOG;
     let mut s = Store::new(demo::shared());

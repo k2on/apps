@@ -24,16 +24,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::db::{read, write, Db, Tables};
-use crate::hash::{FnHash, SchemaHash};
-use crate::peer::{Cas, Ctx, Procedure};
+use crate::hash::SchemaHash;
+use crate::peer::{Ctx, Functions, Procedure};
 use crate::plan::{answer, Maintained, Plan, View};
 use crate::row::{Describe, Input, Row, Type, Value};
 use crate::schema::Schema;
-use crate::store::{Change, Read, Store};
+use crate::store::{Change, Store};
 use crate::Refusal;
 
 /// What a function is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ark_macros::Node)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, crate::prelude::Node)]
 pub enum Kind {
     Mutator,
     Live,
@@ -96,10 +96,6 @@ struct Mutate<S: Tables, I> {
 }
 
 impl<S: Tables, I: Input> Procedure for Mutate<S, I> {
-    fn run(&self, _: &dyn Read, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
-        Err(Refusal::new("a native function runs over the store it writes"))
-    }
-
     fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
         let input = input_of::<I>(input)?;
         // Every run draws from the entry's first id: a run again is the
@@ -149,7 +145,7 @@ struct Scoped<S> {
 }
 
 impl<S: Tables> Procedure for Scoped<S> {
-    fn run(&self, _: &dyn Read, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
+    fn apply(&self, _: &mut Store, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
         Err(Refusal::new("a scope writes nothing"))
     }
 
@@ -279,18 +275,12 @@ impl Domain {
         self.schema.hash()
     }
 
-    /// The hash a function is called by while entries name functions by
-    /// hash: its name's.
-    pub fn hash_of(name: &str) -> FnHash {
-        FnHash::of(name.as_bytes())
-    }
-
-    /// The functions the machine runs, by [`Domain::hash_of`] their names.
-    pub fn cas(&self) -> Cas {
-        let mut c = Cas::default();
+    /// The functions the machine runs, by name.
+    pub fn functions(&self) -> Functions {
+        let mut c = Functions::default();
         for f in self.fns.values() {
             if let Some(p) = &f.proc {
-                c.insert(Domain::hash_of(&f.name), p.clone());
+                c.insert(f.name.clone(), p.clone());
             }
         }
         c

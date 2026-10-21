@@ -19,9 +19,9 @@
 
 use ark_macros::Node;
 
+use crate::codec::Node;
 use crate::codec::{skip, Reader};
 use crate::hash::SchemaHash;
-use crate::ir::Node;
 use crate::ty::Ty;
 use crate::Refusal;
 

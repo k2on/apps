@@ -3,10 +3,10 @@
 //! answers with verdicts and its own pages.
 //!
 //! ```text
-//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes> }
+//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version }
 //! Page    { space, from, logged: [Logged] }
 //! Snapshot{ space, snapshot }
-//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { fn } }
+//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } }
 //! ```
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
@@ -17,23 +17,24 @@
 //! of one. A `Verdict` answers one intent: sequenced at `seq`, refused, or
 //! `Held` — a function the authority does not run.
 //!
-//! **No body crosses the wire.** An authority runs exactly the functions
-//! bound in the modules its operator loaded; `Held` says an intent names
-//! one it does not run, and the intent stays pending on the device, pushed
+//! **No code crosses the wire.** An entry names its function by name; an
+//! authority runs exactly the functions its program was built with, and
+//! `Held` says an intent names one it does not run, and the intent stays pending on the device, pushed
 //! again on its next connection. Nothing a client sends is ever loaded.
 //!
 //! The variants are numbered in that order. Every frame names its space, so
 //! two machines share a connection (§1.9): a verdict's id is `(origin,
 //! local)`'s, and each space counts its own. `device` is what a device says
 //! it is, the bytes the authority authors its `on_join` from (the driver's
-//! to read). The type, the encoder and the decoder are `#[derive(Node)]`'s
+//! to read); `schema` and `version` are the domain the peer runs, its
+//! schema's hash and its version string. The type, the encoder and the decoder are `#[derive(Node)]`'s
 //! (§1.4), and `tests/frames.rs` holds every frame's bytes to
 //! [`frame_ty`].
 
 use ark_macros::Node;
 
-use crate::hash::{EntryHash, FnHash};
-use crate::ir::Node;
+use crate::codec::Node;
+use crate::hash::{EntryHash, SchemaHash};
 use crate::log::{Entry, EntryId, Logged, Record, Seq, Snapshot};
 use crate::schema::Space;
 use crate::store::Change;
@@ -47,6 +48,8 @@ pub enum Frame {
         cursor: Seq,
         hash: Option<EntryHash>,
         device: Option<Vec<u8>>,
+        schema: SchemaHash,
+        version: String,
     },
     Page {
         space: Space,
@@ -70,7 +73,7 @@ pub enum Frame {
 pub enum Verdict {
     Ok { seq: Seq },
     Refused { why: String },
-    Held { func: FnHash },
+    Held { func: String },
 }
 
 /// The types, by name, as the derive writes them.

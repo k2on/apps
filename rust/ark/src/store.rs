@@ -38,9 +38,9 @@ use std::sync::Arc;
 
 use ark_macros::Node;
 
+use crate::codec::Node;
 use crate::codec::{bytes_enc, int_enc, skip, Reader};
 use crate::hash::{add256, sha256, sub256, EntryHash, SchemaHash, StateHash};
-use crate::ir::Node;
 use crate::log::{Entry, Logged, Rows as KvRows, Seq};
 use crate::schema::{Schema, Space, Table};
 use crate::ty::Ty;

@@ -5,7 +5,7 @@
 
 use ark::frames::{Frame, Verdict};
 use ark::log::Logged;
-use ark::peer::{Cas, Input, Journal, Output, Peer, Role, Who};
+use ark::peer::{Functions, Input, Journal, Output, Peer, Role, Who};
 use ark::store::Change;
 
 pub fn who(name: &str) -> Who {
@@ -16,11 +16,11 @@ pub fn who(name: &str) -> Who {
     }
 }
 
-pub fn replica(name: &str, cas: Cas) -> Peer {
+pub fn replica(name: &str, cas: Functions) -> Peer {
     Peer::new(super::super::demo::shared(), cas, Role::Replica, who(name))
 }
 
-pub fn authority(cas: Cas) -> Peer {
+pub fn authority(cas: Functions) -> Peer {
     let role = Role::Authority { journal: Journal::default() };
     Peer::new(super::super::demo::shared(), cas, role, who("server"))
 }

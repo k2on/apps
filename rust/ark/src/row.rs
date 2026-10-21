@@ -23,8 +23,8 @@ use std::borrow::Borrow;
 use std::fmt;
 use std::marker::PhantomData;
 
+use crate::codec::Node;
 use crate::codec::Reader;
-use crate::ir::Node;
 use crate::schema::{Column, Table};
 use crate::ty::Ty;
 use crate::Refusal;

@@ -18,6 +18,10 @@
 //! [`Refusal`]. It checks structure; a refinement's predicate is the
 //! language's to add at this same door.
 
+use std::cell::RefCell;
+
+use crate::hash::{EntryHash, SchemaHash, StateHash, TypeHash};
+use crate::log::{EntryId, Origin};
 use crate::ty::Ty;
 use crate::Refusal;
 
@@ -239,3 +243,207 @@ pub fn parse(ty: &Ty, bytes: &[u8]) -> Result<Typed, Refusal> {
     r.end()?;
     Ok(Typed(bytes.to_vec()))
 }
+
+// * Rust types as values
+
+/// A Rust type as a value of §1.1: how to read and write its bytes.
+pub trait Node: Sized {
+    fn ty() -> Ty;
+    fn put(&self, out: &mut Vec<u8>);
+    fn take(r: &mut Reader) -> Result<Self, Refusal>;
+
+    /// `List Self`; `u8` makes it `Bytes`, so `Vec<u8>` is bytes.
+    fn list_ty() -> Ty {
+        Ty::list(Self::ty())
+    }
+    fn put_list(xs: &[Self], out: &mut Vec<u8>) {
+        put_list(out, xs, |o, x| x.put(o));
+    }
+    fn take_list(r: &mut Reader) -> Result<Vec<Self>, Refusal> {
+        r.list(Self::take)
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut out = vec![];
+        self.put(&mut out);
+        out
+    }
+
+    /// The value, from canonical bytes of it and nothing after them.
+    fn from_bytes(b: &[u8]) -> Result<Self, Refusal> {
+        let mut r = Reader::new(b);
+        let x = Self::take(&mut r)?;
+        r.end()?;
+        Ok(x)
+    }
+}
+
+thread_local!(static OPEN: RefCell<Vec<&'static str>> = const { RefCell::new(vec![]) });
+
+/// The type a derived `Node` is: `f()`, or `Named(name)` where the type
+/// recurs inside itself.
+pub fn named(name: &'static str, f: impl FnOnce() -> Ty) -> Ty {
+    if OPEN.with(|o| o.borrow().contains(&name)) {
+        return Ty::Named(name.into());
+    }
+    OPEN.with(|o| o.borrow_mut().push(name));
+    let t = f();
+    OPEN.with(|o| o.borrow_mut().pop());
+    t
+}
+
+impl Node for i64 {
+    fn ty() -> Ty {
+        Ty::Int
+    }
+    fn put(&self, out: &mut Vec<u8>) {
+        put_int(out, *self);
+    }
+    fn take(r: &mut Reader) -> Result<i64, Refusal> {
+        r.int()
+    }
+}
+
+macro_rules! narrow {
+    ($($t:ty),*) => {$(
+        impl Node for $t {
+            fn ty() -> Ty {
+                Ty::Int
+            }
+            fn put(&self, out: &mut Vec<u8>) {
+                put_int(out, *self as i64);
+            }
+            fn take(r: &mut Reader) -> Result<$t, Refusal> {
+                let at = r.at;
+                <$t>::try_from(r.int()?).map_err(|_| Refusal(format!("an int out of range at byte {at}")))
+            }
+        }
+    )*};
+}
+narrow!(usize, u32);
+
+impl Node for u8 {
+    fn ty() -> Ty {
+        Ty::Int
+    }
+    fn put(&self, out: &mut Vec<u8>) {
+        put_int(out, *self as i64);
+    }
+    fn take(r: &mut Reader) -> Result<u8, Refusal> {
+        u8::try_from(r.int()?).map_err(|_| Refusal::new("a byte out of range"))
+    }
+    fn list_ty() -> Ty {
+        Ty::Bytes
+    }
+    fn put_list(xs: &[u8], out: &mut Vec<u8>) {
+        put_bytes(out, xs);
+    }
+    fn take_list(r: &mut Reader) -> Result<Vec<u8>, Refusal> {
+        r.bytes()
+    }
+}
+
+impl Node for bool {
+    fn ty() -> Ty {
+        Ty::bool()
+    }
+    fn put(&self, out: &mut Vec<u8>) {
+        out.push(*self as u8);
+    }
+    fn take(r: &mut Reader) -> Result<bool, Refusal> {
+        Ok(r.variant(2)? == 1)
+    }
+}
+
+impl Node for String {
+    fn ty() -> Ty {
+        Ty::Bytes
+    }
+    fn put(&self, out: &mut Vec<u8>) {
+        put_bytes(out, self.as_bytes());
+    }
+    fn take(r: &mut Reader) -> Result<String, Refusal> {
+        r.text()
+    }
+}
+
+impl Node for () {
+    fn ty() -> Ty {
+        Ty::unit()
+    }
+    fn put(&self, _: &mut Vec<u8>) {}
+    fn take(_: &mut Reader) -> Result<(), Refusal> {
+        Ok(())
+    }
+}
+
+impl<T: Node> Node for Vec<T> {
+    fn ty() -> Ty {
+        T::list_ty()
+    }
+    fn put(&self, out: &mut Vec<u8>) {
+        T::put_list(self, out);
+    }
+    fn take(r: &mut Reader) -> Result<Vec<T>, Refusal> {
+        T::take_list(r)
+    }
+}
+
+impl<T: Node> Node for Option<T> {
+    fn ty() -> Ty {
+        Ty::option(T::ty())
+    }
+    fn put(&self, out: &mut Vec<u8>) {
+        crate::codec::put_option(out, self.as_ref(), |o, x| x.put(o));
+    }
+    fn take(r: &mut Reader) -> Result<Option<T>, Refusal> {
+        r.option(T::take)
+    }
+}
+
+impl<T: Node> Node for Box<T> {
+    fn ty() -> Ty {
+        T::ty()
+    }
+    fn put(&self, out: &mut Vec<u8>) {
+        (**self).put(out);
+    }
+    fn take(r: &mut Reader) -> Result<Box<T>, Refusal> {
+        T::take(r).map(Box::new)
+    }
+}
+
+macro_rules! tuples {
+    ($(($($t:ident $i:tt),+))*) => {$(
+        impl<$($t: Node),+> Node for ($($t,)+) {
+            fn ty() -> Ty {
+                Ty::Tuple(vec![$($t::ty()),+])
+            }
+            fn put(&self, out: &mut Vec<u8>) {
+                $(self.$i.put(out);)+
+            }
+            fn take(r: &mut Reader) -> Result<Self, Refusal> {
+                Ok(($($t::take(r)?,)+))
+            }
+        }
+    )*};
+}
+tuples!((A 0) (A 0, B 1) (A 0, B 1, C 2) (A 0, B 1, C 2, D 3));
+
+/// A fixed number of bytes — a hash, an id — is `Bytes` of that length.
+macro_rules! fixed {
+    ($($t:ty: $n:literal),*) => {$(
+        impl Node for $t {
+            fn ty() -> Ty {
+                Ty::Bytes
+            }
+            fn put(&self, out: &mut Vec<u8>) {
+                put_bytes(out, &self.0);
+            }
+            fn take(r: &mut Reader) -> Result<$t, Refusal> {
+                r.fixed::<$n>().map(Self)
+            }
+        }
+    )*};
+}
+fixed!(StateHash: 32, TypeHash: 32, EntryHash: 32, SchemaHash: 32, EntryId: 16, Origin: 16);

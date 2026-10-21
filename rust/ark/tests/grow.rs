@@ -14,11 +14,10 @@ use std::sync::Arc;
 
 use ark::codec::bytes_enc;
 use ark::frames::Frame;
-use ark::hash::FnHash;
 use ark::log::{Durable, EntryId, Origin};
 use ark::peer::{Ctx, Input, Journal, Peer, Procedure, Role};
 use ark::schema::{Column, Schema, Table};
-use ark::store::{Change, Read, Store};
+use ark::store::{Change, Store};
 use ark::ty::Ty;
 use ark::Refusal;
 use demo::{create_input, pair_input, ADD, CREATE};
@@ -43,15 +42,17 @@ fn wider() -> Arc<Schema> {
 struct TagIt;
 
 impl Procedure for TagIt {
-    fn run(&self, _: &dyn Read, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
-        Ok(vec![Change::Add {
+    fn apply(&self, store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
+        let c = Change::Add {
             table: "tag".into(),
             row: input.to_vec(),
-        }])
+        };
+        store.apply(&c)?;
+        Ok(vec![c])
     }
 }
 
-const TAG: FnHash = FnHash([7; 32]);
+const TAG: &str = "grow.tag";
 
 fn durable(p: &Peer) -> Durable {
     Durable {
@@ -102,7 +103,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
     assert_ne!(wide.store.state_hash(), server.store.state_hash());
 
     let o = wide.step(Input::Mutate {
-        func: TAG,
+        func: TAG.into(),
         input: bytes_enc(b"loud"),
         now: 3,
     });
@@ -115,6 +116,8 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
             cursor: 0,
             hash: None,
             device: None,
+            schema: Default::default(),
+            version: String::new(),
         },
     )));
     assert!(

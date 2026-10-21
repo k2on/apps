@@ -8,42 +8,32 @@
 //! replica or authority (§1.7, [`peer`]); and the frames (§1.11,
 //! [`frames`]).
 //!
-//! The kernel runs a function as a [`peer::Procedure`], found by its
-//! [`hash::FnHash`] in a [`peer::Cas`]. The language is the rest (§1.4,
-//! §1.5): the IR and every type as a value ([`ir`], `#[derive(Node)]`),
-//! one checker ([`check`]), one interpreter, which is a `Procedure`, and
-//! the boundary's `parse` ([`interp`]), the standard library ([`std`]) and
-//! modules as binding maps over the content store ([`module`]).
+//! The kernel runs a function as a [`peer::Procedure`], found by its name
+//! in a peer's [`peer::Functions`]. A domain is plain Rust (§1.16): rows,
+//! inputs and the schema derived ([`row`]), functions registered by name
+//! in a [`Domain`] ([`domain`]), reads and writes through a typed store
+//! ([`db`]) and views as plans maintained per operator ([`plan`]); rows
+//! without a Rust type are JSON under the schema ([`dynamic`]).
 
 use ::std::fmt;
 
 extern crate self as ark;
 
-/// What a module is assembled into (§1.15).
-pub use module::Domain;
+pub use domain::Domain;
 
-pub mod check;
 pub mod codec;
 pub mod db;
 pub mod domain;
 pub mod dynamic;
 pub mod frames;
-pub mod gen;
 pub mod hash;
-pub mod interp;
-pub mod ir;
 pub mod log;
-pub mod module;
 pub mod peer;
 pub mod plan;
 pub mod row;
 pub mod schema;
-pub mod sexp;
-pub mod std;
 pub mod store;
 pub mod ty;
-pub mod unicode_tables;
-pub mod view;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
 /// a constraint refused, an intent its function refused. What a form shows
@@ -67,9 +57,9 @@ impl fmt::Display for Refusal {
 /// attributes that register a function by name, the context, the typed
 /// store, plans, ids and indexes.
 pub mod prelude {
+    pub use crate::codec::Node;
     pub use crate::db::{Db, Tables};
     pub use crate::domain::{Domain, Scope};
-    pub use crate::ir::Node;
     pub use crate::peer::Ctx;
     pub use crate::plan::{scan, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};

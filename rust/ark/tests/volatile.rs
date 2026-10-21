@@ -16,42 +16,52 @@ use std::sync::Arc;
 
 use ark::codec::bytes_enc;
 use ark::frames::{Frame, Verdict};
-use ark::ir::{CtxField, Effect, Expr, Node};
-use ark::peer::{Cas, Input, Journal, Output, Peer, Role};
-use ark::schema::{Schema, Space, Table};
+use ark::peer::{Functions, Input, Journal, Output, Peer, Role};
+use ark::prelude::*;
+use ark::schema::{Schema, Space};
 use ark::store::Read;
-use ark::ty::Ty;
-use demo::{ctx, func, insert, text_ty};
 use support::wire::*;
 
-/// The demo's tables and `here(session, name)`, volatile.
+/// Who is here, by session: volatile.
+#[derive(Clone, Debug, PartialEq, Eq, Node, Row)]
+#[ark(volatile)]
+pub struct Here {
+    #[ark(key)]
+    pub session: String,
+    pub name: String,
+}
+
+/// The demo's tables and `here`.
+#[derive(Schema)]
+pub struct Waves {
+    pub playlist: demo::Playlist,
+    pub item: demo::Item,
+    pub here: Here,
+}
+
 fn schema() -> Arc<Schema> {
-    let mut s = demo::schema();
-    s.tables.push(
-        Table::new("here")
-            .col("session", "Text", Ty::Bytes)
-            .col("name", "Text", Ty::Bytes)
-            .volatile(),
-    );
-    Arc::new(s)
+    Arc::new(<Waves as Tables>::schema())
+}
+
+#[derive(Clone, Debug, PartialEq, Node, Input)]
+pub struct Wave {
+    pub name: String,
 }
 
 /// `wave(name)`: the caller's row of `here`, put.
-fn wave() -> ark::ir::Function {
-    func(vec![], &[("name", text_ty())], Ty::unit(), Effect::Write, |b| {
-        let key = Expr::Tuple(vec![ctx(CtxField::Session)]);
-        Expr::Seq(vec![
-            Expr::Delete("here".into(), Box::new(key)),
-            insert("here", vec![ctx(CtxField::Session), b.v("name")]),
-        ])
+#[live("waves.wave")]
+pub fn wave(ctx: &Ctx, db: &mut Db<Waves>, input: Wave) -> Result<(), Refusal> {
+    db.here.delete(ctx.device())?;
+    db.here.insert(Here {
+        session: ctx.device().into(),
+        name: input.name,
     })
 }
 
-fn cas() -> Cas {
-    let mut c = Cas::default().with_loader(ark::module::Lib::default().loader(schema()));
-    for b in [wave().to_bytes(), demo::body(demo::CREATE)] {
-        c.add_body(b);
-    }
+fn cas() -> Functions {
+    let mut c = demo::only(&[demo::CREATE]);
+    let waves = ark::register!(Domain::new::<Waves>("waves", "1"); wave).functions();
+    c.insert("waves.wave", waves.get("waves.wave").unwrap().clone());
     c
 }
 
@@ -65,7 +75,7 @@ fn authority() -> Peer {
 
 fn waving(name: &str) -> Input {
     Input::Mutate {
-        func: wave().hash(),
+        func: "waves.wave".into(),
         input: bytes_enc(name.as_bytes()),
         now: 1,
     }

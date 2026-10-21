@@ -1,7 +1,7 @@
 //! `rebase/three-peers`, steps 1–4 of `spec/RUNNERS.md` § rebase, re-derived
 //! for v5: every confirmed entry is applied by its facts, ids are drawn from
 //! the entry, the chain is the log's identity. The states it reaches are
-//! pinned here; the interpreter must reach them byte for byte.
+//! pinned here; the domain in Rust must reach them byte for byte.
 
 #[path = "demo.rs"]
 mod demo;
@@ -12,12 +12,12 @@ mod support {
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use ark::codec::Node;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
-use ark::ir::Node;
 use ark::log::{Durable, EntryId, Logged, Origin, Record};
-use ark::peer::{Cas, Ctx, Input, Output, Peer, Procedure};
-use ark::store::{Change, Read, LOG};
+use ark::peer::{Ctx, Functions, Input, Output, Peer, Procedure};
+use ark::store::{Change, LOG};
 use demo::{create_input, pair_input, pos_of, ADD, CREATE, REMOVE, RENAME};
 use support::wire::*;
 
@@ -204,7 +204,7 @@ fn step_2_a_replica_given_the_entries_backwards() {
 #[test]
 fn step_3_by_facts_alone() {
     let s = scenario();
-    let mut r = replica("nobody", Cas::default());
+    let mut r = replica("nobody", Functions::default());
     for f in &s.batches {
         r.step(down(f));
     }
@@ -258,9 +258,11 @@ fn compaction_and_the_horizon() {
         cursor,
         hash: Some(hash),
         device: None,
+        schema: Default::default(),
+        version: String::new(),
     };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
-    let mut r = replica("x", Cas::default());
+    let mut r = replica("x", Functions::default());
     assert!(matches!(at0[..], [Frame::Snapshot { .. }]));
     r.step(down(&at0[0]));
     assert_eq!((r.log().head(), r.store.state_hash().hex()), (server.log().head(), FINAL.into()));
@@ -300,17 +302,14 @@ fn edits_and_removes_rebase_too() {
     assert_eq!(pos_of(&alice.store, &pid(), "t4"), Some(4));
 }
 
-/// A function the authority does not run is `Held`, and no body a client
-/// has is ever loaded: the intent stays pending on the device, which sends
+/// A function the authority does not run is `Held`: the intent stays pending on the device, which sends
 /// nothing back for a `Held` and pushes it again on its next connection;
-/// held again until the operator loads the function, then sequenced.
+/// held again until the authority has the function, then sequenced.
 /// Falsified by `push` answering an unknown function with a `Reject`
 /// instead of `Held`: the first push came back refused.
 #[test]
-fn held_until_the_operator_loads_it() {
-    let mut lacking = Cas::default().with_loader(demo::loader());
-    lacking.add_body(demo::body(CREATE));
-    let mut server = authority(lacking);
+fn held_until_the_authority_has_it() {
+    let mut server = authority(demo::only(&[CREATE]));
     let mut alice = replica("alice", demo::cas());
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));
     deliver_up(&mut server, &who("alice"), &o);
@@ -324,7 +323,7 @@ fn held_until_the_operator_loads_it() {
         matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Held { .. })]),
         "held again: {s:?}"
     );
-    server.cas.add_body(demo::body(ADD));
+    server.functions.insert(ADD, demo::cas().get(ADD).unwrap().clone());
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
         matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Ok { seq: 2 })]),
@@ -427,9 +426,9 @@ fn a_sessions_pushes_are_judged_in_order() {
 struct Counted(Arc<dyn Procedure>, Arc<AtomicUsize>);
 
 impl Procedure for Counted {
-    fn run(&self, store: &dyn Read, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, ark::Refusal> {
+    fn apply(&self, store: &mut ark::store::Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, ark::Refusal> {
         self.1.fetch_add(1, Ordering::Relaxed);
-        self.0.run(store, ctx, input)
+        self.0.apply(store, ctx, input)
     }
 }
 
@@ -485,15 +484,13 @@ fn a_page_rebases_once() {
 
 /// What a session pushes behind a held intent waits on the authority, in
 /// order: held again on a reconnect while the function is unknown, then
-/// judged after it once the operator loads it — told to the session's
+/// judged after it once the authority has the function — told to the session's
 /// connections, and pushed again it is answered back. Falsified by `push`
 /// dropping what comes behind a held one as a gap (no `waiting`): after
 /// the load nothing was answered and the log stayed at 1.
 #[test]
 fn what_comes_behind_a_held_intent_waits_for_it() {
-    let mut lacking = Cas::default().with_loader(demo::loader());
-    lacking.add_body(demo::body(CREATE));
-    let mut server = authority(lacking);
+    let mut server = authority(demo::only(&[CREATE]));
     let mut alice = replica("alice", demo::cas());
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));
     deliver_up(&mut server, &who("alice"), &o);
@@ -508,7 +505,7 @@ fn what_comes_behind_a_held_intent_waits_for_it() {
         matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Held { .. })]),
         "held again, the third waits: {s:?}"
     );
-    server.cas.add_body(demo::body(ADD));
+    server.functions.insert(ADD, demo::cas().get(ADD).unwrap().clone());
     let to: Vec<Frame> = server
         .step(Input::Loaded)
         .iter()

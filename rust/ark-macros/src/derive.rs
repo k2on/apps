@@ -3,7 +3,7 @@
 //! the `i`-th variant's fields (none for a unit variant). Each field is
 //! encoded by its own type's `Node`, so a type is the composition of its
 //! parts' and no walk is written by hand. A type that contains itself is
-//! `Named` by its identifier where it recurs (`ark::ir::named`), which is
+//! `Named` by its identifier where it recurs (`ark::codec::named`), which is
 //! the only way the five constructors can say a recursive type.
 
 use proc_macro2::TokenStream;
@@ -15,7 +15,7 @@ use syn::{Data, DeriveInput, Fields};
 fn parts(fields: &Fields, path: TokenStream) -> (Vec<&syn::Type>, TokenStream, TokenStream) {
     let tys: Vec<_> = fields.iter().map(|f| &f.ty).collect();
     let vars: Vec<_> = (0..tys.len()).map(|i| quote::format_ident!("f{i}")).collect();
-    let take = quote!(::ark::ir::Node::take(r)?);
+    let take = quote!(::ark::codec::Node::take(r)?);
     match fields {
         Fields::Named(n) => {
             let names: Vec<_> = n.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();
@@ -38,8 +38,8 @@ pub fn node(input: DeriveInput) -> TokenStream {
             let (tys, pat, make) = parts(&s.fields, quote!(#name));
             let vars = (0..tys.len()).map(|i| quote::format_ident!("f{i}"));
             (
-                quote!(::ark::ty::Ty::Tuple(vec![#(<#tys as ::ark::ir::Node>::ty()),*])),
-                quote!(let #pat = self; #(::ark::ir::Node::put(#vars, out);)*),
+                quote!(::ark::ty::Ty::Tuple(vec![#(<#tys as ::ark::codec::Node>::ty()),*])),
+                quote!(let #pat = self; #(::ark::codec::Node::put(#vars, out);)*),
                 quote!(Ok(#make)),
             )
         }
@@ -50,8 +50,8 @@ pub fn node(input: DeriveInput) -> TokenStream {
                 let (vname, i8) = (&v.ident, i as u8);
                 let (ftys, pat, make) = parts(&v.fields, quote!(#name::#vname));
                 let vars = (0..ftys.len()).map(|i| quote::format_ident!("f{i}"));
-                tys.push(quote!(vec![#(<#ftys as ::ark::ir::Node>::ty()),*]));
-                puts.push(quote!(#pat => { out.push(#i8); #(::ark::ir::Node::put(#vars, out);)* }));
+                tys.push(quote!(vec![#(<#ftys as ::ark::codec::Node>::ty()),*]));
+                puts.push(quote!(#pat => { out.push(#i8); #(::ark::codec::Node::put(#vars, out);)* }));
                 takes.push(quote!(#i8 => #make,));
             }
             (
@@ -63,9 +63,9 @@ pub fn node(input: DeriveInput) -> TokenStream {
         Data::Union(_) => return quote!(compile_error!("a union is not a Node");),
     };
     quote! {
-        impl ::ark::ir::Node for #name {
+        impl ::ark::codec::Node for #name {
             fn ty() -> ::ark::ty::Ty {
-                ::ark::ir::named(#label, || #ty)
+                ::ark::codec::named(#label, || #ty)
             }
             #[allow(unused_variables)]
             fn put(&self, out: &mut Vec<u8>) {

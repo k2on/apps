@@ -696,7 +696,7 @@ pub fn scan_raw<S: Tables, T: Elem>(table: &str, decode: impl Fn(&Store, &[u8]) 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Desc<K>(pub K);
 
-impl<K: crate::ir::Node> crate::ir::Node for Desc<K> {
+impl<K: crate::codec::Node> crate::codec::Node for Desc<K> {
     fn ty() -> crate::ty::Ty {
         K::ty()
     }

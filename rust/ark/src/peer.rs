@@ -36,14 +36,13 @@
 //! local)`, a gap in a replica's pushes waits for them in order — stamps it
 //! with the actor, session and roles of the connection it judged it on,
 //! runs it, and logs it with its facts. An origin is bound to the actor
-//! whose intents first came from it; another's pushed from it is refused. It runs exactly the functions in its content store, which
-//! are the ones bound in the modules its operator loaded: it never loads a
-//! body it is sent. An intent naming any other is `Held` — the device keeps
+//! whose intents first came from it; another's pushed from it is refused. It runs exactly the functions its program
+//! was built with, by name (§1.16): nothing it is sent is code. An intent naming any other is `Held` — the device keeps
 //! it pending and pushes it again on its next connection — and a chain
 //! handed over with one is refused. A held intent keeps its `local`: those
 //! pushed after it from its origin wait on the authority, in order, and are
-//! judged when it is — pushed again once the function is loaded, or when
-//! the driver says it loaded functions (`Input::Loaded`), each answer then
+//! judged when it is — pushed again once the function is there, or when
+//! the driver says it has more (`Input::Loaded`), each answer then
 //! sent to the connections of the session that last pushed (`Output::To`).
 //!
 //! **A schema grows** (§1.2). Facts and snapshot rows another schema of a
@@ -61,7 +60,7 @@
 //! its `Hello` the authority takes the union from its store and sends it as
 //! a snapshot at the head; every entry after is sent to it alone
 //! (`Output::To`) with the facts the scope's filter makes of the entry's
-//! ([`crate::view::scoped`]), the union's state hash after them, and a
+//! ([`scoped`]), the union's state hash after them, and a
 //! chain of its own from that snapshot. `Fanout` is for connections fed
 //! whole. The replica is the same machine: it applies facts like every
 //! replica, its own intents previewed over what it holds and confirmed by
@@ -98,12 +97,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::codec::Node;
 use crate::frames::{Frame, Verdict};
-use crate::hash::{EntryHash, FnHash};
-use crate::ir::Node;
+use crate::hash::EntryHash;
 use crate::log::{Durable, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Snapshot};
 use crate::schema::{Schema, Space};
-use crate::store::{Change, Log, Read, Store, LOG};
+use crate::store::{Change, Log, Store, LOG};
 use crate::Refusal;
 
 /// How many logged entries a `Page` carries at most.
@@ -163,18 +162,11 @@ impl Ctx {
     }
 }
 
-/// A function, opaque to the kernel: its changes, or its refusal.
+/// A function, opaque to the kernel: run over the store and its changes
+/// left applied, all or none — or its refusal. A function reads its own
+/// writes as it makes them (§1.16).
 pub trait Procedure: Send + Sync {
-    fn run(&self, store: &dyn Read, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal>;
-
-    /// The function run over `store` and its changes left applied, all or
-    /// none: what the machine does with an intent. A function that reads
-    /// its own writes as it makes them runs here (§1.16).
-    fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
-        let changes = self.run(store, ctx, input)?;
-        store.apply_all(&changes)?;
-        Ok(changes)
-    }
+    fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal>;
 
     /// A scope's verdict on its input, a row as its table's variant
     /// (§1.8): whether the union holds it. Only a `Pure` function gives one.
@@ -183,61 +175,37 @@ pub trait Procedure: Send + Sync {
     }
 }
 
-/// What turns a function's bytes into something that runs: the language's.
-pub type Loader = Arc<dyn Fn(&[u8]) -> Option<Arc<dyn Procedure>> + Send + Sync>;
-
-/// The content store (§1.5): functions by hash, and the bytes of those it
-/// can send.
+/// The functions a peer runs, by the names entries call them by (§1.16):
+/// its domain's, registered when the program was built. Nothing a peer is
+/// sent is ever run but by a name it already has.
 #[derive(Clone, Default)]
-pub struct Cas {
-    procs: BTreeMap<FnHash, Arc<dyn Procedure>>,
-    bodies: BTreeMap<FnHash, Vec<u8>>,
-    loader: Option<Loader>,
+pub struct Functions {
+    procs: BTreeMap<String, Arc<dyn Procedure>>,
 }
 
-impl fmt::Debug for Cas {
+impl fmt::Debug for Functions {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_set().entries(self.procs.keys()).finish()
     }
 }
 
-impl Cas {
-    pub fn insert(&mut self, h: FnHash, p: Arc<dyn Procedure>) {
-        self.procs.insert(h, p);
+impl Functions {
+    pub fn insert(&mut self, name: impl Into<String>, p: Arc<dyn Procedure>) {
+        self.procs.insert(name.into(), p);
     }
 
-    pub fn get(&self, h: &FnHash) -> Option<&Arc<dyn Procedure>> {
-        self.procs.get(h)
+    pub fn get(&self, name: &str) -> Option<&Arc<dyn Procedure>> {
+        self.procs.get(name)
     }
 
-    pub fn with_loader(mut self, l: Loader) -> Cas {
-        self.loader = Some(l);
-        self
+    /// A function runnable no more.
+    pub fn forget(&mut self, name: &str) {
+        self.procs.remove(name);
     }
 
-    /// Keeps a function's bytes under their hash and loads them, when there
-    /// is a loader and it can.
-    pub fn add_body(&mut self, bytes: Vec<u8>) -> FnHash {
-        let h = FnHash::of(&bytes);
-        if let Some(p) = self.loader.as_ref().and_then(|l| l(&bytes)) {
-            self.procs.insert(h, p);
-        }
-        self.bodies.insert(h, bytes);
-        h
-    }
-
-    /// A function runnable no more; its bytes are kept.
-    pub fn forget(&mut self, h: &FnHash) {
-        self.procs.remove(h);
-    }
-
-    pub fn body(&self, h: &FnHash) -> Option<&Vec<u8>> {
-        self.bodies.get(h)
-    }
-
-    /// Every body it holds, in hash order.
-    pub fn bodies(&self) -> impl Iterator<Item = &Vec<u8>> {
-        self.bodies.values()
+    /// Every name, in order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.procs.keys().map(String::as_str)
     }
 }
 
@@ -295,10 +263,10 @@ pub enum Role {
 
 /// What a replica is fed: every entry whole, or a scope's union (§1.8),
 /// the scope by hash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Feed {
     Whole,
-    Scoped(FnHash),
+    Scoped(String),
 }
 
 /// A connection an authority serves by a scope: who it is, the scope, the
@@ -306,7 +274,7 @@ pub enum Feed {
 #[derive(Clone, Debug)]
 pub struct Served {
     pub who: Who,
-    pub scope: FnHash,
+    pub scope: String,
     pub union: Store,
     pub head: Option<(Seq, EntryHash)>,
 }
@@ -318,7 +286,7 @@ pub enum Input {
         bytes: Vec<u8>,
     },
     Mutate {
-        func: FnHash,
+        func: String,
         input: Vec<u8>,
         now: i64,
     },
@@ -329,8 +297,8 @@ pub enum Input {
     Alone,
     Join,
     Compact(Seq),
-    /// The driver loaded functions into `cas` (an operator's module): what
-    /// waits behind a held intent is judged again.
+    /// The driver gave the peer more functions: what waits behind a held
+    /// intent is judged again.
     Loaded,
     /// How the connection verified as `who` is fed (an authority's).
     Feed {
@@ -377,7 +345,7 @@ pub struct Peer {
     /// The confirmed state with the pending intents' changes applied, and
     /// the log as its table (§1.6).
     pub store: Store,
-    pub cas: Cas,
+    pub functions: Functions,
     pub pending: Vec<Pending>,
     pub role: Role,
     pub feed: Feed,
@@ -395,6 +363,9 @@ pub struct Peer {
     pub served: BTreeMap<String, Served>,
     /// What this device says it is, in every `Hello` (§1.9).
     pub device: Option<Vec<u8>>,
+    /// The version of the domain this peer runs, in every `Hello` beside
+    /// its schema's hash: what an operator reads a fleet's spread by.
+    pub version: String,
     /// The chain a join handed over, until the server has answered any of
     /// it: a connection made before then hands it over again.
     pub joining: Option<(Seq, EntryHash, Vec<Logged>)>,
@@ -462,12 +433,12 @@ fn started(mut store: Store) -> Store {
 impl Peer {
     /// A peer from empty; its origin named by its session's bytes until
     /// its driver gives it the one it drew ([`Origin`]).
-    pub fn new(schema: Arc<Schema>, cas: Cas, role: Role, me: Who) -> Peer {
+    pub fn new(schema: Arc<Schema>, functions: Functions, role: Role, me: Who) -> Peer {
         let store = started(Store::new(schema));
         let origin = Origin::named(&me.session);
         Peer {
             store,
-            cas,
+            functions,
             pending: vec![],
             role,
             feed: Feed::Whole,
@@ -479,6 +450,7 @@ impl Peer {
             asked: None,
             served: BTreeMap::new(),
             device: None,
+            version: String::new(),
             joining: None,
             foreign: None,
             faith: false,
@@ -627,7 +599,11 @@ impl Peer {
 
     /// Runs an intent over the store and applies what it did, all or none.
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
-        let p = self.cas.get(&e.func).cloned().ok_or_else(|| Refusal(format!("no function {}", e.func)))?;
+        let p = self
+            .functions
+            .get(&e.func)
+            .cloned()
+            .ok_or_else(|| Refusal(format!("no function {}", e.func)))?;
         let changes = p.apply(&mut self.store, &Ctx::of(e), &e.input)?;
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
@@ -669,7 +645,7 @@ impl Peer {
         true
     }
 
-    fn mutate(&mut self, func: FnHash, input: Vec<u8>, now: i64, o: &mut Out) {
+    fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, o: &mut Out) {
         let local = self.local + 1;
         let entry = Entry {
             id: EntryId::of(self.origin, local),
@@ -817,7 +793,7 @@ impl Peer {
             roles: s.who.roles.clone(),
             now: 0,
         };
-        let (scope, schema) = (self.cas.get(&s.scope).cloned(), self.store.schema_arc().clone());
+        let (scope, schema) = (self.functions.get(&s.scope).cloned(), self.store.schema_arc().clone());
         move |table, row| {
             let scope = scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?;
             let i = schema.table(table).ok_or_else(|| Refusal(format!("no table {table}")))?.0;
@@ -874,7 +850,7 @@ impl Peer {
             let Some((at, prev)) = self.served[&session].head.filter(|h| h.0 + 1 == l.seq) else {
                 continue;
             };
-            let facts = crate::view::scoped(&l.facts, &mut self.holder(&session));
+            let facts = scoped(&l.facts, &mut self.holder(&session));
             let s = self.served.get_mut(&session).unwrap();
             let Some(facts) = facts.ok().filter(|fs| s.union.apply_all(fs).is_ok()) else {
                 s.head = None;
@@ -944,8 +920,8 @@ impl Peer {
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             return;
         }
-        if self.cas.get(&entry.func).is_none() {
-            let func = entry.func;
+        if self.functions.get(&entry.func).is_none() {
+            let func = entry.func.clone();
             if space == Space::Durable {
                 self.journal().waiting.insert(origin, vec![(who.clone(), entry)]);
             }
@@ -977,12 +953,12 @@ impl Peer {
     fn unhold(&mut self, origin: Origin, pushed: bool, o: &mut Out) {
         let mut first = true;
         while let Some((who, e)) = self.journal().waiting.get(&origin).and_then(|q| q.first().cloned()) {
-            let f = match self.cas.get(&e.func) {
+            let f = match self.functions.get(&e.func) {
                 None if first && !pushed => return,
                 None => Frame::Verdict {
                     space: self.space,
                     id: e.id,
-                    verdict: Verdict::Held { func: e.func },
+                    verdict: Verdict::Held { func: e.func.clone() },
                 },
                 Some(_) => {
                     let q = self.journal().waiting.get_mut(&origin).expect("it waits");
@@ -1030,7 +1006,7 @@ impl Peer {
                     self.journal().pass(l.entry.origin, &who.actor, l.entry.local - 1);
                 }
                 let judged = self.journal().verdicts.contains_key(&l.entry.id);
-                match self.cas.get(&l.entry.func) {
+                match self.functions.get(&l.entry.func) {
                     None if !judged && mine => {
                         let why = format!("no function {}", l.entry.func);
                         self.refuse(&l.entry, why, o)
@@ -1048,7 +1024,7 @@ impl Peer {
             let owned = e.id_checks() && !self.journal().others(&e.origin, &who.actor);
             if !owned || self.sequence(e, Some(&l.facts), &mut done).is_err() {
                 (self.store, self.role) = (store, role);
-                let why = match self.cas.get(&l.entry.func) {
+                let why = match self.functions.get(&l.entry.func) {
                     None => format!("the chain's function at {} is not one this authority runs", l.seq),
                     Some(_) => format!("the chain's facts at {} are not what this authority's run gives", l.seq),
                 };
@@ -1149,6 +1125,8 @@ impl Peer {
                 cursor: n,
                 hash: Some(h),
                 device: self.device.clone(),
+                schema: self.store.schema_hash(),
+                version: self.version.clone(),
             });
         }
     }
@@ -1171,6 +1149,8 @@ impl Peer {
             cursor,
             hash: None,
             device: self.device.clone(),
+            schema: self.store.schema_hash(),
+            version: self.version.clone(),
         });
     }
 
@@ -1272,6 +1252,8 @@ impl Peer {
             cursor: at,
             hash: Some(hash),
             device: self.device.clone(),
+            schema: self.store.schema_hash(),
+            version: self.version.clone(),
         });
         self.joining = Some((at, hash, chain.clone()));
         o.send(Frame::Page {
@@ -1359,4 +1341,35 @@ fn foreign(store: &Store) -> Option<Seq> {
     }
     let base = log.base();
     (s.state_hash() != base.state).then_some(base.seq)
+}
+
+/// A scope's verdict on a row of a table.
+pub type Holds<'a> = dyn FnMut(&str, &[u8]) -> Result<bool, Refusal> + 'a;
+
+/// §1.8 A scope's filter over facts, in order: the changes they make to the
+/// rows it holds — an edit across its line as the add or the remove it is.
+/// `holds` is the scope's verdict on a row of a table; a scope is a
+/// function of the row alone, so the filter keeps nothing.
+pub fn scoped(facts: &[Change], holds: &mut Holds) -> Result<Vec<Change>, Refusal> {
+    let mut out = vec![];
+    for c in facts {
+        let t = || c.table().to_string();
+        let kept = match c {
+            Change::Add { row, .. } | Change::Remove { row, .. } => holds(c.table(), row)?.then(|| c.clone()),
+            Change::Edit { old, new, .. } => match (holds(c.table(), old)?, holds(c.table(), new)?) {
+                (true, true) => Some(c.clone()),
+                (true, false) => Some(Change::Remove {
+                    table: t(),
+                    row: old.clone(),
+                }),
+                (false, true) => Some(Change::Add {
+                    table: t(),
+                    row: new.clone(),
+                }),
+                (false, false) => None,
+            },
+        };
+        out.extend(kept);
+    }
+    Ok(out)
 }
