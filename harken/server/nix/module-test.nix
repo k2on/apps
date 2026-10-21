@@ -46,7 +46,6 @@ let
   traced = house { mediaUrl = "http://10.0.0.2:8787"; trace = true; };
   noMedia = eval { devAuth = true; mediaPath = null; };
   roles = eval { devAuth = true; roles = { library = [ "alice" "bob" ]; admin = [ "alice" ]; }; };
-  oldModules = eval { devAuth = true; oldModules = [ "/srv/old/a.ark" "/srv/old/b.ark" ]; };
   adminWide = eval { devAuth = true; admin.bind = "0.0.0.0:8788"; };
   adminWideHeld = eval { devAuth = true; admin.bind = "0.0.0.0:8788"; roles.admin = [ "alice" ]; };
   adminOff = eval { devAuth = true; admin.bind = null; };
@@ -75,8 +74,6 @@ let
     [ (!(lib.any (lib.hasInfix "/srv/media") noMedia.systemd.tmpfiles.rules) && !(env noMedia ? HARKEN_MEDIA) && (unit noMedia).serviceConfig.BindReadOnlyPaths == [ ]) "no media path, no media" ]
     [ ((env roles).HARKEN_ROLES == "admin=alice;library=alice,bob") "roles reach the server, role by role" ]
     [ (!(env dev ? HARKEN_ROLES)) "and none, nothing" ]
-    [ ((env oldModules).HARKEN_OLD_MODULES == "/srv/old/a.ark,/srv/old/b.ark") "the old modules reach the server" ]
-    [ (!(env dev ? HARKEN_OLD_MODULES)) "and none, nothing" ]
     [ ((env dev).HARKEN_ADMIN_BIND == "127.0.0.1:8788" && dev.warnings == [ ]) "the admin page is on loopback by default, asking nothing" ]
     [ ((env adminPage).HARKEN_ADMIN_WEB == "${hello}") "its page is served from the build named" ]
     [ (warns adminWide "names nobody holding it") "an admin page bound wider that nobody holds admin for is a warning" ]

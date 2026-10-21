@@ -1,208 +1,150 @@
-# ArkLang
+# Writing a domain in Rust
 
-`docs/plan-v5.md` §1.15. A domain is written in ArkLang; the module
-(§1.5) — what runtimes load, check, hash and call by name — is built from
-the text, and the text is the source of truth. ArkLang is S-expressions:
-one reader rule, `(head args…)`, so there is one spelling by
-construction, the printer is a tree walk, and a reader in any language is
-small. One printer: `build(print(m)) == m` for every module, and
-`print(build(t)) == t` for every form as the printer lays it out.
+A domain is a crate of plain Rust (`docs/plan-v5.md` §1.16): its rows,
+its inputs and its functions, registered by name in a `Domain` that the
+kernel runs. There is one runtime. A peer finds a function by the name an
+entry carries, and code never crosses the wire. `rust/ark-dev/src/demo.rs`
+is the demo, and `harken/domain/src/` is a whole application, one file
+per part. Everything below comes from `ark::prelude::*`.
 
-The reference is `rust/ark/src/sexp.rs` (reader, lowering, printer,
-`build_dir`, `load`); `arkc` (`rust/ark-dev`) checks, prints, compares
-and compiles modules; `rust/ark-dev/src/demo.ark` is the demo and
-`harken/domain/*.ark` a whole application.
+## Rows and the schema
 
-## 1. Reading
+```rust
+#[derive(Clone, Debug, PartialEq, Eq, Default, Node, Row)]
+#[ark(index(playlist_id, pos))]
+pub struct PlaylistItem {
+    #[ark(key, refs(Playlist))]
+    pub playlist_id: Id<Playlist>,
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    pub pos: i64,
+    pub added_ms: i64,
+    pub user_id: String,
+}
 
-Atoms are **symbols**, **integers** (`5`, `-5`), **strings** `"…"` (`\"`
-and `\\` the only escapes) and **bytes** `0x00ff`; `true`, `false` and
-`none` are symbols with a meaning. Lists are `( … )`; `;` comments run to
-the end of a line. A symbol may hold `.`: one whose head is a bound
-variable is a field path (`input.playlist_id`, `pair.0`); otherwise it is
-a declared name (`playlists.owned`, `Clock.Paused`). An error is said at
-its `file:line:column`.
-
-**The layout.** A form is one line when it ends by column 100, the `)`s
-closing on that line counted. Otherwise its head stays on the first line
-with its first argument when that is an atom or ends by column 100 there
-(a function's name, an `if`'s condition, a `let`'s bindings), and every
-other argument is on its own line, two spaces in from the form's `(`. A
-list whose head is no symbol — a `let`'s bindings — is one element a line,
-each under the first. Top-level forms are a blank line apart. Comments
-are not part of the module: the printer writes none, and a file is its
-forms printed once its comments are set aside.
-
-## 2. How a domain is laid out
-
-A domain is a **directory**: every `*.ark` file under it, at any depth,
-is read in sorted path order, all of its forms first, and only then are
-names resolved — so neither the order of forms nor which file holds one
-means anything. Files are not namespaces; dotted names are
-(`library.add_song`, whose prefix is its router). Several `(schema …)`
-forms are one schema, their tables in file and form order. A name — a
-table's, a type's, a function's — declared twice is refused with both
-places. `arkc print MODULE -o DIR` writes a module back as one file per
-dotted prefix beside `schema.ark` and `types.ark`; an author splits files
-as the reading goes, as `harken/domain` does (`keys.ark`, `queue.ark`).
-
-## 3. Top-level forms
-
-```
-(schema (table NAME [volatile] (COL TY [key] [(refs TABLE)] [(default 0x…)])… (index [unique] COL…)…)…)
-(type NAME TY)
-(mutator NAME ((P TY)…) BODY…)          ; Write, returns ()
-(live    NAME ((P TY)…) BODY…)          ; Write over volatile tables only, returns ()
-(query   NAME ((P TY)…) RET BODY…)      ; Read
-(helper  NAME ((P TY)…) RET BODY…)      ; the least effect its body has
-(guard   NAME ((P TY)…) RET BODY…)      ; as helper
-(scope   NAME ((ROW TY)) BODY…)         ; Pure, returns Bool; TY the sum of the tables' rows
+#[derive(Schema)]
+pub struct Harken { pub playlist: Playlist, pub playlist_item: PlaylistItem, /* … */ }
 ```
 
-A table's key is its leading `key` columns (the first when none is
-marked). A body of several forms is a sequence whose value is the last.
-Every function is bound by its name except one whose name starts with
-`_`. The printer writes the kind by the effect: `live` when every table
-reached is volatile, else `mutator` for `Write` returning `()`; `query`
-for `Read`; `scope` for a `Pure` predicate of the rows' sum; `helper`
-otherwise.
+`#[derive(Row)]` makes a table out of a struct. Its fields are the
+columns, in order. The leading `#[ark(key)]` fields are the key, and a
+table has at least one.
 
-## 4. Types
+- `index(a, b)` and `unique(a, b)` declare an index, a constant named
+  after its columns (`PlaylistItem::PLAYLIST_ID_POS`; `as NAME` renames).
+- `refs(T)` on a column makes it name a row of `T`. An `Option` column
+  names one only when it is `Some`.
+- `#[ark(volatile)]` on the struct puts the table in live state (§1.9). Its
+  rows are never logged or hashed.
 
-| type | is |
-|---|---|
-| `Int` `Bytes` `Text` `Bool` `Never` | the leaves; `Text = Bytes where utf8`; `Bool` the sum of two empty variants; `Never` the empty sum |
-| `(id TABLE)` | `Bytes where len 16`, declared as `Id<TABLE>` |
-| `(option TY)` | `Sum [(), (TY)]`, declared as `Option<TY>` |
-| `(list TY)`, `(tuple TY…)` | a list; a tuple (`(tuple)` is `()`) |
-| `(row TABLE)` | the table's row: the tuple of its columns |
-| `(record (F TY)…)` | at the top of a `type`: a tuple whose fields are named, the names kept in the declaration; a field `(F (where …))` declares `NAME.F` |
-| `(sum (V (F TY)…) (W))` | at the top of a `type`: a sum whose variants and their fields are named |
-| `(where TY RULE ["words"]…)` | a refinement: `(utf8)` `(trim)` `(non-empty)` `(len N)` `(len LO HI)` `(len LO ..)` `(fn (x) e)`, each followed by the words a form shows when a value breaks it |
+`#[derive(Schema)]` on the struct of tables makes the schema: its tables
+in field order, named by the fields. Grow a schema only by appending
+tables, and columns to the end of a table. An appended column is an
+`Option` or carries `#[serde(default)]`. The schema is data: it is hashed,
+carried in every `Hello`, prefix-checked when a log opens, and read by the
+explorer.
 
-## 5. Expressions
+A column is an `i64`, `String`, `bool`, `Vec<u8>`, `Id<T>`, `Option`,
+`Vec`, tuple, or a record or enum deriving `Describe`; no floats.
 
-| form | IR |
-|---|---|
-| `5`, `"x"`, `0x00ff`, `true`, `false`, `(lit TY 0x…)` | `Lit` |
-| `()` | `Seq([])`, unit |
-| `(let ((X E)…) BODY…)`; `(let () E E…)` a sequence | `Let`, `Seq` |
-| `(if C A [B])` — no `B` is `()` | `If` |
-| `(match E (V (X…) BODY…)…)` — every variant in order, each binding all its fields; `V` the declaration's name, `none`/`some`, `false`/`true`, or a position | `Match` |
-| `x.f.g`, `(. E f g)` | `Field` |
-| `(record (F E)…)` where the place wants a record or a row, `(tuple E…)` elsewhere; `(as (row T) (record …))` a row no place wants | `Tuple` |
-| `(T.V E…)` a declared sum's variant; `(variant TY I E…)` any | `Variant` |
-| `(some E)`, `none` (where the place wants an option), `(list E…)`; `(as TY e)` gives one of these the type `TY` | `Variant`, `List` |
-| `(?? P D)` — `P` a path through an option, `o.f` or `(. E f)` | `(match o (none () D) (some (x) x.f))` |
-| `(?. E f…)` | `(match E (none () none) (some (x) (some x.f…)))` |
-| `(?? E D)` — `E` an option no path goes through; `(some? E)`, `(none? E)` | `Std(UnwrapOr)`, `Std(IsSome)`, `not` of it |
-| `(== a b)` `!=` `<` `<=` `>` `>=` `+` `-` `*` `/` `%` `and` `or`, `(not E)`, `(- E)` | `Op`, `Un` |
-| `(refuse "msg")` | `Refuse` |
-| `(fn (X…) BODY)` — only as an operator's argument | `Lambda` |
-| `TABLE`, `(get T KEY…)`, `(filter L FN)`, `(map L FN)`, `(join A B FN)`, `(group L FN FN)`, `(sort L (fn (x) KEYS))` with `(desc E)`, `(asc E)`, `(tuple k (desc k2))`, `(take L N)` | `Scan` `Lookup` `Filter` `Map` `Join` `Group` `Sort` `Take` |
-| `(insert T REC)`, `(update T KEY… FN)`, `(delete T KEY…)` | `Insert` `Update` `Delete` |
-| `ctx.user` `ctx.session` `ctx.roles` `ctx.now` `(new-id T)` `(has-role "x")` | `Ctx`, `Std(Contains, [ctx.roles, x])` |
-| `(NAME ARG…)` a declared function | `Call(hash, …)` |
+## Inputs
 
-A table's key is its key columns as arguments (`(get playlist_item
-playlist.id media_id)`), or one expression of the key's tuple type. A
-binder shadows a table of its name. The names an author gives binders are
-the function's (`Function::names`, in the order a walk of the body meets
-them), so the printer writes them back; a function built without them is
-printed with names made from the binders' types.
-
-## 6. The standard functions
-
-`std.rs`'s, by their names with `-` for `_`; each keeps the refinements
-its signature says (a function of text returns `Text`, its argument's
-length bound dropped; `reverse` and `move-at` keep a list's length rules,
-`insert-at` and list `concat` keep `non-empty`).
-
-| function | takes | returns |
-|---|---|---|
-| `trim` `lower` | `Text` | `Text` |
-| `is-empty` `is-alnum` | `Text` | `Bool` |
-| `concat` | `(list Text)` | `Text` |
-| `chars` | `Text` | `(list Text)` |
-| `len` | `Text` (code points) or a list | `Int` |
-| `fnv1a64` | `Text` | `Int` |
-| `starts-with` | `Text`, `Text` | `Bool` |
-| `split-once` | `Text`, a separator `Text` | `(option (tuple Text Text))` |
-| `to-text` | `Int` | `Text` |
-| `hex` `text-of-id` | `Bytes` | `Text` |
-| `id-of-text` | `Text` | `(option Bytes)` |
-| `min` `max`; `clamp`; `abs` | `Int`s | `Int` |
-| `sha256`; `nil-id`; `utf8` | `Bytes`; nothing; `Text` | `Bytes` |
-| `first` `last` | a list | an option of its element |
-| `contains` | a list, an element | `Bool` |
-| `reverse`; `concat` (two lists); `insert-at`; `remove-at`; `move-at`; `slice` | a list, and indices or a list | a list |
-| `some?` | an option | `Bool` |
-| `??` (`unwrap_or`); `unwrap` | an option and a default; an option | its value (`unwrap` of none refuses) |
-| `sum` | `(list Int)` | `Int`, judged once for overflow |
-
-## 7. Typing
-
-**Every expression has a type, and a declared type is a subtype of what it
-refines.** `Name ≤ Text ≤ Bytes`; a value becomes refined only by a
-literal, parsed once under its type, or by a function whose signature
-says so. Comparison is of one structure, refinements aside.
-
-```
-(helper short ((name Name)) Text (trim name))      ; Name ≤ Text, and trim returns Text
+```rust
+#[derive(Clone, Debug, PartialEq, Node, Input)]
+pub struct CreatePlaylist {
+    #[ark(trim, len = "1..=80", why = "a playlist needs a name")]
+    pub name: String,
+}
 ```
 
-**A `none`, a `(record …)` and a `(list)` take the type their place
-wants** — a function's result, a branch's, a field's, an argument's, a
-row's, a `map`'s element — and `(as T e)` gives one where no place does.
+`#[derive(Input)]` writes `check`: the form's validation, run before a
+mutator sees the input, its refusal the intent's. A field's refinements
+apply in order: `trim` normalises it for the rules after it; `non_empty`,
+`len = "lo..=hi"` and `range = "lo..=hi"` bound it; `check = "path::fn"`
+runs a predicate. `why = "…"` replaces the default words (`at least 1
+character`, `must not be empty`). Every failing field is reported with its
+words, which is what a form shows.
 
+## Functions
+
+```rust
+#[mutator("playlists.add_to_playlist")]
+pub fn add_to_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: AddToPlaylist) -> Result<(), Refusal> {
+    let playlist = owned(ctx, db, input.playlist_id)?;
+    if db.media.has(input.media_id) && !db.playlist_item.has((playlist.id, input.media_id)) {
+        let pos = last_pos(db, playlist.id).unwrap_or(0) + 1;
+        db.playlist_item.insert(PlaylistItem { playlist_id: playlist.id, media_id: input.media_id, pos, added_ms: ctx.now, user_id: ctx.user().into() })?;
+    }
+    Ok(())
+}
+
+fn last_pos(db: &Db<Harken>, playlist: Id<Playlist>) -> Option<i64> {
+    db.playlist_item.by(PlaylistItem::PLAYLIST_ID_POS).from(playlist).last().map(|i| i.pos)
+}
 ```
-(query owner ((id (id playlist))) (option Text) (?. (get playlist id) user_id))
+
+The five kinds of function:
+
+- **A mutator** is `fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>`. The
+  machine runs it as an intent. A refusal undoes every write it made, so a
+  run applies all of its writes or none.
+- **A live transition** (`#[live]`) is a mutator over volatile tables.
+- **A query** (`#[query]`) is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`,
+  answered once.
+- **A view** (`#[view]`) returns `Result<Plan<S, T>, Refusal>`. It is kept
+  up to date, and a UI holds its patches.
+- **A scope** (`#[scope]`) returns a `Scope<S>`: per table, a
+  `fn(&Ctx, &R) -> bool` that says which rows a connection fed by it holds
+  (§1.8).
+
+A helper or a guard takes `&Db<S>` and cannot write: the borrow checker
+is the effect system.
+
+The attribute only registers the function by its name, and
+`ark::register!(Domain::new::<Harken>("harken", VERSION); playlists::create_playlist, …)`
+lists them.
+
+**Determinism is an API rule.** A run is a function of the store, its
+input and its `Ctx` (`user`, `session`, `roles`, `now`, `device`).
+`ctx.now` and `ctx.new_id()` are a function's only non-determinism, and
+both are frozen in the entry. A function reads no clock, no randomness and
+nothing of its host. When replicas disagree, the authority's facts win.
+
+## Reads and writes
+
+- `db.t.get(key)` and `db.t.has(key)` read one row (a key of several
+  columns is a tuple); `db.t.scan()` reads every row, in key order.
+- `db.t.by(T::INDEX)` reads by an index: `.from(prefix)`, `.between(lo,
+  hi)` or `.whole()`, then `.first()`, `.last()`, `.take(n)`, `.all()`,
+  `.count()` or `.any()`; `.rev()` reads from the end.
+- `insert`, `update`, `put` (insert or update), `delete` (by key; a
+  missing row is no change) and `remove` (by row) are the writes. Each is a
+  `Change` the store judges as it is made (a key taken, a unique index, a
+  reference), so a function reads what it wrote.
+
+A read goes exactly where it says, by the key or a declared index, so a
+wrong column does not compile and nothing routes a read at run time.
+
+## Views
+
+```rust
+#[view("playlists.playlist")]
+pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<Harken, LibraryEntry>, Refusal> {
+    let playlist = owned(ctx, db, input.playlist_id)?;
+    Ok(scan::<Harken, PlaylistItem>()
+        .filter_with(move |db, i| i.playlist_id == playlist.id && db.media.has(i.media_id))
+        .sort(|i| i.pos)
+        .map_with(|db, i| library_entry(&db.media.get(i.media_id).expect("an item's media"), Some(i.pos))))
+}
 ```
 
-## 8. Effects
+A plan is `scan`, then `filter`, `map`, `sort` (by a key; `Desc(k)` for
+descending), `take(n)`, `group(by, agg)` and `join`. The `_with` forms
+read the store, as lookups and related rows do. Each operator is kept per
+element. A change re-runs a closure only for the elements whose recorded
+reads it hits. A view's own reads, here the playlist's owner, rebuild it
+when they move. After every change, the view's answer is what a fresh run
+of the plan gives, and its patches splice the old list into the new.
 
-**Every expression has an effect, `Pure < Read < Write`, and a function
-may have no more than its kind says.** A `query` reads, a `mutator`
-writes, a `scope` and a refinement's predicate are pure; a `helper` or a
-`guard` has the least its body has; a `live` function writes volatile
-tables only. A body evaluates to the changes it makes, and reads through
-them.
-
-```
-(query names () (list Text) (map playlist (fn (p) p.name)))   ; Read: a scan
-```
-
-A call is by hash, to a function built before, so the call graph is a DAG
-and every function ends; a lambda stands only as an operator's argument;
-`ctx.now` is the entry's, frozen.
-
-## 9. Bindings
-
-`ark::gen::rust(module)` writes a host's Rust for a module: types and
-stubs, no function body. An app's `build.rs` calls
-`ark::gen::build_script(dir)`, which builds the domain's directory and
-writes `OUT_DIR/domain.rs` (the bindings and `MODULE`, the module file's
-bytes) where rust-analyzer sees them. It emits:
-
-- `HASH`, the module's hash, and `SHAPE`, what the bindings were made
-  from: its schema, its declarations, each function's parameters and
-  result;
-- a struct per table's row (`PlaylistItem`), per record (`AddSong`), an
-  enum per sum (`Clock::Paused { at_ms }`), an alias per refinement or
-  other name (`Queue = Vec<Track>`); `Id<Row>`, `Option`, `Vec`, `String`,
-  `i64`, `bool` for the rest; each derives `Node`, `Clone`, `Debug`,
-  `PartialEq`, `Eq`, and `Copy` and `Default` where its fields allow;
-- a stub per bound function, in a module per dotted prefix, typed by its
-  parameters (named as the author named them) and its result: a mutator
-  or a live function `fn add_to_playlist<C: Call>(peer: &mut C, input:
-  &AddToPlaylist) -> C::Authored`, a query or helper `fn playlists<C:
-  Call>(peer: &C) -> Result<Vec<Playlist>, String>`; each encodes its
-  arguments, calls the function by its binding through `Call`, and decodes
-  the answer;
-- `fits(&Domain)`: whether a loaded module is one the bindings may call —
-  its schema a prefix-extension of theirs (§1.2), every type and function
-  they name of the structure they were made with, a row grown by appended
-  columns read by its prefix (`ark::gen::answer`, `ark::gen::rows`).
-
-`Call` is implemented by whatever runs the module — a replica, a hub, the
-domain alone over an empty store (`impl Call for Domain`).
+Rows without a Rust type (the explorer, the `views/` vectors) use the same
+plans over JSON values, written as JSON (`ark::dynamic`).

@@ -12,13 +12,11 @@ as one typed language every peer runs — and harken, the first app on it.
 - `rust/` — `ark`, the runtime and the specification (`spec/README.md`
   indexes its modules by section): types and the order-preserving codec,
   the schema and the store, the chained log, the one peer machine, the
-  frames, the language (IR, checker, interpreter, standard library,
-  modules), maintained views, ArkLang (`ark::sexp`, the language a
-  domain is written in: S-expressions) and `ark::gen`, the typed bindings
-  an app generates from a module. `ark-dev` is the development tools: the
-  simulator over real peers in both roles, the trace recorder and player,
-  the fuzzer (`ark-fuzz`), the vector writer and `arkc`, which checks,
-  prints, compares and builds modules. Beside them, what every app shares:
+  frames, a domain in plain Rust (derives, the `Domain` registry, the
+  typed `Db`), and maintained views over typed plans. `ark-dev` is the
+  development tools: the demo, the simulator over real peers in both
+  roles, the trace recorder and player, the fuzzer (`ark-fuzz`) and the
+  vector writer. Beside them, what every app shares:
   `ark-peer` (the one peer: a device that dials — storage, the link with
   redial, the views a UI drives and the functions it calls by name, the
   live relay, signing in later — and a server that listens — the
@@ -29,10 +27,9 @@ as one typed language every peer runs — and harken, the first app on it.
 - `spec/` — the conformance vectors `rust/ark` and `rust/ark-dev` write
   and read back, the index of the specification (`spec/README.md`),
   `spec/RUNNERS.md` (what a runtime in another language does with each
-  vector) and `spec/AUTHORING.md`, ArkLang and the bindings.
-- `harken/` — the app: `domain/` (a directory of ArkLang, the source of
-  the module), `server/`, `iced/` (desktop and browser), which call it
-  through the bindings their `build.rs` generates.
+  vector) and `spec/AUTHORING.md`, writing a domain in Rust.
+- `harken/` — the app: `domain/` (its domain, a crate of plain Rust),
+  `server/` and `iced/` (desktop and browser), which link it.
   `harken/README.md` says what each is and how to run them together; the
   browser demo is published at <https://k2on.github.io/apps/harken/>.
 - `kotlin/`, `swift/` — the Kotlin and Swift runtimes, and the phones on
@@ -49,12 +46,11 @@ One command holds all of it:
                                     #   corpus replay; fuzz-smoke: 25 fuzzed sessions;
                                     # versions: harken/server/tests/versions.rs over
                                     #   the pinned revisions (none pinned now);
-                                    # harken-domain: the domain's directory builds
-                                    #   and checks (arkc check);
+                                    # harken-domain: the domain crate builds and
+                                    #   its schema hash is the pinned one;
                                     # harken-module: the NixOS module evaluates
     nix build .#harken-server       # or harken-iced, harken-web, harken-web-server,
                                     # harken-domain, ark-admin, ark, vectors, trace-corpus
-    nix run .#arkc -- check harken/domain
     nix run .#fuzz -- 1000 1 traces
     nix develop .#rust
 

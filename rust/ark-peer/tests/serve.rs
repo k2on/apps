@@ -394,8 +394,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         version: String::new(),
     };
     hub.frame(c, hello.enc(), 1);
-    hub.author(Space::Volatile, "room.point", ark::codec::int_enc(7).to_vec(), 2)
-        .unwrap();
+    hub.author(Space::Volatile, "room.point", ark::codec::int_enc(7).to_vec(), 2).unwrap();
     let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),

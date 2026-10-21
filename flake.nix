@@ -176,16 +176,10 @@
           };
 
           # The specification is `rust/ark` (spec/README.md), and the tools
-          # over it are `rust/ark-dev`: one build of both, whose binaries are
-          # `arkc`, which verifies module files and says whether one may
-          # follow another, and `ark-fuzz`, the fuzzer. `arkc` and `fuzz` are
-          # that build under the names `nix run` takes.
+          # over it are `rust/ark-dev`: one build of both, whose binary is
+          # `ark-fuzz`, the fuzzer; `fuzz` is that build under the name
+          # `nix run` takes.
           ark = crate { pname = "ark"; flags = [ "-p" "ark" "-p" "ark-dev" ]; };
-          arkc = pkgs.writeShellApplication {
-            name = "arkc";
-            runtimeInputs = [ ark ];
-            text = ''exec arkc "$@"'';
-          };
           # `nix run .#fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]`: the
           # fuzzer (rust/ark-dev/src/bin/ark-fuzz.rs), ten thousand sessions
           # from seed 1 by default, each checked for convergence, replay
@@ -198,7 +192,7 @@
             text = ''exec ark-fuzz "$@"'';
           };
           # The vectors as the writer writes them now: the kernel's tests
-          # (hash/, eval/, verify/, module/, views/) and ark-dev's
+          # (hash/, views/) and ark-dev's
           # (protocol/, trace/, rebase/) run with ARK_WRITE_VECTORS over an
           # empty spec/vectors, which is then the output. checks.vectors
           # holds the tree's to it; `nix build .#vectors` and a copy over
@@ -228,14 +222,15 @@
             ark-fuzz 300 2026 traces $out
           '';
 
-          # harken's domain (harken/domain: a directory of ArkLang, §1.15)
-          # as it is checked in, built and checked by arkc: what the
-          # server's HARKEN_MODULE reads.
-          harken-domain = pkgs.runCommand "harken-domain" { nativeBuildInputs = [ ark ]; } ''
-            mkdir -p $out
-            cp ${./harken/domain}/*.ark $out/
-            arkc check $out
-          '';
+          # harken's domain (harken/domain: plain Rust, §1.16) built, and
+          # its schema's hash held to the one its tests pin.
+          harken-domain = crate {
+            pname = "harken-domain";
+            doCheck = true;
+            cargoTestFlags = [ "-p" "harken-domain" "--test" "port" ];
+            checkFlags = [ "the_schema_hash_is_pinned" ];
+            installPhase = "touch $out";
+          };
 
           # The pinned previous revisions (nix/versions.nix), each its
           # `harken-server` package as that revision's own flake builds it:
@@ -248,12 +243,6 @@
               "flake.nix: the input harken-${v.name} is locked at ${input.rev}, and nix/versions.nix says ${v.rev}";
             v // {
               server = input.packages.${system}.harken-server;
-              # The module that revision's peers author at, as its tree has
-              # it committed: what a fresh server of this build is told it
-              # ran before (`HARKEN_OLD_MODULES`, docs/plan-guards.md D1) —
-              # its module file, where it kept one, else its domain's directory.
-              module = let d = "${input}/harken/domain"; in
-                if builtins.pathExists "${d}/harken.ark" then "${d}/harken.ark" else d;
             })
             (import ./nix/versions.nix);
           # What the fleet reads to find them (harken/server/tests/support/fleet.rs).
@@ -265,12 +254,11 @@
             export HARKEN_OLD_${toString n}_NAME=${v.name}
             export HARKEN_OLD_${toString n}_SERVER=${v.server}/bin/harken-server
             export HARKEN_OLD_${toString n}_PEER=${v.server}/bin/harken-peer
-            export HARKEN_OLD_${toString n}_MODULE=${v.module}
           '') versions;
         in
         {
           packages = {
-            inherit ark arkc vectors fuzz harken-domain trace-corpus;
+            inherit ark vectors fuzz harken-domain trace-corpus;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
@@ -343,8 +331,8 @@
               checkFlags = [ "--nocapture" ];
               installPhase = "touch $out";
             };
-            # The fuzzer still generates, verifies, runs and checks: a fixed
-            # seed and a few cases, so that the generator cannot rot.
+            # The fuzzer still runs and checks: a fixed seed and a few
+            # sessions, so that it cannot rot.
             fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
               ark-fuzz 25 1 traces
               touch $out
@@ -366,12 +354,9 @@
               '';
               installPhase = "touch $out";
             };
-            # harken's domain builds from its text, every function checks and
-            # the module verifies (`arkc check`).
-            harken-domain = pkgs.runCommand "check-harken-domain" { nativeBuildInputs = [ ark ]; } ''
-              arkc check ${harken-domain}
-              touch $out
-            '';
+            # harken's domain crate builds, and its schema's hash is the one
+            # pinned (harken/domain/tests/port.rs).
+            inherit harken-domain;
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The NixOS module, evaluated under the configurations that
             # matter and held to its assertions, its warning and its unit.

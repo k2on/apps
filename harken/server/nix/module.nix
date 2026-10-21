@@ -171,25 +171,6 @@ in
       '';
     };
 
-    oldModules = lib.mkOption {
-      type = lib.types.listOf lib.types.path;
-      default = [ ];
-      example = lib.literalExpression ''[ "''${harken-previous}/harken/domain" ]'';
-      description = ''
-        Modules this server is to hold as ones it has run before — a
-        domain's directory of ArkLang, a file of it, or a module file an
-        older release checked in (`harken_server::hosted`): each one's
-        function bodies kept, so an intent a client built with it authors
-        is sequenced though this server never started with it. Without it
-        such an intent is held: no body crosses the wire, and the device
-        keeps it pending and pushes it again until a server runs that
-        function (`docs/plan-v5.md`, K2). The server refuses to start holding a
-        module it may not follow: one whose schema this one's does not
-        extend by appending (`docs/plan-v5.md` §1.2). Nothing is remembered
-        across restarts: name every module still wanted here.
-      '';
-    };
-
     retainDays = lib.mkOption {
       type = lib.types.ints.unsigned;
       default = 30;
@@ -470,8 +451,6 @@ in
         # `library=sub1,sub2;admin=sub1`, as `harken_server::roles_of` reads it.
         HARKEN_ROLES = lib.concatStringsSep ";"
           (lib.mapAttrsToList (role: ids: "${role}=${lib.concatStringsSep "," ids}") cfg.roles);
-      } // lib.optionalAttrs (cfg.oldModules != [ ]) {
-        HARKEN_OLD_MODULES = lib.concatStringsSep "," (map toString cfg.oldModules);
       } // lib.optionalAttrs (cfg.mediaPath != null) {
         HARKEN_MEDIA = "${cfg.mediaPath}";
       } // lib.optionalAttrs (cfg.web != null) {

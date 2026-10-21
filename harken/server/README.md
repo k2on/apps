@@ -53,11 +53,8 @@ crates'; what is here is what only harken has:
   device said in its volatile `Hello` (`device`), `on_join`, `on_leave`
   and `on_restore` the domain's; kept in `log/live` when the hub closes
   and restored by `on_restore`. This crate holds no rule of it.
-- **`hosted.rs`** — the module the hub runs: harken's own, or a module file
-  (`HARKEN_MODULE`: the binding map and every body, `hosted::write`), and
-  the module files held as run before (`HARKEN_OLD_MODULES`), each one this
-  module must follow — §1.2's prefix check on the schema plus one verify
-  per new hash (`hosted::compat`).
+- **`hosted.rs`** — the domain the hub runs: harken's, as this build
+  compiled it, its functions by name (§1.16).
 - **`assistant.rs`** — Home Assistant's media players as devices of that
   session. A pure `Bridge`, handed the session and what the house said:
   who holds a speaker, what a change of the session becomes (a hand-off of
@@ -134,8 +131,6 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_REDIRECTS` | comma-separated prefixes a login may return to, besides loopback, `harken://` and the public URL |
 | `HARKEN_MEDIA` | the media root: `music/` is scanned, all of it served at `/media`, **unauthenticated** |
 | `HARKEN_WEB`, `HARKEN_WEB_MODULE` | the browser client, with the build as its validator; the module names the file whose change is a rebuild off the store |
-| `HARKEN_MODULE` | a module file to host instead of harken's own |
-| `HARKEN_OLD_MODULES` | module files, comma-separated, whose bodies are held as run before; each must be one this module follows |
 | `HARKEN_RETAIN_ENTRIES` | entries the log keeps above its snapshot (10000); `HARKEN_RETAIN_DAYS` is read and keeps nothing on v5 |
 | `HARKEN_KEEPALIVE_MS` | how often the sync socket pings (20000); it closes after three unanswered |
 | `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |

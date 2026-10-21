@@ -3,16 +3,16 @@
 A self-hosted music system: a library a server scans from a directory,
 playlists, one listening session per account across every device, and the
 speakers in the house as devices in it. All of it runs on ArkDB at spec v5
-(`docs/plan-v5.md`): one log, one domain written once in ArkLang and run
-by the one interpreter on the server, the desktop and the browser, and every query a view a client keeps up to date by the rows
-a change touched.
+(`docs/plan-v5.md`): one log, one domain written once in plain Rust and
+linked by the server, the desktop and the browser, and every query a view
+a client keeps up to date by the rows a change touched.
 
 ```
-domain/    the domain, in ArkLang (spec/AUTHORING.md): schema.ark, types.ark,
-           keys.ark, library.ark, browse.ark, playlists.ark; listening.ark,
-           queue.ark, devices.ark and groups.ark, the listening session as
-           volatile tables (never the log); plays.ark (the log). host.rs is
-           the Rust each app includes beside its generated bindings
+domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
+           types.rs, keys.rs, library.rs, browse.rs, playlists.rs;
+           listening.rs, queue.rs, devices.rs and groups.rs, the listening
+           session as volatile tables (never the log); plays.rs (the log);
+           host.rs, what an app knows of it beside its functions
 server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
            bridge, sign-in, /media, the web build, the admin page's listener;
            the NixOS module (server/README.md)
@@ -56,22 +56,20 @@ Four decisions that each show on screen:
 - **Every refused change says why.** A rejection carries the domain's own
   sentence, and each client shows it against the change it refused.
 
-Every query is a query over the relational subset of the language
-(`spec/AUTHORING.md`; `domain/*.ark` is them all): `library`, `albums`, `composers` and the
-rest say what they read and how it joins, so a client holds any of them as
-a view (`ark_peer::Peer::view`) that a change moves by the rows it
-touched (`docs/plan-v5.md` §1.10); the desktop's lists are views. The
+Every query is a view, a plan of typed operators (`spec/AUTHORING.md`;
+`domain/src/browse.rs` and `playlists.rs`): `library`, `albums`,
+`composers` and the rest say what they read and how it joins, so a client
+holds any of them as a view (`ark_peer::Peer::view`) that a change moves
+by the rows it touched (`docs/plan-v5.md` §1.10); the desktop's lists are
+views. The
 domain's tests hold it to what v4's was: the read model, the listening
 session transition for transition, every query maintained against a fresh
 evaluation, and convergence over a simulated fleet (`domain/tests/`).
-The `.ark` files are the source of truth: the server and the client
-generate their bindings from them in `build.rs` and build the module from
-them; a server's `HARKEN_MODULE` may name another domain's directory (or a
-module file an older release checked in). `domain/tests/text.rs` holds
-every file to what the printer writes of it, comments aside, and
-`domain/tests/port.rs` every function to its pin. To check the directory:
-
-    cd rust && cargo run -p ark-dev --bin arkc -- check ../harken/domain
+The crate is the source of truth: the server and the client link it and
+call its types and functions as they are. It was ported from ArkLang in N1,
+and `domain/tests/port.rs` holds it to what the ArkLang text did: the
+schema's hash and, over seeded scripts of every function, the states and
+transcripts the two agreed on, pinned.
 
 ## The listening session
 
@@ -184,9 +182,9 @@ Everything is `nix`, from the repository root:
     nix build .#harken-web         # the browser demo, as a static directory (Pages)
     nix build .#harken-web-server  # the browser client harken-server serves
     nix build .#ark-admin          # the admin page the server's admin listener serves
-    nix build .#harken-domain      # the domain's directory, built and checked by arkc
+    nix build .#harken-domain      # the domain crate, its schema hash held to its pin
     nix flake check                # fmt, clippy and every Rust test; the domain
-                                   # builds and checks;
+                                   # builds, its schema hash pinned;
                                    # the vectors and traces; the NixOS module
 
 `nixosModules.default` is `services.harken` (`server/README.md` has its
@@ -272,8 +270,7 @@ authority: through a table's CRUD where the domain exposes one, unless `R`
 flips the switch, and raw otherwise — a raw write is a function of no input
 the authority authors through the same door as any mutation, which checks
 the row it replaces is the one there, judged by the constraints and served
-to every peer like any entry. `/admin/api/load` loads a module file's
-functions into the authority (over the same schema). harken exposes no
+to every peer like any entry. harken exposes no
 CRUD, so every edit there is raw. On loopback it asks nothing (reach it
 from elsewhere through an SSH tunnel); bound wider it asks for a login
 holding the `admin` role (`services.harken.roles.admin`), signed in
@@ -285,8 +282,7 @@ the NixOS module serves it by default.
     curl http://127.0.0.1:8787/healthz
 
 answers in lines: `ok`; `connections N`; the log's `head` and `horizon`;
-`module <hash> current` and a `module <hash>` line for each module file
-held as run before (`HARKEN_OLD_MODULES`); and a `room <account> peers N`
+`domain <schema hash> <version> current`; and a `room <account> peers N`
 line per account with a connection open. What the data directory holds,
 and whose each file is, is `server/README.md`'s table: the log is
 `log/snapshot` and `log/chain` (the chain of entries, each with its facts,
@@ -393,12 +389,9 @@ scenarios that need no older binary and the rest say they are skipped.
 for what is printed), `n` counting from 1 in `nix/versions.nix`'s order, are
 what the scenarios read; without them, the three that need an older binary
 (1, 4 and 5) say they are skipped and pass, so `cargo test` on a laptop is
-unchanged. The rest need none: they hold the compat check — §1.2's prefix
-check on the schema plus one verify per new hash (`hosted::compat`) — over
-three next releases written in the test (`create_playlist`'s body moved; a
-table `tag` and a mutator over it; a column appended), and run them in the
-fleet as "the next release": `HARKEN_MODULE=FILE` for the server and
-`harken-peer --module FILE` for a peer, `FILE` what `hosted::write` makes.
+unchanged. The rest need none: they hold §1.2's prefix check on the
+schema over next releases written in the test (a table appended, a column
+appended).
 
 **To add a release to the matrix**: append `{ name; rev; }` to
 `nix/versions.nix`, add the input `harken-<name>` to `flake.nix` with the
@@ -411,16 +404,13 @@ the last entry.
 
 What versions mean on v5 (`docs/plan-v5.md` §1.5, and K2's rules):
 
-- **A server runs exactly the functions of the modules its operator
-  loaded**: its own (`HARKEN_MODULE`, or harken's), the module files held
-  as run before (`HARKEN_OLD_MODULES`, each one this module must follow),
-  and any loaded through the admin page's `/admin/api/load`. Nothing is
-  remembered across restarts: name every module still wanted. `/healthz`
-  lists them, the current one marked.
-- **No body crosses the wire.** An intent at a hash the server does not
-  run is answered `Held`: its device keeps it pending, and what it pushed
-  behind it waits on the server in order, until a module with that hash is
-  loaded; then all of it is judged. Nothing is refused for being newer.
+- **A server runs exactly the functions its build registered** (§1.16),
+  by name; `/healthz` says which domain: its schema's hash and version,
+  which every `Hello` carries too.
+- **No code crosses the wire.** An intent naming a function the server
+  does not run is answered `Held`: its device keeps it pending, and what
+  it pushed behind it waits on the server in order, until a server that
+  runs it; then all of it is judged. Nothing is refused for being newer.
 - **A grown schema keeps the log.** A server started on a module whose
   schema appends to the old one opens its chain under the new schema,
   checking each entry by its hash, never deriving a state again. A replica

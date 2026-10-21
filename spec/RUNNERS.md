@@ -1,8 +1,7 @@
 # Running the vectors D1 writes
 
 What a runtime in another language does with each file under
-`vectors/protocol/`, `vectors/trace/`, `vectors/rebase/` and
-`vectors/text/`: what it
+`vectors/protocol/`, `vectors/trace/` and `vectors/rebase/`: what it
 reads, what it does and what it compares. `rust/ark-dev/tests/vectors.rs`
 writes them (`ARK_WRITE_VECTORS=1`) and is the reference reading of this
 file; where the two disagree, the code is right and this file is fixed.
@@ -19,15 +18,18 @@ JSON number (every one fits a 64-bit integer), an object's keys in
 code-point order. A vector under `falsify/` carries `"expect": "fail"`:
 it is a right vector with one thing changed, and a runner must fail it.
 
-**The demo** is `README.md`'s (`vectors/module/demo.json`), with two
-functions beside its four: the query `demo.items` and the scope
+**The demo** is `rust/ark-dev/src/demo.rs`: `playlist(id, name,
+user_id)` and `item(playlist_id, track_id, pos)`; the mutators
+`demo.create_playlist`, `demo.add_to_playlist`, `demo.rename_playlist`
+and `demo.remove_from_playlist`, the view `demo.items` and the scope
 `demo.top_two`. **The room** is live state over volatile tables of its own
 (`rust/ark-dev/src/demo.rs`): `here(session, name, since)` and
 `pointer(session, x)`; `room.on_join` and `room.on_leave` take
 `Arrival(session, name)`; `room.on_restore` lets every pointer go;
 `room.rename(name)` and `room.point(x)` are a device's calls, `point` the
-ephemeral one. A trace carries the bytes of every function it needs, so a
-runner needs neither module to replay one.
+ephemeral one. Code never crosses the wire and is never in a vector: an
+entry names its function by name, and a runner replays a trace with its
+own implementation of the domain it names — the demo and the room.
 
 ## protocol — client
 
@@ -42,9 +44,10 @@ frame type is `frame`.
 
 There are four frames, and one idea: a peer sends pages of its chain; an
 authority answers with verdicts and its own pages. `Hello { space, cursor,
-hash, device }`; `Page { space, from, logged }`; `Snapshot { space,
-snapshot }`; `Verdict { space, id, verdict }`, the verdict `Ok { seq }`,
-`Refused { why }` or `Held { fn }`. Every page carries `Logged` entries, so
+hash, device, schema, version }` (the schema's hash and the domain's
+version); `Page { space, from, logged }`; `Snapshot { space, snapshot }`;
+`Verdict { space, id, verdict }`, the verdict `Ok { seq }`, `Refused { why
+}` or `Held { func }`, the function by name. Every page carries `Logged` entries, so
 these vectors pin the log's own shape. An authority's page (`server-page`)
 is its log from `from`. A client's page is its intents not yet sequenced
 (`client-page`: each entry at sequence 0, no facts, zero state and hash —
@@ -52,9 +55,9 @@ a push is a page of one) or a chain it sequenced alone, handed over from
 its fork at `from` (`client-chain`: each entry at its sequence, hashed).
 Every kind is here, each in each space a session sent it in; a refused
 and a held verdict are built by hand from an entry, since no session
-sends them. No frame carries a function's body: an authority runs only
-the functions its operator loaded, and `Held` tells a device its intent
-names another, to keep pending and push again on its next connection.
+sends them. No frame carries code: an authority runs only the functions
+its build registered, and `Held` tells a device its intent names another,
+to keep pending and push again on its next connection.
 
 ## trace — client
 
@@ -67,10 +70,10 @@ are not in a trace; what they decided is (the frames it received, the
 calls it made, the state an open was given).
 
 **The file**: `{device, from, live, log, steps}`. `log` and `live` are each
-space's module as the machines hold it: `schema`, the schema's bytes
-(`Node` encoding of `Schema`), and `functions`, the bytes of every
-function body, each loaded under its hash (`FnHash = sha256(bytes)`);
-`live` is `null` for a client without live state. `device` is the hex of
+space's module as the machines hold it: `domain`, its name (`demo`,
+`room`); `schema`, the schema's bytes (`Node` encoding of `Schema`); and
+`functions`, the names of the domain's functions the machine runs; `live`
+is `null` for a client without live state. `device` is the hex of
 what the live machine says it is in its `Hello`, or `null`. `from` names
 the session and the client. `steps` holds one step per line, each one of:
 
@@ -80,8 +83,8 @@ the session and the client. `steps` holds one step per line, each one of:
 | `sign_in` | `who`, `origin` | the log's machine authors as `who`; when `origin` is not the one it had (another actor signed in), from it and from `local` 0; the handed-over chain forgotten when the actor or roles changed; the live machine afresh as `who` from `origin`, its `local` kept when the origin is |
 | `step` | `space` (`durable`, `volatile`), `in`, `out`, `after` | `in` given to that space's machine; what it says must be `out`, and it must stand at `after` |
 
-`in` is `{"t": …}`: `frame` (`bytes`, from upstream), `mutate` (`fn`,
-`input`, `now`), `connected`, `alone`, `join`, `compact` (`seq`), `tick`
+`in` is `{"t": …}`: `frame` (`bytes`, from upstream), `mutate` (`fn`, the
+function's name, `input`, `now`), `connected`, `alone`, `join`, `compact` (`seq`), `tick`
 (`now`), `persisted` (`seq`), or `open` (`durable`: the hex of `Durable`,
 `(rows, writes, pending, local)`, what the machine is opened from: its
 store's rows as last written whole — the log's table, `_log`, among them —
@@ -114,28 +117,10 @@ the `script` runs (`mutate` with `client`, `fn`, `input`; `partition`,
 `heal`; `step`, one delivery chosen by the seeded scheduler), everything
 is settled; the hub stands at `head` with state hash `hash`, K1's pin over
 a bare machine. `fleet-fuzz-seed-N.json`: `{found, hash, head, seed,
-state}`, a session the fuzzer (`ark_dev::fuzz::session`) found a bug with,
-what it was, and where it stands once fixed. Both are rust-only: to run
-one is to reimplement the simulator's scheduler and the fuzzer's
-generator exactly, which is not a client. What they do to a client
+state}`, a session of the fuzzer (`ark_dev::fuzz::session`, random
+scripts over the demo) and where it stands settled; the seeds are the
+ones the generator of random modules found bugs with before N1, kept as
+sessions of the new one. Both are rust-only: to run one is to
+reimplement the simulator's scheduler and the fuzzer's scripts exactly,
+which is not a client. What they do to a client
 reaches every runtime through its traces (§ trace).
-
-## text — client
-
-`demo.json`: `{ark, hash, module}`, beside `demo.ark`, the file `ark`
-names: the demo (`rust/ark-dev/src/demo.ark`, its four mutators, its
-query and its scope) in ArkLang (`AUTHORING.md`), the text it is written
-in, its binders' names its own (§1.15). `module` is the hex
-of the module file, `(Module, [body])` encoded (`Node`), the bodies in
-the order of their hashes, and `hash` the module's hash.
-**Do and compare**: read and lower `demo.ark` — its schema, its
-declarations, every function checked, callees first — to a module and its
-bodies; its file's bytes must be `module` and its hash `hash`; that module
-printed must be `demo.ark` byte for byte. A runtime without a printer
-runs the first half and says it skipped the second. `text/falsify/` holds
-the demo with one `pos` stepped by two, which must fail.
-
-The `ark` field of an `eval/`, `verify/` or `views/` vector is its module
-as ArkLang, printed from its functions — informative: the bytes beside it
-are normative and a runner may ignore the text. It is `null` where the
-functions do not check (`verify/refused/`), which nothing can print.
