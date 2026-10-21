@@ -34,6 +34,10 @@
 // — no frame at the top, no frame anywhere else.
 package dev.harken.android
 
+import dev.harken.android.gen.AddSong
+import dev.harken.android.gen.Harken
+import dev.harken.android.gen.CreatePlaylist
+import dev.arkdb.ffi.Id
 import android.view.MotionEvent
 import android.view.View
 import androidx.activity.BackEventCompat
@@ -70,19 +74,11 @@ import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
-import dev.arkdb.Value
-import dev.arkdb.android.ArkSession
-import dev.arkdb.client.Account
-import dev.arkdb.client.Autos
-import dev.arkdb.client.Domain
-import dev.arkdb.client.Login
-import dev.arkdb.client.MemoryStorage
-import dev.arkdb.client.Options
-import dev.arkdb.client.Peer
-import dev.arkdb.ui.DestinationState
-import dev.arkdb.ui.Destinations
-import dev.arkdb.ui.PageMotion
-import dev.arkdb.ui.routes
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.ui.DestinationState
+import dev.harken.android.ui.Destinations
+import dev.harken.android.ui.PageMotion
+import dev.harken.android.ui.routes
 import java.io.File
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
@@ -115,49 +111,38 @@ object Fixture {
     const val ARTIST = "Artist 0"
 
     /** The first playlist, with thirty songs on it, as the last [peer] made it. */
-    var first: dev.arkdb.Id? = null
+    var first: Id? = null
         private set
 
-    private fun harken(): ByteArray {
-        var dir: File? = File("").absoluteFile
-        while (dir != null) {
-            File(dir, "domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            File(dir, "harken/domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            dir = dir.parentFile
-        }
-        error("no harken.ark above ${File("").absolutePath}")
-    }
-
-    private fun song(title: String, artist: String, album: String, ms: Long, track: Long, file: String, part: String = "", performer: String = ""): Map<String, Value> =
-        mapOf(
-            "title" to Value.text(title),
-            "artist" to Value.text(artist),
-            "album" to Value.text(album),
-            "duration_ms" to Value.int(ms),
-            "file" to Value.text(file),
-            "track" to Value.int(track),
-            "part" to Value.text(part),
-            "catalogue" to Value.text(""),
-            "performer" to Value.text(performer),
-            "bpm" to Value.int(0),
-            "album_art" to Value.text(""),
-            "artist_art" to Value.text(""),
-            "disc" to Value.int(1),
-            "work_title" to Value.text(""),
-            "movement_no" to Value.int(0),
+    private fun song(title: String, artist: String, album: String, ms: Long, track: Long, file: String, part: String = "", performer: String = ""): AddSong =
+        AddSong(
+            title = title,
+            artist = artist,
+            album = album,
+            durationMs = ms,
+            file = file,
+            track = track,
+            part = part,
+            catalogue = "",
+            performer = performer,
+            bpm = 0,
+            albumArt = "",
+            artistArt = "",
+            disc = 1,
+            workTitle = "",
+            movementNo = 0,
         )
 
-    fun peer(): Peer {
-        val peer = Peer.open(Domain.fromBytes(harken()), MemoryStorage(), Options.alone("library").copy(autos = Autos.Seeded(5)))
-        peer.setRoles(listOf("library"))
+    fun peer(): Harken {
+        val peer = alone()
         for (t in Demo.tracks) {
             val d = Demo.details.getValue(t.id)
-            peer.mutate("add_song", song(t.title, t.creator, d.album, t.durationMs, d.track, t.file, d.part, d.performer))
+            peer.addSong(song(t.title, t.creator, d.album, t.durationMs, d.track, t.file, d.part, d.performer))
         }
-        for ((i, e) in extra.withIndex()) peer.mutate("add_song", song(e.first, e.second, e.third, 120_000L + i, (i % 2 + 1).toLong(), "music/extra/$i.mp3"))
-        for (n in playlists) peer.mutate("create_playlist", mapOf("name" to Value.text(n)))
-        val list = peer.query("playlists", emptyMap()).asList().map(Playlist::of).first { it.name == playlists[0] }
-        val songs = peer.query("library", Phone.libraryArgs(null)).asList().map(Track::of)
+        for ((i, e) in extra.withIndex()) peer.addSong(song(e.first, e.second, e.third, 120_000L + i, (i % 2 + 1).toLong(), "music/extra/$i.mp3"))
+        for (n in playlists) peer.createPlaylist(CreatePlaylist(n))
+        val list = Phone.once({ peer.playlists() }) { it }.first { it.name == playlists[0] }
+        val songs = Phone.once({ Phone.library(peer, null) }, Track::of)
         for (t in songs.take(30)) Phone.addToPlaylist(peer, list.id, t.id)
         first = list.id
         return peer
@@ -306,7 +291,7 @@ class Driver(private val paparazzi: Paparazzi) {
      */
     fun run(ms: Long, start: LibraryTab? = null, sheet: ((androidx.compose.ui.unit.Density) -> PlayerSheet)? = null, script: suspend Driver.() -> Unit) {
         val peer = Fixture.peer()
-        val login = Login("t", "s", Account("library"), 0)
+        val login = testLogin("library", roles = listOf("library"))
         val session = ArkSession.inline(peer, "https://music.example.com", login)
         back = OnBackPressedDispatcher()
         var done = false
@@ -352,7 +337,7 @@ class Driver(private val paparazzi: Paparazzi) {
         } finally {
             Destinations.sink = null
             session.close()
-            peer.close()
+            peer.peer.close()
         }
         assertTrue("the script ran to its end", done)
     }

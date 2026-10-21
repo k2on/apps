@@ -56,21 +56,22 @@ import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
-import dev.arkdb.Id
-import dev.arkdb.android.ArkSession
-import dev.arkdb.ui.LifecycleCapped
-import dev.arkdb.ui.LocalCoverLoader
-import dev.arkdb.ui.LocalPageMotion
-import dev.arkdb.ui.Origin
-import dev.arkdb.ui.PageBack
-import dev.arkdb.ui.PageMotion
-import dev.arkdb.ui.Recompositions
-import dev.arkdb.ui.Reselect
-import dev.arkdb.ui.TabStack
-import dev.arkdb.ui.Space
-import dev.arkdb.ui.Tapped
-import dev.arkdb.ui.destinationKeepsAPlace
-import dev.arkdb.ui.destinations
+import dev.arkdb.ffi.Id
+import dev.harken.android.gen.Playlist
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.ui.LifecycleCapped
+import dev.harken.android.ui.LocalCoverLoader
+import dev.harken.android.ui.LocalPageMotion
+import dev.harken.android.ui.Origin
+import dev.harken.android.ui.PageBack
+import dev.harken.android.ui.PageMotion
+import dev.harken.android.ui.Recompositions
+import dev.harken.android.ui.Reselect
+import dev.harken.android.ui.TabStack
+import dev.harken.android.ui.Space
+import dev.harken.android.ui.Tapped
+import dev.harken.android.ui.destinationKeepsAPlace
+import dev.harken.android.ui.destinations
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -503,7 +504,7 @@ fun HarkenApp(
                                         val d by reading.diagnostics.collectAsStateWithLifecycle()
                                         val moved by library.moved.collectAsStateWithLifecycle()
                                         LaunchedEffect(moved) { reading.read() }
-                                        Ready(d) { DiagnosticsScreen(it, onBack = act::back, onVerify = library::verify, heard = heard) }
+                                        Ready(d) { DiagnosticsScreen(it, onBack = act::back, heard = heard) }
                                     }
                                 }
                             }

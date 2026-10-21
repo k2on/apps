@@ -6,7 +6,8 @@
 // Fixed, so a screenshot changes only when a screen does.
 package dev.harken.android
 
-import dev.arkdb.Id
+import dev.arkdb.ffi.Id
+import dev.harken.android.gen.Playlist
 
 object Demo {
     private class Row(
@@ -82,7 +83,7 @@ object Demo {
         Row("Behold, a virgin shall conceive", "George Frideric Handel", "Messiah", "Part I", 8, "London Symphony Orchestra, Hermann Scherchen", "", 46012),
         )
 
-    private fun id(n: Int): Id = Id.ofHex("%032x".format(n + 1))
+    private fun id(n: Int): Id = Id("%032x".format(n + 1))
 
     /** Every song, in the order added. */
     val tracks: List<Track> =
@@ -101,7 +102,7 @@ object Demo {
 
     val playlists: List<Playlist> =
         listOf("Favorites", "Sunday morning", "Baroque for working").mapIndexed { i, n ->
-            Playlist(Id.ofHex("%032x".format(1000 + i)), n, "ana", 1_700_000_000_000 + i)
+            Playlist(Id("%032x".format(1000 + i)), n, i.toLong(), 1_700_000_000_000 + i, "ana")
         }
 
     /** What is on "Sunday morning". */

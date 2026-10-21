@@ -44,11 +44,11 @@ import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
-import dev.arkdb.ui.Destination
-import dev.arkdb.ui.DestinationState
-import dev.arkdb.ui.Destinations
-import dev.arkdb.ui.Strict
-import dev.arkdb.ui.rememberDestinationListState
+import dev.harken.android.ui.Destination
+import dev.harken.android.ui.DestinationState
+import dev.harken.android.ui.Destinations
+import dev.harken.android.ui.Strict
+import dev.harken.android.ui.rememberDestinationListState
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals

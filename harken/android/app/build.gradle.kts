@@ -8,8 +8,13 @@ plugins {
     id("app.cash.paparazzi")
 }
 
-/** Where `harken.ark` is copied for the APK's assets. */
-val arkAssets: File = layout.buildDirectory.dir("generated/ark-assets").get().asFile
+/**
+ * harken's library for the phone (`packages.harken-android-lib`): `jniLibs/<abi>/libharken_ffi.so`,
+ * the Rust kernel with harken's domain linked in, and `kotlin/`, the Kotlin UniFFI writes for it with
+ * the bridge's typed half (`dev.arkdb.ffi`). `harken-apk` passes the store path as `-PharkenLib`; a
+ * laptop builds it once (`nix build .#harken-android-lib -o ../ffi/android`) and is pointed at that.
+ */
+val harkenLib: String = providers.gradleProperty("harkenLib").getOrElse(rootProject.file("../ffi/android").path)
 
 android {
     namespace = "dev.harken.android"
@@ -28,6 +33,10 @@ android {
         // local build says neither and is 1, as it always was.
         versionCode = providers.gradleProperty("versionCode").map { it.toInt() }.getOrElse(1)
         versionName = providers.gradleProperty("versionName").getOrElse("0.1")
+        // The ABIs the kernel is built for (`harken-android-lib`): JNA's own
+        // libraries for any other are left out, so no phone installs an APK
+        // it could not load harken on.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
 
     // One key for every build, committed beside this file, and public on
@@ -99,37 +108,17 @@ android {
 
     sourceSets {
         getByName("main") {
-            // harken's module, `harken.ark`, as the domain crate writes it and
-            // the repository commits it: the app loads it from its assets,
-            // verifies it, and interprets it (docs/plan-phones.md). Copied in
-            // at build time from where it is written, never committed twice.
-            assets.srcDir(arkAssets)
+            // The kernel, per ABI, and the Kotlin over it.
+            jniLibs.srcDir("$harkenLib/jniLibs")
+            kotlin.srcDir("$harkenLib/kotlin")
         }
     }
 }
 
-val copyArk by tasks.registering(Copy::class) {
-    from(rootProject.file("../domain/harken.ark"))
-    into(arkAssets)
-}
-
-tasks.named("preBuild") {
-    dependsOn(copyArk)
-}
-
 dependencies {
-    // Substituted from the included build at ../../kotlin: the runtime that
-    // interprets the module, and the client — storage, the link, sign-in,
-    // maintained views.
-    implementation("dev.arkdb:ark-runtime")
-    implementation("dev.arkdb:ark-client")
-    // The onboarding every Ark app on Android shares, and the session it opens
-    // (kotlin/ark-android, a project of this build).
-    implementation(project(":ark-android"))
-    // What it looks like and how it moves, where that is not harken's own: the
-    // springs, the pages grown out of their art, the expanding card the player
-    // is, the derived square and the rows (kotlin/ark-ui).
-    implementation(project(":ark-ui"))
+    // What UniFFI's Kotlin calls the library through, with its native part
+    // for every Android ABI.
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
@@ -141,6 +130,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("androidx.core:core-ktx:1.15.0")
+    // The onboarding's: the server's sign-in in a Custom Tab, and the splash held over a launch.
+    implementation("androidx.browser:browser:1.8.0")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     // Compose brings it already; named, because the release build relies on
     // it: it installs the APK's baseline profile, so the first fling after an
     // install is compiled rather than interpreted.
@@ -149,9 +141,24 @@ dependencies {
     // whose session is the notification, the lock screen and Bluetooth.
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
+
+    // The stdlib's jdk7 and jdk8 halves at the compiler's version, which the
+    // recorded graph holds, rather than the 1.8 that coroutines ask for.
+    constraints {
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21")
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21")
+    }
+
+    // The JVM tests drive the real kernel: the library built for the machine they run on
+    // (`host/`), through JNA's jar, and Android's `org.json` as the JVM has it.
+    testImplementation("net.java.dev.jna:jna:5.17.0")
+    testImplementation("org.json:json:20240303")
 }
 
-// `ark-ui`'s guards against a mistake in how the app uses it throw here
-// (`dev.arkdb.ui.Strict`), as in a debuggable build; a release says them once
-// in the log and keeps working.
-tasks.withType<Test>().configureEach { systemProperty("dev.arkdb.ui.strict", "true") }
+// The look's guards against a mistake in how a screen uses it throw here
+// (`ui.Strict`), as in a debuggable build; a release says them once in the
+// log and keeps working.
+tasks.withType<Test>().configureEach {
+    systemProperty("dev.arkdb.ui.strict", "true")
+    systemProperty("jna.library.path", "$harkenLib/host")
+}

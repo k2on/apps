@@ -13,10 +13,17 @@
 // phone's own entry is Remote.kt's; the picker's rows are there too.
 package dev.harken.android
 
-import dev.arkdb.Value
-import dev.harken.android.listening.Listening
-import dev.harken.android.listening.ListeningDevices
-import dev.harken.android.listening.Output
+import dev.harken.android.gen.Equip
+import dev.harken.android.gen.GroupMute
+import dev.harken.android.gen.GroupNudge
+import dev.harken.android.gen.GroupVolume
+import dev.harken.android.gen.Harken
+import dev.harken.android.gen.NudgeVolume
+import dev.harken.android.gen.Output
+import dev.harken.android.gen.Present
+import dev.harken.android.gen.ReportVolume
+import dev.harken.android.gen.SetMute
+import dev.harken.android.gen.SetVolume
 import kotlin.math.roundToInt
 
 /** How far a volume button moves a volume: one press, five of a hundred, as the desktop's `+` and `-`. */
@@ -56,10 +63,10 @@ val Listening.leader: String?
     get() = (active?.output as? Output.Device)?.id
 
 /** Who follows `leader`, by id. */
-fun Listening.followers(leader: String): List<ListeningDevices> = devices.values.filter { it.follows == leader }.sortedBy { it.id }
+fun Listening.followers(leader: String): List<Present> = devices.values.filter { it.follows == leader }.sortedBy { it.id }
 
 /** The group `leader` leads: it, then whoever follows it. */
-fun Listening.group(leader: String): List<ListeningDevices> = listOfNotNull(devices[leader]) + followers(leader)
+fun Listening.group(leader: String): List<Present> = listOfNotNull(devices[leader]) + followers(leader)
 
 /** Whether the output leads a group: something follows it. */
 val Listening.grouped: Boolean
@@ -107,38 +114,34 @@ fun Listening.volume(me: String): Volume? {
     return devices[me]?.takeIf { it.canVolume }?.let { Volume(Level.Device(me), it.volume.toInt(), it.muted, remote = false) }
 }
 
-/** The transitions a volume control calls, and what joining a speaker calls. */
+/** The transitions a volume control calls. */
 object Volumes {
-    fun equip(canVolume: Boolean, family: String?, level: Int, muted: Boolean): Map<String, Value> =
-        mapOf(
-            "can_volume" to Value.bool(canVolume),
-            "family" to Value.opt(family?.let { Value.text(it) }),
-            "muted" to Value.bool(muted),
-            "volume" to Value.int(level.coerceIn(0, 100).toLong()),
-        )
+    fun equip(canVolume: Boolean, family: String?, level: Int, muted: Boolean): Equip =
+        Equip(canVolume, family, muted, level.coerceIn(0, 100).toLong())
 
-    fun report(level: Int, muted: Boolean): Map<String, Value> =
-        mapOf("level" to Value.int(level.coerceIn(0, 100).toLong()), "muted" to Value.bool(muted))
+    fun report(level: Int, muted: Boolean): ReportVolume = ReportVolume(level.coerceIn(0, 100).toLong(), muted)
 
-    fun member(device: String): Map<String, Value> = mapOf("device" to Value.text(device))
-
-    /** The transition `change` of `level` is, and its input: none for this phone's own stream. */
-    fun call(level: Level, change: Change): Pair<String, Map<String, Value>>? =
-        when (level) {
+    /** The transition `change` of `level` is, by name, and the call: none for this phone's own stream. */
+    fun call(level: Level, change: Change): Pair<String, Harken.() -> Unit>? {
+        fun to(l: Int) = l.coerceIn(0, 100).toLong()
+        fun by(d: Int) = d.coerceIn(-100, 100).toLong()
+        fun t(name: String, f: Harken.() -> Unit) = name to f
+        return when (level) {
             Level.Here -> null
             Level.Group ->
                 when (change) {
-                    is Change.To -> "set_group_volume" to mapOf("level" to Value.int(change.level.coerceIn(0, 100).toLong()))
-                    is Change.By -> "nudge_group_volume" to mapOf("delta" to Value.int(change.delta.coerceIn(-100, 100).toLong()))
-                    is Change.Mute -> "set_group_mute" to mapOf("muted" to Value.bool(change.muted))
+                    is Change.To -> t("set_group_volume") { setGroupVolume(GroupVolume(to(change.level))) }
+                    is Change.By -> t("nudge_group_volume") { nudgeGroupVolume(GroupNudge(by(change.delta))) }
+                    is Change.Mute -> t("set_group_mute") { setGroupMute(GroupMute(change.muted)) }
                 }
             is Level.Device ->
                 when (change) {
-                    is Change.To -> "set_volume" to mapOf("device" to Value.text(level.id), "level" to Value.int(change.level.coerceIn(0, 100).toLong()))
-                    is Change.By -> "nudge_volume" to mapOf("delta" to Value.int(change.delta.coerceIn(-100, 100).toLong()), "device" to Value.text(level.id))
-                    is Change.Mute -> "set_mute" to mapOf("device" to Value.text(level.id), "muted" to Value.bool(change.muted))
+                    is Change.To -> t("set_volume") { setVolume(SetVolume(level.id, to(change.level))) }
+                    is Change.By -> t("nudge_volume") { nudgeVolume(NudgeVolume(by(change.delta), level.id)) }
+                    is Change.Mute -> t("set_mute") { setMute(SetMute(level.id, change.muted)) }
                 }
         }
+    }
 }
 
 /**
@@ -184,13 +187,16 @@ class StreamLevel(private val stream: Stream) {
     }
 }
 
+/** The desktop's and the relay's interval: a dragged control sends at most twenty times a second. */
+const val THROTTLE_MS: Long = 50
+
 /**
  * At most one send per [windowMs], trailing edge, the last value always — what a dragged slider's
  * ordered calls go through, since the client never holds an ordered call (its order is its point):
- * the desktop's 50 ms (`ark_client::THROTTLE_MS`). The caller owns the clock and the timer: it sends
+ * the desktop's 50 ms (`harken_ffi::THROTTLE_MS`). The caller owns the clock and the timer: it sends
  * what [offer] hands back now, and asks [take] again at [due].
  */
-class Throttle<T>(private val windowMs: Long = dev.arkdb.client.THROTTLE_MS) {
+class Throttle<T>(private val windowMs: Long = THROTTLE_MS) {
     private var sent = Long.MIN_VALUE / 2
     private var held: T? = null
 

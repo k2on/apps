@@ -33,6 +33,9 @@
         f (import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
+          # The Android NDK and SDK are unfree, and their licence is
+          # accepted here once.
+          config = { allowUnfree = true; android_sdk.accept_license = true; };
         }));
 
       # A source tree that is only the named directories of this repository,
@@ -58,7 +61,7 @@
       # `harken/` by path, so both trees are the source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/iced" ];
+      rustDirs = [ "rust" "harken/domain" "harken/server" "harken/iced" "harken/ffi" ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
@@ -222,6 +225,207 @@
             ark-fuzz 300 2026 traces $out
           '';
 
+          # The phones (docs/plan-v5.md §1.16, N3): the Rust kernel through
+          # UniFFI. `harken/ffi` is ark-ffi with harken's domain linked in, one
+          # library; UniFFI writes its Kotlin and Swift from the library built
+          # for the host (`uniffi-bindgen generate --library`), and beside
+          # them goes the bridge's typed half (rust/ark-ffi/{kotlin,swift}).
+          ffiBindings = { lib, language }: ''
+            cargo run --release --offline -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+              generate --library ${lib} --language ${language} --no-format --out-dir bindings/${language}
+          '';
+          # The Android NDK nixpkgs packages from Google's zip (x86_64 Linux
+          # and macOS hosts), whose clang links each Android target and
+          # compiles ring's C.
+          ndk = (pkgs.androidenv.composeAndroidPackages {
+            includeNDK = true;
+            ndkVersions = [ "27.0.12077973" ];
+            platformVersions = [ ];
+            buildToolsVersions = [ ];
+            includeEmulator = false;
+            includeSources = false;
+          }).ndk-bundle;
+          # The ABIs the APK carries: a phone, an old phone, an emulator.
+          androidTargets = {
+            "aarch64-linux-android" = { abi = "arm64-v8a"; clang = "aarch64-linux-android"; };
+            "armv7-linux-androideabi" = { abi = "armeabi-v7a"; clang = "armv7a-linux-androideabi"; };
+            "x86_64-linux-android" = { abi = "x86_64"; clang = "x86_64-linux-android"; };
+          };
+          androidRust = rust.override { targets = lib.attrNames androidTargets; };
+          # `harken_ffi` for each Android ABI against API 26 (the app's
+          # minSdk), stripped, as `jniLibs/<abi>/libharken_ffi.so`; the
+          # Kotlin the app compiles with it, UniFFI's bindings and the typed
+          # half, under `kotlin/`; and the library built for this machine as
+          # `host/libharken_ffi.so`, which the app's JVM tests load. What
+          # `harken-apk` builds the app over.
+          harken-android-lib = (pkgs.makeRustPlatform { cargo = androidRust; rustc = androidRust; }).buildRustPackage {
+            pname = "harken-android-lib";
+            version = "0.1.0";
+            src = only rustDirs;
+            sourceRoot = "source/rust";
+            cargoLock.lockFile = ./rust/Cargo.lock;
+            doCheck = false;
+            buildPhase = ''
+              runHook preBuild
+              ndkRoot=$(echo ${ndk}/libexec/android-sdk/ndk/*)
+              bin=$ndkRoot/toolchains/llvm/prebuilt/${if pkgs.stdenv.hostPlatform.isDarwin then "darwin" else "linux"}-x86_64/bin
+              export AR=$bin/llvm-ar
+              ${lib.concatStrings (lib.mapAttrsToList (t: a: let up = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); low = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
+                export CARGO_TARGET_${up}_LINKER=$bin/${a.clang}26-clang
+                export CC_${low}=$bin/${a.clang}26-clang AR_${low}=$bin/llvm-ar
+                cargo build --release --offline --frozen -p harken-ffi --lib --target ${t}
+                mkdir -p jniLibs/${a.abi}
+                $bin/llvm-strip -o jniLibs/${a.abi}/libharken_ffi.so target/${t}/release/libharken_ffi.so
+              '') androidTargets)}
+              cargo build --release --offline --frozen -p harken-ffi --lib
+              ${ffiBindings { lib = "target/release/libharken_ffi.so"; language = "kotlin"; }}
+              runHook postBuild
+            '';
+            installPhase = ''
+              mkdir -p $out/kotlin/dev/arkdb/ffi
+              cp -r jniLibs $out/
+              cp -r bindings/kotlin/. $out/kotlin/
+              install -Dm755 target/release/libharken_ffi.so $out/host/libharken_ffi.so
+              cp ark-ffi/kotlin/Typed.kt $out/kotlin/dev/arkdb/ffi/
+            '';
+          };
+
+          # The Android SDK the APK is built with. Google ships one for
+          # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
+          # instead (nix/android-sdk.nix) — the platform and build-tools jars
+          # from Google's zips, and aapt2, the one native tool AGP runs,
+          # compiled for the host (nix/aapt2.nix) — so an ARM Linux builds the
+          # phone natively. macOS takes nixpkgs' androidenv.
+          aapt2 = pkgs.callPackage ./nix/aapt2.nix { stdenv = pkgs.clangStdenv; };
+          androidSdk = pkgs.callPackage ./nix/android-sdk.nix { inherit aapt2; };
+          sdkRoot =
+            if pkgs.stdenv.hostPlatform.isLinux then "${androidSdk}/${androidSdk.root}"
+            else "${(pkgs.androidenv.composeAndroidPackages {
+              platformVersions = [ "35" ];
+              buildToolsVersions = [ "35.0.0" ];
+            }).androidsdk}/libexec/android-sdk";
+
+          # The phone (harken/android/README.md): gradle over the SDK, the app
+          # — its onboarding and its look are its own code — over
+          # `harken-android-lib` (the kernel per ABI, and the Kotlin over it),
+          # assembled offline from a recorded Maven graph
+          # (harken/android/deps.json; `nix run .#harken-apk-deps` re-records
+          # it). The app's JVM tests run first, so an APK is not built over a
+          # screen or a rule that fails them.
+          #
+          # The release build, `harken.apk`: not debuggable, so ART compiles
+          # it as it would any app, with the baseline profiles Compose's
+          # libraries ship. Not minified: R8 is not in the recorded graph.
+          # Signed with harken/android/debug.keystore, committed and public on
+          # purpose (app/build.gradle.kts says why), so each build installs
+          # over the last; and a version code that rises with each commit, the
+          # flake's own source time in minutes.
+          harken-apk = pkgs.stdenv.mkDerivation (final: {
+            pname = "harken-apk";
+            version = "0.1.0";
+            src = only [ "harken/android" ];
+            sourceRoot = "source/harken/android";
+            postUnpack = "chmod -R u+w source";
+            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
+            mitmCache = pkgs.gradle.fetchDeps {
+              pkg = final.finalPackage;
+              data = ./harken/android/deps.json;
+            };
+            __darwinAllowLocalNetworking = true;
+            ANDROID_HOME = sdkRoot;
+            ANDROID_SDK_ROOT = sdkRoot;
+            gradleFlags = [
+              "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
+              "-Porg.gradle.java.installations.auto-detect=false"
+              "-Porg.gradle.java.installations.auto-download=false"
+              "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
+              # AGP would fetch its own aapt2 from Maven, an unpatched binary
+              # that cannot run here; the SDK's is patched and can.
+              "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+              "-PharkenLib=${harken-android-lib}"
+            ] ++ final.versionFlags;
+            # Read by app/build.gradle.kts; a local build falls back to 1.
+            versionFlags = [
+              "-PversionCode=${toString (self.lastModified / 60)}"
+              "-PversionName=0.1.${self.lastModifiedDate}"
+            ];
+            # AGP keeps its state under ~/.android, and the builder has no home.
+            preBuild = ''
+              export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
+              mkdir -p "$ANDROID_USER_HOME"
+            '';
+            gradleBuildTask = ":app:testDebugUnitTest :app:assembleRelease";
+            # The recording runs the same tasks, and the screenshots' and a
+            # laptop's debug build, so that one recording serves all three.
+            gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
+            doCheck = false;
+            installPhase = ''
+              mkdir -p $out
+              cp app/build/outputs/apk/release/app-release.apk $out/harken.apk
+            '';
+          });
+
+          # The phone's screens as images: every screen and state, light and
+          # dark, at a Pixel 5's size, rendered on the JVM by Paparazzi through
+          # layoutlib from a fixed library (harken/android/app/src/test), and
+          # an index.html laying them out light beside dark.
+          harken-android-screens = harken-apk.overrideAttrs (old: {
+            pname = "harken-android-screens";
+            gradleBuildTask = ":app:recordPaparazziDebug";
+            versionFlags = [ ];
+            installPhase = ''
+              mkdir -p $out
+              shots=app/src/test/snapshots/images
+              for f in $shots/*.png; do
+                b=$(basename "$f" .png)
+                cp "$f" "$out/''${b#dev.harken.android_Screens_}.png"
+              done
+              ${pkgs.python3}/bin/python3 ${./harken/android/screens-index.py} $out > $out/index.html
+            '';
+          });
+
+          # The same library for iOS — `aarch64-apple-ios` for a phone and
+          # `aarch64-apple-ios-sim` for the simulator on an Apple-silicon Mac —
+          # as `HarkenFFI.xcframework`, with UniFFI's Swift and the typed half
+          # under `swift/`. Linking for iOS needs Apple's SDK, which only a
+          # macOS builder has: on Linux this derivation evaluates and is not
+          # built (meta.platforms), and it has not been built anywhere yet.
+          iosRust = rust.override { targets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ]; };
+          harken-ios-xcframework = (pkgs.makeRustPlatform { cargo = iosRust; rustc = iosRust; }).buildRustPackage {
+            pname = "harken-ios-xcframework";
+            version = "0.1.0";
+            src = only rustDirs;
+            sourceRoot = "source/rust";
+            cargoLock.lockFile = ./rust/Cargo.lock;
+            doCheck = false;
+            # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
+            # Xcode, outside the store.
+            __noChroot = true;
+            buildPhase = ''
+              runHook preBuild
+              export PATH=/usr/bin:$PATH DEVELOPER_DIR=''${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}
+              for t in aarch64-apple-ios aarch64-apple-ios-sim; do
+                cargo build --release --offline --frozen -p harken-ffi --lib --target $t
+              done
+              cargo build --release --offline --frozen -p harken-ffi --lib
+              ${ffiBindings { lib = "target/release/libharken_ffi.dylib"; language = "swift"; }}
+              mkdir -p headers
+              cp bindings/swift/*.h headers/
+              cat bindings/swift/*.modulemap > headers/module.modulemap
+              /usr/bin/xcodebuild -create-xcframework \
+                -library target/aarch64-apple-ios/release/libharken_ffi.a -headers headers \
+                -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers headers \
+                -output HarkenFFI.xcframework
+              runHook postBuild
+            '';
+            installPhase = ''
+              mkdir -p $out/swift
+              cp -r HarkenFFI.xcframework $out/
+              cp bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
+            '';
+            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+          };
+
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
           harken-domain = crate {
@@ -258,21 +462,18 @@
         in
         {
           packages = {
-            inherit ark vectors fuzz harken-domain trace-corpus;
+            inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             harken-server = crate { pname = "harken-server"; };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
             inherit harken-web harken-web-server harken-iced ark-admin;
             default = ark;
-            # The F-Droid tooling (nix/fdroid.nix): `harken-fdroid repo --keep`
-            # keeps offering what the live repository has. The phone is frozen
-            # at spec v4 with the Kotlin runtime (kotlin/FROZEN.md), so this
-            # flake builds no APK and the repository for one is not here.
-            inherit (import ./nix/fdroid.nix {
-              inherit lib pkgs;
-              harken-apk = throw "flake.nix: the phone is frozen at spec v4 (kotlin/FROZEN.md); no APK is built";
-            }) harken-fdroid fdroid-keygen;
+            inherit harken-apk harken-android-screens;
+            harken-apk-deps = harken-apk.mitmCache.updateScript;
+            android-sdk = androidSdk;
+            # The APK's F-Droid repository, and a key for it (nix/fdroid.nix).
+            inherit (import ./nix/fdroid.nix { inherit lib pkgs harken-apk; }) harken-fdroid-repo harken-fdroid fdroid-keygen;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an

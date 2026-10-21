@@ -13,10 +13,8 @@
 // row, the lock screen, a headset — is [press], one way in.
 package dev.harken.android
 
-import dev.arkdb.android.ArkSession
-import dev.arkdb.client.LiveStatus
-import dev.arkdb.client.Peer
-import dev.harken.android.listening.Listening
+import dev.harken.android.gen.Harken
+import dev.harken.android.onboarding.ArkSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,17 +27,15 @@ data class Heard(
     val joined: Boolean = false,
     /** The session, while joined. */
     val listening: Listening? = null,
-    /** The server's clock less this phone's, as its stamps say; a moving position is counted with it. */
-    val offsetMs: Long = 0,
     val linked: Boolean = false,
+    /** How many connections have opened. */
     val epoch: Long = 0,
-    val status: LiveStatus? = null,
     val stats: RemoteStats = RemoteStats(),
     /** The last refusal the server sent this phone's calls. */
     val refused: String? = null,
 ) {
-    /** The server's clock now, as this phone guesses it. */
-    fun serverNow(): Long = System.currentTimeMillis() + offsetMs
+    /** The clock a position is counted against: this phone's own, as every entry carries its author's. */
+    fun serverNow(): Long = System.currentTimeMillis()
 
     /** The sound is on another device, here or not: this phone is a controller of it. */
     val elsewhere: Boolean
@@ -73,24 +69,23 @@ class Listen(private val session: ArkSession, val name: String) {
     val heard: StateFlow<Heard> = heardFlow.asStateFlow()
 
     init {
-        unhook = session.onChange { p, _ -> step(p) }
+        unhook = session.onChange { step(it) }
         session.post { step(it) }
     }
 
     // Reconcile, and publish what it came to.
-    private fun step(p: Peer) {
+    private fun step(h: Harken) {
         if (closed) return
-        sound?.let { remote.reconcile(p, it) }
-        val refused = remote.refusals(p).lastOrNull()
+        sound?.let { remote.reconcile(h, it) }
+        val refused = remote.refusals(h).lastOrNull()
+        val st = h.peer.status()
         val now =
             Heard(
                 me = me,
-                joined = remote.joined(p),
-                listening = remote.session(p),
-                offsetMs = p.serverOffset ?: 0,
-                linked = p.linked,
-                epoch = p.epoch,
-                status = remote.status(p),
+                joined = remote.joined(h),
+                listening = remote.session(h),
+                linked = st.linked,
+                epoch = st.epoch.toLong(),
                 stats = remote.stats,
                 refused = refused ?: heardFlow.value.refused,
             )
@@ -117,9 +112,9 @@ class Listen(private val session: ArkSession, val name: String) {
      * itself.
      */
     fun press(press: Press, done: (String?) -> Unit = {}) =
-        session.post { p ->
-            val why = remote.press(p, press, sound)
-            step(p)
+        session.post { h ->
+            val why = remote.press(h, press, sound)
+            step(h)
             done(why)
         }
 

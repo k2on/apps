@@ -25,9 +25,9 @@ import android.database.Cursor
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
-import dev.arkdb.Hex
-import dev.arkdb.ui.Art
-import dev.arkdb.ui.squareBitmap
+
+import dev.harken.android.ui.Art
+import dev.harken.android.ui.squareBitmap
 import java.io.File
 import java.io.FileNotFoundException
 

@@ -29,6 +29,7 @@
 // where it is, or the last thing played, from the page it was played from.
 package dev.harken.android
 
+import dev.harken.android.gen.Playlist
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -37,9 +38,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaConstants
-import dev.arkdb.Hex
-import dev.arkdb.Id
-import dev.harken.android.listening.Track as Queued
+
+import dev.arkdb.ffi.Id
+import dev.harken.android.gen.Track as Queued
 import kotlin.random.Random
 
 /** What a choice in the car plays: a queue, where in it, from what point, and the page it came from. */

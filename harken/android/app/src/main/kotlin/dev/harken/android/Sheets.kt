@@ -8,6 +8,7 @@
 // joined.
 package dev.harken.android
 
+import dev.harken.android.gen.Playlist
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,14 +37,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.arkdb.Id
-import dev.arkdb.ui.Cover
-import dev.arkdb.ui.SheetRow
-import dev.arkdb.ui.Space
-import dev.arkdb.ui.VolumeSlider
-import dev.arkdb.ui.quiet
-import dev.arkdb.ui.rememberTransientListState
-import dev.arkdb.ui.rememberTransientScrollState
+import dev.arkdb.ffi.Id
+import dev.harken.android.ui.Cover
+import dev.harken.android.ui.SheetRow
+import dev.harken.android.ui.Space
+import dev.harken.android.ui.VolumeSlider
+import dev.harken.android.ui.quiet
+import dev.harken.android.ui.rememberTransientListState
+import dev.harken.android.ui.rememberTransientScrollState
 
 /** What a song's menu can do. */
 interface MenuActions {

@@ -12,6 +12,8 @@
 // number of songs or to anything for 2000.
 package dev.harken.android
 
+import dev.harken.android.gen.AddSong
+import dev.harken.android.gen.CreatePlaylist
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.OnBackPressedDispatcher
@@ -41,19 +43,11 @@ import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
-import dev.arkdb.Value
-import dev.arkdb.android.ArkSession
-import dev.arkdb.client.Account
-import dev.arkdb.client.Autos
-import dev.arkdb.client.Domain
-import dev.arkdb.client.Login
-import dev.arkdb.client.MemoryStorage
-import dev.arkdb.client.Options
-import dev.arkdb.client.Peer
-import dev.arkdb.ui.Art
-import dev.arkdb.ui.Cover
-import dev.arkdb.ui.LocalCoverLoader
-import dev.arkdb.ui.Recompositions
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.ui.Art
+import dev.harken.android.ui.Cover
+import dev.harken.android.ui.LocalCoverLoader
+import dev.harken.android.ui.Recompositions
 import java.io.File
 import java.lang.reflect.Proxy
 import java.util.concurrent.ConcurrentHashMap
@@ -79,33 +73,23 @@ class FlingTests {
         override fun close() {}
     }
 
-    private fun harken(): ByteArray {
-        var dir: File? = File("").absoluteFile
-        while (dir != null) {
-            File(dir, "domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            File(dir, "harken/domain/harken.ark").takeIf { it.isFile }?.let { return it.readBytes() }
-            dir = dir.parentFile
-        }
-        error("no harken.ark above ${File("").absolutePath}")
-    }
-
-    private fun song(i: Int): Map<String, Value> =
-        mapOf(
-            "title" to Value.text("Song number $i, a title of some length"),
-            "artist" to Value.text("Artist ${i / 40}"),
-            "album" to Value.text("Album ${i / 10}"),
-            "duration_ms" to Value.int(120_000L + 997L * i),
-            "file" to Value.text("music/$i.flac"),
-            "track" to Value.int((i % 10 + 1).toLong()),
-            "part" to Value.text(""),
-            "catalogue" to Value.text(""),
-            "performer" to Value.text(""),
-            "bpm" to Value.int(0),
-            "album_art" to Value.text("covers/${i / 10}.png"),
-            "artist_art" to Value.text(""),
-            "disc" to Value.int(1),
-            "work_title" to Value.text(""),
-            "movement_no" to Value.int(0),
+    private fun song(i: Int): AddSong =
+        AddSong(
+            title = "Song number $i, a title of some length",
+            artist = "Artist ${i / 40}",
+            album = "Album ${i / 10}",
+            durationMs = 120_000L + 997L * i,
+            file = "music/$i.flac",
+            track = (i % 10 + 1).toLong(),
+            part = "",
+            catalogue = "",
+            performer = "",
+            bpm = 0,
+            albumArt = "covers/${i / 10}.png",
+            artistArt = "",
+            disc = 1,
+            workTitle = "",
+            movementNo = 0,
         )
 
     private val counts = ConcurrentHashMap<String, Int>()
@@ -173,9 +157,8 @@ class FlingTests {
         assumeTrue("set HARKEN_FLING_BENCH to run the fling's measurement", asked != null)
         val n = asked!!.toIntOrNull() ?: 2000
         val server = "https://music.example.com"
-        val peer = Peer.open(Domain.fromBytes(harken()), MemoryStorage(), Options.alone("library").copy(autos = Autos.Seeded(5)))
-        peer.setRoles(listOf("library"))
-        repeat(n) { peer.mutate("add_song", song(it)) }
+        val peer = alone()
+        repeat(n) { peer.addSong(song(it)) }
         // Every album's cover on the disk already, where `Covers` keeps the originals.
         val png = java.util.Base64.getDecoder().decode(PNG)
         val dirs = setOf(File(paparazzi.context.cacheDir, "covers"), File(paparazzi.context.applicationContext.cacheDir, "covers"))
@@ -183,7 +166,7 @@ class FlingTests {
             d.mkdirs()
             for (a in 0..(n - 1) / 10) File(d, "%08x".format(Art.hash(Media.url(server, "covers/$a.png")))).writeBytes(png)
         }
-        val session = ArkSession.inline(peer, server, Login("t", "s", Account("library"), 0))
+        val session = ArkSession.inline(peer, server, testLogin("library", roles = listOf("library")))
         val rowsPerFrame = 3
         val passes = mutableListOf<Pass>()
         // Each frame drawn once more, on a software canvas, timed: layoutlib's own render is not
@@ -241,7 +224,7 @@ class FlingTests {
         } finally {
             Recompositions.sink = null
             session.close()
-            peer.close()
+            peer.peer.close()
             for (d in dirs) d.deleteRecursively()
         }
         passes.forEachIndexed { i, p -> println("fling over $n songs, pass ${i + 1}${if (i < 4) " (warming)" else ""}: $p") }
@@ -259,16 +242,15 @@ class FlingTests {
     fun searchResultsArriveWithTheirCoversDecoded() {
         val n = 300
         val server = "https://music.example.com"
-        val peer = Peer.open(Domain.fromBytes(harken()), MemoryStorage(), Options.alone("library").copy(autos = Autos.Seeded(5)))
-        peer.setRoles(listOf("library"))
-        repeat(n) { peer.mutate("add_song", song(it)) }
+        val peer = alone()
+        repeat(n) { peer.addSong(song(it)) }
         val png = java.util.Base64.getDecoder().decode(PNG)
         val dirs = setOf(File(paparazzi.context.cacheDir, "covers"), File(paparazzi.context.applicationContext.cacheDir, "covers"))
         for (d in dirs) {
             d.mkdirs()
             for (a in 0..(n - 1) / 10) File(d, "%08x".format(Art.hash(Media.url(server, "covers/$a.png")))).writeBytes(png)
         }
-        val session = ArkSession.inline(peer, server, Login("t", "s", Account("library"), 0))
+        val session = ArkSession.inline(peer, server, testLogin("library", roles = listOf("library")))
         var covers: Covers? = null
         var looked = -1
         var rows = -1
@@ -323,7 +305,7 @@ class FlingTests {
         } finally {
             Recompositions.sink = null
             session.close()
-            peer.close()
+            peer.peer.close()
             for (d in dirs) d.deleteRecursively()
         }
         println("search fling: $rows rows entered, $looked went looking for their cover")

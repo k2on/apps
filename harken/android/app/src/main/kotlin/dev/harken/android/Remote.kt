@@ -1,24 +1,25 @@
 // This phone's end of the account's listening session: a reconciler, the
 // Kotlin twin of the desktop's (`harken/iced/src/listening.rs`), and kept
-// free of Android so that a test drives it with real peers and a stand-in
+// free of Android so that it can be driven off a phone with a stand-in
 // player.
 //
-// The session is the domain's live state (`harken_domain::listening`), held
-// by the server, one per account, on the same `/sync` socket as the log —
-// what `Peer.live("listening")` hands back is the server's confirmed state
-// with this phone's own calls replayed on top, read here through the types
-// `arkc gen kotlin` prints of the module (`listening/Listening.kt`). **The
-// state is the instruction**: nothing here is told what to do. Every
-// button on every device is a transition ([Remote.press]); the device the
-// session names as its output makes its player agree ([Remote.reconcile]);
-// every other device is silent and draws it.
+// The session is the domain's live state (`harken_domain::listening`): three
+// volatile tables the server's second machine holds (§1.9), one session per
+// account, on the same `/sync` socket as the log — what `harken_listening`
+// hands back is the server's confirmed state with this phone's own calls
+// previewed on top, read here through the types the domain generates
+// (`gen/Harken.kt`). **The state is the instruction**: nothing here is told
+// what to do. Every button on every device is a transition ([Remote.press]);
+// the device the session names as its output makes its player agree
+// ([Remote.reconcile]); every other device is silent and draws it.
 //
 // What the output says back is only what happens to it: `started` once a
 // hand-off is loaded, `advance` once per end of a track, `stalled` when the
 // sound stopped by itself (the player says so: focus lost, the headphones
 // out, a stream that failed — no timer here). No heartbeat: a playing clock
-// carries the server's time it started from, and every device counts the
-// position for itself against `Peer.serverNow`.
+// carries the time it started from, and every device counts the position
+// for itself against its own clock — an entry carries the clock of whoever
+// authored it.
 //
 // Where the desktop loads one track at a time, the phone's player holds the
 // whole queue, so that it plays on through it when the socket goes: a track
@@ -26,37 +27,73 @@
 // and waited for, never fought.
 //
 // **A phone unlinked is its own session**, as the desktop is: nothing is
-// called while the socket is down or before the server's snapshot has come
-// on a new one. Plays are the exception, because they are the log's: one is
-// authored once a track has played thirty seconds or half its length, once
-// per load, by the device making the sound — and offline it is a pending
-// intent like any other. Coming back, the decided rule: sounding somewhere
-// else, this phone's own sound stops and it is a controller; nothing
-// sounding and this phone was playing on its own, its queue, track and
-// position become the session — a `start`, which hands it the sound.
+// called while the socket is down or before this phone stands in the
+// session on a new one (its `on_join` has landed). Plays are the exception,
+// because they are the log's: one is authored once a track has played
+// thirty seconds or half its length, once per load, by the device making
+// the sound — and offline it is a pending intent like any other. Coming
+// back, the decided rule: sounding somewhere else, this phone's own sound
+// stops and it is a controller; nothing sounding and this phone was playing
+// on its own, its queue, track and position become the session — a
+// `start`, which hands it the sound.
 package dev.harken.android
 
-import dev.arkdb.Id
-import dev.arkdb.Value
-import dev.arkdb.client.LiveStatus
-import dev.arkdb.client.Peer
-import dev.arkdb.client.PeerError
-import dev.harken.android.listening.Clock
-import dev.harken.android.listening.Listening
-import dev.harken.android.listening.Output
-import dev.harken.android.listening.Session
-import dev.harken.android.listening.Track as Queued
+import dev.arkdb.ffi.Id
+import dev.arkdb.ffi.Refusal
+import dev.harken.android.gen.Active
+import dev.harken.android.gen.Advance
+import dev.harken.android.gen.At
+import dev.harken.android.gen.Clock
+import dev.harken.android.gen.Enqueue
+import dev.harken.android.gen.Harken
+import dev.harken.android.gen.Jump
+import dev.harken.android.gen.Member
+import dev.harken.android.gen.Move
+import dev.harken.android.gen.Output
+import dev.harken.android.gen.Present
+import dev.harken.android.gen.RecordPlay
+import dev.harken.android.gen.Remove
+import dev.harken.android.gen.Report
+import dev.harken.android.gen.Scrub
+import dev.harken.android.gen.Seek
+import dev.harken.android.gen.Skip
+import dev.harken.android.gen.Start
+import dev.harken.android.gen.Track as Queued
+import dev.harken.android.gen.Transfer
+import dev.harken.ffi.harkenListening
 import kotlin.math.abs
-
-/** The live state's name. */
-const val LISTENING = "listening"
+import org.json.JSONObject
 
 /** What a press is answered with while this phone is its own session: the player's, then. */
 const val NOT_PART = "not part of the session"
 
+/**
+ * The account's listening session as this phone holds it (`harken_listening`): every device
+ * standing in it, by id; where each one's scrubber is being dragged; and what is queued, if anything.
+ */
+data class Listening(
+    val devices: Map<String, Present> = emptyMap(),
+    val scrub: Map<String, Long> = emptyMap(),
+    val active: Active? = null,
+) {
+    companion object {
+        fun parse(json: String): Listening {
+            val o = JSONObject(json)
+            val ds = o.getJSONArray("devices")
+            val sc = o.getJSONObject("scrub")
+            val session = o.opt("session")
+            return Listening(
+                devices = List(ds.length()) { Present.of(ds.get(it)) }.associateBy { it.id },
+                scrub = sc.keys().asSequence().associateWith { sc.getLong(it) },
+                active = if (session == null || session == JSONObject.NULL) null else Active.of(session),
+            )
+        }
+    }
+}
+
 // The session read: the generated types say what is there, these what it means.
 
-/** How far into the track at `now`, the server's clock. */
+/** How far into the track at `now`. */
 fun Clock.position(now: Long): Long =
     when (this) {
         is Clock.Paused -> atMs
@@ -67,12 +104,12 @@ val Clock.playing: Boolean
     get() = this is Clock.Playing
 
 /**
- * Where the session stands at `now`, the server's clock: the clock's position — except while the
- * sound is on its way to a device (`moving`), when it stands where it was handed over until that
- * device says it has started. The domain's `standing`, read the same way: what the bar draws, and
- * where a phone the sound is handed to loads the track.
+ * Where the session stands at `now`: the clock's position — except while the sound is on its way to
+ * a device (`moving`), when it stands where it was handed over until that device says it has
+ * started. The domain's `standing`, read the same way: what the bar draws, and where a phone the
+ * sound is handed to loads the track.
  */
-fun Session.Active.position(now: Long): Long =
+fun Active.position(now: Long): Long =
     if ((output as? Output.Device)?.moving == true) {
         when (val c = clock) {
             is Clock.Paused -> c.atMs
@@ -81,7 +118,7 @@ fun Session.Active.position(now: Long): Long =
     } else clock.position(now)
 
 /** Whether its position is moving: playing, and not waiting on a hand-off. */
-val Session.Active.counting: Boolean
+val Active.counting: Boolean
     get() = clock.playing && (output as? Output.Device)?.moving != true
 
 /** The device an output names, here or not; none for nowhere. */
@@ -93,11 +130,7 @@ val Output.id: String?
             Output.Nowhere -> null
         }
 
-/** The queue and where in it, when anything is queued. */
-val Listening.active: Session.Active?
-    get() = session as? Session.Active
-
-val Session.Active.now: Queued
+val Active.now: Queued
     get() = queue[at.toInt().coerceIn(0, queue.size - 1)]
 
 /** Whether `id` is the output and is here. */
@@ -110,59 +143,40 @@ val Listening.sounding: Boolean
 /** The sound is on its way to `id`, which has not said it has started. */
 fun Listening.movingTo(id: String): Boolean = (active?.output as? Output.Device)?.let { it.id == id && it.moving } == true
 
-/** The inputs, as the transitions take them (`read::input`). */
+/** The inputs, as the transitions take them. */
 object Inputs {
-    val none: Map<String, Value> = emptyMap()
+    fun start(queue: List<Queued>, at: Int, positionMs: Long, from: String): Start = Start(at.toLong(), from, maxOf(positionMs, 0), queue)
 
-    fun start(queue: List<Queued>, at: Int, positionMs: Long, from: String): Map<String, Value> =
-        mapOf(
-            "at" to Value.int(at.toLong()),
-            "from" to Value.text(from),
-            "position" to Value.int(maxOf(positionMs, 0)),
-            "queue" to Value.list(queue.map { it.toValue() }),
-        )
+    fun seek(ms: Long): Seek = Seek(maxOf(ms, 0))
 
-    fun seek(ms: Long): Map<String, Value> = mapOf("ms" to Value.int(maxOf(ms, 0)))
+    fun skip(by: Int): Skip = Skip(by.toLong())
 
-    fun skip(by: Int): Map<String, Value> = mapOf("by" to Value.int(by.toLong()))
+    fun jump(index: Int): Jump = Jump(index.toLong())
 
-    fun jump(index: Int): Map<String, Value> = mapOf("index" to Value.int(index.toLong()))
-
-    fun transfer(to: String): Map<String, Value> = mapOf("to" to Value.text(to))
+    fun transfer(to: String): Transfer = Transfer(to)
 
     /** Tracks after the one playing (`next`), or at the end of the queue. */
-    fun enqueue(tracks: List<Queued>, next: Boolean): Map<String, Value> =
-        mapOf("next" to Value.bool(next), "tracks" to Value.list(tracks.map { it.toValue() }))
+    fun enqueue(tracks: List<Queued>, next: Boolean): Enqueue = Enqueue(next, tracks)
 
-    fun remove(index: Int): Map<String, Value> = mapOf("index" to Value.int(index.toLong()))
+    fun remove(index: Int): Remove = Remove(index.toLong())
 
-    fun move(from: Int, to: Int): Map<String, Value> = mapOf("from" to Value.int(from.toLong()), "to" to Value.int(to.toLong()))
+    fun move(from: Int, to: Int): Move = Move(from.toLong(), to.toLong())
 
     /** `started` and `stalled`. */
-    fun at(atMs: Long): Map<String, Value> = mapOf("at_ms" to Value.int(maxOf(atMs, 0)))
+    fun at(atMs: Long): At = At(maxOf(atMs, 0))
 
     /** `report_position`: where the output is, measured against the clock that started playing at `since`. */
-    fun reportPosition(atMs: Long, since: Long): Map<String, Value> =
-        mapOf("at_ms" to Value.int(maxOf(atMs, 0)), "since" to Value.int(since))
+    fun reportPosition(atMs: Long, since: Long): Report = Report(maxOf(atMs, 0), since)
 
-    fun advance(fromTrack: Int): Map<String, Value> = mapOf("from_track" to Value.int(fromTrack.toLong()))
+    fun advance(fromTrack: Int): Advance = Advance(fromTrack.toLong())
 
-    fun scrub(atMs: Long?): Map<String, Value> = mapOf("at_ms" to Value.opt(atMs?.let { Value.int(maxOf(it, 0)) }))
+    fun scrub(atMs: Long?): Scrub = Scrub(atMs?.let { maxOf(it, 0) })
 
-    fun recordPlay(t: Queued, from: String): Map<String, Value> =
-        mapOf(
-            "album" to Value.text(t.album),
-            "creator" to Value.text(t.creator),
-            "duration_ms" to Value.int(maxOf(t.durationMs, 0)),
-            "file" to Value.text(t.file),
-            "from" to Value.text(from),
-            "title" to Value.text(t.title),
-            "track" to Value.id(t.id),
-        )
+    fun recordPlay(t: Queued, from: String): RecordPlay = RecordPlay(t.id, t.title, t.creator, t.album, maxOf(t.durationMs, 0), t.file, from)
 
     /**
      * How long a track has to have played before it counts as a play: thirty seconds or half its
-     * length, whichever is first (`read::counts_after`).
+     * length, whichever is first (`host::counts_after`).
      */
     fun countsAfter(durationMs: Long): Long = if (durationMs <= 0) 30_000 else minOf(durationMs / 2, 30_000)
 }
@@ -338,17 +352,20 @@ class Remote(
     var stats = RemoteStats()
         private set
 
-    /** Whether this phone is part of the session now: linked, as itself, and the server's snapshot met. */
-    fun joined(peer: Peer): Boolean = peer.linked && peer.ctx.session == me && peer.liveStatus(LISTENING)?.synced == true
+    /** The session as this phone holds it, linked or not. */
+    fun held(h: Harken): Listening = runCatching { Listening.parse(harkenListening(h.peer)) }.getOrDefault(Listening())
 
-    /** The session, when there is one to be part of; null is this phone being its own session. */
-    fun session(peer: Peer): Listening? {
-        if (!joined(peer)) return null
-        return peer.live(LISTENING)?.let { v -> runCatching { Listening.of(v) }.getOrNull() }
+    /** Whether this phone is part of the session now: linked, as itself, and standing in it (its `on_join` landed). */
+    fun joined(h: Harken): Boolean {
+        val st = h.peer.status()
+        return st.linked && st.session == me && held(h).devices.containsKey(me)
     }
 
-    /** The live instance's numbers, for the diagnostics. */
-    fun status(peer: Peer): LiveStatus? = peer.liveStatus(LISTENING)
+    /** The session, when there is one to be part of; null is this phone being its own session. */
+    fun session(h: Harken): Listening? = if (joined(h)) held(h) else null
+
+    // A transition, as `press` hands it to `call`.
+    private fun call(f: Harken.() -> Unit): Harken.() -> Unit = f
 
     /** Whether the sound belongs to another device — here or not — which is when this phone is silent. */
     fun elsewhere(s: Listening): Boolean = s.active?.output?.id?.let { it != me } == true
@@ -357,21 +374,21 @@ class Remote(
      * Call a transition. A refusal — the preview's, here — is counted and handed back; the
      * server's arrive later ([refusals]).
      */
-    fun call(peer: Peer, transition: String, input: Map<String, Value>): String? {
+    fun call(h: Harken, transition: String, f: Harken.() -> Unit): String? {
         stats = stats.copy(calls = stats.calls + 1)
         return try {
-            if (transition == "scrub") peer.callThrottled(LISTENING, transition, input) else peer.call(LISTENING, transition, input)
+            h.f()
             null
-        } catch (e: PeerError) {
-            val why = e.message ?: "refused"
+        } catch (e: Refusal) {
+            val why = e.why
             stats = stats.copy(refused = stats.refused + 1, lastRefusal = "$transition: $why")
             why
         }
     }
 
     /** What the server refused of this phone's calls since the last ask. */
-    fun refusals(peer: Peer): List<String> {
-        val out = peer.takeLiveRefusals().map { it.reason }
+    fun refusals(h: Harken): List<String> {
+        val out = h.peer.takeLiveRefusals()
         if (out.isNotEmpty()) stats = stats.copy(refused = stats.refused + out.size, lastRefusal = out.last())
         return out
     }
@@ -381,68 +398,71 @@ class Remote(
      * this phone's own session. `local` is that player, whose queue a press plays when the session
      * has none. Null when it was taken; the refusal, in a sentence, when it was not.
      */
-    fun press(peer: Peer, press: Press, local: Sound?): String? {
-        val s = session(peer) ?: return NOT_PART
+    fun press(h: Harken, press: Press, local: Sound?): String? {
+        val s = session(h) ?: return NOT_PART
         val a = s.active
-        val (transition, input) =
+        val (transition, f) =
             when (press) {
                 Press.Toggle ->
                     when {
-                        s.sounding -> "pause" to Inputs.none
-                        a != null -> "play" to Inputs.none
+                        s.sounding -> "pause" to call { pause() }
+                        a != null -> "play" to call { play() }
                         else -> startLocal(local) ?: return "nothing to play"
                     }
-                Press.Play -> if (a != null) "play" to Inputs.none else startLocal(local) ?: return "nothing to play"
-                Press.Pause -> "pause" to Inputs.none
-                is Press.Skip -> "skip" to Inputs.skip(if (press.by < 0) -1 else 1)
-                is Press.Seek -> "seek" to Inputs.seek(press.ms)
-                is Press.Jump -> "jump" to Inputs.jump(press.index)
-                is Press.Start -> "start" to Inputs.start(press.queue, press.at, press.positionMs, press.from)
-                is Press.Scrub -> "scrub" to Inputs.scrub(press.atMs)
-                is Press.Transfer -> "transfer" to Inputs.transfer(press.to)
+                Press.Play -> if (a != null) "play" to call { play() } else startLocal(local) ?: return "nothing to play"
+                Press.Pause -> "pause" to call { pause() }
+                is Press.Skip -> "skip" to call { skip(Inputs.skip(if (press.by < 0) -1 else 1)) }
+                is Press.Seek -> "seek" to call { seek(Inputs.seek(press.ms)) }
+                is Press.Jump -> "jump" to call { jump(Inputs.jump(press.index)) }
+                is Press.Start -> "start" to call { start(Inputs.start(press.queue, press.at, press.positionMs, press.from)) }
+                is Press.Scrub -> "scrub" to call { scrub(Inputs.scrub(press.atMs)) }
+                is Press.Transfer -> "transfer" to call { transfer(Inputs.transfer(press.to)) }
                 is Press.Loud -> Volumes.call(press.level, press.change) ?: return NOT_PART
-                is Press.Join -> "join" to Volumes.member(press.device)
-                is Press.Unjoin -> "unjoin" to Volumes.member(press.device)
-                Press.Here -> if (a == null || s.outputs(me)) return null else "transfer" to Inputs.transfer(me)
+                is Press.Join -> "join" to call { join(Member(press.device)) }
+                is Press.Unjoin -> "unjoin" to call { unjoin(Member(press.device)) }
+                Press.Here -> if (a == null || s.outputs(me)) return null else "transfer" to call { transfer(Inputs.transfer(me)) }
                 // The session's own edits of its queue: the track playing plays on. Into a session
                 // with nothing queued, `enqueue` starts it, as a track pressed does.
-                is Press.Next -> "enqueue" to Inputs.enqueue(press.tracks, true)
-                is Press.Append -> "enqueue" to Inputs.enqueue(press.tracks, false)
-                is Press.Remove -> "remove" to Inputs.remove(press.index)
-                is Press.Move -> "move" to Inputs.move(press.from, press.to)
+                is Press.Next -> "enqueue" to call { enqueue(Inputs.enqueue(press.tracks, true)) }
+                is Press.Append -> "enqueue" to call { enqueue(Inputs.enqueue(press.tracks, false)) }
+                is Press.Remove -> "remove" to call { remove(Inputs.remove(press.index)) }
+                is Press.Move -> "move" to call { move(Inputs.move(press.from, press.to)) }
             }
-        return call(peer, transition, input)
+        return call(h, transition, f)
     }
 
     // Nothing queued in the session: what this phone last had, pressed again.
-    private fun startLocal(local: Sound?): Pair<String, Map<String, Value>>? {
+    private fun startLocal(local: Sound?): Pair<String, Harken.() -> Unit>? {
         val l = local ?: return null
         if (l.queue.isEmpty()) return null
-        return "start" to Inputs.start(l.queue, l.index.coerceIn(0, l.queue.size - 1), 0, l.from)
+        val input = Inputs.start(l.queue, l.index.coerceIn(0, l.queue.size - 1), 0, l.from)
+        return "start" to call { start(input) }
     }
 
     /**
      * Make this phone agree with the session, and say what happened to it. Called after every
      * change the peer reports and every event the player raises.
      */
-    fun reconcile(peer: Peer, sound: Sound) {
-        if (!joined(peer)) {
+    fun reconcile(h: Harken, sound: Sound) {
+        if (!joined(h)) {
             // Its own session. Whether it was playing on its own is what matters when it comes
             // back; and a play is the log's, so it counts here too.
             alonePlaying = sound.playing
-            count(peer, sound, sound.queue.getOrNull(sound.index), sound.from)
+            count(h, sound, sound.queue.getOrNull(sound.index), sound.from)
             return
         }
-        val s = session(peer) ?: return
-        equip(peer, sound, s)
-        if (met != peer.epoch) {
+        val s = session(h) ?: return
+        val epoch = h.peer.status().epoch.toLong()
+        equip(h, sound, s, epoch)
+        if (met != epoch) {
             // The first sight of the session on this connection: the rule for coming back.
-            met = peer.epoch
+            met = epoch
             if (alonePlaying && sound.queue.isNotEmpty()) {
                 alonePlaying = false
                 if (!(s.sounding && !s.outputs(me))) {
                     val at = sound.index.coerceIn(0, sound.queue.size - 1)
-                    if (call(peer, "start", Inputs.start(sound.queue, at, sound.positionMs, sound.from)) == null)
+                    val input = Inputs.start(sound.queue, at, sound.positionMs, sound.from)
+                    if (call(h, "start") { start(input) } == null)
                         stats = stats.copy(cameBackPlaying = stats.cameBackPlaying + 1)
                     // Its own sound goes on: the session it has just made says what it is doing.
                     expect = at
@@ -452,11 +472,11 @@ class Remote(
                 // sound stops below.
             }
         }
-        val now = session(peer) ?: s
-        follow(peer, sound, now)
+        val now = session(h) ?: s
+        follow(h, sound, now)
         val a = now.active
         if (a != null && now.outputs(me)) {
-            drive(peer, sound, a)
+            drive(h, sound, a)
             return
         }
         // Not the output: silent. Losing the sound is not something this phone does; it is told,
@@ -468,11 +488,11 @@ class Remote(
     // What this phone can do, said once a connection: a volume anybody can move, at the level its
     // stream is at, and no family — a phone joins no group. Its entry starts as whatever `on_join`
     // assumed, which is nothing; a player with no volume says nothing and stays that.
-    private fun equip(peer: Peer, sound: Sound, s: Listening) {
-        if (equipped == peer.epoch || s.devices[me] == null) return
+    private fun equip(h: Harken, sound: Sound, s: Listening, epoch: Long) {
+        if (equipped == epoch || s.devices[me] == null) return
         val now = sound.volume() ?: return
-        if (call(peer, "equip", Volumes.equip(true, null, now.first, now.second)) != null) return
-        equipped = peer.epoch
+        if (call(h, "equip") { equip(Volumes.equip(true, null, now.first, now.second)) } != null) return
+        equipped = epoch
         wanted = now
         seen = now
     }
@@ -483,7 +503,7 @@ class Remote(
      * own last write, so its own write is never said back: the session asks for 30, the stream
      * takes its nearest step and reads 27, and 27 is where this phone left it, not a hand.
      */
-    private fun follow(peer: Peer, sound: Sound, s: Listening) {
+    private fun follow(h: Harken, sound: Sound, s: Listening) {
         val mine = s.devices[me]?.takeIf { it.canVolume } ?: return
         val now = sound.volume() ?: return
         val want = mine.volume.toInt() to mine.muted
@@ -492,7 +512,7 @@ class Remote(
             // Moved, and not by this: the buttons, the system's panel, another app.
             seen = now
             wanted = now
-            if (now != want) call(peer, "report_volume", Volumes.report(now.first, now.second))
+            if (now != want) call(h, "report_volume") { reportVolume(Volumes.report(now.first, now.second)) }
             return
         }
         if (want != wanted) {
@@ -504,8 +524,8 @@ class Remote(
 
     // This phone is the output: its player made to agree with the session, and what happened to
     // it said.
-    private fun drive(peer: Peer, sound: Sound, a: Session.Active) {
-        val now = peer.serverNow()
+    private fun drive(h: Harken, sound: Sound, a: Active) {
+        val now = System.currentTimeMillis()
         val at = a.at.toInt()
         val track = a.now
         val here = a.at to track.id
@@ -523,7 +543,7 @@ class Remote(
                 // The player moved on by itself: the track the session is at ended.
                 sound.index == expect + 1 && expect == at && a.clock.playing -> {
                     advancedFor = here
-                    call(peer, "advance", Inputs.advance(at))
+                    call(h, "advance") { advance(Inputs.advance(at)) }
                     return
                 }
                 // Somebody moved the session: a skip, a jump, a track pressed.
@@ -540,7 +560,8 @@ class Remote(
         val moving = (a.output as? Output.Device)?.moving == true
         if (moving && startedFor != here) {
             startedFor = here
-            call(peer, "started", Inputs.at(sound.positionMs))
+            val input = Inputs.at(sound.positionMs)
+            call(h, "started") { started(input) }
             return
         }
         if (!moving) startedFor = null
@@ -548,12 +569,13 @@ class Remote(
         // any other — played again from the start if somebody presses play.
         if (sound.ended && a.clock.playing && advancedFor != here) {
             advancedFor = here
-            call(peer, "advance", Inputs.advance(at))
+            call(h, "advance") { advance(Inputs.advance(at)) }
             return
         }
         // It stopped by itself: the session is told, and pauses there.
         if (sound.takeStalled() && a.clock.playing) {
-            call(peer, "stalled", Inputs.at(sound.positionMs))
+            val input = Inputs.at(sound.positionMs)
+            call(h, "stalled") { stalled(input) }
             return
         }
         when {
@@ -575,19 +597,20 @@ class Remote(
                     val last = reported
                     if (last == null || now - last >= REPORT_MS) {
                         reported = now
-                        call(peer, "report_position", Inputs.reportPosition(sound.positionMs, clock.since))
+                        val input = Inputs.reportPosition(sound.positionMs, clock.since)
+                        call(h, "report_position") { reportPosition(input) }
                     }
                 }
                 !moved && clock is Clock.Playing -> {}
                 else -> sound.seek(want)
             }
         }
-        count(peer, sound, track, a.from)
+        count(h, sound, track, a.from)
     }
 
     // A play, once it has played long enough, once per load of a track — and, short of that, a
     // wake at the moment it will have.
-    private fun count(peer: Peer, sound: Sound, track: Queued?, from: String) {
+    private fun count(h: Harken, sound: Sound, track: Queued?, from: String) {
         if (track == null) return
         val current = sound.index to track.id
         if (loaded != current) {
@@ -599,10 +622,10 @@ class Remote(
         if (due > 0) return sound.wakeIn(due)
         counted = play
         try {
-            peer.mutate("record_play", Inputs.recordPlay(track, from))
+            h.recordPlay(Inputs.recordPlay(track, from))
             stats = stats.copy(plays = stats.plays + 1)
-        } catch (e: PeerError) {
-            stats = stats.copy(lastRefusal = "record_play: ${e.message}")
+        } catch (e: Refusal) {
+            stats = stats.copy(lastRefusal = "record_play: ${e.why}")
         }
     }
 

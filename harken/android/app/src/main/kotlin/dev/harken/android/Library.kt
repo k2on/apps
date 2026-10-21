@@ -1,38 +1,35 @@
-// The library, as the screens see it: harken's queries over the session the
-// onboarding opened (`kotlin/ark-android`'s `ArkSession`) — the Kotlin
-// `Peer` over `harken.ark`, signed in, linked, on a thread of its own that
-// runs only when something happens (`docs/plan-reactive.md`). Everything
-// that touches the peer runs on that thread: every mutation, every read,
-// and the splice after each change the session reports (`onChange`) —
-// never on a clock, so a library at rest runs nothing at all.
+// The library, as the screens see it: harken's views over the session the
+// onboarding opened (`onboarding/ArkSession.kt`) — the Rust kernel through
+// the bridge, signed in, linked, driving itself. Everything the app does to
+// it runs on the session's thread: every write, every read, and the splice
+// after each change the session reports (`onChange`) — never on a clock, so
+// a library at rest runs nothing at all.
 //
 // **The lists are spliced, not re-read.** The library, the playlists, the
-// albums, the artists and the songs' details are maintained views
-// (`ClientView`), hydrated once — Home's three first — and handed every `Changes` the peer
-// reports; the patches each answers with are applied to the list the
-// screens hold (`ClientView.splice`), and only a `Reset` reads one again.
-// A page — an album, an artist, a playlist — is a view too, held while a
-// screen shows it and dropped when the last one leaves. Search is a single
-// read per needle, of the module's `search` over its text index.
+// albums, the artists and the songs' details are maintained views — the
+// kernel's (§1.10), typed by the generated stubs (`gen.View`) — read once,
+// Home's three first; after every change each is asked what it did, and its
+// patches are spliced into the list the screens hold; only a `Reset` reads
+// one again. A page — an album, an artist, a playlist — is a view too, held
+// while a screen shows it and dropped when the last one leaves. Search is a
+// read per needle of the domain's `search`.
 //
 // Every change this phone makes is kept with its entry's id, so the
 // diagnostics can say where each one stands; a rejection from the server
 // is said once, in a sentence, as a notice.
 package dev.harken.android
 
-import dev.arkdb.Changes
-import dev.arkdb.Hex
-import dev.arkdb.Id
-import dev.arkdb.Value
-import dev.arkdb.android.ArkSession
-import dev.arkdb.android.SessionStatus
-import dev.arkdb.client.ClientView
-import dev.arkdb.client.LaunchView
-import dev.arkdb.client.Peer
-import dev.arkdb.client.PeerError
-import dev.arkdb.client.Standing
-import dev.arkdb.client.Status
-import dev.arkdb.client.Update
+import dev.arkdb.ffi.Change
+import dev.arkdb.ffi.Id
+import dev.arkdb.ffi.Refusal
+import dev.arkdb.ffi.Standing
+import dev.arkdb.ffi.Status
+import dev.arkdb.ffi.Update
+import dev.arkdb.ffi.View
+import dev.harken.android.gen.Harken
+import dev.harken.android.gen.Playlist
+import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.onboarding.SessionStatus
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -103,7 +100,7 @@ sealed class Page {
                 when (kind) {
                     "album" -> ForAlbum(name())
                     "artist" -> ForArtist(name())
-                    "playlist" -> ForPlaylist(Id.ofHex(arg))
+                    "playlist" -> ForPlaylist(Id(arg).also { require(arg.length == 32) })
                     "songs" -> Songs
                     else -> null
                 }
@@ -147,23 +144,32 @@ object Places {
 }
 
 /** One change this phone made, and what to call it beside its standing. */
-data class Authored(val id: Id, val what: String)
+data class Authored(val id: String, val what: String)
 
 /** Every number the diagnostics show. */
 data class Diagnostics(
     val status: Status?,
     val changes: List<Pair<String, String>>,
-    val verdict: String?,
 )
+
+/** `changes` made to `rows`, each row read by `of`. */
+fun <E, T> MutableList<T>.splice(changes: List<Change<E>>, of: (E) -> T) {
+    for (c in changes)
+        when (c) {
+            is Change.Insert -> add(c.at, of(c.row))
+            is Change.Remove -> removeAt(c.at)
+            is Change.Update -> set(c.at, of(c.row))
+        }
+}
 
 class Library(private val session: ArkSession) {
     /** Who is signed in. */
-    val user: String = session.login.user.id
+    val user: String = session.login.user
 
     /** What to call them. */
-    val name: String = session.login.user.name.ifBlank { session.login.user.id }
+    val name: String = session.login.name.ifBlank { session.login.user }
 
-    val email: String = session.login.user.email
+    val email: String = session.login.email
 
     /** The server, as the onboarding found it. */
     val server: String = session.server
@@ -173,13 +179,6 @@ class Library(private val session: ArkSession) {
     private val _loaded = MutableStateFlow(false)
     /** Whether Home's views — the songs, the playlists, the albums — have been read once. */
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
-
-    private val _provisional = MutableStateFlow(false)
-    /**
-     * Whether what Home shows came from the launch views' files and the live views have not yet
-     * answered (Zero's `unknown`). harken draws it the same; a screen could tell.
-     */
-    val provisional: StateFlow<Boolean> = _provisional.asStateFlow()
 
     private val _complete = MutableStateFlow(false)
     /** Whether the rest — the artists, the songs' details — have been read too, after. */
@@ -226,37 +225,25 @@ class Library(private val session: ArkSession) {
     val notice: StateFlow<String?> = noticeFlow.asStateFlow()
 
     private val movedFlow = MutableStateFlow(0L)
-    /**
-     * How many changes the session has reported: what the diagnostics read again on, rather than
-     * on a clock.
-     */
+    /** How many changes the session has reported: what the diagnostics read again on, rather than on a clock. */
     val moved: StateFlow<Long> = movedFlow.asStateFlow()
 
-    // On the peer's thread only — except, until the live view is there, the
-    // launch view's provisional rows, under the held's own lock.
-    private inner class Held<T>(val name: String, val args: Map<String, Value>, val of: (Value) -> T, val set: (List<T>) -> Unit = {}) {
-        fun publish(rows: List<T>) {
-            homePublishes.incrementAndGet()
-            set(rows)
-        }
-
-        var view: ClientView? = null
+    // A view of the domain's and the list it is spliced into; on the session's thread only.
+    private class Held<E, T>(val open: (Harken) -> View<E>, val of: (E) -> T, val set: (List<T>) -> Unit = {}) {
+        var view: View<E>? = null
         val rows = ArrayList<T>()
-        var launch: LaunchView? = null
-        var shown: List<Value>? = null
-        var live = false
+
+        fun publish() = set(rows.toList())
     }
 
-    /** How many times one of Home's lists was published: a test counts them across a launch. */
-    internal val homePublishes = java.util.concurrent.atomic.AtomicInteger()
-
-    private val library = Held("library", Phone.libraryArgs(null), Track::of) { tracksFlow.value = it }
-    private val playlistsHeld = Held("playlists", emptyMap(), Playlist::of) { playlistsFlow.value = it }
-    private val albumsHeld = Held("albums", emptyMap(), Album::of) { albumsFlow.value = it }
-    private val home = listOf<Held<*>>(library, playlistsHeld, albumsHeld)
-    private val artistsHeld = Held("artists", emptyMap(), Artist::of)
-    private val detailsHeld = Held("track_details", emptyMap(), TrackDetail::of)
-    private val playedHeld = Held("last_played", emptyMap(), Played::of)
+    private val library = Held({ Phone.library(it, null) }, Track::of) { tracksFlow.value = it }
+    private val playlistsHeld = Held({ it.playlists() }, { p: Playlist -> p }) { playlistsFlow.value = it }
+    private val albumsHeld = Held({ it.albums() }, Album::of) { albumsFlow.value = it }
+    private val artistsHeld = Held({ it.artists() }, Artist::of) { artistsFlow.value = it }
+    private val detailsHeld = Held({ it.trackDetails() }, TrackDetail::of) { r -> detailsFlow.value = r.associateBy { it.mediaId } }
+    private val playedHeld = Held({ it.lastPlayed() }, Played::of) { lastFlow.value = it.firstOrNull() }
+    private val home = listOf<Held<*, *>>(library, playlistsHeld, albumsHeld)
+    private val rest = listOf<Held<*, *>>(artistsHeld, detailsHeld, playedHeld)
     private val lastFlow = MutableStateFlow<Played?>(null)
 
     /**
@@ -266,82 +253,36 @@ class Library(private val session: ArkSession) {
      */
     val lastPlayed: StateFlow<Played?> = lastFlow.asStateFlow()
 
-    // A page's view, and how many screens hold it. The map is shared with the
-    // main thread; each entry's view is touched on the peer's thread only.
-    // Null until the page's view has been read: a page told "none yet" from "none".
-    private class Opened(val held: Held<Track>, val flow: MutableStateFlow<List<Track>?>) {
+    // A page's view, and how many screens hold it. The map is shared with the main thread; each
+    // entry's view is touched on the session's thread only. Null until the page's view has been
+    // read: a page told "none yet" from "none".
+    private class Opened(val held: Held<*, Track>, val flow: MutableStateFlow<List<Track>?>) {
         var refs = 0
     }
 
     private val pages = ConcurrentHashMap<Page, Opened>()
 
     private val changes = ArrayList<Authored>()
-    private var verdict: String? = null
-    private var verdictsSeen = 0
     private var unhook: () -> Unit = {}
 
-    // **What the first screen draws is read first.** Home is the songs, the
-    // playlists and the albums: those are hydrated and published, and only
-    // then — on a later turn of the peer's thread, so nothing that published
-    // waits on it — the artists and every song's details, which Library's
-    // Artists tab and a row's album ask for and which cost as much again.
-    // A pump between the two splices what it can; a view not yet hydrated
-    // has nothing to splice, and hydrates from the store as it then is.
-    //
-    // **And before that, from disk.** Home's three are launch views
-    // (`dev.arkdb.client.LaunchView`): what they held when the app last went
-    // to the background is read on a thread of its own while the peer opens,
-    // and published as provisional — Home, populated, before the replica has
-    // been read at all. When the peer is open the live views answer against
-    // what was shown: equal, and nothing is published; different, and the
-    // difference is spliced in. What a tap does in that window: playing a
-    // provisional row starts at once (it needs only the row's file); a
-    // change (a playlist made, a song added to one) is posted to the peer's
-    // thread like any other, runs after the open, against the real replica,
-    // and its own checks refuse a row that is gone — no queue of our own.
+    // The peer, once the session has opened it: on the session's thread only.
+    private var harken: Harken? = null
+
+    // **What the first screen draws is read first.** Home is the songs, the playlists and the
+    // albums: those are read and published, and only then — on a later turn of the session's
+    // thread, so nothing that published waits on it — the artists, every song's details and the
+    // last play, which the Library's Artists tab and a row's album ask for.
     init {
-        for (h in home) launch(h)
-        session.post { p ->
-            p.takeChanges()
-            var moved = false
-            for (h in home) moved = goLive(p, h) || moved
-            _provisional.value = false
+        session.post { h ->
+            harken = h
+            for (held in home) hydrate(h, held)
             homeShown()
-            if (moved) session.launchChanged()
-            unhook = session.onChange { q, _ -> tick(q) }
+            unhook = session.onChange { tick() }
             session.post { q ->
-                hydrate(q, artistsHeld)
-                hydrate(q, detailsHeld)
-                hydrate(q, playedHeld)
-                artistsFlow.value = artistsHeld.rows.toList()
-                detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
-                lastFlow.value = playedHeld.rows.firstOrNull()
+                for (held in rest) hydrate(q, held)
                 _complete.value = true
             }
         }
-    }
-
-    private fun <T> launch(h: Held<T>) {
-        h.launch =
-            session.launchView(h.name, h.name, h.args) { rows ->
-                val mapped =
-                    try {
-                        rows.map(h.of)
-                    } catch (e: Exception) {
-                        return@launchView
-                    }
-                synchronized(h) {
-                    if (h.live) return@launchView
-                    h.shown = rows
-                    h.rows.clear()
-                    h.rows.addAll(mapped)
-                    h.publish(mapped)
-                }
-                if (home.all { synchronized(it) { it.shown != null || it.live } }) {
-                    _provisional.value = home.none { synchronized(it) { it.live } }
-                    homeShown()
-                }
-            }
     }
 
     // Home has what it draws: the splash may go.
@@ -350,114 +291,58 @@ class Library(private val session: ArkSession) {
         session.ready()
     }
 
-    // The live view, against whatever was shown provisionally; true when its
-    // rows moved (and were published), so the files are written again.
-    private fun <T> goLive(p: Peer, h: Held<T>): Boolean {
-        val shown = synchronized(h) {
-            h.live = true
-            h.shown
-        }
-        val lv = h.launch
-        if (lv == null) {
-            hydrate(p, h)
-            h.publish(h.rows.toList())
-            return false
-        }
-        val u =
+    private fun <E, T> hydrate(h: Harken, held: Held<E, T>) {
+        held.view?.close()
+        held.view =
             try {
-                lv.live(p, shown)
-            } catch (e: PeerError) {
-                h.view = null
-                h.rows.clear()
-                h.publish(emptyList())
-                return shown != null
-            }
-        h.view = lv.view
-        return when (u) {
-            is Update.Unchanged -> false
-            is Update.Patched -> {
-                ClientView.splice(h.rows, u.patches, h.of)
-                h.publish(h.rows.toList())
-                true
-            }
-            is Update.Reset -> {
-                h.rows.clear()
-                lv.view?.rows?.mapTo(h.rows, h.of)
-                h.publish(h.rows.toList())
-                true
-            }
-        }
-    }
-
-    private fun <T> hydrate(p: Peer, h: Held<T>) {
-        h.view =
-            try {
-                p.view(h.name, h.args)
-            } catch (e: PeerError) {
+                held.open(h)
+            } catch (e: Refusal) {
                 null
             }
-        h.rows.clear()
-        h.view?.rows?.mapTo(h.rows, h.of)
+        held.rows.clear()
+        held.view?.rows()?.mapTo(held.rows, held.of)
+        held.publish()
     }
 
-    // A Home view, handed what moved: spliced and published when it moved.
-    private fun <T> moveHome(p: Peer, h: Held<T>, ch: Changes): Boolean {
-        if (!update(p, h, ch)) return false
-        h.publish(h.rows.toList())
-        return true
-    }
-
-    // Hand what moved to a view, and splice its list; true when it moved.
-    private fun <T> update(p: Peer, h: Held<T>, ch: Changes): Boolean {
-        val v = h.view ?: return false
-        return when (val u = v.update(p, ch)) {
+    // What a view did since it was last asked, spliced into its list; true when it moved.
+    private fun <E, T> update(held: Held<E, T>): Boolean {
+        val v = held.view ?: return false
+        return when (val u = v.take()) {
             is Update.Unchanged -> false
             is Update.Patched -> {
-                ClientView.splice(h.rows, u.patches, h.of)
+                held.rows.splice(u.changes, held.of)
                 true
             }
             is Update.Reset -> {
-                h.rows.clear()
-                v.rows.mapTo(h.rows, h.of)
+                held.rows.clear()
+                u.rows.mapTo(held.rows, held.of)
                 true
             }
         }
     }
 
-    private fun splice(p: Peer) {
-        val ch = p.takeChanges()
-        if (ch is Changes.Applied && ch.changes.isEmpty()) return
-        var moved = false
-        for (h in home) if (moveHome(p, h, ch)) moved = true
-        if (moved) session.launchChanged()
-        if (update(p, artistsHeld, ch)) artistsFlow.value = artistsHeld.rows.toList()
-        if (update(p, detailsHeld, ch)) detailsFlow.value = detailsHeld.rows.associateBy { it.mediaId }
-        if (update(p, playedHeld, ch)) lastFlow.value = playedHeld.rows.firstOrNull()
-        for (o in pages.values) if (update(p, o.held, ch)) o.flow.value = o.held.rows.toList()
+    private fun splice() {
+        for (held in home + rest) if (update(held)) held.publish()
+        for (o in pages.values) if (update(o.held)) o.flow.value = o.held.rows.toList()
     }
 
-    // What a change the session reported comes to here: the views spliced
-    // (a list is published only when its rows moved), a verdict said once.
-    private fun tick(p: Peer) {
+    // What a change the session reported comes to here: the views spliced (a list is published
+    // only when its rows moved), a rejection said once.
+    private fun tick() {
+        val h = harken ?: return
         movedFlow.value++
-        splice(p)
-        val rejected = p.takeRejections()
-        if (rejected.isNotEmpty()) noticeFlow.value = "Not saved: ${rejected.last().reason}"
-        val agreed = p.agreed
-        if (agreed.size > verdictsSeen) {
-            val (n, ok) = agreed.last()
-            verdictsSeen = agreed.size
-            verdict = "at $n the server ${if (ok) "agrees" else "DIVERGES"}"
-        }
+        splice()
+        val rejected = h.peer.takeRejections()
+        if (rejected.isNotEmpty()) noticeFlow.value = "Not saved: ${rejected.last().why}"
     }
 
     // Pages -------------------------------------------------------------------
 
-    private fun pageView(page: Page): Held<Track>? =
+    private fun pageView(page: Page): Held<*, Track>? =
         when (page) {
-            is Page.ForAlbum -> Held("album", Phone.namedArgs(page.name), Track::of)
-            is Page.ForArtist -> Held("artist", Phone.namedArgs(page.name), Track::of)
-            is Page.ForPlaylist -> Held("playlist", Phone.playlistArgs(page.id), Track::of)
+            is Page.ForAlbum -> Held({ Phone.album(it, page.name) }, Track::of)
+            is Page.ForArtist -> Held({ Phone.artist(it, page.name) }, Track::of)
+            is Page.ForPlaylist -> Held({ Phone.playlist(it, page.id) }, Track::of)
             is Page.Songs -> null
         }
 
@@ -466,9 +351,9 @@ class Library(private val session: ArkSession) {
         if (page is Page.Songs) return tracks
         val o = pages.computeIfAbsent(page) { Opened(pageView(page)!!, MutableStateFlow(null)) }
         synchronized(o) { o.refs++ }
-        session.post { p ->
+        session.post { h ->
             if (o.held.view == null) {
-                hydrate(p, o.held)
+                hydrate(h, o.held)
                 o.flow.value = o.held.rows.toList()
             }
         }
@@ -478,34 +363,23 @@ class Library(private val session: ArkSession) {
     fun release(page: Page) {
         val o = pages[page] ?: return
         val gone = synchronized(o) { --o.refs <= 0 }
-        if (gone) pages.remove(page, o)
+        if (gone && pages.remove(page, o)) session.post { o.held.view?.close() }
     }
 
     /** A page's tracks once, for playing it from somewhere that does not show it (Home's last played). */
     suspend fun read(page: Page): List<Track> =
-        if (page is Page.Songs) tracks.value
-        else
-            session.run { p ->
-                val h = pageView(page)!!
-                try {
-                    p.query(h.name, h.args).asList().map(Track::of)
-                } catch (e: PeerError) {
-                    emptyList()
-                }
-            }
+        when (page) {
+            is Page.Songs -> tracks.value
+            is Page.ForAlbum -> session.run { h -> Phone.once({ Phone.album(h, page.name) }, Track::of) }
+            is Page.ForArtist -> session.run { h -> Phone.once({ Phone.artist(h, page.name) }, Track::of) }
+            is Page.ForPlaylist -> session.run { h -> Phone.once({ Phone.playlist(h, page.id) }, Track::of) }
+        }
 
     /**
      * This person's plays, newest first — the domain's `recently_played`, the last fifty, a track as
      * often as it was played: what a car's Home lists after what is playing (Car.kt).
      */
-    suspend fun recentlyPlayed(): List<Played> =
-        session.run { p ->
-            try {
-                p.query("recently_played", emptyMap()).asList().map(Played::of)
-            } catch (e: PeerError) {
-                emptyList()
-            }
-        }
+    suspend fun recentlyPlayed(): List<Played> = session.run { h -> Phone.once({ h.recentlyPlayed() }, Played::of) }
 
     /**
      * Every list read once — the artists and the songs' details come a turn after Home's — or ten
@@ -516,25 +390,25 @@ class Library(private val session: ArkSession) {
         withTimeoutOrNull(10_000) { complete.first { it } }
     }
 
-    /** The library's songs matching `needle`, by the module's own text index. */
-    suspend fun search(needle: String): List<Track> = session.run { p -> Phone.search(p, needle) }
+    /** The library's songs matching `needle`, by the domain's `search`. */
+    suspend fun search(needle: String): List<Track> = session.run { h -> Phone.search(h, needle) }
 
     /** Which of the person's playlists `track` is on. */
-    suspend fun playlistsOf(track: Track): Set<Id> = session.run { p -> Phone.playlistsOf(p, track.id).map { it.id }.toSet() }
+    suspend fun playlistsOf(track: Track): Set<Id> = session.run { h -> Phone.playlistsOf(h, track.id).map { it.id }.toSet() }
 
     /** What `create_playlist`'s own checks say of a name as it is typed; null when it would pass. */
-    suspend fun nameProblem(name: String): String? = session.run { p -> Phone.nameProblem(p, name) }
+    suspend fun nameProblem(name: String): String? = session.run { h -> Phone.nameProblem(h, name) }
 
     // Writing -----------------------------------------------------------------
 
-    private fun write(f: (Peer) -> Unit) =
-        session.post { p ->
+    private fun write(f: (Harken) -> Unit) =
+        session.post { h ->
             try {
-                f(p)
+                f(h)
             } catch (e: Exception) {
                 noticeFlow.value = e.message ?: e.javaClass.simpleName
             }
-            splice(p)
+            splice()
         }
 
     private fun record(w: Wrote, what: String, refused: String) {
@@ -545,22 +419,22 @@ class Library(private val session: ArkSession) {
     }
 
     /** Make a playlist, and put `then` on it once it is there. */
-    fun createPlaylist(name: String, then: Track? = null) = write { p ->
+    fun createPlaylist(name: String, then: Track? = null) = write { h ->
         val before = playlistsHeld.rows.map { it.id }.toSet()
-        record(Phone.createPlaylist(p, name), "make the playlist ${name.trim()}", "Couldn't make it")
-        splice(p)
+        record(Phone.createPlaylist(h, name), "make the playlist ${name.trim()}", "Couldn't make it")
+        splice()
         val made = playlistsHeld.rows.firstOrNull { it.id !in before }
         if (then != null && made != null)
-            record(Phone.addToPlaylist(p, made.id, then.id), "add ${then.title} to ${made.name}", "Couldn't add it")
+            record(Phone.addToPlaylist(h, made.id, then.id), "add ${then.title} to ${made.name}", "Couldn't add it")
     }
 
-    fun addToPlaylist(track: Track, playlist: Playlist) = write { p ->
-        record(Phone.addToPlaylist(p, playlist.id, track.id), "add ${track.title} to ${playlist.name}", "Couldn't add it")
+    fun addToPlaylist(track: Track, playlist: Playlist) = write { h ->
+        record(Phone.addToPlaylist(h, playlist.id, track.id), "add ${track.title} to ${playlist.name}", "Couldn't add it")
     }
 
-    fun removeFromPlaylist(track: Track, playlist: Id) = write { p ->
+    fun removeFromPlaylist(track: Track, playlist: Id) = write { h ->
         val name = playlistsHeld.rows.firstOrNull { it.id == playlist }?.name ?: "a playlist"
-        record(Phone.removeFromPlaylist(p, playlist, track.id), "take ${track.title} off $name", "Couldn't take it off")
+        record(Phone.removeFromPlaylist(h, playlist, track.id), "take ${track.title} off $name", "Couldn't take it off")
     }
 
     fun dismiss() {
@@ -571,13 +445,9 @@ class Library(private val session: ArkSession) {
 
     /** Every number the old settings screen had, and every change with where it stands. */
     suspend fun diagnostics(): Diagnostics =
-        session.run { p ->
+        session.run { h ->
             val mine = synchronized(changes) { changes.toList() }
-            Diagnostics(
-                status = p.status(),
-                changes = mine.map { it.what to standing(p.standing(it.id)) },
-                verdict = verdict,
-            )
+            Diagnostics(status = h.peer.status(), changes = mine.map { it.what to standing(h.peer.standing(it.id)) })
         }
 
     private fun standing(st: Standing): String =
@@ -588,13 +458,14 @@ class Library(private val session: ArkSession) {
             is Standing.Rejected -> "not saved: ${st.why}"
         }
 
-    /** Ask the server whether it agrees with this phone; the answer arrives as a change. */
-    fun verify() = write { p -> p.verify() }
-
     fun signOut() = session.signOut()
 
     /** Stop listening to the session; closing it is the onboarding's. */
     fun close() {
-        session.post { unhook() }
+        session.post {
+            unhook()
+            for (held in home + rest) held.view?.close()
+            for (o in pages.values) o.held.view?.close()
+        }
     }
 }
