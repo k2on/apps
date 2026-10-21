@@ -36,8 +36,10 @@ a crate of plain Rust every peer links — and harken, the first app on it.
 
 One command holds all of it:
 
-    nix flake check   # rust: fmt, clippy and every test of the workspace
+    nix flake check   # rust: every test of the workspace
                       #   (and harken-iced's demo feature);
+                      # clippy: the workspace lint-clean, -D warnings;
+                      # fmt: the workspace formatted;
                       # vectors: spec/vectors is what the writer writes;
                       # traces: spec/vectors/trace/ and a fuzzed corpus replay;
                       # fuzz-smoke: 25 fuzzed sessions;
