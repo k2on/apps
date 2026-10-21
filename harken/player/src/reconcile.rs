@@ -20,10 +20,10 @@ use ark::db::{Durable, Volatile};
 use ark::format::Encode;
 use ark_peer::{Disk, Instance};
 use harken_domain::host::{counts_after, UNSAID_VOLUME};
-use harken_domain::{Active, Clock, Output, Present, Track};
+use harken_domain::{Active, Advance, At, Clock, Jump, Output, Present, Report, Seek, Track};
 
 use crate::memory::*;
-use crate::{Event, Place, Say, Sound, View, Vol, DRIFT_MS, REPORT_MS, SYNC_MS};
+use crate::{Event, Place, Say, Sound, View, Vol, DRIFT_MS, SYNC_MS};
 
 /// One device's reconciler: its mind, and its play counter.
 pub struct Reconciler {
@@ -108,10 +108,7 @@ impl Reconciler {
             self.group(m, v, mine, sound, say);
         }
         match &s.session {
-            Some(a) if s.outputs(v.me) => {
-                m.role = Role::Output;
-                self.drive(m, v, a, sound, say);
-            }
+            Some(a) if s.outputs(v.me) => self.drive(m, v, a, sound, say),
             _ => {
                 // Not the output: silent. Losing the sound is not something
                 // a device does; it is told, and this is where it notices.
@@ -256,10 +253,20 @@ impl Reconciler {
     /// and what happened to it said.
     fn drive(&mut self, m: &mut Mind, v: &View, a: &Active, sound: &mut dyn Sound, say: &mut dyn Say) {
         let event = sound.take();
+        let moving = matches!(a.output, Output::Device { moving: true, .. });
         if let Some(Event::Lost { why }) = &event {
             let _ = say.call("release", ().to_bytes(), None, why);
-            m.handoff = Handoff::None;
+            (m.handoff, m.role) = (Handoff::None, Role::Released);
             return;
+        }
+        if m.role == Role::Released && !moving {
+            // It let the session go, and the session has not heard yet:
+            // nothing to take again.
+            return;
+        }
+        m.role = Role::Output;
+        if matches!(m.waiting, Waiting::On { clock } if clock != a.clock) {
+            m.waiting = Waiting::Nothing;
         }
         let at = (a.at.max(0) as usize).min(a.queue.len().saturating_sub(1));
         let track = a.now();
@@ -285,13 +292,10 @@ impl Reconciler {
                 // by itself — the track ended, or a hand moved it.
                 (Expect::At { at: e }, Some(i)) if e == here.at => {
                     m.handoff = Handoff::Advanced { here };
-                    if i == at + 1 && playing {
-                        let input = harken_domain::Advance { from_track: here.at };
-                        let _ = say.call("advance", input.to_bytes(), None, "the track ended");
-                    } else {
-                        let input = harken_domain::Jump { index: i as i64 };
-                        let _ = say.call("jump", input.to_bytes(), None, "it was moved by hand");
-                    }
+                    let _ = match i == at + 1 && playing {
+                        true => say.call("advance", Advance { from_track: here.at }.to_bytes(), None, "the track ended"),
+                        false => say.call("jump", Jump { index: i as i64 }.to_bytes(), None, "it was moved by hand"),
+                    };
                     return;
                 }
                 // Somebody moved the session: a skip, a jump, a track pressed.
@@ -309,14 +313,13 @@ impl Reconciler {
         }
         // The hand-off has landed when the player has it: said once, where
         // it measurably is.
-        let moving = matches!(a.output, Output::Device { moving: true, .. });
         if moving && heard.ready && m.handoff != (Handoff::Started { here }) {
             m.handoff = Handoff::Started { here };
             let (ms, as_of) = match heard.place {
                 Place::Measured { ms, at } => (ms, playing.then_some(at)),
                 p => (p.ms().unwrap_or(want), None),
             };
-            let _ = say.call("started", harken_domain::At { at_ms: ms.max(0) }.to_bytes(), as_of, "it has the hand-off");
+            let _ = say.call("started", At { at_ms: ms.max(0) }.to_bytes(), as_of, "it has the hand-off");
             return;
         }
         if !moving && matches!(m.handoff, Handoff::Started { .. }) {
@@ -326,30 +329,21 @@ impl Reconciler {
         // end is reconciled like any other.
         if heard.ended && playing && m.handoff != (Handoff::Advanced { here }) {
             m.handoff = Handoff::Advanced { here };
-            let _ = say.call(
-                "advance",
-                harken_domain::Advance { from_track: here.at }.to_bytes(),
-                None,
-                "the queue ended",
-            );
+            let _ = say.call("advance", Advance { from_track: here.at }.to_bytes(), None, "the queue ended");
             return;
         }
-        match event {
+        let said = match event {
             // It stopped by itself: the session pauses there.
-            Some(Event::Stalled { at_ms }) if playing => {
-                let _ = say.call(
-                    "stalled",
-                    harken_domain::At { at_ms: at_ms.max(0) }.to_bytes(),
-                    None,
-                    "it stopped by itself, or by hand",
-                );
-                return;
-            }
-            Some(Event::Resumed) if !playing => {
-                let _ = say.call("play", ().to_bytes(), None, "it was resumed by hand");
-                return;
-            }
-            _ => {}
+            Some(Event::Stalled { at_ms }) if playing => say.call("stalled", At { at_ms: at_ms.max(0) }.to_bytes(), None, "it stopped by itself"),
+            Some(Event::Resumed) if !playing => say.call("play", ().to_bytes(), None, "it was resumed by hand"),
+            _ => Err(String::new()),
+        };
+        if said.is_ok() {
+            m.waiting = Waiting::On { clock: a.clock };
+        }
+        if m.waiting != Waiting::Nothing {
+            // What it did is on its way to the session: not fought.
+            return;
         }
         match (playing, heard.playing) {
             (true, false) => sound.resume(),
@@ -361,31 +355,29 @@ impl Reconciler {
         // agree — a seek on another device — the player goes where it is
         // now; if it is the player that came apart from a clock nobody
         // touched, the player is right about where it is, and the session is
-        // told: as the player's own `seek` past [`DRIFT_MS`], else
-        // `report_position`, at most once a [`REPORT_MS`].
+        // told — as the player's own `seek` past [`DRIFT_MS`], else
+        // `report_position` — once, until the session moves.
         let against = Against::Clock { here, clock: a.clock };
         let moved = m.against != against;
         m.against = against;
-        match heard.place {
-            p if moved => {
+        match (heard.place, a.clock) {
+            (p, _) if moved => {
                 if p.ms().is_none_or(|ms| (ms - want).abs() > SYNC_MS) {
                     sound.seek(want);
                 }
             }
-            Place::Measured { ms, at: when } if heard.playing => {
-                let Clock::Playing { since, .. } = a.clock else { return };
+            (Place::Measured { ms, at: when }, Clock::Playing { since, .. }) if heard.playing => {
                 let off = ms - a.clock.position(when);
-                if off.abs() > DRIFT_MS {
-                    let _ = say.call(
-                        "seek",
-                        harken_domain::Seek { ms: ms.max(0) }.to_bytes(),
-                        Some(when),
-                        "it is somewhere else in the track",
-                    );
-                } else if off.abs() > SYNC_MS && !matches!(m.reported, Reported::At { ms: last } if v.now - last < REPORT_MS) {
-                    m.reported = Reported::At { ms: v.now };
-                    let input = harken_domain::Report { at_ms: ms.max(0), since };
-                    let _ = say.call("report_position", input.to_bytes(), Some(when), "it is not where the session counts it");
+                let said = if off.abs() > DRIFT_MS {
+                    say.call("seek", Seek { ms: ms.max(0) }.to_bytes(), Some(when), "it is somewhere else in the track")
+                } else if off.abs() > SYNC_MS {
+                    let input = Report { at_ms: ms.max(0), since };
+                    say.call("report_position", input.to_bytes(), Some(when), "it is not where the session counts it")
+                } else {
+                    Err(String::new())
+                };
+                if said.is_ok() {
+                    m.waiting = Waiting::On { clock: a.clock };
                 }
             }
             _ => {}

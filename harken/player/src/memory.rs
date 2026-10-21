@@ -28,11 +28,13 @@ pub enum Alone {
 }
 
 /// Whether the device was the output at its last look: one that stops being
-/// it lets go once.
+/// it lets go once; one that let the session go (`release`) is not taken
+/// again until the session hands it the sound again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Describe)]
 pub enum Role {
     Silent,
     Output,
+    Released,
 }
 
 /// What was said of the track `here`: the hand-off landed on it
@@ -62,11 +64,13 @@ pub enum Against {
     Clock { here: Here, clock: Clock },
 }
 
-/// When the player last said where it is, by the server's clock.
+/// What the player did by itself — a stall, a resume, a seek, where it
+/// drifted to — said while the session's clock was `clock`: the player is
+/// neither fought nor said again until the session moves off it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Describe)]
-pub enum Reported {
-    Never,
-    At { ms: i64 },
+pub enum Waiting {
+    Nothing,
+    On { clock: Clock },
 }
 
 /// What the device said it can do (`equip`), and on which connection.
@@ -109,7 +113,7 @@ pub struct Mind {
     pub handoff: Handoff,
     pub expect: Expect,
     pub against: Against,
-    pub reported: Reported,
+    pub waiting: Waiting,
     pub equipped: Equipped,
     pub volume: Tuned,
     pub group: Grouped,
@@ -125,7 +129,7 @@ impl Mind {
             handoff: Handoff::None,
             expect: Expect::Nowhere,
             against: Against::Nothing,
-            reported: Reported::Never,
+            waiting: Waiting::Nothing,
             equipped: Equipped::Not,
             volume: Tuned::Untold,
             group: Grouped::Untold,

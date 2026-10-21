@@ -48,10 +48,6 @@ pub use reconcile::Reconciler;
 /// has drifted to (`report_position`).
 pub const DRIFT_MS: i64 = 3_000;
 
-/// How often, at most, a player that stays apart from the clock is said
-/// again.
-pub const REPORT_MS: i64 = 1_000;
-
 /// A volume, 0 to 100, and its mute.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ark::prelude::Describe)]
 pub struct Vol {
