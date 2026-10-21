@@ -10,8 +10,9 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
+use ark::peer::Who;
 use ark_ffi::{Login, Peer, Refusal};
-use ark_peer::{dev, now_ms, Config, Handle, Live, Memory, Module};
+use ark_peer::{now_ms, Config, Handle, Live, Memory, Module};
 use harken_domain::host::{self, Listening};
 use serde_json::json;
 
@@ -80,6 +81,16 @@ pub fn harken_media_url(server: String, file: String) -> String {
 /// domain's — over memory, which devices dial without a socket. Its devices
 /// are pumped by hand ([`Hall::carry`]), so a test says when what was said
 /// has been answered.
+/// Who a hall's token, `user/session`, is.
+fn token(t: &str) -> Option<Who> {
+    let (actor, session) = t.split_once('/')?;
+    Some(Who {
+        actor: actor.into(),
+        session: session.into(),
+        roles: vec![],
+    })
+}
+
 #[derive(uniffi::Object)]
 pub struct Hall {
     hub: Handle,
@@ -108,23 +119,22 @@ impl Hall {
         })
     }
 
-    /// A device on the disk at `dir`, signed in as `token` reads in dev
-    /// (`user@device`: the device is that whole login's session), saying
-    /// `device` (a `Device`'s JSON), dialling this hall.
-    pub fn device(&self, dir: String, token: String, device: String) -> Result<Arc<Peer>, Refusal> {
-        let who = dev(&token).ok_or_else(|| Refusal::from("no login"))?;
+    /// A device on the disk at `dir`, signed in as `user` on the session
+    /// `session` — which is the device's id in the listening session —
+    /// saying `device` (a `Device`'s JSON), dialling this hall.
+    pub fn device(&self, dir: String, user: String, session: String, device: String) -> Result<Arc<Peer>, Refusal> {
         let login = Login {
-            token,
-            session: who.session,
-            user: who.actor,
+            token: format!("{user}/{session}"),
+            session,
+            user,
             name: String::new(),
             email: String::new(),
-            roles: who.roles,
+            roles: vec![],
             expires_ms: 0,
         };
         let p = Peer::open(config(device.into_bytes()), &dir, Some(login))?;
         p.by_hand();
-        p.connect_with("hall", self.hub.dialer(Arc::new(dev)));
+        p.connect_with("hall", self.hub.dialer(Arc::new(token)));
         self.devices.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&p));
         self.carry();
         Ok(p)

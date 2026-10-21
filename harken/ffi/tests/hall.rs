@@ -19,10 +19,10 @@ fn two_devices_share_a_session() {
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let hall = Hall::new();
     let phone = hall
-        .device(a.path().to_str().unwrap().into(), "alice@phone".into(), device("Phone"))
+        .device(a.path().to_str().unwrap().into(), "alice".into(), "phone".into(), device("Phone"))
         .unwrap();
     let laptop = hall
-        .device(b.path().to_str().unwrap().into(), "alice@laptop".into(), device("Laptop"))
+        .device(b.path().to_str().unwrap().into(), "alice".into(), "laptop".into(), device("Laptop"))
         .unwrap();
     hall.carry();
     let ids: Vec<String> = listening(&laptop)["devices"]
@@ -31,14 +31,14 @@ fn two_devices_share_a_session() {
         .iter()
         .map(|d| d["id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(ids, ["alice@laptop", "alice@phone"]);
+    assert_eq!(ids, ["laptop", "phone"]);
     let track = r#"{"album":"","creator":"","duration_ms":1000,"file":"a.flac","id":"00000000000000000000000000000001","title":"A"}"#;
     phone
         .call("start".into(), format!(r#"{{"at":0,"from":"","position":0,"queue":[{track}]}}"#))
         .unwrap();
     hall.carry();
     let s = &listening(&laptop)["session"];
-    assert_eq!(s["output"]["Device"]["id"], "alice@phone", "{s}");
+    assert_eq!(s["output"]["Device"]["id"], "phone", "{s}");
     assert_eq!(phone.status().pending, 0);
     let held: serde_json::Value = serde_json::from_str(&hall.listening("alice".into())).unwrap();
     assert_eq!(&held["session"], s, "the hall holds what the laptop does");
