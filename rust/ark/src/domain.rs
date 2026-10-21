@@ -95,8 +95,11 @@ fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
     }
 }
 
+/// A mutator's function, or a live transition's (`P` the space it writes).
+pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>;
+
 struct Mutate<S: Tables, P: Writes, I> {
-    f: fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>,
+    f: WriteFn<S, P, I>,
 }
 
 impl<S: Tables, P: Writes, I: Input> Procedure for Mutate<S, P, I> {
@@ -180,7 +183,7 @@ impl Domain {
         self
     }
 
-    fn writer<S: Tables, P: Writes, I: Input>(self, name: &str, kind: Kind, f: fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>) -> Domain {
+    fn writer<S: Tables, P: Writes, I: Input>(self, name: &str, kind: Kind, f: WriteFn<S, P, I>) -> Domain {
         self.add(Function {
             name: name.into(),
             kind,
@@ -200,7 +203,7 @@ impl Domain {
 
     /// A transition of live state: a mutator over volatile tables (§1.9),
     /// which writes none other ([`crate::db`]).
-    pub fn live<S: Tables, I: Input>(self, name: &str, f: fn(&Ctx, &mut Db<S, Volatile>, I) -> Result<(), Refusal>) -> Domain {
+    pub fn live<S: Tables, I: Input>(self, name: &str, f: WriteFn<S, Volatile, I>) -> Domain {
         self.writer(name, Kind::Live, f)
     }
 

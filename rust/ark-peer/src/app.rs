@@ -122,7 +122,7 @@ impl Peer {
     /// login's when they were somebody else's.
     pub fn open_as(config: Config, disk: Box<dyn Disk>, login: Option<(Who, String)>) -> Peer {
         let (disk, mut local) = crate::local::beside(disk);
-        let kept = local.read(|db| crate::local::replica(db)).unwrap_or_default();
+        let kept = local.read(crate::local::replica).unwrap_or_default();
         let me = match kept.actor {
             Some(actor) => Who {
                 actor,

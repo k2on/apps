@@ -150,20 +150,14 @@ pub struct Local {
 /// The names a peer's local instance journals under on its disk.
 pub const LOCAL: &str = "local.";
 
-/// The one function an instance runs: the changes its run made.
+/// The one function an instance runs: the changes its run made, which
+/// were undone from this store a moment before.
 struct Apply(Arc<Mutex<Vec<Change>>>);
 
 impl Procedure for Apply {
     fn apply(&self, store: &mut Store, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
         let cs = std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()));
-        for (n, c) in cs.iter().enumerate() {
-            if let Err(e) = store.apply(c) {
-                for c in cs[..n].iter().rev() {
-                    store.apply(&c.inverse()).expect("an inverse applies");
-                }
-                return Err(e);
-            }
-        }
+        cs.iter().for_each(|c| store.apply(c).expect("a run's changes apply again"));
         Ok(cs)
     }
 }
@@ -222,12 +216,7 @@ impl<S: Tables, P: Writes> Instance<S, P> {
         let run = Arc::new(Mutex::new(vec![]));
         let mut functions = Functions::default();
         functions.insert("write", Arc::new(Apply(run.clone())));
-        let me = Who {
-            actor: "local".into(),
-            session: "local".into(),
-            roles: vec![],
-        };
-        let mut machine = Machine::new(Arc::new(S::schema()), functions, alone_at(None), me).in_space(P::SPACE);
+        let mut machine = Machine::new(Arc::new(S::schema()), functions, alone_at(None), Who::default()).in_space(P::SPACE);
         // Its own ids, drawn afresh at each open: the log it folds keeps none.
         machine.origin = draw_origin();
         Instance {
@@ -257,27 +246,16 @@ impl<S: Tables, P: Writes> Instance<S, P> {
         }
         let moved: isize = changes
             .iter()
-            .map(|c| match c {
-                Change::Add { .. } => 1,
-                Change::Remove { .. } => -1,
-                Change::Edit { .. } => 0,
-            })
+            .map(|c| matches!(c, Change::Add { .. }) as isize - matches!(c, Change::Remove { .. }) as isize)
             .sum();
+        self.rows = self.rows.saturating_add_signed(moved);
         *self.run.lock().unwrap_or_else(|e| e.into_inner()) = changes;
         let out = self.machine.step(Input::Mutate {
             func: "write".into(),
             input: vec![],
             now: now_ms(),
         });
-        let refused = out.iter().find_map(|o| match o {
-            Output::Refused { why, .. } => Some(Refusal(why.clone())),
-            _ => None,
-        });
         self.persist(out);
-        if let Some(r) = refused {
-            return Err(r);
-        }
-        self.rows = self.rows.saturating_add_signed(moved);
         let (head, base) = (self.machine.log().head().0, self.machine.log().base_seq());
         if head - base > 64 + self.rows as i64 {
             let out = self.machine.step(Input::Compact(head));
