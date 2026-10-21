@@ -10,7 +10,7 @@
 
 mod common;
 
-use ark::ir::Node;
+use ark::codec::Node;
 use common::*;
 use harken_server::domain::Id;
 use harken_server::domain::Play;

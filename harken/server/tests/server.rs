@@ -6,7 +6,7 @@
 
 mod common;
 
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::store::Change;
 use common::*;
 use harken_server::domain::CreatePlaylist;
@@ -422,10 +422,10 @@ fn a_clients_raw_write_is_refused() {
     let (h, raw) = ark_peer::admin::raw(&edit);
     let mut bob = signed_in(&server, "bob");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == 1);
-    bob.client.log.cas.insert(h, raw);
+    bob.client.log.functions.insert(h.clone(), raw);
     let _ = bob
         .client
-        .author(ark::schema::Space::Durable, h, vec![], ark_peer::now_ms());
+        .author(ark::schema::Space::Durable, &h, vec![], ark_peer::now_ms());
     for _ in 0..100 {
         bob.pump();
         std::thread::sleep(std::time::Duration::from_millis(10));

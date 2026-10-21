@@ -99,8 +99,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
+use ark::codec::Node;
 use ark::hash::hex;
-use ark::ir::Node;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Journal, Role, Who};
 use ark_auth::client::Patience;
@@ -826,7 +826,7 @@ impl Headless {
         });
         let config = Config {
             live,
-            ..Config::native(hosted.domain.clone())
+            ..Config::of(hosted.domain.clone())
         };
         let disk = Files::new(f.dir.join("replica"))
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;

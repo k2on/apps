@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use ark::domain::Domain;
-use ark::hash::FnHash;
 
 /// The domain assembled, and the same as a peer's per-space module.
 #[derive(Clone)]
@@ -24,19 +23,19 @@ impl Hosted {
 
     pub fn of(domain: Arc<Domain>) -> Hosted {
         Hosted {
-            module: ark_peer::Module::native(&domain),
+            module: ark_peer::Module::of(&domain),
             domain,
         }
     }
 
-    /// The hash a registered function is called by, by its name,
-    /// `library.add_song`.
-    pub fn get(&self, name: &str) -> Option<FnHash> {
-        self.domain.get(name).map(|_| Domain::hash_of(name))
+    /// A registered function's name, `library.add_song`, as an entry
+    /// calls it: there when this build registers it.
+    pub fn get(&self, name: &str) -> Option<String> {
+        self.domain.get(name).map(|_| name.to_string())
     }
 
     /// [`Hosted::get`] of a function that must be there.
-    pub fn func(&self, name: &str) -> FnHash {
+    pub fn func(&self, name: &str) -> String {
         self.get(name)
             .unwrap_or_else(|| panic!("no function {name}"))
     }

@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::log::EntryId;
 use ark::peer::Who;
 use ark::schema::Space;
@@ -90,7 +90,7 @@ pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
     });
     let config = ark_peer::Config {
         live,
-        ..ark_peer::Config::native(hosted().domain.clone())
+        ..ark_peer::Config::of(hosted().domain.clone())
     };
     let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()), false);
     client.link.backoff = QUICK;

@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::AddSong;
 use anyhow::{Context, Result};
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::peer::{Ctx, Who};
 use ark::store::{Dir, Read, Scan as Range, Store};
 use ark_auth::Login;
@@ -185,7 +185,7 @@ impl Scanner {
         let dir = replica_dir(&data);
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
-        let config = Config::native(hosted.domain.clone());
+        let config = Config::of(hosted.domain.clone());
         let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk), false);
         // Each start is a login of its own: what the replica kept pending
         // is authored again under it, from its session's first `local`,

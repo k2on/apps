@@ -59,7 +59,7 @@ pub type Args = Vec<u8>;
 /// say them: each the domain's input type, encoded.
 pub mod input {
     use crate::domain::*;
-    use ark::ir::Node;
+    use ark::codec::Node;
 
     pub fn none() -> Vec<u8> {
         ().to_bytes()
@@ -3158,7 +3158,7 @@ pub mod ha {
     use crate::domain::host::{Kind, Listening};
     use crate::domain::{Device, Output as Sound};
     use crate::domain::{Listening as Row, ListeningDevice};
-    use ark::ir::Node;
+    use ark::codec::Node;
     use ark::peer::{Input, Output, Peer, Role, Who};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
@@ -3407,7 +3407,7 @@ pub mod ha {
             let peer = self.machines.entry(k.clone()).or_insert_with(|| {
                 let mut p = Peer::new(
                     module.schema.clone(),
-                    module.cas.clone(),
+                    module.functions.clone(),
                     Role::Replica,
                     who.clone(),
                 )

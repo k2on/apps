@@ -27,7 +27,7 @@ mod support {
 use std::path::PathBuf;
 use std::time::Instant;
 
-use ark::ir::Node;
+use ark::codec::Node;
 use ark::schema::{compat, Column, Ref, Schema, Space, Table};
 use ark::ty::Ty;
 use serde_json::json;

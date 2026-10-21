@@ -22,8 +22,8 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use ark::codec::Node;
 use ark::hash::hex;
-use ark::ir::Node;
 use ark::log::Logged;
 use ark::peer::Who;
 use ark::store::{Change, Store};
@@ -167,15 +167,11 @@ impl Log {
 
 /// The function an entry names, by its binding's last part.
 pub fn function(e: &Logged) -> String {
-    hosted()
-        .domain
-        .fns
-        .keys()
-        .find(|n| ark::domain::Domain::hash_of(n) == e.entry.func)
-        .map_or_else(
-            || format!("#{}", e.entry.func),
-            |n| n.rsplit('.').next().unwrap_or(n).to_string(),
-        )
+    let n = &e.entry.func;
+    match hosted().domain.fns.contains_key(n) {
+        true => n.rsplit('.').next().unwrap_or(n).to_string(),
+        false => format!("#{n}"),
+    }
 }
 
 /// The rows an entry added to `table`.
