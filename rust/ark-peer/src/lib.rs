@@ -38,9 +38,10 @@
 //! first `local` — an authority binds an origin to the actor whose intents
 //! first came from it.
 //!
-//! **Who is signed in** is the domain's rows (`signed`): a device reads
-//! its session and signs out through the domain, a server judges every
-//! token by the row it names and closes what is revoked or expired.
+//! **Who is signed in** is `ark-auth`'s rows (`signed`): a device reads
+//! its session and signs out through the domain; a server's hub judges
+//! every token by the row it names and closes what is revoked or expired,
+//! as `ark_auth::server::Auth` says (`serve`).
 //!
 //! Every input either machine of a device is given is recorded, when asked
 //! (`record`), as an [`Act`]: a device is a pure function of these, which
@@ -78,7 +79,6 @@ pub use hub::{ConnId, Deliver};
 pub use link::{Event, Pumped, Wake};
 #[cfg(not(target_arch = "wasm32"))]
 pub use serve::{dev, Authenticate, Handle, Running, Server};
-pub use signed::Signed;
 
 /// One space's module: its schema, the functions a peer runs by name, and
 /// the domain its views are made by.
@@ -437,6 +437,9 @@ impl Peer {
                     self.changed(space, cs);
                     if space == Space::Durable {
                         self.signs(cs);
+                        if self.hub.watched {
+                            self.hub.seen.extend(cs.iter().cloned());
+                        }
                     }
                 }
                 Output::Refused { id, why } if !self.hub.serving => self.told.refused(space, *id, why),

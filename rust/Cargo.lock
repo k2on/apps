@@ -2140,6 +2140,7 @@ name = "harken-domain"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-auth",
  "ark-dev",
  "ark-peer",
  "serde",

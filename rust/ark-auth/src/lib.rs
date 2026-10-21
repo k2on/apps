@@ -3,9 +3,11 @@
 //! The engine asks one question about identity: at every `Hello`, what does
 //! this token prove? This crate signs people in for a server — with OpenID
 //! Connect, or in dev mode by name — and mints the token; the session it
-//! stands for is a row of the log the hub writes and judges by
-//! (`ark-peer`'s `Server::auth`). The other half is how a client gets a
-//! token to send, for a desktop program and a page.
+//! stands for is a row of the app's log ([`rows`]: the tables, the
+//! functions over them and the scope an app's schema takes in), which the
+//! hub writes and judges by ([`server::Auth`], plugged in by `ark-peer`'s
+//! `Server::auth`). The other half is how a client gets a token to send,
+//! for a desktop program and a page.
 //!
 //! # The shape
 //!
@@ -37,9 +39,9 @@
 //!
 //! The session id is what every entry authored under it carries
 //! (`ctx.session`), and what a live room names a device by. It is a row
-//! (`server::Opened`): who it is, the device, when it expires, whether it
-//! was revoked — which its owner does through the domain's mutation, and
-//! the hub closes its connections. Entries authored under it stay its
+//! ([`SignIn`]): who it is, the device, when it expires, whether it was
+//! revoked — which its owner does through [`rows::revoke`], and the hub
+//! closes its connections. Entries authored under it stay its
 //! owner's.
 //!
 //! # Without a provider
@@ -56,12 +58,14 @@ pub mod client;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod oidc;
 pub mod remember;
+pub mod rows;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 
 pub use login::{Account, Login};
+pub use rows::{feed, register, AuthTables, Grant, Revoke, Role, SignIn, ADMIN};
 pub use util::{login_url, percent_decode, percent_encode, query_value, socket_url, with_code};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -2,25 +2,25 @@
 //! part a test machine cannot have, and everything after the account is
 //! known is the same code either way.
 
-use std::sync::{Arc, Mutex};
+mod common;
 
-use ark_auth::server::{router, Auth, Mode, Opened};
+use std::sync::Arc;
 
-type Rows = Arc<Mutex<Vec<Opened>>>;
+use ark_auth::server::{router, Auth, Mode};
+use common::{App, Memory};
 
-fn serve() -> (tokio::runtime::Runtime, String, Arc<Auth>, Rows) {
+fn serve() -> (tokio::runtime::Runtime, String, Arc<Auth>, Memory) {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
     let (addr, auth) = rt.block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let auth = Arc::new(Auth::new(Mode::Dev, &format!("http://{addr}"), b"key"));
+        let auth = Arc::new(Auth::new::<App>(Mode::Dev, &format!("http://{addr}"), b"key"));
         let app = router(auth.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (addr, auth)
     });
-    let rows = Rows::default();
-    let r = rows.clone();
-    auth.on_sign_in(move |o| Ok(r.lock().unwrap().push(o.clone())));
+    let rows = Memory::new();
+    auth.serve(Box::new(rows.clone()));
     (rt, format!("http://{addr}"), auth, rows)
 }
 
@@ -34,13 +34,13 @@ fn a_dev_login_is_a_code_then_a_session_row_and_its_token() {
     // Headless: a dev server given a name answers with the code at once.
     let login = ark_auth::client::login(&server, Some("alice"), |url| panic!("a browser was asked to open {url}")).expect("signed in");
     assert_eq!(login.user.id, "alice");
-    let row = rows.lock().unwrap()[0].clone();
+    let row = rows.sign_ins()[0].clone();
     assert_eq!((row.id.as_str(), row.user.as_str()), (login.session.as_str(), "alice"));
     assert!(row.device.starts_with("ureq"), "{}", row.device);
     assert_eq!(auth.verify(&login.token), Some(login.session.as_str()));
     let again = ark_auth::client::login(&server, Some("alice"), |_| {}).unwrap();
     assert_ne!(again.session, login.session);
-    assert_eq!(rows.lock().unwrap().len(), 2);
+    assert_eq!(rows.sign_ins().len(), 2);
 }
 
 #[test]

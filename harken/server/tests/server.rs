@@ -118,7 +118,7 @@ fn work_done_signed_out_or_under_an_older_login_arrives_as_its_owners() {
     let mut other = open(ark_peer::who(&second), None);
     other.connect(&url, &second.token);
     pump_until(&mut [&mut other], 10, |ps| ps[0].client.current().is_some());
-    let revoke = harken_server::domain::session::Revoke {
+    let revoke = ark_auth::Revoke {
         id: first.session.clone(),
     };
     other.mutate("session.revoke", &revoke);

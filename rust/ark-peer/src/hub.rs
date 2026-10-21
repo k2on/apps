@@ -31,7 +31,7 @@
 //! moves as `keep` says: the log keeps that many entries above its
 //! snapshot.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
@@ -64,10 +64,10 @@ pub(crate) struct Hub {
     pub held: Vec<Deliver>,
     /// The refusals and the horizon the journal was last written at.
     mark: (usize, i64),
-    /// Sessions whose connections are to close (`signed`), and when each
-    /// session judged expires.
-    pub ended: BTreeSet<String>,
-    pub expires: BTreeMap<String, i64>,
+    /// What the log's entries changed since the hub's watch last looked,
+    /// kept while one watches (`serve`).
+    pub watched: bool,
+    pub seen: Vec<ark::store::Change>,
 }
 
 impl Hub {

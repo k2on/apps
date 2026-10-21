@@ -114,7 +114,7 @@ pub struct Config {
     /// `host:port`; port 0 takes an ephemeral one.
     pub listen: String,
     /// The log (sign-ins among its rows), the kept listening sessions, the
-    /// key tokens are signed with unless one is named, and the scanner's
+    /// key tokens are signed with (`session.key`), and the scanner's
     /// replica.
     pub data: PathBuf,
     /// Whether every connection is fed `session.feed` (`HARKEN_SCOPED=1`):
@@ -122,10 +122,6 @@ pub struct Config {
     /// every connection holds the log whole, every person's sign-ins among
     /// it, as it holds every person's playlists.
     pub scoped: bool,
-    /// The file holding the key tokens are signed with
-    /// (`HARKEN_SESSION_KEY_FILE`); `session.key` in `data`, made at first
-    /// start, when unset.
-    pub session_key: Option<PathBuf>,
     /// Where a browser reaches this server — the proxy's address behind one.
     /// The provider sends people back under it, and the page it serves
     /// signs in against it. `http://{listen}` when unset.
@@ -174,7 +170,6 @@ impl Config {
         Config {
             listen: listen.into(),
             data: data.into(),
-            session_key: None,
             scoped: false,
             public_url: None,
             sign_in: SignIn::Dev,
@@ -195,7 +190,6 @@ impl Config {
     ///
     /// ```text
     /// HARKEN_DATA                   where the state lives (default: the temp dir)
-    /// HARKEN_SESSION_KEY_FILE       the key tokens are signed with (default: made in HARKEN_DATA)
     /// HARKEN_SCOPED=1               each connection fed its person's sign-ins only
     /// HARKEN_PUBLIC_URL             where a browser reaches this server
     /// HARKEN_DEV_AUTH=1             anyone is whoever they say
@@ -288,7 +282,6 @@ impl Config {
             listen: listen.into(),
             data: env("HARKEN_DATA")
                 .map_or_else(|| std::env::temp_dir().join("harken-server"), PathBuf::from),
-            session_key: env("HARKEN_SESSION_KEY_FILE").map(PathBuf::from),
             scoped: env("HARKEN_SCOPED").is_some(),
             public_url: env("HARKEN_PUBLIC_URL"),
             sign_in,
@@ -419,61 +412,8 @@ pub fn pretty(entity: &str) -> String {
     }
 }
 
-/// The key tokens are signed with, kept in `path`: read, or 32 bytes from
-/// the OS written there (readable by its owner alone) when there is none.
-pub fn session_key(path: &Path) -> Result<Vec<u8>> {
-    use ark_auth::server::{random_token, unhex};
-    match std::fs::read_to_string(path) {
-        Ok(text) => unhex(text.trim())
-            .filter(|k| !k.is_empty())
-            .ok_or_else(|| anyhow!("not a hex key")),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let key = random_token();
-            std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
-            let mut f = std::fs::OpenOptions::new();
-            #[cfg(unix)]
-            std::os::unix::fs::OpenOptionsExt::mode(&mut f, 0o600);
-            std::io::Write::write_all(
-                &mut f.write(true).create_new(true).open(path)?,
-                key.as_bytes(),
-            )?;
-            Ok(unhex(&key).expect("hex"))
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
 /// What the scanner's session says signed in.
 const SCANNER: &str = "the scanner";
-
-/// The scanner's live session from an earlier start, its token minted
-/// again: a restart signs it in without a new entry.
-fn scanner_session(
-    hub: &ark_peer::Handle,
-    auth: &Auth,
-    account: &Account,
-) -> Option<ark_auth::Login> {
-    use crate::domain::session::SignIn;
-    let (user, now) = (account.id.clone(), ark_peer::now_ms());
-    let s = hub.with(move |h| {
-        ark::db::read::<crate::domain::Harken, _>(&h.log.store, |db| {
-            let mine = db.sign_in.by(SignIn::USER).from(user).all();
-            mine.into_iter().rfind(|s| {
-                s.device == SCANNER && !s.revoked && s.expires_ms > now + 24 * 60 * 60 * 1000
-            })
-        })
-    })??;
-    let mut user = account.clone();
-    user.roles.extend(auth.configured_roles(&user.id));
-    user.roles.sort();
-    user.roles.dedup();
-    Some(ark_auth::Login {
-        token: auth.mint(&s.id),
-        session: s.id,
-        user,
-        expires_ms: s.expires_ms,
-    })
-}
 
 /// The hub's configuration for `hosted`: the log and the listening
 /// session's volatile space over the one domain, `on_join`, `on_leave` and
@@ -613,14 +553,6 @@ pub async fn start(config: Config) -> Result<Server> {
         .with_context(|| format!("creating {}", config.data.display()))?;
     eprintln!("harken-server: data in {}", config.data.display());
 
-    // A sign-in is a row of the log; its token is signed with this key,
-    // which never leaves this machine.
-    let key_file = config
-        .session_key
-        .clone()
-        .unwrap_or_else(|| config.data.join("session.key"));
-    let key = session_key(&key_file)
-        .with_context(|| format!("the session key {}", key_file.display()))?;
     let public_url = config.public_url();
     // `docs/plan-auth.md` The roles the configuration grants, and the
     // scanner's own `library`, by construction: the scanner is the library,
@@ -635,7 +567,11 @@ pub async fn start(config: Config) -> Result<Server> {
             crate::domain::LIBRARY.to_string(),
             vec![library::ACCOUNT.to_string()],
         )]);
-    let mut auth = Auth::new(mode(&config.sign_in).await?, &public_url, &key)
+    // A sign-in is a row of the log, its token signed with a key kept in
+    // the data directory (`ark_auth::server`).
+    let mode = mode(&config.sign_in).await?;
+    let mut auth = Auth::open::<crate::domain::Harken>(mode, &public_url, &config.data)
+        .context("the session key")?
         .allow_redirect(PHONE_SCHEME)
         .with_roles(roles);
     for prefix in &config.redirects {
@@ -730,12 +666,9 @@ pub async fn start(config: Config) -> Result<Server> {
                 roles: vec![crate::domain::LIBRARY.into()],
                 ..Account::default()
             };
-            let login = match scanner_session(&hub, &auth, &account) {
-                Some(login) => login,
-                None => auth
-                    .issue(&account, SCANNER)
-                    .map_err(|e| anyhow!("signing the scanner in: {e}"))?,
-            };
+            let login = auth
+                .own(&account, SCANNER)
+                .map_err(|e| anyhow!("signing the scanner in: {e}"))?;
             Some(Scanner::start(
                 dir.clone(),
                 hosted.clone(),
@@ -787,26 +720,6 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         move |k| m.get(k).cloned()
-    }
-
-    /// The key file is made once, readable by its owner alone, and read
-    /// back the same. Falsified by `session_key` drawing a key every time:
-    /// the second read was another key.
-    #[test]
-    fn the_session_key_is_kept() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("session.key");
-        let key = session_key(&path).unwrap();
-        assert_eq!(key.len(), 32);
-        assert_eq!(session_key(&path).unwrap(), key);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-        std::fs::write(&path, "not hex").unwrap();
-        assert!(session_key(&path).is_err());
     }
 
     #[test]

@@ -17,12 +17,13 @@
 //! ([`Handle::dialer`], the transport the perf tests and the scanner use),
 //! the sign-in routes writing a session. What the peer delivers goes to
 //! each connection's [`Sink`]; dropping a sink — the connection closed, its
-//! session revoked or expired (`crate::signed`) — closes the connection.
+//! session revoked or expired (`Handle::watched`) — closes the connection.
 //!
 //! A connection is who its token proves (with `ark-auth`, the session row
-//! its signature names, [`judging`]; with no sign-in configured the dev
-//! reading of [`dev`]); a token proving nobody is closed with code 4401. The server pings every `keepalive` and closes
-//! a socket that leaves three unanswered.
+//! its signature names; with no sign-in configured the dev reading of
+//! [`dev`]); a token proving nobody is closed with code 4401. The server
+//! pings every `keepalive` and closes a socket that leaves three
+//! unanswered.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -43,6 +44,8 @@ use axum::routing::get;
 use axum::Router;
 use tokio::sync::oneshot;
 
+use ark_auth::server::Watch;
+
 use crate::link::{Closed, Dial, Event, Wake, Wire};
 use crate::{admin, now_ms, web, Config, ConnId, Deliver, Disk, Files, Memory, Peer};
 
@@ -53,7 +56,7 @@ pub type Sink = Box<dyn Fn(Vec<u8>) -> bool + Send>;
 pub type Admin = (String, Router);
 
 /// Who a token proves, or nobody.
-pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
+pub use ark_auth::server::Authenticate;
 
 /// The dev reading of a token: `user@device` is `user` on a session named
 /// by the whole token; `:role,role` after it, the roles.
@@ -85,10 +88,19 @@ impl Handle {
     /// The peer's thread, started; it ends when every handle is dropped or
     /// one says [`Handle::stop`], writing the volatile space for the next
     /// open.
-    pub fn spawn(mut peer: Peer) -> Handle {
+    pub fn spawn(peer: Peer) -> Handle {
+        Handle::watched(peer, None)
+    }
+
+    /// [`Handle::spawn`], with `watch` told what every job's entries
+    /// changed and, each second, the clock; the sessions it names have
+    /// their connections closed (`ark_auth::server::Auth::watcher`).
+    pub fn watched(mut peer: Peer, mut watch: Option<Watch>) -> Handle {
         let (tx, rx) = channel::<Cmd>();
+        peer.hub.watched = watch.is_some();
         std::thread::spawn(move || {
             let mut sinks = BTreeMap::new();
+            let mut ticked = now_ms();
             loop {
                 let mut out = match rx.recv_timeout(Duration::from_secs(1)) {
                     Ok(Cmd::Run(job)) => job(&mut peer, &mut sinks),
@@ -102,8 +114,16 @@ impl Handle {
                 };
                 out.extend(peer.release());
                 deliver(&mut sinks, out);
+                let Some(w) = watch.as_mut() else { continue };
                 // Delivered first: a sign-out's own confirmation, then the close.
-                for session in peer.ended(now_ms()) {
+                let (now, seen) = (now_ms(), std::mem::take(&mut peer.hub.seen));
+                let tick = now - ticked >= 1000;
+                if !tick && seen.is_empty() {
+                    continue;
+                }
+                ticked = if tick { now } else { ticked };
+                let open: Vec<Who> = peer.connections().map(|(_, w)| w.clone()).collect();
+                for session in w(&peer.log.store, (!tick).then_some(&seen[..]), &open, now) {
                     let out = close(&mut peer, &mut sinks, &session);
                     deliver(&mut sinks, out);
                 }
@@ -308,8 +328,9 @@ impl Server {
         }
     }
 
-    /// Sign-in: its routes, each sign-in a session row the hub writes, and
-    /// a token judged by its signature and the row it names ([`judging`]).
+    /// Sign-in: its routes, each sign-in a session row the hub writes, a
+    /// token judged by its signature and the row it names, and the hub
+    /// watching for sessions to close — all `ark_auth::server::Auth`'s.
     pub fn auth(mut self, auth: Arc<ark_auth::server::Auth>) -> Self {
         self.auth = Some(auth);
         self
@@ -326,12 +347,11 @@ impl Server {
             }
             None => Box::new(Memory::default()),
         };
-        let schema = self.config.log.schema.clone();
-        let hub = Handle::spawn(Peer::serve(self.config, disk, now_ms()));
+        let peer = Peer::serve(self.config, disk, now_ms());
+        let hub = Handle::watched(peer, self.auth.as_ref().map(|a| a.watcher()));
         if let Some(auth) = &self.auth {
-            self.authenticate = judging(auth.clone(), hub.clone());
-            let h = hub.clone();
-            auth.on_sign_in(move |row| opened(&h, &schema, row));
+            auth.serve(Box::new(hub.clone()));
+            self.authenticate = auth.authenticate();
         }
         let shared = Shared {
             hub: hub.clone(),
@@ -359,31 +379,17 @@ impl Server {
     }
 }
 
-/// A token judged: signed by this server, naming a live session, whose
-/// person holds the roles its row and the role table say and those the
-/// configuration grants. Asked on the caller's thread, of the hub's.
-pub fn judging(auth: Arc<ark_auth::server::Auth>, hub: Handle) -> Authenticate {
-    Arc::new(move |token| {
-        let id = auth.verify(token)?.to_string();
-        let mut who = hub.with(move |p| p.judge(&id, now_ms())).flatten()?;
-        who.roles.extend(auth.configured_roles(&who.actor));
-        who.roles.sort();
-        who.roles.dedup();
-        Some(who)
-    })
-}
+/// What sign-in asks of the hub: its store read on its thread, a sign-in
+/// written as an entry it authors.
+impl ark_auth::server::Hub for Handle {
+    fn read(&self, f: Box<dyn FnOnce(&ark::store::Store) + Send>) {
+        self.with(move |p| f(&p.log.store));
+    }
 
-/// A sign-in's session row written, as the authority: a raw write, which
-/// no client's intent can name.
-fn opened(hub: &Handle, schema: &ark::schema::Schema, row: &ark_auth::server::Opened) -> Result<(), String> {
-    let (_, t) = schema.table(crate::signed::SESSIONS).ok_or("the domain keeps no sessions")?;
-    let text = serde_json::to_string(row).map_err(|e| e.to_string())?;
-    let row = ark::json::from_text(&t.row_type(), &text).map_err(|r| r.0)?;
-    let (name, f) = admin::raw(&ark::store::Change::Add {
-        table: crate::signed::SESSIONS.into(),
-        row,
-    });
-    hub.author(Space::Durable, name, vec![], Some(f)).ok_or("the hub is gone")?.map(|_| ())
+    fn write(&self, c: ark::store::Change) -> std::result::Result<(), String> {
+        let (name, f) = admin::raw(&c);
+        self.author(Space::Durable, name, vec![], Some(f)).ok_or("the hub is gone")?.map(|_| ())
+    }
 }
 
 /// `router` served on `listener` until told to stop.

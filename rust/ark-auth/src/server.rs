@@ -1,20 +1,23 @@
-//! The routes: `/auth/login`, `/auth/callback`, `/auth/exchange`. Mount
-//! them beside the socket.
+//! The routes — `/auth/login`, `/auth/callback`, `/auth/exchange` — and
+//! the hub's side of who is signed in (S1, `crate::rows`).
 //!
-//! A sign-in is a session row the hub writes as the authority
-//! ([`Auth::on_sign_in`]), and its token is the row's id with this
-//! server's HMAC of it ([`Auth::mint`]): nothing here keeps a session. The
-//! hub judges a token by the HMAC ([`Auth::verify`]) and the row it names;
-//! who is signed in, and signing out, are the domain's query and mutation.
+//! A sign-in is a [`SignIn`] row the hub writes as its authority
+//! ([`Auth::issue`]), and its token is the row's id with this server's HMAC
+//! of it ([`Auth::mint`]): the server keeps nothing but its key
+//! (`session.key` in the data directory it is handed, [`key_file`]). The
+//! hub judges a token by the HMAC and the row it names ([`Auth::judge`],
+//! [`Auth::authenticate`]) and closes the connections of a session revoked
+//! or expired, or of a person whose roles changed ([`Auth::watcher`]).
 //!
 //! ```ignore
-//! let auth = Arc::new(Auth::new(Mode::Dev, "http://127.0.0.1:8787", &key).allow_redirect("myapp://"));
-//! // ark-peer does the rest: `.auth(auth)` mounts these routes, writes the
-//! // sessions and judges every connection's token.
+//! let auth = Arc::new(Auth::open::<App>(Mode::Dev, "http://127.0.0.1:8787", &data)?.allow_redirect("myapp://"));
+//! // ark-peer does the rest: `.auth(auth)` mounts these routes, hands the
+//! // hub over (`Auth::serve`) and plugs in the authenticator and watcher.
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::path::Path;
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -22,12 +25,19 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tower_http::cors::{Any, CorsLayer};
 
+use ark::db::read;
+use ark::format::Encode;
 use ark::hash::hex;
+use ark::log::EntryId;
+use ark::peer::{Ctx, Who};
+use ark::row::Row;
+use ark::store::{Change, Store};
 
 use crate::oidc::{Challenge, Provider};
+use crate::rows::{current, live, AuthTables, Role, SignIn};
 use crate::util::with_code;
 use crate::{Account, Login};
 
@@ -57,24 +67,22 @@ impl Mode {
     }
 }
 
-/// A sign-in as the session row the hub writes for it: the domain's
-/// `sign_in` table's columns, by name.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Opened {
-    pub id: String,
-    pub user: String,
-    pub name: String,
-    pub email: String,
-    pub device: String,
-    pub issued_ms: i64,
-    pub expires_ms: i64,
-    pub revoked: bool,
-    pub roles: Vec<String>,
+/// What sign-in asks of the hub it serves (`ark-peer`'s `Handle`).
+pub trait Hub: Send + Sync {
+    /// `f` over the authority's store, on its thread, waited for.
+    fn read(&self, f: Box<dyn FnOnce(&Store) + Send>);
+    /// One change written as an entry the authority authors: a raw write,
+    /// which no client's intent can name.
+    fn write(&self, c: Change) -> Result<(), String>;
 }
 
-/// What [`Auth::on_sign_in`] is handed: the row to write, written before
-/// the token is handed out.
-pub type Open = Box<dyn Fn(&Opened) -> Result<(), String> + Send + Sync>;
+/// The hub's watch over who is signed in: given what an entry changed — or
+/// `None`, the clock's tick — and the sessions connected, the sessions
+/// whose connections to close.
+pub type Watch = Box<dyn FnMut(&Store, Option<&[Change]>, &[Who], i64) -> Vec<String> + Send>;
+
+/// Who signs in, as a token proves it.
+pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
 
 /// A login started and not finished: what the provider's answer has to
 /// match, where the code goes, and what is signing in.
@@ -99,6 +107,22 @@ struct Issued {
 const CODE_TTL_MS: i64 = 60 * 1000;
 const PENDING_TTL_MS: i64 = 10 * 60 * 1000;
 
+/// The schema's reads, its type erased: a session live at `ctx.now` with
+/// its granted roles, a sign-in by id, and a person's sign-ins.
+struct Reads {
+    current: fn(&Store, &Ctx) -> Option<SignIn>,
+    get: fn(&Store, &str) -> Option<SignIn>,
+    of: fn(&Store, &str) -> Vec<SignIn>,
+}
+
+fn reads<S: AuthTables>() -> Reads {
+    Reads {
+        current: |store, ctx| read::<S, _>(store, |db| current::<S>(ctx, db, ())).ok().flatten(),
+        get: |store, id| read::<S, _>(store, |db| Ok::<_, ark::Refusal>(S::sign_in(db).get(id.to_string()))).ok().flatten(),
+        of: |store, user| read::<S, _>(store, |db| Ok::<_, ark::Refusal>(S::sign_in(db).by(SignIn::USER).from(user.to_string()).all())).unwrap_or_default(),
+    }
+}
+
 /// Everything the routes share. `Arc` it; the same one is what the hub is
 /// opened with, so the socket and the routes agree on who is who.
 pub struct Auth {
@@ -114,15 +138,17 @@ pub struct Auth {
     ttl_ms: i64,
     pending: Mutex<HashMap<String, Pending>>,
     codes: Mutex<HashMap<String, Issued>>,
-    open: OnceLock<Open>,
+    hub: OnceLock<Box<dyn Hub>>,
+    reads: Reads,
     /// `docs/plan-auth.md` The roles the configuration grants, by account
     /// id ([`Auth::with_roles`]), merged at every judging.
     roles: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Auth {
-    /// Signing in by `mode` at `public_url`, tokens signed with `key`.
-    pub fn new(mode: Mode, public_url: &str, key: &[u8]) -> Self {
+    /// Signing in by `mode` at `public_url` to an app of schema `S`,
+    /// tokens signed with `key`.
+    pub fn new<S: AuthTables>(mode: Mode, public_url: &str, key: &[u8]) -> Self {
         Auth {
             mode,
             public_url: public_url.trim_end_matches('/').to_string(),
@@ -131,9 +157,15 @@ impl Auth {
             ttl_ms: DEFAULT_TTL_MS,
             pending: Mutex::new(HashMap::new()),
             codes: Mutex::new(HashMap::new()),
-            open: OnceLock::new(),
+            hub: OnceLock::new(),
+            reads: reads::<S>(),
             roles: BTreeMap::new(),
         }
+    }
+
+    /// [`Auth::new`] with the key kept in `data` ([`key_file`]).
+    pub fn open<S: AuthTables>(mode: Mode, public_url: &str, data: &Path) -> std::io::Result<Self> {
+        Ok(Auth::new::<S>(mode, public_url, &key_file(&data.join("session.key"))?))
     }
 
     /// How long a session lasts from issue.
@@ -154,9 +186,12 @@ impl Auth {
         self
     }
 
-    /// The roles the configuration grants an account.
-    pub fn configured_roles(&self, account: &str) -> BTreeSet<String> {
-        self.roles.get(account).cloned().unwrap_or_default()
+    /// `roles` joined by those the configuration grants `account`, sorted,
+    /// once each.
+    fn merged(&self, account: &str, roles: &[String]) -> Vec<String> {
+        let mut all: BTreeSet<String> = roles.iter().cloned().collect();
+        all.extend(self.roles.get(account).into_iter().flatten().cloned());
+        all.into_iter().collect()
     }
 
     /// Let a login code go back to anything starting with `prefix` — an
@@ -192,10 +227,16 @@ impl Auth {
         self.redirects.iter().any(|p| url.starts_with(p))
     }
 
-    /// Where every sign-in's session row is written: the hub, as its
-    /// authority. Once; a sign-in before it is refused.
-    pub fn on_sign_in(&self, f: impl Fn(&Opened) -> Result<(), String> + Send + Sync + 'static) {
-        let _ = self.open.set(Box::new(f));
+    /// The hub every sign-in's row is written to and every token judged
+    /// over. Once; a sign-in before it is refused.
+    pub fn serve(&self, hub: Box<dyn Hub>) {
+        let _ = self.hub.set(hub);
+    }
+
+    fn ask<T: Send + 'static>(&self, f: impl FnOnce(&Store) -> T + Send + 'static) -> Option<T> {
+        let (tx, rx) = mpsc::channel();
+        self.hub.get()?.read(Box::new(move |s| drop(tx.send(f(s)))));
+        rx.recv().ok()
     }
 
     fn mac(&self, id: &str) -> Hmac<sha2::Sha256> {
@@ -216,13 +257,80 @@ impl Auth {
         self.mac(id).verify_slice(&sig).ok().map(|_| id)
     }
 
+    /// Who session `id` proves over `store` at `now`: its row live, its
+    /// person holding the roles it was opened with, those the role table
+    /// grants and those the configuration does.
+    pub fn judge(&self, store: &Store, id: &str, now: i64) -> Option<Who> {
+        let s = (self.reads.current)(store, &at(id, now))?;
+        Some(Who {
+            roles: self.merged(&s.user, &s.roles),
+            actor: s.user,
+            session: id.into(),
+        })
+    }
+
+    /// A token judged: signed by this server, and [`Auth::judge`]d over the
+    /// hub's store. Asked on the caller's thread, of the hub's.
+    pub fn authenticate(self: &Arc<Self>) -> Authenticate {
+        let auth = self.clone();
+        Arc::new(move |token| {
+            let id = auth.verify(token)?.to_string();
+            let a = auth.clone();
+            auth.ask(move |store| a.judge(store, &id, now_ms())).flatten()
+        })
+    }
+
+    /// The hub's [`Watch`]: at a tick, every connected session whose row is
+    /// no longer live; at an entry, those of its changed sign-ins no longer
+    /// live or gone, and every session of a person whose roles changed, to
+    /// be judged again. A connection no row names is not a sign-in's (one
+    /// the server's process connected itself) and is left be.
+    pub fn watcher(self: &Arc<Self>) -> Watch {
+        let auth = self.clone();
+        Box::new(move |store, changes, open, now| {
+            let (mut ids, mut users) = (BTreeSet::new(), BTreeSet::new());
+            for c in changes.unwrap_or_default() {
+                let row = match c {
+                    Change::Add { row, .. } | Change::Remove { row, .. } | Change::Edit { new: row, .. } => row,
+                };
+                match c.table() {
+                    t if t == SignIn::TABLE => ids.extend(SignIn::from_bytes(row).ok().map(|s| s.id)),
+                    t if t == Role::TABLE => users.extend(Role::from_bytes(row).ok().map(|r| r.user)),
+                    _ => {}
+                }
+            }
+            let ended = open.iter().filter(|w| {
+                let row = || (auth.reads.get)(store, &w.session);
+                users.contains(&w.actor)
+                    || match changes {
+                        None => row().is_some_and(|s| !live(&s, now)),
+                        Some(_) => ids.contains(&w.session) && row().is_none_or(|s| !live(&s, now)),
+                    }
+            });
+            let ended: BTreeSet<String> = ended.map(|w| w.session.clone()).collect();
+            ended.into_iter().collect()
+        })
+    }
+
+    /// The login of row `s` for `account`.
+    fn login(&self, account: &Account, s: SignIn) -> Login {
+        Login {
+            token: self.mint(&s.id),
+            user: Account {
+                roles: self.merged(&account.id, &account.roles),
+                ..account.clone()
+            },
+            session: s.id,
+            expires_ms: s.expires_ms,
+        }
+    }
+
     /// Sign `account` in on `device`, with no code and no browser: the
-    /// session row written, and the login. What a peer the server runs
-    /// itself signs in with (a scanner authoring what it finds).
+    /// session row written, and the login.
     pub fn issue(&self, account: &Account, device: &str) -> Result<Login, String> {
-        let open = self.open.get().ok_or("no hub writes sessions here")?;
+        let hub = self.hub.get().ok_or("no hub writes sessions here")?;
         let issued_ms = now_ms();
-        let row = Opened {
+        let row = SignIn {
             id: random_id(),
             user: account.id.clone(),
             name: account.name.clone(),
@@ -233,18 +341,26 @@ impl Auth {
             revoked: false,
             roles: account.roles.clone(),
         };
-        open(&row).map_err(|e| format!("could not record the session: {e}"))?;
-        let mut roles: BTreeSet<String> = account.roles.iter().cloned().collect();
-        roles.extend(self.configured_roles(&account.id));
-        Ok(Login {
-            token: self.mint(&row.id),
-            session: row.id,
-            user: Account {
-                roles: roles.into_iter().collect(),
-                ..account.clone()
-            },
-            expires_ms: row.expires_ms,
-        })
+        let c = Change::Add {
+            table: SignIn::TABLE.into(),
+            row: row.to_bytes(),
+        };
+        hub.write(c).map_err(|e| format!("could not record the session: {e}"))?;
+        Ok(self.login(account, row))
+    }
+
+    /// What a peer the server runs itself signs in with (a scanner
+    /// authoring what it finds): its live session on `device` from an
+    /// earlier start with a day or more left, minted again — a restart
+    /// writes no entry — or a new one.
+    pub fn own(&self, account: &Account, device: &str) -> Result<Login, String> {
+        let (user, of, now) = (account.id.clone(), self.reads.of, now_ms());
+        let day = 24 * 60 * 60 * 1000;
+        let earlier = self.ask(move |store| of(store, &user)).unwrap_or_default();
+        match earlier.into_iter().rfind(|s| s.device == device && live(s, now + day)) {
+            Some(s) => Ok(self.login(account, s)),
+            None => self.issue(account, device),
+        }
     }
 
     /// Sign `account` in and mint the code the redirect carries.
@@ -263,6 +379,37 @@ impl Auth {
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         let issued = codes.remove(code)?;
         (now_ms() - issued.issued_ms < CODE_TTL_MS).then_some(issued.login)
+    }
+}
+
+/// A context as session `id` at `now`: what judging reads under.
+fn at(id: &str, now: i64) -> Ctx {
+    Ctx {
+        draws: Default::default(),
+        id: EntryId::of(id, 0),
+        actor: String::new(),
+        session: id.into(),
+        roles: vec![],
+        now,
+    }
+}
+
+/// The key kept in `path`: read, or 32 bytes from the OS written there
+/// (readable by its owner alone) when there is none.
+pub fn key_file(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::{Error, ErrorKind, Write};
+    match std::fs::read_to_string(path) {
+        Ok(text) => unhex(text.trim()).filter(|k| !k.is_empty()).ok_or_else(|| Error::other(format!("{}: not a hex key", path.display()))),
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            let key = random_token();
+            std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+            let mut f = std::fs::OpenOptions::new();
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut f, 0o600);
+            f.write(true).create_new(true).open(path)?.write_all(key.as_bytes())?;
+            Ok(unhex(&key).expect("hex"))
+        }
+        Err(e) => Err(e),
     }
 }
 

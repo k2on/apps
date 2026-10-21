@@ -4,11 +4,14 @@
 //! axum routes here that sign their ID tokens HS256 with the client secret
 //! (which `openidconnect` verifies, as it would RS256 against the key set).
 
+mod common;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use ark_auth::oidc::Provider;
-use ark_auth::server::{router, Auth, Mode, Opened};
+use ark_auth::server::{router, Auth, Mode};
+use common::{App, Memory};
 use axum::extract::{Form, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -27,7 +30,7 @@ struct Fake {
     key: String,
     asked: Vec<HashMap<String, String>>,
     /// The session rows the server wrote.
-    rows: Vec<Opened>,
+    rows: Memory,
 }
 
 fn jwt(claims: serde_json::Value, key: &str) -> String {
@@ -79,9 +82,8 @@ fn serve() -> (tokio::runtime::Runtime, Arc<Mutex<Fake>>, String) {
     rt.spawn(async move { axum::serve(pl, app).await.unwrap() });
     let provider = Provider::discover(&issuer, "harken", SECRET, &["openid", "profile", "email"]).expect("discovered");
     let (sl, server) = listen(&rt);
-    let auth = Arc::new(Auth::new(Mode::Oidc(provider), &server, b"key"));
-    let f = fake.clone();
-    auth.on_sign_in(move |o| Ok(f.lock().unwrap().rows.push(o.clone())));
+    let auth = Arc::new(Auth::new::<App>(Mode::Oidc(provider), &server, b"key"));
+    auth.serve(Box::new(fake.lock().unwrap().rows.clone()));
     rt.spawn(async move { axum::serve(sl, router(auth)).await.unwrap() });
     (rt, fake, server)
 }
@@ -137,7 +139,7 @@ fn a_login_through_the_provider_is_its_subject() {
     let login = ark_auth::client::exchange(&server, code).unwrap();
     assert_eq!((login.user.id.as_str(), login.user.name.as_str()), ("42", "Ann"));
     assert_eq!(login.user.email, "ann@example.org");
-    let row = fake.lock().unwrap().rows.pop().expect("the callback wrote the session");
+    let row = fake.lock().unwrap().rows.sign_ins().pop().expect("the callback wrote the session");
     assert_eq!((row.id, row.user, row.email), (login.session, "42".into(), "ann@example.org".into()));
     let sent = fake.lock().unwrap().asked.pop().unwrap();
     assert_eq!((sent["grant_type"].as_str(), sent["code"].as_str()), ("authorization_code", "the-code"));
