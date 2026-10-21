@@ -154,6 +154,29 @@ pub fn fleet(seed: u64) -> Net {
     net
 }
 
+/// [`fleet`] over the demo in plain Rust (§1.16): the same script, each
+/// function called by its name's hash.
+pub fn fleet_native(seed: u64) -> Net {
+    let d = crate::native::demo();
+    let config = || Config::new(Module::native(&d));
+    let lang = domain();
+    let rename = |op: Op| match op {
+        Op::Mutate(i, f, input) => {
+            let (name, _) = lang.module.bindings.iter().find(|(_, h)| *h == f).expect("a demo function");
+            Op::Mutate(i, ark::domain::Domain::hash_of(name), input)
+        }
+        op => op,
+    };
+    let mut net = Net::new(config(), |_| config(), 3, seed);
+    net.run(&rename(create(0, "Fleet")));
+    net.settle().expect("the playlist settles");
+    for op in fleet_script() {
+        net.run(&rename(op));
+    }
+    net.settle().expect("the fleet settles");
+    net
+}
+
 /// The scripted sessions whose clients are the `trace/` vectors.
 pub fn sessions() -> Vec<(&'static str, Net)> {
     let room = room();

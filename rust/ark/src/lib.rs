@@ -24,6 +24,8 @@ pub use module::Domain;
 
 pub mod check;
 pub mod codec;
+pub mod db;
+pub mod domain;
 pub mod frames;
 pub mod gen;
 pub mod hash;
@@ -32,6 +34,8 @@ pub mod ir;
 pub mod log;
 pub mod module;
 pub mod peer;
+pub mod plan;
+pub mod row;
 pub mod schema;
 pub mod sexp;
 pub mod std;
@@ -56,4 +60,18 @@ impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&self.0)
     }
+}
+
+/// What a domain written in plain Rust uses (§1.16): the derives and the
+/// attributes that register a function by name, the context, the typed
+/// store, plans, ids and indexes.
+pub mod prelude {
+    pub use crate::db::{Db, Tables};
+    pub use crate::domain::{Domain, Scope};
+    pub use crate::ir::Node;
+    pub use crate::peer::Ctx;
+    pub use crate::plan::{scan, Desc, Plan};
+    pub use crate::row::{Describe, Id, Index, Input, Row};
+    pub use crate::Refusal;
+    pub use ark_macros::{live, mutator, query, scope, view, Describe, Input, Node, Row, Schema};
 }

@@ -5,6 +5,7 @@
 
 pub mod demo;
 pub mod fuzz;
+pub mod native;
 pub mod sim;
 pub mod trace;
 pub mod vectors;

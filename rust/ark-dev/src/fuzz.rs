@@ -336,6 +336,7 @@ fn login(i: i64, n: u64, admin: bool) -> Who {
 
 fn ctx_of(w: &Who) -> Ctx {
     Ctx {
+        draws: Default::default(),
         id: EntryId::default(),
         actor: w.actor.clone(),
         session: w.session.clone(),

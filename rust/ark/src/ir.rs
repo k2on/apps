@@ -198,18 +198,22 @@ impl<T: Node> Node for Box<T> {
     }
 }
 
-impl<A: Node, B: Node> Node for (A, B) {
-    fn ty() -> Ty {
-        Ty::Tuple(vec![A::ty(), B::ty()])
-    }
-    fn put(&self, out: &mut Vec<u8>) {
-        self.0.put(out);
-        self.1.put(out);
-    }
-    fn take(r: &mut Reader) -> Result<(A, B), Refusal> {
-        Ok((A::take(r)?, B::take(r)?))
-    }
+macro_rules! tuples {
+    ($(($($t:ident $i:tt),+))*) => {$(
+        impl<$($t: Node),+> Node for ($($t,)+) {
+            fn ty() -> Ty {
+                Ty::Tuple(vec![$($t::ty()),+])
+            }
+            fn put(&self, out: &mut Vec<u8>) {
+                $(self.$i.put(out);)+
+            }
+            fn take(r: &mut Reader) -> Result<Self, Refusal> {
+                Ok(($($t::take(r)?,)+))
+            }
+        }
+    )*};
 }
+tuples!((A 0) (A 0, B 1) (A 0, B 1, C 2) (A 0, B 1, C 2, D 3));
 
 /// A fixed number of bytes — a hash, an id — is `Bytes` of that length.
 macro_rules! fixed {

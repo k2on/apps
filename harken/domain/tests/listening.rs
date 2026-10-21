@@ -61,6 +61,7 @@ impl House {
     fn author(&mut self, user: &str, session: &str, name: &str, input: &impl Node) -> Result<(), String> {
         self.local += 1;
         let ctx = Ctx {
+            draws: Default::default(),
             id: EntryId::of(session, self.local),
             actor: user.into(),
             session: session.into(),

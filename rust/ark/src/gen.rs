@@ -113,6 +113,7 @@ impl Call for Domain {
 
 fn nobody() -> Ctx {
     Ctx {
+        draws: Default::default(),
         id: EntryId::of("host", 0),
         actor: String::new(),
         session: String::new(),

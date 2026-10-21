@@ -66,6 +66,7 @@ impl Lib {
         self.local += 1;
         self.now += 1;
         Ctx {
+            draws: Default::default(),
             id: EntryId::of("s", self.local),
             actor: user.into(),
             session: "s".into(),
@@ -97,6 +98,7 @@ impl Lib {
     /// Ask as `user`: the answer, or the refusal's text.
     pub fn query<T: Node>(&self, user: &str, name: &str, input: &impl Node) -> Result<T, String> {
         let ctx = Ctx {
+            draws: Default::default(),
             id: EntryId::of("q", 0),
             actor: user.into(),
             session: "q".into(),

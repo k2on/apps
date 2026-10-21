@@ -1217,6 +1217,7 @@ impl Headless {
                 };
                 let me = &self.client.log.me;
                 let ctx = Ctx {
+                    draws: Default::default(),
                     id: EntryId::of("query", 0),
                     actor: me.actor.clone(),
                     session: me.session.clone(),

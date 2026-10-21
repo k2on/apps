@@ -94,6 +94,16 @@ impl Module {
             lib: d.lib.clone(),
         }
     }
+
+    /// A domain in plain Rust as a peer holds it (§1.16): its functions by
+    /// their names' hashes.
+    pub fn native(d: &ark::domain::Domain) -> Module {
+        Module {
+            schema: d.schema.clone(),
+            cas: d.cas(),
+            lib: Lib::default(),
+        }
+    }
 }
 
 /// What `on_join` and `on_leave` are authored with: from who a connection

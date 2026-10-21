@@ -1,0 +1,311 @@
+//! §1.16 A domain: its schema and its functions by name.
+//!
+//! A [`Domain`] is what a crate of plain Rust registers: the schema its
+//! `#[derive(Schema)]` struct is, and per name — `playlists.add_to_playlist`
+//! — a function and its input's type description. `#[mutator(..)]`,
+//! `#[live(..)]`, `#[query(..)]`, `#[view(..)]` and `#[scope(..)]` only
+//! register a function by name ([`register!`]); what it does is the Rust.
+//!
+//! - a **mutator** (and a **live transition**, over volatile tables) is
+//!   `fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>`: the machine runs it
+//!   as a [`Procedure`], its input read and refined first ([`Input`]);
+//! - a **query** is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`, answered
+//!   over a store;
+//! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>`,
+//!   kept up to date ([`crate::plan::View`]) or answered afresh;
+//! - a **scope** is a [`Scope`]: per table, `fn(&Ctx, &R) -> bool`, which
+//!   rows a connection fed by it holds (§1.8).
+//!
+//! Determinism is an API rule: `ctx.now` and `ctx.new_id()` are a
+//! function's only non-determinism; a function reads nothing else that
+//! differs between runs (no clock, no randomness, no host state).
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use crate::db::{read, write, Db, Tables};
+use crate::hash::{FnHash, SchemaHash};
+use crate::peer::{Cas, Ctx, Procedure};
+use crate::plan::{answer, Maintained, Plan, View};
+use crate::row::{Describe, Input, Row, Type, Value};
+use crate::schema::Schema;
+use crate::store::{Change, Read, Store};
+use crate::Refusal;
+
+/// What a function is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Mutator,
+    Live,
+    Query,
+    View,
+    Scope,
+}
+
+/// A function's answer over a store, encoded.
+pub type Ask = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Vec<u8>, Refusal> + Send + Sync>;
+/// A view of a function, kept.
+pub type Watch = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Box<dyn Maintained>, Refusal> + Send + Sync>;
+/// An input's refinements over its encoding: every field that fails, and why.
+pub type Check = Arc<dyn Fn(&[u8]) -> Result<(), Vec<(String, String)>> + Send + Sync>;
+
+/// One function of a domain, by name.
+#[derive(Clone)]
+pub struct Function {
+    pub name: String,
+    pub kind: Kind,
+    /// What it takes, as a form reads it.
+    pub input: Type,
+    /// What it answers, a query's or a view's element.
+    pub output: Option<Type>,
+    /// What the machine runs: a mutator's, a live transition's, a scope's.
+    pub proc: Option<Arc<dyn Procedure>>,
+    pub ask: Option<Ask>,
+    pub watch: Option<Watch>,
+    pub check: Check,
+}
+
+impl std::fmt::Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?} {}", self.kind, self.name)
+    }
+}
+
+/// A domain: its name and version, its schema, its functions by name.
+#[derive(Clone, Debug)]
+pub struct Domain {
+    pub name: String,
+    pub version: String,
+    pub schema: Arc<Schema>,
+    pub fns: BTreeMap<String, Function>,
+}
+
+fn check_of<I: Input>() -> Check {
+    Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e.0)])?.check().map(|_| ()))
+}
+
+fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
+    I::decode(b)?.refine()
+}
+
+struct Mutate<S: Tables, I> {
+    f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>,
+}
+
+impl<S: Tables, I: Input> Procedure for Mutate<S, I> {
+    fn run(&self, _: &dyn Read, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
+        Err(Refusal::new("a native function runs over the store it writes"))
+    }
+
+    fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
+        let input = input_of::<I>(input)?;
+        write::<S, _>(store, |db| (self.f)(ctx, db, input)).map(|(_, cs)| cs)
+    }
+}
+
+/// A scope's predicate on a row's encoding.
+type Holds = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
+
+/// A view's function, as a domain writes it.
+pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>;
+
+/// Which rows a connection fed by a scope holds (§1.8): per table, a
+/// predicate on its rows; a table the scope does not name holds none.
+pub struct Scope<S> {
+    tables: BTreeMap<&'static str, Holds>,
+    _p: std::marker::PhantomData<fn() -> S>,
+}
+
+impl<S: Tables> Default for Scope<S> {
+    fn default() -> Self {
+        Scope {
+            tables: BTreeMap::new(),
+            _p: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<S: Tables> Scope<S> {
+    pub fn new() -> Scope<S> {
+        Scope::default()
+    }
+
+    /// The rows of `R`'s table `f` holds.
+    pub fn on<R: Row>(mut self, f: fn(&Ctx, &R) -> bool) -> Scope<S> {
+        self.tables.insert(R::TABLE, Arc::new(move |ctx, b| Ok(f(ctx, &R::decode(b)?))));
+        self
+    }
+}
+
+struct Scoped<S> {
+    scope: Scope<S>,
+    schema: Arc<Schema>,
+}
+
+impl<S: Tables> Procedure for Scoped<S> {
+    fn run(&self, _: &dyn Read, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
+        Err(Refusal::new("a scope writes nothing"))
+    }
+
+    fn holds(&self, ctx: &Ctx, input: &[u8]) -> Result<bool, Refusal> {
+        let (i, row) = input.split_first().ok_or_else(|| Refusal::new("no row"))?;
+        let t = self.schema.tables.get(*i as usize).ok_or_else(|| Refusal::new("no such table"))?;
+        match self.scope.tables.get(t.name.as_str()) {
+            Some(f) => f(ctx, row),
+            None => Ok(false),
+        }
+    }
+}
+
+impl Domain {
+    /// A domain of `S`'s schema, with no functions yet.
+    pub fn new<S: Tables>(name: &str, version: &str) -> Domain {
+        Domain {
+            name: name.into(),
+            version: version.into(),
+            schema: Arc::new(S::schema()),
+            fns: BTreeMap::new(),
+        }
+    }
+
+    fn add(mut self, f: Function) -> Domain {
+        assert!(!self.fns.contains_key(&f.name), "{} is registered twice", f.name);
+        self.fns.insert(f.name.clone(), f);
+        self
+    }
+
+    fn writer<S: Tables, I: Input>(self, name: &str, kind: Kind, f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>) -> Domain {
+        self.add(Function {
+            name: name.into(),
+            kind,
+            input: I::describe(),
+            output: None,
+            proc: Some(Arc::new(Mutate { f })),
+            ask: None,
+            watch: None,
+            check: check_of::<I>(),
+        })
+    }
+
+    pub fn mutator<S: Tables, I: Input>(self, name: &str, f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>) -> Domain {
+        self.writer(name, Kind::Mutator, f)
+    }
+
+    /// A transition of live state: a mutator over volatile tables (§1.9).
+    pub fn live<S: Tables, I: Input>(self, name: &str, f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>) -> Domain {
+        self.writer(name, Kind::Live, f)
+    }
+
+    pub fn query<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>) -> Domain {
+        let ask: Ask = Arc::new(move |store, ctx, b| {
+            let input = input_of::<I>(b)?;
+            read::<S, _>(store, |db| f(ctx, db, input)).map(|t| t.encode())
+        });
+        self.add(Function {
+            name: name.into(),
+            kind: Kind::Query,
+            input: I::describe(),
+            output: Some(T::describe()),
+            proc: None,
+            ask: Some(ask),
+            watch: None,
+            check: check_of::<I>(),
+        })
+    }
+
+    pub fn view<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: ViewFn<S, I, T>) -> Domain {
+        let make = move |b: &[u8]| -> Result<crate::plan::Make<S, T>, Refusal> {
+            let input = input_of::<I>(b)?;
+            Ok(Arc::new(move |ctx: &Ctx, db: &Db<S>| f(ctx, db, input.clone())))
+        };
+        let ask: Ask = Arc::new(move |store, ctx, b| Ok(answer(&make(b)?, ctx, store)?.encode()));
+        let watch: Watch = Arc::new(move |store, ctx, b| Ok(Box::new(View::new(make(b)?, ctx.clone(), store)?) as Box<dyn Maintained>));
+        self.add(Function {
+            name: name.into(),
+            kind: Kind::View,
+            input: I::describe(),
+            output: Some(T::describe()),
+            proc: None,
+            ask: Some(ask),
+            watch: Some(watch),
+            check: check_of::<I>(),
+        })
+    }
+
+    pub fn scope<S: Tables>(self, name: &str, scope: Scope<S>) -> Domain {
+        let schema = self.schema.clone();
+        self.add(Function {
+            name: name.into(),
+            kind: Kind::Scope,
+            input: Type::Unit,
+            output: None,
+            proc: Some(Arc::new(Scoped { scope, schema })),
+            ask: None,
+            watch: None,
+            check: check_of::<()>(),
+        })
+    }
+
+    /// `register(self)`: what `#[mutator(..)]` and the rest generate, and
+    /// [`register!`] calls.
+    pub fn with(self, register: fn(Domain) -> Domain) -> Domain {
+        register(self)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Function> {
+        self.fns.get(name)
+    }
+
+    /// The function a name means: itself, or the first whose last part it
+    /// is.
+    pub fn binding(&self, name: &str) -> Option<&str> {
+        self.fns
+            .keys()
+            .map(String::as_str)
+            .find(|n| *n == name || n.rsplit('.').next() == Some(name))
+    }
+
+    pub fn schema_hash(&self) -> SchemaHash {
+        self.schema.hash()
+    }
+
+    /// The hash a function is called by while entries name functions by
+    /// hash: its name's.
+    pub fn hash_of(name: &str) -> FnHash {
+        FnHash::of(name.as_bytes())
+    }
+
+    /// The functions the machine runs, by [`Domain::hash_of`] their names.
+    pub fn cas(&self) -> Cas {
+        let mut c = Cas::default();
+        for f in self.fns.values() {
+            if let Some(p) = &f.proc {
+                c.insert(Domain::hash_of(&f.name), p.clone());
+            }
+        }
+        c
+    }
+
+    /// A query's or a view's answer over a store, as `ctx` reads it.
+    pub fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, Refusal> {
+        let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
+        let ask = f.ask.as_ref().ok_or_else(|| Refusal(format!("{name} answers nothing")))?;
+        ask(store, ctx, input)
+    }
+
+    /// A view of a function, kept over `store`.
+    pub fn watch(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Box<dyn Maintained>, Refusal> {
+        let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
+        let w = f.watch.as_ref().ok_or_else(|| Refusal(format!("{name} is not a view")))?;
+        w(store, ctx, input)
+    }
+}
+
+/// Registers functions by their paths: `register!(domain; demo::create,
+/// demo::rename)` is `domain.with(demo::create::register)…`.
+#[macro_export]
+macro_rules! register {
+    ($d:expr; $($($p:ident)::+),* $(,)?) => {
+        $d $(.with($($p)::+::register))*
+    };
+}

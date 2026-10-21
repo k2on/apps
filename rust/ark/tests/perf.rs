@@ -1136,6 +1136,7 @@ fn group_source() -> Function {
 
 fn vctx() -> Ctx {
     Ctx {
+        draws: Default::default(),
         id: EntryId::default(),
         actor: "alice".into(),
         session: "dev".into(),

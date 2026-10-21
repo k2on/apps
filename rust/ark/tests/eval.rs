@@ -33,6 +33,7 @@ use support::vectors::{ark_text, falsify, vector};
 
 fn entry(user: &str, roles: &[&str], local: i64) -> Ctx {
     Ctx {
+        draws: Default::default(),
         id: EntryId::of("session-1", local),
         actor: user.into(),
         session: "session-1".into(),

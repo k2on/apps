@@ -118,11 +118,14 @@ pub struct Ctx {
     pub session: String,
     pub roles: Vec<String>,
     pub now: i64,
+    /// How many row ids this run has drawn ([`Ctx::new_id`]).
+    pub draws: std::cell::Cell<i64>,
 }
 
 impl Ctx {
     pub fn of(e: &Entry) -> Ctx {
         Ctx {
+            draws: Default::default(),
             id: e.id,
             actor: e.actor.clone(),
             session: e.session.clone(),
@@ -132,14 +135,46 @@ impl Ctx {
     }
 
     /// The `n`-th row id this intent draws (§1.6).
-    pub fn new_id(&self, n: i64) -> [u8; 16] {
+    pub fn draw(&self, n: i64) -> [u8; 16] {
         self.id.draw(n)
+    }
+
+    /// The next row id this run draws: the entry's `n`-th, from 0 (§1.6).
+    /// With `now`, a function's only non-determinism, frozen in the entry.
+    pub fn new_id<R>(&self) -> crate::row::Id<R> {
+        let n = self.draws.get();
+        self.draws.set(n + 1);
+        crate::row::Id::new(self.id.draw(n))
+    }
+
+    /// Who the intent is from.
+    pub fn user(&self) -> &str {
+        &self.actor
+    }
+
+    /// The device the intent came from: its session.
+    pub fn device(&self) -> &str {
+        &self.session
+    }
+
+    /// Whether the intent was judged under `role`.
+    pub fn has_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r == role)
     }
 }
 
 /// A function, opaque to the kernel: its changes, or its refusal.
 pub trait Procedure: Send + Sync {
     fn run(&self, store: &dyn Read, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal>;
+
+    /// The function run over `store` and its changes left applied, all or
+    /// none: what the machine does with an intent. A function that reads
+    /// its own writes as it makes them runs here (§1.16).
+    fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
+        let changes = self.run(store, ctx, input)?;
+        store.apply_all(&changes)?;
+        Ok(changes)
+    }
 
     /// A scope's verdict on its input, a row as its table's variant
     /// (§1.8): whether the union holds it. Only a `Pure` function gives one.
@@ -593,12 +628,14 @@ impl Peer {
     /// Runs an intent over the store and applies what it did, all or none.
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
         let p = self.cas.get(&e.func).cloned().ok_or_else(|| Refusal(format!("no function {}", e.func)))?;
-        let changes = p.run(&self.store, &Ctx::of(e), &e.input)?;
+        let changes = p.apply(&mut self.store, &Ctx::of(e), &e.input)?;
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
+            for c in changes.iter().rev() {
+                self.store.apply(&c.inverse()).expect("an inverse applies");
+            }
             return Err(Refusal(format!("{} is not in this space", c.table())));
         }
-        self.store.apply_all(&changes)?;
         o.told.extend(changes.iter().cloned());
         Ok(changes)
     }
@@ -773,6 +810,7 @@ impl Peer {
     fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
         let s = &self.served[session];
         let ctx = Ctx {
+            draws: Default::default(),
             id: EntryId::default(),
             actor: s.who.actor.clone(),
             session: s.who.session.clone(),

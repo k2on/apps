@@ -51,6 +51,7 @@ impl Fleet {
     /// What client `i` shows, as `user`: its optimistic view.
     fn query<T: Node>(&self, i: i64, user: &str, name: &str, input: &impl Node) -> T {
         let ctx = Ctx {
+            draws: Default::default(),
             id: EntryId::of("q", 0),
             actor: user.into(),
             session: "q".into(),

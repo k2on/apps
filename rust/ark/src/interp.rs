@@ -458,7 +458,7 @@ impl<'a> Machine<'a> {
                     CtxField::Now => V::Int(ctx.now),
                     CtxField::NewId(_) => {
                         self.draws += 1;
-                        V::Bytes(ctx.new_id(self.draws - 1).to_vec())
+                        V::Bytes(ctx.draw(self.draws - 1).to_vec())
                     }
                 }
             }

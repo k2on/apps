@@ -181,6 +181,7 @@ impl Peer {
     pub fn ctx(&self) -> Ctx {
         let me = self.me();
         Ctx {
+            draws: Default::default(),
             id: EntryId::of(&me.session, 0),
             actor: me.actor.clone(),
             session: me.session.clone(),

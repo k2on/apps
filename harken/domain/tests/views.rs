@@ -305,6 +305,7 @@ fn hold(name: &str, input: &impl Node) -> Tally {
     let d = domain();
     let (f, input) = (d.get(&full(name)), input.to_bytes());
     let ctx = Ctx {
+        draws: Default::default(),
         id: EntryId::of("q", 0),
         actor: "alice".into(),
         session: "q".into(),
@@ -500,6 +501,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     let d = domain();
     let (f, input) = (d.get(&full("library")), Library { playlist_id: favs }.to_bytes());
     let ctx = Ctx {
+        draws: Default::default(),
         id: EntryId::of("q", 0),
         actor: "alice".into(),
         session: "q".into(),

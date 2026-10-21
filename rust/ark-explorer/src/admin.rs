@@ -62,6 +62,7 @@ impl Loaded {
 
     fn source(&self) -> Source<'_> {
         let ctx = Ctx {
+            draws: Default::default(),
             id: EntryId::default(),
             actor: self.state.who.clone(),
             session: "admin".into(),

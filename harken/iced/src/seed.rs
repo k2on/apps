@@ -4273,6 +4273,7 @@ impl Seeder {
             // so it holds the role the library's guard asks
             // (`docs/plan-guards.md` D1).
             ctx: Ctx {
+                draws: Default::default(),
                 id: EntryId::of(LOCAL, 0),
                 actor: DEMO.into(),
                 session: LOCAL.into(),

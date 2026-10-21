@@ -175,6 +175,7 @@ fn source(st: &Store) -> Source<'_> {
         lib: &domain().lib,
         log: &NoLog,
         ctx: Ctx {
+            draws: Default::default(),
             id: EntryId::of("s1", 0),
             actor: "alice".into(),
             session: "s1".into(),

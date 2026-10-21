@@ -478,6 +478,22 @@ impl Store {
         self.hash_of(ds.into_iter())
     }
 
+    /// A row's key, and its entry in each of its table's indexes: what a
+    /// read through the key or an index covers of it (§1.10).
+    pub fn paths_of(&self, table: &str, row: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>), Refusal> {
+        let tab = &self.schema.tables[self.find(table)?];
+        let spans = tab.spans(row)?;
+        let key = row[..spans[tab.key - 1].1].to_vec();
+        let es = entries(tab, row, &spans, &key);
+        Ok((key, es))
+    }
+
+    /// A row's key.
+    pub fn key_of(&self, table: &str, row: &[u8]) -> Result<Vec<u8>, Refusal> {
+        let tab = &self.schema.tables[self.find(table)?];
+        Ok(row[..tab.key_len(row)?].to_vec())
+    }
+
     /// Applies one change, judging it: the row before must be what the
     /// change says, the row after canonical and within every constraint.
     pub fn apply(&mut self, c: &Change) -> Result<(), Refusal> {

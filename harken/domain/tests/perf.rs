@@ -394,6 +394,7 @@ fn perf_playlist_name() {
     eprintln!("{:<40} {:>7} {:>12}", "name", "P", "µs per call");
     let st = Store::new(domain().schema.clone());
     let ctx = Ctx {
+        draws: Default::default(),
         id: EntryId::of("q", 0),
         actor: "alice".into(),
         session: "q".into(),
@@ -449,6 +450,7 @@ fn read_cases() -> Vec<(&'static str, &'static str, Make)> {
 
 fn ctx_of(n: i64) -> Ctx {
     Ctx {
+        draws: Default::default(),
         id: EntryId::of("local", n),
         actor: "alice".into(),
         session: "local".into(),

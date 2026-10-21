@@ -558,6 +558,7 @@ fn known_file(store: &Store, file: &str) -> bool {
 fn would_change(peer: &Peer, name: &str, input: &[u8]) -> bool {
     let me = &peer.client.log.me;
     let ctx = Ctx {
+        draws: Default::default(),
         id: peer.client.log.next_id(),
         actor: me.actor.clone(),
         session: me.session.clone(),

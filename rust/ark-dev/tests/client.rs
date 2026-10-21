@@ -91,6 +91,7 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
     n.settle().unwrap();
     let pid = EntryId::of(Origin::named("peer-0-session"), 1).draw(0);
     let ctx = Ctx {
+        draws: Default::default(),
         id: EntryId::default(),
         actor: "peer-0".into(),
         session: "peer-0-session".into(),
@@ -141,6 +142,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);
     n.deliver();
     let ctx = Ctx {
+        draws: Default::default(),
         id: EntryId::default(),
         actor: "".into(),
         session: "".into(),

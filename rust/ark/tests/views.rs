@@ -695,6 +695,7 @@ fn groups_of_two() -> Function {
 
 fn ctx_of(user: &str) -> Ctx {
     Ctx {
+        draws: Default::default(),
         id: EntryId::default(),
         actor: user.into(),
         session: "dev".into(),
@@ -965,6 +966,7 @@ fn the_interpreter_reads_through_indexes() {
         let store = store_of(&demo::schema(), &rows);
         let counting = Counting::new(&store);
         let ctx = Ctx {
+            draws: Default::default(),
             id: EntryId::of("s", 1),
             ..ctx()
         };
