@@ -277,6 +277,8 @@ impl Reconciler {
         let want = a.position(v.now);
         let playing = a.clock.playing();
         let mut heard = sound.heard();
+        // Whether it was put where the session is on this look.
+        let mut placed = true;
         if heard.queue.len() != a.queue.len() || heard.queue.iter().zip(&a.queue).any(|(h, t)| *h != t.id) {
             // Another queue: the session's, loaded as the player's own, so
             // that going offline mid-track leaves it playing what it was.
@@ -310,6 +312,7 @@ impl Reconciler {
             }
         } else {
             m.expect = Expect::At { at: here.at };
+            placed = false;
         }
         // The hand-off has landed when the player has it: said once, where
         // it measurably is.
@@ -358,7 +361,7 @@ impl Reconciler {
         // told — as the player's own `seek` past [`DRIFT_MS`], else
         // `report_position` — once, until the session moves.
         let against = Against::Clock { here, clock: a.clock };
-        let moved = m.against != against;
+        let moved = m.against != against && !placed;
         m.against = against;
         match (heard.place, a.clock) {
             (p, _) if moved => {
