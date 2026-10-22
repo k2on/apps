@@ -31,6 +31,8 @@ ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
 # tests read back as the page reads it.
 ark-explorer = { path = "../../rust/ark-explorer", default-features = false, features = ["server"] }
 ark-auth = { path = "../../rust/ark-auth" }
+# harken-peer drives its peer as a phone does: on a thread, in JSON.
+ark-ffi = { path = "../../rust/ark-ffi" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }

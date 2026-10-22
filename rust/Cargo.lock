@@ -2206,6 +2206,7 @@ dependencies = [
  "ark-auth",
  "ark-dev",
  "ark-explorer",
+ "ark-ffi",
  "ark-peer",
  "axum",
  "harken-domain",

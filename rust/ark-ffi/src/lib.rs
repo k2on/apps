@@ -341,7 +341,12 @@ impl Peer {
     pub fn open(config: Config, dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
         let disk = Files::new(dir).map_err(|e| format!("{dir}: {e}"))?;
         let login = login.map(|l| (l.who(), l.token));
-        let mut peer = ark_peer::Peer::open_as(config, Box::new(disk), login);
+        Peer::of(ark_peer::Peer::open_as(config, Box::new(disk), login))
+    }
+
+    /// A peer opened by its host its own way — as a login it keeps itself,
+    /// its link tuned — driven from now on as [`Peer::open`]'s is.
+    pub fn of(mut peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
         let (wake, rx) = bell();
         peer.set_waker(wake.clone());
         let state = State {
