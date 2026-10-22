@@ -15,17 +15,26 @@ import dev.harken.android.gen.AlbumInput
 import dev.harken.android.gen.AlbumsEntry
 import dev.harken.android.gen.Artist as ArtistInput
 import dev.harken.android.gen.ArtistsEntry
-import dev.harken.android.gen.CreatePlaylist
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Library as LibraryInput
-import dev.harken.android.gen.LibraryEntry
 import dev.harken.android.gen.Play
-import dev.harken.android.gen.Playlist
-import dev.harken.android.gen.PlaylistInput
-import dev.harken.android.gen.PlaylistsOf
 import dev.harken.android.gen.RemoveFromPlaylist
 import dev.harken.android.gen.Search
 import dev.harken.android.gen.TrackDetailsEntry
+// The typed path (docs/plan-v5.md, Experiment: one generator): harken's own types and functions
+// through UniFFI, no JSON.
+import uniffi.harken_domain.CreatePlaylist
+import uniffi.harken_domain.LibraryEntry
+import uniffi.harken_domain.LibraryEntryView
+import uniffi.harken_domain.Playlist
+import uniffi.harken_domain.PlaylistInput
+import uniffi.harken_domain.PlaylistView
+import uniffi.harken_domain.PlaylistsOf
+import uniffi.harken_domain.playlistsCreatePlaylist
+import uniffi.harken_domain.playlistsCreatePlaylistCheck
+import uniffi.harken_domain.playlistsPlaylist
+import uniffi.harken_domain.playlistsPlaylists
+import uniffi.harken_domain.playlistsPlaylistsOf
 
 /**
  * Something playable as a list draws it: a row of the `library` or `playlist` view (the domain's
@@ -131,7 +140,14 @@ object Phone {
 
     fun artist(h: Harken, name: String): View<LibraryEntry> = h.artist(ArtistInput(NO_PLAYLIST, name))
 
-    fun playlist(h: Harken, id: Id): View<LibraryEntry> = h.playlist(PlaylistInput(id))
+    fun playlist(h: Harken, id: Id): View<LibraryEntry> = typed(playlistsPlaylist(h.peer, PlaylistInput(id)))
+
+    /** The caller's playlists, in the order they were made. */
+    fun playlists(h: Harken): View<Playlist> = typed(playlistsPlaylists(h.peer))
+
+    private fun typed(v: LibraryEntryView) = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+
+    private fun typed(v: PlaylistView) = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 
     /** A view's rows once, and the view let go. */
     fun <E, T> once(v: () -> View<E>, of: (E) -> T): List<T> =
@@ -145,14 +161,14 @@ object Phone {
     fun search(h: Harken, needle: String): List<Track> = once({ h.search(Search(NO_PLAYLIST, needle)) }, Track::of)
 
     /** Which of the caller's playlists a track is on; nothing when it is refused. */
-    fun playlistsOf(h: Harken, media: Id): List<Playlist> = once({ h.playlistsOf(PlaylistsOf(media)) }) { it }
+    fun playlistsOf(h: Harken, media: Id): List<Playlist> = once({ typed(playlistsPlaylistsOf(h.peer, PlaylistsOf(media))) }) { it }
 
     /**
      * What the form validator says of a name as it is typed: the sentence `create_playlist`'s own
      * checks would refuse it with, or null. A name the person already has passes: the log numbers
      * it "Name (1)".
      */
-    fun nameProblem(h: Harken, name: String): String? = h.peer.check("playlists.create_playlist", CreatePlaylist(name).json())
+    fun nameProblem(h: Harken, name: String): String? = playlistsCreatePlaylistCheck(h.peer, CreatePlaylist(name))
 
     private fun wrote(f: () -> String): Wrote =
         try {
@@ -161,7 +177,7 @@ object Phone {
             Wrote.Refused(e.why)
         }
 
-    fun createPlaylist(h: Harken, name: String): Wrote = wrote { h.createPlaylist(CreatePlaylist(name)) }
+    fun createPlaylist(h: Harken, name: String): Wrote = wrote { playlistsCreatePlaylist(h.peer, CreatePlaylist(name)) }
 
     fun addToPlaylist(h: Harken, playlist: Id, media: Id): Wrote = wrote { h.addToPlaylist(AddToPlaylist(playlist, media)) }
 

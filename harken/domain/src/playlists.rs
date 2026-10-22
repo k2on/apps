@@ -139,6 +139,7 @@ pub fn playlists(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Playlist>, Ref
 
 /// Which of the caller's playlists a track is on: what makes a playlist
 /// sheet a toggle.
+#[cfg_attr(feature = "ffi", ark_macros::ffi)]
 #[view("playlists.playlists_of")]
 pub fn playlists_of(ctx: &Ctx, _: &Db<Harken>, input: PlaylistsOf) -> Result<Plan<Playlist>, Refusal> {
     let user = ctx.user().to_string();

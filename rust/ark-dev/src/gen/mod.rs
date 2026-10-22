@@ -16,7 +16,7 @@
 pub mod kotlin;
 pub mod swift;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ark::domain::Kind;
 use ark::row::Type;
@@ -30,6 +30,20 @@ pub struct Walked {
     pub types: BTreeMap<String, Type>,
     pub fns: Vec<Stub>,
     pub live: Vec<(String, String)>,
+    /// The types UniFFI declares (the typed path, `ark_ffi::typed`), and
+    /// its Kotlin package: of these only their JSON is written, as
+    /// extensions, for the functions still called by name.
+    pub typed: BTreeSet<String>,
+    pub typed_package: String,
+}
+
+impl Walked {
+    /// `names` declared by UniFFI in the Kotlin package `package`.
+    pub fn typed(mut self, package: &str, names: &[&str]) -> Walked {
+        self.typed = names.iter().map(|n| n.to_string()).collect();
+        self.typed_package = package.into();
+        self
+    }
 }
 
 /// One function, as a stub calls it: its name, the method's, its kind,
@@ -118,6 +132,8 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
         types,
         fns: stubs,
         live,
+        typed: BTreeSet::new(),
+        typed_package: String::new(),
     }
 }
 

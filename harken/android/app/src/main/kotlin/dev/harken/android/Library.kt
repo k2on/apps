@@ -27,7 +27,7 @@ import dev.arkdb.ffi.Status
 import dev.arkdb.ffi.Update
 import dev.arkdb.ffi.View
 import dev.harken.android.gen.Harken
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.SessionStatus
 import java.util.concurrent.ConcurrentHashMap
@@ -237,7 +237,7 @@ class Library(private val session: ArkSession) {
     }
 
     private val library = Held({ Phone.library(it, null) }, Track::of) { tracksFlow.value = it }
-    private val playlistsHeld = Held({ it.playlists() }, { p: Playlist -> p }) { playlistsFlow.value = it }
+    private val playlistsHeld = Held({ Phone.playlists(it) }, { p: Playlist -> p }) { playlistsFlow.value = it }
     private val albumsHeld = Held({ it.albums() }, Album::of) { albumsFlow.value = it }
     private val artistsHeld = Held({ it.artists() }, Artist::of) { artistsFlow.value = it }
     private val detailsHeld = Held({ it.trackDetails() }, TrackDetail::of) { r -> detailsFlow.value = r.associateBy { it.mediaId } }

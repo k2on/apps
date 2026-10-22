@@ -4,7 +4,7 @@
 // module's own checks decide whether a name will do, and say why not.
 package dev.harken.android
 
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement

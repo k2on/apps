@@ -13,7 +13,7 @@
 package dev.harken.android
 
 import dev.harken.android.gen.AddSong
-import dev.harken.android.gen.CreatePlaylist
+import uniffi.harken_domain.CreatePlaylist
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.OnBackPressedDispatcher

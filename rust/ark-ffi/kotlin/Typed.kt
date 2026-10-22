@@ -16,24 +16,59 @@ value class Id(val hex: String) {
     }
 }
 
-/** A view's rows read as `T`, and what it did since last taken. */
-class View<T>(val handle: ViewHandle, private val read: (Any?) -> T) : AutoCloseable {
-    fun rows(): List<T> = handle.rows().map { read(J.parse(it)) }
+/**
+ * A view's rows read as `T`, and what it did since last taken: each row its JSON read by `read`
+ * over a [ViewHandle], or — the typed path — rows UniFFI hands over as they are ([typed]).
+ */
+class View<T> private constructor(
+    private val rowsOf: () -> List<T>,
+    private val takeOf: () -> Update<T>,
+    private val closeOf: () -> Unit,
+) : AutoCloseable {
+    constructor(handle: ViewHandle, read: (Any?) -> T) : this(
+        { handle.rows().map { read(J.parse(it)) } },
+        {
+            when (val u = handle.take()) {
+                is ViewUpdate.Unchanged -> Update.Unchanged
+                is ViewUpdate.Reset -> Update.Reset(u.rows.map { read(J.parse(it)) })
+                is ViewUpdate.Patched -> Update.Patched(u.patches.map { p ->
+                    when (p) {
+                        is Patch.Insert -> Change.Insert(p.at.toInt(), read(J.parse(p.row)))
+                        is Patch.Remove -> Change.Remove(p.at.toInt())
+                        is Patch.Update -> Change.Update(p.at.toInt(), read(J.parse(p.row)))
+                    }
+                })
+            }
+        },
+        handle::close,
+    )
 
-    fun take(): Update<T> =
-        when (val u = handle.take()) {
-            is ViewUpdate.Unchanged -> Update.Unchanged
-            is ViewUpdate.Reset -> Update.Reset(u.rows.map { read(J.parse(it)) })
-            is ViewUpdate.Patched -> Update.Patched(u.patches.map { p ->
-                when (p) {
-                    is Patch.Insert -> Change.Insert(p.at.toInt(), read(J.parse(p.row)))
-                    is Patch.Remove -> Change.Remove(p.at.toInt())
-                    is Patch.Update -> Change.Update(p.at.toInt(), read(J.parse(p.row)))
+    fun rows(): List<T> = rowsOf()
+
+    fun take(): Update<T> = takeOf()
+
+    override fun close() = closeOf()
+
+    companion object {
+        /** A domain's typed view object (`<T>View`): its rows, and what it did with the rows that came with it. */
+        fun <T> typed(rows: () -> List<T>, take: () -> Pair<Taken, List<T>>, close: () -> Unit): View<T> =
+            View(rows, {
+                val (t, came) = take()
+                when (t) {
+                    is Taken.Unchanged -> Update.Unchanged
+                    is Taken.Reset -> Update.Reset(came)
+                    is Taken.Patched -> came.iterator().let { r ->
+                        Update.Patched(t.ops.map { o ->
+                            when (o) {
+                                is Op.Insert -> Change.Insert(o.at.toInt(), r.next())
+                                is Op.Remove -> Change.Remove(o.at.toInt())
+                                is Op.Update -> Change.Update(o.at.toInt(), r.next())
+                            }
+                        })
+                    }
                 }
-            })
-        }
-
-    override fun close() = handle.close()
+            }, close)
+    }
 }
 
 sealed class Update<out T> {

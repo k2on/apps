@@ -7,6 +7,19 @@ import dev.arkdb.ffi.J
 import dev.arkdb.ffi.Peer
 import dev.arkdb.ffi.View
 import org.json.JSONObject
+import uniffi.harken_domain.CreatePlaylist
+import uniffi.harken_domain.JobLooked
+import uniffi.harken_domain.LibraryEntry
+import uniffi.harken_domain.Look
+import uniffi.harken_domain.LookCancel
+import uniffi.harken_domain.LookClaim
+import uniffi.harken_domain.LookDue
+import uniffi.harken_domain.LookFinish
+import uniffi.harken_domain.LookOutcome
+import uniffi.harken_domain.Looked
+import uniffi.harken_domain.Playlist
+import uniffi.harken_domain.PlaylistInput
+import uniffi.harken_domain.PlaylistsOf
 
 /** The record `Active`. */
 data class Active(val at: Long, val clock: Clock, val from: String, val output: Output, val queue: List<Track>) {
@@ -139,14 +152,10 @@ data class ComposersEntry(val art: String, val born: Long, val died: Long, val n
     }
 }
 
-/** The record `CreatePlaylist`. */
-data class CreatePlaylist(val name: String) {
-    fun json(): String = "{" + "\"name\":" + J.q(name) + "}"
+/** The record `CreatePlaylist` (UniFFI's): its JSON, for the functions called by name. */
+fun CreatePlaylist.json(): String = "{" + "\"name\":" + J.q(name) + "}"
 
-    companion object {
-        fun of(j: Any?): CreatePlaylist = (j as JSONObject).let { o -> CreatePlaylist(J.text(o.opt("name"))) }
-    }
-}
+fun CreatePlaylist.Companion.of(j: Any?): CreatePlaylist = (j as JSONObject).let { o -> CreatePlaylist(J.text(o.opt("name"))) }
 
 /** The record `Credit`. */
 data class Credit(val recordingId: String, val personName: String, val role: String, val instrument: String, val pos: Long, val addedMs: Long, val userId: String) {
@@ -274,41 +283,24 @@ data class GroupVolume(val level: Long) {
     }
 }
 
-/** The sum `JobLooked`. */
-sealed class JobLooked {
-    abstract fun json(): String
-
-    data class Pending(val dueMs: Long) : JobLooked() {
-        override fun json(): String = "{\"Pending\":" + "{" + "\"due_ms\":" + dueMs.toString() + "}" + "}"
+/** The sum `JobLooked` (UniFFI's): its JSON, for the functions called by name. */
+fun JobLooked.json(): String =
+    when (val v = this) {
+        is JobLooked.Pending -> with(v) { "{\"Pending\":" + "{" + "\"due_ms\":" + dueMs.toString() + "}" + "}" }
+        is JobLooked.Claimed -> with(v) { "{\"Claimed\":" + "{" + "\"by\":" + J.q(by) + "," + "\"at_ms\":" + atMs.toString() + "}" + "}" }
+        is JobLooked.Done -> with(v) { "{\"Done\":" + "{" + "\"value\":" + value.json() + "}" + "}" }
+        is JobLooked.Failed -> with(v) { "{\"Failed\":" + "{" + "\"why\":" + J.q(why) + "," + "\"retry_ms\":" + retryMs.toString() + "}" + "}" }
+        is JobLooked.Cancelled -> "\"Cancelled\""
     }
 
-    data class Claimed(val by: String, val atMs: Long) : JobLooked() {
-        override fun json(): String = "{\"Claimed\":" + "{" + "\"by\":" + J.q(by) + "," + "\"at_ms\":" + atMs.toString() + "}" + "}"
-    }
-
-    data class Done(val value: dev.harken.android.gen.Looked) : JobLooked() {
-        override fun json(): String = "{\"Done\":" + "{" + "\"value\":" + value.json() + "}" + "}"
-    }
-
-    data class Failed(val why: String, val retryMs: Long) : JobLooked() {
-        override fun json(): String = "{\"Failed\":" + "{" + "\"why\":" + J.q(why) + "," + "\"retry_ms\":" + retryMs.toString() + "}" + "}"
-    }
-
-    data object Cancelled : JobLooked() {
-        override fun json(): String = "\"Cancelled\""
-    }
-
-    companion object {
-        fun of(j: Any?): JobLooked = J.sum(j) { t, o ->
-            when (t) {
-                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
-                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
-                "Done" -> Done(dev.harken.android.gen.Looked.of(o!!.opt("value")))
-                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
-                "Cancelled" -> Cancelled
-                else -> throw IllegalArgumentException("JobLooked: no variant $t")
-            }
-        }
+fun JobLooked.Companion.of(j: Any?): JobLooked = J.sum(j) { t, o ->
+    when (t) {
+        "Pending" -> JobLooked.Pending(J.int(o!!.opt("due_ms")))
+        "Claimed" -> JobLooked.Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+        "Done" -> JobLooked.Done(uniffi.harken_domain.Looked.of(o!!.opt("value")))
+        "Failed" -> JobLooked.Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+        "Cancelled" -> JobLooked.Cancelled
+        else -> throw IllegalArgumentException("JobLooked: no variant $t")
     }
 }
 
@@ -330,14 +322,10 @@ data class Library(val playlistId: Id) {
     }
 }
 
-/** The record `LibraryEntry`. */
-data class LibraryEntry(val addedMs: Long, val creator: String, val durationMs: Long, val file: String, val id: Id, val kind: String, val playlistPos: Long?, val pos: Long, val title: String, val userId: String) {
-    fun json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"kind\":" + J.q(kind) + "," + "\"playlist_pos\":" + J.wopt(playlistPos) { v0 -> v0.toString() } + "," + "\"pos\":" + pos.toString() + "," + "\"title\":" + J.q(title) + "," + "\"user_id\":" + J.q(userId) + "}"
+/** The record `LibraryEntry` (UniFFI's): its JSON, for the functions called by name. */
+fun LibraryEntry.json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"kind\":" + J.q(kind) + "," + "\"playlist_pos\":" + J.wopt(playlistPos) { v0 -> v0.toString() } + "," + "\"pos\":" + pos.toString() + "," + "\"title\":" + J.q(title) + "," + "\"user_id\":" + J.q(userId) + "}"
 
-    companion object {
-        fun of(j: Any?): LibraryEntry = (j as JSONObject).let { o -> LibraryEntry(J.int(o.opt("added_ms")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), Id(J.text(o.opt("id"))), J.text(o.opt("kind")), J.opt(o.opt("playlist_pos")) { v0 -> J.int(v0) }, J.int(o.opt("pos")), J.text(o.opt("title")), J.text(o.opt("user_id"))) }
-    }
-}
+fun LibraryEntry.Companion.of(j: Any?): LibraryEntry = (j as JSONObject).let { o -> LibraryEntry(J.int(o.opt("added_ms")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), Id(J.text(o.opt("id"))), J.text(o.opt("kind")), J.opt(o.opt("playlist_pos")) { v0 -> J.int(v0) }, J.int(o.opt("pos")), J.text(o.opt("title")), J.text(o.opt("user_id"))) }
 
 /** The record `Listening`. */
 data class Listening(val user: String, val session: Session) {
@@ -366,14 +354,10 @@ data class ListeningScrub(val user: String, val device: String, val atMs: Long) 
     }
 }
 
-/** The record `Look`. */
-data class Look(val id: Id, val paths: List<String>, val state: JobLooked) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"paths\":" + J.wlist(paths) { v0 -> J.q(v0) } + "," + "\"state\":" + state.json() + "}"
+/** The record `Look` (UniFFI's): its JSON, for the functions called by name. */
+fun Look.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"paths\":" + J.wlist(paths) { v0 -> J.q(v0) } + "," + "\"state\":" + state.json() + "}"
 
-    companion object {
-        fun of(j: Any?): Look = (j as JSONObject).let { o -> Look(Id(J.text(o.opt("id"))), J.list(o.opt("paths")) { v0 -> J.text(v0) }, JobLooked.of(o.opt("state"))) }
-    }
-}
+fun Look.Companion.of(j: Any?): Look = (j as JSONObject).let { o -> Look(Id(J.text(o.opt("id"))), J.list(o.opt("paths")) { v0 -> J.text(v0) }, JobLooked.of(o.opt("state"))) }
 
 /** The record `LookAt`. */
 data class LookAt(val paths: List<String>) {
@@ -384,73 +368,45 @@ data class LookAt(val paths: List<String>) {
     }
 }
 
-/** The record `LookCancel`. */
-data class LookCancel(val id: Id) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
+/** The record `LookCancel` (UniFFI's): its JSON, for the functions called by name. */
+fun LookCancel.json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
-    companion object {
-        fun of(j: Any?): LookCancel = (j as JSONObject).let { o -> LookCancel(Id(J.text(o.opt("id")))) }
+fun LookCancel.Companion.of(j: Any?): LookCancel = (j as JSONObject).let { o -> LookCancel(Id(J.text(o.opt("id")))) }
+
+/** The record `LookClaim` (UniFFI's): its JSON, for the functions called by name. */
+fun LookClaim.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
+
+fun LookClaim.Companion.of(j: Any?): LookClaim = (j as JSONObject).let { o -> LookClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
+
+/** The record `LookDue` (UniFFI's): its JSON, for the functions called by name. */
+fun LookDue.json(): String = "{" + "\"rows\":" + J.wlist(rows) { v0 -> v0.json() } + "," + "\"next_ms\":" + J.wopt(nextMs) { v0 -> v0.toString() } + "}"
+
+fun LookDue.Companion.of(j: Any?): LookDue = (j as JSONObject).let { o -> LookDue(J.list(o.opt("rows")) { v0 -> Look.of(v0) }, J.opt(o.opt("next_ms")) { v0 -> J.int(v0) }) }
+
+/** The record `LookFinish` (UniFFI's): its JSON, for the functions called by name. */
+fun LookFinish.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "}"
+
+fun LookFinish.Companion.of(j: Any?): LookFinish = (j as JSONObject).let { o -> LookFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), LookOutcome.of(o.opt("outcome"))) }
+
+/** The sum `LookOutcome` (UniFFI's): its JSON, for the functions called by name. */
+fun LookOutcome.json(): String =
+    when (val v = this) {
+        is LookOutcome.Ok -> with(v) { "{\"Ok\":" + "{" + "\"value\":" + value.json() + "}" + "}" }
+        is LookOutcome.Err -> with(v) { "{\"Err\":" + "{" + "\"why\":" + J.q(why) + "}" + "}" }
+    }
+
+fun LookOutcome.Companion.of(j: Any?): LookOutcome = J.sum(j) { t, o ->
+    when (t) {
+        "Ok" -> LookOutcome.Ok(uniffi.harken_domain.Looked.of(o!!.opt("value")))
+        "Err" -> LookOutcome.Err(J.text(o!!.opt("why")))
+        else -> throw IllegalArgumentException("LookOutcome: no variant $t")
     }
 }
 
-/** The record `LookClaim`. */
-data class LookClaim(val id: Id, val by: String) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
+/** The record `Looked` (UniFFI's): its JSON, for the functions called by name. */
+fun Looked.json(): String = "{" + "\"read\":" + read.toString() + "," + "\"authored\":" + authored.toString() + "}"
 
-    companion object {
-        fun of(j: Any?): LookClaim = (j as JSONObject).let { o -> LookClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
-    }
-}
-
-/** The record `LookDue`. */
-data class LookDue(val rows: List<Look>, val nextMs: Long?) {
-    fun json(): String = "{" + "\"rows\":" + J.wlist(rows) { v0 -> v0.json() } + "," + "\"next_ms\":" + J.wopt(nextMs) { v0 -> v0.toString() } + "}"
-
-    companion object {
-        fun of(j: Any?): LookDue = (j as JSONObject).let { o -> LookDue(J.list(o.opt("rows")) { v0 -> Look.of(v0) }, J.opt(o.opt("next_ms")) { v0 -> J.int(v0) }) }
-    }
-}
-
-/** The record `LookFinish`. */
-data class LookFinish(val id: Id, val by: String, val outcome: LookOutcome) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "}"
-
-    companion object {
-        fun of(j: Any?): LookFinish = (j as JSONObject).let { o -> LookFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), LookOutcome.of(o.opt("outcome"))) }
-    }
-}
-
-/** The sum `LookOutcome`. */
-sealed class LookOutcome {
-    abstract fun json(): String
-
-    data class Ok(val value: dev.harken.android.gen.Looked) : LookOutcome() {
-        override fun json(): String = "{\"Ok\":" + "{" + "\"value\":" + value.json() + "}" + "}"
-    }
-
-    data class Err(val why: String) : LookOutcome() {
-        override fun json(): String = "{\"Err\":" + "{" + "\"why\":" + J.q(why) + "}" + "}"
-    }
-
-    companion object {
-        fun of(j: Any?): LookOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(dev.harken.android.gen.Looked.of(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("LookOutcome: no variant $t")
-            }
-        }
-    }
-}
-
-/** The record `Looked`. */
-data class Looked(val read: Long, val authored: Long) {
-    fun json(): String = "{" + "\"read\":" + read.toString() + "," + "\"authored\":" + authored.toString() + "}"
-
-    companion object {
-        fun of(j: Any?): Looked = (j as JSONObject).let { o -> Looked(J.int(o.opt("read")), J.int(o.opt("authored"))) }
-    }
-}
+fun Looked.Companion.of(j: Any?): Looked = (j as JSONObject).let { o -> Looked(J.int(o.opt("read")), J.int(o.opt("authored"))) }
 
 /** The record `Media`. */
 data class Media(val id: Id, val kind: String, val title: String, val creator: String, val durationMs: Long, val file: String, val pos: Long, val addedMs: Long, val userId: String) {
@@ -543,23 +499,15 @@ data class Play(val id: Id, val userId: String, val track: String, val title: St
     }
 }
 
-/** The record `Playlist`. */
-data class Playlist(val id: Id, val name: String, val pos: Long, val createdMs: Long, val userId: String) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+/** The record `Playlist` (UniFFI's): its JSON, for the functions called by name. */
+fun Playlist.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
-    companion object {
-        fun of(j: Any?): Playlist = (j as JSONObject).let { o -> Playlist(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
-    }
-}
+fun Playlist.Companion.of(j: Any?): Playlist = (j as JSONObject).let { o -> Playlist(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
 
-/** The record `PlaylistInput`. */
-data class PlaylistInput(val playlistId: Id) {
-    fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "}"
+/** The record `PlaylistInput` (UniFFI's): its JSON, for the functions called by name. */
+fun PlaylistInput.json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "}"
 
-    companion object {
-        fun of(j: Any?): PlaylistInput = (j as JSONObject).let { o -> PlaylistInput(Id(J.text(o.opt("playlist_id")))) }
-    }
-}
+fun PlaylistInput.Companion.of(j: Any?): PlaylistInput = (j as JSONObject).let { o -> PlaylistInput(Id(J.text(o.opt("playlist_id")))) }
 
 /** The record `PlaylistItem`. */
 data class PlaylistItem(val playlistId: Id, val mediaId: Id, val pos: Long, val addedMs: Long, val userId: String) {
@@ -570,14 +518,10 @@ data class PlaylistItem(val playlistId: Id, val mediaId: Id, val pos: Long, val 
     }
 }
 
-/** The record `PlaylistsOf`. */
-data class PlaylistsOf(val mediaId: Id) {
-    fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "}"
+/** The record `PlaylistsOf` (UniFFI's): its JSON, for the functions called by name. */
+fun PlaylistsOf.json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "}"
 
-    companion object {
-        fun of(j: Any?): PlaylistsOf = (j as JSONObject).let { o -> PlaylistsOf(Id(J.text(o.opt("media_id")))) }
-    }
-}
+fun PlaylistsOf.Companion.of(j: Any?): PlaylistsOf = (j as JSONObject).let { o -> PlaylistsOf(Id(J.text(o.opt("media_id")))) }
 
 /** The record `Present`. */
 data class Present(val canPlay: Boolean, val canVolume: Boolean, val family: String?, val follows: String?, val id: String, val kind: String, val muted: Boolean, val name: String, val user: String, val volume: Long) {

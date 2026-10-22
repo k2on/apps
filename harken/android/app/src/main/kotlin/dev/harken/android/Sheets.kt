@@ -8,7 +8,7 @@
 // joined.
 package dev.harken.android
 
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement

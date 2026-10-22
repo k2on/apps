@@ -29,7 +29,7 @@
 // where it is, or the last thing played, from the page it was played from.
 package dev.harken.android
 
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore

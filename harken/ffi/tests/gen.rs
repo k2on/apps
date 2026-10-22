@@ -18,11 +18,30 @@ fn held(path: &str, now: String) {
     assert!(was == now, "{path} is not what the domain generates now; ARK_WRITE_GEN=1 writes it");
 }
 
+/// The types the domain hands UniFFI (`#[ark(ffi)]`, the experiment of one
+/// generator): of these the generator writes only their JSON.
+const TYPED: &[&str] = &[
+    "CreatePlaylist",
+    "JobLooked",
+    "LibraryEntry",
+    "Look",
+    "LookCancel",
+    "LookClaim",
+    "LookDue",
+    "LookFinish",
+    "LookOutcome",
+    "Looked",
+    "Playlist",
+    "PlaylistInput",
+    "PlaylistsOf",
+];
+
 /// Falsified by a field added to `CreatePlaylist` (`note: String`): both
-/// files differed from what was generated.
+/// files differed from what was generated; and by a name of `TYPED` misspelt
+/// (`PlaylistsOfX`): the Kotlin declared `PlaylistsOf` again.
 #[test]
 fn the_phones_types_are_the_domains() {
-    let w = walk("harken", &Catalog::of(&harken_domain::domain()));
+    let w = walk("harken", &Catalog::of(&harken_domain::domain())).typed("uniffi.harken_domain", TYPED);
     held(KOTLIN, kotlin::write(&w, "dev.harken.android.gen"));
     held(SWIFT, swift::write(&w));
 }

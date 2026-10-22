@@ -286,6 +286,7 @@ pub struct RemoveFromPlaylist {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct PlaylistsOf {
     pub media_id: Id<Media>,
 }

@@ -15,7 +15,7 @@ package dev.harken.android
 
 import dev.harken.android.gen.AddSong
 import dev.harken.android.gen.Harken
-import dev.harken.android.gen.CreatePlaylist
+import uniffi.harken_domain.CreatePlaylist
 import android.view.MotionEvent
 import android.view.View
 import androidx.activity.BackEventCompat

@@ -229,12 +229,8 @@ public struct ComposersEntry: Equatable {
     public var json: String { J.obj(["\"art\":" + J.q(art), "\"born\":" + String(born), "\"died\":" + String(died), "\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"tracks\":" + String(tracks), "\"works\":" + String(works)]) }
 }
 
-/// The record `CreatePlaylist`.
-public struct CreatePlaylist: Equatable {
-    public var name: String
-
-    public init(name: String) { self.name = name; }
-
+/// The record `CreatePlaylist` (UniFFI's): its JSON, for the functions called by name.
+extension CreatePlaylist {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(name: J.text(o["name"]))
@@ -476,14 +472,8 @@ public struct GroupVolume: Equatable {
     public var json: String { J.obj(["\"level\":" + String(level)]) }
 }
 
-/// The sum `JobLooked`.
-public indirect enum JobLooked: Equatable {
-    case pending(dueMs: Int64)
-    case claimed(by: String, atMs: Int64)
-    case done(value: Looked)
-    case failed(why: String, retryMs: Int64)
-    case cancelled
-
+/// The sum `JobLooked` (UniFFI's): its JSON, for the functions called by name.
+extension JobLooked {
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
         switch t {
@@ -535,21 +525,8 @@ public struct Library: Equatable {
     public var json: String { J.obj(["\"playlist_id\":" + J.q(playlistId.hex)]) }
 }
 
-/// The record `LibraryEntry`.
-public struct LibraryEntry: Equatable {
-    public var addedMs: Int64
-    public var creator: String
-    public var durationMs: Int64
-    public var file: String
-    public var id: Id
-    public var kind: String
-    public var playlistPos: Int64?
-    public var pos: Int64
-    public var title: String
-    public var userId: String
-
-    public init(addedMs: Int64, creator: String, durationMs: Int64, file: String, id: Id, kind: String, playlistPos: Int64?, pos: Int64, title: String, userId: String) { self.addedMs = addedMs; self.creator = creator; self.durationMs = durationMs; self.file = file; self.id = id; self.kind = kind; self.playlistPos = playlistPos; self.pos = pos; self.title = title; self.userId = userId; }
-
+/// The record `LibraryEntry` (UniFFI's): its JSON, for the functions called by name.
+extension LibraryEntry {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(addedMs: J.int(o["added_ms"]), creator: J.text(o["creator"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), id: Id(J.text(o["id"])), kind: J.text(o["kind"]), playlistPos: J.opt(o["playlist_pos"]) { v0 in J.int(v0) }, pos: J.int(o["pos"]), title: J.text(o["title"]), userId: J.text(o["user_id"]))
@@ -605,14 +582,8 @@ public struct ListeningScrub: Equatable {
     public var json: String { J.obj(["\"user\":" + J.q(user), "\"device\":" + J.q(device), "\"at_ms\":" + String(atMs)]) }
 }
 
-/// The record `Look`.
-public struct Look: Equatable {
-    public var id: Id
-    public var paths: [String]
-    public var state: JobLooked
-
-    public init(id: Id, paths: [String], state: JobLooked) { self.id = id; self.paths = paths; self.state = state; }
-
+/// The record `Look` (UniFFI's): its JSON, for the functions called by name.
+extension Look {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), paths: J.list(o["paths"]) { v0 in J.text(v0) }, state: JobLooked(json: o["state"]))
@@ -635,12 +606,8 @@ public struct LookAt: Equatable {
     public var json: String { J.obj(["\"paths\":" + J.wlist(paths) { v0 in J.q(v0) }]) }
 }
 
-/// The record `LookCancel`.
-public struct LookCancel: Equatable {
-    public var id: Id
-
-    public init(id: Id) { self.id = id; }
-
+/// The record `LookCancel` (UniFFI's): its JSON, for the functions called by name.
+extension LookCancel {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])))
@@ -649,13 +616,8 @@ public struct LookCancel: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex)]) }
 }
 
-/// The record `LookClaim`.
-public struct LookClaim: Equatable {
-    public var id: Id
-    public var by: String
-
-    public init(id: Id, by: String) { self.id = id; self.by = by; }
-
+/// The record `LookClaim` (UniFFI's): its JSON, for the functions called by name.
+extension LookClaim {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), by: J.text(o["by"]))
@@ -664,13 +626,8 @@ public struct LookClaim: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by)]) }
 }
 
-/// The record `LookDue`.
-public struct LookDue: Equatable {
-    public var rows: [Look]
-    public var nextMs: Int64?
-
-    public init(rows: [Look], nextMs: Int64?) { self.rows = rows; self.nextMs = nextMs; }
-
+/// The record `LookDue` (UniFFI's): its JSON, for the functions called by name.
+extension LookDue {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(rows: J.list(o["rows"]) { v0 in Look(json: v0) }, nextMs: J.opt(o["next_ms"]) { v0 in J.int(v0) })
@@ -679,14 +636,8 @@ public struct LookDue: Equatable {
     public var json: String { J.obj(["\"rows\":" + J.wlist(rows) { v0 in v0.json }, "\"next_ms\":" + J.wopt(nextMs) { v0 in String(v0) }]) }
 }
 
-/// The record `LookFinish`.
-public struct LookFinish: Equatable {
-    public var id: Id
-    public var by: String
-    public var outcome: LookOutcome
-
-    public init(id: Id, by: String, outcome: LookOutcome) { self.id = id; self.by = by; self.outcome = outcome; }
-
+/// The record `LookFinish` (UniFFI's): its JSON, for the functions called by name.
+extension LookFinish {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), by: J.text(o["by"]), outcome: LookOutcome(json: o["outcome"]))
@@ -695,11 +646,8 @@ public struct LookFinish: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by), "\"outcome\":" + outcome.json]) }
 }
 
-/// The sum `LookOutcome`.
-public indirect enum LookOutcome: Equatable {
-    case ok(value: Looked)
-    case err(why: String)
-
+/// The sum `LookOutcome` (UniFFI's): its JSON, for the functions called by name.
+extension LookOutcome {
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
         switch t {
@@ -717,13 +665,8 @@ public indirect enum LookOutcome: Equatable {
     }
 }
 
-/// The record `Looked`.
-public struct Looked: Equatable {
-    public var read: Int64
-    public var authored: Int64
-
-    public init(read: Int64, authored: Int64) { self.read = read; self.authored = authored; }
-
+/// The record `Looked` (UniFFI's): its JSON, for the functions called by name.
+extension Looked {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(read: J.int(o["read"]), authored: J.int(o["authored"]))
@@ -886,16 +829,8 @@ public struct Play: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"user_id\":" + J.q(userId), "\"track\":" + J.q(track), "\"title\":" + J.q(title), "\"creator\":" + J.q(creator), "\"album\":" + J.q(album), "\"duration_ms\":" + String(durationMs), "\"file\":" + J.q(file), "\"played_ms\":" + String(playedMs), "\"from\":" + J.q(from)]) }
 }
 
-/// The record `Playlist`.
-public struct Playlist: Equatable {
-    public var id: Id
-    public var name: String
-    public var pos: Int64
-    public var createdMs: Int64
-    public var userId: String
-
-    public init(id: Id, name: String, pos: Int64, createdMs: Int64, userId: String) { self.id = id; self.name = name; self.pos = pos; self.createdMs = createdMs; self.userId = userId; }
-
+/// The record `Playlist` (UniFFI's): its JSON, for the functions called by name.
+extension Playlist {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), name: J.text(o["name"]), pos: J.int(o["pos"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
@@ -904,12 +839,8 @@ public struct Playlist: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
 }
 
-/// The record `PlaylistInput`.
-public struct PlaylistInput: Equatable {
-    public var playlistId: Id
-
-    public init(playlistId: Id) { self.playlistId = playlistId; }
-
+/// The record `PlaylistInput` (UniFFI's): its JSON, for the functions called by name.
+extension PlaylistInput {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(playlistId: Id(J.text(o["playlist_id"])))
@@ -936,12 +867,8 @@ public struct PlaylistItem: Equatable {
     public var json: String { J.obj(["\"playlist_id\":" + J.q(playlistId.hex), "\"media_id\":" + J.q(mediaId.hex), "\"pos\":" + String(pos), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId)]) }
 }
 
-/// The record `PlaylistsOf`.
-public struct PlaylistsOf: Equatable {
-    public var mediaId: Id
-
-    public init(mediaId: Id) { self.mediaId = mediaId; }
-
+/// The record `PlaylistsOf` (UniFFI's): its JSON, for the functions called by name.
+extension PlaylistsOf {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(mediaId: Id(J.text(o["media_id"])))
