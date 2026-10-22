@@ -1006,6 +1006,107 @@ comment added to `harken/domain/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
+### Experiment: one machine
+
+**Asked:** one machine per peer instead of two — the volatile space on
+something lighter than a second `Machine` with its own chain, snapshot,
+fold, protocol stream and persistence. **Built** (`0fd2939`, `2d12e41`, on
+`claude/one-machine`): `ark::live::Live`, the volatile space's machine — its
+store, its pending intents rebased under each entry, a `seq` — and no
+chain, no `_log`, no fold, no snapshot of a log, nothing made durable. It
+judges an intent by the log's machine's own judgment (`peer::run`: no
+function by its name, the function's refusal, a table of the other space)
+and rebases by the same `undo` and `redo`; both machines take the same
+`Input` and say the same `Output`. The frames are the log's four with less
+in them: a live `Hello` says the `seq` and no hash and is **always answered
+with the rows** (a `Snapshot` at the `seq`, hash zero), which is what
+replaces the pages a replica joining mid-session or after a gap or a
+divergence or an authority's restart was sent; an entry is a `Page` of one
+at its `seq` with its facts and the state after them, its hash zero; a
+replica applies the next one only, skips one it has, says `Hello` once at
+a gap or a state it does not reach. The authority remembers the last 64
+verdicts of each origin (a push again is answered as it was), refuses one
+at or below its origin's last as overtaken, takes a gap, answers `Held`
+with nothing waiting. A server writes the rows when it closes (no log
+row) and opens them with `seq` 0. `Space`, `Writes`, `Db<S, P>` and the
+`compile_fail` check stay: they are about tables. The log's `Machine` keeps
+`space` only for the unwired ephemeral local instance; its five volatile
+rules (the `Persist` filter, overtaken, the gap taken, `Held` not waited
+on, an older snapshot taken) and its `device` go. `ark_peer::Live::keep`
+goes (nothing to fold). **Kept, measured:** nothing of the log's machine
+turned out to be needed by the live one beyond the shared judgment and
+rebase; verdicts and the hub's fan-out order are the same outputs.
+
+**Size** (`tools/loc.sh`, source): `ark` 4,956 → 5,237 (+281: `live.rs` is
+281, `peer.rs` 1,070 → 1,069), `ark-peer` 2,550 → 2,560, `ark-ffi` 487,
+harken's domain 2,429 (tests 4,090 → 4,098), `ark-dev` 2,142 → 2,134,
+harken-server 4,517 → 4,515, harken-iced 8,163 → 8,162, harken-ffi 288 →
+287; tests: `ark` 3,961 → 4,051 (`tests/volatile.rs` rewritten over `Live`,
+three tests new), `ark-peer` 1,620 → 1,740 (`perf_v_live`, new). **Up 279
+source lines, not down**: the log's machine is the same machine for the
+log, and the live one is a second kind of thing beside it, so what goes is
+a few volatile branches, not a machine. **Space branches** (a `match` or a
+comparison on a space, shipped source): 30 → 26 — the kernel's machine 7 →
+2 (`live.rs` adds one, its frame filter), `ark-peer` 10 → 12 (two types,
+so `store`, `head`, `route` and the recording dispatch on the space where
+one `instance(space)` did), `ark-dev` 6 → 4; every line naming a space,
+88 → 83.
+
+**Speed and memory** (`perf_v_live`, debug profile with the kernel at
+`opt-level 2`; `N` calls of `room.point` from one of `C` devices, every
+frame carried by hand; before, the hub's live fold `keep` 256 as
+harken-server's): a call's round trip, `C` = 2: 75.6 → 39.2 µs, `C` = 10:
+205.7 → 106.2 µs (no chain hashed and no log row pushed per entry per
+peer); what the process holds after 10,000 calls (hub and devices, the
+harness's own 256 KB of timings in both): `C` = 2: 11,775 → 266 KB, `C` =
+10: 53,970 → 270 KB — **a device's live log was never folded** (only the
+authority's has a `Fold`), so before, every device held every live entry
+for its life, ~575 B each, and the authority's verdict map grew by one
+per entry for its life; now neither grows. A late `Hello`'s answer: the
+same snapshot, 128–221 B here. harken's listening tests 65 → 60 ms a run
+(32 tests, one thread), `ark-dev`'s client tests 2.6 → 2.4 s.
+
+**Protocol and vectors:** the frame types are unchanged; what moved is
+what the volatile ones carry: `client-hello-volatile` (no hash: 32 bytes
+less), `server-page-volatile` (hash zero), `server-snapshot-volatile` new
+(every live `Hello` is answered with one), the room's two traces (their
+live steps' `after` is the `seq` and a zero hash), and
+`fleet-fuzz-seed-225`'s durable chain hash (head 11 and state unchanged:
+the scheduler's interleaving moved with the volatile frames). Tests: 444
+→ 447 passed, each new or rewritten one falsified once; clippy and fmt
+clean; the fuzzer 4,000 sessions (two seeds, one with every trace
+replayed), none failed.
+
+**What gets worse.** Two kinds of machine where §1.7 had one used twice:
+the rebase's page loop and the push rules are written twice (the log's
+`confirm` and `push`, the live ones), so a fix to one is a question for
+the other; the trace player, the simulator's convergence, `At` and
+`ark-peer`'s routing each grew a second arm. A replica coming back after a
+blip is sent every live row of the server — every account's, the volatile
+space being fed whole — where it was sent the entries it missed while
+they were inside the fold window. A push older than the last 64 verdicts
+of its origin, pushed again, is refused as overtaken though it was taken.
+No history: a test or a tool that read what a device's live machine
+applied reads it from the device's recording now (harken's `heard`), and
+a live entry's chain no longer proves the order (each entry's state hash
+still holds a replica to the authority's rows). After a server restart the
+live `seq` starts at 0 rather than where the space closed.
+
+**Verdict: part of it.** As a size cut it is not effective (+279 lines,
+−4 branches). As a memory fix it is: what a device holds for live state
+stops growing with every transition, and a call is about twice as fast.
+The memory fix should not need the second kind of machine: a device's live
+`Instance` folded as the authority's is (today `Compact` is an authority's
+only, so the replica's machine would have to move its own horizon) and
+the authority's volatile verdicts capped would keep one machine and stop
+the growth — untried here. So the recommendation is to leave the two
+machines one type, take that fold and cap, and not land `ark::live`; the
+speed half (no chain hashed per live entry) is the part that would be
+given up, and is worth measuring on that change. Not verified: a phone or a
+browser against a server running it; a real network's reconnects at scale
+(how big every-row snapshots get on a busy server); the release-profile
+numbers (`perf_v_live` ran in the debug profile).
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
