@@ -12,5 +12,10 @@ ark-peer = { path = "../../rust/ark-peer" }
 harken-domain = { path = "../domain" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The screens' rows and asks as UniFFI types, for harken/ffi (`ffi`).
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+
+[features]
+ffi = ["dep:uniffi"]
 
 [dev-dependencies]

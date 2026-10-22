@@ -2190,6 +2190,7 @@ dependencies = [
  "harken-domain",
  "serde",
  "serde_json",
+ "uniffi",
 ]
 
 [[package]]

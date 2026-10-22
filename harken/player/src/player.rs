@@ -17,6 +17,7 @@ use harken_domain::{Active, Clock, Output};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::screens::{self, Alone, Ask, Line, NowPlaying, Picker};
 use crate::{Press, Reconciler, Say, Sound, View, NOT_PART};
 
 /// Every number a device's player holds that its peer does not, for the
@@ -193,6 +194,91 @@ impl Player {
             "stats": self.stats,
             "refused": self.refused,
         })
+    }
+
+    /// The player screen's row (`screens::now_playing`): `here` what this
+    /// phone is called, `server` what a cover's path is joined to — each
+    /// album's cover read from the log as the peer holds it.
+    pub fn now_playing(&self, p: &Peer, sound: Option<&dyn Sound>, here: &str, server: &str) -> NowPlaying {
+        let s = Player::listening(p);
+        let joined = self.joined(p, &s);
+        let active = match joined {
+            true => s.session.clone(),
+            false => sound.and_then(|sound| self.own(sound)),
+        };
+        let buffering = sound.is_some_and(|s| matches!(s.heard().place, crate::Place::Believed(_)));
+        let cover = |album: &str| {
+            let art = ark::db::read::<harken_domain::schema::Harken, _>(&p.log.store, |db| db.album.get(album).map(|a| a.art));
+            art.filter(|a| !a.is_empty())
+                .map(|a| harken_domain::host::url(server, &a))
+                .unwrap_or_default()
+        };
+        screens::now_playing(
+            &s,
+            &self.me,
+            joined,
+            active.as_ref(),
+            (sound.and_then(|s| s.volume()), buffering),
+            here,
+            &cover,
+        )
+    }
+
+    /// The device picker's rows, while joined; none alone.
+    pub fn picker(&self, p: &Peer) -> Picker {
+        let s = Player::listening(p);
+        match self.joined(p, &s) {
+            true => screens::picker(&s, &self.me),
+            false => Picker::default(),
+        }
+    }
+
+    /// The diagnostics' listening numbers.
+    pub fn numbers(&self, p: &Peer) -> Vec<Line> {
+        let s = Player::listening(p);
+        let joined = self.joined(p, &s);
+        let st = p.status();
+        let held = joined.then_some(&s);
+        screens::numbers(
+            held,
+            &self.me,
+            joined,
+            st.linked,
+            st.epoch as i64,
+            &self.stats,
+            self.refused.as_deref(),
+            now_ms(),
+        )
+    }
+
+    /// A screen's ask: its presses while joined, the first refusal said;
+    /// alone, a level put on the player's stream, or [`NOT_PART`] for what
+    /// the caller does to the player itself.
+    pub fn ask(&mut self, p: &mut Peer, ask: &Ask, sound: Option<&mut dyn Sound>) -> Option<String> {
+        let s = Player::listening(p);
+        if !self.joined(p, &s) {
+            return match ask.alone(sound.as_ref().and_then(|s| s.volume())) {
+                Ok(Some(Alone::Stream(v))) => {
+                    if let Some(sound) = sound {
+                        sound.set_volume(v);
+                    }
+                    None
+                }
+                Ok(Some(Alone::Player)) => Some(NOT_PART.into()),
+                Ok(None) => None,
+                Err(why) => Some(why.into()),
+            };
+        }
+        let presses = match ask.presses(&s, &self.me) {
+            Ok(ps) => ps,
+            Err(why) => return Some(why.into()),
+        };
+        let mut why = None;
+        for press in presses {
+            let local = sound.as_deref().map(|s| s as &dyn Sound);
+            why = why.or(self.press(p, &press, local));
+        }
+        why
     }
 
     /// The player's own queue as a session would hold it, this device its

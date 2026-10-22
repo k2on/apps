@@ -15,7 +15,7 @@ ark = { path = "../../rust/ark" }
 ark-ffi = { path = "../../rust/ark-ffi" }
 ark-peer = { path = "../../rust/ark-peer" }
 harken-domain = { path = "../domain" }
-harken-player = { path = "../player" }
+harken-player = { path = "../player", features = ["ffi"] }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 

@@ -32,6 +32,7 @@ pub mod memory;
 pub mod player;
 pub mod press;
 pub mod reconcile;
+pub mod screens;
 
 pub use harken_domain::host::{Listening, SYNC_MS};
 use harken_domain::{Id, Media, Track};
@@ -41,6 +42,10 @@ pub use memory::Mind;
 pub use player::{Player, Stats};
 pub use press::{Change, Level, Press, NOT_PART};
 pub use reconcile::Reconciler;
+pub use screens::{Ask, DeviceRow, Line, NowPlaying, Picker, Playing, Volume, Where};
+
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
 
 /// How far a playing player may be from the session before what moved it
 /// was somebody's hand on it — a seek in the Sonos app, a buffer that ran

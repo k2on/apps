@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use ark_ffi::Peer;
 use harken_domain::{Id, Media, Track};
-use harken_player::{Event, Heard, Place, Sound, Vol};
+use harken_player::{Ask, Event, Heard, Line, NowPlaying, Picker, Place, Sound, Vol};
 
 /// A volume, 0 to 100, and its mute.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
@@ -143,7 +143,11 @@ pub struct Player {
     inner: Mutex<harken_player::Player>,
     sound: Mutex<Option<Arc<dyn PhoneSound>>>,
     last: Mutex<String>,
+    shown: Mutex<Shown>,
 }
+
+/// The screens' rows as last made.
+type Shown = (NowPlaying, Picker, Vec<Line>);
 
 #[uniffi::export]
 impl Player {
@@ -160,6 +164,7 @@ impl Player {
             inner: Mutex::new(harken_player::Player::new(&me, Some(counts))),
             sound: Mutex::default(),
             last: Mutex::new("{}".into()),
+            shown: Mutex::default(),
         })
     }
 
@@ -194,6 +199,36 @@ impl Player {
         self.peer.with(|p| inner.press(p, &press, local.as_ref().map(|l| l as &dyn Sound)))
     }
 
+    /// The player screen's row (`harken_player::screens`): `here` what this
+    /// phone is called, `server` what a cover is joined to.
+    pub fn now_playing(&self, here: String, server: String) -> NowPlaying {
+        let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let local = sound.as_deref().map(Phone);
+        self.shown(
+            |s| &mut s.0,
+            |inner, p| inner.now_playing(p, local.as_ref().map(|l| l as &dyn Sound), &here, &server),
+        )
+    }
+
+    /// The device picker's rows; none alone.
+    pub fn picker(&self) -> Picker {
+        self.shown(|s| &mut s.1, |inner, p| inner.picker(p))
+    }
+
+    /// The diagnostics' listening numbers.
+    pub fn numbers(&self) -> Vec<Line> {
+        self.shown(|s| &mut s.2, |inner, p| inner.numbers(p))
+    }
+
+    /// A screen's control asked: none when it was taken, else why not —
+    /// "not part of the session" for what the caller does to the player.
+    pub fn ask(&self, ask: Ask) -> Option<String> {
+        let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut local = sound.as_deref().map(Phone);
+        self.peer.with(|p| inner.ask(p, &ask, local.as_mut().map(|l| l as &mut dyn Sound)))
+    }
+
     /// What plays, as JSON: `{me, joined, linked, epoch, listening, active,
     /// stats, refused}` (`harken_player::Player::view`).
     pub fn view(&self) -> String {
@@ -211,6 +246,16 @@ impl Player {
             Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
             Err(std::sync::TryLockError::WouldBlock) => None,
         }
+    }
+
+    /// A screen's row, made now — or, a step under way on this thread, the
+    /// one last made, as [`Player::view`] answers.
+    fn shown<T: Clone>(&self, slot: impl Fn(&mut Shown) -> &mut T, make: impl FnOnce(&harken_player::Player, &mut ark_peer::Peer) -> T) -> T {
+        let mut last = self.shown.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(inner) = self.busy() {
+            *slot(&mut last) = self.peer.with(|p| make(&inner, p));
+        }
+        slot(&mut last).clone()
     }
 
     fn last(&self) -> String {
