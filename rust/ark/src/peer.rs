@@ -682,19 +682,7 @@ impl Peer {
 
     /// The next intent of this peer's own.
     fn entry(&self, func: String, input: Vec<u8>, now: i64) -> Entry {
-        let local = self.local + 1;
-        Entry {
-            id: EntryId::of(self.origin, local),
-            actor: self.me.actor.clone(),
-            session: self.me.session.clone(),
-            origin: self.origin,
-            local,
-            roles: self.me.roles.clone(),
-            func,
-            // An input is its encoding; no bytes are `()`'s.
-            input: if input.is_empty() { ().to_bytes() } else { input },
-            now,
-        }
+        Entry::new(&self.me, self.origin, self.local + 1, func, input, now)
     }
 
     fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, o: &mut Out) {

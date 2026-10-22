@@ -9,11 +9,13 @@ use std::sync::Arc;
 use ark::db::{Durable, Volatile};
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::log::{Entry, EntryId, Origin};
+
 use ark::peer::Who;
 use ark::prelude::*;
 use ark::schema::Space;
 use ark_peer::{dev, Config, Disk, Instance, Memory, Peer};
+
+mod support;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 pub struct Note {
@@ -102,19 +104,7 @@ fn config() -> Config {
 }
 
 fn push(who: &Who, local: i64, func: &str, name: &str) -> Vec<u8> {
-    let origin = Origin::named(&who.session);
-    let entry = Entry {
-        id: EntryId::of(origin, local),
-        actor: who.actor.clone(),
-        session: who.session.clone(),
-        origin,
-        local,
-        roles: vec![],
-        func: func.into(),
-        input: ark_dev::demo::CreatePlaylist { name: name.into() }.to_bytes(),
-        now: 1,
-    };
-    Frame::push(Space::Durable, [entry]).enc()
+    support::push(who, local, func, support::named(name))
 }
 
 const CREATE: &str = "demo.create_playlist";

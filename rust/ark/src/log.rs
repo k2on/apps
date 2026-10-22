@@ -137,6 +137,23 @@ impl Default for Entry {
 }
 
 impl Entry {
+    /// The `local`-th intent from `origin`, as `who` makes it: calling
+    /// `func` on `input` (an input is its encoding; no bytes are `()`'s) at
+    /// `now`.
+    pub fn new(who: &crate::peer::Who, origin: Origin, local: i64, func: impl Into<String>, input: Vec<u8>, now: i64) -> Entry {
+        Entry {
+            id: EntryId::of(origin, local),
+            actor: who.actor.clone(),
+            session: who.session.clone(),
+            origin,
+            local,
+            roles: who.roles.clone(),
+            func: func.into(),
+            input: if input.is_empty() { ().to_bytes() } else { input },
+            now,
+        }
+    }
+
     /// Whether the id is the one `(origin, local)` names: an id is never
     /// taken on trust.
     pub fn id_checks(&self) -> bool {

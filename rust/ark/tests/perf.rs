@@ -23,6 +23,9 @@
 
 #[path = "demo.rs"]
 mod demo;
+mod support {
+    pub mod wire;
+}
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -32,11 +35,12 @@ use std::sync::Arc;
 
 use ark::frames::{Frame, Verdict};
 use ark::log::{Entry, EntryId, Logged, Origin, Seq};
-use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer, Role, Who, PAGE};
+use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer, Role, Who, PAGE};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
 use ark::store::{Change, Read, Scan, Store};
 use demo::*;
+use support::wire::up;
 
 // Counting allocations, on this thread ------------------------------------------
 //
@@ -100,12 +104,8 @@ fn who(actor: &str, session: &str) -> Who {
     }
 }
 
-fn authority_with(cas: Functions) -> Peer {
-    Peer::new(shared(), cas, Role::Authority { journal: Journal::default() }, who("server", "server"))
-}
-
 fn authority() -> Peer {
-    authority_with(demo::cas())
+    support::wire::authority(demo::cas())
 }
 
 fn replica(actor: &str, session: &str) -> Peer {
@@ -130,36 +130,19 @@ impl Author {
 
     fn entry(&mut self, name: &str, input: Vec<u8>) -> Entry {
         self.local += 1;
-        Entry {
-            id: EntryId::of(Origin::named(&self.who.session), self.local),
-            actor: self.who.actor.clone(),
-            session: self.who.session.clone(),
-            origin: Origin::named(&self.who.session),
-            local: self.local,
-            roles: vec![],
-            func: hash(name),
-            input,
-            now: self.local,
-        }
+        Entry::new(&self.who, Origin::named(&self.who.session), self.local, hash(name), input, self.local)
     }
 
     /// The push of the next entry, as a connection verified as this
     /// author delivers it.
     fn push(&mut self, name: &str, input: Vec<u8>) -> Input {
         let entry = self.entry(name, input);
-        up(&self.who, Frame::push(Space::Durable, [entry]))
+        up(&self.who, &Frame::push(Space::Durable, [entry]))
     }
 
     /// The playlist its `local`-th entry created.
     fn pid(&self, local: i64) -> [u8; 16] {
         EntryId::of(Origin::named(&self.who.session), local).draw(0)
-    }
-}
-
-fn up(w: &Who, f: Frame) -> Input {
-    Input::Frame {
-        from: Some(w.clone()),
-        bytes: f.enc(),
     }
 }
 
@@ -448,7 +431,7 @@ fn perf_d_initial_sync() {
         let mut b = log(10, n);
         let hello = up(
             &who("bob", "bob-dev"),
-            Frame::Hello {
+            &Frame::Hello {
                 space: Space::Durable,
                 cursor: 0,
                 hash: None,
@@ -718,7 +701,7 @@ fn perf_g_authority_and_fanout() {
         let t = Instant::now();
         let out = b.a.step(up(
             &who("bob", "bob-dev"),
-            Frame::Hello {
+            &Frame::Hello {
                 space: Space::Durable,
                 cursor,
                 hash: Some(hash),
@@ -763,7 +746,7 @@ fn perf_i_partial_fanout() {
     for c in [10usize, 40, 160] {
         for s in [500u64, 8000] {
             for partial in [true, false] {
-                let mut b = log_named(authority_with(cas.clone()), 10, s, |i| format!("alice:{i}"));
+                let mut b = log_named(support::wire::authority(cas.clone()), 10, s, |i| format!("alice:{i}"));
                 let head = b.a.log().head();
                 for conn in 0..c {
                     let actor = if conn % 2 == 0 { "alice".to_string() } else { format!("u{conn}") };
@@ -775,7 +758,7 @@ fn perf_i_partial_fanout() {
                         });
                         let o = b.a.step(up(
                             &w,
-                            Frame::Hello {
+                            &Frame::Hello {
                                 space: Space::Durable,
                                 cursor: head.0,
                                 hash: Some(head.1),

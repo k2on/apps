@@ -216,6 +216,17 @@ fn writer(authority: bool) -> Recorder {
     }
 }
 
+/// A test's opening: the store, a source over it, a writer (the
+/// authority's, or a client's) and a fresh explorer, by the names given.
+macro_rules! opened {
+    ($st:ident, $src:ident, $w:ident, $ex:ident, $authority:expr) => {
+        let $st = store();
+        let $src = source(&$st);
+        let mut $w = writer($authority);
+        let mut $ex = Explorer::new();
+    };
+}
+
 fn source(st: &Store) -> Source<'_> {
     Source {
         store: st,
@@ -303,10 +314,7 @@ fn an_edit_goes_through_the_exposed_update() {
 /// client's switch said "writing raw".
 #[test]
 fn the_switch_writes_raw_at_the_authority_alone() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(true);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, true);
     ex.update(Msg::Open("user".into()), &src, &mut w);
     ex.update(key("R"), &src, &mut w);
     assert!(ex.raw);
@@ -373,10 +381,7 @@ fn a_table_with_no_crud_is_the_authoritys_alone() {
 /// read as the key.
 #[test]
 fn a_delete_goes_through_delete_or_raw() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(true);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, true);
     ex.update(Msg::Open("user".into()), &src, &mut w);
     ex.update(named(Named::ArrowDown), &src, &mut w);
     ex.update(key("x"), &src, &mut w);
@@ -451,10 +456,7 @@ fn a_cell_reads_back_as_its_column() {
 /// the explorer could not be left by the keyboard.
 #[test]
 fn the_keys_walk_open_and_close() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     ex.update(key("j"), &src, &mut w);
     assert_eq!(ex.tables_at, 1);
     ex.update(key("j"), &src, &mut w);
@@ -698,10 +700,7 @@ fn a_long_value_never_exceeds_its_column() {
 /// still ann, bob, cat.
 #[test]
 fn a_table_sorts_by_a_column_and_edits_the_row_drawn() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     ex.update(Msg::Open("user".into()), &src, &mut w);
     let names = |ex: &Explorer| ex.lit_table(&src, "user").0.rows.iter().map(|r| cell_text(&r[1])).collect::<Vec<_>>();
     ex.update(key("l"), &src, &mut w);
@@ -933,10 +932,7 @@ fn every_type_reads_from_its_text() {
 /// `make_team` was authored with an empty name.
 #[test]
 fn the_checks_run_before_calling_with_the_modules_messages() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     ex.update(Msg::Function(at("make_team")), &src, &mut w);
     assert_eq!(ex.screen, Screen::Call("teams.make_team".into()));
     ex.update(Msg::FormText(vec![0], "   ".into()), &src, &mut w);
@@ -964,10 +960,7 @@ fn the_checks_run_before_calling_with_the_modules_messages() {
 /// empty team: there were no rows.
 #[test]
 fn a_query_call_returns_rows_and_is_run_again() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     ex.update(key("f"), &src, &mut w);
     assert_eq!(ex.screen, Screen::Functions);
     for _ in 0..at("members") {
@@ -1078,10 +1071,7 @@ fn a_mutation_call_reaches_the_writer_and_its_verdict_is_said() {
 /// too. Falsified by filtering on the id alone: "CAT" left nothing.
 #[test]
 fn the_picker_filters_and_chooses() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     ex.update(Msg::Function(at("kick")), &src, &mut w);
     ex.update(named(Named::Enter), &src, &mut w);
     assert!(ex.picker.is_some(), "<Enter> on an id field opens the picker");
@@ -1119,10 +1109,7 @@ fn the_picker_filters_and_chooses() {
 /// panic in the picker's view: the test failed.
 #[test]
 fn the_functions_screens_draw() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     ex.update(key("f"), &src, &mut w);
     let _ = ex.view(&src, &w);
     ex.update(Msg::Function(at("kick")), &src, &mut w);
@@ -1194,10 +1181,7 @@ fn authored_name(w: &Recorder) -> (Id<User>, String) {
 /// open and nothing was written.
 #[test]
 fn a_click_elsewhere_submits_a_changed_edit() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     editing(&mut ex, &src, &mut w, 0, "annie");
     ex.update(Msg::Cell(2, 3), &src, &mut w);
     assert!(ex.editing.is_none(), "no editor is left open");
@@ -1216,10 +1200,7 @@ fn a_click_elsewhere_submits_a_changed_edit() {
 /// submitting whatever the editor holds: the note said "nothing to change".
 #[test]
 fn a_click_elsewhere_drops_an_unchanged_edit() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     editing(&mut ex, &src, &mut w, 0, "ann");
     ex.note = "before".into();
     ex.update(Msg::Cell(1, 1), &src, &mut w);
@@ -1235,10 +1216,7 @@ fn a_click_elsewhere_drops_an_unchanged_edit() {
 /// read: it stayed open over the row the cursor had left.
 #[test]
 fn a_click_elsewhere_drops_an_invalid_edit() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(true);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, true);
     ex.update(Msg::Open("team".into()), &src, &mut w);
     ex.update(Msg::Cell(0, 1), &src, &mut w);
     ex.update(Msg::Edit, &src, &mut w);
@@ -1256,10 +1234,7 @@ fn a_click_elsewhere_drops_an_invalid_edit() {
 /// open after the click into the app, and nothing was written.
 #[test]
 fn a_click_outside_the_table_ends_the_edit() {
-    let st = store();
-    let src = source(&st);
-    let mut w = writer(false);
-    let mut ex = Explorer::new();
+    opened!(st, src, w, ex, false);
     editing(&mut ex, &src, &mut w, 2, "catherine");
     ex.update(Msg::Show(Screen::Log), &src, &mut w);
     assert!(ex.editing.is_none() && ex.screen == Screen::Log);
