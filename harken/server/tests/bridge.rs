@@ -2290,8 +2290,9 @@ fn a_press_reaches_the_house_measured() {
 /// `harken-house` unit tells it — a phone arrives and the kitchen stands
 /// beside it, named and a speaker; handed the sound, the house is asked to
 /// play the queue; and when the process dies its sockets close, which is
-/// the kitchen's `on_leave`. Falsified by not giving it `HARKEN_HOUSE_KEY`:
-/// it exited at once, and the kitchen never stood.
+/// the kitchen's `on_leave`; started again, it stands again and what it
+/// says is taken. Falsified by not giving it `HARKEN_HOUSE_KEY`: it exited
+/// at once, and the kitchen never stood.
 #[test]
 fn the_house_is_a_process_of_its_own() {
     let rt = runtime();
@@ -2310,18 +2311,21 @@ fn the_house_is_a_process_of_its_own() {
             let _ = self.0.wait();
         }
     }
-    let house = std::process::Command::new(env!("CARGO_BIN_EXE_harken-peer"))
-        .args(["--house", "--server", &server.url()])
-        .env("HARKEN_HA_URL", url)
-        .env("HARKEN_HA_TOKEN_FILE", &token)
-        .env("HARKEN_HA_PLAYERS", format!("{KITCHEN}=Kitchen"))
-        .env("HARKEN_HA_MEDIA", MEDIA)
-        .env("HARKEN_HOUSE_KEY", &key)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("harken-peer --house starts");
-    let house = Process(house);
+    let start = || {
+        let house = std::process::Command::new(env!("CARGO_BIN_EXE_harken-peer"))
+            .args(["--house", "--server", &server.url()])
+            .env("HARKEN_HA_URL", &url)
+            .env("HARKEN_HA_TOKEN_FILE", &token)
+            .env("HARKEN_HA_PLAYERS", format!("{KITCHEN}=Kitchen"))
+            .env("HARKEN_HA_MEDIA", MEDIA)
+            .env("HARKEN_HOUSE_KEY", &key)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("harken-peer --house starts");
+        Process(house)
+    };
+    let house = start();
 
     let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
     let s = told(&mut phone, "the kitchen standing beside the phone", |s| {
@@ -2357,6 +2361,32 @@ fn the_house_is_a_process_of_its_own() {
     drop(house);
     told(&mut phone, "the kitchen gone with its process", |s| {
         s.device(KITCHEN).is_none()
+    });
+
+    // Started again under the same server: the same sessions, new machines
+    // whose transitions count from the start again, and taken as before.
+    let _house = start();
+    told(&mut phone, "the kitchen back", |s| {
+        s.device(KITCHEN).is_some()
+    });
+    fake.take();
+    call(&mut phone, "transfer", input::transfer(KITCHEN));
+    told(&mut phone, "the kitchen the output again", |s| {
+        s.outputs(KITCHEN)
+    });
+    let calls = fake.calls(2);
+    assert_eq!(
+        calls
+            .iter()
+            .map(|(s, _)| s.as_str())
+            .take(2)
+            .collect::<Vec<_>>(),
+        ["clear_playlist", "play_media"],
+        "{calls:#?}"
+    );
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 1.0);
+    told(&mut phone, "and its own word taken: it started", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN)
     });
     rt.block_on(server.stop());
 }
