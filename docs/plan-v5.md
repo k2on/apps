@@ -925,6 +925,56 @@ no schema hash moved. Tests: 451 passed, 30 ignored (each crate's, one at a time
 1,000 from 2026, every trace replayed, none failed. Not verified: a crash
 between ark-peer's pre-write of the chain and the join's step (the merge
 drops a duplicate by id, by reading); the phones and a browser running it.
+### Landed: typed views
+
+The experiment of one generator's recommendation, taken: **views are
+typed, functions are by name.** `#[ark(ffi_view)]` on a view's row type
+(`Row`, `Input` or `Describe`; `ark-macros/src/ffi.rs`) writes its twin, a
+UniFFI record named as the type with the conversions both ways
+(`ark_ffi::Twin`, per the domain's UniFFI tag), and its view object
+`<T>View` — made by a view's name and its input's JSON, refused when that
+view's rows are not `T`, with `rows()` and `take() -> <T>Taken {update,
+rows}`, the rows crossing Rust as their bytes and decoded there, never as
+JSON per row (`ark-ffi/src/typed.rs`: `Twin`, `RowId`, `Op`, `Taken`,
+`Typed<T>`, `Peer::view_typed`). `#[ark(ffi)]` writes the twin alone, for a
+type a row holds (nested sums, options, lists, ids). harken asks for it
+behind its domain's `ffi` feature (which harken-ffi enables) on
+`LibraryEntry` and `Playlist`. `ark-dev gen` stays, with its pin: of a type
+UniFFI declares it writes only its JSON, as extensions, and a view stub
+whose rows are such a type makes that type's view object, adapted into the
+generic `View<T>` (`Typed.kt`, `Typed.swift`); so `library`, `album`,
+`artist`, `recording`, `search`, `playlist`, `playlists` and `playlists_of`
+are typed on both phones, and the screens' code is unchanged but for eleven
+Kotlin imports and `Rows.swift` taking UniFFI's `Hashable`. Not landed from
+the experiment: `#[ffi]` on mutators, views and queries and its functions,
+the job's twins, the inputs' twins. Fixed on the way: a kept view made
+again after a reset was made from its input's JSON passed as bytes (a
+reset view read nothing); it keeps the bytes now.
+
+*Measured.* Source (`tools/loc.sh`, src): `ark-macros` 570 → 730 (`ffi.rs`
+151, the experiment's 371), `ark-ffi` 487 → 634 (`typed.rs` 103), `ark-dev`
+2,142 → 2,246, the domain 2,429 → 2,433; tests: `ark-ffi` 199 → 230,
+harken-ffi 627 → 732. Hand-written, non-blank: `Typed.kt` 77 → 111,
+`Typed.swift` 88 → 114, `Phone.kt` 164 → 165, `Rows.swift` 80 → 78.
+Generated, non-blank: `Harken.kt` 837 → 835, `Harken.swift` 1,292 →
+1,277; UniFFI's new `harken_domain` 1,736 Kotlin and 1,009 Swift (+554
+header), `ark_ffi` 2,974 → 3,173 Kotlin and 1,941 → 2,108 Swift,
+`harken_ffi` unchanged. The library for the host, release, stripped:
+8,012,904 → 8,091,816 B (+1.0%; the experiment's whole prototype +1.7%),
+defined dynamic symbols 285 → 370. The domain alone, dev, after a one-line
+edit: 2.46–3.01 s → 3.52–3.79 s with `ffi` on. On the JVM over the host
+release library, the same 2,000 `LibraryEntry` rows of `library.library`
+read: 12.1–13.0 µs a row by name as JSON (`element_json`, `org.json`, the
+generated `of`) against 2.2–2.5 µs typed — 5× (one machine, three rounds,
+the rows equal either way; not a phone, not ART's `org.json`). Tests: the
+view objects over harken's views, a wrong row type refused, nested twins,
+the reset fix (`ark-ffi`), and the pin with `Playlist` left out of the
+typed — each falsified once; the app's JVM tests 99 (one skipped) over the host
+library, by the throwaway expression of S3b. The iOS type-check passes over
+the new bindings (run by hand with `typecheck.sh`; it found `Rows.swift`'s
+own `Hashable` redundant). Not verified: an APK, a phone, an iPhone; a
+typed sum in Kotlin (UniFFI writes an all-unit enum as an `enum class`,
+which the extension's `is` would not match; harken has none).
 
 ## Landed
 

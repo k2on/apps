@@ -14,7 +14,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 ark = { path = "../../rust/ark" }
 ark-ffi = { path = "../../rust/ark-ffi" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
-harken-domain = { path = "../domain" }
+harken-domain = { path = "../domain", features = ["ffi"] }
 harken-player = { path = "../player" }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }

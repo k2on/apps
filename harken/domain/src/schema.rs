@@ -129,6 +129,7 @@ pub struct Song {
 // One column in two indexes reads to clippy as an attribute said twice.
 #[allow(clippy::duplicated_attributes)]
 #[ark(unique(user_id, name), index(pos), index(user_id, pos))]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct Playlist {
     #[ark(key)]
     pub id: Id<Playlist>,

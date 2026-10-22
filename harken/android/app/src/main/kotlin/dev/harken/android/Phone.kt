@@ -1,6 +1,7 @@
 // The domain as the screens see it, and nothing Android: rows of harken's
-// views read into the types the screens draw, and every write one of the
-// domain's functions by name — the generated, typed calls over the bridge
+// views read into the types the screens draw — the library's and the
+// playlists' typed, UniFFI's own records with no JSON (`LibraryEntry`,
+// `Playlist`) — and every write one of the domain's functions by name — the generated, typed calls over the bridge
 // (`gen/Harken.kt`, `ark-dev gen kotlin`), run by the Rust kernel the phone
 // embeds — returning the entry's id so that where it stands can be asked
 // later. Kept free of Android so that it can be driven off a phone.
@@ -18,9 +19,9 @@ import dev.harken.android.gen.ArtistsEntry
 import dev.harken.android.gen.CreatePlaylist
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Library as LibraryInput
-import dev.harken.android.gen.LibraryEntry
+import uniffi.harken_domain.LibraryEntry
 import dev.harken.android.gen.Play
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import dev.harken.android.gen.PlaylistInput
 import dev.harken.android.gen.PlaylistsOf
 import dev.harken.android.gen.RemoveFromPlaylist

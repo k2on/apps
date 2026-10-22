@@ -2145,9 +2145,11 @@ dependencies = [
  "ark",
  "ark-auth",
  "ark-dev",
+ "ark-ffi",
  "ark-peer",
  "serde",
  "serde_json",
+ "uniffi",
 ]
 
 [[package]]

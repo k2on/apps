@@ -7,6 +7,10 @@ import dev.arkdb.ffi.J
 import dev.arkdb.ffi.Peer
 import dev.arkdb.ffi.View
 import org.json.JSONObject
+import uniffi.harken_domain.LibraryEntry
+import uniffi.harken_domain.Playlist
+import uniffi.harken_domain.LibraryEntryView
+import uniffi.harken_domain.PlaylistView
 
 /** The record `Active`. */
 data class Active(val at: Long, val clock: Clock, val from: String, val output: Output, val queue: List<Track>) {
@@ -330,14 +334,10 @@ data class Library(val playlistId: Id) {
     }
 }
 
-/** The record `LibraryEntry`. */
-data class LibraryEntry(val addedMs: Long, val creator: String, val durationMs: Long, val file: String, val id: Id, val kind: String, val playlistPos: Long?, val pos: Long, val title: String, val userId: String) {
-    fun json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"kind\":" + J.q(kind) + "," + "\"playlist_pos\":" + J.wopt(playlistPos) { v0 -> v0.toString() } + "," + "\"pos\":" + pos.toString() + "," + "\"title\":" + J.q(title) + "," + "\"user_id\":" + J.q(userId) + "}"
+/** The record `LibraryEntry` (UniFFI's): its JSON, for the functions called by name. */
+fun LibraryEntry.json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"kind\":" + J.q(kind) + "," + "\"playlist_pos\":" + J.wopt(playlistPos) { v0 -> v0.toString() } + "," + "\"pos\":" + pos.toString() + "," + "\"title\":" + J.q(title) + "," + "\"user_id\":" + J.q(userId) + "}"
 
-    companion object {
-        fun of(j: Any?): LibraryEntry = (j as JSONObject).let { o -> LibraryEntry(J.int(o.opt("added_ms")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), Id(J.text(o.opt("id"))), J.text(o.opt("kind")), J.opt(o.opt("playlist_pos")) { v0 -> J.int(v0) }, J.int(o.opt("pos")), J.text(o.opt("title")), J.text(o.opt("user_id"))) }
-    }
-}
+fun LibraryEntry.Companion.of(j: Any?): LibraryEntry = (j as JSONObject).let { o -> LibraryEntry(J.int(o.opt("added_ms")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), Id(J.text(o.opt("id"))), J.text(o.opt("kind")), J.opt(o.opt("playlist_pos")) { v0 -> J.int(v0) }, J.int(o.opt("pos")), J.text(o.opt("title")), J.text(o.opt("user_id"))) }
 
 /** The record `Listening`. */
 data class Listening(val user: String, val session: Session) {
@@ -543,14 +543,10 @@ data class Play(val id: Id, val userId: String, val track: String, val title: St
     }
 }
 
-/** The record `Playlist`. */
-data class Playlist(val id: Id, val name: String, val pos: Long, val createdMs: Long, val userId: String) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+/** The record `Playlist` (UniFFI's): its JSON, for the functions called by name. */
+fun Playlist.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
-    companion object {
-        fun of(j: Any?): Playlist = (j as JSONObject).let { o -> Playlist(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
-    }
-}
+fun Playlist.Companion.of(j: Any?): Playlist = (j as JSONObject).let { o -> Playlist(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
 
 /** The record `PlaylistInput`. */
 data class PlaylistInput(val playlistId: Id) {
@@ -877,14 +873,14 @@ class Harken(val peer: Peer) {
     /** `library.add_song`: its intent's id. */
     fun addSong(input: AddSong): String = peer.mutate("library.add_song", input.json())
 
-    /** `library.album`, kept. */
-    fun album(input: AlbumInput): View<LibraryEntry> = View(peer.view("library.album", input.json())) { j -> LibraryEntry.of(j) }
+    /** `library.album`, kept, its rows UniFFI's. */
+    fun album(input: AlbumInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.album", input.json()))
 
     /** `library.albums`, kept. */
     fun albums(): View<AlbumsEntry> = View(peer.view("library.albums", "null")) { j -> AlbumsEntry.of(j) }
 
-    /** `library.artist`, kept. */
-    fun artist(input: Artist): View<LibraryEntry> = View(peer.view("library.artist", input.json())) { j -> LibraryEntry.of(j) }
+    /** `library.artist`, kept, its rows UniFFI's. */
+    fun artist(input: Artist): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.artist", input.json()))
 
     /** `library.artists`, kept. */
     fun artists(): View<ArtistsEntry> = View(peer.view("library.artists", "null")) { j -> ArtistsEntry.of(j) }
@@ -907,14 +903,14 @@ class Harken(val peer: Peer) {
     /** `library.describe_work`: its intent's id. */
     fun describeWork(input: DescribeWork): String = peer.mutate("library.describe_work", input.json())
 
-    /** `library.library`, kept. */
-    fun library(input: Library): View<LibraryEntry> = View(peer.view("library.library", input.json())) { j -> LibraryEntry.of(j) }
+    /** `library.library`, kept, its rows UniFFI's. */
+    fun library(input: Library): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.library", input.json()))
 
     /** `library.look`: its intent's id. */
     fun look(input: LookAt): String = peer.mutate("library.look", input.json())
 
-    /** `library.recording`, kept. */
-    fun recording(input: RecordingInput): View<LibraryEntry> = View(peer.view("library.recording", input.json())) { j -> LibraryEntry.of(j) }
+    /** `library.recording`, kept, its rows UniFFI's. */
+    fun recording(input: RecordingInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.recording", input.json()))
 
     /** `library.recordings`, kept. */
     fun recordings(input: Recordings): View<RecordingsEntry> = View(peer.view("library.recordings", input.json())) { j -> RecordingsEntry.of(j) }
@@ -922,8 +918,8 @@ class Harken(val peer: Peer) {
     /** `library.remove_media`: its intent's id. */
     fun removeMedia(input: RemoveMedia): String = peer.mutate("library.remove_media", input.json())
 
-    /** `library.search`, kept. */
-    fun search(input: Search): View<LibraryEntry> = View(peer.view("library.search", input.json())) { j -> LibraryEntry.of(j) }
+    /** `library.search`, kept, its rows UniFFI's. */
+    fun search(input: Search): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.search", input.json()))
 
     /** `library.track_details`, kept. */
     fun trackDetails(): View<TrackDetailsEntry> = View(peer.view("library.track_details", "null")) { j -> TrackDetailsEntry.of(j) }
@@ -1060,14 +1056,14 @@ class Harken(val peer: Peer) {
     /** `playlists.create_playlist`: its intent's id. */
     fun createPlaylist(input: CreatePlaylist): String = peer.mutate("playlists.create_playlist", input.json())
 
-    /** `playlists.playlist`, kept. */
-    fun playlist(input: PlaylistInput): View<LibraryEntry> = View(peer.view("playlists.playlist", input.json())) { j -> LibraryEntry.of(j) }
+    /** `playlists.playlist`, kept, its rows UniFFI's. */
+    fun playlist(input: PlaylistInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "playlists.playlist", input.json()))
 
-    /** `playlists.playlists`, kept. */
-    fun playlists(): View<Playlist> = View(peer.view("playlists.playlists", "null")) { j -> Playlist.of(j) }
+    /** `playlists.playlists`, kept, its rows UniFFI's. */
+    fun playlists(): View<Playlist> = typed(PlaylistView(peer, "playlists.playlists", "null"))
 
-    /** `playlists.playlists_of`, kept. */
-    fun playlistsOf(input: PlaylistsOf): View<Playlist> = View(peer.view("playlists.playlists_of", input.json())) { j -> Playlist.of(j) }
+    /** `playlists.playlists_of`, kept, its rows UniFFI's. */
+    fun playlistsOf(input: PlaylistsOf): View<Playlist> = typed(PlaylistView(peer, "playlists.playlists_of", input.json()))
 
     /** `playlists.remove_from_playlist`: its intent's id. */
     fun removeFromPlaylist(input: RemoveFromPlaylist): String = peer.mutate("playlists.remove_from_playlist", input.json())
@@ -1086,6 +1082,10 @@ class Harken(val peer: Peer) {
 
     /** `session.revoke`: its intent's id. */
     fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
+
+    private fun typed(v: LibraryEntryView): View<LibraryEntry> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+
+    private fun typed(v: PlaylistView): View<Playlist> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 
     /** The live table `listening`, as this device holds it. */
     fun liveListening(): List<Listening> = peer.liveRows("listening").map { Listening.of(J.parse(it)) }

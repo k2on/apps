@@ -27,7 +27,7 @@ import dev.arkdb.ffi.Status
 import dev.arkdb.ffi.Update
 import dev.arkdb.ffi.View
 import dev.harken.android.gen.Harken
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.SessionStatus
 import java.util.concurrent.ConcurrentHashMap

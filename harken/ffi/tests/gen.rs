@@ -18,11 +18,16 @@ fn held(path: &str, now: String) {
     assert!(was == now, "{path} is not what the domain generates now; ARK_WRITE_GEN=1 writes it");
 }
 
+/// The view rows the domain hands UniFFI (`#[ark(ffi_view)]`): of these the
+/// generator writes only their JSON, and their views are read typed.
+const TYPED: &[&str] = &["LibraryEntry", "Playlist"];
+
 /// Falsified by a field added to `CreatePlaylist` (`note: String`): both
-/// files differed from what was generated.
+/// files differed from what was generated; and by `Playlist` left out of
+/// `TYPED`: the Kotlin declared `Playlist` again and read its views as JSON.
 #[test]
 fn the_phones_types_are_the_domains() {
-    let w = walk("harken", &Catalog::of(&harken_domain::domain()));
+    let w = walk("harken", &Catalog::of(&harken_domain::domain())).typed("uniffi.harken_domain", TYPED);
     held(KOTLIN, kotlin::write(&w, "dev.harken.android.gen"));
     held(SWIFT, swift::write(&w));
 }

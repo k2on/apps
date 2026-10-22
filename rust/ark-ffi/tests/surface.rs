@@ -196,6 +196,8 @@ fn a_denied_login_is_said() {
 }
 
 pub mod jobs {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use ark::effect::Job;
     use ark::prelude::*;
 
@@ -224,8 +226,29 @@ pub mod jobs {
         db.fetch.insert(Fetch { id: i.id, state })
     }
 
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
+    pub struct Of {
+        pub id: String,
+    }
+
+    /// Whether `fetch.every` refuses the next time it is made.
+    pub static REFUSE: AtomicBool = AtomicBool::new(false);
+
+    /// Every job, as a plan that reads the row `id` names, so that a write
+    /// to it makes the plan again — which refuses once when asked to.
+    fn every(_: &Ctx, db: &Db<Jobs>, i: Of) -> Result<Plan<Jobs, Fetch>, Refusal> {
+        let _ = db.fetch.get(i.id);
+        match REFUSE.swap(false, Ordering::SeqCst) {
+            true => Err(Refusal("refused once".into())),
+            false => Ok(scan::<Jobs, Fetch>()),
+        }
+    }
+
     pub fn domain() -> Domain {
-        Domain::new::<Jobs>("jobs", "1").mutator("fetch.ask", ask).with(Fetch::register::<Jobs>)
+        Domain::new::<Jobs>("jobs", "1")
+            .mutator("fetch.ask", ask)
+            .view("fetch.every", every)
+            .with(Fetch::register::<Jobs>)
     }
 }
 
@@ -248,4 +271,24 @@ fn a_kinds_due_jobs_are_asked_by_name() {
     assert_eq!(due.rows.len(), 1, "{due:?}");
     assert!(due.rows[0].contains(r#""id":"now""#), "{due:?}");
     assert!(due.next_ms.is_some_and(|t| t > ark_peer::now_ms() + 3_000_000));
+}
+
+/// A kept view that could not be kept up is made again from its input,
+/// and reads as it should. Falsified by `Peer::view` keeping its input's
+/// JSON as the bytes it is made again from (`input.into_bytes()`): the
+/// view made again read nothing.
+#[test]
+fn a_view_made_again_after_a_reset_is_made_from_its_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
+    let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
+    d.mutate("fetch.ask".into(), r#"{"id":"b","after_ms":0}"#.into()).unwrap();
+    assert!(matches!(every.take(), ViewUpdate::Patched { .. }));
+    jobs::REFUSE.store(true, Ordering::SeqCst);
+    d.mutate("fetch.ask".into(), r#"{"id":"a","after_ms":0}"#.into()).unwrap();
+    assert!(!jobs::REFUSE.load(Ordering::SeqCst), "the plan was made again, and refused");
+    let ViewUpdate::Reset { rows } = every.take() else { panic!("reset") };
+    assert_eq!(rows.len(), 2, "made again from its input: {rows:?}");
+    d.mutate("fetch.ask".into(), r#"{"id":"c","after_ms":0}"#.into()).unwrap();
+    assert!(matches!(every.take(), ViewUpdate::Patched { .. }), "and kept up after");
 }

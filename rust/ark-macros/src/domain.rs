@@ -32,7 +32,7 @@ fn snake(s: &str) -> String {
 }
 
 /// One item of an `#[ark(..)]` attribute.
-enum Item {
+pub(crate) enum Item {
     Flag(Ident),
     Is(Ident, Expr),
     /// `index(a, b)` / `unique(a, b)`, maybe `as NAME`.
@@ -66,7 +66,7 @@ impl Parse for Item {
     }
 }
 
-fn items(attrs: &[syn::Attribute]) -> syn::Result<Vec<Vec<Item>>> {
+pub(crate) fn items(attrs: &[syn::Attribute]) -> syn::Result<Vec<Vec<Item>>> {
     items_of(attrs, "ark")
 }
 
@@ -95,7 +95,8 @@ fn fields_of(input: &DeriveInput) -> Result<&syn::FieldsNamed, TokenStream> {
 }
 
 /// `Describe` for a struct (a record of its fields) or an enum (a sum of
-/// its variants, each a record of its fields).
+/// its variants, each a record of its fields); and its twin, when it asks
+/// for one (`crate::ffi`).
 fn describe(input: &DeriveInput) -> TokenStream {
     let name = &input.ident;
     let label = name.to_string();
@@ -122,12 +123,15 @@ fn describe(input: &DeriveInput) -> TokenStream {
         }
         Data::Union(_) => return err(name.span(), "a union describes nothing"),
     };
+    let twin = crate::ffi::twin(input);
     quote! {
         impl ::ark::row::Describe for #name {
             fn describe() -> ::ark::row::Type {
                 #body
             }
         }
+
+        #twin
     }
 }
 
@@ -213,12 +217,18 @@ pub fn row(input: DeriveInput) -> TokenStream {
     for it in top.into_iter().flatten() {
         match it {
             Item::Flag(f) if f == "volatile" => volatile = true,
+            Item::Flag(f) if f == "ffi" || f == "ffi_view" => {}
             Item::Is(n, Expr::Lit(l)) if n == "table" => match &l.lit {
                 syn::Lit::Str(s) => table = s.value(),
                 _ => return err(n.span(), "table = \"name\""),
             },
             Item::Cols(k, cols, alias) if k == "index" || k == "unique" => indexes.push((k == "unique", cols, alias)),
-            _ => return err(name.span(), "#[ark(..)] on a row: table = \"..\", volatile, index(..), unique(..)"),
+            _ => {
+                return err(
+                    name.span(),
+                    "#[ark(..)] on a row: table = \"..\", volatile, index(..), unique(..), ffi, ffi_view",
+                )
+            }
         }
     }
     let names: Vec<&Ident> = fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();

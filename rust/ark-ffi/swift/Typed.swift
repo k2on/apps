@@ -1,6 +1,7 @@
 // The typed half of the bridge (`docs/plan-v5.md` §1.16, N3), beside the
 // bindings UniFFI writes: what the Swift `ark-dev gen` writes for a domain
-// stands on — a row id, a view's rows read as their type with what it did,
+// stands on — a row id, a view's rows read as their type with what it did
+// (from their JSON, or a typed view's records as UniFFI hands them over),
 // and JSON as the kernel reads and writes it.
 import Foundation
 
@@ -11,29 +12,56 @@ public struct Id: Hashable {
     public static let none = Id(String(repeating: "0", count: 32))
 }
 
-/// A view's rows read as `T`, and what it did since last taken.
+/// A view's rows read as `T`, and what it did since last taken: each row its
+/// JSON read by `read` over a `ViewHandle`, or — a typed view — rows UniFFI
+/// hands over as they are (`typed`).
 public final class View<T> {
-    public let handle: ViewHandle
-    let read: (Any?) -> T
+    let rowsOf: () -> [T]
+    let takeOf: () -> Update<T>
 
-    public init(_ handle: ViewHandle, _ read: @escaping (Any?) -> T) { self.handle = handle; self.read = read }
+    init(rows: @escaping () -> [T], take: @escaping () -> Update<T>) { rowsOf = rows; takeOf = take }
 
-    public func rows() -> [T] { handle.rows().map { read(J.parse($0)) } }
-
-    public func take() -> Update<T> {
-        switch handle.take() {
-        case .unchanged: return .unchanged
-        case let .reset(rows): return .reset(rows.map { read(J.parse($0)) })
-        case let .patched(patches):
-            return .patched(patches.map { p -> Change<T> in
-                switch p {
-                case let .insert(at, row): return .insert(at: Int(at), row: read(J.parse(row)))
-                case let .remove(at): return .remove(at: Int(at))
-                case let .update(at, row): return .update(at: Int(at), row: read(J.parse(row)))
-                }
-            })
-        }
+    public convenience init(_ handle: ViewHandle, _ read: @escaping (Any?) -> T) {
+        self.init(rows: { handle.rows().map { read(J.parse($0)) } }, take: {
+            switch handle.take() {
+            case .unchanged: return .unchanged
+            case let .reset(rows): return .reset(rows.map { read(J.parse($0)) })
+            case let .patched(patches):
+                return .patched(patches.map { p -> Change<T> in
+                    switch p {
+                    case let .insert(at, row): return .insert(at: Int(at), row: read(J.parse(row)))
+                    case let .remove(at): return .remove(at: Int(at))
+                    case let .update(at, row): return .update(at: Int(at), row: read(J.parse(row)))
+                    }
+                })
+            }
+        })
     }
+
+    /// A domain's typed view object (`<T>View`): its rows, and what it did
+    /// with the rows that came with it.
+    public static func typed(rows: @escaping () -> [T], take: @escaping () -> (Taken, [T])) -> View<T> {
+        View(rows: rows, take: {
+            let (t, came) = take()
+            switch t {
+            case .unchanged: return .unchanged
+            case .reset: return .reset(came)
+            case let .patched(ops):
+                var r = came.makeIterator()
+                return .patched(ops.map { o -> Change<T> in
+                    switch o {
+                    case let .insert(at): return .insert(at: Int(at), row: r.next()!)
+                    case let .remove(at): return .remove(at: Int(at))
+                    case let .update(at): return .update(at: Int(at), row: r.next()!)
+                    }
+                })
+            }
+        })
+    }
+
+    public func rows() -> [T] { rowsOf() }
+
+    public func take() -> Update<T> { takeOf() }
 }
 
 public enum Update<T> {
