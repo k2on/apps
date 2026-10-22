@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ark::format::Encode;
 use ark::log::EntryId;
@@ -289,38 +289,30 @@ pub fn pump_until(
     secs: u64,
     mut done: impl FnMut(&mut [&mut Peer]) -> bool,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(secs);
-    loop {
+    let held = ark_peer::link::until(Duration::from_secs(secs), Duration::from_millis(5), || {
         for p in peers.iter_mut() {
             p.pump();
         }
-        if done(peers) {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out; {:#?}",
-            peers
-                .iter()
-                .map(|p| (p.me(), p.linked(), p.cursor(), p.pending(), &p.refused))
-                .collect::<Vec<_>>()
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        done(peers)
+    });
+    assert!(
+        held,
+        "timed out; {:#?}",
+        peers
+            .iter()
+            .map(|p| (p.me(), p.linked(), p.cursor(), p.pending(), &p.refused))
+            .collect::<Vec<_>>()
+    );
 }
 
 /// Wait for `f` to hold, or `secs` pass; what it last said either way.
 pub fn eventually<T>(secs: u64, mut f: impl FnMut() -> Option<T>) -> Option<T> {
-    let deadline = Instant::now() + Duration::from_secs(secs);
-    loop {
-        if let Some(t) = f() {
-            return Some(t);
-        }
-        if Instant::now() > deadline {
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let mut last = None;
+    ark_peer::link::until(Duration::from_secs(secs), Duration::from_millis(20), || {
+        last = f();
+        last.is_some()
+    });
+    last
 }
 
 /// A playable WAV of `ms` milliseconds: 44.1kHz, mono, 16-bit silence —

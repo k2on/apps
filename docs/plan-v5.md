@@ -1022,6 +1022,93 @@ own `Hashable` redundant). Not verified: an APK, a phone, an iPhone; a
 typed sum in Kotlin (UniFFI writes an all-unit enum as an `enum class`,
 which the extension's `is` would not match; harken has none).
 
+### Landed: T2, one client runtime
+
+Five items, each its own commit (`cb0b747`…`1f3cf4e`). **One player**: the desktop
+and browser client's own reconciler goes — `listening.rs`'s `reconcile`,
+its memory fields (`met`, `alone_playing`, `started_for`, `advanced_for`,
+`play`/`counted`, `asked`, `applied`, `seen`, `reported`), its `Sound`, its
+presses and the `input` module; the window's `Player` is a
+`harken_player::Sound` (`Sounding` in `main.rs`: the browser's `<audio>`,
+which now says whether it was asked to play and whether it stopped by
+itself — `asked`, `take_stalled` — and the desktop's silence, which never
+plays), over the window's queue, which it plays through on its own as a
+phone's player does; every press, queue edit, volume control, transfer and
+group change is a `harken_player::Press`; `Player::step` returns the
+refusals it takes. So there is one reconciler for the phone, the speaker,
+the browser and the desktop. The nine iced tests were already the phone's
+(`harken/ffi/tests/player.rs`) and the player crate's: output obeys →
+`the_output_obeys_the_session_and_nobody_else_makes_a_sound`; the session
+follows the output → `the_session_follows_the_phone_and_the_phone_follows_a_seek`
+and `a_player_drifting_from_the_session_is_followed_and_told_nothing`; a
+track ends → `a_track_that_ends_is_said_once_and_the_next_one_plays`; a
+play once → `a_play_is_recorded_once_by_the_output_alone`; both ways of
+coming back → `coming_back_to_a_session_sounding_elsewhere_stops_this_phone`,
+`coming_back_playing_to_a_quiet_session_makes_it_this_one`; unlinked →
+`a_phone_unlinked_is_its_own_session`; volume →
+`the_phones_volume_is_its_entry_and_only_a_hand_is_said` and
+`a_volume_is_told_and_a_hand_on_the_knob_is_said`. The one iced-only case,
+a hand-off picking up where the track stopped, is
+`a_hand_off_picks_up_where_the_track_stopped` beside them (falsified by
+loading at the clock's count, not where the session stands). The iced
+reconciler's STALL_MS/REPORT_MS timers are the core's rules now (a stop by
+itself is an event; a drift is said once per clock). A browser alone now
+counts its plays, as a phone alone does.
+**harken-peer over `ark_ffi::Peer`**: its pump loop, stdin thread, held
+lines and turn go; the peer is pumped on the FFI peer's thread and its
+commands go through the FFI peer's JSON (`check`, `mutate`, `query`,
+`call`, `standing`, `status`, rejections, live refusals, `login`,
+`logout`); stderr's linked/dropped/denied lines come from a `Listener`.
+ark-ffi gains `Peer::of` (a peer its host opened its own way, driven as
+`open`'s). **One typed live view**: `ark_peer::Watched<T>` (`watched.rs`;
+the peer's private `Watched` is now `Kept`) — a view by name and input, its
+rows decoded by a reader and spliced as it moves, read whole on a reset,
+asked again when a refused query might answer, opened again for a new
+login; harken-iced's `Open`, `splice` and its row fields go (the lists are
+`Peer::items()`, `albums()`, …), ark-ffi's `Kept` is a `Watched<()>` (rows
+still read from the peer as asked, so nothing is held twice) and gains the
+reopen for a new login; the phones' `View<T>` stays, no FFI signature
+changed, no binding regenerated. **The step-and-settle loop**:
+`ark_peer::link::until(within, every, done)` is ark-peer's test support
+`until`, harken-peer's `wait`/`settle`, the server tests' `pump_until` and
+`eventually` and the fleet's `eventually`; the desktop's copy went with
+item 1; the simulator's `settle` counts rounds with no clock and the
+phones' hall carries until two quiet rounds, so both stay. **Configuration**:
+harken's device and hub configuration is `harken_player::config` (`peer`,
+`hub`, `device`, `THROTTLE_MS`) — runtime, not domain, so the player crate,
+which every client and the server already link — used by harken-iced,
+harken-ffi (`config`, `Hall`), harken-peer and harken-server
+(`hub_config`); the generic server configuration is `ark_peer::Serve`
+(`settings.rs`, the `server` feature: `SignIn`, `Keepalive`, `Retention`,
+`roles_of`, `Serve::from_env(prefix, listen)`), and harken's `Config` is a
+`Serve` read under `HARKEN_` (it derefs to it) and its media and house.
+
+*Measured* (`tools/loc.sh`, src / bins): harken-iced 8,155 / 1,651 →
+7,343 / 1,679; harken-player 884 → 929; harken-server 4,596 / 1,295 →
+4,440 / 1,201; ark-peer 2,392 → 2,656 (`watched.rs`, `settings.rs`,
+`until`); ark-ffi 634 → 630; harken-ffi 288 → 267. Those six, source and
+binaries, 19,898 → 19,148. Tests: harken-iced 1,678 → 1,686 (its in-file
+reconciler tests, ~590 lines, were counted as source), ark-peer 1,759 →
+1,792, harken-ffi 732 → 761, harken-server 6,755 → 6,738. New tests, each
+falsified once: the hand-off (harken-ffi), `Watched` (`ark-peer/tests/
+views.rs`: falsified by settling whoever is signed in), and harken-peer's
+`harkens_types_cross_as_json` rewritten over the FFI peer (falsified by
+sending a unit input its `{}`). `cargo test --workspace`: 447 passed, 30
+ignored, none failed (the fleet's 23 and its witness, the versions' 6, the
+bridge's 15 among them); clippy `--workspace --all-targets -D warnings`
+and fmt clean; the wasm32 check of harken-iced passes, with and without
+`demo` (harken-iced's tests with `demo`: 60 passed, 2 ignored — the
+flake builds them so, which found the demo's tests still reaching for the
+old row fields: `1f3cf4e`). After `rm -rf rust/target`, `nix build
+--max-jobs 1` of `path:` refs: `checks.rust` 767 s (its dependency layer
+already rebuilt for the new lock by a first run), `checks.harken-module`
+35 s, `packages.harken-web` 689 s, all three passing.
+Not verified: a real desktop audio device (there is none: the desktop
+declares it cannot play, as before) and a real browser — the `<audio>`
+adapter's `asked`/`take_stalled` (an autoplay refusal, a stall said as
+`stalled`, the move on at a track's end while the output) is compiled for
+wasm32 and run by nothing; the phones and an iPhone over the changed
+ark-ffi views.
 ### Landed: T3
 
 Six items, each its own commit (`9c4c36c`…). **ark-macros**: every derive

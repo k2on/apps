@@ -274,6 +274,25 @@ pub fn wait(peer: &Peer, rx: &std::sync::mpsc::Receiver<()>, most: std::time::Du
     while rx.try_recv().is_ok() {}
 }
 
+/// Looks at `done` every `every` until it holds or `within` has passed:
+/// whether it held. What a driver with no window — a test, a headless
+/// peer — steps and settles by: `done` pumps what it drives and says
+/// whether what it waits for has happened.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn until(within: std::time::Duration, every: std::time::Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        if done() {
+            return true;
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        std::thread::sleep(every.min(deadline - now));
+    }
+}
+
 /// A WebSocket on a thread of its own: the token first, then frames; a
 /// close with code 4401 is the server turning the login away.
 #[cfg(not(target_arch = "wasm32"))]

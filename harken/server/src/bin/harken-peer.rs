@@ -8,8 +8,9 @@
 //!   [--device KIND,NAME,CAN_PLAY]
 //! ```
 //!
-//! It is an `ark_peer::Peer` and its link, as the desktop is, minus the
-//! window: the replica in `DIR/replica` (the chain on disk), signed in the
+//! It is an `ark_peer::Peer` and its link, driven as a phone's is
+//! (`ark_ffi::Peer`, which pumps it on a thread of its own and speaks JSON),
+//! minus the screen: the replica in `DIR/replica` (the chain on disk), signed in the
 //! way the desktop signs in under dev auth (`ark_auth::client::login` with a
 //! name, which a dev server answers with a code and no browser), the login
 //! remembered in `DIR/logins` so a restart reuses it. Without `--user`
@@ -30,7 +31,7 @@
 //!
 //! It runs harken's domain as this build compiled it
 //! (`harken_server::hosted`), and reads a function's arguments by its
-//! input's own checks ([`input`]).
+//! input's own checks (`Headless::args`).
 //!
 //! `--auth-patience-ms` bounds each sign-in request — its connection and
 //! each read — where `ark_auth::client::Patience::DEFAULT` is ten seconds
@@ -86,27 +87,25 @@
 //! link — opened, dropped, denied — goes to stderr, one line each, prefixed
 //! `harken-peer:`, so a test can attach it to a failure.
 //!
-//! The peer pumps when the link says something (it waits on the link a few
-//! milliseconds at a time between lines) and after every command; `wait`
-//! and `settle` pump while they wait and read no more commands until they
-//! answer: a driver sends one command and reads one answer. `--pump-ms` is
-//! how long `settle` waits with nothing new before it counts the cursor as
-//! still.
+//! The peer pumps on its own thread whenever the link says something;
+//! `wait` and `settle` look at it every few milliseconds and read no more
+//! commands until they answer: a driver sends one command and reads one
+//! answer. `--pump-ms` is how long `settle` waits with nothing new before it
+//! counts the cursor as still.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ark::format::Encode as Bytes;
 use ark::hash::hex;
 use ark::log::EntryId;
 use ark::peer::{Journal, Role, Who};
 use ark_auth::client::Patience;
 use ark_auth::Login;
-use ark_peer::{Config, Files, Live, Peer, Standing};
+use ark_ffi::Standing;
+use ark_peer::{Config, Files, Peer};
 use harken_server::domain::host::Listening;
-use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
 use serde_json::{json, Map, Value};
 
@@ -270,28 +269,6 @@ fn nobody(name: &str) -> Who {
 }
 
 // -- JSON: the domain's own --------------------------------------------------------
-
-/// A function's input as the domain reads it: the command's `args` as they
-/// are, or `null` for a function that takes nothing; refused here, field by
-/// field, when the input's own checks would refuse it.
-fn input(hosted: &Hosted, name: &str, v: &Value) -> Result<Vec<u8>, String> {
-    let f = hosted
-        .domain
-        .get(name)
-        .ok_or_else(|| format!("harken-peer knows no function {name}"))?;
-    let v = match f.input {
-        ark::row::Type::Unit => &Value::Null,
-        _ => v,
-    };
-    let b = ark::json::typed_bytes(&f.input, v).map_err(|r| format!("`args`: {r}"))?;
-    (f.check)(&b).map_err(|fs| {
-        fs.into_iter()
-            .map(|(f, why)| format!("`{f}`: {why}"))
-            .collect::<Vec<_>>()
-            .join("; ")
-    })?;
-    Ok(b)
-}
 
 /// One account's session as JSON: its devices, scrubbers and what plays.
 fn listening_json(l: &Listening) -> Value {
@@ -460,9 +437,9 @@ impl Answer {
 // -- the peer --------------------------------------------------------------------------
 
 struct Headless {
-    client: Peer,
-    /// What the link rings.
-    bell: Receiver<()>,
+    /// The peer, driven by its own thread (`ark_ffi::Peer`): its link
+    /// pumped whenever it rings, a command answered meanwhile.
+    peer: Arc<ark_ffi::Peer>,
     hosted: Hosted,
     dir: PathBuf,
     server: Option<String>,
@@ -471,29 +448,22 @@ struct Headless {
     /// How long `settle` waits with nothing new before the cursor counts
     /// as still for a turn (`--pump-ms`).
     still: Duration,
-    /// The lines of stdin, as they come; `None` is its end.
-    lines: Receiver<Option<String>>,
-    /// Lines that arrived while a `wait` or a `settle` was pumping.
-    held: Vec<Option<String>>,
     /// Verdicts collected and not yet asked for. Every one is also appended
     /// to `DIR/rejections.jsonl` as it arrives, since a client keeps a
     /// verdict in memory only.
     unasked: Vec<Value>,
-    /// The server's refusals of the volatile machine's intents.
-    live_refusals: Vec<String>,
     /// `--roles`: what this device's entries carry beside its login's.
     roles: Vec<String>,
-    /// Whether the last connection opened and has heard nothing yet (a
-    /// token the hub does not know is closed before a word); why it was
-    /// last turned away; whether the hub has paged the volatile machine
-    /// since it opened.
-    quiet_open: bool,
-    denied: Option<String>,
-    synced: bool,
 }
 
-/// How many of the link's events the client is given in one turn.
+/// How many of the link's events the client is given in one turn: a server
+/// confirming two thousand intents one entry at a time is two thousand
+/// frames, each a rebase of what is still pending; taken a chunk at a time,
+/// a command is answered between chunks rather than after all of them.
 const CHUNK: usize = 32;
+
+/// How often a `wait` or a `settle` looks again.
+const LOOK: Duration = Duration::from_millis(2);
 
 impl Headless {
     fn open(f: &Flags, hosted: Hosted) -> Result<Headless, String> {
@@ -521,157 +491,92 @@ impl Headless {
             (None, true) => nobody(f.user.as_deref().unwrap_or("me")),
             (None, false) => nobody(""),
         };
-        who.roles.extend(f.roles.iter().cloned());
-        who.roles.sort();
-        who.roles.dedup();
-        let live = f.device.as_ref().map(|d| Live {
-            device: Some(
-                Device {
-                    can_play: d.can_play,
-                    id: String::new(),
-                    kind: d.kind.clone(),
-                    name: d.name.clone(),
-                    user: String::new(),
-                }
-                .to_bytes(),
-            ),
-            ephemeral: hosted.get("listening.scrub").into_iter().collect(),
-            every_ms: 250,
-            ..Live::new(hosted.module.clone())
-        });
-        let config = Config {
-            live,
-            ..Config::of(hosted.domain.clone())
+        with_roles(&mut who, &f.roles);
+        let config = match &f.device {
+            Some(d) => {
+                let said = harken_player::config::device(d.can_play, &d.kind, &d.name);
+                harken_player::config::peer(&hosted.domain, said, 250)
+            }
+            None => Config::of(hosted.domain.clone()),
         };
         let disk = Files::new(f.dir.join("replica"))
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
         let mut client = Peer::open(config, who.clone(), Box::new(disk), false);
-        let (wake, bell) = ark_peer::link::bell();
-        client.set_waker(wake);
         client.link.backoff = (f.backoff.0.max(1), f.backoff.1.max(f.backoff.0).max(1));
         client.link.chunk = CHUNK;
-        let (tx, lines) = channel();
-        std::thread::spawn(move || {
-            for line in std::io::stdin().lock().lines() {
-                let Ok(line) = line else { break };
-                if tx.send(Some(line)).is_err() {
-                    return;
-                }
-            }
-            let _ = tx.send(None);
-        });
-        let mut h = Headless {
-            client,
-            bell,
+        match (f.alone, client.is_alone()) {
+            (true, false) => client.alone(),
+            (false, true) => client.join(),
+            _ => {}
+        }
+        // A directory that was another login's, or alone: what it has
+        // pending is authored again as this one.
+        if login.is_some()
+            && client
+                .log
+                .pending
+                .iter()
+                .any(|p| p.entry.session != who.session)
+        {
+            reauthor(&mut client, who);
+        }
+        let peer = ark_ffi::Peer::of(client).map_err(|e| e.to_string())?;
+        peer.set_listener(Some(Arc::new(Stderr {
+            peer: Arc::downgrade(&peer),
+            was: Default::default(),
+        })));
+        let h = Headless {
+            peer,
             hosted,
             dir: f.dir.clone(),
             server: f.server.clone(),
             token: login.map(|l| l.token),
             patience: f.patience,
             still: f.pump,
-            lines,
-            held: vec![],
             unasked: vec![],
-            live_refusals: vec![],
             roles: f.roles.clone(),
-            quiet_open: false,
-            denied: None,
-            synced: false,
         };
-        match (f.alone, h.client.is_alone()) {
-            (true, false) => h.client.alone(),
-            (false, true) => h.client.join(),
-            _ => {}
-        }
-        // A directory that was another login's, or alone: what it has
-        // pending is authored again as this one.
-        if h.token.is_some()
-            && h.client
-                .log
-                .pending
-                .iter()
-                .any(|p| p.entry.session != who.session)
-        {
-            h.reauthor(who);
-        }
         h.dial();
         Ok(h)
     }
 
-    /// Off the network, with nothing of the old connection left to give
-    /// the client.
-    fn drop_link(&mut self) {
-        self.client.set_token(None);
+    /// The link up, when there is a server and a login; down otherwise.
+    fn dial(&self) {
+        let (server, token) = (self.server.clone(), self.token.clone());
+        self.peer.with(|p| {
+            p.set_token(None);
+            if let (Some(server), Some(token), false) = (server, token, p.is_alone()) {
+                p.set_token(Some(token));
+                p.connect(&ark_auth::socket_url(&server));
+            }
+        });
     }
 
-    /// Whether the link is up or being dialled.
-    fn dialling(&self) -> bool {
-        !self.client.is_signed_out()
-    }
-
-    /// The link up, when there is a server and a login.
-    fn dial(&mut self) {
-        self.drop_link();
-        if let (Some(server), Some(token), false) =
-            (&self.server, &self.token, self.client.is_alone())
-        {
-            let url = ark_auth::socket_url(server);
-            self.client.set_token(Some(token.clone()));
-            self.client.connect(&url);
-        }
-    }
-
-    /// One turn of the link, a chunk of what it said ([`CHUNK`]): a server
-    /// confirming two thousand intents one entry at a time is two thousand
-    /// frames, each a rebase of what is still pending; taken a chunk at a
-    /// time, a command is answered between chunks rather than after all of
-    /// them. What it came to goes on stderr.
-    fn pump(&mut self) {
-        let p = self.client.pump();
-        if p.opened {
-            (self.quiet_open, self.synced) = (true, false);
-            eprintln!(
-                "harken-peer: linked (epoch {}, cursor {})",
-                self.client.link.epoch,
-                self.client.log.log().head().0
-            );
-        }
-        if p.frames != [0, 0] {
-            (self.quiet_open, self.denied) = (false, None);
-        }
-        self.synced |= p.frames[1] > 0;
-        for why in &p.closed {
-            eprintln!("harken-peer: dropped: {why}");
-        }
-        if p.denied.is_some() || !p.closed.is_empty() && std::mem::take(&mut self.quiet_open) {
-            self.ask_why(p.denied.is_some());
-        }
-        self.collect();
-    }
-
-    /// The hub closed a connection before saying a word, which is what it
-    /// does to a token that proves nobody (with code 4401, `denied`) — or a
-    /// server going down, or a session revoked, which the next dial is
-    /// denied. Denied, the peer stops dialling with it until it signs in
-    /// again; its store and its pending intents stay.
-    fn ask_why(&mut self, denied: bool) {
-        if self.token.is_none() {
-            return;
-        }
-        if denied {
-            self.denied = Some(REVOKED.into());
-            self.drop_link();
-            eprintln!("harken-peer: denied: {REVOKED}");
+    /// A function's arguments as the peer reads them: the command's `args`
+    /// as they are, or `null` for a function that takes nothing; refused
+    /// here when the input's own checks would refuse it.
+    fn args(&self, name: &str, v: &Value) -> Result<String, String> {
+        let f = self
+            .hosted
+            .domain
+            .get(name)
+            .ok_or_else(|| format!("harken-peer knows no function {name}"))?;
+        let v = match f.input {
+            ark::row::Type::Unit => Value::Null,
+            _ => v.clone(),
+        };
+        let text = v.to_string();
+        match self.peer.check(name.into(), text.clone()) {
+            Some(why) => Err(format!("`args`: {why}")),
+            None => Ok(text),
         }
     }
 
     /// Take the verdicts that arrived, and write each down.
     fn collect(&mut self) {
-        let mut fresh = vec![];
-        for (id, why) in self.client.take_rejections() {
-            fresh.push(json!({ "id": hex(&id.0), "reason": why }));
-        }
-        self.live_refusals.extend(self.client.take_live_refusals());
+        let fresh: Vec<Value> = (self.peer.take_rejections().into_iter())
+            .map(|r| json!({ "id": r.id, "reason": r.why }))
+            .collect();
         if fresh.is_empty() {
             return;
         }
@@ -688,171 +593,94 @@ impl Headless {
         self.unasked.extend(fresh);
     }
 
-    /// Waits on the link for at most `wait` (on stdin when there is no
-    /// link), and pumps.
-    fn turn(&mut self, wait: Duration) {
-        if !self.dialling() {
-            if let Ok(l) = self.lines.recv_timeout(wait) {
-                self.held.push(l);
-            }
-        } else if self.client.backlog() == 0 {
-            ark_peer::link::wait(&self.client, &self.bell, wait);
-        }
-        self.pump();
-    }
-
-    /// Pumps until `done`, or the timeout; with `step`, `done` is asked
-    /// once a step. Whether it was done.
-    fn pump_until(
-        &mut self,
+    /// Looks at the peer every `step` until `done`, or the timeout:
+    /// whether it was done.
+    fn until(
+        &self,
         timeout: Duration,
-        step: Option<Duration>,
-        mut done: impl FnMut(&Headless) -> bool,
+        step: Duration,
+        mut done: impl FnMut(&mut Peer) -> bool,
     ) -> bool {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if done(self) {
-                return true;
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            let looked = Instant::now();
-            loop {
-                while let Ok(l) = self.lines.try_recv() {
-                    self.held.push(l);
-                }
-                self.turn(Duration::from_millis(2));
-                if step.is_none_or(|s| looked.elapsed() >= s) || Instant::now() >= deadline {
-                    break;
-                }
-            }
-        }
-    }
-
-    /// The next line to answer, pumping meanwhile; `None` at the end of
-    /// stdin.
-    fn next(&mut self) -> Option<String> {
-        if !self.held.is_empty() {
-            return self.held.remove(0);
-        }
-        loop {
-            match self.lines.try_recv() {
-                Ok(l) => return l,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => return None,
-                Err(_) => {}
-            }
-            if self.dialling() {
-                self.turn(Duration::from_millis(2));
-                continue;
-            }
-            match self.lines.recv_timeout(Duration::from_millis(50)) {
-                Ok(l) => return l,
-                Err(RecvTimeoutError::Disconnected) => return None,
-                Err(RecvTimeoutError::Timeout) => self.pump(),
-            }
-        }
-    }
-
-    fn fork(&self) -> i64 {
-        match &self.client.log.role {
-            Role::Authority {
-                journal: Journal {
-                    fork: Some((n, _)), ..
-                },
-            } => *n,
-            _ => 0,
-        }
+        ark_peer::link::until(timeout, step, || self.peer.with(&mut done))
     }
 
     fn status(&self) -> Answer {
-        let me = &self.client.log.me;
-        let link = match (self.client.is_alone(), self.dialling(), self.client.linked) {
+        let st = self.peer.status();
+        let (alone, signed_out) = (st.alone, self.token.is_none() && !st.alone);
+        let (dialling, diverged, fork) = self.peer.with(|p| {
+            let fork = match &p.log.role {
+                Role::Authority {
+                    journal:
+                        Journal {
+                            fork: Some((n, _)), ..
+                        },
+                } => *n,
+                _ => 0,
+            };
+            (!p.is_signed_out(), p.log.diverged.len(), fork)
+        });
+        let link = match (alone, dialling, st.linked) {
             (true, _, _) => "alone",
-            (_, false, _) if self.token.is_none() => "signed out",
+            (_, false, _) if signed_out => "signed out",
             (_, false, _) => "offline",
             (_, true, true) => "linked",
             (_, true, false) => "dialling",
         };
         Answer::default()
-            .set("cursor", json!(self.client.cursor()))
-            .set("pending", json!(self.client.pending_len()))
+            .set("cursor", json!(st.cursor))
+            .set("pending", json!(st.pending))
             .set("held", json!(0))
             .set("behind", json!(false))
-            .set("linked", json!(self.client.linked))
-            .set(
-                "denied",
-                self.denied.as_ref().map_or(Value::Null, |d| json!(d)),
-            )
-            .set("user", json!(me.actor))
-            .set("session", json!(me.session))
-            .set(
-                "signed_out",
-                json!(self.token.is_none() && !self.client.is_alone()),
-            )
-            .set("epoch", json!(self.client.link.epoch))
+            .set("linked", json!(st.linked))
+            .set("denied", st.denied.map_or(Value::Null, |_| json!(REVOKED)))
+            .set("user", json!(st.user))
+            .set("session", json!(st.session))
+            .set("signed_out", json!(signed_out))
+            .set("epoch", json!(st.epoch))
             .set("link", json!(link))
-            .set("opens", json!(self.client.link.epoch))
-            .set("diverged", json!(self.client.log.diverged.len()))
-            .set("fork", json!(self.fork()))
-    }
-
-    fn session(&self) -> Option<Listening> {
-        let live = self.client.live.as_ref()?;
-        Some(Listening::of(&live.store, &self.client.log.me.actor))
-    }
-
-    /// What is pending authored again as `who`.
-    ///
-    /// The same session is no new login: its intents are its own already,
-    /// and authoring them again from its first `local` would name entries
-    /// the server has answered.
-    fn reauthor(&mut self, who: Who) {
-        let log = &self.client.log;
-        let mut theirs = log.pending.iter().map(|p| &p.entry.session);
-        if who.session == log.me.session && theirs.all(|s| *s == who.session) {
-            return;
-        }
-        self.client.sign_in(who);
+            .set("opens", json!(st.epoch))
+            .set("diverged", json!(diverged))
+            .set("fork", json!(fork))
     }
 
     /// Signs in as `login`: the client authors as it, the link dials with it.
     fn signed_in(&mut self, login: &Login) {
-        let mut who = ark_peer::who(login);
-        who.roles.extend(self.roles.iter().cloned());
-        who.roles.sort();
-        who.roles.dedup();
-        self.reauthor(who);
+        let mut l = ark_ffi::Login::from(login.clone());
+        l.roles.extend(self.roles.iter().cloned());
+        l.roles.sort();
+        l.roles.dedup();
+        self.peer.login(l);
         self.token = Some(login.token.clone());
-        self.denied = None;
         self.dial();
     }
 
     /// Answer one command. `quit` is answered like `persist`; the loop is
     /// what stops.
     fn handle(&mut self, cmd: Cmd) -> Answer {
+        let binding = |name: &str| self.peer.with(|p| p.binding(name));
         match cmd {
             Cmd::Mutate { name, args } => {
-                let Some(name) = self.client.binding(&name) else {
+                let Some(name) = binding(&name) else {
                     return Answer::refused(format!("no function {name}"));
                 };
-                let bytes = match input(&self.hosted, &name, &args) {
-                    Ok(b) => b,
-                    Err(e) => return Answer::refused(e),
-                };
-                match self.client.mutate_bytes(&name, bytes) {
+                match self
+                    .args(&name, &args)
+                    .and_then(|a| self.peer.mutate(name, a).map_err(|e| e.to_string()))
+                {
                     Err(why) => Answer::refused(why),
-                    Ok(id) => Answer::ok(true).set("id", json!(hex(&id.0))),
+                    Ok(id) => Answer::ok(true).set("id", json!(id)),
                 }
             }
             Cmd::Status => self.status(),
-            Cmd::Hash => Answer::default()
-                .set("cursor", json!(self.client.cursor()))
-                .set("hash", json!(self.client.log.confirmed_hash().hex()))
-                .set("view", json!(self.client.log.store.state_hash().hex())),
+            Cmd::Hash => self.peer.with(|p| {
+                Answer::default()
+                    .set("cursor", json!(p.cursor()))
+                    .set("hash", json!(p.log.confirmed_hash().hex()))
+                    .set("view", json!(p.log.store.state_hash().hex()))
+            }),
             Cmd::Wait { cursor, timeout } => {
-                let ok = self.pump_until(timeout, None, |h| h.client.cursor() >= cursor);
-                Answer::ok(ok).set("cursor", json!(self.client.cursor()))
+                let ok = self.until(timeout, LOOK, |p| p.cursor() >= cursor);
+                Answer::ok(ok).set("cursor", json!(self.peer.status().cursor))
             }
             Cmd::Settle { timeout } => {
                 // Linked (or alone), nothing pending, and the cursor still
@@ -860,28 +688,26 @@ impl Headless {
                 // from this end alone. The fleet compares against the
                 // server's head as well.
                 let (mut last, mut still) = (-1, 0);
-                let step = self.still;
-                let ok = self.pump_until(timeout, Some(step), |h| {
-                    if h.client.cursor() == last {
+                let ok = self.until(timeout, self.still, |p| {
+                    if p.cursor() == last {
                         still += 1;
                     } else {
-                        (last, still) = (h.client.cursor(), 0);
+                        (last, still) = (p.cursor(), 0);
                     }
-                    (h.client.linked || h.client.is_alone())
-                        && h.client.pending_len() == 0
-                        && still >= 2
+                    (p.linked || p.is_alone()) && p.pending_len() == 0 && still >= 2
                 });
+                let st = self.peer.status();
                 Answer::ok(ok)
-                    .set("cursor", json!(self.client.cursor()))
-                    .set("pending", json!(self.client.pending_len()))
+                    .set("cursor", json!(st.cursor))
+                    .set("pending", json!(st.pending))
             }
             Cmd::Query { name, args } => {
-                let Some(name) = self.client.binding(&name) else {
+                let Some(name) = binding(&name) else {
                     return Answer::refused(format!("no function {name}"));
                 };
-                let answer = input(&self.hosted, &name, &args)
-                    .and_then(|b| self.client.ask(&name, &b))
-                    .and_then(|b| self.client.answer_json(&name, &b))
+                let answer = self
+                    .args(&name, &args)
+                    .and_then(|a| self.peer.query(name, a).map_err(|e| e.to_string()))
                     .and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string()));
                 match answer {
                     Ok(v) => Answer::default().set("rows", v),
@@ -905,18 +731,18 @@ impl Headless {
             Cmd::Standing { id } => {
                 // The kit's standing, and what is in the log: a confirmed
                 // entry stays so across a restart.
-                let id = EntryId(id);
                 let logged = || {
-                    self.client
-                        .log
-                        .log()
-                        .entries()
-                        .iter()
-                        .any(|l| l.entry.id == id)
+                    self.peer.with(|p| {
+                        p.log
+                            .log()
+                            .entries()
+                            .iter()
+                            .any(|l| l.entry.id == EntryId(id))
+                    })
                 };
-                let (standing, why) = match self.client.standing(&id) {
+                let (standing, why) = match self.peer.standing(hex(&id)) {
                     Standing::Pending => ("pending", None),
-                    Standing::Rejected(why) => ("rejected", Some(why)),
+                    Standing::Rejected { why } => ("rejected", Some(why)),
                     Standing::Confirmed => ("confirmed", None),
                     Standing::Unknown if logged() => ("confirmed", None),
                     Standing::Unknown => ("unknown", None),
@@ -929,7 +755,7 @@ impl Headless {
                 }
             }
             Cmd::Disconnect => {
-                self.drop_link();
+                self.peer.with(|p| p.set_token(None));
                 Answer::ok(true)
             }
             Cmd::Reconnect => {
@@ -954,9 +780,9 @@ impl Headless {
             }
             Cmd::SignOut => {
                 // The session revoked through the domain, while linked.
-                let _ = self.client.sign_out();
+                self.peer.logout();
                 self.token = None;
-                self.client.sign_in(nobody(""));
+                self.peer.with(|p| p.sign_in(nobody("")));
                 self.dial();
                 if let Some(server) = &self.server {
                     logins(&self.dir).forget(server);
@@ -984,9 +810,11 @@ impl Headless {
                     },
                 };
                 let took = Instant::now();
-                if self.client.is_alone() {
-                    self.client.join();
-                }
+                self.peer.with(|p| {
+                    if p.is_alone() {
+                        p.join();
+                    }
+                });
                 self.server = Some(server.clone());
                 match &login {
                     Some(l) => {
@@ -998,48 +826,46 @@ impl Headless {
                         self.dial();
                     }
                 }
+                let st = self.peer.status();
                 eprintln!(
                     "harken-peer: joined {server}: {} pending in {:?}",
-                    self.client.pending_len(),
+                    st.pending,
                     took.elapsed()
                 );
                 Answer::ok(true)
-                    .set("pending", json!(self.client.pending_len()))
-                    .set("cursor", json!(self.client.cursor()))
+                    .set("pending", json!(st.pending))
+                    .set("cursor", json!(st.cursor))
             }
             Cmd::Leave => {
-                if self.client.is_alone() {
+                if self.peer.status().alone {
                     return Answer::refused("already alone");
                 }
-                self.drop_link();
-                self.client.alone();
+                self.peer.with(|p| {
+                    p.set_token(None);
+                    p.alone();
+                });
                 self.server = None;
-                self.pump();
-                Answer::ok(true).set("cursor", json!(self.client.cursor()))
+                Answer::ok(true).set("cursor", json!(self.peer.status().cursor))
             }
             Cmd::Call {
                 live,
                 transition,
-                input: args,
+                input,
             } => {
-                if self.client.live.is_none() {
-                    return Answer::refused("this peer is no device (--device)");
-                }
                 let name = format!("{live}.{transition}");
-                let Some(func) = self.hosted.get(&name) else {
-                    return Answer::refused(format!("no transition {name}"));
-                };
-                let bytes = match input(&self.hosted, &func, &args) {
-                    Ok(b) => b,
-                    Err(e) => return Answer::refused(e),
-                };
                 let ephemeral = self
-                    .client
-                    .config
-                    .live
-                    .as_ref()
-                    .is_some_and(|l| l.ephemeral.contains(&func));
-                match self.client.call(&name, bytes) {
+                    .peer
+                    .with(|p| p.config.live.as_ref().map(|l| l.ephemeral.contains(&name)));
+                let Some(ephemeral) = ephemeral else {
+                    return Answer::refused("this peer is no device (--device)");
+                };
+                if self.hosted.get(&name).is_none() {
+                    return Answer::refused(format!("no transition {name}"));
+                }
+                match self
+                    .args(&name, &input)
+                    .and_then(|a| self.peer.call(name, a).map_err(|e| e.to_string()))
+                {
                     Err(why) => Answer::refused(why),
                     Ok(()) => Answer::ok(true).set(
                         "kind",
@@ -1051,27 +877,36 @@ impl Headless {
                 if name != "listening" {
                     return Answer::refused(format!("no live state {name}"));
                 }
-                let (seq, pending) = self
-                    .client
-                    .live
-                    .as_ref()
-                    .map_or((0, 0), |l| (l.log().head().0, l.pending.len()));
-                Answer::default()
-                    .set(
-                        "value",
-                        self.session().as_ref().map_or(Value::Null, listening_json),
-                    )
-                    .set("device", json!(self.client.log.me.session))
-                    .set("seq", json!(seq))
-                    .set("pending", json!(pending))
-                    .set("synced", json!(self.client.linked && self.synced))
+                self.peer.with(|p| {
+                    let me = p.me().clone();
+                    let (value, seq, pending) = match &p.live {
+                        Some(l) => (
+                            Some(Listening::of(&l.store, &me.actor)),
+                            l.log().head().0,
+                            l.pending.len(),
+                        ),
+                        None => (None, 0, 0),
+                    };
+                    // The hub has paged it since the connection opened:
+                    // this device stands in the session it holds.
+                    let synced = p.linked
+                        && value
+                            .as_ref()
+                            .is_some_and(|l| l.device(&me.session).is_some());
+                    Answer::default()
+                        .set("value", value.as_ref().map_or(Value::Null, listening_json))
+                        .set("device", json!(me.session))
+                        .set("seq", json!(seq))
+                        .set("pending", json!(pending))
+                        .set("synced", json!(synced))
+                })
             }
             Cmd::LiveRefusals => {
-                Answer::default().set("refusals", json!(std::mem::take(&mut self.live_refusals)))
+                Answer::default().set("refusals", json!(self.peer.take_live_refusals()))
             }
             Cmd::Persist | Cmd::Quit => {
-                self.pump();
-                match self.client.failure().map(String::from) {
+                self.peer.pump();
+                match self.peer.status().failure {
                     None => Answer::ok(true),
                     Some(e) => Answer::refused(e),
                 }
@@ -1080,16 +915,61 @@ impl Headless {
     }
 }
 
+/// What happens on the link, said on stderr as it moves: opened, dropped,
+/// denied.
+struct Stderr {
+    peer: std::sync::Weak<ark_ffi::Peer>,
+    /// Linked, and denied, when last told.
+    was: std::sync::Mutex<(bool, bool)>,
+}
+
+impl ark_ffi::Listener for Stderr {
+    fn changed(&self) {
+        let Some(st) = self.peer.upgrade().map(|p| p.status()) else {
+            return;
+        };
+        let mut was = self.was.lock().unwrap_or_else(|e| e.into_inner());
+        match (was.0, st.linked) {
+            (false, true) => eprintln!(
+                "harken-peer: linked (epoch {}, cursor {})",
+                st.epoch, st.cursor
+            ),
+            (true, false) => eprintln!("harken-peer: dropped"),
+            _ => {}
+        }
+        if st.denied.is_some() && !was.1 {
+            eprintln!("harken-peer: denied: {REVOKED}");
+        }
+        *was = (st.linked, st.denied.is_some());
+    }
+}
+
+/// `--roles` beside a login's.
+fn with_roles(who: &mut Who, roles: &[String]) {
+    who.roles.extend(roles.iter().cloned());
+    who.roles.sort();
+    who.roles.dedup();
+}
+
+/// What is pending authored again as `who`.
+///
+/// The same session is no new login: its intents are its own already, and
+/// authoring them again from its first `local` would name entries the
+/// server has answered.
+fn reauthor(client: &mut Peer, who: Who) {
+    let log = &client.log;
+    let mut theirs = log.pending.iter().map(|p| &p.entry.session);
+    if who.session == log.me.session && theirs.all(|s| *s == who.session) {
+        return;
+    }
+    client.sign_in(who);
+}
+
 fn run(f: Flags) -> Result<(), String> {
     let mut h = Headless::open(&f, Hosted::harken())?;
     let mut out = std::io::stdout().lock();
-    h.pump();
-    loop {
-        let Some(line) = h.next() else {
-            // The end of stdin is a quit.
-            h.handle(Cmd::Quit);
-            return Ok(());
-        };
+    for line in std::io::stdin().lock().lines() {
+        let Ok(line) = line else { break };
         if line.trim().is_empty() {
             continue;
         }
@@ -1108,8 +988,11 @@ fn run(f: Flags) -> Result<(), String> {
         {
             return Ok(());
         }
-        h.pump();
+        h.collect();
     }
+    // The end of stdin is a quit.
+    h.handle(Cmd::Quit);
+    Ok(())
 }
 
 fn main() {
@@ -1130,6 +1013,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark::format::Encode;
 
     fn a(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -1317,32 +1201,37 @@ mod tests {
     }
 
     /// Arguments cross as the domain's own JSON — an id its hex, a sum
-    /// externally tagged — checked by the input's own refinements, field
-    /// by field; a function that takes nothing takes `null` whatever was
-    /// sent. Falsified by sending `playlists` its `args` as they came
-    /// (`{}`): the input did not read as `()`.
+    /// externally tagged — checked by the input's own refinements; a
+    /// function that takes nothing takes `null` whatever was sent.
+    /// Falsified by sending `playlists` its `args` as they came (`{}`): the
+    /// input did not read as `()`.
     #[test]
     fn harkens_types_cross_as_json() {
-        let h = harken();
+        let dir = tempfile::tempdir().unwrap();
+        let f = flags(&a(&["--dir", dir.path().to_str().unwrap(), "--alone"])).unwrap();
+        let h = Headless::open(&f, harken()).unwrap();
+        let input = |name: &str, v: Value| {
+            let text = h.args(name, &v)?;
+            h.peer.with(|p| p.input_json(name, &text))
+        };
         let id = json!("0000000000000000000000000000002a");
         let b = input(
-            &h,
             "playlists.add_to_playlist",
-            &json!({"playlist_id": id, "media_id": id}),
+            json!({"playlist_id": id, "media_id": id}),
         )
         .unwrap();
         let back = harken_server::domain::AddToPlaylist::from_bytes(&b).unwrap();
         assert_eq!(back.media_id.0[15], 42);
         assert_eq!(
-            input(&h, "playlists.playlists", &json!({})).unwrap(),
+            input("playlists.playlists", json!({})).unwrap(),
             ().to_bytes()
         );
         let start = json!({"at": 0, "from": "", "position": 0, "queue": [{"album": "", "creator": "", "duration_ms": 1, "file": "a", "id": id, "title": "A"}]});
-        assert!(input(&h, "listening.start", &start).is_ok());
-        let why = input(&h, "playlists.create_playlist", &json!({"name": " "})).unwrap_err();
+        assert!(input("listening.start", start).is_ok());
+        let why = input("playlists.create_playlist", json!({"name": " "})).unwrap_err();
         assert!(why.contains("a playlist needs a name"), "{why}");
-        assert!(input(&h, "playlists.create_playlist", &json!({"name": 3})).is_err());
-        assert!(input(&h, "nothing.here", &json!({})).is_err());
+        assert!(input("playlists.create_playlist", json!({"name": 3})).is_err());
+        assert!(input("nothing.here", json!({})).is_err());
     }
 
     /// A peer alone, driven through `handle` exactly as stdin would: an
@@ -1504,6 +1393,6 @@ mod tests {
         assert_eq!(status["pending"], json!(1));
         drop(h);
         let h = Headless::open(&f, harken()).unwrap();
-        assert_eq!(h.client.pending_len(), 1, "the intent was on disk");
+        assert_eq!(h.peer.status().pending, 1, "the intent was on disk");
     }
 }

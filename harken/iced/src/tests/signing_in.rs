@@ -43,7 +43,7 @@ fn signing_in_moves_the_same_replica_on() {
         .expect("a window holding the library role takes a song signed out");
     p.refresh();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), None);
-    assert_eq!(app.peer.items.len(), 1, "what was done signed out is on screen");
+    assert_eq!(app.peer.items().len(), 1, "what was done signed out is on screen");
     assert_eq!(app.peer.client.standing(&id), Standing::Pending);
     let pending = |app: &App| app.peer.client.log.pending.iter().map(|p| p.entry.actor.clone()).collect::<Vec<_>>();
     assert_eq!(pending(&app), [""], "authored as nobody");
@@ -51,7 +51,7 @@ fn signing_in_moves_the_same_replica_on() {
     let _ = app.update(Message::SignedIn(Ok(login("alice"))));
     assert!(!app.peer.client.is_signed_out());
     assert_eq!(app.login.as_ref().map(|l| l.user.id.as_str()), Some("alice"));
-    assert_eq!(app.peer.items.len(), 1, "the same replica, not a new one");
+    assert_eq!(app.peer.items().len(), 1, "the same replica, not a new one");
     assert_eq!(app.peer.client.pending_len(), 1);
     assert_eq!(pending(&app), ["alice"], "…and the work is hers now");
     let now = app.peer.client.log.pending[0].entry.id;
@@ -67,7 +67,7 @@ fn signing_in_moves_the_same_replica_on() {
     assert!(app.peer.client.is_signed_out());
     let funcs: Vec<String> = app.peer.client.log.pending.iter().map(|p| p.entry.func.clone()).collect();
     assert_eq!(funcs.last().map(String::as_str), Some("session.revoke"), "{funcs:?}");
-    assert_eq!(app.peer.items.len(), 1);
+    assert_eq!(app.peer.items().len(), 1);
 }
 
 /// A refusal is said about the change it refuses — "put Air on Favorites" —
@@ -107,7 +107,7 @@ fn a_refusal_names_what_was_refused() {
         Some(&("put Air on Favorites".to_string(), "not your playlist".to_string()))
     );
     assert!(matches!(app.peer.client.standing(&edit.id), Standing::Rejected(why) if why == "not your playlist"));
-    assert!(!app.peer.items[0].on_playlist(), "the rebase took the optimistic row back");
+    assert!(!app.peer.items()[0].on_playlist(), "the rebase took the optimistic row back");
 }
 
 /// Signed in, the default "Favorites" waits until the log has been heard —

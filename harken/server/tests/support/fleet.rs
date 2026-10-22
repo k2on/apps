@@ -61,17 +61,8 @@ pub fn hosted() -> &'static Hosted {
 }
 
 /// Poll `ok` until it holds or `within` passes; whether it held.
-pub fn eventually(within: Duration, mut ok: impl FnMut() -> bool) -> bool {
-    let deadline = Instant::now() + within;
-    loop {
-        if ok() {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+pub fn eventually(within: Duration, ok: impl FnMut() -> bool) -> bool {
+    ark_peer::link::until(within, Duration::from_millis(10), ok)
 }
 
 /// The last `n` lines of a file, for a failure message.

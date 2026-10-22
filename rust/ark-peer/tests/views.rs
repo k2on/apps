@@ -61,3 +61,43 @@ fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
     author(&mut p, "demo.rename_playlist", rename("Road"));
     assert_eq!((p.update(v), p.values(v).map(|r| r.len())), (Update::Reset, Some(1)), "made again");
 }
+
+/// A UI's view (`Watched`) keeps its rows as its own type: refused at open
+/// it is no rows, asked again when anything moved; once it answers its rows
+/// are read whole, then patched; and opened for one login it is opened
+/// again for the next, whose rows are its own. Falsified by settling a view
+/// whoever is signed in (the `who` test taken out of `Watched::take`): after
+/// bob signed in it said nothing moved, alice's two tracks still its rows.
+#[test]
+fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
+    let domain = ark::register!(Domain::new::<Demo>("demo", "1"); create_playlist, add_to_playlist, rename_playlist, named);
+    let mut p = Peer::open_as(Config::of(Arc::new(domain)), Box::new(Memory::default()), None);
+    p.alone();
+    p.sign_in(ark::peer::Who {
+        actor: "alice".into(),
+        session: "a".into(),
+        roles: vec![],
+    });
+    let road = CreatePlaylist { name: "Road".into() }.to_bytes();
+    let mut w = ark_peer::Watched::open(&mut p, "demo.named", road.clone(), |b| Item::from_bytes(b).unwrap());
+    assert_eq!((w.view(), w.rows.len()), (None, 0), "refused: no rows");
+    author(&mut p, "demo.create_playlist", road);
+    let id = Id::new(p.log.log().entries()[0].entry.id.draw(0));
+    let add = |t: &str| AddToPlaylist {
+        playlist_id: id,
+        track_id: t.into(),
+    };
+    author(&mut p, "demo.add_to_playlist", add("t1").to_bytes());
+    assert_eq!(w.settle(&mut p, true), Update::Reset, "it answers now: read whole");
+    author(&mut p, "demo.add_to_playlist", add("t2").to_bytes());
+    assert!(matches!(w.settle(&mut p, true), Update::Patched(_)));
+    let tracks: Vec<&str> = w.rows.iter().map(|i| i.track_id.as_str()).collect();
+    assert_eq!(tracks, ["t1", "t2"]);
+    p.sign_in(ark::peer::Who {
+        actor: "bob".into(),
+        session: "b".into(),
+        roles: vec![],
+    });
+    assert_eq!(w.settle(&mut p, false), Update::Reset, "opened again for bob");
+    assert!(w.rows.is_empty(), "bob has no playlist Road");
+}

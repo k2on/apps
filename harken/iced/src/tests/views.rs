@@ -12,45 +12,45 @@ use crate::rows::{Album, Artist, Composer, Item, Playlist};
 
 /// Every open list against its query, read once.
 fn check(peer: &Peer, what: &str) {
-    assert_eq!(peer.items, peer.library_now(), "library, {what}");
+    assert_eq!(peer.items(), peer.library_now(), "library, {what}");
     assert_eq!(
         peer.playlists(),
         Peer::rows_of::<_, Playlist>(peer.client.answer(crate::domain::playlists::playlists, ())),
         "playlists, {what}"
     );
     assert_eq!(
-        peer.albums,
+        peer.albums(),
         Peer::rows_of::<_, Album>(peer.client.answer(crate::domain::browse::albums, ())),
         "albums, {what}"
     );
     assert_eq!(
-        peer.artists,
+        peer.artists(),
         Peer::rows_of::<_, Artist>(peer.client.answer(crate::domain::browse::artists, ())),
         "artists, {what}"
     );
     assert_eq!(
-        peer.composers,
+        peer.composers(),
         Peer::rows_of::<_, Composer>(peer.client.answer(crate::domain::browse::composers, ())),
         "composers, {what}"
     );
     let details: HashMap<_, _> = peer.track_details().into_iter().map(|t| (t.media_id, t)).collect();
     assert_eq!(peer.details, details, "track_details, {what}");
     let Source::Album(name) = &peer.source else { unreachable!() };
-    assert_eq!(peer.shown, peer.album_rows(name), "the album page, {what}");
+    assert_eq!(peer.shown(), peer.album_rows(name), "the album page, {what}");
     assert_eq!(
         peer.choices[0].count,
-        Some(peer.items.len() as i64),
+        Some(peer.items().len() as i64),
         "the Songs line counts the library, {what}"
     );
 }
 
 /// Which lists the last refresh moved, and that each was patched rather than
 /// read again.
-fn patched(peer: &Peer) -> BTreeSet<&'static str> {
+fn patched(peer: &Peer) -> BTreeSet<&str> {
     for (name, m) in &peer.moved {
         assert!(matches!(m, Moved::Patched(_)), "{name} was taken whole");
     }
-    peer.moved.iter().map(|(name, _)| *name).collect()
+    peer.moved.iter().map(|(name, _)| name.as_str()).collect()
 }
 
 /// Over the demo library, with an album page open: a playlist toggle, a
@@ -72,7 +72,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
     peer.open_page();
     check(&peer, "opened");
     let favorites = peer.playlist;
-    let off = peer.shown.iter().find(|i| !i.on_playlist()).expect("a track not on Favorites").id;
+    let off = peer.shown().iter().find(|i| !i.on_playlist()).expect("a track not on Favorites").id;
     let on = AddToPlaylist {
         playlist_id: key(favorites),
         media_id: key(off),
@@ -98,7 +98,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
     peer.client.mutate("add_song", &song).unwrap();
     peer.refresh();
     check(&peer, "a song added");
-    assert!(peer.shown.iter().any(|i| i.title == "Hornpipe again"), "on the open page");
+    assert!(peer.shown().iter().any(|i| i.title == "Hornpipe again"), "on the open page");
 
     let off_it = RemoveFromPlaylist {
         playlist_id: key(favorites),
@@ -108,7 +108,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
     peer.refresh();
     check(&peer, "the toggle undone");
 
-    let gone = peer.items[3].id;
+    let gone = peer.items()[3].id;
     peer.client.mutate("remove_media", &RemoveMedia { id: key(gone) }).unwrap();
     peer.refresh();
     check(&peer, "a song removed");

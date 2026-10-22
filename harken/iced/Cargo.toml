@@ -16,6 +16,8 @@ demo = []
 [dependencies]
 ark = { path = "../../rust/ark" }
 harken-domain = { path = "../domain" }
+# The one reconciler, the phones' and the speakers', over this window's player.
+harken-player = { path = "../player" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.

@@ -22,7 +22,7 @@ use crate::domain::Id as Key;
 use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
 use crate::domain::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, Works};
 use ark::format::Encode;
-use ark_peer::Patch;
+use ark_peer::{Patch, Watched};
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
@@ -46,97 +46,6 @@ pub fn key<T>(id: Id) -> Key<T> {
     Key::new(id)
 }
 
-/// One query held open: its name and input — the key a page's views are
-/// kept or replaced by — who it was opened for, and the client's view of
-/// it.
-struct Open {
-    name: &'static str,
-    input: Vec<u8>,
-    who: ark::peer::Who,
-    /// The view, or — while its query refuses (somebody else's playlist,
-    /// nobody signed in) — none, which is no rows.
-    view: Option<usize>,
-}
-
-impl Open {
-    /// Hydrate once. A refusal is no rows rather than an error: a page that
-    /// is not yours is an empty page, as the query's answer was.
-    fn hydrate(client: &mut Replica, name: &'static str, input: Vec<u8>) -> Open {
-        let view = client.view(name, &input).ok();
-        Open {
-            name,
-            input,
-            who: client.me().clone(),
-            view,
-        }
-    }
-
-    fn is(&self, name: &str, input: &[u8]) -> bool {
-        self.name == name && self.input == input
-    }
-
-    /// Held no more.
-    fn close(self, client: &mut Replica) {
-        if let Some(v) = self.view {
-            client.unwatch(v);
-        }
-    }
-
-    /// The list as the view holds it, each row its bytes.
-    fn values(&self, client: &Replica) -> Vec<Vec<u8>> {
-        self.view.map(|v| client.rows(v)).unwrap_or_default()
-    }
-
-    /// What one settle did to it. A view that faults is made again by the
-    /// peer, and read again whole, which is what a reset is; one opened for
-    /// somebody else is opened again; one refused at open is asked again
-    /// when anything moved — the query it stands for would have been.
-    fn update(&mut self, client: &mut Replica, moved: bool) -> Update {
-        match self.view {
-            Some(v) if self.who == *client.me() => client.update(v),
-            Some(_) => {
-                self.reopen(client);
-                Update::Reset
-            }
-            None if !moved && self.who == *client.me() => Update::Unchanged,
-            None => {
-                self.reopen(client);
-                match self.view {
-                    Some(_) => Update::Reset,
-                    None => Update::Unchanged,
-                }
-            }
-        }
-    }
-
-    fn reopen(&mut self, client: &mut Replica) {
-        let input = std::mem::take(&mut self.input);
-        let old = std::mem::replace(self, Open::hydrate(client, self.name, input));
-        old.close(client);
-    }
-
-    /// Hydrate into `rows`, decoded by `read`.
-    fn fill<T>(&self, client: &Replica, rows: &mut Vec<T>, read: fn(&[u8]) -> T) {
-        *rows = self.values(client).iter().map(|b| read(b)).collect();
-    }
-
-    /// [`Open::update`], onto the rows a screen holds: what moved, if
-    /// anything did.
-    fn refresh<T>(&mut self, client: &mut Replica, moved: bool, rows: &mut Vec<T>, read: fn(&[u8]) -> T) -> Option<Moved> {
-        match self.update(client, moved) {
-            Update::Unchanged => None,
-            Update::Patched(patches) => {
-                splice(rows, &patches, read);
-                Some(Moved::Patched(patches.len()))
-            }
-            Update::Reset => {
-                self.fill(client, rows, read);
-                Some(Moved::Reset)
-            }
-        }
-    }
-}
-
 /// What one refresh did to one list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Moved {
@@ -146,65 +55,47 @@ pub enum Moved {
     Reset,
 }
 
-/// The patches, in order, onto the decoded list: `ark::plan::splice` with
-/// the decoding said, because a row here is a type of this crate's.
-fn splice<T>(rows: &mut Vec<T>, patches: &[Patch], read: fn(&[u8]) -> T) {
-    for p in patches {
-        match p {
-            Patch::Insert { at, node } => {
-                let at = (*at).min(rows.len());
-                rows.insert(at, read(node));
-            }
-            Patch::Remove { at } => {
-                if *at < rows.len() {
-                    rows.remove(*at);
-                }
-            }
-            Patch::Update { at, node } => {
-                if *at < rows.len() {
-                    rows[*at] = read(node);
-                }
-            }
+impl Moved {
+    fn of(u: &Update) -> Option<Moved> {
+        match u {
+            Update::Unchanged => None,
+            Update::Patched(ps) => Some(Moved::Patched(ps.len())),
+            Update::Reset => Some(Moved::Reset),
         }
     }
 }
 
-/// The views the peer holds open. The first six live as long as the window;
-/// the page's are whichever its source needs, opened when the source changes
+/// The views the peer holds open, each with its rows
+/// (`ark_peer::Watched`). The first six live as long as the window; the
+/// page's are whichever its source needs, opened when the source changes
 /// and dropped with it; the picker's is the last track it was asked about.
 struct Views {
-    library: Open,
-    playlists: Open,
-    albums: Open,
-    artists: Open,
-    composers: Open,
-    details: Open,
+    library: Watched<Item>,
+    playlists: Watched<Playlist>,
+    albums: Watched<Album>,
+    artists: Watched<Artist>,
+    composers: Watched<Composer>,
+    details: Watched<TrackDetail>,
     /// The page's list of tracks (`playlist`, `album`, `artist`,
     /// `recording`).
-    shown: Option<Open>,
+    shown: Option<Watched<Item>>,
     /// The page's works (`works`, or one `work` for a header).
-    works: Option<Open>,
+    works: Option<Watched<Work>>,
     /// The page's performances (`recordings`).
-    recordings: Option<Open>,
+    recordings: Option<Watched<Recording>>,
     /// Which playlists one track is on (`playlists_of`).
-    on: Option<Open>,
+    on: Option<Watched<Playlist>>,
 }
 
 /// A page slot, brought to what the source wants: kept when it is already
-/// that query with that input, opened when it is not, dropped (and its rows
-/// cleared) when the page wants nothing there.
-fn want<T>(client: &mut Replica, slot: &mut Option<Open>, wanted: Option<(&'static str, Vec<u8>)>, rows: &mut Vec<T>, read: fn(&[u8]) -> T) -> bool {
+/// that query with that input, opened when it is not, dropped when the page
+/// wants nothing there.
+fn want<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, wanted: Option<(&'static str, Vec<u8>)>, read: fn(&[u8]) -> T) -> bool {
     match wanted {
-        None => {
-            let had = slot.take().map(|o| o.close(client)).is_some();
-            rows.clear();
-            had
-        }
+        None => slot.take().map(|o| o.close(client)).is_some(),
         Some((name, a)) if slot.as_ref().is_some_and(|o| o.is(name, &a)) => false,
         Some((name, a)) => {
-            let open = Open::hydrate(client, name, a);
-            open.fill(client, rows, read);
-            if let Some(old) = slot.replace(open) {
+            if let Some(old) = slot.replace(Watched::open(client, name, a, read)) {
                 old.close(client);
             }
             true
@@ -212,26 +103,26 @@ fn want<T>(client: &mut Replica, slot: &mut Option<Open>, wanted: Option<(&'stat
     }
 }
 
-/// A page slot's settle, when the page has one there.
-fn settle<T>(client: &mut Replica, slot: &mut Option<Open>, moved: bool, rows: &mut Vec<T>, read: fn(&[u8]) -> T) -> Option<Moved> {
-    slot.as_mut().and_then(|o| o.refresh(client, moved, rows, read))
+/// A page slot's settle, when the page has one there: its name, and what
+/// it did.
+fn settle<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, moved: bool) -> Option<(String, Update)> {
+    slot.as_mut().map(|w| (w.name().to_string(), w.settle(client, moved)))
+}
+
+/// A slot's rows: none while the page has nothing there.
+fn rows<T>(slot: &Option<Watched<T>>) -> &[T] {
+    slot.as_ref().map_or(&[], |w| &w.rows)
 }
 
 /// A replica, and the lists a window draws from it.
 pub struct Peer {
     pub client: Replica,
     views: Views,
-    /// What `view` draws of the library: decoded once per change, not per
-    /// frame.
-    pub items: Vec<Item>,
     /// The playlist the library is read against, which is what gives every
     /// row its `on_playlist`. The domain has no favorites of its own — a
     /// playlist named Favorites is just the first one. Zero when there is
     /// none, which is what a peer nobody is signed in on has.
     pub playlist: Id,
-    /// The caller's playlists, in their order: the sidebar's last lines, and
-    /// the picker's rows.
-    playlists: Vec<Playlist>,
     /// What the sidebar picked, and the list that answers it.
     ///
     /// `Source::Library` is `items` itself. Every other list of tracks is the
@@ -241,33 +132,17 @@ pub struct Peer {
     /// `None` is the whole library. While there is one, the page's list is
     /// the `search` view (`docs/plan-db.md` D4) rather than `items`.
     pub search: Option<String>,
-    pub shown: Vec<Item>,
     /// Which album each track is on, and the rest of what only a song has: a
     /// map beside the list, because the library row is kind-neutral. Joined
     /// in memory while drawing.
     pub details: HashMap<Id, TrackDetail>,
-    /// `track_details` in the view's order: what a patch's position means,
-    /// so the map can be moved by the same patches.
-    detail_rows: Vec<TrackDetail>,
     /// The sidebar, flat, in the order it is drawn. Headings are derived
     /// while drawing rather than stored, so "line 9" means the same to the
     /// keyboard and to the eye.
     pub choices: Vec<Choice>,
-    /// The index pages' contents — and what a `#album/…` link resolves
-    /// against, now that no sidebar line carries one.
-    pub albums: Vec<Album>,
-    pub artists: Vec<Artist>,
-    pub composers: Vec<Composer>,
-    /// What the current page shows when it is not a list of tracks: one
-    /// composer's works, or one work's recordings (and that work's own row,
-    /// for its header).
-    pub works: Vec<Work>,
-    pub recordings: Vec<Recording>,
-    /// `playlists_of` for the track the picker was last opened on.
-    on: Vec<Playlist>,
     /// What the last [`Peer::refresh`] moved, by query: the one place to
     /// see that a change cost the lists it touched and no others.
-    pub moved: Vec<(&'static str, Moved)>,
+    pub moved: Vec<(String, Moved)>,
     /// Bumped whenever a list that carries covers moved: the window asks for
     /// covers when this moves, which is the *data* changing.
     pub art_gen: u64,
@@ -291,68 +166,99 @@ impl Peer {
     /// Every list the window starts on, hydrated once; everything after this
     /// is maintained.
     pub fn open(mut client: Replica) -> Peer {
-        let playlists = Open::hydrate(&mut client, "playlists", none());
-        let mut rows = Vec::new();
-        playlists.fill(&client, &mut rows, Playlist::from_bytes);
-        let playlist = rows.first().map_or(NONE, |p: &Playlist| p.id);
+        let c = &mut client;
+        let playlists = Watched::open(c, "playlists", none(), Playlist::from_bytes);
+        let playlist = playlists.rows.first().map_or(NONE, |p| p.id);
         let views = Views {
-            library: Open::hydrate(&mut client, "library", library_of(playlist)),
+            library: Watched::open(c, "library", library_of(playlist), Item::from_bytes),
             playlists,
-            albums: Open::hydrate(&mut client, "albums", none()),
-            artists: Open::hydrate(&mut client, "artists", none()),
-            composers: Open::hydrate(&mut client, "composers", none()),
-            details: Open::hydrate(&mut client, "track_details", none()),
+            albums: Watched::open(c, "albums", none(), Album::from_bytes),
+            artists: Watched::open(c, "artists", none(), Artist::from_bytes),
+            composers: Watched::open(c, "composers", none(), Composer::from_bytes),
+            details: Watched::open(c, "track_details", none(), TrackDetail::from_bytes),
             shown: None,
             works: None,
             recordings: None,
             on: None,
         };
+        // What the hydrate already read is not news.
+        for v in [
+            views.library.view(),
+            views.playlists.view(),
+            views.albums.view(),
+            views.artists.view(),
+            views.composers.view(),
+            views.details.view(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            client.update(v);
+        }
         let seen = client.state();
+        let details = views.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
         let mut peer = Peer {
             client,
             views,
-            items: Vec::new(),
             playlist,
-            playlists: rows,
             source: Source::Library,
             search: None,
-            shown: Vec::new(),
-            details: HashMap::new(),
-            detail_rows: Vec::new(),
+            details,
             choices: Vec::new(),
-            albums: Vec::new(),
-            artists: Vec::new(),
-            composers: Vec::new(),
-            works: Vec::new(),
-            recordings: Vec::new(),
-            on: Vec::new(),
             moved: Vec::new(),
             art_gen: 1,
             store_gen: 1,
             seen,
         };
-        let (c, v) = (&peer.client, &peer.views);
-        v.library.fill(c, &mut peer.items, Item::from_bytes);
-        v.albums.fill(c, &mut peer.albums, Album::from_bytes);
-        v.artists.fill(c, &mut peer.artists, Artist::from_bytes);
-        v.composers.fill(c, &mut peer.composers, Composer::from_bytes);
-        v.details.fill(c, &mut peer.detail_rows, TrackDetail::from_bytes);
-        peer.details = peer.detail_rows.iter().map(|t| (t.media_id, t.clone())).collect();
-        // What the hydrate already read is not news.
-        for v in [
-            &peer.views.library,
-            &peer.views.playlists,
-            &peer.views.albums,
-            &peer.views.artists,
-            &peer.views.composers,
-            &peer.views.details,
-        ] {
-            if let Some(v) = v.view {
-                peer.client.update(v);
-            }
-        }
         peer.choose();
         peer
+    }
+
+    /// What `view` draws of the library: decoded once per change, not per
+    /// frame.
+    pub fn items(&self) -> &[Item] {
+        &self.views.library.rows
+    }
+
+    /// The page's list of tracks, when it is not the library.
+    pub fn shown(&self) -> &[Item] {
+        rows(&self.views.shown)
+    }
+
+    /// The index pages' contents — and what a `#album/…` link resolves
+    /// against, now that no sidebar line carries one.
+    pub fn albums(&self) -> &[Album] {
+        &self.views.albums.rows
+    }
+
+    pub fn artists(&self) -> &[Artist] {
+        &self.views.artists.rows
+    }
+
+    /// The index pages' rows, to set by hand: a test's covers.
+    #[cfg(test)]
+    pub fn albums_mut(&mut self) -> &mut [Album] {
+        &mut self.views.albums.rows
+    }
+
+    #[cfg(test)]
+    pub fn artists_mut(&mut self) -> &mut [Artist] {
+        &mut self.views.artists.rows
+    }
+
+    pub fn composers(&self) -> &[Composer] {
+        &self.views.composers.rows
+    }
+
+    /// What the current page shows when it is not a list of tracks: one
+    /// composer's works, or one work's recordings (and that work's own row,
+    /// for its header).
+    pub fn works(&self) -> &[Work] {
+        rows(&self.views.works)
+    }
+
+    pub fn recordings(&self) -> &[Recording] {
+        rows(&self.views.recordings)
     }
 
     /// Make sure there is a playlist to read the library against: make
@@ -366,7 +272,7 @@ impl Peer {
     /// no playlist yet.
     pub fn ensure_playlist(&mut self) {
         let made = CreatePlaylist { name: "Favorites".into() };
-        if self.playlists.is_empty() && self.client.mutate("create_playlist", &made).is_ok() {
+        if self.playlists().is_empty() && self.client.mutate("create_playlist", &made).is_ok() {
             self.refresh();
         }
     }
@@ -400,39 +306,33 @@ impl Peer {
         }
         let (c, v) = (&mut self.client, &mut self.views);
         let mut changed = Vec::new();
-        let mut note = |name: &'static str, m: Option<Moved>| match m {
+        let mut note = |name: &str, u: Update| match Moved::of(&u) {
             Some(m) => {
-                changed.push((name, m));
+                changed.push((name.to_string(), m));
                 true
             }
             None => false,
         };
-        let lists = note("playlists", v.playlists.refresh(c, moved, &mut self.playlists, Playlist::from_bytes));
-        let library = note("library", v.library.refresh(c, moved, &mut self.items, Item::from_bytes));
-        let albums = note("albums", v.albums.refresh(c, moved, &mut self.albums, Album::from_bytes));
-        let artists = note("artists", v.artists.refresh(c, moved, &mut self.artists, Artist::from_bytes));
-        let composers = note("composers", v.composers.refresh(c, moved, &mut self.composers, Composer::from_bytes));
-        let details = match v.details.update(c, moved) {
-            Update::Unchanged => None,
-            Update::Patched(patches) => {
-                patch_details(&mut self.detail_rows, &mut self.details, &patches);
-                Some(Moved::Patched(patches.len()))
-            }
+        let lists = note("playlists", v.playlists.settle(c, moved));
+        let library = note("library", v.library.settle(c, moved));
+        let albums = note("albums", v.albums.settle(c, moved));
+        let artists = note("artists", v.artists.settle(c, moved));
+        let composers = note("composers", v.composers.settle(c, moved));
+        let u = v.details.take(c, moved);
+        match &u {
+            Update::Unchanged => {}
+            Update::Patched(patches) => patch_details(&mut v.details.rows, &mut self.details, patches),
             Update::Reset => {
-                v.details.fill(c, &mut self.detail_rows, TrackDetail::from_bytes);
-                self.details = self.detail_rows.iter().map(|t| (t.media_id, t.clone())).collect();
-                Some(Moved::Reset)
+                v.details.apply(c, &u);
+                self.details = v.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
             }
-        };
-        let details = note("track_details", details);
-        let name = |slot: &Option<Open>| slot.as_ref().map_or("", |o| o.name);
-        let shown = note(name(&v.shown), settle(c, &mut v.shown, moved, &mut self.shown, Item::from_bytes));
-        let works = note(name(&v.works), settle(c, &mut v.works, moved, &mut self.works, Work::from_bytes));
-        let recordings = note(
-            name(&v.recordings),
-            settle(c, &mut v.recordings, moved, &mut self.recordings, Recording::from_bytes),
-        );
-        let on = note(name(&v.on), settle(c, &mut v.on, moved, &mut self.on, Playlist::from_bytes));
+        }
+        let details = note("track_details", u);
+        let mut slot = |u: Option<(String, Update)>| u.is_some_and(|(name, u)| note(&name, u));
+        let shown = slot(settle(c, &mut v.shown, moved));
+        let works = slot(settle(c, &mut v.works, moved));
+        let recordings = slot(settle(c, &mut v.recordings, moved));
+        let on = slot(settle(c, &mut v.on, moved));
         self.moved = changed;
 
         // The playlist the library is read against can stop existing, and
@@ -440,13 +340,12 @@ impl Peer {
         // dropped on the rebase when another device's turns out to have been
         // first. Re-pointing costs a hydrate of the library and of a page
         // read against it, so only when it moved.
-        let first = self.playlists.first().map_or(NONE, |p| p.id);
-        let repointed = !self.playlists.iter().any(|p| p.id == self.playlist) && self.playlist != first;
+        let first = self.playlists().first().map_or(NONE, |p| p.id);
+        let repointed = !self.playlists().iter().any(|p| p.id == self.playlist) && self.playlist != first;
         if repointed {
             self.playlist = first;
-            let old = std::mem::replace(&mut self.views.library, Open::hydrate(&mut self.client, "library", library_of(first)));
-            old.close(&mut self.client);
-            self.views.library.fill(&self.client, &mut self.items, Item::from_bytes);
+            let library = Watched::open(&mut self.client, "library", library_of(first), Item::from_bytes);
+            std::mem::replace(&mut self.views.library, library).close(&mut self.client);
             self.open_page();
         }
         if lists || library || albums || artists || composers || repointed {
@@ -471,12 +370,12 @@ impl Peer {
         let mut choices = vec![Choice {
             source: Source::Library,
             label: "Songs".into(),
-            count: Some(self.items.len() as i64),
+            count: Some(self.items().len() as i64),
         }];
         for (source, label, count) in [
-            (Source::Albums, "Albums", self.albums.len()),
-            (Source::Artists, "Artists", self.artists.len()),
-            (Source::Composers, "Composers", self.composers.len()),
+            (Source::Albums, "Albums", self.albums().len()),
+            (Source::Artists, "Artists", self.artists().len()),
+            (Source::Composers, "Composers", self.composers().len()),
         ] {
             if count > 0 {
                 choices.push(Choice {
@@ -486,7 +385,7 @@ impl Peer {
                 });
             }
         }
-        choices.extend(self.playlists.iter().map(|p| Choice {
+        choices.extend(self.playlists().iter().map(|p| Choice {
             source: Source::Playlist(p.id, p.name.clone()),
             label: p.name.clone(),
             count: None,
@@ -496,7 +395,7 @@ impl Peer {
 
     /// The caller's playlists, as the sidebar holds them.
     pub fn playlists(&self) -> &[Playlist] {
-        &self.playlists
+        &self.views.playlists.rows
     }
 
     /// Which of the caller's playlists a track is on: a view kept open on
@@ -504,8 +403,8 @@ impl Peer {
     /// after it made a playlist — reads nothing.
     pub fn playlists_of(&mut self, media: Id) -> Vec<Playlist> {
         let wanted = Some(("playlists_of", PlaylistsOf { media_id: key(media) }.to_bytes()));
-        want(&mut self.client, &mut self.views.on, wanted, &mut self.on, Playlist::from_bytes);
-        self.on.clone()
+        want(&mut self.client, &mut self.views.on, wanted, Playlist::from_bytes);
+        rows(&self.views.on).to_vec()
     }
 
     /// A query's rows, asked once through its stub; a refusal (a guard,
@@ -655,9 +554,9 @@ impl Peer {
             }
         };
         let (c, v) = (&mut self.client, &mut self.views);
-        want(c, &mut v.shown, shown, &mut self.shown, Item::from_bytes);
-        let works = want(c, &mut v.works, works, &mut self.works, Work::from_bytes);
-        want(c, &mut v.recordings, recordings, &mut self.recordings, Recording::from_bytes);
+        want(c, &mut v.shown, shown, Item::from_bytes);
+        let works = want(c, &mut v.works, works, Work::from_bytes);
+        want(c, &mut v.recordings, recordings, Recording::from_bytes);
         if works {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
@@ -669,7 +568,7 @@ impl Peer {
     fn label_recording(&mut self) {
         if let Source::Recording(id, who) = &mut self.source {
             if who.is_empty() {
-                if let Some(take) = self.recordings.iter().find(|r| r.id == *id) {
+                if let Some(take) = rows(&self.views.recordings).iter().find(|r| r.id == *id) {
                     who.clone_from(&take.performers);
                 }
             }
@@ -688,15 +587,15 @@ impl Peer {
     /// the library — a page, rather than a heading with nothing under it.
     pub fn source_of(&self, place: &Place) -> Source {
         match place {
-            Place::Album(name) => match self.albums.iter().any(|a| a.name == *name) {
+            Place::Album(name) => match self.albums().iter().any(|a| a.name == *name) {
                 true => Source::Album(name.clone()),
                 false => Source::Library,
             },
-            Place::Artist(name) => match self.artists.iter().any(|a| a.name == *name) {
+            Place::Artist(name) => match self.artists().iter().any(|a| a.name == *name) {
                 true => Source::Artist(name.clone()),
                 false => Source::Library,
             },
-            Place::Composer(name) => match self.composers.iter().any(|c| c.name == *name) {
+            Place::Composer(name) => match self.composers().iter().any(|c| c.name == *name) {
                 true => Source::Works(name.clone()),
                 false => Source::Library,
             },
@@ -739,15 +638,15 @@ impl Peer {
     /// What the table is showing, whichever side it came from.
     pub fn rows(&self) -> &[Item] {
         match self.source {
-            Source::Library if self.search.is_none() => &self.items,
-            _ => &self.shown,
+            Source::Library if self.search.is_none() => self.items(),
+            _ => self.shown(),
         }
     }
 
     /// Every album this artist made something on: `Album::creator` is whoever
     /// made its first track, the same fact an artist page selects on.
     pub fn albums_by(&self, artist: &str) -> Vec<&Album> {
-        self.albums.iter().filter(|a| a.creator == artist).collect()
+        self.albums().iter().filter(|a| a.creator == artist).collect()
     }
 }
 
@@ -811,19 +710,19 @@ mod tests {
 
         peer.client.mutate("add_song", &song("Air", "Bach", "Suites", "a")).unwrap();
         assert!(peer.refresh());
-        assert_eq!(peer.items, peer.library_now());
+        assert_eq!(peer.items(), peer.library_now());
 
         for (t, f) in [("Glue", "b"), ("Opal", "c"), ("Gosh", "d")] {
             peer.client.mutate("add_song", &song(t, "X", "Y", f)).unwrap();
         }
         peer.refresh();
-        assert_eq!(peer.items, peer.library_now(), "a batch, each change pushed in turn");
+        assert_eq!(peer.items(), peer.library_now(), "a batch, each change pushed in turn");
 
-        let id = peer.items[2].id;
+        let id = peer.items()[2].id;
         peer.client.mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
-        assert_eq!(peer.items, peer.library_now());
-        assert!(peer.items[2].on_playlist());
+        assert_eq!(peer.items(), peer.library_now());
+        assert!(peer.items()[2].on_playlist());
         assert!(!peer.refresh(), "nothing moved, nothing read");
 
         // A song and its place on the playlist before the next refresh: the
@@ -832,7 +731,7 @@ mod tests {
         let late = peer.library_now().last().unwrap().id;
         peer.client.mutate("add_to_playlist", &on(peer.playlist, late)).unwrap();
         peer.refresh();
-        assert_eq!(peer.items, peer.library_now(), "a song and its playlist entry in one refresh");
+        assert_eq!(peer.items(), peer.library_now(), "a song and its playlist entry in one refresh");
     }
 
     /// `docs/plan-alone.md` §4: a window alone joins a server in place. The
@@ -863,16 +762,16 @@ mod tests {
             peer.client.mutate("add_song", &song(t, "Bach", "Suites", f)).unwrap();
         }
         peer.refresh();
-        let id = peer.items[1].id;
+        let id = peer.items()[1].id;
         peer.client.mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
         assert_eq!(peer.client.status().link, "alone");
-        let before = peer.items.clone();
+        let before = peer.items().to_vec();
 
         peer.join("ws://hub/sync");
         assert!(peer.moved.is_empty(), "nothing moved: {:?}", peer.moved);
-        assert_eq!(peer.items, before, "the library does not blink");
-        assert_eq!(peer.items, peer.library_now());
+        assert_eq!(peer.items(), before, "the library does not blink");
+        assert_eq!(peer.items(), peer.library_now());
         assert_eq!(peer.client.pending_len(), 5);
 
         let d = crate::client::domain();
@@ -903,13 +802,13 @@ mod tests {
         }
         peer.refresh();
         assert_eq!(peer.client.pending_len(), 0);
-        assert_eq!(peer.items, peer.library_now());
+        assert_eq!(peer.items(), peer.library_now());
         // An intent's id is its origin's (§1.6), whoever signs in: the
         // playlist made alone keeps its id through the sign-in, and the item
         // put on it names it still.
         assert_eq!(hub.log.log().head().0, 5, "the playlist, the three songs and the add");
         assert!(peer.client.take_rejections().is_empty());
-        assert!(peer.items[1].on_playlist());
+        assert!(peer.items()[1].on_playlist());
     }
 
     /// The playlist the library is read against can go — here the server
@@ -933,10 +832,10 @@ mod tests {
         peer.refresh();
         let [mine, other] = [0, 1].map(|i| peer.playlists()[i].id);
         assert_eq!(peer.playlist, mine, "the first is read against");
-        let air = peer.items[0].id;
+        let air = peer.items()[0].id;
         peer.client.mutate("add_to_playlist", &on(other, air)).unwrap();
         peer.refresh();
-        assert!(!peer.items[0].on_playlist(), "on Other, not on Mine");
+        assert!(!peer.items()[0].on_playlist(), "on Other, not on Mine");
         peer.source = Source::Album("Suites".into());
         peer.open_page();
 
@@ -948,9 +847,9 @@ mod tests {
         peer.client.receive(reject.enc());
         peer.refresh();
         assert_eq!(peer.playlist, other, "re-pointed at what is left");
-        assert!(peer.items[0].on_playlist(), "the library is read against Other now");
-        assert_eq!(peer.items, peer.library_now());
-        assert!(peer.shown[0].on_playlist(), "…and so is the page");
+        assert!(peer.items()[0].on_playlist(), "the library is read against Other now");
+        assert_eq!(peer.items(), peer.library_now());
+        assert!(peer.shown()[0].on_playlist(), "…and so is the page");
         let lines: Vec<&str> = peer.choices.iter().map(|c| c.label.as_str()).collect();
         assert_eq!(lines, ["Songs", "Albums", "Artists", "Other"]);
     }
