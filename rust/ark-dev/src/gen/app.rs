@@ -55,6 +55,8 @@ pub const HARKEN: App = App {
 #[derive(Default, Debug)]
 pub struct Took {
     pub parse: Duration,
+    /// The typed Kotlin and Swift; UniFFI's two, at the same time, done
+    /// by `uniffi` (which includes `emit`).
     pub emit: Duration,
     pub uniffi: Duration,
     pub write: Duration,
@@ -75,28 +77,33 @@ pub fn generate(app: &App, root: &Path, source: &Path) -> Result<(BTreeMap<Strin
     let package = format!("uniffi.{}", app.crate_name);
     let typed: Vec<&str> = read.twins.iter().map(|t| t.name.as_str()).collect();
     let w = walk(app.name, &read.catalog).typed(&package, &typed);
-    let mut out = BTreeMap::new();
-    out.insert(app.kotlin.to_string(), kotlin::write(&w, app.kotlin_package));
-    out.insert(app.swift.to_string(), swift::write(&w));
-    took.emit = t.elapsed();
-    let t = Instant::now();
-    if read.scaffolding {
-        let items = uniffi::metadata(app.crate_name, &read.twins);
-        let roots: BTreeMap<String, PathBuf> = app.roots.iter().map(|(c, d)| (c.to_string(), root.join(d))).collect();
-        let scratch = std::env::temp_dir().join(format!("ark-dev-gen-{}", std::process::id()));
-        let made = (|| -> Result<(), String> {
-            for (lang, file, to) in [
-                ("kotlin", format!("uniffi/{0}/{0}.kt", app.crate_name), app.uniffi_kotlin),
-                ("swift", format!("{}.swift", app.crate_name), app.uniffi_swift),
-            ] {
-                let mut files = uniffi::bindings(&items, app.library, app.crate_name, lang, &roots, &scratch)?;
-                let text = files.remove(&file).ok_or_else(|| format!("UniFFI wrote no {file}"))?;
-                out.insert(to.to_string(), text);
-            }
-            Ok(())
-        })();
+    let items = read.scaffolding.then(|| uniffi::metadata(app.crate_name, &read.twins));
+    let roots: BTreeMap<String, PathBuf> = app.roots.iter().map(|(c, d)| (c.to_string(), root.join(d))).collect();
+    // UniFFI's two languages beside the typed Kotlin and Swift, at once.
+    let bound = |lang: &str, file: String| -> Result<Option<String>, String> {
+        let Some(items) = &items else { return Ok(None) };
+        let scratch = std::env::temp_dir().join(format!("ark-dev-gen-{}-{lang}", std::process::id()));
+        let made = uniffi::bindings(items, app.library, app.crate_name, lang, &roots, &scratch);
         let _ = std::fs::remove_dir_all(&scratch);
-        made?;
+        made?.remove(&file).map(Some).ok_or_else(|| format!("UniFFI wrote no {file}"))
+    };
+    let (kt, sw, (k, s, emitted)) = std::thread::scope(|sc| {
+        let kt = sc.spawn(|| bound("kotlin", format!("uniffi/{0}/{0}.kt", app.crate_name)));
+        let sw = sc.spawn(|| bound("swift", format!("{}.swift", app.crate_name)));
+        let k = kotlin::write(&w, app.kotlin_package);
+        let s = swift::write(&w);
+        let emitted = t.elapsed();
+        (kt.join().unwrap(), sw.join().unwrap(), (k, s, emitted))
+    });
+    took.emit = emitted;
+    let mut out = BTreeMap::new();
+    out.insert(app.kotlin.to_string(), k);
+    out.insert(app.swift.to_string(), s);
+    if let Some(kt) = kt? {
+        out.insert(app.uniffi_kotlin.to_string(), kt);
+    }
+    if let Some(sw) = sw? {
+        out.insert(app.uniffi_swift.to_string(), sw);
     }
     took.uniffi = t.elapsed();
     Ok((out, took))

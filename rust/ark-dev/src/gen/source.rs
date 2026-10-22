@@ -230,7 +230,8 @@ impl Crate<'_> {
 
     fn load(&mut self, path: Vec<String>, file: PathBuf, parent: Option<usize>) -> Result<usize, String> {
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        let parsed = light.parse_str(&text).map_err(|e| at(&file, e.span(), e))?;
+        let tokens: proc_macro2::TokenStream = text.parse().map_err(|e: proc_macro2::LexError| at(&file, e.span(), e))?;
+        let parsed = light(tokens).map_err(|e| at(&file, e.span(), e))?;
         // A module's own directory: `src/` for the root and a `mod.rs`,
         // `src/a/` for `src/a.rs`.
         let dir = match (parent, file.file_name().and_then(|n| n.to_str())) {
@@ -351,7 +352,10 @@ impl Crate<'_> {
                 let mut sub = path.to_vec();
                 sub.push(md.ident.to_string());
                 let child = match content {
-                    Some(items) => self.module(sub, file.to_path_buf(), Some(m), items, dir.join(md.ident.to_string()))?,
+                    Some(tokens) => {
+                        let items = self::light(tokens).map_err(|e| at(file, e.span(), e))?;
+                        self.module(sub, file.to_path_buf(), Some(m), items, dir.join(md.ident.to_string()))?
+                    }
                     None => {
                         let (a, b) = (dir.join(format!("{}.rs", md.ident)), dir.join(md.ident.to_string()).join("mod.rs"));
                         let f = if a.exists() { a } else { b };
@@ -414,76 +418,116 @@ impl Crate<'_> {
 // * Parsing, function bodies left as tokens
 
 /// An item as read: a function's body is kept as its tokens (only the
-/// domain's builder is parsed), an `impl`'s or a trait's skipped, and an
-/// inline module's items read so too.
+/// domain's builder is parsed), an `impl`'s or a trait's skipped unread, and
+/// an inline module's items left as tokens until its `cfg` is known to hold.
 enum Light {
     Item(Item),
     Fn(syn::ItemFn, proc_macro2::TokenStream),
-    Mod(syn::ItemMod, Option<Vec<Light>>),
+    Mod(syn::ItemMod, Option<proc_macro2::TokenStream>),
 }
 
-fn light(input: ParseStream) -> syn::Result<Vec<Light>> {
+/// A module's items, split at the top level of its tokens — an item ends
+/// at a `;` or, for one whose body is braced, at its body — and each read
+/// as little as what is read of it needs.
+fn light(tokens: proc_macro2::TokenStream) -> syn::Result<Vec<Light>> {
+    use proc_macro2::{Delimiter, TokenTree};
+    let is = |t: &TokenTree, w: &str| matches!(t, TokenTree::Ident(i) if i == w);
+    let punct = |t: &TokenTree, c: char| matches!(t, TokenTree::Punct(p) if p.as_char() == c);
+    let braced = |t: &TokenTree| matches!(t, TokenTree::Group(g) if g.delimiter() == Delimiter::Brace);
     let mut out = vec![];
-    input.call(Attribute::parse_inner)?;
-    while !input.is_empty() {
-        let ahead = input.fork();
-        ahead.call(Attribute::parse_outer)?;
-        ahead.parse::<syn::Visibility>()?;
-        let skip = ahead.peek(Token![impl])
-            || ahead.peek(Token![trait])
-            || (ahead.peek(Token![unsafe]) && (ahead.peek2(Token![impl]) || ahead.peek2(Token![trait])));
-        if skip {
-            // Up to and with its body, the first brace group.
-            input.step(|sc| {
-                let mut c = *sc;
-                while let Some((tt, next)) = c.token_tree() {
-                    c = next;
-                    if matches!(&tt, proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Brace) {
-                        return Ok(((), c));
+    let mut it = tokens.into_iter().peekable();
+    let mut item: Vec<TokenTree> = vec![];
+    while let Some(t) = it.next() {
+        // An inner attribute (`#![..]`) of the module: nothing an item needs.
+        if item.is_empty() && punct(&t, '#') && it.peek().is_some_and(|n| punct(n, '!')) {
+            it.next();
+            it.next();
+            continue;
+        }
+        let ends = punct(&t, ';') || braced(&t);
+        item.push(t);
+        if !ends {
+            continue;
+        }
+        // The item's leading words, past its attributes and visibility.
+        let mut k = 0;
+        while k < item.len() && punct(&item[k], '#') {
+            k += 2;
+        }
+        let words: Vec<&TokenTree> = item[k..].iter().filter(|t| matches!(t, TokenTree::Ident(_))).take(4).collect();
+        let has = |w: &str| words.iter().any(|t| is(t, w));
+        let brace = braced(item.last().unwrap());
+        let kind = if has("impl") || has("trait") {
+            "skip"
+        } else if has("fn") && brace && !has("macro_rules") {
+            "fn"
+        } else if has("mod") && words.iter().position(|t| is(t, "mod")) < Some(2) {
+            "mod"
+        } else if brace && (has("const") || has("static") || has("type") || has("use") || has("let")) {
+            // A braced expression inside an item that ends at its `;`.
+            continue;
+        } else if brace && it.peek().is_some_and(|n| punct(n, ';')) {
+            // `name! { .. };` or `struct X { .. }` never — a macro's `;`.
+            item.push(it.next().unwrap());
+            "item"
+        } else {
+            "item"
+        };
+        let tokens: proc_macro2::TokenStream = std::mem::take(&mut item).into_iter().collect();
+        match kind {
+            "skip" => {}
+            "fn" => {
+                let mut ts: Vec<TokenTree> = tokens.into_iter().collect();
+                let TokenTree::Group(body) = ts.pop().unwrap() else { unreachable!() };
+                let head: proc_macro2::TokenStream = ts.into_iter().collect();
+                let (attrs, vis, sig) = (|input: ParseStream| {
+                    let attrs = input.call(Attribute::parse_outer)?;
+                    let vis: syn::Visibility = input.parse()?;
+                    let sig: syn::Signature = input.parse()?;
+                    Ok((attrs, vis, sig))
+                })
+                .parse2(head)?;
+                let block = Box::new(syn::Block {
+                    brace_token: syn::token::Brace(body.delim_span()),
+                    stmts: vec![],
+                });
+                out.push(Light::Fn(syn::ItemFn { attrs, vis, sig, block }, body.stream()));
+            }
+            "mod" => {
+                let mut ts: Vec<TokenTree> = tokens.into_iter().collect();
+                let content = match ts.last() {
+                    Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => {
+                        let g = g.stream();
+                        ts.pop();
+                        Some(g)
                     }
-                }
-                Err(sc.error("an impl without a body"))
-            })?;
-            continue;
+                    _ => None,
+                };
+                let head: proc_macro2::TokenStream = ts.into_iter().collect();
+                let md = (|input: ParseStream| {
+                    let attrs = input.call(Attribute::parse_outer)?;
+                    let vis: syn::Visibility = input.parse()?;
+                    let mod_token: Token![mod] = input.parse()?;
+                    let ident: Ident = input.parse()?;
+                    let semi: Option<Token![;]> = input.parse()?;
+                    Ok(syn::ItemMod {
+                        attrs,
+                        vis,
+                        unsafety: None,
+                        mod_token,
+                        ident,
+                        content: None,
+                        semi,
+                    })
+                })
+                .parse2(head)?;
+                out.push(Light::Mod(md, content));
+            }
+            _ => out.push(Light::Item(syn::parse2(tokens)?)),
         }
-        if ahead.peek(Token![mod]) {
-            let attrs = input.call(Attribute::parse_outer)?;
-            let vis: syn::Visibility = input.parse()?;
-            let mod_token: Token![mod] = input.parse()?;
-            let ident: Ident = input.parse()?;
-            let (content, semi) = match input.peek(Token![;]) {
-                true => (None, Some(input.parse::<Token![;]>()?)),
-                false => {
-                    let inner;
-                    syn::braced!(inner in input);
-                    (Some(light(&inner)?), None)
-                }
-            };
-            let md = syn::ItemMod {
-                attrs,
-                vis,
-                unsafety: None,
-                mod_token,
-                ident,
-                content: None,
-                semi,
-            };
-            out.push(Light::Mod(md, content));
-            continue;
-        }
-        let sig = ahead.fork();
-        if sig.parse::<syn::Signature>().is_ok() && sig.peek(syn::token::Brace) {
-            let attrs = input.call(Attribute::parse_outer)?;
-            let vis: syn::Visibility = input.parse()?;
-            let sig: syn::Signature = input.parse()?;
-            let inner;
-            let brace_token = syn::braced!(inner in input);
-            let body: proc_macro2::TokenStream = inner.parse()?;
-            let block = Box::new(syn::Block { brace_token, stmts: vec![] });
-            out.push(Light::Fn(syn::ItemFn { attrs, vis, sig, block }, body));
-            continue;
-        }
-        out.push(Light::Item(input.parse()?));
+    }
+    if let Some(t) = item.first() {
+        return Err(syn::Error::new(t.span(), "an item without its end"));
     }
     Ok(out)
 }
@@ -1170,8 +1214,14 @@ impl Crate<'_> {
     fn domain_fn(&self) -> Result<(usize, Expr), String> {
         let mut found = vec![];
         for (i, f) in self.fns.iter().enumerate() {
-            let text = f.body.to_string();
-            if !text.contains("Domain") {
+            fn names(ts: &proc_macro2::TokenStream, w: &str) -> bool {
+                ts.clone().into_iter().any(|t| match t {
+                    proc_macro2::TokenTree::Ident(i) => i == w,
+                    proc_macro2::TokenTree::Group(g) => names(&g.stream(), w),
+                    _ => false,
+                })
+            }
+            if !names(&f.body, "Domain") {
                 continue;
             }
             let stmts = syn::Block::parse_within
