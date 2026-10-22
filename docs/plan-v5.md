@@ -553,11 +553,11 @@ kernel through FFI (N3); ArkLang, the checker and the interpreter go.
    disagrees anyway is healed as now: the authority's facts win.
 4. **serde everywhere.** Rows, inputs, entries, `Logged`, frames, snapshots
    and journal records are serde values written in one **value format**
-   (`ark::format`): **postcard** by default since N4 (a struct its fields
-   in declaration order, integers varints, an enum its variant's index),
-   or compact **JSON** with the `values-json` feature — no floats, maps as
-   `BTreeMap`, one encoding per value, the canonical form hashed. JSON is
-   the human form under both: what the explorer, the phones' bridge and
+   (`ark::format`): **postcard** since N4 (a struct its fields in
+   declaration order, integers varints, an enum its variant's index) — no
+   floats, maps as `BTreeMap`, one encoding per value, the canonical form
+   hashed (the `values-json` build is gone, T1). JSON is the human form:
+   what the explorer, the phones' bridge and
    the vectors read, a value of a `Type` read back from either
    (`ark::json`). Keys — a row's, an index entry's — are `memcomparable`
    bytes, so the store stays one `memcmp`-ordered map. A grown row is read

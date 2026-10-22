@@ -12,12 +12,9 @@ use ark_dev::vectors::fleet;
 /// K1's pin (`rust/ark/tests/fleet.rs`, now moved here): twenty entries,
 /// this state. N1 moved the state (`ff04f56d…` before): rows are their
 /// JSON and ids drawn without the codec; the twenty entries are as they were.
-/// N4 made rows postcard (`8316d1f4…` under `values-json`).
+/// N4 made rows postcard (`8316d1f4…` as JSON).
 const HEAD: i64 = 20;
-const HASH: &str = match ark::format::NAME.as_bytes() {
-    b"json" => "8316d1f4900f9d9e6605671960aef8fc72900a80be59e01168a090250ba005bf",
-    _ => "54e6f160d45bc0722c3b167ed47d938d63dc7d2ae0affe4edd2ee573da942d5d",
-};
+const HASH: &str = "54e6f160d45bc0722c3b167ed47d938d63dc7d2ae0affe4edd2ee573da942d5d";
 
 /// Seed 7 converges to K1's pin through the hub: every client's log is the
 /// hub's, entry for entry and hash for hash, every store is its store,

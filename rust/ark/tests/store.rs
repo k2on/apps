@@ -81,16 +81,11 @@ fn constraints_refuse() {
         row: row_of(&first, serde_json::json!({"playlist_id": hex(&id(1))})),
     };
     assert!(whys(&mut s, short).contains("item"));
-    // The row's bytes but not its one encoding: its columns out of order
-    // in JSON, its last varint (`pos`, 5) not the shortest in postcard.
+    // The row's bytes but not its one encoding: its last varint (`pos`, 5)
+    // not the shortest.
     let mut other = item_row(&id(1), "t5", 5);
-    match ark::format::NAME {
-        "json" => other = br#"{"track_id":"t5","playlist_id":"00000000000000000000000000000001","pos":5}"#.to_vec(),
-        _ => {
-            assert_eq!(other.pop(), Some(10));
-            other.extend([0x8a, 0x00]);
-        }
-    }
+    assert_eq!(other.pop(), Some(10));
+    other.extend([0x8a, 0x00]);
     let unordered = Change::Add {
         table: "item".into(),
         row: other,

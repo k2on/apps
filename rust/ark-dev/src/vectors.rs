@@ -26,17 +26,6 @@ fn dir(d: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors").join(d)
 }
 
-/// Whether this build's value format is the vectors': postcard, the
-/// default. A build of `values-json` runs everything but what holds bytes
-/// to them, and says so.
-pub fn held() -> bool {
-    let held = ark::format::NAME == "postcard";
-    if !held {
-        eprintln!("spec/vectors are postcard's; this build writes {}: not held", ark::format::NAME);
-    }
-    held
-}
-
 /// A vector written, or held to what is on disk.
 pub fn vector(d: &str, name: &str, text: &str) -> Result<(), String> {
     let path = dir(d).join(name);

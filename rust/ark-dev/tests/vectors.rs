@@ -12,7 +12,7 @@ use ark::peer::{Input, Output};
 use ark::schema::Space;
 use ark_dev::fuzz::session;
 use ark_dev::trace::{record, replay};
-use ark_dev::vectors::{fleet, fleet_script, held, on_disk, op_json, sessions, vector};
+use ark_dev::vectors::{fleet, fleet_script, on_disk, op_json, sessions, vector};
 use ark_peer::Act;
 use serde_json::{json, Value};
 
@@ -65,9 +65,6 @@ fn run_protocol(text: &str) -> Result<(), String> {
 /// by the runner not comparing the JSON: the falsified one passed.
 #[test]
 fn protocol() {
-    if !held() {
-        return;
-    }
     let mut frames: Vec<(String, Frame)> = vec![];
     let mut seen = BTreeSet::new();
     for (_, net) in sessions() {
@@ -155,9 +152,6 @@ fn protocol() {
 /// `Hello`s were other bytes than recorded.
 #[test]
 fn traces() {
-    if !held() {
-        return;
-    }
     let mut written = BTreeSet::new();
     for (session, net) in sessions() {
         for (i, c) in &net.clients {
@@ -223,9 +217,6 @@ fn fleet_vector(seed: u64, head: i64, hash: StateHash) -> Value {
 /// reopened horizon: seed 202 did not settle.
 #[test]
 fn rebase() {
-    if !held() {
-        return;
-    }
     let net = fleet(7);
     let (head, hash) = (net.hub.log.log().head().0, net.hub.log.store.state_hash());
     assert_eq!(

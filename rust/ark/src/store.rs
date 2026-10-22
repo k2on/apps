@@ -229,16 +229,12 @@ fn read(b: &LogRow) -> Logged {
 
 /// A row's sequence, state and hash, read past its entry and facts.
 fn ends(b: &[u8]) -> (Seq, StateHash, EntryHash) {
-    #[cfg_attr(feature = "values-json", derive(Deserialize))]
     struct Ends {
         seq: Seq,
         state: StateHash,
         hash: EntryHash,
     }
-    #[cfg(feature = "values-json")]
-    let e: Ends = serde_json::from_slice(b).expect("a row of the log reads");
     // A row ends with its state and hash, each 32 bytes after their length.
-    #[cfg(not(feature = "values-json"))]
     let e = {
         let (seq, _) = postcard::take_from_bytes::<Seq>(b).expect("a row of the log reads");
         let n = b.len();

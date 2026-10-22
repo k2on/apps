@@ -8,8 +8,7 @@ the FFI library — runs the same code, so it is held by the same runner;
 the forms below are what a reader of a failure needs.
 
 **Every file is JSON** (§1.1's human form): hashes, ids and bytes are
-lowercase hex; a row inside a frame is its JSON under `values-json` and
-its hex under `values-postcard`. A vector under `falsify/` carries
+lowercase hex, a row inside a frame among them. A vector under `falsify/` carries
 `"expect": "fail"`: a right vector with one thing changed, which the
 runner must fail. The runner reports each file by name; a file the writer
 did not write is stale.

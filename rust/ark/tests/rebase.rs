@@ -25,11 +25,8 @@ use support::wire::*;
 /// playlist "Favorites" with t1, t2 and t9 at 1, 2 and 3. N1 moved it
 /// (`bb0abc1a…` before): rows are their JSON, and an id is drawn from
 /// `(origin, local)` without the codec; the scenario is as it was. N4
-/// made the value format postcard (`dbd4f870…` under `values-json`).
-const FINAL: &str = match ark::format::NAME.as_bytes() {
-    b"json" => "dbd4f870f936b8fc142002dc4c605e8e81b9d59c64a95cccfd22b99637188c4e",
-    _ => "bde6d903ffaacfaf561e66bd8cfd41a15b3efa5c56a55f80c749eac0bc78a87e",
-};
+/// made the value format postcard (`dbd4f870…` as JSON).
+const FINAL: &str = "bde6d903ffaacfaf561e66bd8cfd41a15b3efa5c56a55f80c749eac0bc78a87e";
 
 /// The playlist alice's first intent creates: its first draw.
 fn pid() -> [u8; 16] {

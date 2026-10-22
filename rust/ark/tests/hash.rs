@@ -49,9 +49,6 @@ fn dir() -> PathBuf {
 }
 
 fn vector(name: &str, text: String) {
-    if ark::format::NAME != "postcard" {
-        return eprintln!("spec/vectors are postcard's; this build writes {}: not held", ark::format::NAME);
-    }
     let path = dir().join(name);
     if std::env::var_os("ARK_WRITE_VECTORS").is_some() {
         std::fs::create_dir_all(dir()).unwrap();

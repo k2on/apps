@@ -224,13 +224,9 @@ pub enum Record {
 
 impl Record {
     /// A logged entry's record from its row of the log's table, which is
-    /// the entry's encoding: the variant around the row as it is (its
-    /// object in JSON, its index, 0, before it in postcard).
+    /// the entry's encoding: the variant's index, 0, before the row as it is.
     pub fn logged(row: &[u8]) -> Vec<u8> {
-        #[cfg(not(feature = "values-json"))]
-        return [&[0u8][..], row].concat();
-        #[cfg(feature = "values-json")]
-        return [&b"{\"Logged\":"[..], row, b"}"].concat();
+        [&[0u8][..], row].concat()
     }
 
     pub fn enc(&self) -> Vec<u8> {
@@ -240,10 +236,7 @@ impl Record {
     /// Whether these bytes are a record of the store's rows whole, told by
     /// their variant alone.
     pub fn is_rows(b: &[u8]) -> bool {
-        #[cfg(not(feature = "values-json"))]
-        return b.first() == Some(&1);
-        #[cfg(feature = "values-json")]
-        return b.starts_with(br#"{"Rows""#);
+        b.first() == Some(&1)
     }
 
     pub fn dec(b: &[u8]) -> Result<Record, Refusal> {

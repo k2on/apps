@@ -31,7 +31,7 @@ is right. `RUNNERS.md` says what `ark-dev` does with `protocol/`, `trace/`,
 
 | § | `rust/ark/src/` | what it defines |
 |---|---|---|
-| 1.1 | `format.rs` | the value format, chosen at build by a feature of `ark` — `values-postcard` (the default) or `values-json` — that rows, inputs, entries, frames, snapshots, journal records and the hashed bytes are written in, one encoding per value; a key is the same value memcomparable (prefix-free, ordered as the values are); JSON is the human form (hashes and ids hex; a row inside a frame its JSON or, under postcard, its hex) |
+| 1.1 | `format.rs` | the value format, postcard, that rows, inputs, entries, frames, snapshots, journal records and the hashed bytes are written in, one encoding per value; a key is the same value memcomparable (prefix-free, ordered as the values are); JSON is the human form (hashes and ids hex; a row inside a frame its hex) |
 | 1.1 | `json.rs` | a value without a Rust type: JSON under a `Type`, written as the Rust type it describes would be (`Typed`) and read back from those bytes (`Seed`) |
 | 1.1 | `hash.rs` | the hash spaces, each its own type: `StateHash`, `EntryHash`, `SchemaHash` |
 | 1.2 | `schema.rs` | tables, columns, keys, indexes, references, spaces; append-only growth (`compat`); a row as another schema of its table wrote it read under this one, completed or cut to its prefix (`Table::fit`) |
@@ -64,6 +64,3 @@ writer's own runner must fail.
 | `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes in each space: its bytes, and its JSON | §1.11 |
 | `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session: what its two machines were given and said, and where they stood | §1.7, §1.9 |
 | `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed, and the fuzzer's sessions that once found a bug: where each stands settled | §1.6, §1.7 |
-
-The vectors are the default format's. A build of the other format runs
-every test but the ones that hold bytes to these files.

@@ -208,10 +208,7 @@ pub fn typed_bytes(t: &Type, v: &J) -> Result<Vec<u8>, Refusal> {
 /// A value of a type from its bytes in the value format, whole: the JSON
 /// its Rust type is written as.
 pub fn typed_value(t: &Type, b: &[u8]) -> Result<J, Refusal> {
-    #[cfg(not(feature = "values-json"))]
-    return crate::format::decode_seed(Seed(t), b);
-    #[cfg(feature = "values-json")]
-    return serde_json::from_slice(b).map_err(|e| Refusal(format!("a {}: {e}", t.decl())));
+    crate::format::decode_seed(Seed(t), b)
 }
 
 /// A value's key under its type, appended to `out`, or why it is not one.
