@@ -198,7 +198,8 @@ impl Undo {
 #[derive(Clone, Copy)]
 pub struct Log<'a>(&'a BTreeMap<Vec<u8>, LogRow>);
 
-/// A row of the log's table, and its sequence, state and hash read once.
+/// A row of the log's table, and its sequence, state and hash, taken from
+/// the entry it was read or written as.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LogRow {
     bytes: Vec<u8>,
@@ -206,8 +207,11 @@ struct LogRow {
 }
 
 impl LogRow {
-    fn of(bytes: Vec<u8>) -> LogRow {
-        LogRow { ends: ends(&bytes), bytes }
+    fn of(l: &Logged, bytes: Vec<u8>) -> LogRow {
+        LogRow {
+            ends: (l.seq, l.state, l.hash),
+            bytes,
+        }
     }
 }
 
@@ -225,31 +229,6 @@ impl std::fmt::Debug for Log<'_> {
 
 fn read(b: &LogRow) -> Logged {
     Logged::from_bytes(&b.bytes).expect("a row of the log reads")
-}
-
-/// A row's sequence, state and hash, read past its entry and facts.
-fn ends(b: &[u8]) -> (Seq, StateHash, EntryHash) {
-    struct Ends {
-        seq: Seq,
-        state: StateHash,
-        hash: EntryHash,
-    }
-    // A row ends with its state and hash, each 32 bytes after their length.
-    let e = {
-        let (seq, _) = postcard::take_from_bytes::<Seq>(b).expect("a row of the log reads");
-        let n = b.len();
-        assert!(
-            n >= 66 && b[n - 66] == 32 && b[n - 33] == 32,
-            "a row of the log ends with its state and hash"
-        );
-        let state = StateHash(b[n - 65..n - 33].try_into().unwrap());
-        Ends {
-            seq,
-            state,
-            hash: EntryHash(b[n - 32..].try_into().unwrap()),
-        }
-    };
-    (e.seq, e.state, e.hash)
 }
 
 /// A sequence's key in the log's table.
@@ -385,7 +364,7 @@ impl Store {
         }
         match c {
             Change::Add { .. } => {
-                self.log.insert(key, LogRow::of(row.clone()));
+                self.log.insert(key, LogRow::of(&l, row.clone()));
             }
             _ => {
                 self.log.remove(&key);
@@ -411,14 +390,14 @@ impl Store {
             return Err(Refusal(format!("{LOG}: entry {} does not link onto the head", l.seq)));
         }
         self.apply_all(facts)?;
-        self.log_push(l.seq, l.to_bytes());
+        self.log_push(l, l.to_bytes());
         Ok(())
     }
 
-    /// A row added at the head of the log by a peer that chained it onto
-    /// the head, or checked that it links there.
-    pub(crate) fn log_push(&mut self, seq: Seq, row: Vec<u8>) {
-        self.log.insert(seq_key(seq), LogRow::of(row));
+    /// An entry added at the head of the log as its row, `row`, by a peer
+    /// that chained it onto the head, or checked that it links there.
+    pub(crate) fn log_push(&mut self, l: &Logged, row: Vec<u8>) {
+        self.log.insert(seq_key(l.seq), LogRow::of(l, row));
     }
 
     /// The log's rows above `seq` deleted, newest first.

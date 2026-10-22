@@ -523,7 +523,7 @@ impl Peer {
         debug_assert!(l.seq == self.log().head().0 + 1 && l.links(&self.log().head().1));
         let row = l.to_bytes();
         o.out.push(Output::Persist(Record::logged(&row)));
-        self.store.log_push(l.seq, row);
+        self.store.log_push(l, row);
     }
 
     fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
