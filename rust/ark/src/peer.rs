@@ -580,10 +580,7 @@ impl Peer {
                 let entry = self.entry(String::new(), vec![], now);
                 let given = self.store.apply_all(&facts).map(|_| facts);
                 o.told.extend(given.iter().flatten().cloned());
-                let id = entry.id;
-                let v = self.judged(entry, given, &mut o);
-                self.local += v.is_ok() as i64;
-                o.out.push(v.map_or_else(|why| Output::Refused { id, why }, |_| Output::Confirmed(id)));
+                self.decide(entry, given, &mut o);
             }
             Input::Write { .. } => {}
             Input::Feed { who, feed } => match feed {
@@ -683,12 +680,8 @@ impl Peer {
         let entry = self.entry(func, input, now);
         let (id, local) = (entry.id, entry.local);
         if self.is_authority() {
-            // One it refuses draws no `local`: a chain made alone has no gaps.
-            self.decide(entry, o);
-            if let Some(Output::Confirmed(_)) = o.out.last() {
-                self.local = local;
-            }
-            return;
+            let run = self.attempt(&entry, o);
+            return self.decide(entry, run, o);
         }
         match self.attempt(&entry, o) {
             Err(why) => o.out.push(Output::Refused { id, why: why.0 }),
@@ -700,17 +693,18 @@ impl Peer {
         }
     }
 
-    /// An authority's own intent, sequenced, and the verdict told.
-    fn decide(&mut self, entry: Entry, o: &mut Out) {
-        let id = entry.id;
-        let v = self.sequence(entry, o);
-        o.out.push(v.map_or_else(|why| Output::Refused { id, why }, |_| Output::Confirmed(id)));
-    }
-
-    /// The authority's judgment of one intent: run, log, tell everyone.
-    fn sequence(&mut self, entry: Entry, o: &mut Out) -> Result<Seq, String> {
-        let r = self.attempt(&entry, o);
-        self.judged(entry, r, o)
+    /// An authority's own intent judged by what its run did — a function's
+    /// or its driver's facts — and the verdict told: logged, its `local`
+    /// drawn, or refused, drawing none, so a chain made alone has no gaps.
+    fn decide(&mut self, entry: Entry, run: Result<Vec<Change>, Refusal>, o: &mut Out) {
+        let (id, local) = (entry.id, entry.local);
+        match self.judged(entry, run, o) {
+            Ok(_) => {
+                self.local = self.local.max(local);
+                o.out.push(Output::Confirmed(id));
+            }
+            Err(why) => o.out.push(Output::Refused { id, why }),
+        }
     }
 
     /// An intent judged: logged with its facts and told everyone, or
@@ -947,7 +941,8 @@ impl Peer {
             None => Verdict::Held { func: entry.func },
             Some(_) => {
                 (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-                self.sequence(entry, o)
+                let run = self.attempt(&entry, o);
+                self.judged(entry, run, o)
                     .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq })
             }
         };
@@ -1130,12 +1125,8 @@ impl Peer {
             journal: Journal { fork, ..Journal::default() },
         };
         for p in std::mem::take(&mut self.pending) {
-            let id = p.entry.id;
             match self.attempt(&p.entry, o) {
-                Ok(facts) => {
-                    let _ = self.judged(p.entry, Ok(facts), o);
-                    o.out.push(Output::Confirmed(id));
-                }
+                Ok(facts) => self.decide(p.entry, Ok(facts), o),
                 // Kept for the server, whose `local`s it would otherwise skip.
                 Err(_) => self.pending.push(Pending::new(p.entry, vec![])),
             }
