@@ -8,6 +8,11 @@
     nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.2411.*.tar.gz";
     rust-overlay.url = "https://flakehub.com/f/oxalica/rust-overlay/0.1.*.tar.gz";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    # The Rust builds' library: each target's dependencies built once, and
+    # the workspace once over them, which every check then reuses. 0.20 is
+    # the last series that supports nixpkgs 24.11 (0.21 dropped it); it
+    # moves with nixpkgs.
+    crane.url = "https://flakehub.com/f/ipetkov/crane/0.20.*.tar.gz";
 
     # The pinned previous revisions of this repository (nix/versions.nix),
     # one input each, so that the lockfile pins them and an old build is
@@ -25,7 +30,7 @@
     #   };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, ... }@inputs:
+  outputs = { self, nixpkgs, rust-overlay, crane, ... }@inputs:
     let
       lib = nixpkgs.lib;
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
@@ -85,19 +90,135 @@
       perSystem = pkgs:
         let
           rust = pkgs.rust-bin.stable.latest.default;
+          # Only for the wasm-bindgen CLI below, which nixpkgs builds itself.
           rustPlatform = pkgs.makeRustPlatform { cargo = rust; rustc = rust; };
 
-          # One crate of the workspace, built from the whole of it.
-          crate = { pname, flags ? [ "-p" pname ], ... }@args: rustPlatform.buildRustPackage ({
-            inherit pname;
+          # Every Rust build is crane's, in layers, so that compiled code is
+          # compiled once per target rather than once per derivation: a
+          # target's dependencies (`buildDepsOnly`, over a dummy of the
+          # workspace that is only its manifests, so an edit to the Rust
+          # does not rebuild them), then for the host the workspace over
+          # them, then its test targets over that, which every check runs
+          # from. A crane library per toolchain, since compiled code is per
+          # target.
+          craneFor = toolchain: (crane.mkLib pkgs).overrideToolchain toolchain;
+          craneLib = craneFor rust;
+          # What every layer shares: the source, the workspace at rust/, the
+          # dependencies vendored once from the lockfile.
+          common = {
             version = "0.1.0";
             src = only rustDirs;
             sourceRoot = "source/rust";
-            cargoLock.lockFile = ./rust/Cargo.lock;
-            cargoBuildFlags = flags;
-            cargoTestFlags = flags;
+            inherit cargoVendorDir;
+          };
+          # crane vendors each crate as a symlink into its own store path,
+          # and cargo then sees a crate at its real path while rustc's
+          # `file!()` is the vendored one. askama's derive joins the two
+          # (`<file's dir>/../../<real manifest dir>/askama.toml`), and in
+          # uniffi_bindgen, which UniFFI's bindgen binary compiles, that
+          # path does not exist. So the crates that do so are copied whole
+          # into the vendor directory, and every other stays a link.
+          cargoVendorDir =
+            let
+              linked = craneLib.vendorCargoDeps { cargoLock = ./rust/Cargo.lock; };
+              copied = [ "uniffi_bindgen" ];
+            in
+            pkgs.runCommand "vendor-cargo-deps" { } ''
+              for registry in ${linked}/*/; do
+                dest=$out/$(basename "$registry")
+                mkdir -p "$dest"
+                for crate in "$registry"*; do
+                  case $(basename "$crate") in
+                    ${lib.concatMapStringsSep "|" (c: "${c}-[0-9]*") copied}) cp -rL "$crate" "$dest/" ;;
+                    *) ln -s "$(readlink -f "$crate")" "$dest/$(basename "$crate")" ;;
+                  esac
+                done
+              done
+              sed "s|${linked}|$out|g" ${linked}/config.toml > $out/config.toml
+            '';
+          # The dummy source keeps a Cargo.lock only at its root, and the
+          # workspace's is rust/'s; no build script or `include_*!` in the
+          # workspace reads a file at compile time, so that is all it lacks.
+          depsArgs = common // {
+            extraDummyScript = "cp ${./rust/Cargo.lock} $out/rust/Cargo.lock";
+          };
+          # On the host every cargo command resolves features once for the
+          # whole workspace (cargo's `feature-unification = "workspace"`),
+          # so that `-p ark` and `--workspace` compile the same units and a
+          # check of a few crates reuses the layers rather than compiling
+          # them again with other features. The setting is unstable in
+          # cargo, and the channel override is read by cargo alone: rustc
+          # and build scripts see stable, as before.
+          hostEnv = {
+            __CARGO_TEST_CHANNEL_OVERRIDE_DO_NOT_USE_THIS = "nightly";
+            CARGO_UNSTABLE_FEATURE_UNIFICATION = "true";
+            CARGO_RESOLVER_FEATURE_UNIFICATION = "workspace";
+          };
+          host = common // { env = hostEnv; };
+          # The host's dependencies: built, checked (for clippy), and their
+          # test-only ones, and the CLI feature UniFFI's bindgen binary adds.
+          hostDeps = craneLib.buildDepsOnly (depsArgs // host // {
+            pname = "arkdb";
+            cargoExtraArgs = "--locked --workspace";
+            postBuild = "cargoWithProfile build --locked -p ark-ffi --features bindgen --bin uniffi-bindgen";
+          });
+          # UniFFI's bindgen binary (rust/ark-ffi/src/bin/uniffi-bindgen.rs),
+          # which is UniFFI's main and nothing of the workspace: built over
+          # the dummy source with that one file real, so the workspace is
+          # not compiled again under the features its CLI adds.
+          uniffiBindgen = craneLib.buildPackage (host // {
+            pname = "uniffi-bindgen";
+            src = craneLib.mkDummySrc (depsArgs // {
+              extraDummyScript = depsArgs.extraDummyScript + ''
+
+                install -m644 ${./rust/ark-ffi/src/bin/uniffi-bindgen.rs} $out/rust/ark-ffi/src/bin/uniffi-bindgen.rs
+              '';
+            });
+            cargoArtifacts = hostDeps;
+            cargoExtraArgs = "--locked -p ark-ffi --features bindgen --bin uniffi-bindgen";
+            # The dummy layer built a stub at the same path, and every file
+            # in the store is as old as every other, so cargo would take the
+            # stub for this file's build.
+            preBuild = "touch ark-ffi/src/bin/uniffi-bindgen.rs";
             doCheck = false;
-          } // removeAttrs args [ "pname" "flags" ]);
+          });
+          # The workspace over the dependencies, once: every library and
+          # binary under `bin/` and `lib/`, and the target directory the
+          # packages and the tests are built from.
+          hostWorkspace = craneLib.buildPackage (host // {
+            pname = "arkdb-workspace";
+            cargoArtifacts = hostDeps;
+            cargoExtraArgs = "--locked --workspace";
+            doCheck = false;
+            doInstallCargoArtifacts = true;
+          });
+          # Every test target of the workspace, compiled and not run, and
+          # harken-iced's with its demo feature: what the checks run.
+          hostTests = craneLib.mkCargoDerivation (host // {
+            pname = "arkdb-tests";
+            cargoArtifacts = hostWorkspace;
+            buildPhaseCargoCommand = ''
+              cargoWithProfile test --locked --workspace --no-run
+              cargoWithProfile test --locked -p harken-iced --features demo --no-run
+            '';
+          });
+
+          # One crate of the workspace (or a few: `flags`), its binaries and
+          # libraries, from the workspace layer.
+          crate = { pname, flags ? "-p ${pname}", ... }@args: craneLib.buildPackage (host // {
+            cargoArtifacts = hostWorkspace;
+            cargoExtraArgs = "--locked ${flags}";
+            doCheck = false;
+          } // removeAttrs args [ "flags" ]);
+          # A run of some of the workspace's tests, from the test layer:
+          # `cargo test --release <flags> <testArgs>`, the output empty.
+          tests = { pname, flags, testArgs ? "", ... }@args: craneLib.cargoTest (host // {
+            cargoArtifacts = hostTests;
+            cargoExtraArgs = "--locked ${flags}";
+            cargoTestExtraArgs = testArgs;
+            doInstallCargoArtifacts = false;
+            installPhase = "touch $out";
+          } // removeAttrs args [ "flags" "testArgs" ]);
 
           # The browser peer: `harken/iced` compiled to wasm32 and bound by
           # wasm-bindgen, beside its page — one static directory. The same
@@ -107,7 +228,7 @@
           # workspace's with the wasm target added, and the CLI is built from
           # the crate at the version the lockfile names.
           wasmRust = rust.override { targets = [ "wasm32-unknown-unknown" ]; };
-          wasmPlatform = pkgs.makeRustPlatform { cargo = wasmRust; rustc = wasmRust; };
+          wasmCrane = craneFor wasmRust;
           wasm-bindgen-cli = pkgs.wasm-bindgen-cli.override ({
             inherit rustPlatform;
             version = wasmBindgenVersion;
@@ -117,38 +238,39 @@
           # bound by wasm-bindgen, beside the static files it is loaded from —
           # the browser peer, and the admin page (docs/plan-guards.md D4),
           # which is the same mechanism with another binary and another page.
-          wasmPage = { pname, crate, bin ? crate, features ? "", files }: wasmPlatform.buildRustPackage {
+          # The pages' dependencies for wasm32, once for all three: the
+          # browser peer with and without its demo, and the admin page.
+          wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
+          wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
+            pname = "arkdb-wasm";
+            doCheck = false;
+            buildPhaseCargoCommand = lib.concatMapStringsSep "\n" wasmBuild [
+              "-p harken-iced" "-p harken-iced --features demo" "-p ark-explorer"
+            ];
+          });
+          wasmPage = { pname, crate, bin ? crate, features ? "", files }: wasmCrane.mkCargoDerivation (common // {
             inherit pname;
-            version = "0.1.0";
-            src = only rustDirs;
-            sourceRoot = "source/rust";
-            cargoLock.lockFile = ./rust/Cargo.lock;
+            cargoArtifacts = wasmDeps;
+            doInstallCargoArtifacts = false;
             nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ];
-            # Not cargoBuildHook: it targets the host, and this is the wasm.
-            buildPhase = ''
-              runHook preBuild
-              cargo build --release --offline --frozen -p ${crate} \
-                ${features} --target wasm32-unknown-unknown
+            buildPhaseCargoCommand = ''
+              ${wasmBuild "-p ${crate} ${features}"}
               wasm-bindgen --target web --no-typescript --out-dir pkg \
                 target/wasm32-unknown-unknown/release/${bin}.wasm
               wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
                 --enable-sign-ext --enable-mutable-globals --enable-reference-types \
                 -o pkg/${bin}_bg.wasm pkg/${bin}_bg.wasm
-              runHook postBuild
             '';
             # The page names the module and the wasm with `?v=dev`; this
             # output's own hash replaces it, so a browser holding an older
             # build is sent URLs its cache has never seen (harken/iced/web).
-            installPhase = ''
-              runHook preInstall
+            installPhaseCommand = ''
               mkdir -p $out
               cp -r pkg $out/
               cp ${files} $out/
               substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
-              runHook postInstall
             '';
-            doCheck = false;
-          };
+          });
           icedWeb = { pname, demo }: wasmPage {
             inherit pname;
             crate = "harken-iced";
@@ -185,7 +307,7 @@
           # over it are `rust/ark-dev`: one build of both, whose binary is
           # `ark-fuzz`, the fuzzer; `fuzz` is that build under the name
           # `nix run` takes.
-          ark = crate { pname = "ark"; flags = [ "-p" "ark" "-p" "ark-dev" ]; };
+          ark = crate { pname = "ark"; flags = "-p ark -p ark-dev"; };
           # `nix run .#fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]`: the
           # fuzzer (rust/ark-dev/src/bin/ark-fuzz.rs), ten thousand sessions
           # from seed 1 by default, each checked for convergence, replay
@@ -203,12 +325,11 @@
           # empty spec/vectors, which is then the output. checks.vectors
           # holds the tree's to it; `nix build .#vectors` and a copy over
           # spec/vectors is how they are written again without cargo.
-          vectors = crate {
+          vectors = tests {
             pname = "ark-vectors";
-            flags = [ "-p" "ark" "-p" "ark-dev" ];
+            flags = "-p ark -p ark-dev";
             # ark-dev's tests also hold spec/README.md and AUTHORING.md.
             src = only (rustDirs ++ [ "spec/README.md" "spec/AUTHORING.md" ]);
-            doCheck = true;
             # stdenv makes only the source root (rust/) writable, and the
             # writer writes beside it.
             postUnpack = "chmod u+w source";
@@ -237,7 +358,7 @@
           # for the host (`uniffi-bindgen generate --library`), and beside
           # them goes the bridge's typed half (rust/ark-ffi/{kotlin,swift}).
           ffiBindings = { lib, language }: ''
-            cargo run --release --offline -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+            ${uniffiBindgen}/bin/uniffi-bindgen \
               generate --library ${lib} --language ${language} --no-format --out-dir bindings/${language}
           '';
           # The Android NDK nixpkgs packages from Google's zip (x86_64 Linux
@@ -258,43 +379,68 @@
             "x86_64-linux-android" = { abi = "x86_64"; clang = "x86_64-linux-android"; };
           };
           androidRust = rust.override { targets = lib.attrNames androidTargets; };
-          # `harken_ffi` for each Android ABI against API 26 (the app's
-          # minSdk), stripped, as `jniLibs/<abi>/libharken_ffi.so`; the
-          # Kotlin the app compiles with it, UniFFI's bindings and the typed
-          # half, under `kotlin/`; and the library built for this machine as
-          # `host/libharken_ffi.so`, which the app's JVM tests load. What
-          # `harken-apk` builds the app over.
-          harken-android-lib = (pkgs.makeRustPlatform { cargo = androidRust; rustc = androidRust; }).buildRustPackage {
-            pname = "harken-android-lib";
-            version = "0.1.0";
-            src = only rustDirs;
-            sourceRoot = "source/rust";
-            cargoLock.lockFile = ./rust/Cargo.lock;
-            doCheck = false;
-            buildPhase = ''
-              runHook preBuild
+          androidCrane = craneFor androidRust;
+          # The NDK's clang and ar for one target, as cargo and cc-rs read them.
+          androidEnv = t: a:
+            let up = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); low = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
               ndkRoot=$(echo ${ndk}/libexec/android-sdk/ndk/*)
               bin=$ndkRoot/toolchains/llvm/prebuilt/${if pkgs.stdenv.hostPlatform.isDarwin then "darwin" else "linux"}-x86_64/bin
               export AR=$bin/llvm-ar
-              ${lib.concatStrings (lib.mapAttrsToList (t: a: let up = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); low = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
-                export CARGO_TARGET_${up}_LINKER=$bin/${a.clang}26-clang
-                export CC_${low}=$bin/${a.clang}26-clang AR_${low}=$bin/llvm-ar
-                cargo build --release --offline --frozen -p harken-ffi --lib --target ${t}
-                mkdir -p jniLibs/${a.abi}
-                $bin/llvm-strip -o jniLibs/${a.abi}/libharken_ffi.so target/${t}/release/libharken_ffi.so
-              '') androidTargets)}
-              cargo build --release --offline --frozen -p harken-ffi --lib
-              ${ffiBindings { lib = "target/release/libharken_ffi.so"; language = "kotlin"; }}
-              runHook postBuild
+              export CARGO_TARGET_${up}_LINKER=$bin/${a.clang}26-clang
+              export CC_${low}=$bin/${a.clang}26-clang AR_${low}=$bin/llvm-ar
             '';
-            installPhase = ''
+          # `harken_ffi` for one Android ABI against API 26 (the app's
+          # minSdk), stripped, as `jniLibs/<abi>/libharken_ffi.so`: its
+          # dependencies for that target, and the library over them.
+          androidLib = t: a:
+            let
+              build = "cargoWithProfile build --locked -p harken-ffi --lib --target ${t}";
+              deps = androidCrane.buildDepsOnly (depsArgs // {
+                pname = "harken-android-${a.abi}";
+                doCheck = false;
+                preBuild = androidEnv t a;
+                buildPhaseCargoCommand = build;
+              });
+            in
+            androidCrane.mkCargoDerivation (common // {
+              pname = "harken-android-${a.abi}";
+              cargoArtifacts = deps;
+              doInstallCargoArtifacts = false;
+              preBuild = androidEnv t a;
+              buildPhaseCargoCommand = build;
+              installPhaseCommand = ''
+                mkdir -p $out/jniLibs/${a.abi}
+                $bin/llvm-strip -o $out/jniLibs/${a.abi}/libharken_ffi.so target/${t}/release/libharken_ffi.so
+              '';
+            });
+          # The Kotlin the app compiles with the library, UniFFI's bindings
+          # and the typed half, under `kotlin/`; and the library built for
+          # this machine as `host/libharken_ffi.so`, which the app's JVM
+          # tests load: from the host's workspace layer, which has built it.
+          androidHost = craneLib.mkCargoDerivation (host // {
+            pname = "harken-android-host";
+            cargoArtifacts = hostWorkspace;
+            doInstallCargoArtifacts = false;
+            buildPhaseCargoCommand = ''
+              cargoWithProfile build --locked -p harken-ffi --lib
+              ${ffiBindings { lib = "target/release/libharken_ffi.so"; language = "kotlin"; }}
+            '';
+            installPhaseCommand = ''
               mkdir -p $out/kotlin/dev/arkdb/ffi
-              cp -r jniLibs $out/
               cp -r bindings/kotlin/. $out/kotlin/
               install -Dm755 target/release/libharken_ffi.so $out/host/libharken_ffi.so
               cp ark-ffi/kotlin/Typed.kt $out/kotlin/dev/arkdb/ffi/
             '';
-          };
+          });
+          # Each ABI's library and the host's part, one directory: what
+          # `harken-apk` builds the app over.
+          harken-android-lib = pkgs.runCommand "harken-android-lib-0.1.0" { } ''
+            mkdir -p $out
+            for part in ${lib.concatStringsSep " " (lib.mapAttrsToList androidLib androidTargets)} ${androidHost}; do
+              cp -r --no-preserve=mode $part/. $out/
+            done
+            chmod 755 $out/host/libharken_ffi.so
+          '';
 
           # The Android SDK the APK is built with. Google ships one for
           # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
@@ -397,23 +543,31 @@
           # macOS builder has: on Linux this derivation evaluates and is not
           # built (meta.platforms), and it has not been built anywhere yet.
           iosRust = rust.override { targets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ]; };
-          harken-ios-xcframework = (pkgs.makeRustPlatform { cargo = iosRust; rustc = iosRust; }).buildRustPackage {
-            pname = "harken-ios-xcframework";
-            version = "0.1.0";
-            src = only rustDirs;
-            sourceRoot = "source/rust";
-            cargoLock.lockFile = ./rust/Cargo.lock;
+          iosCrane = craneFor iosRust;
+          iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
+          # The library for each iOS target and for the host, which UniFFI
+          # reads the Swift from.
+          iosBuild = ''
+            export PATH=/usr/bin:$PATH DEVELOPER_DIR=''${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}
+            ${lib.concatMapStrings (t: "cargoWithProfile build --locked -p harken-ffi --lib --target ${t}\n") iosTargets}
+            cargoWithProfile build --locked -p harken-ffi --lib
+          '';
+          # Their dependencies.
+          iosDeps = iosCrane.buildDepsOnly (depsArgs // {
+            pname = "harken-ios";
             doCheck = false;
             # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
             # Xcode, outside the store.
             __noChroot = true;
-            buildPhase = ''
-              runHook preBuild
-              export PATH=/usr/bin:$PATH DEVELOPER_DIR=''${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}
-              for t in aarch64-apple-ios aarch64-apple-ios-sim; do
-                cargo build --release --offline --frozen -p harken-ffi --lib --target $t
-              done
-              cargo build --release --offline --frozen -p harken-ffi --lib
+            buildPhaseCargoCommand = iosBuild;
+            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+          });
+          harken-ios-xcframework = iosCrane.mkCargoDerivation (common // {
+            pname = "harken-ios-xcframework";
+            cargoArtifacts = iosDeps;
+            doInstallCargoArtifacts = false;
+            __noChroot = true;
+            buildPhaseCargoCommand = iosBuild + ''
               ${ffiBindings { lib = "target/release/libharken_ffi.dylib"; language = "swift"; }}
               mkdir -p headers
               cp bindings/swift/*.h headers/
@@ -422,24 +576,21 @@
                 -library target/aarch64-apple-ios/release/libharken_ffi.a -headers headers \
                 -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers headers \
                 -output HarkenFFI.xcframework
-              runHook postBuild
             '';
-            installPhase = ''
+            installPhaseCommand = ''
               mkdir -p $out/swift
               cp -r HarkenFFI.xcframework $out/
               cp bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
             '';
             meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-          };
+          });
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
-          harken-domain = crate {
+          harken-domain = tests {
             pname = "harken-domain";
-            doCheck = true;
-            cargoTestFlags = [ "-p" "harken-domain" "--test" "port" ];
-            checkFlags = [ "the_schema_hash_is_pinned" ];
-            installPhase = "touch $out";
+            flags = "-p harken-domain --test port";
+            testArgs = "-- the_schema_hash_is_pinned";
           };
 
           # The pinned previous revisions (nix/versions.nix), each its
@@ -511,15 +662,13 @@
             # With nix/versions.nix empty it runs the scenarios that need no
             # older binary (a schema grown, a module updated over a retained
             # log) and the others say they are skipped and why.
-            versions = crate {
+            # The test target's two binaries, built beside it, are in the
+            # workspace layer.
+            versions = tests {
               pname = "harken-versions";
-              flags = [ "-p" "harken-server" "--test" "versions" ];
-              doCheck = true;
-              # The test target needs the two binaries built beside it.
-              cargoBuildFlags = [ "-p" "harken-server" ];
-              checkFlags = [ "--nocapture" ];
+              flags = "-p harken-server --test versions";
+              testArgs = "-- --nocapture";
               preCheck = oldEnv;
-              installPhase = "touch $out";
             };
             # The vectors in the tree are the ones the writer writes.
             vectors = pkgs.runCommand "check-vectors" { } ''
@@ -530,15 +679,12 @@
             # Its own check rather than part of checks.rust, so that the
             # workspace's tests do not wait on a fuzz run and a trace that
             # stops replaying is named as that.
-            traces = crate {
+            traces = tests {
               pname = "ark-traces";
-              flags = [ "-p" "ark-dev" "--test" "vectors" ];
-              cargoBuildFlags = [ "-p" "ark-dev" ];
+              flags = "-p ark-dev --test vectors";
+              testArgs = "-- --nocapture";
               src = only (rustDirs ++ [ "spec/vectors" ]);
-              doCheck = true;
               preCheck = "export ARK_TRACE_CORPUS=${trace-corpus}";
-              checkFlags = [ "--nocapture" ];
-              installPhase = "touch $out";
             };
             # The fuzzer still runs and checks: a fixed seed and a few
             # sessions, so that it cannot rot.
@@ -546,24 +692,35 @@
               ark-fuzz 25 1 traces
               touch $out
             '';
-            # The Rust workspace: formatted, lint-clean, and its tests (which
-            # hold spec/README.md's index and AUTHORING.md's examples too).
-            rust = crate {
+            # The Rust workspace's tests (which hold spec/README.md's index
+            # and AUTHORING.md's examples too); formatted and lint-clean are
+            # `fmt` and `clippy`.
+            rust = tests {
               pname = "arkdb-rust";
-              flags = [ "--workspace" ];
+              flags = "--workspace";
               src = only (rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ]);
-              doCheck = true;
-              preCheck = ''
-                cargo fmt --all --check
-                cargo clippy --workspace --all-targets --offline -- -D warnings
-                cargo clippy -p harken-iced --features demo --all-targets --offline -- -D warnings
-              '';
               # The client's demo is a feature, so its tests are a second run.
               postCheck = ''
-                cargo test -p harken-iced --features demo --offline
+                cargoWithProfile test --locked -p harken-iced --features demo
               '';
-              installPhase = "touch $out";
             };
+            # The workspace lint-clean, the demo feature too, over the
+            # host's dependencies.
+            clippy = craneLib.cargoClippy (host // {
+              pname = "arkdb";
+              cargoArtifacts = hostDeps;
+              cargoExtraArgs = "--locked --workspace";
+              cargoClippyExtraArgs = "--all-targets -- -D warnings";
+              postBuild = "cargoWithProfile clippy --locked -p harken-iced --features demo --all-targets -- -D warnings";
+              doInstallCargoArtifacts = false;
+              installPhase = "touch $out";
+            });
+            # The workspace formatted as rust/rustfmt.toml says.
+            fmt = craneLib.cargoFmt (common // {
+              pname = "arkdb";
+              cargoExtraArgs = "--all";
+              installPhase = "touch $out";
+            });
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;
@@ -573,15 +730,14 @@
             # alone and joining, a hall of devices) and hold the generated
             # Kotlin and Swift to the domain; and UniFFI writes the Kotlin and
             # the Swift for the library.
-            ffi = crate {
+            ffi = tests {
               pname = "arkdb-ffi";
-              flags = [ "-p" "ark-ffi" "-p" "harken-ffi" ];
+              flags = "-p ark-ffi -p harken-ffi";
               src = only (rustDirs ++ genDirs);
-              doCheck = true;
               postCheck = ''
-                lib=$(echo target/*/release/libharken_ffi.so)
+                lib=target/release/libharken_ffi.so
                 for language in kotlin swift; do
-                  cargo run --release --offline --frozen -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+                  ${uniffiBindgen}/bin/uniffi-bindgen \
                     generate --library "$lib" --language $language --no-format --out-dir "$TMPDIR/bindings/$language"
                 done
                 grep -q 'fun `harkenOpen`' "$TMPDIR/bindings/kotlin/dev/harken/ffi/harken_ffi.kt"
