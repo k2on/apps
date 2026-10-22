@@ -199,3 +199,95 @@ fn a_volatile_push_overtaken_is_refused() {
     assert!(live.pending.is_empty(), "both answered");
     assert_eq!(server.log().head().0, 1, "only the later one taken");
 }
+
+/// A replica moves its own horizon (`Compact`, at most its head): the
+/// entries below it go, a `Hello` from there is answered with no snapshot,
+/// and an intent pending across the fold is rebased under another's entry
+/// and confirmed as before. Falsified by `compact` taking an authority's
+/// only, as it did: the replica held all five entries.
+#[test]
+fn a_replica_folds_its_own_log() {
+    let (mut server, mut alice, mut bob) = (
+        authority(),
+        peer(Role::Replica, "alice", Space::Volatile),
+        peer(Role::Replica, "bob", Space::Volatile),
+    );
+    let carry = |server: &mut Peer, w: &str, o: &[Output], to: &mut [&mut Peer]| {
+        let (s, f) = deliver_up(server, &who(w), o);
+        for frame in s.iter().chain(&f) {
+            for p in to.iter_mut() {
+                p.step(down(frame));
+            }
+        }
+    };
+    for n in 0..5 {
+        let o = alice.step(waving(&format!("phone {n}")));
+        carry(&mut server, "alice", &o, &mut [&mut alice]);
+    }
+    let pending = alice.step(waving("laptop"));
+    alice.step(Input::Compact(i64::MAX));
+    assert_eq!((alice.log().len(), alice.log().base_seq()), (0, 5), "it stands on its head");
+    let o = bob.step(waving("tablet"));
+    let (_, f) = deliver_up(&mut server, &who("bob"), &o);
+    alice.step(down(&f[0]));
+    assert_eq!(alice.log().head(), server.log().head());
+    assert_eq!(alice.pending.len(), 1, "still pending, rebased");
+    carry(&mut server, "alice", &pending, &mut [&mut alice]);
+    assert!(alice.pending.is_empty() && alice.store == server.store);
+    let hello = sends(&alice.step(Input::Connected));
+    let (s, _) = deliver_up(&mut server, &who("alice"), &[Output::Send(hello[0].enc())]);
+    assert!(s.is_empty(), "nothing to send from its head: {s:?}");
+}
+
+/// A durable replica's fold makes its rows durable as confirmed: its
+/// pending intent's changes are not in them. Falsified by persisting the
+/// store's rows as they stand: the pending playlist was in them.
+#[test]
+fn a_replica_folds_its_confirmed_rows() {
+    let mut durable = peer(Role::Authority { journal: Journal::default() }, "server", Space::Durable);
+    let mut log = peer(Role::Replica, "alice", Space::Durable);
+    let o = durable.step(mutate(demo::CREATE, demo::create_input("a"), 1));
+    log.step(down(&fanouts(&o)[0]));
+    log.step(mutate(demo::CREATE, demo::create_input("Mix"), 1));
+    let o = log.step(Input::Compact(i64::MAX));
+    let rows = o.iter().find_map(|x| match x {
+        Output::Persist(b) => match ark::log::Record::dec(b) {
+            Ok(ark::log::Record::Rows(r)) => Some(r),
+            _ => None,
+        },
+        _ => None,
+    });
+    let rows = rows.expect("the rows made durable whole");
+    let playlists = rows.iter().find(|(t, _)| t == "playlist").map_or(0, |(_, rs)| rs.len());
+    assert_eq!(playlists, 1, "the confirmed playlist only");
+    assert_eq!(log.pending.len(), 1);
+}
+
+/// A volatile authority keeps each origin's last 64 verdicts: a push again
+/// inside them is answered as it was, one below them refused as
+/// overtaken, and no more are kept however many come. Falsified by
+/// keeping every verdict, as before: it held 70.
+#[test]
+fn volatile_verdicts_are_a_window() {
+    let (mut server, mut live) = (authority(), peer(Role::Replica, "alice", Space::Volatile));
+    let mut pushes = vec![];
+    for n in 0..70 {
+        let o = live.step(waving(&format!("phone {n}")));
+        let (s, f) = deliver_up(&mut server, &who("alice"), &o);
+        for frame in s.iter().chain(&f) {
+            live.step(down(frame));
+        }
+        pushes.push(o);
+    }
+    let Role::Authority { journal } = &server.role else { unreachable!() };
+    assert_eq!(journal.verdicts.len(), 64);
+    let (s, _) = deliver_up(&mut server, &who("alice"), &pushes[69]);
+    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 70 })]), "{s:?}");
+    let (s, _) = deliver_up(&mut server, &who("alice"), &pushes[6]);
+    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 7 })]), "the 64th last: {s:?}");
+    let (s, _) = deliver_up(&mut server, &who("alice"), &pushes[5]);
+    assert!(
+        matches!(&verdicts(&s)[..], [Some(Verdict::Refused { why })] if why.contains("overtaken")),
+        "{s:?}"
+    );
+}
