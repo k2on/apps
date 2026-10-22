@@ -48,6 +48,7 @@ every `Hello`, prefix-checked when a log opens and read by the explorer.
 
 ```rust
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct CreatePlaylist {
     #[ark(trim, non_empty, why = "a playlist needs a name")]
     #[ark(len = "0..=120")]
@@ -56,7 +57,8 @@ pub struct CreatePlaylist {
 ```
 
 `#[derive(Input)]` writes `check`, the form's validation, run before a
-mutator sees the input; its refusal is the intent's. A field's
+mutator sees the input; its refusal is the intent's. `#[ark(ffi)]`, under
+the crate's `ffi` feature, gives the type a UniFFI twin for the phones. A field's
 refinements apply in order: `trim` normalises it for the rules after it;
 `non_empty`, `len = "lo..=hi"` and `range = "lo..=hi"` bound it;
 `check = "path::fn"` runs a predicate; `why = "…"` replaces the default
