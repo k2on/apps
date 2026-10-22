@@ -678,7 +678,8 @@
             # (rust/ark-dev/tests/vectors.rs, `traces` and `trace_corpus`).
             # Its own check rather than part of checks.rust, so that the
             # workspace's tests do not wait on a fuzz run and a trace that
-            # stops replaying is named as that.
+            # stops replaying is named as that. The corpus is the fuzzer's
+            # 300 sessions, each checked as it runs: the fuzzer cannot rot.
             traces = tests {
               pname = "ark-traces";
               flags = "-p ark-dev --test vectors";
@@ -686,12 +687,6 @@
               src = only (rustDirs ++ [ "spec/vectors" ]);
               preCheck = "export ARK_TRACE_CORPUS=${trace-corpus}";
             };
-            # The fuzzer still runs and checks: a fixed seed and a few
-            # sessions, so that it cannot rot.
-            fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
-              ark-fuzz 25 1 traces
-              touch $out
-            '';
             # The Rust workspace's tests (which hold spec/README.md's index
             # and AUTHORING.md's examples too); formatted and lint-clean are
             # `fmt` and `clippy`.
