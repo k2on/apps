@@ -1038,13 +1038,13 @@ as the server's dynamic user for `house.key`. The variables keep their
 names and are the house's; a server given `HARKEN_HA_*` refuses to start.
 
 *Size* (`tools/loc.sh`): `harken-server` src 4,517 → 1,749, bins 1,304 →
-45, tests 6,675 → 6,871 (total 12,496 → 8,665); `harken-peer` 4,334 (of
+45, tests 6,675 → 6,897 (total 12,496 → 8,691); `harken-peer` 4,334 (of
 it in-file tests 1,330: the bridge's 887, the headless peer's 351, the
 house's configuration 92); `harken-player` 884 + 405, unchanged. Shipped
 lines, in-file tests out: the server's 3,391 → 1,575 and its binaries 961
 → 45; server and peer together 4,352 → 4,624 (+272: sockets, logins and
 the agreement gate in the house +170 with its configuration moved in, the
-door +115, a second `Hosted` +21); tests +231. *Concepts the server no
+door +115, a second `Hosted` +21); tests +257. *Concepts the server no
 longer knows*: Home Assistant (its REST calls, entities, feature bits,
 template, a Sonos's queue), the speaker as a `Sound` and its memory, the
 poll and its constants, the house's clock (`when`), kernel machines of its
@@ -1064,7 +1064,7 @@ reported to phones), which now crosses the speaker's socket, whose thread
 sends between 5 ms reads.
 
 *Verdict*: effective for the server — less than half its shipped source,
-a seventh of what it knew, at no measured latency — and about even for the
+eight things it knew gone for one gained, at no measured latency — and about even for the
 repository (+6% shipped, the socket plumbing and the agreement gate).
 *What gets worse*: a second unit to run and order (it restarts until the
 server has written the key); a key that mints a full login for any account
@@ -1080,8 +1080,9 @@ binary would need a second shim in the server's package for the same
 `CARGO_BIN_EXE_*` reason and buys nothing measured. Not verified: the
 units under systemd (evaluated, `checks.harken-module`, never booted; the
 two sharing one dynamic user is systemd's documentation, not seen), the
-house restarted under a running server (its machines start over at
-`local` 0 on the same sessions), a long-lived login renewed, a real Home
+house restarted while a speaker plays (restarted idle under a running
+server it stands again and its word is taken, `bridge.rs`
+`the_house_is_a_process_of_its_own`), a login renewed after its month, a real Home
 Assistant, the bridge's tests against the binary (one is; the rest run
 the house in the test's process, against the server's socket).
 
