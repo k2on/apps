@@ -471,3 +471,25 @@ fn the_player_screen_alone_is_the_players_own() {
         value: "—".into()
     }));
 }
+
+/// A session given whole — what a screenshot draws from, with no peer
+/// behind it — is the same picker and the same lines as the phone's own.
+///
+/// Falsified by `listening_of` reading no session (`session: None`): the
+/// whole session's picker ticked this phone where the phone's ticked the
+/// laptop.
+#[test]
+fn a_session_given_whole_draws_the_same_picker() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone");
+    let _laptop = on(&hall, "laptop", true, "computer");
+    phone.press(start(&queue(), 0));
+    phone.ask(Ask::Pick { id: "laptop".into() });
+    let whole = hall.listening("alice".into());
+    assert_eq!(harken_ffi::harken_picker(whole.clone(), "phone".into()), phone.player.picker());
+    let lines = harken_ffi::harken_lines(whole, "phone".into());
+    assert!(lines.contains(&Line {
+        name: "output".into(),
+        value: "laptop (moving)".into()
+    }));
+}

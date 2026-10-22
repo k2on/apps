@@ -71,6 +71,33 @@ fn listening_json(l: &Listening) -> String {
     json!({ "devices": l.devices, "scrub": l.scrub, "session": l.session }).to_string()
 }
 
+/// A session given whole, as [`harken_listening`] writes it; nothing where it
+/// does not read.
+fn listening_of(json: &str) -> Listening {
+    let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    Listening {
+        devices: serde_json::from_value(v["devices"].clone()).unwrap_or_default(),
+        scrub: serde_json::from_value(v["scrub"].clone()).unwrap_or_default(),
+        session: serde_json::from_value(v["session"].clone()).unwrap_or_default(),
+    }
+}
+
+/// The device picker of a session given whole (`harken_listening`'s JSON)
+/// for the device `me`: what a screen with no peer behind it — a
+/// screenshot's — draws.
+#[uniffi::export]
+pub fn harken_picker(listening: String, me: String) -> harken_player::Devices {
+    harken_player::screens::picker(&listening_of(&listening), &me)
+}
+
+/// The diagnostics' listening lines of a session given whole, for `me`,
+/// part of it and linked.
+#[uniffi::export]
+pub fn harken_lines(listening: String, me: String) -> Vec<harken_player::Line> {
+    let l = listening_of(&listening);
+    harken_player::screens::numbers(Some(&l), &me, true, true, 0, &Default::default(), None, now_ms())
+}
+
 /// The domain this library carries as a server's `/healthz` names it:
 /// its schema's hash and its version (`harken-server`'s `domain` line).
 #[uniffi::export]

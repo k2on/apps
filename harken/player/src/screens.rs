@@ -87,16 +87,6 @@ pub struct NowPlaying {
 /// How much of what is to come the queue sheet shows.
 pub const UP_NEXT: usize = 100;
 
-impl NowPlaying {
-    /// The position at `now`, as the screen ticks it.
-    pub fn position(&self, now: i64) -> i64 {
-        match self.since {
-            Some(since) => self.at_ms + (now - since).max(0),
-            None => self.at_ms,
-        }
-    }
-}
-
 /// One row of the picker: a device of the account — or the group that
 /// plays — and what it can be asked.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -129,7 +119,7 @@ pub struct DeviceRow {
 /// The device picker: its rows, and the one the cursor starts on.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct Picker {
+pub struct Devices {
     pub rows: Vec<DeviceRow>,
     pub cursor: i64,
 }
@@ -323,7 +313,7 @@ pub fn now_playing(
 /// and the output that has gone, drawn and not selectable — and, while the
 /// output leads a group, the group first, as a whole; the cursor on the
 /// output, or on this phone.
-pub fn picker(s: &Listening, me: &str) -> Picker {
+pub fn picker(s: &Listening, me: &str) -> Devices {
     let output = s.output();
     let ticked = output.and_then(|o| o.id()).unwrap_or(me);
     let leader = s.leader();
@@ -377,7 +367,7 @@ pub fn picker(s: &Listening, me: &str) -> Picker {
         );
     }
     let cursor = rows.iter().position(|r| r.ticked && !r.group && r.join != Some(false)).unwrap_or(0) as i64;
-    Picker { rows, cursor }
+    Devices { rows, cursor }
 }
 
 /// `m:ss`, or `h:mm:ss` past an hour.

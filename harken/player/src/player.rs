@@ -17,7 +17,7 @@ use harken_domain::{Active, Clock, Output};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::screens::{self, Alone, Ask, Line, NowPlaying, Picker};
+use crate::screens::{self, Alone, Ask, Devices, Line, NowPlaying};
 use crate::{Press, Reconciler, Say, Sound, View, NOT_PART};
 
 /// Every number a device's player holds that its peer does not, for the
@@ -225,11 +225,11 @@ impl Player {
     }
 
     /// The device picker's rows, while joined; none alone.
-    pub fn picker(&self, p: &Peer) -> Picker {
+    pub fn picker(&self, p: &Peer) -> Devices {
         let s = Player::listening(p);
         match self.joined(p, &s) {
             true => screens::picker(&s, &self.me),
-            false => Picker::default(),
+            false => Devices::default(),
         }
     }
 

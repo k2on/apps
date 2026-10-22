@@ -42,7 +42,7 @@ pub use memory::Mind;
 pub use player::{Player, Stats};
 pub use press::{Change, Level, Press, NOT_PART};
 pub use reconcile::Reconciler;
-pub use screens::{Ask, DeviceRow, Line, NowPlaying, Picker, Playing, Volume, Where};
+pub use screens::{Ask, DeviceRow, Devices, Line, NowPlaying, Playing, Volume, Where};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();

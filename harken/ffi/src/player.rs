@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use ark_ffi::Peer;
 use harken_domain::{Id, Media, Track};
-use harken_player::{Ask, Event, Heard, Line, NowPlaying, Picker, Place, Sound, Vol};
+use harken_player::{Ask, Devices, Event, Heard, Line, NowPlaying, Place, Sound, Vol};
 
 /// A volume, 0 to 100, and its mute.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
@@ -147,7 +147,7 @@ pub struct Player {
 }
 
 /// The screens' rows as last made.
-type Shown = (NowPlaying, Picker, Vec<Line>);
+type Shown = (NowPlaying, Devices, Vec<Line>);
 
 #[uniffi::export]
 impl Player {
@@ -211,7 +211,7 @@ impl Player {
     }
 
     /// The device picker's rows; none alone.
-    pub fn picker(&self) -> Picker {
+    pub fn picker(&self) -> Devices {
         self.shown(|s| &mut s.1, |inner, p| inner.picker(p))
     }
 
