@@ -52,9 +52,9 @@
 //! schema takes each confirmed state as the entry says ([`Peer::faith`]).
 //!
 //! **Partial sync is a view** (§1.8). A connection the driver says is fed
-//! by a scope (`Input::Feed`) is served its union: the rows a `Pure`
-//! function of a row — `Sum` over the schema's tables in order, each
-//! variant that table's row — holds, under the connection's identity. At
+//! by a scope (`Input::Feed`) is served its union: the rows its scope —
+//! a [`Scope`], its own kind of function, asked of a table's row — holds,
+//! under the connection's identity. At
 //! its `Hello` the authority takes the union from its store and sends it as
 //! a snapshot at the head; every entry after is sent to it alone
 //! (`Output::To`) with the facts the scope's filter makes of the entry's
@@ -181,12 +181,18 @@ impl Ctx {
 /// writes as it makes them (§1.16).
 pub trait Procedure: Send + Sync {
     fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal>;
+}
 
-    /// A scope's verdict on its input, a row as its table's variant
-    /// (§1.8): whether the union holds it. Only a `Pure` function gives one.
-    fn holds(&self, _ctx: &Ctx, _input: &[u8]) -> Result<bool, Refusal> {
-        Err(Refusal::new("not a scope"))
-    }
+/// A scope (§1.8): whether the union of who reads holds a row of the table
+/// named, by the row's bytes. Never run as an intent.
+pub type Scope = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
+
+/// One function a peer has by name: a procedure it runs, or a scope it
+/// asks of rows.
+#[derive(Clone)]
+pub enum Runs {
+    Procedure(Arc<dyn Procedure>),
+    Scope(Scope),
 }
 
 /// The functions a peer runs, by the names entries call them by (§1.16):
@@ -194,27 +200,48 @@ pub trait Procedure: Send + Sync {
 /// sent is ever run but by a name it already has.
 #[derive(Clone, Default)]
 pub struct Functions {
-    procs: BTreeMap<String, Arc<dyn Procedure>>,
+    fns: BTreeMap<String, Runs>,
 }
 
 impl fmt::Debug for Functions {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_set().entries(self.procs.keys()).finish()
+        f.debug_set().entries(self.fns.keys()).finish()
     }
 }
 
 impl Functions {
     pub fn insert(&mut self, name: impl Into<String>, p: Arc<dyn Procedure>) {
-        self.procs.insert(name.into(), p);
+        self.put(name, Runs::Procedure(p));
     }
 
+    pub fn put(&mut self, name: impl Into<String>, r: Runs) {
+        self.fns.insert(name.into(), r);
+    }
+
+    /// What `name` is here, of either kind.
+    pub fn of(&self, name: &str) -> Option<&Runs> {
+        self.fns.get(name)
+    }
+
+    /// The procedure `name` is.
     pub fn get(&self, name: &str) -> Option<&Arc<dyn Procedure>> {
-        self.procs.get(name)
+        match self.fns.get(name)? {
+            Runs::Procedure(p) => Some(p),
+            Runs::Scope(_) => None,
+        }
+    }
+
+    /// The scope `name` is.
+    pub fn scope(&self, name: &str) -> Option<&Scope> {
+        match self.fns.get(name)? {
+            Runs::Scope(s) => Some(s),
+            Runs::Procedure(_) => None,
+        }
     }
 
     /// Every name, in order.
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.procs.keys().map(String::as_str)
+        self.fns.keys().map(String::as_str)
     }
 }
 
@@ -609,11 +636,11 @@ impl Peer {
 
     /// Runs an intent over the store and applies what it did, all or none.
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
-        let p = self
-            .functions
-            .get(&e.func)
-            .cloned()
-            .ok_or_else(|| Refusal(format!("no function {}", e.func)))?;
+        let p = match self.functions.of(&e.func) {
+            Some(Runs::Procedure(p)) => p.clone(),
+            Some(Runs::Scope(_)) => return Err(Refusal::new("a scope writes nothing")),
+            None => return Err(Refusal(format!("no function {}", e.func))),
+        };
         let changes = p.apply(&mut self.store, &Ctx::of(e), &e.input)?;
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
@@ -807,13 +834,8 @@ impl Peer {
     /// A scope's verdict on a row of `table`, for the connection it serves.
     fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
         let s = &self.served[session];
-        let ctx = Ctx::new(&s.who, 0);
-        let (scope, schema) = (self.functions.get(&s.scope).cloned(), self.store.schema_arc().clone());
-        move |table, row| {
-            let scope = scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?;
-            let i = schema.table(table).ok_or_else(|| Refusal(format!("no table {table}")))?.0;
-            scope.holds(&ctx, &[&[i as u8][..], row].concat())
-        }
+        let (scope, ctx) = (self.functions.scope(&s.scope).cloned(), Ctx::new(&s.who, 0));
+        move |table, row| scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?(&ctx, table, row)
     }
 
     /// A `Hello` from a connection fed by a scope: nothing when it stands at
@@ -930,7 +952,7 @@ impl Peer {
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             return None;
         }
-        if self.functions.get(&entry.func).is_none() {
+        if self.functions.of(&entry.func).is_none() {
             return Some(Verdict::Held { func: entry.func });
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());

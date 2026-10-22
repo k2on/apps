@@ -260,14 +260,12 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
         return Err("the log replayed from its facts is not the store".into());
     }
     if let Some(c) = net.clients.get(&0).filter(|_| partial) {
-        let holds = g.module.functions.get(&g.scope).expect("the scope");
+        let holds = g.module.functions.scope(&g.scope).expect("the scope");
         let ctx = ctx_of(&c.log.me);
         let mut rows = vec![];
-        for (t, (name, rs)) in hub.store.snapshot_rows().into_iter().enumerate() {
-            let held = rs
-                .into_iter()
-                .filter(|row| holds.holds(&ctx, &[&[t as u8][..], row].concat()) == Ok(true));
-            rows.push((name, held.collect()));
+        for (name, rs) in hub.store.snapshot_rows() {
+            let held = rs.into_iter().filter(|row| holds(&ctx, &name, row) == Ok(true)).collect();
+            rows.push((name, held));
         }
         let union = Store::from_rows(schema, Space::Durable, &rows).map_err(|r| r.0)?.0;
         if c.log.store != union || !c.log.pending.is_empty() {

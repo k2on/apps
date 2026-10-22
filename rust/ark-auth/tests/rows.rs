@@ -137,31 +137,23 @@ fn nobody_else_s_sessions_are_held_or_listed() {
     signed_in(&hub, "a2", "alice", 10_000);
     signed_in(&hub, "b1", "bob", 10_000);
     let alice = on("alice", "a1", &[], 2_000);
-    let feed = domain().functions().get("feed").cloned().unwrap();
-    let schema = domain().schema;
-    let tagged = |table: &str, row: Vec<u8>| [vec![schema.table(table).unwrap().0 as u8], row].concat();
+    let feed = domain().functions().scope("feed").cloned().unwrap();
     let held: Vec<String> = hub
         .sign_ins()
         .into_iter()
-        .filter(|s| feed.holds(&alice, &tagged("sign_in", s.to_bytes())).unwrap())
+        .filter(|s| feed(&alice, "sign_in", &s.to_bytes()).unwrap())
         .map(|s| s.id)
         .collect();
     assert_eq!(held, ["a1", "a2"]);
     let role = |user: &str| {
-        tagged(
-            "role",
-            Role {
-                user: user.into(),
-                role: "x".into(),
-            }
-            .to_bytes(),
-        )
+        Role {
+            user: user.into(),
+            role: "x".into(),
+        }
+        .to_bytes()
     };
-    assert!(feed.holds(&alice, &role("alice")).unwrap() && !feed.holds(&alice, &role("bob")).unwrap());
-    assert!(
-        feed.holds(&alice, &tagged("note", common::Note::default().to_bytes())).unwrap(),
-        "the app's own"
-    );
+    assert!(feed(&alice, "role", &role("alice")).unwrap() && !feed(&alice, "role", &role("bob")).unwrap());
+    assert!(feed(&alice, "note", &common::Note::default().to_bytes()).unwrap(), "the app's own");
     let b = domain().ask(&hub.0.lock().unwrap(), &alice, "session.mine", &[]).unwrap();
     let mine = Vec::<SignIn>::from_bytes(&b).unwrap();
     assert_eq!(mine.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);

@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use crate::db::{read, write_in, Db, Tables, Volatile, Writes};
 use crate::hash::SchemaHash;
-use crate::peer::{Ctx, Functions, Procedure};
+use crate::peer::{self, Ctx, Functions, Procedure, Runs};
 use crate::plan::{answer, Maintained, Plan, View};
 use crate::row::{Describe, Input, Row, Type, Value};
 use crate::schema::Schema;
@@ -63,8 +63,10 @@ pub struct Function {
     pub input: Type,
     /// What it answers, a query's or a view's element.
     pub output: Option<Type>,
-    /// What the machine runs: a mutator's, a live transition's, a scope's.
+    /// What the machine runs: a mutator's, a live transition's.
     pub proc: Option<Arc<dyn Procedure>>,
+    /// What a scope holds (§1.8).
+    pub scope: Option<peer::Scope>,
     pub ask: Option<Ask>,
     pub watch: Option<Watch>,
     pub check: Check,
@@ -151,26 +153,6 @@ impl<S: Tables> Scope<S> {
     }
 }
 
-struct Scoped<S> {
-    scope: Scope<S>,
-    schema: Arc<Schema>,
-}
-
-impl<S: Tables> Procedure for Scoped<S> {
-    fn apply(&self, _: &mut Store, _: &Ctx, _: &[u8]) -> Result<Vec<Change>, Refusal> {
-        Err(Refusal::new("a scope writes nothing"))
-    }
-
-    fn holds(&self, ctx: &Ctx, input: &[u8]) -> Result<bool, Refusal> {
-        let (i, row) = input.split_first().ok_or_else(|| Refusal::new("no row"))?;
-        let t = self.schema.tables.get(*i as usize).ok_or_else(|| Refusal::new("no such table"))?;
-        match self.scope.tables.get(t.name.as_str()) {
-            Some(f) => f(ctx, row),
-            None => Ok(false),
-        }
-    }
-}
-
 impl Domain {
     /// A domain of `S`'s schema, with no functions yet.
     pub fn new<S: Tables>(name: &str, version: &str) -> Domain {
@@ -195,6 +177,7 @@ impl Domain {
             input: I::describe(),
             output: None,
             proc: Some(Arc::new(Mutate { f })),
+            scope: None,
             ask: None,
             watch: None,
             check: check_of::<I>(),
@@ -223,6 +206,7 @@ impl Domain {
             input: I::describe(),
             output: Some(T::describe()),
             proc: None,
+            scope: None,
             ask: Some(ask),
             watch: None,
             check: check_of::<I>(),
@@ -243,6 +227,7 @@ impl Domain {
             input: I::describe(),
             output: Some(T::describe()),
             proc: None,
+            scope: None,
             ask: Some(ask),
             watch: Some(watch),
             check: check_of::<I>(),
@@ -251,13 +236,15 @@ impl Domain {
     }
 
     pub fn scope<S: Tables>(self, name: &str, scope: Scope<S>) -> Domain {
-        let schema = self.schema.clone();
+        let tables = scope.tables;
+        let holds: peer::Scope = Arc::new(move |ctx, table, row| tables.get(table).map_or(Ok(false), |f| f(ctx, row)));
         self.add(Function {
             name: name.into(),
             kind: Kind::Scope,
             input: Type::Unit,
             output: None,
-            proc: Some(Arc::new(Scoped { scope, schema })),
+            proc: None,
+            scope: Some(holds),
             ask: None,
             watch: None,
             check: check_of::<()>(),
@@ -292,9 +279,8 @@ impl Domain {
     pub fn functions(&self) -> Functions {
         let mut c = Functions::default();
         for f in self.fns.values() {
-            if let Some(p) = &f.proc {
-                c.insert(f.name.clone(), p.clone());
-            }
+            let run = f.proc.clone().map(Runs::Procedure).or(f.scope.clone().map(Runs::Scope));
+            run.into_iter().for_each(|r| c.put(f.name.clone(), r));
         }
         c
     }

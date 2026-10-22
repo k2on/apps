@@ -204,7 +204,7 @@ fn module_of(v: &Value) -> Result<ark_peer::Module, String> {
     let mut functions = ark::peer::Functions::default();
     for f in v["functions"].as_array().ok_or("no functions")? {
         let f = f.as_str().ok_or("a function is a name")?;
-        functions.insert(f, all.get(f).ok_or(format!("{name} has no {f}"))?.clone());
+        functions.put(f, all.of(f).ok_or(format!("{name} has no {f}"))?.clone());
     }
     Ok(ark_peer::Module {
         schema,
