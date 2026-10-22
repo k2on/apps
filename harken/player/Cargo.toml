@@ -4,7 +4,7 @@ version = "0.1.0"
 workspace = "../../rust"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's players (docs/plan-v5.md §1.9, S3b): one reconciler that makes a player agree with the account's listening session and says what happened to it, over any Sound — a phone's ExoPlayer through harken/ffi, a Home Assistant speaker in harken-server."
+description = "harken's players (docs/plan-v5.md §1.9, S3b): one reconciler that makes a player agree with the account's listening session and says what happened to it, over any Sound — a phone's ExoPlayer through harken/ffi, a Home Assistant speaker in harken-server, the browser's <audio> in harken-iced."
 
 [dependencies]
 ark = { path = "../../rust/ark" }

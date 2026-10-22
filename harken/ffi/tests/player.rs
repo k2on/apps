@@ -7,7 +7,9 @@
 //! and nobody else sounding, a track's end said once, the session following
 //! the phone and the phone following a seek, a play recorded once by the
 //! output alone, both branches of coming back, a phone unlinked being its
-//! own session, a stall, a press, and the phone's own volume.
+//! own session, a stall, a press, and the phone's own volume; and the
+//! desktop's one case the phone's lacked, a hand-off picking up where the
+//! track stopped.
 //!
 //! Each was falsified once by breaking what it holds in the reconciler
 //! (`harken/player/src/reconcile.rs`); the comment beside each says how.
@@ -316,6 +318,45 @@ fn the_output_obeys_the_session_and_nobody_else_makes_a_sound() {
     let s = laptop.session().unwrap();
     assert!(s.outputs("laptop") && !s.moving_to("laptop"), "the laptop said it had started");
     assert_eq!(phone.sound.s().loads, 1, "the phone loaded once");
+}
+
+/// A hand-off between two players picks up where the track stopped: while
+/// the sound is on its way the session stands where it was, not counting a
+/// sound nobody hears; the laptop, slow to reconcile, loads the track there
+/// and says `started` there; and nobody's position goes back. (The desktop's
+/// own reconciler's case, ported to the one reconciler.)
+///
+/// Falsified by loading where the session's clock counts rather than where
+/// the session stands (`a.clock.position(v.now)` for `a.position(v.now)` in
+/// `drive`): the laptop, a second and a half late, loaded 1,5xx ms on.
+#[test]
+fn a_hand_off_picks_up_where_the_track_stopped() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone", None);
+    let laptop = on(&hall, "laptop", true, "computer", None);
+    phone.call("start", start(&queue(), 0, 40_000, ""));
+    phone.reconcile();
+    assert!(phone.sound.s().playing);
+    phone.call("transfer", json!({ "to": "laptop" }));
+    phone.reconcile();
+    assert!(!phone.sound.s().playing, "silent once the sound is handed on");
+    let handed = phone.active().position(now());
+    assert!((40_000..40_500).contains(&handed), "{handed}");
+    std::thread::sleep(std::time::Duration::from_millis(1_500));
+    assert_eq!(phone.active().position(now()), handed, "standing where it was");
+    laptop.reconcile();
+    assert_eq!(laptop.sound.s().position_ms, handed, "loaded where the track stopped");
+    let s = laptop.session().unwrap();
+    assert!(s.outputs("laptop") && !s.moving_to("laptop"), "and said it had started");
+    let a = s.session.unwrap();
+    assert!(
+        matches!(a.clock, Clock::Playing { at_ms, .. } if at_ms == handed),
+        "started there: {:?}",
+        a.clock
+    );
+    assert!(laptop.active().position(now()) >= handed, "and never back");
+    phone.reconcile();
+    assert!(!phone.sound.s().playing, "and the phone stays quiet");
 }
 
 /// The phone's player holds the queue and moves on through it by itself:

@@ -135,16 +135,18 @@ fn the_keys_on_a_picker_row_join_it_or_move_its_volume() {
 fn a_control_calls_the_groups_transition_or_its_devices() {
     let mut app = app();
     assert_eq!(app.volumed(&Level::Output), Some(Volumed::Group));
-    let (t, _) = app.volume_call(&Volumed::Group, Change::To(50)).unwrap();
-    assert_eq!(t, "set_group_volume");
-    let (t, _) = app.volume_call(&Volumed::Group, Change::By(-5)).unwrap();
-    assert_eq!(t, "nudge_group_volume");
+    use harken_player::{Change as To, Level as L, Press};
+    let loud = |level: L, change: To| Some(Press::Loud { level, change });
+    assert_eq!(app.volume_call(&Volumed::Group, Change::To(50)), loud(L::Group, To::To { level: 50 }));
+    assert_eq!(app.volume_call(&Volumed::Group, Change::By(-5)), loud(L::Group, To::By { delta: -5 }));
     let study = Volumed::Device(STUDY.into());
-    let (t, input) = app.volume_call(&study, Change::Mute).unwrap();
-    assert_eq!(t, "set_mute");
-    assert_eq!(input, crate::listening::input::set_mute(STUDY, false), "muted, so unmuted");
-    let (t, input) = app.volume_call(&study, Change::To(20)).unwrap();
-    assert_eq!((t, input), ("set_volume", crate::listening::input::set_volume(STUDY, 20)));
+    let id = || L::Device { id: STUDY.into() };
+    assert_eq!(
+        app.volume_call(&study, Change::Mute),
+        loud(id(), To::Mute { muted: false }),
+        "muted, so unmuted"
+    );
+    assert_eq!(app.volume_call(&study, Change::To(20)), loud(id(), To::To { level: 20 }));
     assert_eq!(app.volumed(&Level::Device("phone".into())), None, "the phone said no volume");
 
     // Nothing playing: the bar is this device's, which has no volume yet.

@@ -345,7 +345,7 @@ fn a_submenu_is_as_wide_as_its_longest_name() {
 fn enter_opens_a_card_and_h_leaves_a_grid() {
     let mut app = app();
     let _ = app.update(Message::Select(Source::Albums));
-    let first = app.peer.albums[0].name.clone();
+    let first = app.peer.albums()[0].name.clone();
     let _ = app.act(vim::Action::Activate);
     assert_eq!(app.peer.source, Source::Album(first), "a card is a place");
     let _ = app.update(Message::Select(Source::Albums));
