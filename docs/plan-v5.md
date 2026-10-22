@@ -1213,9 +1213,13 @@ refused with its line; and, ignored as they need the host library
 (`cargo build -p harken-ffi --lib`, run here), the twins' metadata equals
 the library's, checksums and all, every one of the library's 83 items
 re-encodes byte for byte, and UniFFI's generators over the built library
-write the checked-in files — each falsified once. Not verified: an APK or
-the xcframework built over the checked-in files (the nix evaluation is;
-`checks.ffi` and `harken-module` ran), an editor's hook in use, a twin
+write the checked-in files — each falsified once; UniFFI's own
+`uniffi-bindgen` over the host's debug library wrote the same two files,
+byte for byte. Not verified: `checks.ffi` (its `diff` of the two files
+against the release library's bindings: the shared disk filled twice
+while the workspace's tests compiled, before it ran; `harken-module`
+passed, and every changed derivation evaluates), an APK or the
+xcframework built over the checked-in files, an editor's hook in use, a twin
 enum against a library (harken has none; the encoding is held by the
 bridge's enums), a domain using what the reader refuses.
 
