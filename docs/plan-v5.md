@@ -578,24 +578,26 @@ separately. Generated Unicode tables are excluded from both.
 
 ### Speed
 
-The same shapes, the same sizes (four and sixteen times apart), the same
-columns (mean, first hundred, last hundred), reported per operation:
+The tables below were recorded by harnesses that printed every shape and
+asserted nothing (`tests/perf.rs` in `rust/ark`, `rust/ark-peer` — once
+`ark-server` — and `harken/domain`, each shape a v4 one: a local mutation,
+the round trip, offline pending, initial sync, the rebase, fan-out, frames,
+harken's mutations, views at 1k/4k/16k rows). T3 replaced them, and they
+are in the history up to its commit. What is measured now is held: each
+crate's `tests/costs.rs` asserts the counts that stay put as the data
+grows, and prints its timings from one ignored test, `timings`, run as
+`cargo test -p CRATE --release --test costs -- --ignored --nocapture`:
 
-| shape | v4 harness | what it measures |
+| crate | held (asserted, each falsified once) | printed by `timings` |
 |---|---|---|
-| a | `ark/tests/perf.rs::perf_a_mutate_alone` | a local mutation, alone, pending depth growing |
-| d | `perf_d_initial_sync` | a client catching up from empty; bytes and time per entry |
-| e | `perf_e_rebase` | a confirmed entry under N pending; per entry and per page |
-| g | `perf_g_authority_and_fanout` | the authority sequencing and fanning out to C connections |
-| h | `perf_h_frames` | encode/decode of each frame; allocations |
-| i | `perf_i_partial_fanout` | the authority serving scoped connections |
-| b, c | `ark-server/tests/perf.rs` | a round trip through the hub; the pump alone; offline pending; storage |
-| harken | `harken/domain/tests/perf.rs` | `add_song`, `playlists`, `playlist_name`, rows examined, allocations |
-| views | new in both | a change against `playlist-with-items`, `top-two-by-pos`, `group-source` at 1k/4k/16k rows: time, entries touched |
+| `ark` | a `Batch` of 256 decoded in ≤ 12 allocations an entry; a peer alone's step allocating the same over a log of 500 and of 8,000; one change on `playlist-with-items`, `top-two-by-pos`, `group-source` reading and allocating the same at 1k and 16k rows | a: a peer alone's add, log of 8,000; h: a `Batch` of 256 decoded; views: a change on each at 16k |
+| `ark-peer` | an offline device's intents writing the same bytes at 100 and 4,000 pending; a fan-out ≤ one allocation per connection; ≤ 400 live bytes per harken `media` row with its two indexes | b: a linked round trip through the hub in process; c: an offline intent at 4,000 pending |
+| `harken-domain` | the rows a mutation reads (`reads_are_bounded_by_what_they_need`); `add_to_playlist` allocating the same at a library of 500 and 8,000; `library` read whole in ≤ 32 allocations an entry | harken `add_song`, a library growing to 8,000 |
 
-The v5 harnesses are written to print the same lines so the two outputs
-diff. Where v5 has no counterpart to a v4 shape (the inbox, the
-`verify` round trip), the line says `n/a` and why.
+`ark-peer/tests/live_memory.rs` holds a live space's memory as before
+(Landed: live fold). The numbers of the tables are not those of the new
+benchmarks' shapes in every case (`a` is now a peer alone over playlists
+of ten): a comparison runs both trees' `timings`.
 
 ### The report
 
