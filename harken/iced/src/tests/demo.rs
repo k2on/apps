@@ -68,8 +68,13 @@ fn a_scanned_cover_is_asked_for_at_the_media_route_and_drawn() {
     let mut app = super::demo_app();
     app.server = "https://harken.example.com".into();
     let (extracted, beside) = (".art/5f3c.png", ".cover/0123456789abcdef/music/Handel/Water Music/cover.jpg");
-    app.peer.albums().iter_mut().find(|a| a.name == "Water Music").unwrap().art = extracted.into();
-    app.peer.artists().iter_mut().find(|a| a.name == "George Frideric Handel").unwrap().art = beside.into();
+    app.peer.albums_mut().iter_mut().find(|a| a.name == "Water Music").unwrap().art = extracted.into();
+    app.peer
+        .artists_mut()
+        .iter_mut()
+        .find(|a| a.name == "George Frideric Handel")
+        .unwrap()
+        .art = beside.into();
     let _ = app.want_covers();
     let at = |path: &str| format!("https://harken.example.com/media/{path}");
     let beside_url = at(".cover/0123456789abcdef/music/Handel/Water%20Music/cover.jpg");
@@ -210,7 +215,7 @@ fn a_compilation_carries_six_works_and_two_performers() {
 fn nobody_is_named_after_a_licence() {
     let peer = fresh();
     let mut credited = Vec::new();
-    for c in &peer.composers() {
+    for c in peer.composers() {
         for w in peer.works_of(&c.name) {
             for take in peer.recordings_of(&w.id) {
                 credited.extend(peer.credits(&take.id).into_iter().map(|c| c.name));

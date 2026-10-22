@@ -235,6 +235,17 @@ impl Peer {
         &self.views.artists.rows
     }
 
+    /// The index pages' rows, to set by hand: a test's covers.
+    #[cfg(test)]
+    pub fn albums_mut(&mut self) -> &mut [Album] {
+        &mut self.views.albums.rows
+    }
+
+    #[cfg(test)]
+    pub fn artists_mut(&mut self) -> &mut [Artist] {
+        &mut self.views.artists.rows
+    }
+
     pub fn composers(&self) -> &[Composer] {
         &self.views.composers.rows
     }
