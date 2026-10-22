@@ -14,6 +14,8 @@ description = "A database explorer for any ArkDB v5 module: its tables and rows,
 [features]
 default = ["ui"]
 ui = ["dep:iced", "dep:arkui", "dep:ark-auth", "dep:ureq", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys", "dep:js-sys"]
+# The admin page's routes on a server (`serve`): ark-peer's server side.
+server = ["dep:ark-peer", "dep:axum", "dep:tokio"]
 
 [dependencies]
 ark = { path = "../ark" }
@@ -22,9 +24,12 @@ serde_json = { workspace = true }
 arkui = { path = "../arkui", optional = true }
 # Signing the admin page in when it is served wider than loopback: the page's
 # own address and the server's `/auth/login`, as the browser peer does.
-ark-auth = { path = "../ark-auth", optional = true }
+ark-auth = { path = "../ark-auth", optional = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ark-peer = { path = "../ark-peer", optional = true }
+axum = { version = "0.7", optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"], optional = true }
 # The admin page run natively against a server: the same requests, blocking,
 # on a thread of their own.

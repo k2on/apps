@@ -157,7 +157,7 @@ pub struct Config {
     /// `docs/plan-guards.md` D4 Where the admin page listens
     /// (`HARKEN_ADMIN_BIND`, what `services.harken.admin.bind` sets; none
     /// without it): nothing asked on loopback and a login holding `admin`
-    /// anywhere wider (`ark_peer::admin`).
+    /// anywhere wider (`ark_explorer::serve`).
     pub admin_bind: Option<String>,
     /// The admin page's static build (`HARKEN_ADMIN_WEB`): `ark-admin`
     /// compiled to wasm. Without it the admin listener serves its API alone.
@@ -582,7 +582,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // sent one when it names a host. A wildcard bind names none, and the
     // address the page is reached at goes in `HARKEN_REDIRECTS`.
     if let Some(bind) = &config.admin_bind {
-        if !ark_peer::admin::is_loopback(bind)
+        if !ark_explorer::serve::is_loopback(bind)
             && !bind.starts_with("0.0.0.0:")
             && !bind.starts_with("[::]:")
         {
@@ -625,12 +625,13 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     // `docs/plan-guards.md` D4 The admin page, where one is asked for.
     if let Some(bind) = &config.admin_bind {
-        server.admin = Some(ark_peer::admin::Admin {
+        let admin = ark_explorer::serve::Admin {
             bind: bind.clone(),
             page: config.admin_web.clone(),
             server: Some(public_url.clone()),
-            catalog: ark_peer::admin::Catalog::of(&hosted.domain),
-        });
+            catalog: ark::domain::Catalog::of(&hosted.domain),
+        };
+        server.admin = Some(admin.routes());
     }
     // Everything the routes above do not match falls through to the page,
     // with the build as its validator: a store path cannot be one, since nix

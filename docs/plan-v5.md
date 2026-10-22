@@ -604,15 +604,17 @@ rust/ark/           the kernel: §1.1–§1.11 and §1.16 — format, json, hash
                     store, log, peer, frames, row, db, domain, plan, dynamic
 rust/ark-macros/    the derives (Row, Input, Describe, Schema) and the attributes
                     that register a function by name
-rust/ark-peer/      the one peer that dials and listens: storage, link, hub, the
-                    app kit, the server's socket, admin listener and web build;
-                    local instances and the peer's own schema (`local`)
+rust/ark-peer/      the one peer that dials and listens: storage, link, hub (on a
+                    thread, `handle`), the app kit; local instances and the
+                    peer's own schema (`local`); the server's socket and web
+                    build behind its `server` feature (axum, tokio)
 rust/ark-ffi/       ark-peer's app kit through UniFFI, for the phones
 rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer (with
                     the `views/` vectors' reference domains, `library`), and
                     `gen kotlin|swift` (a domain's types for the phones)
 rust/ark-auth/      dev sign-in and OpenID Connect
-rust/ark-explorer/  the admin page and the explorer over a replica
+rust/ark-explorer/  the admin page (its routes behind `server`) and the explorer
+                    over a replica
 rust/arkui/         the iced components
 harken/domain/      harken's domain, a crate of plain Rust
 harken/server/, harken/iced/, harken/ffi/ (with android/ and ios/)

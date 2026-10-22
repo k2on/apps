@@ -7,8 +7,8 @@ description = "ArkDB's peer for an app in another language (docs/plan-v5.md §1.
 
 [dependencies]
 ark = { path = "../ark" }
-ark-peer = { path = "../ark-peer" }
-ark-auth = { path = "../ark-auth" }
+ark-peer = { path = "../ark-peer", default-features = false }
+ark-auth = { path = "../ark-auth", default-features = false }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 

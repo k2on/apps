@@ -9,9 +9,10 @@
 //!   calls, and keeps the maintained views a UI draws (§1.10);
 //! - **a server** ([`Peer::serve`]) is the authority of each space; it
 //!   **listens** (`hub`: the connections, each with its identity and its
-//!   feed, routed; the journal beside the log) and, natively, on a socket
-//!   (`serve`: the hub on a thread of its own, the sync socket, the admin
-//!   listener, the web build's routes and sign-in).
+//!   feed, routed; the journal beside the log), natively on a thread of its
+//!   own (`handle`) and, with the `server` feature, on a socket (`serve`:
+//!   the sync socket, the admin listener, the web build's routes and
+//!   sign-in — axum and tokio, which a phone or a browser never links).
 //!
 //! It is sans-io like the machines: a UI, a test or the hub's thread feeds
 //! it what happens (an intent, a frame, a connection up or down, the clock)
@@ -67,10 +68,10 @@ pub mod local;
 pub mod signed;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod admin;
-#[cfg(not(target_arch = "wasm32"))]
+pub mod handle;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod serve;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod web;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -87,12 +88,14 @@ use ark::{Domain, Refusal};
 
 pub use app::{nobody, Standing, Status, Update};
 pub use disk::{Disk, Files, Memory};
+#[cfg(not(target_arch = "wasm32"))]
+pub use handle::{dev, Authenticate, Handle};
 pub use hub::{ConnId, Deliver};
 pub use instance::{Fold, Instance};
 pub use link::{Event, Pumped, Wake};
 pub use local::{Local, Logins, Shared};
-#[cfg(not(target_arch = "wasm32"))]
-pub use serve::{dev, Authenticate, Handle, Running, Server};
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub use serve::{Running, Server};
 
 /// One space's module: its schema, the functions a peer runs by name, and
 /// the domain its views are made by.

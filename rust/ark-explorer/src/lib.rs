@@ -40,6 +40,8 @@
 pub mod data;
 pub mod edit;
 pub mod form;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub mod serve;
 pub mod value;
 pub mod wire;
 

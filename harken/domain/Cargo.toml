@@ -11,10 +11,10 @@ path = "src/lib.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-ark-auth = { path = "../../rust/ark-auth" }
+ark-auth = { path = "../../rust/ark-auth", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-ark-peer = { path = "../../rust/ark-peer" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-dev = { path = "../../rust/ark-dev" }

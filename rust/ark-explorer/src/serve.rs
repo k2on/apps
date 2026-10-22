@@ -1,5 +1,6 @@
-//! The admin page (`docs/plan-guards.md` D4): the explorer, compiled to
-//! wasm as a browser peer is, served on a listener of its own — bound to
+//! The admin page's routes (`docs/plan-guards.md` D4; the `server`
+//! feature): the explorer, compiled to wasm as a browser peer is, served on
+//! a listener of its own — bound to
 //! loopback by default — over the log's authority: its store, its log and
 //! the connections, writing as the authority.
 //!
@@ -12,7 +13,8 @@
 //!        ── /admin/api/author    a function of the domain, by name, as the authority
 //! ```
 //!
-//! Each body is a value of §1.1's codec in hex (`ark_explorer::wire`).
+//! Each body is a value of §1.1's codec in hex ([`crate::wire`]). A server
+//! is handed them as [`Admin::routes`] (`ark_peer::Server::admin`).
 //!
 //! **Who may open it.** Bound to loopback, anyone who can reach the port is
 //! on the machine already, and it asks nothing. Bound wider, every request
@@ -31,17 +33,18 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ark::domain::Catalog;
 use ark::schema::Space;
-use ark_explorer::wire::{self, Hello, State};
-pub use ark_explorer::Catalog;
-use ark_explorer::{crud_of, Connection, CrudVerbs, Line};
+use ark_peer::serve::AdminRoutes;
+use ark_peer::{Authenticate, Handle, Peer};
 use axum::extract::State as With;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 
-use crate::{Authenticate, Handle, Peer};
+use crate::wire::{self, Hello, State};
+use crate::{crud_of, Connection, CrudVerbs, Line};
 
 /// The role a login must hold to open a wider-bound admin page.
 pub const ROLE: &str = "admin";
@@ -60,6 +63,14 @@ pub struct Admin {
     pub server: Option<String>,
     /// The domain the log's functions are, described.
     pub catalog: Catalog,
+}
+
+impl Admin {
+    /// Its bind and its routes, as a server takes them.
+    pub fn routes(self) -> (String, AdminRoutes) {
+        let bind = self.bind.clone();
+        (bind, Box::new(move |hub, authenticate| router(self, hub, authenticate)))
+    }
 }
 
 /// Whether `bind` is plainly loopback: a loopback address, or `localhost`.
@@ -97,7 +108,7 @@ pub fn router(admin: Admin, hub: Handle, authenticate: Authenticate) -> Router {
         .route("/", get(|| async { Redirect::to("/admin/") }))
         .with_state(ctx);
     if let Some(dir) = page {
-        r = r.nest_service("/admin", crate::web::router(dir, None));
+        r = r.nest_service("/admin", ark_peer::web::router(dir, None));
     }
     r
 }

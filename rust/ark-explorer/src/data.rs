@@ -150,49 +150,7 @@ pub trait LogView {
     fn connections(&self) -> Vec<Connection>;
 }
 
-/// What the explorer knows of a domain (§1.16): its schema, and per
-/// function its name, its kind, and the descriptions of its input, of what
-/// it answers and of its input's refinements — what a form is drawn from.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Catalog {
-    pub schema: Schema,
-    pub functions: Vec<Described>,
-}
-
-/// One function, described.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Described {
-    pub name: String,
-    pub kind: Kind,
-    pub input: Type,
-    pub output: Option<Type>,
-    pub checks: Vec<(String, Vec<String>)>,
-}
-
-impl Catalog {
-    /// A domain's, as it registers its functions.
-    pub fn of(d: &Domain) -> Catalog {
-        let functions = d
-            .fns
-            .values()
-            .map(|f| Described {
-                name: f.name.clone(),
-                kind: f.kind,
-                input: f.input.clone(),
-                output: f.output.clone(),
-                checks: f.checks.clone(),
-            })
-            .collect();
-        Catalog {
-            schema: (*d.schema).clone(),
-            functions,
-        }
-    }
-
-    pub fn get(&self, name: &str) -> Option<&Described> {
-        self.functions.iter().find(|f| f.name == name)
-    }
-}
+pub use ark::domain::{Catalog, Described};
 
 /// What answers a query and checks an input for the explorer: the domain,
 /// where the host holds it.
