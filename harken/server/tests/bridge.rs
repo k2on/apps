@@ -1380,6 +1380,98 @@ fn a_group_of_speakers_and_its_volume_over_real_sockets() {
     rt.block_on(server.stop());
 }
 
+/// Two speakers of one session act on one moment of it, however the hub's
+/// jobs interleave: the study is joined to the kitchen and taken out again,
+/// four times, while another account's phone presses pause and play as
+/// fast as it can — every press an entry of the volatile space, fanned out
+/// to both speakers' machines while the house reads and acts — and the
+/// house is asked for each join and each unjoin once, never a join undone
+/// and done again. Over sockets, where each speaker read the session off
+/// its own machine, it was joined, unjoined and joined again one run in two
+/// (`docs/plan-v5.md`, "Landed: speakers agree").
+///
+/// Falsified by the house deciding for the study on the session as it read
+/// it the turn before (a speaker a moment behind its neighbour): the house
+/// was asked join, unjoin, join in one round, two runs in three.
+#[test]
+fn two_speakers_of_one_session_act_on_one_moment_of_it() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.sonos(KITCHEN, 0.3, &[KITCHEN]);
+    fake.sonos(STUDY, 0.6, &[STUDY]);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(two_sonos(url)));
+
+    let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
+    told(&mut phone, "two speakers that say what they can do", |s| {
+        [KITCHEN, STUDY].iter().all(|e| {
+            s.device(e)
+                .is_some_and(|d| d.can_volume && d.family.is_some())
+        })
+    });
+    call(&mut phone, "start", input::start(&queue(&["a"]), 0, 0, ""));
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 0.5);
+    call(&mut phone, "transfer", input::transfer(KITCHEN));
+    told(&mut phone, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN)
+    });
+    let mut other = device(&server, "ann", Kind::Phone, "Moto", true);
+    told(&mut other, "ann's phone standing", |s| s.devices.len() == 3);
+    call(&mut other, "start", input::start(&queue(&["b"]), 0, 0, ""));
+    told(&mut other, "ann's phone playing", |s| s.session.is_some());
+    std::thread::sleep(Duration::from_millis(200));
+    fake.take();
+
+    // Until the session says `want` and the house has been asked for every
+    // one of `expect`, and a while after for anything more, the other
+    // account pressing all the while: every group call the house was asked.
+    let mut presses = 0usize;
+    let mut churn = |phone: &mut Peer, want: &dyn Fn(&Listening) -> bool, expect: &[&str]| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut seen: Vec<String> = vec![];
+        let mut since: Option<std::time::Instant> = None;
+        loop {
+            let press = if presses % 2 == 0 { "pause" } else { "play" };
+            if other.call(press, input::none()).is_ok() {
+                presses += 1;
+            }
+            other.pump();
+            phone.pump();
+            seen.extend(
+                fake.take()
+                    .into_iter()
+                    .filter(|(c, _)| c == "join" || c == "unjoin")
+                    .map(|(c, _)| c),
+            );
+            let there = phone.live_settled()
+                && phone.listening(SPEAKERS).is_some_and(|s| want(&s))
+                && seen.len() >= expect.len();
+            match (there, since) {
+                (true, None) => since = Some(std::time::Instant::now()),
+                (true, Some(t)) if t.elapsed() > Duration::from_millis(400) => return seen,
+                (false, _) => since = None,
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "never settled on {expect:?}; asked {seen:?}"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    for round in 0..4 {
+        call(&mut phone, "join", input::member(STUDY));
+        let asked = churn(&mut phone, &|s: &Listening| s.grouped(), &["join"]);
+        assert_eq!(asked, ["join"], "round {round}: joined once");
+        call(&mut phone, "unjoin", input::member(STUDY));
+        let asked = churn(&mut phone, &|s: &Listening| !s.grouped(), &["unjoin"]);
+        assert_eq!(asked, ["unjoin"], "round {round}: unjoined once");
+    }
+    assert!(presses > 100, "the other account pressed {presses} times");
+    rt.block_on(server.stop());
+}
+
 /// The bug as somebody heard it: a track played on the speaker, playing
 /// fine, while every bar's position ran to six seconds and went back to
 /// nothing, over and over. The house says a playing speaker's position as it
