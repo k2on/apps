@@ -1649,9 +1649,8 @@ fn leave_more_intents_and_join_again() {
 /// and killed a tenth, a half, nine tenths and ninety-nine hundredths of
 /// that time later — each a directory of its own — and started again with
 /// `--server`. Whatever the kill cut, the restart finishes the join: the
-/// client keeps the chain it hands over (`joining`) until the server has
-/// answered any of it, and one killed before it wrote that reopens alone
-/// and joins at open. Every intent is on the server once.
+/// client keeps the chain as pending intents until the server answers each,
+/// and one killed before it wrote that reopens alone and joins at open. Every intent is on the server once.
 ///
 /// Falsified on v5 by the peer opening an alone directory with `--server`
 /// and not joining: the ones killed before the join was written stay

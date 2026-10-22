@@ -1,8 +1,9 @@
 //! What the fuzzer (`ark-dev`) found in going alone, joining and the
 //! horizon, each held here at the machine: an intent refused alone draws
-//! no `local`; a joined chain with a gap is taken whole by a server that
-//! moved on; a `Join` lost on the way is handed over again on the next
-//! connection, the intents made since pushed after it; a push of an intent
+//! no `local`, and one pending that refuses as the device goes alone is
+//! kept for its server, so a joined chain has no gap; a `Join` lost on the
+//! way is pushed again on the next connection, the intents made since
+//! after it; a push of an intent
 //! sequenced below a reopened log's horizon is acknowledged there; and a
 //! volatile push overtaken by a later one of its session is refused.
 
@@ -34,53 +35,42 @@ fn an_intent_refused_alone_draws_no_local() {
     assert_eq!(eve.log().entries()[0].entry.local, 1);
 }
 
-/// A chain whose `local`s skip one — an intent eve refused herself as she
-/// went alone — is sequenced anew whole by a server that moved on, the gap
-/// not held for. Falsified by `adopt` pushing the chain without taking a
-/// gap as final: the entry after it waited and stayed pending.
+/// An intent pending as the device went alone that refused then is kept,
+/// unrun, and pushed in its place at the join: the server, which never saw
+/// it, judges it and takes the chain after it, with no gap. It stands for
+/// one a rebase left refusing (its input made to name no playlist).
+/// Falsified by `alone` refusing it as an authority's own (`decide`): it
+/// was told refused, and (that check dropped) its `local` was a gap at the
+/// server, the playlist after it pending still.
 #[test]
-fn a_chain_with_a_gap_is_taken_whole() {
+fn an_intent_refused_going_alone_is_the_servers_to_judge() {
     let mut server = authority(demo::cas());
     let mut bob = replica("bob", demo::cas());
     let o = bob.step(mutate(CREATE, create_input("Bob's"), 1));
-    deliver_up(&mut server, &who("bob"), &o);
+    let (_, f) = deliver_up(&mut server, &who("bob"), &o);
     let mut eve = replica("eve", demo::cas());
-    eve.step(Input::Alone);
-    eve.step(mutate(CREATE, create_input("Road"), 1));
-    eve.step(mutate(ADD, pair_input(&road(), "t5"), 2));
-    let mut o = eve.step(Input::Join);
-    for f in &mut o {
-        if let Output::Send(b) = f {
-            if let Ok(Frame::Page { space, from, mut logged }) = Frame::dec(b) {
-                logged[1].entry.local = 3;
-                logged[1].entry.id = EntryId::of(Origin::named("eve-session"), 3);
-                *b = Frame::Page { space, from, logged }.enc();
-            }
-        }
+    eve.step(down(&f[0]));
+    let bobs = EntryId::of(Origin::named("bob-session"), 1).draw(0);
+    eve.step(mutate(ADD, pair_input(&bobs, "t1"), 2));
+    eve.pending[0].entry.input = pair_input(&[9; 16], "t1");
+    let o = eve.step(Input::Alone);
+    assert!(!o.iter().any(|x| matches!(x, Output::Refused { .. })) && eve.pending.len() == 1, "{o:?}");
+    eve.step(mutate(CREATE, create_input("Road"), 3));
+    let o = eve.step(Input::Join);
+    let (back, fan) = deliver_up(&mut server, &who("eve"), &o);
+    for b in fan.iter().chain(&back) {
+        eve.step(down(b));
     }
-    let (acks, _) = deliver_up(&mut server, &who("eve"), &o);
-    assert_eq!(
-        acks.iter()
-            .filter(|f| matches!(
-                f,
-                Frame::Verdict {
-                    verdict: Verdict::Ok { .. },
-                    ..
-                }
-            ))
-            .count(),
-        2,
-        "{acks:?}"
-    );
-    assert_eq!(server.log().head().0, 3);
+    assert_eq!(server.log().head().0, 2, "{back:?}");
+    assert!(eve.pending.is_empty() && eve.store == server.store);
 }
 
-/// A `Join` lost on the way: the next connection hands the chain over
-/// again rather than pushing its entries one by one, and an intent made
-/// since is pushed after it. Falsified by `connected` pushing the pending
-/// intents whatever the join: its frames were a `Hello` and three pushes.
+/// A `Join` lost on the way: the chain is pending intents, pushed again on
+/// the next connection, an intent made since after it. Falsified by `join`
+/// leaving the chain out of the pending intents: the next connection pushed
+/// one intent, and the playlist was lost.
 #[test]
-fn a_lost_join_is_handed_over_again() {
+fn a_lost_join_is_pushed_again() {
     let mut eve = replica("eve", demo::cas());
     eve.step(Input::Alone);
     eve.step(mutate(CREATE, create_input("Road"), 1));
@@ -89,7 +79,7 @@ fn a_lost_join_is_handed_over_again() {
     let o = eve.step(Input::Connected);
     let f = sends(&o);
     assert!(
-        matches!(&f[..], [Frame::Hello { .. }, Frame::Page { logged, .. }, Frame::Page { logged: pushed, .. }] if logged.len() == 1 && logged[0].seq == 1 && pushed[0].seq == 0 && pushed[0].entry.local == 2),
+        matches!(&f[..], [Frame::Hello { .. }, Frame::Page { logged, .. }] if logged.iter().map(|l| (l.seq, l.entry.local)).eq([(0, 1), (0, 2)])),
         "{f:?}"
     );
     let mut server = authority(demo::cas());
@@ -97,14 +87,7 @@ fn a_lost_join_is_handed_over_again() {
     for b in fan.iter().chain(&back) {
         eve.step(down(b));
     }
-    assert!(eve.pending.is_empty() && eve.store == server.store);
-    let again = sends(&eve.step(Input::Connected));
-    assert!(
-        !again
-            .iter()
-            .any(|f| matches!(f, Frame::Page { logged, .. } if logged.iter().any(|l| l.seq > 0))),
-        "answered, it is not handed over again"
-    );
+    assert!(eve.pending.is_empty() && eve.store == server.store && server.log().head().0 == 2);
 }
 
 /// A log reopened from a snapshot above an intent's sequence has no verdict

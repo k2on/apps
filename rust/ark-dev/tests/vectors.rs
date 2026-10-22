@@ -26,13 +26,11 @@ fn space(s: Space) -> &'static str {
     ["durable", "volatile"][s as usize]
 }
 
-/// A frame's name: who writes it, its kind, its space. A client's page is
-/// its intents or, sequenced, a chain it made alone; a verdict is named by
-/// its own kind.
+/// A frame's name: who writes it, its kind, its space; a verdict is named
+/// by its own kind.
 fn name(f: &Frame, client: bool) -> String {
     let word = |d: String| d.split([' ', '{', '(']).next().unwrap().to_lowercase();
     let kind = match f {
-        Frame::Page { logged, .. } if client && logged.first().is_some_and(|l| l.seq > 0) => "chain".into(),
         Frame::Verdict { verdict, .. } => format!("verdict-{}", word(format!("{verdict:?}"))),
         _ => word(format!("{f:?}")),
     };
@@ -129,7 +127,6 @@ fn protocol() {
     for name in [
         "client-hello-volatile",
         "client-page-durable",
-        "client-chain-durable",
         "server-verdict-ok-volatile",
         "server-page-volatile",
         "server-snapshot-durable",

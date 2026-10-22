@@ -38,8 +38,7 @@
 //! runs it, and logs it with its facts. An origin is bound to the actor
 //! whose intents first came from it; another's pushed from it is refused. It runs exactly the functions its program
 //! was built with, by name (§1.16): nothing it is sent is code. An intent naming any other is `Held` — the device keeps
-//! it pending and pushes it again on its next connection — and a chain
-//! handed over with one is refused. A held intent keeps its `local`: those
+//! it pending and pushes it again on its next connection. A held intent keeps its `local`: those
 //! pushed after it from its origin wait on the authority, in order, and are
 //! judged when it is — pushed again once the function is there, or when
 //! the driver says it has more (`Input::Loaded`), each answer then
@@ -70,15 +69,13 @@
 //!
 //! **Going alone and joining.** `Alone` makes a replica an authority over
 //! its own log from where it is (the fork), sequencing its pending intents
-//! and every one after. `Join` hands the chain above the fork to a server
-//! as a page of it (§1.11) and turns back into a replica, the chain its
-//! pending intents: a server whose head the chain links onto adopts the chain whole when its own run of every
-//! entry gives the entry's facts, and refuses every entry of it when one
-//! does not; a server that moved on sequences them anew as pushes, a gap
-//! in the chain's `local`s being one the device refused itself, and the
-//! peer rebases onto what it answers. Until the server has answered any of
-//! the chain, a new connection hands it over again rather than pushing its
-//! entries one by one, which a gap would hold.
+//! and every one after; a pending intent that refuses then stays pending,
+//! unrun, the server's to judge. `Join` turns back into a replica, the
+//! chain above the fork its pending intents beside those, in the order
+//! they were authored, and pushes them as after any connection: the server
+//! judges each as the push it is, and the peer rebases onto what it
+//! answers. A chain is never taken whole: an entry refused loses that
+//! entry, not the chain.
 //!
 //! **Live state is a second machine** (§1.9): a peer [`Peer::in_space`]
 //! `Volatile` is this machine over the volatile tables, sharing the
@@ -409,9 +406,6 @@ pub struct Peer {
     /// The version of the domain this peer runs, in every `Hello` beside
     /// its schema's hash: what an operator reads a fleet's spread by.
     pub version: String,
-    /// The chain a join handed over, until the server has answered any of
-    /// it: a connection made before then hands it over again.
-    pub joining: Option<(Seq, EntryHash, Vec<Logged>)>,
     /// The last entry whose state is not this peer's own derivation: one
     /// logged under another schema (§1.2). An authority answers a `Hello`
     /// below it with the snapshot at its head.
@@ -494,7 +488,6 @@ impl Peer {
             served: BTreeMap::new(),
             device: None,
             version: String::new(),
-            joining: None,
             foreign: None,
             faith: false,
         }
@@ -660,10 +653,13 @@ impl Peer {
 
     /// Runs the pending intents again, in order, over the store as it is;
     /// one that now refuses stays pending with no changes, the authority's
-    /// to judge.
+    /// to judge. A device alone keeps its own unrun: they are its server's.
     fn redo_pending(&mut self, o: &mut Out) {
         for p in std::mem::take(&mut self.pending) {
-            let changes = self.attempt(&p.entry, o).unwrap_or_default();
+            let changes = match self.is_authority() {
+                true => vec![],
+                false => self.attempt(&p.entry, o).unwrap_or_default(),
+            };
             self.pending.push(Pending::new(p.entry, changes));
         }
     }
@@ -720,22 +716,13 @@ impl Peer {
     /// An authority's own intent, sequenced, and the verdict told.
     fn decide(&mut self, entry: Entry, o: &mut Out) {
         let id = entry.id;
-        let v = self.sequence(entry, None, o);
+        let v = self.sequence(entry, o);
         o.out.push(v.map_or_else(|why| Output::Refused { id, why }, |_| Output::Confirmed(id)));
     }
 
-    /// The authority's judgment of one intent: run, log, tell everyone. With
-    /// `expect`, the facts must be those or it is refused.
-    fn sequence(&mut self, entry: Entry, expect: Option<&[Change]>, o: &mut Out) -> Result<Seq, String> {
-        let mut r = self.attempt(&entry, o);
-        if let (Ok(facts), Some(x)) = (&r, expect) {
-            if facts != x {
-                self.store
-                    .apply_all(&facts.iter().rev().map(Change::inverse).collect::<Vec<_>>())
-                    .expect("its inverse applies");
-                r = Err(Refusal::new("its facts are not what this authority's run of it gives"));
-            }
-        }
+    /// The authority's judgment of one intent: run, log, tell everyone.
+    fn sequence(&mut self, entry: Entry, o: &mut Out) -> Result<Seq, String> {
+        let r = self.attempt(&entry, o);
         self.judged(entry, r, o)
     }
 
@@ -800,8 +787,7 @@ impl Peer {
         match (f, self.is_authority(), from) {
             (Frame::Hello { cursor, hash, .. }, true, _) if scoped.is_some() => self.serve_scoped(&scoped.unwrap(), cursor, hash, o),
             (Frame::Hello { cursor, hash, .. }, true, _) => self.serve(cursor, hash, o),
-            // A chain sequenced alone, handed over; or intents, each a push.
-            (Frame::Page { from, logged, .. }, true, Some(who)) if logged.first().is_some_and(|l| l.seq > 0) => self.adopt(&who, from, logged, o),
+            // A peer's intents, each a push.
             (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
             (Frame::Snapshot { snapshot, .. }, false, _) => self.reset(snapshot, o),
@@ -1000,7 +986,7 @@ impl Peer {
     fn judge(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Frame {
         let (id, space) = (entry.id, self.space);
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-        let verdict = match self.sequence(entry, None, o) {
+        let verdict = match self.sequence(entry, o) {
             Ok(seq) => Verdict::Ok { seq },
             Err(why) => Verdict::Refused { why },
         };
@@ -1049,72 +1035,6 @@ impl Peer {
             }
             first = false;
         }
-    }
-
-    /// A chain made alone, handed over from its fork at `at`: adopted when
-    /// it links onto this log's head.
-    fn adopt(&mut self, who: &Who, at: Seq, chain: Vec<Logged>, o: &mut Out) {
-        let fresh = !chain.iter().any(|l| self.journal().verdicts.contains_key(&l.entry.id));
-        let (n, h) = self.log().head();
-        if !fresh || n != at || !chain[0].links(&h) {
-            // A chain is its origin's whole history above the fork: a gap in
-            // it is an intent the device refused itself, never to come. One
-            // naming a function this authority does not run is refused, not
-            // held: a chain is handed over once.
-            for l in chain {
-                let mine = l.entry.id_checks() && !self.journal().others(&l.entry.origin, &who.actor);
-                if mine && l.entry.local > self.journal().last_of(&l.entry.origin) + 1 {
-                    self.journal().pass(l.entry.origin, &who.actor, l.entry.local - 1);
-                }
-                let judged = self.journal().verdicts.contains_key(&l.entry.id);
-                match self.functions.get(&l.entry.func) {
-                    None if !judged && mine => {
-                        let why = format!("no function {}", l.entry.func);
-                        self.refuse(&l.entry, why, o)
-                    }
-                    _ => self.push(who, l.entry, o),
-                }
-            }
-            return;
-        }
-        let (store, role) = (self.store.clone(), self.role.clone());
-        let mut done = Out::default();
-        for l in &chain {
-            let mut e = l.entry.clone();
-            (e.actor, e.session, e.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-            let owned = e.id_checks() && !self.journal().others(&e.origin, &who.actor);
-            if !owned || self.sequence(e, Some(&l.facts), &mut done).is_err() {
-                (self.store, self.role) = (store, role);
-                let why = match self.functions.get(&l.entry.func) {
-                    None => format!("the chain's function at {} is not one this authority runs", l.seq),
-                    Some(_) => format!("the chain's facts at {} are not what this authority's run gives", l.seq),
-                };
-                for l in &chain {
-                    self.refuse(&l.entry, why.clone(), o);
-                }
-                return;
-            }
-        }
-        o.told.extend(done.told);
-        o.out.extend(done.out);
-        for (k, l) in chain.iter().enumerate() {
-            o.send(Frame::Verdict {
-                space: self.space,
-                id: l.entry.id,
-                verdict: Verdict::Ok { seq: n + 1 + k as Seq },
-            });
-        }
-    }
-
-    /// An intent refused without being run: its verdict kept, its `local`
-    /// passed.
-    fn refuse(&mut self, e: &Entry, why: String, o: &mut Out) {
-        self.verdict(e.origin, &e.actor, e.local, e.id, Verdict::Refused { why: why.clone() });
-        o.send(Frame::Verdict {
-            space: self.space,
-            id: e.id,
-            verdict: Verdict::Refused { why },
-        });
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.
@@ -1280,21 +1200,7 @@ impl Peer {
         }
         self.asked = None;
         self.ask(o);
-        match self.joining.take() {
-            Some(j) if self.pending.first().map(|p| p.entry.id) == j.2.first().map(|l| l.entry.id) => {
-                let (from, _, logged) = j.clone();
-                let all = self.pending.clone();
-                self.pending.retain(|p| !logged.iter().any(|l| l.entry.id == p.entry.id));
-                o.send(Frame::Page {
-                    space: self.space,
-                    from,
-                    logged,
-                });
-                self.repush(o);
-                (self.pending, self.joining) = (all, Some(j));
-            }
-            _ => self.repush(o),
-        }
+        self.repush(o);
     }
 
     fn alone(&mut self, o: &mut Out) {
@@ -1307,36 +1213,43 @@ impl Peer {
             journal: Journal { fork, ..Journal::default() },
         };
         for p in std::mem::take(&mut self.pending) {
-            self.decide(p.entry, o);
+            let id = p.entry.id;
+            match self.attempt(&p.entry, o) {
+                Ok(facts) => {
+                    let _ = self.judged(p.entry, Ok(facts), o);
+                    o.out.push(Output::Confirmed(id));
+                }
+                // Kept for the server, whose `local`s it would otherwise skip.
+                Err(_) => self.pending.push(Pending::new(p.entry, vec![])),
+            }
         }
     }
 
+    /// The chain above the fork made pending intents, its facts their
+    /// changes, with those kept unrun as it went alone among them in the
+    /// order they were authored (one already in the chain is not two), the
+    /// log made durable at the fork; then a `Hello` there and every pending
+    /// intent pushed, as on any connection.
     fn join(&mut self, o: &mut Out) {
         let Role::Authority {
-            journal: Journal { fork: Some((at, hash)), .. },
+            journal: Journal { fork: Some((at, _)), .. },
         } = self.role
         else {
             return;
         };
         let chain: Vec<Logged> = self.log().after(at).collect();
         self.store.log_truncate(at);
-        self.pending = chain.iter().map(|l| Pending::new(l.entry.clone(), l.facts.clone())).collect();
-        self.role = Role::Replica;
-        self.asked = Some(at);
-        o.send(Frame::Hello {
-            space: self.space,
-            cursor: at,
-            hash: Some(hash),
-            device: self.device.clone(),
-            schema: self.store.schema_hash(),
-            version: self.version.clone(),
-        });
-        self.joining = Some((at, hash, chain.clone()));
-        o.send(Frame::Page {
-            space: self.space,
-            from: at,
-            logged: chain,
-        });
+        let mut pending: Vec<Pending> = chain.into_iter().map(|l| Pending::new(l.entry, l.facts)).collect();
+        for p in std::mem::take(&mut self.pending) {
+            let e = &p.entry;
+            if pending.iter().all(|q| q.entry.id != e.id) {
+                let at = pending.iter().position(|q| (q.entry.origin, e.local < q.entry.local) == (e.origin, true));
+                pending.insert(at.unwrap_or(pending.len()), p);
+            }
+        }
+        (self.pending, self.role) = (pending, Role::Replica);
+        o.persist(Record::Rows(self.confirmed_rows()));
+        self.connected(o);
     }
 
     /// Moves the horizon to `n`, at most the head (a device alone keeps

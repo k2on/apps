@@ -497,7 +497,7 @@ impl Peer {
             epoch: st.epoch,
             cursor: st.cursor,
             pending: st.pending as u64,
-            joining: st.joining,
+            joining: false,
             user: st.user,
             session: s.peer.me().session.clone(),
             alone: st.alone,

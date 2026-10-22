@@ -4,8 +4,7 @@
 //! `local` and actor (`origin`), the intents it refused (`verdict`), those
 //! waiting behind a held one (`waiting`) — and its volatile space as it
 //! last closed (`volatile`); a device's replica (`replica`: its origin,
-//! the last `local` drawn, who last signed in, its fork and the chain it
-//! hands over) and its pending intents (`pending`). And an app's logins
+//! the last `local` drawn, who last signed in, its fork) and its pending intents (`pending`). And an app's logins
 //! ([`Logins`]), a local instance of `ark-auth`'s schema.
 
 use std::io;
@@ -18,7 +17,7 @@ use ark::prelude::{Deserialize, Row, Schema, Serialize};
 use ark::row::Bytes;
 use ark_auth::remember::Remembered;
 
-use crate::{Disk, Instance, Joining};
+use crate::{Disk, Instance};
 
 /// A server's: an origin's last `local` judged, and the actor it is bound
 /// to.
@@ -67,8 +66,7 @@ pub struct LiveRow {
 }
 
 /// A device's, one row: its origin and the last `local` drawn from it,
-/// who last signed in on it, its fork while alone, and the chain it hands
-/// over while joined unanswered.
+/// who last signed in on it, and its fork while alone.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[ark(table = "replica")]
 pub struct Replica {
@@ -81,7 +79,6 @@ pub struct Replica {
     pub actor: Option<String>,
     pub session: String,
     pub fork: Option<(Seq, EntryHash)>,
-    pub joining: Option<Joining>,
 }
 
 /// A device's: one of its own intents not yet confirmed, by its `local`.

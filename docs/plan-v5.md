@@ -317,10 +317,10 @@ entries the authority itself authors, through the same `Mutate` input;
 there is no second door.
 
 **Going alone and joining.** An `Authority { journal }` sequences its own
-intents; `join` hands its chain to a server, which adopts it by applying
-its facts (a chain whose facts disagree with its own run is refused, as
-v4's `FactsDiffer` is) and answers with the sequences it assigned; the
-peer rebases its chain onto them. Both are the machine's own transitions.
+intents; `join` turns its chain above the fork into pending intents,
+pushed as after any connection, and the server judges each as the push it
+is — one refused loses that entry, not the chain; the peer rebases onto
+what it answers. Both are the machine's own transitions.
 
 ### 1.8 Partial sync is a view
 

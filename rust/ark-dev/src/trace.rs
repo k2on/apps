@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::hash::{hex, unhex};
-use ark::log::{Durable, EntryId, Logged, Origin};
+use ark::log::{Durable, EntryId, Origin};
 use ark::peer::{Input, Output, Peer, Role, Who};
 use ark::schema::{Schema, Space};
 use ark::store::Change;
@@ -93,10 +93,7 @@ pub fn record(from: &str, c: &ark_peer::Peer) -> String {
         .flatten()
         .map(|(act, out, at)| {
             let step = match act {
-                Act::Open(w, o, f, j) => {
-                    let joining = j.clone().map(|(n, h, c)| hex(&((n, h), c).to_bytes()));
-                    json!({"fork": f.map(|(n, h)| json!([n, h.hex()])), "joining": joining, "origin": hex(&o.0), "t": "open", "who": who(w)})
-                }
+                Act::Open(w, o, f) => json!({"fork": f.map(|(n, h)| json!([n, h.hex()])), "origin": hex(&o.0), "t": "open", "who": who(w)}),
                 Act::SignIn(w, o) => json!({"origin": hex(&o.0), "t": "sign_in", "who": who(w)}),
                 Act::Step(s, i) => {
                     let out: Vec<Value> = out.iter().map(output).collect();
@@ -153,13 +150,10 @@ impl Player {
     /// One act; for a step, what the machine says.
     pub fn act(&mut self, a: &Act) -> Vec<Output> {
         match a {
-            Act::Open(w, o, f, j) => {
+            Act::Open(w, o, f) => {
                 (self.log, self.live) = (self.fresh(w, *o, Space::Durable), self.fresh(w, *o, Space::Volatile));
-                if let Some(l) = &mut self.log {
-                    if f.is_some() {
-                        l.role = ark_peer::alone_at(*f);
-                    }
-                    l.joining = j.clone();
+                if let Some(l) = self.log.as_mut().filter(|_| f.is_some()) {
+                    l.role = ark_peer::alone_at(*f);
                 }
             }
             Act::SignIn(w, o) => {
@@ -169,7 +163,6 @@ impl Player {
                     if !same {
                         (l.origin, l.local) = (*o, 0);
                     }
-                    l.joining = l.joining.take().filter(|_| (&l.me.actor, &l.me.roles) == (&w.actor, &w.roles));
                     l.me = w.clone();
                 }
                 let local = self.live.as_ref().filter(|_| same).map_or(0, |x| x.local);
@@ -307,13 +300,7 @@ pub fn replay(text: &str) -> Result<usize, String> {
                 } else {
                     Some((f[0].as_i64().ok_or("no fork")?, hash(&f[1], ark::hash::EntryHash)?))
                 };
-                let j = &s["joining"];
-                let joining = if j.is_null() {
-                    None
-                } else {
-                    Some(<((i64, ark::hash::EntryHash), Vec<Logged>)>::from_bytes(&bytes(j)?).map_err(|r| r.0)?)
-                };
-                Act::Open(who_of(&s["who"]), origin_of(&s["origin"])?, fork, joining.map(|((n, h), c)| (n, h, c)))
+                Act::Open(who_of(&s["who"]), origin_of(&s["origin"])?, fork)
             }
             "sign_in" => Act::SignIn(who_of(&s["who"]), origin_of(&s["origin"])?),
             _ => Act::Step(

@@ -1,6 +1,6 @@
 //! §1.11 The frames: one `Sum` type, encoded by §1.1. **The protocol is
-//! pages of a chain**: a peer sends pages of its chain; an authority
-//! answers with verdicts and its own pages.
+//! pages**: a peer sends pages of its intents; an authority answers with
+//! verdicts and pages of its chain.
 //!
 //! ```text
 //! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version }
@@ -10,11 +10,9 @@
 //! ```
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
-//! is one of two things, told by its entries: a chain it sequenced alone
-//! from its fork at `from` (each entry at its sequence, hashed — what a
-//! join hands over), or its intents not yet sequenced, each at sequence 0
-//! with no facts and zero hashes ([`Logged::intent`]) — a push being a page
-//! of one. A `Verdict` answers one intent: sequenced at `seq`, refused, or
+//! is its intents not yet sequenced, each at sequence 0 with no facts and
+//! zero hashes ([`Logged::intent`]) — a push being a page of one; a chain
+//! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers one intent: sequenced at `seq`, refused, or
 //! `Held` — a function the authority does not run.
 //!
 //! **No code crosses the wire.** An entry names its function by name; an

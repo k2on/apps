@@ -78,7 +78,7 @@ use std::sync::Arc;
 
 use ark::frames::Frame;
 use ark::hash::EntryHash;
-use ark::log::{Durable, Entry, EntryId, Logged, Origin, Seq};
+use ark::log::{Durable, Entry, EntryId, Origin, Seq};
 use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Who};
 use ark::plan::Maintained;
 use ark::schema::{Schema, Space};
@@ -187,17 +187,13 @@ impl Config {
 /// A patch of a view's rows, each its bytes.
 pub type Patch = ark::plan::Patch<Vec<u8>>;
 
-/// What a joined peer hands over again until the server answers it.
-pub type Joining = (Seq, EntryHash, Vec<Logged>);
-
 /// One input to one machine; or both machines opened afresh as a login,
 /// as at [`Peer::open`] — the log's alone from its fork when it was
-/// alone, handing its chain over again when it had joined unanswered; or a
-/// sign-in: the log's machine authoring as the login from its first
+/// alone; or a sign-in: the log's machine authoring as the login from its first
 /// `local`, the live one afresh.
 #[derive(Clone, Debug)]
 pub enum Act {
-    Open(Who, Origin, Option<(Seq, EntryHash)>, Option<Joining>),
+    Open(Who, Origin, Option<(Seq, EntryHash)>),
     SignIn(Who, Origin),
     Step(Space, Input),
 }
@@ -249,9 +245,8 @@ pub struct Peer {
     /// What it keeps beside its log, on the same disk.
     pub local: Instance,
     /// The `local` and the pending intents (each its `local` and id) its
-    /// local instance holds, and whether it holds a chain to hand over.
+    /// local instance holds.
     saved: (i64, Vec<(i64, EntryId)>),
-    joined: bool,
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
     missed: Option<Vec<Change>>,
@@ -347,7 +342,6 @@ impl Peer {
             told: app::Told::default(),
             local,
             saved: (0, vec![]),
-            joined: false,
             runners: vec![],
             missed: None,
             reconcilers: BTreeMap::new(),
@@ -379,14 +373,14 @@ impl Peer {
         };
         let pending: Vec<Entry> = intents.into_iter().map(|i| i.entry).collect();
         if let Some(rec) = &mut record {
-            rec.push((Act::Open(me.clone(), origin, r.fork, r.joining.clone()), vec![], None));
+            rec.push((Act::Open(me.clone(), origin, r.fork), vec![], None));
         }
         let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
         let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
-        (log.disk, log.joining) = (Some(disk), r.joining);
+        log.disk = Some(disk);
         let live = live_of(&config, &me, origin);
         let mut p = Peer::with(config, log, live, local);
-        (p.record, p.link, p.joined) = (record, link, p.log.joining.is_some());
+        (p.record, p.link) = (record, link);
         p.saved = (r.local, pending.iter().map(|e| (e.local, e.id)).collect());
         let durable = Durable {
             pending,
@@ -496,21 +490,18 @@ impl Peer {
         }
     }
 
-    /// A device's pending intents, its last `local` and its joined chain
-    /// kept as they change, as the change to what is kept: the intents
+    /// A device's pending intents and its last `local` kept as they change, as the change to what is kept: the intents
     /// confirmed or refused off the front deleted, those new at the back
     /// put — so a mutate writes its one row — or, when the intents are
     /// others (authored again from a new origin), all of them.
     fn keep_pending(&mut self) {
-        let joined = self.log.joining.is_some();
         let ids: Vec<(i64, EntryId)> = self.log.pending.iter().map(|p| (p.entry.local, p.entry.id)).collect();
-        if (self.log.local, &ids, joined) == (self.saved.0, &self.saved.1, self.joined) {
+        if (self.log.local, &ids) == (self.saved.0, &self.saved.1) {
             return;
         }
         let was = std::mem::take(&mut self.saved.1);
         let gone = (0..=was.len()).find(|d| ids.starts_with(&was[*d..]));
         let (gone, kept) = gone.map_or((was.len(), 0), |d| (d, was.len() - d));
-        let chain = (joined != self.joined).then(|| self.log.joining.clone());
         let local = self.log.local;
         let fresh: Vec<Entry> = self.log.pending[kept..].iter().map(|p| p.entry.clone()).collect();
         self.keep(|db| {
@@ -522,12 +513,9 @@ impl Peer {
             }
             let mut r = local::replica(db).unwrap_or_default();
             r.local = local;
-            if let Some(c) = chain {
-                r.joining = c;
-            }
             db.replica.put(r)
         });
-        (self.saved, self.joined) = ((local, ids), joined);
+        self.saved = (local, ids);
     }
 
     fn changed(&mut self, space: Space, cs: &[Change]) {
@@ -634,7 +622,20 @@ impl Peer {
         }
     }
 
+    /// Joined again: the chain made alone is pending intents (§1.7), kept
+    /// so before the log forgets it at the fork.
     pub fn join(&mut self) {
+        if let Role::Authority {
+            journal: Journal { fork: Some((at, _)), .. },
+        } = &self.log.role
+        {
+            let chain: Vec<Entry> = self.log.log().after(*at).map(|l| l.entry).collect();
+            self.keep(|db| {
+                chain
+                    .into_iter()
+                    .try_for_each(|entry| db.pending.put(local::Intent { local: entry.local, entry }))
+            });
+        }
         self.step(Space::Durable, Input::Join);
         self.replica(|r| r.fork = None);
     }
@@ -642,15 +643,10 @@ impl Peer {
     /// Another login: every pending intent the signer's, its id kept — or,
     /// for another actor than the one this device authored as, authored
     /// again from a new origin's first `local` — and the live machine
-    /// started over. A chain handed over as another actor is not handed
-    /// over again: its facts are not the signer's, and its intents are
-    /// pushed as the signer's instead.
+    /// started over.
     pub fn sign_in(&mut self, who: Who) {
         let was = &self.log.me;
         let other = !was.actor.is_empty() && was.actor != who.actor;
-        if (&was.actor, &was.roles) != (&who.actor, &who.roles) {
-            self.log.joining = None;
-        }
         if other {
             self.log.origin = Origin::named([&self.log.origin.0[..], who.session.as_bytes()].concat());
             self.log.local = 0;
