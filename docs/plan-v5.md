@@ -1006,6 +1006,58 @@ comment added to `harken/domain/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
+### Experiment: phone views
+
+**Question**: the phones' screen state in Rust, as the player went — each
+screen reads one named row and sends asks; Kotlin and Swift only render.
+**Built** (`claude/phone-views`): `harken_player::screens` — `NowPlaying`
+(the mini and full player, the queue sheet, the lock screen's volume: the
+track and its cover URL from the log, up next, the device button, what is
+playing's volume, another device's scrub, a position as `at_ms` + `since`
+which the screen ticks itself), `Devices` (the picker's rows and cursor),
+`Line`s (the diagnostics' listening group), and one `Ask` enum (`Toggle`,
+`Next`, `Previous`, `Seek`, `Scrub`, `UpNext`, `Volume`, `Nudge`, `Mute`,
+`Pick`, `RowVolume`, `RowMute`, `RowJoin`) resolved there into `Press`es,
+alone into the stream or `NOT_PART`; UniFFI records behind an `ffi`
+feature (Kotlin `dev.harken.screens`); `harken_ffi::Player::{now_playing,
+picker, numbers, ask}` (answered from the last row during a re-entrant
+step) and `harken_picker`/`harken_lines` over a session given whole, for
+the screenshots. Kotlin: `Heard` carries the two rows; `Playback` maps
+`NowPlaying` to `PlayerState`; `Picker`, `DeviceRow`, `RemoteStats`,
+`Level`/`Change`/`Press.Loud`, the volume and group readings, and
+`listeningNumbers` go. Swift: a `Screens` stand-in over the same calls.
+**Measured** (non-blank, non-comment): Kotlin main 8,321 → 8,056 (−265;
+`wc` 11,800 → 11,419), tests 4,165 → 4,066 (−99); Swift 795 → 812 (+17);
+`harken-player` src 884 → 1,415 (+531), `harken/ffi` src 288 → 335 (+47),
+tests 405 + 627 → 405 + 1,026 (+399); by non-whitespace characters Kotlin
+−7.7k, Rust +13.7k. The Rust is larger than the Kotlin it replaced: the
+asks are a layer Kotlin did not have (it pressed transitions directly), the
+re-entrancy cache and the whole-session exports are FFI plumbing, the
+records are spelt twice (Rust, then generated), and Kotlin keeps a call per
+control. Rust row cost (debug build, 200-track queue, 5 devices): a step's
+JSON view 4.0 ms, `now_playing` 0.6 ms, `picker` 0.37 ms, an ask 0.8 ms —
+once per change of the session, never per frame. **Extrapolated**, from the
+inventory (Kotlin main: ~2,600 state/wiring, ~1,200 Android glue, ~4,550
+rendering): Home's last played (Kotlin −30, Rust +60), Search's results
+(−40, +50), the library and its pages as typed rows with covers joined
+(−220, +280; Swift −90), the car's browse tree (−200, +200), the lock
+screen's seek/start (−30, +30), the onboarding machine (−195 and its 266
+test lines, +210; iOS reuses it) — about Kotlin −715, Swift −150, Rust
++830; the rest (sessions, lifecycle, Media3, Compose) stays. **Verdict**:
+not effective by lines on one phone — Rust grows more than Kotlin shrinks —
+and effective only by count of implementations: what iOS would otherwise
+write again (≈ the Kotlin removed, again in Swift) it gets for one call. It
+moves the bugs that matter (who is ticked, which volume a button moves) to
+one tested place. Worse: the FFI surface (+9 records, 1 enum, 6 calls; a
+Kotlin `Volume` is now `Long`s), a row per change crossing JNA whole (100
+up-next `Playing`s each time), a second Kotlin package and Swift module,
+and screenshots that need the native library. Compose keeps what a row
+cannot carry: the ticking position, the slider's throttle (a timer), the
+controller's shuffle and repeat. JVM tests 96 passed (one skipped; three
+moved to Rust), over a host library built by cargo. Not verified: a phone,
+the screenshots (`recordPaparazziDebug` not run), Swift type-checked, a
+release-build timing.
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
