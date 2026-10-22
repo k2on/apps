@@ -206,7 +206,7 @@ fn arg(t: &Type, last: bool) -> Option<Type> {
         _ => None,
     });
     if last {
-        tys.last()
+        tys.next_back()
     } else {
         tys.next()
     }
