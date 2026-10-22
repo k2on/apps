@@ -53,17 +53,17 @@ use std::collections::{HashMap, HashSet};
 
 use harken_player::{Caps, Event, Followers, Heard, Place, Reconciler, Say, View, Vol};
 
-use crate::domain::host::url;
-use crate::domain::host::{Kind, Listening};
-use crate::domain::{Output, Track};
+use harken_domain::host::url;
+use harken_domain::host::{Kind, Listening};
+use harken_domain::{Output, Track};
 
 pub type Args = Vec<u8>;
 
 /// The inputs of the session's transitions the bridge and its tests say,
 /// each the domain's input type, encoded; and a position in one moved on.
 pub mod input {
-    use crate::domain::*;
     use ark::format::Encode;
+    use harken_domain::*;
 
     pub fn none() -> Vec<u8> {
         ().to_bytes()
@@ -207,7 +207,7 @@ pub const SEEKS: u8 = 3;
 /// told (`report_position`, said as the speaker, and nothing told to any
 /// player); and the session is right about where somebody asked it to be,
 /// so the speaker is told (`media_seek`) when it is the session that moved.
-pub use crate::domain::host::SYNC_MS;
+pub use harken_domain::host::SYNC_MS;
 
 /// How far a playing speaker may be from the session before what moved it
 /// was somebody's hand on the speaker — a seek in the Sonos app — said as
@@ -961,7 +961,7 @@ impl Say for Calls<'_> {
 
     /// A speaker's plays are not counted here (the speakers' machines have
     /// no log).
-    fn play(&mut self, _: crate::domain::RecordPlay) -> Result<(), String> {
+    fn play(&mut self, _: harken_domain::RecordPlay) -> Result<(), String> {
         Ok(())
     }
 }
@@ -1667,8 +1667,8 @@ pub fn playing<'a>(state: &Listening, entities: impl IntoIterator<Item = &'a str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::host::Kind;
-    use crate::domain::{Active, Clock, Id, Present};
+    use harken_domain::host::Kind;
+    use harken_domain::{Active, Clock, Id, Present};
 
     const KITCHEN: &str = "media_player.kitchen";
     const NOW: i64 = 1_700_000_000_000;
@@ -1686,7 +1686,7 @@ mod tests {
             muted: false,
             name: id.into(),
             user: String::new(),
-            volume: crate::domain::host::UNSAID_VOLUME,
+            volume: harken_domain::host::UNSAID_VOLUME,
         }
     }
 
@@ -2420,7 +2420,7 @@ mod tests {
     /// re-spelling was a different address.
     #[test]
     fn an_address_is_the_same_however_it_is_spelt() {
-        let ours = crate::domain::host::url(
+        let ours = harken_domain::host::url(
             "http://10.0.0.2:8787",
             "music/Bach/Air (BWV 1068) & Café d'Été.mp3",
         );
@@ -2747,21 +2747,23 @@ mod tests {
     }
 }
 
-/// The thread: Home Assistant's REST API, and the sessions.
+/// The thread: Home Assistant's REST API, and the sessions over the
+/// server's socket.
 ///
-/// Blocking and polled, on a thread of its own, exactly as the scanner is.
-/// There is no async in this server's own code and a bridge to a house is
-/// not a reason to start — a handful of small requests a second on a LAN is
-/// not a problem worth a runtime.
+/// Blocking and polled, on a thread of its own. There is no async here and a
+/// bridge to a house is not a reason to start — a handful of small requests
+/// a second on a LAN is not a problem worth a runtime.
 ///
-/// **Each speaker is a device**, one connection to the hub per session it
-/// stands in ([`ark_peer::Handle::connect`]): a volatile machine of its
-/// own, signed in as the session's account on a session of its own
-/// ([`speaker`]), which says in its `Hello` that it is a speaker — so the
-/// hub authors its `on_join`, and its `on_leave` when the connection
-/// closes. It has no log and no socket. The frames it is sent keep its
-/// machine current and wake the thread, which reads the sessions whole
-/// from the hub, which is in this process.
+/// **Each speaker is a device**, one connection to the server per session
+/// it stands in: a volatile machine of its own on a socket of its own,
+/// signed in as the session's account on a session of its own ([`speaker`])
+/// that the server hands the house ([`Wires::login`]), which says in its
+/// `Hello` that it is a speaker — so the hub authors its `on_join`, and its
+/// `on_leave` when the connection closes. It has no log. **The house's own
+/// connection** watches: a volatile machine that says no device, fed every
+/// session as every connection in the volatile space is, read for where to
+/// stand; a speaker standing reads its session off its own machine, so what
+/// it says is previewed over what it acted on.
 ///
 /// A device is a session (`harken/domain/devices.ark`), so a speaker's id
 /// in the session is its connection's session, `user@entity`, which two
@@ -2777,8 +2779,8 @@ mod tests {
 /// ([`playing`]) — the music is the kitchen's, not the browser's that sent it
 /// there — for as long as the session sounds and for [`IDLE`] after it stops;
 /// then they go too, and the session is kept, paused, as any is. It polls
-/// only the speakers standing: a server whose house nobody is listening in
-/// makes no requests at all.
+/// only the speakers standing: a house nobody is listening in is asked
+/// nothing at all.
 pub mod ha {
     use std::collections::{HashMap, VecDeque};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -2787,18 +2789,17 @@ pub mod ha {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
-    use crate::domain::host::{Kind, Listening};
-    use crate::domain::{Device, Output as Sound};
-    use crate::domain::{Listening as Row, ListeningDevice};
     use ark::format::Encode;
     use ark::peer::{Input, Output, Peer, Role, Who};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
-    use ark_peer::Handle;
-    use ark_peer::{now_ms, ConnId};
+    use ark_peer::link::{Event, Wire};
+    use ark_peer::{now_ms, Wake};
+    use harken_domain::host::{Kind, Listening};
+    use harken_domain::{Device, Output as Sound};
+    use harken_domain::{Listening as Row, ListeningDevice};
 
     use super::{input, listening, playing, Act, Playing, Speaker, Speakers, GROUPING, VOLUME_SET};
-    use crate::hosted::Hosted;
 
     /// How many of a handed queue's tracks are pushed at a speaker on one
     /// pass of the bridge. The first track goes at once, with its seek; the
@@ -2823,12 +2824,15 @@ pub mod ha {
     /// hundred service calls.
     pub const WINDOW: usize = 200;
 
-    /// How long one request to the house may take. A house that does not
-    /// answer is asked again next tick; a request that never returns would
-    /// stop the bridge for every session.
+    /// How long one request to the house, or to the server for a login, may
+    /// take. A house that does not answer is asked again next tick; a
+    /// request that never returns would stop the bridge for every session.
     const TIMEOUT: Duration = Duration::from_secs(5);
 
-    /// What the server was told about the house.
+    /// How long after a connection closed it is dialled again.
+    const REDIAL: Duration = Duration::from_millis(500);
+
+    /// What the house's peer was told.
     #[derive(Clone, Debug)]
     pub struct Config {
         /// Where Home Assistant is, e.g. `http://homeassistant.local:8123`.
@@ -2842,6 +2846,11 @@ pub mod ha {
         /// does: the phone may be on `https://harken.example.com` while the
         /// speaker only knows an address on the LAN.
         pub media: String,
+        /// The harken server whose sessions the speakers stand in, and the
+        /// house's key there (`HARKEN_HOUSE_KEY`'s file, as hex), which is
+        /// what it hands a speaker's login for.
+        pub server: String,
+        pub key: String,
         /// How often to poll; [`TICK`] outside a test.
         pub tick: Duration,
         /// How long a silent speaker stands where nobody is listening;
@@ -2861,23 +2870,24 @@ pub mod ha {
     pub enum Trace {
         #[default]
         Off,
-        /// Standard output, so the journal: `journalctl -u harken`.
+        /// Standard output, so the journal: `journalctl -u harken-house`.
         Out,
         /// Each line sent here, for a test to read.
         Lines(Sender<String>),
     }
 
     impl std::fmt::Display for Config {
-        /// Everything but the token.
+        /// Everything but the token and the key.
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let names: Vec<&str> = self.players.iter().map(|(id, _)| id.as_str()).collect();
             write!(
                 f,
-                "{} player(s) from {} ({}), fetching from {}",
+                "{} player(s) from {} ({}), fetching from {}, standing in {}'s sessions",
                 names.len(),
                 self.url,
                 names.join(", "),
-                self.media
+                self.media,
+                self.server
             )
         }
     }
@@ -2901,31 +2911,24 @@ pub mod ha {
     }
 
     /// Offer the house's players to every account somebody is listening as.
-    pub fn start(config: Config, hub: Handle, hosted: Hosted) -> Assistant {
+    pub fn start(config: Config) -> Assistant {
         let stop = Arc::new(AtomicBool::new(false));
         let (wake, woken) = channel();
         let flag = stop.clone();
-        let waker = wake.clone();
+        let ring = wake.clone();
+        let waker: Wake = Arc::new(move || _ = ring.send(()));
         #[allow(clippy::let_and_return)]
         let thread = std::thread::Builder::new()
             .name("harken-house".into())
             .spawn(move || {
                 let mut bridge = Speakers::new(config.players.clone(), &config.media);
                 let house = House::new(&config);
-                let mut wires = Wires {
-                    hub,
-                    hosted,
-                    entities: config.players.iter().map(|(e, _)| e.clone()).collect(),
-                    machines: HashMap::new(),
-                    standing: HashMap::new(),
-                    frames: channel(),
-                    waker,
-                };
+                let mut wires = Wires::new(&config, waker);
                 run(&config, &house, &mut bridge, &mut wires, &woken, &flag);
             })
             .ok();
         if thread.is_none() {
-            eprintln!("harken-server: house: could not start its thread");
+            eprintln!("harken-peer: house: could not start its thread");
         }
         Assistant { stop, wake, thread }
     }
@@ -2965,64 +2968,204 @@ pub mod ha {
         s
     }
 
-    /// Every session, as the hub holds it now: each account with a row in
-    /// the session's tables, its speakers named by their entities.
-    fn sessions(hub: &Handle, entities: &[String]) -> Vec<(String, Listening)> {
-        let read = hub.with(|h| {
-            let store = &h.live.as_ref()?.store;
-            let mut users: Vec<String> = store
-                .scan("listening", &Scan::all())
-                .iter()
-                .filter_map(|r| Row::from_bytes(r).ok())
-                .map(|r| r.user)
-                .chain(
-                    store
-                        .scan("listening_device", &Scan::all())
-                        .iter()
-                        .filter_map(|r| ListeningDevice::from_bytes(r).ok())
-                        .map(|r| r.user),
-                )
-                .collect();
-            users.dedup();
-            users.sort();
-            users.dedup();
-            Some(
-                users
-                    .into_iter()
-                    .map(|u| (u.clone(), Listening::of(store, &u)))
-                    .collect::<Vec<_>>(),
+    /// Every session a store holds: each account with a row in the
+    /// session's tables, its speakers named by their entities.
+    fn sessions(store: &dyn Read, entities: &[String]) -> Vec<(String, Listening)> {
+        let mut users: Vec<String> = store
+            .scan("listening", &Scan::all())
+            .iter()
+            .filter_map(|r| Row::from_bytes(r).ok())
+            .map(|r| r.user)
+            .chain(
+                store
+                    .scan("listening_device", &Scan::all())
+                    .iter()
+                    .filter_map(|r| ListeningDevice::from_bytes(r).ok())
+                    .map(|r| r.user),
             )
-        });
-        read.flatten()
-            .unwrap_or_default()
+            .collect();
+        users.sort();
+        users.dedup();
+        users
             .into_iter()
-            .map(|(u, s)| {
-                let s = as_entities(s, &u, entities);
+            .map(|u| {
+                let s = as_entities(Listening::of(store, &u), &u, entities);
                 (u, s)
             })
             .collect()
     }
 
-    /// A frame the hub sent the speaker at (account, entity).
-    type Framed = ((String, String), Vec<u8>);
+    /// One connection to the server: its socket, and whether it has opened.
+    struct Line {
+        wire: Box<dyn Wire>,
+        open: bool,
+    }
 
-    /// The speakers' machines and their connections to the hub.
+    impl Line {
+        /// A machine's frames to its socket; a refusal of what it said,
+        /// said out loud.
+        fn send(&mut self, out: Vec<Output>) {
+            for o in out {
+                match o {
+                    Output::Send(b) => self.wire.send(b),
+                    Output::Refused { why, .. } => {
+                        eprintln!("harken-peer: house: a speaker's transition was refused: {why}")
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        /// What the socket said, to `machine`; whether it is still up.
+        fn take(&mut self, machine: &mut Peer, what: &str) -> bool {
+            for e in self.wire.events() {
+                match e {
+                    Event::Open => {
+                        self.open = true;
+                        let out = machine.step(Input::Connected);
+                        self.send(out);
+                    }
+                    Event::Frame(bytes) => {
+                        let out = machine.step(Input::Frame { from: None, bytes });
+                        self.send(out);
+                    }
+                    Event::Closed(why) => {
+                        eprintln!("harken-peer: house: {what}: the connection closed: {why}");
+                        return false;
+                    }
+                }
+            }
+            true
+        }
+    }
+
+    /// A volatile machine of harken's domain, as `who`, saying `device`.
+    fn machine(who: Who, device: Option<Vec<u8>>) -> Peer {
+        let module = crate::Hosted::harken().module;
+        let mut p = Peer::new(
+            module.schema.clone(),
+            module.functions.clone(),
+            Role::Replica,
+            who,
+        )
+        .in_space(Space::Volatile);
+        p.device = device;
+        p
+    }
+
+    /// The speakers' machines and their connections to the server, and the
+    /// house's own.
     struct Wires {
-        hub: Handle,
-        hosted: Hosted,
+        server: String,
+        key: String,
+        agent: ureq::Agent,
         /// The entities offered.
         entities: Vec<String>,
+        /// The house's own machine, standing nowhere, and its connection;
+        /// when it was last dialled.
+        watch: Peer,
+        watching: Option<Line>,
+        dialled: Option<Instant>,
         /// Each speaker's volatile machine in each session it has stood
         /// in, by (account, entity): kept, so its `local` goes on.
         machines: HashMap<(String, String), Peer>,
         /// The connections of those standing now.
-        standing: HashMap<(String, String), ConnId>,
-        /// Frames the hub sent a speaker, and the thread woken for them.
-        frames: (Sender<Framed>, Receiver<Framed>),
-        waker: Sender<()>,
+        standing: HashMap<(String, String), Line>,
+        wake: Wake,
     }
 
     impl Wires {
+        fn new(config: &Config, wake: Wake) -> Wires {
+            let nobody = Who {
+                actor: String::new(),
+                session: String::new(),
+                roles: vec![],
+            };
+            Wires {
+                server: config.server.trim_end_matches('/').to_string(),
+                key: config.key.clone(),
+                agent: ureq::AgentBuilder::new().timeout(TIMEOUT).build(),
+                entities: config.players.iter().map(|(e, _)| e.clone()).collect(),
+                watch: machine(nobody, None),
+                watching: None,
+                dialled: None,
+                machines: HashMap::new(),
+                standing: HashMap::new(),
+                wake,
+            }
+        }
+
+        /// A login the server hands the house, for the speaker `entity` in
+        /// `user`'s session or, with neither, the house's own: its token and
+        /// its session.
+        fn login(&self, speaker: Option<(&str, &str)>) -> Option<(String, String)> {
+            let body = match speaker {
+                Some((user, entity)) => serde_json::json!({ "user": user, "speaker": entity }),
+                None => serde_json::json!({}),
+            };
+            let answer = self
+                .agent
+                .post(&format!("{}/house/sign-in", self.server))
+                .set("Authorization", &format!("Bearer {}", self.key))
+                .send_json(body);
+            let v: serde_json::Value = match answer {
+                Ok(r) => r.into_json().ok()?,
+                Err(e) => {
+                    eprintln!("harken-peer: house: the server would not sign the house in: {e}");
+                    return None;
+                }
+            };
+            Some((v["token"].as_str()?.into(), v["session"].as_str()?.into()))
+        }
+
+        fn dial(&self, token: &str) -> Line {
+            Line {
+                wire: ark_peer::link::socket(
+                    &ark_auth::socket_url(&self.server),
+                    token,
+                    Some(self.wake.clone()),
+                ),
+                open: false,
+            }
+        }
+
+        /// The house's own connection, dialled when it is down.
+        fn watch(&mut self) {
+            if self.watching.is_some() || self.dialled.is_some_and(|d| d.elapsed() < REDIAL) {
+                return;
+            }
+            self.dialled = Some(Instant::now());
+            if let Some((token, session)) = self.login(None) {
+                self.watch = machine(
+                    Who {
+                        actor: session.clone(),
+                        session,
+                        roles: vec![],
+                    },
+                    None,
+                );
+                self.watching = Some(self.dial(&token));
+            }
+        }
+
+        /// Every session, as the house's own connection holds it now.
+        fn sessions(&self) -> Vec<(String, Listening)> {
+            match &self.watching {
+                Some(l) if l.open => sessions(&self.watch.store, &self.entities),
+                _ => vec![],
+            }
+        }
+
+        /// `user`'s session as the speaker `entity`'s own machine holds it,
+        /// once it stands there.
+        fn session(&self, user: &str, entity: &str) -> Option<Listening> {
+            let k = (user.to_string(), entity.to_string());
+            let _ = self.standing.get(&k).filter(|l| l.open)?;
+            let s = Listening::of(&self.machines.get(&k)?.store, user);
+            let s = as_entities(s, user, &self.entities);
+            s.device(entity).is_some().then_some(s)
+        }
+
         fn stands(&self, k: &(String, String)) -> bool {
             self.standing.contains_key(k)
         }
@@ -3030,20 +3173,15 @@ pub mod ha {
         /// The speaker `entity`, called `name`, standing in `user`'s session.
         fn stand(&mut self, user: &str, entity: &str, name: &str) {
             let k = (user.to_string(), entity.to_string());
+            let Some((token, session)) = self.login(Some((user, entity))) else {
+                return;
+            };
             let who = Who {
                 actor: user.into(),
-                session: speaker(user, entity),
+                session,
                 roles: vec![],
             };
-            let module = &self.hosted.module;
-            let peer = self.machines.entry(k.clone()).or_insert_with(|| {
-                let mut p = Peer::new(
-                    module.schema.clone(),
-                    module.functions.clone(),
-                    Role::Replica,
-                    who.clone(),
-                )
-                .in_space(Space::Volatile);
+            self.machines.entry(k.clone()).or_insert_with(|| {
                 let said = Device {
                     can_play: true,
                     id: entity.into(),
@@ -3051,83 +3189,60 @@ pub mod ha {
                     name: name.into(),
                     user: user.into(),
                 };
-                p.device = Some(said.to_bytes());
-                p
+                machine(who, Some(said.to_bytes()))
             });
-            let (to, wake, key) = (self.frames.0.clone(), self.waker.clone(), k.clone());
-            let c = self.hub.connect(
-                who,
-                Box::new(move |b| {
-                    let _ = wake.send(());
-                    to.send((key.clone(), b)).is_ok()
-                }),
-            );
-            let out = peer.step(Input::Connected);
-            self.standing.insert(k, c);
-            self.send(c, out);
+            let line = self.dial(&token);
+            self.standing.insert(k, line);
         }
 
         /// The speaker out of the session: its connection closed, which is
         /// its `on_leave`.
         fn leave(&mut self, k: &(String, String)) {
-            if let Some(c) = self.standing.remove(k) {
-                self.hub.close(c);
-            }
+            self.standing.remove(k);
         }
 
-        /// A speaker's machine's frames to its connection; a refusal of
-        /// what it said, said out loud.
-        fn send(&self, c: ConnId, out: Vec<Output>) {
-            for o in out {
-                match o {
-                    Output::Send(b) => self.hub.frame(c, b),
-                    Output::Refused { why, .. } => {
-                        eprintln!("harken-server: house: a speaker's transition was refused: {why}")
-                    }
-                    _ => {}
+        /// What the server sent each connection, to its machine; a
+        /// connection that closed is gone, to be dialled again.
+        fn receive(&mut self) {
+            if let Some(l) = &mut self.watching {
+                if !l.take(&mut self.watch, "the house") {
+                    self.watching = None;
                 }
             }
-        }
-
-        /// What the hub sent each speaker, to its machine.
-        fn receive(&mut self) {
-            let got: Vec<_> = self.frames.1.try_iter().collect();
-            for (k, bytes) in got {
-                let (Some(peer), Some(c)) =
-                    (self.machines.get_mut(&k), self.standing.get(&k).copied())
-                else {
+            let mut closed = vec![];
+            for (k, line) in self.standing.iter_mut() {
+                let Some(peer) = self.machines.get_mut(k) else {
                     continue;
                 };
-                let out = peer.step(Input::Frame { from: None, bytes });
-                self.send(c, out);
+                if !line.take(peer, &k.1) {
+                    closed.push(k.clone());
+                }
+            }
+            for k in closed {
+                self.standing.remove(&k);
             }
         }
 
         /// A transition of `user`'s session, called as the speaker `entity`.
         fn call(&mut self, user: &str, entity: &str, transition: &str, input: Vec<u8>) {
             let k = (user.to_string(), entity.to_string());
-            let Some(c) = self.standing.get(&k).copied() else {
-                return;
-            };
-            let Some(func) = self.hosted.get(&format!("listening.{transition}")) else {
+            let Some(line) = self.standing.get_mut(&k).filter(|l| l.open) else {
                 return;
             };
             let Some(peer) = self.machines.get_mut(&k) else {
                 return;
             };
             let out = peer.step(Input::Mutate {
-                func,
+                func: format!("listening.{transition}"),
                 input,
                 now: now_ms(),
             });
-            self.send(c, out);
+            line.send(out);
         }
 
         fn drain(&mut self) {
-            let all: Vec<_> = self.standing.keys().cloned().collect();
-            for k in all {
-                self.leave(&k);
-            }
+            self.standing.clear();
+            self.watching = None;
         }
     }
 
@@ -3153,13 +3268,12 @@ pub mod ha {
             let now = now_ms();
             let mut acts = vec![];
             let entities: Vec<String> = bridge.players().iter().map(|(e, _)| e.clone()).collect();
-            let states = sessions(&wires.hub, &entities);
-            // Every frame the hub sent the speakers before it was read is in
-            // their channel by now (the hub delivers a step's frames before
-            // it takes the next job): each speaker's machine holds at least
-            // the state the bridge acts on, so what it says as the speaker
-            // is previewed over that and not refused for being behind.
+            // What the server said since, to each machine; then where to
+            // stand, read off the house's own, and what each speaker does,
+            // off its own (below).
+            wires.watch();
             wires.receive();
+            let states = wires.sessions();
             // Where to stand, and which speakers: every one beside a client;
             // where no client is, the ones making the sound, until it has
             // been silent for `idle`.
@@ -3221,7 +3335,7 @@ pub mod ha {
                 wires.leave(&k);
                 for act in bridge.left(&k.0, &k.1) {
                     println!(
-                        "harken-server: house: {}: nobody is listening as {} and it is not playing; paused",
+                        "harken-peer: house: {}: nobody is listening as {} and it is not playing; paused",
                         k.1, k.0
                     );
                     acts.push(act);
@@ -3231,9 +3345,11 @@ pub mod ha {
             // volume and its group before its queue, so that a member about
             // to lead is made the leader in the house before anything is
             // handed to it: a queue handed to a member is its leader's.
-            for (key, state, es) in &stood {
+            for (key, _, es) in &stood {
                 for entity in es {
-                    acts.extend(bridge.wants(key, entity, state, now));
+                    if let Some(state) = wires.session(key, entity) {
+                        acts.extend(bridge.wants(key, entity, &state, now));
+                    }
                 }
             }
             // Told before anything is read back, so that what a poll below
@@ -3264,7 +3380,7 @@ pub mod ha {
                     let heard = bridge.heard(&entity, poll, now);
                     if !matches!(config.trace, Trace::Off) {
                         let line = format!(
-                            "harken-server: house: trace: {entity}: {}; {}; {}",
+                            "harken-peer: house: trace: {entity}: {}; {}; {}",
                             reading
                                 .as_ref()
                                 .map_or("no answer".to_string(), |r| r.said.clone()),
@@ -3361,12 +3477,12 @@ pub mod ha {
                 // looks exactly like one that stopped for no reason, and the
                 // reason is only ever known here.
                 if transition == "release" {
-                    println!("harken-server: house: {entity}: {why}; let go of {key}'s session");
+                    println!("harken-peer: house: {entity}: {why}; let go of {key}'s session");
                 }
                 // The members a speaker reports are speakers: by their ids in
                 // this session.
                 if transition == "report_group" {
-                    if let Ok(mut g) = crate::domain::ReportGroup::from_bytes(&input) {
+                    if let Ok(mut g) = harken_domain::ReportGroup::from_bytes(&input) {
                         for m in &mut g.members {
                             if wires.entities.contains(m) {
                                 *m = speaker(&key, m);
@@ -3385,7 +3501,7 @@ pub mod ha {
                     return;
                 }
                 println!(
-                    "harken-server: house: {entity}: {} track(s) {}",
+                    "harken-peer: house: {entity}: {} track(s) {}",
                     urls.len(),
                     if next { "put next" } else { "added to the end" }
                 );
@@ -3405,7 +3521,7 @@ pub mod ha {
             }
             Act::Verb { entity, verb, why } => {
                 if verb == "media_pause" {
-                    println!("harken-server: house: {entity}: {why}; paused");
+                    println!("harken-peer: house: {entity}: {why}; paused");
                 }
                 house.call(&entity, verb, None);
             }
@@ -3433,7 +3549,7 @@ pub mod ha {
             }
             Act::Join { leader, members } => {
                 println!(
-                    "harken-server: house: {leader}: joined by {}",
+                    "harken-peer: house: {leader}: joined by {}",
                     members.join(", ")
                 );
                 house.call(
@@ -3443,7 +3559,7 @@ pub mod ha {
                 );
             }
             Act::Unjoin { entity } => {
-                println!("harken-server: house: {entity}: unjoined");
+                println!("harken-peer: house: {entity}: unjoined");
                 house.call(&entity, "unjoin", None);
             }
             Act::Start {
@@ -3469,7 +3585,7 @@ pub mod ha {
                     return;
                 };
                 println!(
-                    "harken-server: house: {entity}: handed {} track(s) from {at}, {}",
+                    "harken-peer: house: {entity}: handed {} track(s) from {at}, {}",
                     urls.len(),
                     if playing { "playing" } else { "paused" }
                 );
@@ -3602,7 +3718,7 @@ pub mod ha {
                 .set("Authorization", &self.bearer)
                 .send_json(body);
             if let Err(e) = &sent {
-                eprintln!("harken-server: house: {entity}: {service} failed: {e}");
+                eprintln!("harken-peer: house: {entity}: {service} failed: {e}");
             }
             sent.is_ok()
         }
@@ -3713,6 +3829,205 @@ pub mod ha {
                 speaker,
                 said,
             })
+        }
+    }
+}
+
+/// `harken-peer --house --server URL`: the house, from the environment,
+/// standing in that server's sessions until the process is stopped — a
+/// stop closes every socket, which is each speaker's `on_leave`.
+pub fn serve(server: &str) -> Result<(), String> {
+    let config = ha::Config::from_vars(server, |k| std::env::var(k).ok())?;
+    println!("harken-peer: house: {config}");
+    let _house = ha::start(config);
+    loop {
+        std::thread::park();
+    }
+}
+
+impl ha::Config {
+    /// What the NixOS module sets for `harken-house`; blank is unset.
+    ///
+    /// ```text
+    /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS   all three
+    /// HARKEN_HA_MEDIA       where a speaker fetches from (else HARKEN_PUBLIC_URL)
+    /// HARKEN_HOUSE_KEY      the file the server keeps the house's key in
+    /// HARKEN_BRIDGE_TRACE=1 a line per poll per speaker
+    /// ```
+    ///
+    /// The tokens are *files*, for the reason the server's client secret
+    /// is one: never in a process listing, a unit file or the store.
+    pub fn from_vars(
+        server: &str,
+        var: impl Fn(&str) -> Option<String>,
+    ) -> Result<ha::Config, String> {
+        let env = |k: &str| var(k).filter(|v| !v.trim().is_empty());
+        let secret = |k: &str| -> Result<String, String> {
+            let file = env(k).ok_or_else(|| format!("{k}: the house needs it"))?;
+            let text = std::fs::read_to_string(&file)
+                .map_err(|e| format!("cannot read {k} {file}: {e}"))?;
+            match text.trim() {
+                "" => Err(format!("{k} {file} is empty")),
+                t => Ok(t.to_string()),
+            }
+        };
+        let (Some(url), Some(players)) = (env("HARKEN_HA_URL"), env("HARKEN_HA_PLAYERS")) else {
+            return Err("HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE and HARKEN_HA_PLAYERS: the house needs all three".into());
+        };
+        let token = secret("HARKEN_HA_TOKEN_FILE")?;
+        let players = players_of(&players);
+        if players.is_empty() {
+            return Err("HARKEN_HA_PLAYERS names no players".into());
+        }
+        // Where a *speaker* fetches from, which is not necessarily where a
+        // phone does: the phone may be on a public address while the speaker
+        // only knows one on the LAN.
+        let media = env("HARKEN_HA_MEDIA")
+            .or_else(|| env("HARKEN_PUBLIC_URL"))
+            .ok_or("HARKEN_HA_MEDIA: speakers need an address they can fetch bytes from")?;
+        Ok(ha::Config {
+            url,
+            token,
+            players,
+            media,
+            server: server.trim_end_matches('/').to_string(),
+            key: secret("HARKEN_HOUSE_KEY")?,
+            tick: ha::TICK,
+            idle: ha::IDLE,
+            trace: match env("HARKEN_BRIDGE_TRACE").is_some_and(|v| v != "0") {
+                true => ha::Trace::Out,
+                false => ha::Trace::Off,
+            },
+        })
+    }
+}
+
+/// `media_player.kitchen=Kitchen,media_player.study` — a name after an `=`
+/// when the entity id is not what you would call it out loud, and a guess
+/// from the id when it is.
+pub fn players_of(list: &str) -> Vec<(String, String)> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| match p.split_once('=') {
+            Some((id, name)) => (id.trim().to_string(), name.trim().to_string()),
+            None => (p.to_string(), pretty(p)),
+        })
+        .collect()
+}
+
+/// `media_player.the_kitchen` as `The kitchen`. A guess, overridden by
+/// writing the name out — but a picker full of entity ids is a picker for
+/// somebody who already knows what is in their house.
+pub fn pretty(entity: &str) -> String {
+    let tail = entity
+        .rsplit('.')
+        .next()
+        .unwrap_or(entity)
+        .replace('_', " ");
+    let mut chars = tail.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => entity.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod config {
+    use super::ha;
+    use std::collections::BTreeMap;
+
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let m: BTreeMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |k| m.get(k).cloned()
+    }
+
+    /// The house is all three or nothing, its token and the house's key are
+    /// files, and neither is ever printed. Moved from the server's
+    /// configuration with the house; falsified there by reading the token
+    /// as the variable's value: `sekrit` was the path.
+    #[test]
+    fn the_house_is_all_three_and_the_tokens_are_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let token = dir.path().join("ha-token");
+        std::fs::write(&token, "sekrit\n").unwrap();
+        let key = dir.path().join("house.key");
+        std::fs::write(&key, "abcdef\n").unwrap();
+        let (token, key) = (token.to_str().unwrap(), key.to_str().unwrap());
+        let e =
+            ha::Config::from_vars("http://s", vars(&[("HARKEN_HA_URL", "http://ha")])).unwrap_err();
+        assert!(e.contains("all three"), "{e}");
+        let three = [
+            ("HARKEN_HA_URL", "http://ha:8123"),
+            ("HARKEN_HA_TOKEN_FILE", token),
+            (
+                "HARKEN_HA_PLAYERS",
+                "media_player.the_kitchen, media_player.study=Study",
+            ),
+            ("HARKEN_HOUSE_KEY", key),
+        ];
+        let e = ha::Config::from_vars("http://s", vars(&three)).unwrap_err();
+        assert!(
+            e.contains("HARKEN_HA_MEDIA"),
+            "a speaker needs somewhere to fetch from: {e}"
+        );
+        let mut with_media = three.to_vec();
+        with_media.push(("HARKEN_HA_MEDIA", "http://10.0.0.2:8787"));
+        let house = ha::Config::from_vars("http://s/", vars(&with_media)).unwrap();
+        assert_eq!(
+            (house.token.as_str(), house.key.as_str()),
+            ("sekrit", "abcdef")
+        );
+        assert_eq!(
+            (house.media.as_str(), house.server.as_str()),
+            ("http://10.0.0.2:8787", "http://s")
+        );
+        assert_eq!(
+            house.players,
+            [
+                (
+                    "media_player.the_kitchen".to_string(),
+                    "The kitchen".to_string()
+                ),
+                ("media_player.study".to_string(), "Study".to_string())
+            ]
+        );
+        let said = house.to_string();
+        assert!(
+            !said.contains("sekrit") && !said.contains("abcdef"),
+            "no secret is printed: {said}"
+        );
+        assert!(
+            matches!(house.trace, ha::Trace::Off),
+            "the trace is off unless asked for"
+        );
+        let mut traced = with_media.clone();
+        traced.push(("HARKEN_BRIDGE_TRACE", "1"));
+        assert!(matches!(
+            ha::Config::from_vars("http://s", vars(&traced))
+                .unwrap()
+                .trace,
+            ha::Trace::Out
+        ));
+        // The public URL stands in for a speaker's when nothing else is said.
+        let mut public = three.to_vec();
+        public.push(("HARKEN_PUBLIC_URL", "http://10.0.0.2:8787"));
+        assert_eq!(
+            ha::Config::from_vars("http://s", vars(&public))
+                .unwrap()
+                .media,
+            "http://10.0.0.2:8787"
+        );
+        for (i, missing) in [(1, "/nonexistent/ha-token"), (3, "/nonexistent/house.key")] {
+            let mut m = with_media.clone();
+            m[i].1 = missing;
+            assert!(
+                ha::Config::from_vars("http://s", vars(&m)).is_err(),
+                "{missing}"
+            );
         }
     }
 }

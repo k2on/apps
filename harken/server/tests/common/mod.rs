@@ -247,7 +247,7 @@ impl Peer {
         let user = self.user();
         let s = Listening::of(&live.store, &user);
         let es: Vec<String> = speakers.iter().map(|s| s.to_string()).collect();
-        Some(harken_server::assistant::ha::as_entities(s, &user, &es))
+        Some(harken_peer::house::ha::as_entities(s, &user, &es))
     }
 
     /// Whether the live machine is linked, has heard the hub since, and

@@ -66,7 +66,7 @@
       # `harken/` by path, so both trees are the source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/peer" "harken/server" "harken/iced" "harken/ffi" ];
       # The typed Kotlin and Swift `ark-dev gen` writes, which harken/ffi's
       # tests hold to the domain (harken/ffi/tests/gen.rs).
       genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];

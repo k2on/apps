@@ -36,7 +36,7 @@ fn titles(p: &Peer, query: &str) -> Vec<String> {
 }
 
 fn played(track: &Track, from: &str) -> RecordPlay {
-    RecordPlay::from_bytes(&harken_server::assistant::input::record_play(track, from)).unwrap()
+    RecordPlay::from_bytes(&harken_peer::house::input::record_play(track, from)).unwrap()
 }
 
 /// A phone plays two tracks while it has no connection: both are there at

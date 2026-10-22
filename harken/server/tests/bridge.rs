@@ -38,7 +38,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use common::*;
-use harken_server::assistant::{ha, input};
+use harken_peer::house::{ha, input};
 use harken_server::domain::host::{Kind, Listening};
 use harken_server::domain::{
     Clock, Member, NudgeVolume, Output, SetMute, SetVolume, Track, Transfer,
@@ -245,7 +245,7 @@ fn position_now(st: &Json_) -> f64 {
     let at = st["attributes"]["media_position"].as_f64().unwrap_or(0.0);
     let since = st["attributes"]["media_position_updated_at"]
         .as_str()
-        .and_then(harken_server::assistant::when::rfc3339_ms);
+        .and_then(harken_peer::house::when::rfc3339_ms);
     match (st["state"].as_str(), since) {
         (Some("playing"), Some(since)) => at + (wall_ms() - since).max(0) as f64 / 1000.0,
         _ => at,
@@ -583,6 +583,8 @@ fn house(url: String) -> ha::Config {
         token: TOKEN.into(),
         players: vec![(KITCHEN.into(), "Kitchen".into())],
         media: MEDIA.into(),
+        server: String::new(),
+        key: String::new(),
         tick: Duration::from_millis(40),
         idle: ha::IDLE,
         trace: ha::Trace::Off,
@@ -590,6 +592,45 @@ fn house(url: String) -> ha::Config {
 }
 
 const STUDY: &str = "media_player.study";
+
+/// The server, and the house's peer standing in its sessions over its
+/// socket — a server keeping a key for the house, and the house started
+/// against it in this process, as `harken-peer --house` starts it.
+struct Served {
+    server: Server,
+    house: Option<ha::Assistant>,
+}
+
+impl std::ops::Deref for Served {
+    type Target = Server;
+    fn deref(&self) -> &Server {
+        &self.server
+    }
+}
+
+impl Served {
+    /// The house first: it joins a thread.
+    async fn stop(mut self) {
+        let house = self.house.take();
+        let _ = tokio::task::spawn_blocking(move || drop(house)).await;
+        self.server.stop().await;
+    }
+}
+
+fn with_house(rt: &tokio::runtime::Runtime, data: &std::path::Path, house: ha::Config) -> Served {
+    let file = data.join("house.key");
+    let server = serve(rt, data, |c| c.house_key = Some(file.clone()));
+    let key = std::fs::read_to_string(&file).unwrap().trim().to_string();
+    let house = ha::start(ha::Config {
+        server: server.url(),
+        key,
+        ..house
+    });
+    Served {
+        server,
+        house: Some(house),
+    }
+}
 
 /// The house with two Sonos in it.
 fn two_sonos(url: String) -> ha::Config {
@@ -764,7 +805,7 @@ fn a_speaker_is_a_device_the_whole_way_round() {
     let fake = Fake::default();
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
 
     let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
     let me = phone.me();
@@ -910,7 +951,7 @@ fn a_speaker_taken_or_sent_elsewhere_is_let_go_out_loud() {
     let fake = Fake::default();
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
 
     let mut alice = device(&server, "alice", Kind::Phone, "Alice's phone", true);
     let mut bob = device(&server, "bob", Kind::Phone, "Bob's phone", true);
@@ -982,7 +1023,7 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
     let fake = Fake::default();
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
     // A library of two pages, authored by the library's own account.
     let login = server
         .auth
@@ -1064,7 +1105,7 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
     let fake = Fake::default();
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
@@ -1247,7 +1288,7 @@ fn a_group_of_speakers_and_its_volume_over_real_sockets() {
     fake.sonos(STUDY, 0.6, &[STUDY]);
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(two_sonos(url)));
+    let server = with_house(&rt, data.path(), two_sonos(url));
 
     let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
     let s = told(&mut phone, "two speakers that say what they can do", |s| {
@@ -1399,7 +1440,7 @@ fn a_speaker_playing_on_is_never_sought_back_by_its_own_stale_position() {
     let fake = Fake::default();
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
 
     let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
     told(&mut phone, "the kitchen beside the phone", |s| {
@@ -1485,7 +1526,7 @@ fn a_speaker_plays_through(spell: fn(&str) -> String) {
     fake.keeps_a_queue(KITCHEN, spell);
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
@@ -1602,7 +1643,7 @@ fn a_hand_off_picks_up_where_the_track_stopped() {
     fake.keeps_a_queue(KITCHEN, as_given);
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
@@ -1752,12 +1793,14 @@ fn a_cast_is_where_the_speaker_is_and_never_the_beginning() {
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
     let (lines, traced) = std::sync::mpsc::channel();
-    let server = serve(&rt, data.path(), |c| {
-        c.house = Some(ha::Config {
+    let server = with_house(
+        &rt,
+        data.path(),
+        ha::Config {
             trace: ha::Trace::Lines(lines),
             ..house(url)
-        })
-    });
+        },
+    );
     let bound = harken_server::domain::host::SYNC_MS;
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
@@ -1878,7 +1921,7 @@ fn a_cast_is_where_the_speaker_is_and_never_the_beginning() {
     let lines: Vec<String> = traced.try_iter().collect();
     assert!(lines
         .iter()
-        .all(|l| l.starts_with("harken-server: house: trace: media_player.kitchen: ")));
+        .all(|l| l.starts_with("harken-peer: house: trace: media_player.kitchen: ")));
     let started_line = lines
         .iter()
         .find(|l| l.contains("did started "))
@@ -1928,9 +1971,7 @@ fn a_speaker_plays_on_through_the_queue_with_nobody_listening() {
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
     let idle = Duration::from_millis(300);
-    let server = serve(&rt, data.path(), |c| {
-        c.house = Some(quick_to_idle(url, idle))
-    });
+    let server = with_house(&rt, data.path(), quick_to_idle(url, idle));
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     told(&mut browser, "the kitchen beside the browser", |s| {
@@ -2006,9 +2047,7 @@ fn a_speaker_left_paused_with_nobody_listening_goes_after_a_while() {
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
     let idle = Duration::from_millis(1_200);
-    let server = serve(&rt, data.path(), |c| {
-        c.house = Some(quick_to_idle(url, idle))
-    });
+    let server = with_house(&rt, data.path(), quick_to_idle(url, idle));
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     told(&mut browser, "the kitchen beside the browser", |s| {
@@ -2064,7 +2103,7 @@ fn an_idle_house_is_asked_nothing() {
     fake.sonos(KITCHEN, 0.3, &[KITCHEN]);
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(fake.reads(), 0, "nobody has signed in");
 
@@ -2113,7 +2152,7 @@ fn the_queue_edited_reaches_the_speaker_without_a_gap() {
     fake.keeps_a_queue(KITCHEN, as_given);
     let url = fake.serve(&rt);
     let data = tempfile::tempdir().unwrap();
-    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let server = with_house(&rt, data.path(), house(url));
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
     told(&mut browser, "the kitchen beside the browser", |s| {

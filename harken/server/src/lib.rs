@@ -11,10 +11,9 @@
 //! - [`library`]: the media directory as a peer — walked, watched, and
 //!   authored as `library.add_song`;
 //! - [`covers`]: where a track's cover comes from, and `/media`;
-//! - [`assistant`]: the house's speakers, as devices in each account's
-//!   listening session — which is the domain's live state
-//!   (`harken/domain/listening.ark`), sequenced by the hub's volatile
-//!   authority, and needs nothing of this crate;
+//! - [`house`]: the door the house's peer (`harken-peer --house`, the
+//!   house's speakers as devices of each account's listening session) is
+//!   handed its logins through — the speakers themselves are not here;
 //! - [`domain`]: the domain's bindings and the host's Rust beside them;
 //! - [`hosted`]: the domain the hub runs, harken's own, as this build compiled it;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
@@ -31,10 +30,10 @@
 //! volatile `Hello` says what the device is, and the hub authors `on_join`
 //! with it, its user and id the verified login's ([`device`]).
 
-pub mod assistant;
 pub mod covers;
 pub mod domain;
 pub mod hosted;
+pub mod house;
 pub mod library;
 
 use std::path::{Path, PathBuf};
@@ -47,7 +46,6 @@ use ark_auth::server::{Auth, Mode};
 use ark_auth::Account;
 use ark_peer::{Config as HubConfig, Live, Running};
 
-use assistant::ha;
 use hosted::Hosted;
 use library::Scanner;
 
@@ -138,8 +136,10 @@ pub struct Config {
     /// The file whose change is a rebuild off the store
     /// (`pkg/harken_iced_bg.wasm`); unset, every file is.
     pub web_module: Option<String>,
-    /// The house, if there is one.
-    pub house: Option<ha::Config>,
+    /// The file the house's key is kept in (`HARKEN_HOUSE_KEY`), made
+    /// when it is not there: set, `/house/sign-in` hands a peer holding the
+    /// key the speakers' logins ([`house`]).
+    pub house_key: Option<PathBuf>,
     /// How often the sync socket pings. The default everywhere but a test:
     /// the process fleet shortens it (`HARKEN_KEEPALIVE_MS`) so a
     /// black-holed socket is closed in a second rather than a minute
@@ -177,7 +177,7 @@ impl Config {
             media: None,
             web: None,
             web_module: None,
-            house: None,
+            house_key: None,
             keepalive: Keepalive::default(),
             retain: Retention::default(),
             roles: Default::default(),
@@ -198,10 +198,8 @@ impl Config {
     /// HARKEN_REDIRECTS              comma-separated prefixes
     /// HARKEN_MEDIA                  the media root
     /// HARKEN_WEB, HARKEN_WEB_MODULE the browser client
-    /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
-    ///                               all three, or none; HARKEN_HA_MEDIA
-    /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
-    ///                               house said and what the bridge did
+    /// HARKEN_HOUSE_KEY              the house's key's file (made if missing):
+    ///                               `/house/sign-in` for `harken-peer --house`
     /// HARKEN_KEEPALIVE_MS           the sync socket's ping interval (20000)
     /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3, and only 3)
     /// HARKEN_RETAIN_DAYS            read and checked; kept nothing by
@@ -239,7 +237,14 @@ impl Config {
             ),
             _ => bail!("HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID and HARKEN_OIDC_CLIENT_SECRET_FILE go together; set all three"),
         };
-        let house = house(&env)?;
+        // The house is its own peer now: a server told of one would start
+        // and quietly not do the thing it was configured for.
+        if let Some(k) = ["HARKEN_HA_URL", "HARKEN_HA_TOKEN_FILE", "HARKEN_HA_PLAYERS"]
+            .into_iter()
+            .find(|k| env(k).is_some())
+        {
+            bail!("{k}: the house's speakers are `harken-peer --house`'s, not the server's; set HARKEN_HOUSE_KEY here and the house's variables there");
+        }
         let mut keepalive = Keepalive::default();
         if let Some(ms) = env("HARKEN_KEEPALIVE_MS") {
             let ms: u64 = ms.trim().parse().ok().filter(|n| *n > 0).ok_or_else(|| {
@@ -289,7 +294,7 @@ impl Config {
             media: env("HARKEN_MEDIA").map(PathBuf::from),
             web: env("HARKEN_WEB").map(PathBuf::from),
             web_module: env("HARKEN_WEB_MODULE"),
-            house,
+            house_key: env("HARKEN_HOUSE_KEY").map(PathBuf::from),
             keepalive,
             retain,
             roles: roles_of(&env("HARKEN_ROLES").unwrap_or_default())?,
@@ -328,88 +333,6 @@ pub fn roles_of(text: &str) -> Result<std::collections::BTreeMap<String, Vec<Str
         );
     }
     Ok(out)
-}
-
-/// The house, from the environment, or nothing.
-///
-/// All three together or none of them, the way the OpenID Connect three
-/// are: half a configuration is a server that starts and quietly does not do
-/// the thing it was configured for. The token is a *file* for the reason the
-/// client secret is one.
-fn house(env: &impl Fn(&str) -> Option<String>) -> Result<Option<ha::Config>> {
-    match (
-        env("HARKEN_HA_URL"),
-        env("HARKEN_HA_TOKEN_FILE"),
-        env("HARKEN_HA_PLAYERS"),
-    ) {
-        (Some(url), Some(file), Some(players)) => {
-            let token = std::fs::read_to_string(&file)
-                .with_context(|| format!("cannot read HARKEN_HA_TOKEN_FILE {file}"))?
-                .trim()
-                .to_string();
-            if token.is_empty() {
-                bail!("HARKEN_HA_TOKEN_FILE {file} is empty");
-            }
-            let players = players_of(&players);
-            if players.is_empty() {
-                bail!("HARKEN_HA_PLAYERS names no players");
-            }
-            // Where a *speaker* fetches from, which is not necessarily where
-            // a phone does: the phone may be on a public address while the
-            // speaker only knows one on the LAN.
-            let media = env("HARKEN_HA_MEDIA")
-                .or_else(|| env("HARKEN_PUBLIC_URL"))
-                .ok_or_else(|| {
-                    anyhow!("HARKEN_HA_MEDIA: speakers need an address they can fetch bytes from")
-                })?;
-            Ok(Some(ha::Config {
-                url,
-                token,
-                players,
-                media,
-                tick: ha::TICK,
-                idle: ha::IDLE,
-                trace: match env("HARKEN_BRIDGE_TRACE").is_some_and(|v| v != "0") {
-                    true => ha::Trace::Out,
-                    false => ha::Trace::Off,
-                },
-            }))
-        }
-        (None, None, None) => Ok(None),
-        _ => bail!(
-            "HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE and HARKEN_HA_PLAYERS go together; set all three"
-        ),
-    }
-}
-
-/// `media_player.kitchen=Kitchen,media_player.study` — a name after an `=`
-/// when the entity id is not what you would call it out loud, and a guess
-/// from the id when it is.
-pub fn players_of(list: &str) -> Vec<(String, String)> {
-    list.split(',')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .map(|p| match p.split_once('=') {
-            Some((id, name)) => (id.trim().to_string(), name.trim().to_string()),
-            None => (p.to_string(), pretty(p)),
-        })
-        .collect()
-}
-
-/// `media_player.the_kitchen` as `The kitchen`. A guess, overridden by
-/// writing the name out — but a picker full of entity ids is a picker for
-/// somebody who already knows what is in their house.
-pub fn pretty(entity: &str) -> String {
-    let tail = entity
-        .rsplit('.')
-        .next()
-        .unwrap_or(entity)
-        .replace('_', " ");
-    let mut chars = tail.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => entity.to_string(),
-    }
 }
 
 /// What the scanner's session says signed in.
@@ -491,7 +414,6 @@ pub struct Server {
     pub auth: Arc<Auth>,
     pub hosted: Hosted,
     pub scanner: Option<Scanner>,
-    pub house: Option<ha::Assistant>,
 }
 
 impl Server {
@@ -499,20 +421,13 @@ impl Server {
         format!("http://{}", self.running.addr)
     }
 
-    /// Stop the scanner and the bridge, then the listener.
+    /// Stop the scanner, then the listener.
     pub async fn stop(self) {
         let Server {
-            running,
-            scanner,
-            house,
-            ..
+            running, scanner, ..
         } = self;
-        // Both join threads that talk to the hub; neither may block a worker.
-        let _ = tokio::task::spawn_blocking(move || {
-            drop(scanner);
-            drop(house);
-        })
-        .await;
+        // It joins a thread that talks to the hub, which may not block a worker.
+        let _ = tokio::task::spawn_blocking(move || drop(scanner)).await;
         running.stop().await;
     }
 }
@@ -545,8 +460,7 @@ async fn mode(sign_in: &SignIn) -> Result<Mode> {
     })
 }
 
-/// Build the server from `config`, listen, and start the scanner and the
-/// bridge beside it.
+/// Build the server from `config`, listen, and start the scanner beside it.
 pub async fn start(config: Config) -> Result<Server> {
     let hosted = Hosted::harken();
     std::fs::create_dir_all(&config.data)
@@ -639,6 +553,23 @@ pub async fn start(config: Config) -> Result<Server> {
         server.web = Some((dir.clone(), config.web_module.clone()));
     }
     let (hub, router, admin) = server.build()?;
+    // The house's door, where its key is kept.
+    let router = match &config.house_key {
+        Some(file) => {
+            let key = ark_auth::server::key_file(file)
+                .with_context(|| format!("the house's key, {}", file.display()))?;
+            eprintln!(
+                "harken-server: the house signs in at /house/sign-in with the key in {}",
+                file.display()
+            );
+            router.merge(house::routes(house::Door {
+                key: ark::hash::hex(&key),
+                auth: auth.clone(),
+                hub: hub.clone(),
+            }))
+        }
+        None => router,
+    };
     let router = router.layer(axum::middleware::from_fn_with_state(
         (hub.clone(), hosted.clone()),
         healthz,
@@ -648,14 +579,6 @@ pub async fn start(config: Config) -> Result<Server> {
     if let Some(a) = running.admin_addr {
         eprintln!("harken-server: the admin page on http://{a}/admin/");
     }
-
-    // Every `media_player` named becomes a device in every listening
-    // session somebody is in: a connection of its own in that session,
-    // which is how it is a device rather than a client.
-    let house = config.house.clone().map(|house| {
-        eprintln!("harken-server: the house: {house}");
-        ha::start(house, hub.clone(), hosted.clone())
-    });
 
     // The scanner signs in like everything else, as the account `library`.
     let scanner = match &config.media {
@@ -705,7 +628,6 @@ pub async fn start(config: Config) -> Result<Server> {
         auth,
         hosted,
         scanner,
-        house,
     })
 }
 
@@ -856,6 +778,18 @@ mod tests {
         assert!(Config::from_vars("x:1", vars(&[dev, ("HARKEN_ROLES", "=alice")])).is_err());
     }
 
+    /// The house's variables refuse to start a server, which no longer
+    /// runs it, and its key's file is read as told. Falsified by dropping
+    /// the check: a server with `HARKEN_HA_URL` started.
+    #[test]
+    fn the_house_is_not_the_servers() {
+        let dev = ("HARKEN_DEV_AUTH", "1");
+        let e = Config::from_vars("x:1", vars(&[dev, ("HARKEN_HA_URL", "http://ha")])).unwrap_err();
+        assert!(e.to_string().contains("harken-peer --house"), "{e}");
+        let c = Config::from_vars("x:1", vars(&[dev, ("HARKEN_HOUSE_KEY", "/k")])).unwrap();
+        assert_eq!(c.house_key, Some(PathBuf::from("/k")));
+    }
+
     /// The two retention constants are the defaults unless told, and
     /// nothing a typo could make of them. Falsified by ignoring
     /// `HARKEN_RETAIN_ENTRIES`: the count is 10,000.
@@ -896,80 +830,5 @@ mod tests {
                 "{bad:?}"
             );
         }
-    }
-
-    #[test]
-    fn the_house_is_all_three_or_none_and_the_token_is_a_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let token = dir.path().join("ha-token");
-        std::fs::write(&token, "sekrit\n").unwrap();
-        let token = token.to_str().unwrap();
-        let dev = ("HARKEN_DEV_AUTH", "1");
-        let e = Config::from_vars("x:1", vars(&[dev, ("HARKEN_HA_URL", "http://ha")])).unwrap_err();
-        assert!(e.to_string().contains("go together"), "{e}");
-        let three = [
-            dev,
-            ("HARKEN_HA_URL", "http://ha:8123"),
-            ("HARKEN_HA_TOKEN_FILE", token),
-            (
-                "HARKEN_HA_PLAYERS",
-                "media_player.the_kitchen, media_player.study=Study",
-            ),
-        ];
-        let e = Config::from_vars("x:1", vars(&three)).unwrap_err();
-        assert!(
-            e.to_string().contains("HARKEN_HA_MEDIA"),
-            "a speaker needs somewhere to fetch from: {e}"
-        );
-        let mut with_media = three.to_vec();
-        with_media.push(("HARKEN_HA_MEDIA", "http://10.0.0.2:8787"));
-        let house = Config::from_vars("x:1", vars(&with_media))
-            .unwrap()
-            .house
-            .unwrap();
-        assert_eq!(house.token, "sekrit");
-        assert_eq!(house.media, "http://10.0.0.2:8787");
-        assert_eq!(
-            house.players,
-            [
-                (
-                    "media_player.the_kitchen".to_string(),
-                    "The kitchen".to_string()
-                ),
-                ("media_player.study".to_string(), "Study".to_string())
-            ]
-        );
-        assert!(
-            !house.to_string().contains("sekrit"),
-            "the token is never printed"
-        );
-        assert!(
-            matches!(house.trace, ha::Trace::Off),
-            "the bridge's trace is off unless asked for"
-        );
-        let mut traced = with_media.clone();
-        traced.push(("HARKEN_BRIDGE_TRACE", "1"));
-        assert!(matches!(
-            Config::from_vars("x:1", vars(&traced))
-                .unwrap()
-                .house
-                .unwrap()
-                .trace,
-            ha::Trace::Out
-        ));
-        // The public URL stands in for a speaker's when nothing else is said.
-        let mut public = three.to_vec();
-        public.push(("HARKEN_PUBLIC_URL", "http://10.0.0.2:8787"));
-        assert_eq!(
-            Config::from_vars("x:1", vars(&public))
-                .unwrap()
-                .house
-                .unwrap()
-                .media,
-            "http://10.0.0.2:8787"
-        );
-        let mut missing = with_media.clone();
-        missing[2] = ("HARKEN_HA_TOKEN_FILE", "/nonexistent/ha-token");
-        assert!(Config::from_vars("x:1", vars(&missing)).is_err());
     }
 }

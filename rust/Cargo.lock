@@ -2182,6 +2182,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "harken-peer"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-auth",
+ "ark-peer",
+ "harken-domain",
+ "harken-player",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
 name = "harken-player"
 version = "0.1.0"
 dependencies = [
@@ -2204,7 +2218,7 @@ dependencies = [
  "ark-peer",
  "axum",
  "harken-domain",
- "harken-player",
+ "harken-peer",
  "libc",
  "lofty",
  "notify",

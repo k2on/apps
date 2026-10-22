@@ -3,17 +3,18 @@ name = "harken-server"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "harken's server, an ark-peer that listens: the log and the listening session (harken/domain, linked) on the hub, sign-in (ark-auth), a media directory authored as a peer, the house's speakers as devices, and the browser client"
+description = "harken's server, an ark-peer that listens: the log and the listening session (harken/domain, linked) on the hub, sign-in (ark-auth), a media directory authored as a peer, the door the house's peer signs in at, and the browser client"
 workspace = "../../rust"
 
 [[bin]]
 name = "harken-server"
 path = "src/main.rs"
 
-# A peer with no screen, driven by JSON lines: what the process fleet
-# (tests/fleet.rs) and the VM test run as a device (docs/plan-fleet.md §1).
-# A binary of this package because `CARGO_BIN_EXE_*` reaches only the
-# binaries of the crate whose tests run.
+# A peer with no screen (`harken/peer`): driven by JSON lines, what the
+# process fleet (tests/fleet.rs) and the VM test run as a device
+# (docs/plan-fleet.md §1); with `--house`, the house's speakers. A binary of
+# this package because `CARGO_BIN_EXE_*` reaches only the binaries of the
+# crate whose tests run; the server's library uses nothing of it.
 [[bin]]
 name = "harken-peer"
 path = "src/bin/harken-peer.rs"
@@ -22,10 +23,10 @@ path = "src/bin/harken-peer.rs"
 ark = { path = "../../rust/ark" }
 serde = { workspace = true }
 harken-domain = { path = "../domain" }
-# The one reconciler a phone's player is held to; a speaker is its Sound.
-harken-player = { path = "../player" }
-# The server is a peer that listens; the scanner and the house's speakers
-# are peers in this process that reach it through its handle, never a socket.
+# `harken-peer`, the binary beside the server (above).
+harken-peer = { path = "../peer" }
+# The server is a peer that listens; the scanner is a peer in this process
+# that reaches it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer" }
 ark-auth = { path = "../../rust/ark-auth" }
 anyhow = "1"
@@ -42,9 +43,6 @@ lofty = "0.25"
 sha2 = { workspace = true }
 tower-http = { version = "0.5", features = ["fs"] }
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
-# Home Assistant, over its REST API: blocking, on a thread of its own. The
-# same ureq ark-auth talks to an identity provider with.
-ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]

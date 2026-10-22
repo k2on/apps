@@ -1,0 +1,27 @@
+[package]
+name = "harken-peer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "harken's peer with no screen: a replica driven by JSON lines (what the process fleet runs as a device), and the peer that hosts the house's Home Assistant speakers as devices of a server's listening sessions"
+workspace = "../../rust"
+
+# The binary is `harken-server`'s package's (`harken/server/src/bin/harken-peer.rs`
+# calls `harken_peer::headless::main`): `CARGO_BIN_EXE_*` reaches only the
+# binaries of the crate whose tests run, and the fleet that drives it is the
+# server's.
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+ark-peer = { path = "../../rust/ark-peer" }
+ark-auth = { path = "../../rust/ark-auth" }
+harken-domain = { path = "../domain" }
+# The one reconciler a phone's player is held to; a speaker is its Sound.
+harken-player = { path = "../player" }
+serde_json = { workspace = true }
+# Home Assistant over its REST API, and the server's `/house/sign-in`:
+# blocking, on the house's thread.
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+
+[dev-dependencies]
+tempfile = "3"
