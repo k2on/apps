@@ -1006,6 +1006,112 @@ comment added to `harken/domain/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
+### Experiment: one generator
+
+The question: could the domain's own types — rows, inputs, answers,
+`Job<T>`, `Result` — ride UniFFI as the bridge does, so that the phones
+have one generator and no JSON at the boundary? Measured on harken
+(`claude/one-generator`, from `2e14dd4`).
+
+*What there was.* Two generators: UniFFI's (the bridge: `Peer`, views by
+name, listener, player) and `ark-dev gen` (436 lines of Rust over the
+catalog: a data class or struct per record, a sealed class or enum per
+sum, each with a JSON reader and writer, and a stub per function calling
+`mutate`/`view`/`query` by name with JSON; `harken/ffi/tests/gen.rs` pins
+its output). Generated, non-blank: `Harken.kt` 837, `Harken.swift` 1,292;
+UniFFI's `ark_ffi` 2,974 Kotlin / 1,941 Swift, `harken_ffi` 2,664 / 1,716
+(plus headers). The JSON the phones hold by hand is small at the domain's
+functions (one `CreatePlaylist(name).json()` for `check`) and ~75 lines of
+Kotlin at harken-ffi's own string APIs (`Listening.of`, `Press.json`,
+`Heard.of`, `RemoteStats.of`, a queue's tracks) — the player and the
+listening session, not `mutate`/`view`. S3a's shapes (`Done(T)` as
+`{"Done":{"value":…}}`, `Result` as `{Ok:{value}}|{Err:{why}}`) exist so
+that a variant carrying one value is a record the generated types can read.
+
+*What was built.* `#[ark(ffi)]` on a type (`#[ark(ffi_view)]` on a view's
+row) makes `Row`/`Input`/`Describe` write its **twin**: a UniFFI record or
+enum named as the type, each field `<T as Twin<Tag>>::Ffi`, with the
+conversions both ways (`ark_ffi::Twin`, parameterised by the domain crate's
+UniFFI tag so that the domain may give `ark`'s generic types a twin); a
+view's row gets an object `<T>View` (`rows()`, `take() -> <T>Taken {update:
+Taken, rows}`). `#[ffi]` above `#[mutator]`/`#[view]`/`#[query]` writes a
+UniFFI function over a `Peer` (`playlists_create_playlist` and its `_check`,
+`playlists_playlist`, …); `#[derive(Effect)]` on a row that asks writes
+`Job<T>`'s and `Result<T, String>`'s twins (`JobLooked`, `LookOutcome`),
+`LookClaim`/`Finish`/`Cancel`/`Due` and `look_claim`/`_finish`/`_cancel`/
+`_due`. Inputs and rows cross Rust as their value-format bytes; an id is
+`RowId`, its hex, the apps' `Id` by `uniffi.toml`. harken asks for it with
+`#[cfg_attr(feature = "ffi", …)]` (feature `ffi`, enabled by harken-ffi):
+`CreatePlaylist`, `PlaylistInput`, `PlaylistsOf`, `LibraryEntry`,
+`Playlist`, `Look`, `Looked`; `create_playlist`, `playlists`,
+`playlists_of`, `playlist`. `ark-dev gen` writes, of a type UniFFI
+declares, only its JSON as extensions, so the functions still called by
+name read UniFFI's own types and there is one Kotlin and one Swift type per
+domain type. Moved in Kotlin: `Phone.playlist`, `playlists`, `playlistsOf`,
+`createPlaylist`, `nameProblem` (and so every screen's playlist type).
+
+*The hard parts.* Handled: `Option`, `Vec`, nested sums with data (a lone
+unnamed field is `{value}`), `i64` (`Long`/`Int64`; a `u64` is `ULong`), a
+refusal as the answer (`Result<_, Refusal>` is a thrown `Refusal`). A
+wrapper: `Job<T>` (UniFFI has no generics: one enum per instantiation,
+written by the job's derive), `Result<T, String>` as a value (one enum per
+instantiation), `Id<R>` (one custom type for every table, as before; not
+`ByteArray`, whose data-class equality is identity), a view (one object per
+row type; Kotlin adapts each into the generic `View<T>` in a line, since a
+UniFFI object cannot implement a generic interface). Not possible as such:
+a tuple (UniFFI has none; neither has the old generator), so a key never
+crosses — a row's twin is its fields; recursive types (not tried). Not
+the phones' concern: the explorer's memcomparable keys and the vectors,
+which are `ark::json` in Rust and stay so; `mutate`/`view` by name with JSON
+stay in `ark-ffi` for any host that speaks JSON.
+
+*Measured.* Source (`tools/loc.sh`): `ark-macros` 570 → 964 (`ffi.rs` 371),
+`ark-ffi` 487 → 648 (`typed.rs` 117, a view by its bytes), `ark-dev`
+2,142 → 2,221 (the extensions), harken-ffi tests 627 → 790, the domain
+2,429 → 2,442 (attributes). Hand-written Kotlin: `Typed.kt` 73 → 106,
+`Phone.kt` 158 → 169, twelve imports switched; JSON deleted at the moved
+sites: one line. Generated, non-blank: `Harken.kt` 837 → 788, `Harken.swift`
+1,292 → 1,243; UniFFI's `harken_domain` module 2,312 Kotlin (1,141 its
+runtime, once; ~39 a record, ~187 a view object, ~10 a function) and 1,621
+Swift (+624 header); `ark_ffi` +199 / +167. Extrapolated to all of harken
+(86 types, ~12 view row types, ~70 functions): ~7,800 Kotlin and ~7,500
+Swift lines generated against 837 and 1,292, and `ark-dev gen` (436) and its
+pin gone against `ffi.rs` + `typed.rs` (~490) and ~160 attribute lines in
+the domain. The library for the host, release, stripped: 8,012,704 →
+8,151,176 B (+1.7%; exported symbols 218 → 301) for 15 records and enums,
+2 view objects and 9 functions; ≈ +0.7–0.9 MB (+9–11%) per ABI for all.
+The domain alone, dev, after a one-line edit: 2.14 → 2.68 s (+25%; ≈ 2.9×
+extrapolated); release 26.5–38.5 s against 39.0–39.8 s, within this
+machine's noise. On the JVM over the host release library, 2,000
+`LibraryEntry` rows read: 10.8–16.5 µs a row as JSON (`element_json`,
+`org.json`, the generated `of`) against 1.3–1.8 µs typed — 8× (one machine,
+three rounds; not a phone, not ART's `org.json`).
+
+*Judged.* Effective at what it is for: no JSON on a typed call, a refusal
+typed, one type per domain type on each phone, and view rows read 8× faster
+on the JVM. Not one generator: UniFFI's generic gap puts a second mechanism
+beside it (twins, an object per view row type, an enum per `Job<T>` and
+`Result<T, _>`), so the generator code is about the same size (~490 against
+436), the generated code ~9× larger (not read, but compiled into every
+app), the library ~10% larger per ABI and the domain's compile ~3× in dev.
+Worse besides: an attribute on every type and function that crosses (or a
+macro feature, which the workspace's feature unification would turn on for
+the server too — as `ffi` here already is under nix's unified host build);
+Swift compiles every binding into one module, so a type may never be both
+generated and UniFFI's (the extension mode exists for that); the explorer
+and the vectors keep JSON regardless. **Recommendation: a typed path for
+views** (rows are where JSON is decoded, per patch, and where the 8× is),
+by the twin derive, with the inputs a view takes; keep mutations, queries
+and the live calls on the generated stubs by name, and keep `ark-dev gen`.
+Move everything only if the binary cost is accepted and the phones' typed
+APIs (player, listening session) are moved with it, which is where the
+hand-written JSON is. Found on the way: a kept view made again after a
+reset was made from its input's JSON passed as bytes; it keeps the bytes
+now. Not verified: the app's JVM tests and the APK (Kotlin compiled here
+for `Typed.kt`, the generated `Harken.kt`, `Phone.kt` and UniFFI's
+bindings only, with a throwaway check run over the host library); the iOS
+type-check (Swift generated, not compiled); a phone; recursive types.
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
