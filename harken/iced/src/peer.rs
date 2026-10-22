@@ -87,19 +87,13 @@ impl Open {
         self.view.map(|v| client.rows(v)).unwrap_or_default()
     }
 
-    /// What one settle did to it. A view that faults is read again whole,
-    /// which is what a reset is; so is one opened for somebody else; one
-    /// refused at open is asked again when anything moved — the query it
-    /// stands for would have been.
+    /// What one settle did to it. A view that faults is made again by the
+    /// peer, and read again whole, which is what a reset is; one opened for
+    /// somebody else is opened again; one refused at open is asked again
+    /// when anything moved — the query it stands for would have been.
     fn update(&mut self, client: &mut Replica, moved: bool) -> Update {
         match self.view {
-            Some(v) if self.who == *client.me() => match client.update(v) {
-                Update::Reset => {
-                    self.reopen(client);
-                    Update::Reset
-                }
-                u => u,
-            },
+            Some(v) if self.who == *client.me() => client.update(v),
             Some(_) => {
                 self.reopen(client);
                 Update::Reset

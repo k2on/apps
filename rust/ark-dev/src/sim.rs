@@ -62,7 +62,8 @@ pub struct Net {
     pub to_client: BTreeMap<i64, Vec<Vec<u8>>>,
     pub seed: u64,
     pub now: i64,
-    /// Every refusal a client was told, and every view it dropped.
+    /// Every refusal a client was told; how many frames the network
+    /// dropped and how many it delivered twice.
     pub refused: Vec<(i64, String)>,
     pub dropped: usize,
     pub doubled: usize,
@@ -153,9 +154,8 @@ impl Net {
             match c.update(k.1) {
                 Update::Patched(patches) => self.views.entry(k).and_modify(|v| v.4 = splice(&patches, &v.4)),
                 Update::Reset => {
-                    self.views.remove(&k);
-                    self.refused.push((i, format!("view {} dropped", k.1)));
-                    continue;
+                    let rows = c.values(k.1).unwrap_or_default();
+                    self.views.entry(k).and_modify(|v| v.4 = rows)
                 }
                 Update::Unchanged => continue,
             };

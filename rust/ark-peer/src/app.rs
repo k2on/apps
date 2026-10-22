@@ -41,7 +41,8 @@ pub enum Standing {
 pub enum Update {
     Unchanged,
     Patched(Vec<Patch>),
-    /// It could not be kept up: read it again.
+    /// It could not be kept up and was made again, under its number: read
+    /// its rows afresh.
     Reset,
 }
 

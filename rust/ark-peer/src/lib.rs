@@ -175,6 +175,14 @@ impl Config {
         }
     }
 
+    /// The domain `space`'s views are made by.
+    fn domain_of(&self, space: Space) -> Option<Arc<Domain>> {
+        match space {
+            Space::Durable => self.log.domain.clone(),
+            Space::Volatile => self.live.as_ref()?.module.domain.clone(),
+        }
+    }
+
     /// A domain's: its module for the log, its functions by name.
     pub fn of(domain: Arc<Domain>) -> Config {
         Config {
@@ -237,7 +245,7 @@ pub struct Peer {
     hub: hub::Hub,
     /// Frames for its server.
     frames: Vec<Vec<u8>>,
-    views: Vec<(Space, Option<Box<dyn Maintained>>)>,
+    views: Vec<Option<Watched>>,
     relay: BTreeMap<String, (Vec<u8>, i64)>,
     relayed: Option<i64>,
     /// What became of its own intents, and what its views did.
@@ -252,6 +260,17 @@ pub struct Peer {
     missed: Option<Vec<Change>>,
     /// The reconcilers, by their view.
     reconcilers: BTreeMap<usize, jobs::Reconciler>,
+}
+
+/// A view a peer keeps (§1.10): what it is made of — its space, the
+/// domain's function, its input and who reads — and the view, while it
+/// can be made.
+struct Watched {
+    space: Space,
+    name: String,
+    input: Vec<u8>,
+    ctx: Ctx,
+    view: Option<Box<dyn Maintained>>,
 }
 
 /// The role of a device alone since `fork`.
@@ -518,23 +537,33 @@ impl Peer {
         self.saved = (local, ids);
     }
 
+    /// Every view of `space` told a settle's changes. One that cannot be
+    /// kept up, or could not be made, is made again over the store as it
+    /// is, under its number: its rows are read afresh ([`Update::Reset`]).
     fn changed(&mut self, space: Space, cs: &[Change]) {
         let store = match space {
             Space::Durable => &self.log.store,
             Space::Volatile => &self.live.as_ref().expect("a machine that spoke").store,
         };
-        for (i, (_, w)) in self.views.iter_mut().enumerate().filter(|(_, (s, _))| *s == space) {
-            let Some(v) = w else { continue };
-            match v.push(cs, store) {
-                Ok(patches) => {
-                    if let (false, Some(f)) = (patches.is_empty(), self.reconcilers.get_mut(&i)) {
+        let domain = self.config.domain_of(space);
+        for (i, w) in self.views.iter_mut().enumerate() {
+            let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
+            let pushed = w.view.as_mut().map(|v| v.push(cs, store));
+            match pushed {
+                Some(Ok(patches)) => {
+                    if let (false, Some(f), Some(v)) = (patches.is_empty(), self.reconcilers.get_mut(&i), &w.view) {
                         f(&v.rows());
                     }
                     self.told.patched(i, patches)
                 }
-                Err(_) => {
-                    *w = None;
-                    self.told.reset(i);
+                was => {
+                    w.view = domain.as_ref().and_then(|d| d.watch(store, &w.ctx, &w.name, &w.input).ok());
+                    if was.is_some() || w.view.is_some() {
+                        if let (Some(f), Some(v)) = (self.reconcilers.get_mut(&i), &w.view) {
+                            f(&v.rows());
+                        }
+                        self.told.reset(i);
+                    }
                 }
             }
         }
@@ -685,21 +714,25 @@ impl Peer {
 
     /// A view's answer as it stands.
     pub fn values(&self, view: usize) -> Option<Vec<Vec<u8>>> {
-        self.views.get(view)?.1.as_ref().map(|v| v.rows())
+        self.views.get(view)?.as_ref()?.view.as_ref().map(|v| v.rows())
     }
 
     /// A maintained view of the domain's function `name` on `input` over
     /// `space`'s optimistic state, as `ctx` reads it (§1.16); what it does
-    /// comes as its [`Update`]s.
+    /// comes as its [`Update`]s, under its number for as long as it is
+    /// held.
     pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
-        let m = match space {
-            Space::Durable => Some(&self.config.log),
-            Space::Volatile => self.config.live.as_ref().map(|l| &l.module),
-        };
-        let d = m.and_then(|m| m.domain.clone()).ok_or_else(|| Refusal::new("no domain here"))?;
+        let d = self.config.domain_of(space).ok_or_else(|| Refusal::new("no domain here"))?;
         let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;
-        let view = d.watch(store, &ctx, name, input)?;
-        self.views.push((space, Some(view)));
+        let view = Some(d.watch(store, &ctx, name, input)?);
+        let (name, input) = (name.into(), input.to_vec());
+        self.views.push(Some(Watched {
+            space,
+            name,
+            input,
+            ctx,
+            view,
+        }));
         Ok(self.views.len() - 1)
     }
 
@@ -707,7 +740,7 @@ impl Peer {
     /// number is not given to another.
     pub fn unwatch(&mut self, view: usize) {
         if let Some(w) = self.views.get_mut(view) {
-            w.1 = None;
+            *w = None;
         }
         self.told.updates.remove(&view);
     }
