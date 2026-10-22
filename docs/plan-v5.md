@@ -1006,6 +1006,85 @@ comment added to `harken/domain/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
+### Experiment: server split
+
+**The house leaves the server; the headless peer hosts it.** A crate,
+`harken/peer` (`harken-peer`): `headless.rs` (the server's `bin/harken-peer.rs`,
+moved, plus `--house`) and `house.rs` (`assistant.rs`, moved). The house's
+speakers were kernel machines the server's thread connected to the hub in
+its process and read every session off the hub's store; now `harken-peer
+--house --server URL` holds one volatile machine per (account, speaker) on
+a socket of its own, signed in through the server's `POST
+/house/sign-in` — the one thing added to the server (`house.rs`, 115
+lines): a bearer key the server keeps in `HARKEN_HOUSE_KEY`'s file buys
+the login `user@entity` (a `sign_in` row, renewed with a day left), so a
+speaker's id is what it was — plus its own watching connection (`the
+house@house`, no device), which every session reaches, as it reaches any
+volatile connection. Over sockets the speakers and the watcher hear the hub
+each at its pace, and two speakers of one session acting on two moments of
+it joined, unjoined and joined a group (one bridge run in two): a session
+is acted on only once every speaker in it has heard what the watcher has,
+no more, with nothing unanswered (`Wires::caught_up`) — the hub's job order
+the in-process bridge had for free; eighteen runs in a row then pass. The
+reconciler is still `harken-player`'s, through `Speakers` (not its
+`Player`, which is one device over one `ark_peer::Peer`; a speaker is many
+sessions' over one piece of hardware). `harken-server`'s package keeps the
+binary (a three-line shim over `harken_peer::headless::main`):
+`CARGO_BIN_EXE_*` reaches only the package's own binaries, and the fleet,
+the bridge tests and the release's `bin/harken-peer` are the server
+package's. NixOS: `services.harken`'s options unchanged; with
+`homeAssistant` a second unit, `harken-house`, bound to `harken.service`,
+as the server's dynamic user for `house.key`. The variables keep their
+names and are the house's; a server given `HARKEN_HA_*` refuses to start.
+
+*Size* (`tools/loc.sh`): `harken-server` src 4,517 → 1,749, bins 1,304 →
+45, tests 6,675 → 6,871 (total 12,496 → 8,665); `harken-peer` 4,334 (of
+it in-file tests 1,330: the bridge's 887, the headless peer's 351, the
+house's configuration 92); `harken-player` 884 + 405, unchanged. Shipped
+lines, in-file tests out: the server's 3,391 → 1,575 and its binaries 961
+→ 45; server and peer together 4,352 → 4,624 (+272: sockets, logins and
+the agreement gate in the house +170 with its configuration moved in, the
+door +115, a second `Hosted` +21); tests +231. *Concepts the server no
+longer knows*: Home Assistant (its REST calls, entities, feature bits,
+template, a Sonos's queue), the speaker as a `Sound` and its memory, the
+poll and its constants, the house's clock (`when`), kernel machines of its
+own on its hub and every session read off its store, `harken-player`,
+`ureq` and any outbound request but sign-in's, a thread, six variables and
+a credential, and the JSON-lines peer; it gained one, the house's door.
+*Latency*, a press on a phone to the house's service call
+(`bridge.rs` `a_press_reaches_the_house_measured`, forty presses, the same
+test run against `main` with the house in-process): median 11.7 ms
+in-process, 11.6 ms over sockets, three runs each (p90 12.2–13.2 against
+12.4–15.9 ms). The extra hop is not seen: the house's thread waits on a
+channel each socket rings, so a frame is acted on at once — the tick
+(1 s) paces only the polls of the house — and a press needs nothing sent
+by the speaker before the service call. Without the ring (falsified) the
+median is 22.6 ms. Not measured: the way back (a hand on the speaker
+reported to phones), which now crosses the speaker's socket, whose thread
+sends between 5 ms reads.
+
+*Verdict*: effective for the server — less than half its shipped source,
+a seventh of what it knew, at no measured latency — and about even for the
+repository (+6% shipped, the socket plumbing and the agreement gate).
+*What gets worse*: a second unit to run and order (it restarts until the
+server has written the key); a key that mints a full login for any account
+— the speaker's session can author log entries as that person, where the
+in-process bridge held no credential at all (narrowing it to the volatile
+space needs `ark-auth`/`ark-peer`); a `sign_in` row per account and
+speaker in the log and in each person's sessions; an agreement rule the
+hub's order used to give; `ws://` only (no TLS in the native link). Not
+worse: nothing on disk — the house keeps no replica and no log, its
+logins are the server's to hand again. *One binary or two*: one. The
+headless peer and the house share a crate and a domain, not code; a second
+binary would need a second shim in the server's package for the same
+`CARGO_BIN_EXE_*` reason and buys nothing measured. Not verified: the
+units under systemd (evaluated, `checks.harken-module`, never booted; the
+two sharing one dynamic user is systemd's documentation, not seen), the
+house restarted under a running server (its machines start over at
+`local` 0 on the same sessions), a long-lived login renewed, a real Home
+Assistant, the bridge's tests against the binary (one is; the rest run
+the house in the test's process, against the server's socket).
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
