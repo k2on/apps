@@ -5,10 +5,9 @@
 
 use std::fmt::Write;
 
-use ark::domain::Kind;
 use ark::row::Type;
 
-use super::{camel, ident, Walked};
+use super::{Hole, Lang, Walked};
 
 /// How a named type is spelt: bare, or qualified by its package (where a
 /// variant's name could hide it) — the generated package's, or UniFFI's
@@ -34,54 +33,41 @@ impl Q<'_> {
     }
 }
 
-const KEYWORDS: &str = "as break class continue do else false for fun if in interface is null object package return super this throw true try typealias typeof val var when while";
+/// Kotlin's spelling of the shared walk.
+const LANG: Lang = Lang {
+    keywords: "as break class continue do else false for fun if in interface is null object package return super this throw true try typealias typeof val var when while",
+    int: "Long",
+    bool: "Boolean",
+    unit: "Unit",
+    unit_value: "Unit",
+    arrow: "->",
+    list: |t| format!("List<{t}>"),
+    show: |e| format!("{e}.toString()"),
+    read: |n, e| format!("{n}.of({e})"),
+    write: |e| format!("{e}.json()"),
+    param: |t| format!("input: {t}"),
+    mutator: |Hole { m, p, name, arg, .. }| format!("/** `{name}`: its intent's id. */\n    fun {m}({p}): String = peer.mutate(\"{name}\", {arg})"),
+    live: |Hole { m, p, name, arg, .. }| format!("/** `{name}`, on the live space. */\n    fun {m}({p}) = peer.call(\"{name}\", {arg})"),
+    typed_view: |Hole { m, p, name, arg, r, .. }| {
+        format!("/** `{name}`, kept, its rows UniFFI's. */\n    fun {m}({p}): View<{r}> = typed({r}View(peer, \"{name}\", {arg}))")
+    },
+    view: |Hole { m, p, name, arg, t, rd, .. }| {
+        format!("/** `{name}`, kept. */\n    fun {m}({p}): View<{t}> = View(peer.view(\"{name}\", {arg})) {{ j -> {rd} }}")
+    },
+    query: |Hole { m, p, name, t, rd, .. }| format!("/** `{name}`. */\n    fun {m}({p}): {t} = {rd}"),
+    query_call: |name, arg| format!("J.parse(peer.query(\"{name}\", {arg}))"),
+    typed: |r| format!("private fun typed(v: {r}View): View<{r}> = View.typed(v::rows, {{ v.take().let {{ it.update to it.rows }} }}, v::close)"),
+    live_table: |table, row, m| {
+        format!("/** The live table `{table}`, as this device holds it. */\n    fun {m}(): List<{row}> = peer.liveRows(\"{table}\").map {{ {row}.of(J.parse(it)) }}")
+    },
+};
 
-fn field(n: &str) -> String {
-    ident(n, KEYWORDS)
-}
-
-/// `t` as a Kotlin type, a named one as `q` spells it.
 fn ty(t: &Type, q: Q) -> String {
-    match t {
-        Type::Int => "Long".into(),
-        Type::Text | Type::Bytes => "String".into(),
-        Type::Bool => "Boolean".into(),
-        Type::Unit => "Unit".into(),
-        Type::Id(_) => "Id".into(),
-        Type::Option(x) => format!("{}?", ty(x, q)),
-        Type::List(x) => format!("List<{}>", ty(x, q)),
-        Type::Record(n, _) | Type::Sum(n, _) => q.name(n),
-        Type::Tuple(_) => unreachable!("walked"),
-    }
+    LANG.ty(t, &|n| q.name(n))
 }
 
-/// An expression reading `e`, a JSON tree, as `t`.
 fn rd(t: &Type, e: &str, q: Q, d: usize) -> String {
-    match t {
-        Type::Int => format!("J.int({e})"),
-        Type::Text | Type::Bytes => format!("J.text({e})"),
-        Type::Bool => format!("J.bool({e})"),
-        Type::Unit => "Unit".into(),
-        Type::Id(_) => format!("Id(J.text({e}))"),
-        Type::Option(x) => format!("J.opt({e}) {{ v{d} -> {} }}", rd(x, &format!("v{d}"), q, d + 1)),
-        Type::List(x) => format!("J.list({e}) {{ v{d} -> {} }}", rd(x, &format!("v{d}"), q, d + 1)),
-        Type::Record(n, _) | Type::Sum(n, _) => format!("{}.of({e})", q.name(n)),
-        Type::Tuple(_) => unreachable!("walked"),
-    }
-}
-
-/// An expression writing `e`, a value of `t`, as its JSON.
-fn wr(t: &Type, e: &str, d: usize) -> String {
-    match t {
-        Type::Int | Type::Bool => format!("{e}.toString()"),
-        Type::Text | Type::Bytes => format!("J.q({e})"),
-        Type::Unit => "\"null\"".into(),
-        Type::Id(_) => format!("J.q({e}.hex)"),
-        Type::Option(x) => format!("J.wopt({e}) {{ v{d} -> {} }}", wr(x, &format!("v{d}"), d + 1)),
-        Type::List(x) => format!("J.wlist({e}) {{ v{d} -> {} }}", wr(x, &format!("v{d}"), d + 1)),
-        Type::Record(..) | Type::Sum(..) => format!("{e}.json()"),
-        Type::Tuple(_) => unreachable!("walked"),
-    }
+    LANG.rd(t, e, &|n| q.name(n), d)
 }
 
 /// The JSON object of `fields`, each read off `this`.
@@ -91,7 +77,7 @@ fn object(fields: &[(String, Type)]) -> String {
     }
     let parts: Vec<String> = fields
         .iter()
-        .map(|(n, t)| format!("\"\\\"{n}\\\":\" + {}", wr(t, &field(n), 0)))
+        .map(|(n, t)| format!("\"\\\"{n}\\\":\" + {}", LANG.wr(t, &LANG.ident(n), 0)))
         .collect();
     format!("\"{{\" + {} + \"}}\"", parts.join(" + \",\" + "))
 }
@@ -99,7 +85,7 @@ fn object(fields: &[(String, Type)]) -> String {
 fn params(fields: &[(String, Type)], q: Q) -> String {
     fields
         .iter()
-        .map(|(n, t)| format!("val {}: {}", field(n), ty(t, q)))
+        .map(|(n, t)| format!("val {}: {}", LANG.ident(n), ty(t, q)))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -218,45 +204,5 @@ pub fn write(w: &Walked, package: &str) -> String {
         "\n/** The domain's functions, each called by its name through [peer]. */\nclass {}(val peer: Peer) {{",
         w.name
     );
-    for f in &w.fns {
-        let (p, arg) = match &f.input {
-            Type::Unit => (String::new(), "\"null\"".to_string()),
-            t => (format!("input: {}", ty(t, q.bare())), wr(t, "input", 0)),
-        };
-        let (m, name) = (&f.method, &f.name);
-        let line = match (f.kind, &f.output) {
-            (Kind::Mutator, _) => format!("/** `{name}`: its intent's id. */\n    fun {m}({p}): String = peer.mutate(\"{name}\", {arg})"),
-            (Kind::Live, _) => format!("/** `{name}`, on the live space. */\n    fun {m}({p}) = peer.call(\"{name}\", {arg})"),
-            (Kind::View, Some(Type::Record(n, _))) if views.contains(n.as_str()) => {
-                format!("/** `{name}`, kept, its rows UniFFI's. */\n    fun {m}({p}): View<{n}> = typed({n}View(peer, \"{name}\", {arg}))")
-            }
-            (Kind::View, Some(o)) => format!(
-                "/** `{name}`, kept. */\n    fun {m}({p}): View<{}> = View(peer.view(\"{name}\", {arg})) {{ j -> {} }}",
-                ty(o, q.bare()),
-                rd(o, "j", q.bare(), 0)
-            ),
-            (_, Some(o)) => format!(
-                "/** `{name}`. */\n    fun {m}({p}): {} = {}",
-                ty(o, q.bare()),
-                rd(o, &format!("J.parse(peer.query(\"{name}\", {arg}))"), q.bare(), 0)
-            ),
-            (_, None) => continue,
-        };
-        let _ = writeln!(out, "    {line}\n");
-    }
-    for n in &views {
-        let _ = writeln!(
-            out,
-            "    private fun typed(v: {n}View): View<{n}> = View.typed(v::rows, {{ v.take().let {{ it.update to it.rows }} }}, v::close)\n"
-        );
-    }
-    for (table, row) in &w.live {
-        let _ = writeln!(
-            out,
-            "    /** The live table `{table}`, as this device holds it. */\n    fun {}(): List<{row}> = peer.liveRows(\"{table}\").map {{ {row}.of(J.parse(it)) }}\n",
-            camel(&format!("live_{table}"), false)
-        );
-    }
-    out.truncate(out.trim_end().len());
-    out + "\n}\n"
+    LANG.stubs(out, w)
 }

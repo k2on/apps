@@ -64,3 +64,17 @@ writer's own runner must fail.
 | `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes in each space: its bytes, and its JSON | §1.11 |
 | `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session: what its two machines were given and said, and where they stood | §1.7, §1.9 |
 | `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed, and the fuzzer's sessions that once found a bug: where each stands settled | §1.6, §1.7 |
+
+## The data directory
+
+What a peer keeps on disk is a contract too: a new build opens the
+directory an old one wrote. `disk.rs` (`rust/ark-peer/src/`) is its
+format — `kv`, `log`, `local.kv`, `local.log` per peer, under a
+server's `log/`; a server's `session.key` beside it (`ark-auth`). The
+fixture `rust/ark-peer/tests/data/server/` is a server's directory with a
+device's replica in it, written once by an older build and opened by
+`rust/ark-peer/tests/old_data.rs`, which reads back its rows, its chain
+and its sign-in. **A change to the on-disk format comes with a migration
+that opens the fixtures as they are, or with a new fixture beside them
+and a note here of what moved and what reads the old one**; a fixture is
+never written over.

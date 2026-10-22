@@ -11,8 +11,8 @@ use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Expr, Fields, Ident, ItemFn, LitStr, Token, Type};
 
-fn err(span: Span, msg: &str) -> TokenStream {
-    syn::Error::new(span, msg).to_compile_error()
+pub(crate) fn err<T>(span: Span, msg: &str) -> syn::Result<T> {
+    Err(syn::Error::new(span, msg))
 }
 
 /// `snake_case` of a type's name: `PlaylistItem` → `playlist_item`.
@@ -84,20 +84,20 @@ fn items_of(attrs: &[syn::Attribute], name: &str) -> syn::Result<Vec<Vec<Item>>>
     Ok(out)
 }
 
-fn fields_of(input: &DeriveInput) -> Result<&syn::FieldsNamed, TokenStream> {
+fn fields_of(input: &DeriveInput) -> syn::Result<&syn::FieldsNamed> {
     match &input.data {
         Data::Struct(s) => match &s.fields {
             Fields::Named(n) => Ok(n),
-            _ => Err(err(input.ident.span(), "a struct with named fields")),
+            _ => err(input.ident.span(), "a struct with named fields"),
         },
-        _ => Err(err(input.ident.span(), "a struct")),
+        _ => err(input.ident.span(), "a struct"),
     }
 }
 
 /// `Describe` for a struct (a record of its fields) or an enum (a sum of
 /// its variants, each a record of its fields); and its twin, when it asks
 /// for one (`crate::ffi`).
-fn describe(input: &DeriveInput) -> TokenStream {
+fn describe(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let label = name.to_string();
     let record = |fields: &Fields| {
@@ -123,8 +123,8 @@ fn describe(input: &DeriveInput) -> TokenStream {
         }
         Data::Union(_) => return err(name.span(), "a union describes nothing"),
     };
-    let twin = crate::ffi::twin(input);
-    quote! {
+    let twin = crate::ffi::twin(input)?;
+    Ok(quote! {
         impl ::ark::row::Describe for #name {
             fn describe() -> ::ark::row::Type {
                 #body
@@ -132,18 +132,15 @@ fn describe(input: &DeriveInput) -> TokenStream {
         }
 
         #twin
-    }
+    })
 }
 
 /// `Effect` for a row: its `state: Job<T>` field, and what `#[effect(..)]`
 /// says — the lease and the retry (a minute each by default), the role a
 /// claim needs, the field naming its owner.
-pub fn effect(input: DeriveInput) -> TokenStream {
+pub fn effect(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let fields = match fields_of(&input) {
-        Ok(f) => f,
-        Err(e) => return e,
-    };
+    let fields = fields_of(&input)?;
     let state = fields.named.iter().find(|f| f.ident.as_ref().is_some_and(|i| i == "state"));
     let outcome = state.and_then(|f| match &f.ty {
         Type::Path(p) => match &p.path.segments.last()?.arguments {
@@ -162,11 +159,7 @@ pub fn effect(input: DeriveInput) -> TokenStream {
     };
     let (key, key_ty) = (key.ident.as_ref().unwrap(), &key.ty);
     let (mut lease, mut retry, mut role, mut owner) = (quote!(60_000), quote!(60_000), quote!(None), quote!());
-    let its = match items_of(&input.attrs, "effect") {
-        Ok(i) => i,
-        Err(e) => return e.to_compile_error(),
-    };
-    for it in its.into_iter().flatten() {
+    for it in items_of(&input.attrs, "effect")?.into_iter().flatten() {
         match it {
             Item::Is(n, e) if n == "lease_ms" => lease = e.to_token_stream(),
             Item::Is(n, e) if n == "retry_ms" => retry = e.to_token_stream(),
@@ -175,7 +168,7 @@ pub fn effect(input: DeriveInput) -> TokenStream {
             _ => return err(name.span(), "#[effect(..)]: lease_ms = .., retry_ms = .., role = \"..\", owner = field"),
         }
     }
-    quote! {
+    Ok(quote! {
         impl ::ark::effect::Effect for #name {
             type Outcome = #outcome;
             const LEASE_MS: i64 = #lease;
@@ -196,25 +189,18 @@ pub fn effect(input: DeriveInput) -> TokenStream {
                 self.#key.clone()
             }
         }
-    }
+    })
 }
 
-pub fn describe_derive(input: DeriveInput) -> TokenStream {
+pub fn describe_derive(input: DeriveInput) -> syn::Result<TokenStream> {
     describe(&input)
 }
 
-pub fn row(input: DeriveInput) -> TokenStream {
+pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let fields = match fields_of(&input) {
-        Ok(f) => f,
-        Err(e) => return e,
-    };
+    let fields = fields_of(&input)?;
     let (mut table, mut volatile, mut indexes) = (snake(&name.to_string()), false, vec![]);
-    let top = match items(&input.attrs) {
-        Ok(i) => i,
-        Err(e) => return e.to_compile_error(),
-    };
-    for it in top.into_iter().flatten() {
+    for it in items(&input.attrs)?.into_iter().flatten() {
         match it {
             Item::Flag(f) if f == "volatile" => volatile = true,
             Item::Flag(f) if f == "ffi" || f == "ffi_view" => {}
@@ -235,11 +221,7 @@ pub fn row(input: DeriveInput) -> TokenStream {
     let tys: Vec<&Type> = fields.named.iter().map(|f| &f.ty).collect();
     let (mut keys, mut refs) = (vec![], vec![]);
     for (i, f) in fields.named.iter().enumerate() {
-        let its = match items(&f.attrs) {
-            Ok(i) => i,
-            Err(e) => return e.to_compile_error(),
-        };
-        for it in its.into_iter().flatten() {
+        for it in items(&f.attrs)?.into_iter().flatten() {
             match it {
                 Item::Flag(k) if k == "key" => keys.push(i),
                 Item::Refs(t) => refs.push((i, t)),
@@ -294,8 +276,8 @@ pub fn row(input: DeriveInput) -> TokenStream {
     let ref_defs = refs
         .iter()
         .map(|(i, t)| quote!(::ark::schema::Ref { column: #i, table: <#t as ::ark::row::Row>::TABLE.into() }));
-    let describe = describe(&input);
-    quote! {
+    let describe = describe(&input)?;
+    Ok(quote! {
         #describe
 
         impl ::ark::row::Row for #name {
@@ -330,17 +312,16 @@ pub fn row(input: DeriveInput) -> TokenStream {
             pub const KEY: ::ark::row::Index<#name, (#(#key_tys,)*)> = ::ark::row::Index::key();
             #(#ix_consts)*
         }
-    }
+    })
 }
 
 /// One field's refinements, attribute by attribute: each a list of rules
 /// and the words for any of them failing.
-fn rules(f: &syn::Field) -> Result<Vec<TokenStream>, TokenStream> {
+fn rules(f: &syn::Field) -> syn::Result<Vec<TokenStream>> {
     let name = f.ident.as_ref().unwrap();
     let label = name.to_string();
     let mut out = vec![];
-    let its = items(&f.attrs).map_err(|e| e.to_compile_error())?;
-    for group in its {
+    for group in items(&f.attrs)? {
         let why = group.iter().find_map(|i| match i {
             Item::Is(n, Expr::Lit(l)) if n == "why" => Some(l.lit.clone()),
             _ => None,
@@ -368,11 +349,11 @@ fn rules(f: &syn::Field) -> Result<Vec<TokenStream>, TokenStream> {
                 Item::Is(k, Expr::Lit(l)) if k == "len" => {
                     let s = match &l.lit {
                         syn::Lit::Str(s) => s.value(),
-                        _ => return Err(err(k.span(), "len = \"lo..=hi\"")),
+                        _ => return err(k.span(), "len = \"lo..=hi\""),
                     };
                     let (lo, hi) = match bounds(&s) {
                         Some(b) => b,
-                        None => return Err(err(k.span(), "len = \"lo..=hi\", \"lo..hi\" or \"lo..\"")),
+                        None => return err(k.span(), "len = \"lo..=hi\", \"lo..hi\" or \"lo..\""),
                     };
                     let w = words(quote!(why));
                     quote! {
@@ -386,8 +367,8 @@ fn rules(f: &syn::Field) -> Result<Vec<TokenStream>, TokenStream> {
                 }
                 Item::Is(k, Expr::Lit(l)) if k == "range" => {
                     let r: Expr = match &l.lit {
-                        syn::Lit::Str(s) => s.parse().map_err(|e| e.to_compile_error())?,
-                        _ => return Err(err(k.span(), "range = \"lo..=hi\"")),
+                        syn::Lit::Str(s) => s.parse()?,
+                        _ => return err(k.span(), "range = \"lo..=hi\""),
                     };
                     let w = words(quote!(::std::string::String::from("is not valid")));
                     quote! {
@@ -399,8 +380,8 @@ fn rules(f: &syn::Field) -> Result<Vec<TokenStream>, TokenStream> {
                 }
                 Item::Is(k, Expr::Lit(l)) if k == "check" => {
                     let c: Expr = match &l.lit {
-                        syn::Lit::Str(s) => s.parse().map_err(|e| e.to_compile_error())?,
-                        _ => return Err(err(k.span(), "check = \"|x| …\"")),
+                        syn::Lit::Str(s) => s.parse()?,
+                        _ => return err(k.span(), "check = \"|x| …\""),
                     };
                     let w = words(quote!(::std::string::String::from("is not valid")));
                     quote! {
@@ -412,10 +393,10 @@ fn rules(f: &syn::Field) -> Result<Vec<TokenStream>, TokenStream> {
                 }
                 Item::Is(k, _) if k == "why" => continue,
                 _ => {
-                    return Err(err(
+                    return err(
                         name.span(),
                         "#[ark(..)] on an input's field: trim, non_empty, len = \"..\", range = \"..\", check = \"..\", why = \"..\"",
-                    ))
+                    )
                 }
             };
             out.push(r);
@@ -474,34 +455,26 @@ fn bounds(s: &str) -> Option<(usize, usize)> {
     Some((lo, hi))
 }
 
-pub fn input(input: DeriveInput) -> TokenStream {
+pub fn input(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let fields = match fields_of(&input) {
-        Ok(f) => f,
-        Err(e) => return e,
-    };
+    let fields = fields_of(&input)?;
     let mut per = vec![];
     let mut checks = vec![];
     for f in &fields.named {
-        let s = match said(f) {
-            Ok(s) => s,
-            Err(e) => return e.to_compile_error(),
-        };
+        let s = said(f)?;
         if !s.is_empty() {
             let n = f.ident.as_ref().unwrap().to_string();
             checks.push(quote!((#n.to_string(), vec![#(#s.to_string()),*])));
         }
-        match rules(f) {
-            Ok(r) => per.push(quote! {
-                #[allow(unused_mut, unused_assignments)]
-                let mut ok = true;
-                #(#r)*
-            }),
-            Err(e) => return e,
-        }
+        let r = rules(f)?;
+        per.push(quote! {
+            #[allow(unused_mut, unused_assignments)]
+            let mut ok = true;
+            #(#r)*
+        });
     }
-    let describe = describe(&input);
-    quote! {
+    let describe = describe(&input)?;
+    Ok(quote! {
         #describe
 
         impl ::ark::row::Input for #name {
@@ -520,21 +493,18 @@ pub fn input(input: DeriveInput) -> TokenStream {
                 }
             }
         }
-    }
+    })
 }
 
-pub fn schema(input: DeriveInput) -> TokenStream {
+pub fn schema(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let fields = match fields_of(&input) {
-        Ok(f) => f,
-        Err(e) => return e,
-    };
+    let fields = fields_of(&input)?;
     let db = format_ident!("{}Db", name);
     let names: Vec<&Ident> = fields.named.iter().map(|f| f.ident.as_ref().unwrap()).collect();
     let tys: Vec<&Type> = fields.named.iter().map(|f| &f.ty).collect();
     let vis = &input.vis;
     let doc = format!("The tables of [`{name}`], each a handle (§1.16).");
-    quote! {
+    Ok(quote! {
         #[doc = #doc]
         #vis struct #db<'t, P = ::ark::db::Durable> {
             #(pub #names: ::ark::db::Tab<'t, #tys, P>,)*
@@ -549,20 +519,13 @@ pub fn schema(input: DeriveInput) -> TokenStream {
                 ::ark::schema::Schema { tables: vec![#(<#tys as ::ark::row::Row>::table()),*] }
             }
         }
-    }
+    })
 }
 
 /// `#[mutator("name")]` and the rest: the function as it is, and beside
 /// it a module of its name whose `register` adds it to a domain.
-pub fn register(kind: &str, attr: TokenStream, item: TokenStream) -> TokenStream {
-    let name: LitStr = match syn::parse2(attr) {
-        Ok(n) => n,
-        Err(e) => return e.to_compile_error(),
-    };
-    let f: ItemFn = match syn::parse2(item) {
-        Ok(f) => f,
-        Err(e) => return e.to_compile_error(),
-    };
+pub fn register(kind: &str, attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    let (name, f): (LitStr, ItemFn) = (syn::parse2(attr)?, syn::parse2(item)?);
     let (ident, vis) = (&f.sig.ident, &f.vis);
     let method = format_ident!("{}", kind);
     let add = if kind == "scope" {
@@ -571,7 +534,7 @@ pub fn register(kind: &str, attr: TokenStream, item: TokenStream) -> TokenStream
         quote!(d.#method(#name, super::#ident))
     };
     let doc = format!("Registers `{}` as `{}`.", ident, name.value());
-    quote! {
+    Ok(quote! {
         #f
 
         #[doc(hidden)]
@@ -582,5 +545,5 @@ pub fn register(kind: &str, attr: TokenStream, item: TokenStream) -> TokenStream
                 #add
             }
         }
-    }
+    })
 }

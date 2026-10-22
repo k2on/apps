@@ -12,11 +12,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, Ident, Index, Type};
 
-use crate::domain::{items, Item};
-
-fn err(span: Span, msg: &str) -> TokenStream {
-    syn::Error::new(span, msg).to_compile_error()
-}
+use crate::domain::{err, items, Item};
 
 /// `<t as Twin>::Ffi`, the type `t` crosses as; `t` to it; `t` from it.
 fn ffi_ty(t: &Type) -> TokenStream {
@@ -51,21 +47,21 @@ type Field = (Ident, Type, Option<Index>);
 
 /// A variant's or a struct's fields as `(name, type)`: a lone unnamed field
 /// is `value` (as `Job::Done`'s is), more than one is refused.
-fn named(fields: &Fields, span: Span) -> Result<Vec<Field>, TokenStream> {
+fn named(fields: &Fields, span: Span) -> syn::Result<Vec<Field>> {
     match fields {
         Fields::Named(n) => Ok(n.named.iter().map(|f| (f.ident.clone().unwrap(), f.ty.clone(), None)).collect()),
         Fields::Unit => Ok(vec![]),
         Fields::Unnamed(u) if u.unnamed.len() == 1 => Ok(vec![(Ident::new("value", span), u.unnamed[0].ty.clone(), Some(Index::from(0)))]),
-        Fields::Unnamed(_) => Err(err(span, "a twin names its fields: one unnamed field at most")),
+        Fields::Unnamed(_) => err(span, "a twin names its fields: one unnamed field at most"),
     }
 }
 
 /// The twin of a struct or an enum, and for a view's row its view object,
 /// when its attributes ask for them; nothing otherwise.
-pub fn twin(input: &DeriveInput) -> TokenStream {
+pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
     let (wanted, view) = asked(&input.attrs);
     if !wanted {
-        return quote!();
+        return Ok(quote!());
     }
     let name = &input.ident;
     if !input.generics.params.is_empty() {
@@ -74,10 +70,7 @@ pub fn twin(input: &DeriveInput) -> TokenStream {
     let (label, tw) = (name.to_string(), format_ident!("{}Ffi", name));
     let (kind, decl, out, back) = match &input.data {
         Data::Struct(s) => {
-            let fs = match named(&s.fields, name.span()) {
-                Ok(f) => f,
-                Err(e) => return e,
-            };
+            let fs = named(&s.fields, name.span())?;
             let ns: Vec<&Ident> = fs.iter().map(|(f, _, _)| f).collect();
             let (tys, tos) = (fs.iter().map(|(_, t, _)| ffi_ty(t)), fs.iter().map(|(f, t, _)| to(t, quote!(self.#f))));
             let froms = fs.iter().map(|(f, t, _)| from(t, quote!(t.#f)));
@@ -92,10 +85,7 @@ pub fn twin(input: &DeriveInput) -> TokenStream {
             let (mut decl, mut out, mut back) = (vec![], vec![], vec![]);
             for v in &e.variants {
                 let vi = &v.ident;
-                let fs = match named(&v.fields, vi.span()) {
-                    Ok(f) => f,
-                    Err(e) => return e,
-                };
+                let fs = named(&v.fields, vi.span())?;
                 let ns: Vec<&Ident> = fs.iter().map(|(f, _, _)| f).collect();
                 let tys = fs.iter().map(|(_, t, _)| ffi_ty(t));
                 let tos: Vec<_> = fs.iter().map(|(f, t, _)| to(t, quote!(#f))).collect();
@@ -122,7 +112,7 @@ pub fn twin(input: &DeriveInput) -> TokenStream {
         Data::Union(_) => return err(name.span(), "a union has no twin"),
     };
     let view = if view { view_object(name) } else { quote!() };
-    quote! {
+    Ok(quote! {
         #[derive(Clone, Debug, PartialEq, #kind)]
         #[uniffi(name = #label)]
         pub #decl
@@ -138,7 +128,7 @@ pub fn twin(input: &DeriveInput) -> TokenStream {
         }
 
         #view
-    }
+    })
 }
 
 /// `<T>View`, a view of rows of `T` as UniFFI holds it, made from a view's
