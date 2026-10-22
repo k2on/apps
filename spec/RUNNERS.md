@@ -45,7 +45,8 @@ and `after` (head, hash, state hash, pending ids). The runner replays
 every step into fresh machines (`ark_dev::trace`) and fails at the first
 that says other than `out` or stands other than `after`. The corpus
 beyond these files — every client of every fleet and fuzz session — is
-replayed by `ark-dev`'s tests and by `ark-fuzz N FIRST traces DIR`, not
+replayed by `ark-dev`'s tests and by `ark-fuzz N FIRST traces`, and
+written by `ark-fuzz N FIRST traces DIR` for `trace_corpus` to replay; not
 checked in.
 
 ## rebase

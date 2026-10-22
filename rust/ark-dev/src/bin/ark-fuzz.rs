@@ -1,9 +1,9 @@
 //! `ark-fuzz [sessions] [first seed] [traces [DIR]]`: that many sessions
 //! (`ark_dev::fuzz::session`), seeds counted up from the first, each
-//! checked, every client's trace replayed when `traces` is given and, with
-//! `DIR`, written there as `seed-<seed>-client-<i>.json` (a trace corpus,
-//! `spec/RUNNERS.md` § trace); each failure printed with its seed, which
-//! reproduces it.
+//! checked, every client's trace replayed when `traces` is given or, with
+//! `DIR`, written there instead as `seed-<seed>-client-<i>.json` (a trace
+//! corpus, `spec/RUNNERS.md` § trace, which the flake's `traces` check
+//! replays); each failure printed with its seed, which reproduces it.
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -16,7 +16,7 @@ fn main() {
     }
     let (mut failed, mut entries, mut refused, mut ops) = (0, 0, 0, 0);
     for seed in first..first + n {
-        match std::panic::catch_unwind(|| ark_dev::fuzz::session(seed, traces)) {
+        match std::panic::catch_unwind(|| ark_dev::fuzz::session(seed, traces && out.is_none())) {
             Ok(Ok((net, f))) => {
                 (entries, refused, ops) = (entries + f.entries, refused + f.refused, ops + f.ops);
                 for (i, c) in net.clients.iter().filter(|_| out.is_some()) {
