@@ -11,7 +11,7 @@ use ark_ffi::{Login, Op, Peer, RowId, Taken, Twin};
 use harken_domain::playlists::{playlists_create_playlist, playlists_create_playlist_check, playlists_playlist, playlists_playlists};
 use harken_domain::schema::{look_claim, look_due, look_finish, JobLookedFfi, LookClaimFfi, LookFinishFfi, LookOutcomeFfi};
 use harken_domain::types::{CreatePlaylistFfi, LookedFfi, PlaylistInputFfi};
-use harken_domain::{Looked, UniFfiTag};
+use harken_domain::{Looked, UniFfiTag as DomainTag};
 use harken_ffi::harken_open;
 
 /// A peer alone whose person holds the library's role, so that it can add
@@ -92,14 +92,14 @@ fn a_playlist_made_and_read_through_the_domains_own_types() {
 #[test]
 fn a_look_is_claimed_and_finished_through_its_twins() {
     let done = Job::Done(Looked { read: 3, authored: 2 });
-    let ffi = <Job<Looked> as Twin<UniFfiTag>>::ffi(done.clone());
+    let ffi = <Job<Looked> as Twin<DomainTag>>::ffi(done.clone());
     assert_eq!(
         ffi,
         JobLookedFfi::Done {
             value: LookedFfi { read: 3, authored: 2 }
         }
     );
-    assert_eq!(<Job<Looked> as Twin<UniFfiTag>>::from_ffi(ffi), done);
+    assert_eq!(<Job<Looked> as Twin<DomainTag>>::from_ffi(ffi), done);
 
     let dir = tempfile::tempdir().unwrap();
     let p = librarian(&dir);
@@ -121,4 +121,56 @@ fn a_look_is_claimed_and_finished_through_its_twins() {
     let after = look_due(p.clone()).unwrap();
     assert!(after.rows.is_empty() && after.next_ms.is_none(), "done: nothing more is due");
     assert!(look_finish(p.clone(), finish(outcome)).is_err(), "a finish of a done job is refused");
+}
+
+/// UniFFI's tag for this test's own twins: what `setup_scaffolding!` would
+/// define, which this test cannot call beside the library's own.
+pub struct UniFfiTag;
+
+mod nested {
+    use ark::prelude::*;
+    use harken_domain::Media;
+
+    #[derive(Clone, Debug, PartialEq, Describe)]
+    #[ark(ffi)]
+    pub struct Inner {
+        pub at: Option<i64>,
+        pub ids: Vec<Id<Media>>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Describe)]
+    #[ark(ffi)]
+    pub enum Outer {
+        Has { inner: Inner, tags: Vec<Option<String>> },
+        Wraps(Inner),
+        Nothing,
+    }
+}
+
+/// Falsified by the enum twin's way back dropping a lone unnamed field
+/// (`unreachable!()` in its place): the round trip of `Wraps` panicked.
+#[test]
+fn nested_sums_options_lists_and_ids_have_twins() {
+    use nested::{Inner, InnerFfi, Outer, OuterFfi};
+    let inner = Inner {
+        at: Some(3),
+        ids: vec![ark::row::Id::new([7; 16])],
+    };
+    let all = [
+        Outer::Has {
+            inner: inner.clone(),
+            tags: vec![Some("a".into()), None],
+        },
+        Outer::Wraps(inner.clone()),
+        Outer::Nothing,
+    ];
+    for o in all {
+        let t = <Outer as Twin<crate::UniFfiTag>>::ffi(o.clone());
+        assert_eq!(<Outer as Twin<crate::UniFfiTag>>::from_ffi(t), o);
+    }
+    let w = <Outer as Twin<crate::UniFfiTag>>::ffi(Outer::Wraps(inner));
+    let OuterFfi::Wraps { value: InnerFfi { at, ids } } = w else {
+        panic!("Wraps is a record of its value: {w:?}")
+    };
+    assert_eq!((at, ids), (Some(3), vec![RowId([7; 16])]));
 }
