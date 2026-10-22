@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: web-out
-          key: harken-web-${{ hashFiles('rust/**', 'harken/domain/**', 'harken/server/**', 'harken/iced/**', 'flake.nix', 'flake.lock') }}
+          key: harken-web-${{ hashFiles('rust/**', 'harken/domain/**', 'harken/player/**', 'harken/server/**', 'harken/iced/**', 'harken/ffi/**', 'flake.nix', 'flake.lock') }}
 
       - if: steps.built.outputs.cache-hit != 'true'
         uses: DeterminateSystems/nix-installer-action@main
@@ -94,6 +94,29 @@ jobs:
           name: harken-web
           path: web-out
           if-no-files-found: error
+
+  # The flake's Linux checks. Each is a few test runs over one shared
+  # build of the workspace (flake.nix: crane's layers), so building them
+  # all costs about one workspace build; with Cachix the dependency layer
+  # is substituted and only the workspace and its tests are compiled.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build the checks
+        run: |
+          nix build --print-build-logs --no-link \
+            .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy \
+            .#checks.x86_64-linux.rust .#checks.x86_64-linux.ffi \
+            .#checks.x86_64-linux.traces .#checks.x86_64-linux.vectors \
+            .#checks.x86_64-linux.fuzz-smoke .#checks.x86_64-linux.versions \
+            .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module
 
   apk:
     runs-on: ubuntu-latest
