@@ -118,7 +118,7 @@ pub const WINDOW: i64 = 64;
 
 /// What a function knows of the intent it runs for: all frozen in the
 /// entry, so every run of it, anywhere, is the same.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Ctx {
     pub id: EntryId,
     pub actor: String,
@@ -132,18 +132,24 @@ pub struct Ctx {
 impl Ctx {
     pub fn of(e: &Entry) -> Ctx {
         Ctx {
-            draws: Default::default(),
             id: e.id,
             actor: e.actor.clone(),
             session: e.session.clone(),
             roles: e.roles.clone(),
             now: e.now,
+            ..Ctx::default()
         }
     }
 
-    /// The `n`-th row id this intent draws (§1.6).
-    pub fn draw(&self, n: i64) -> [u8; 16] {
-        self.id.draw(n)
+    /// `who`'s at `now`, in no entry: a query's or a view's context.
+    pub fn new(who: &Who, now: i64) -> Ctx {
+        Ctx {
+            actor: who.actor.clone(),
+            session: who.session.clone(),
+            roles: who.roles.clone(),
+            now,
+            ..Ctx::default()
+        }
     }
 
     /// The next row id this run draws: the entry's `n`-th, from 0 (§1.6).
@@ -204,11 +210,6 @@ impl Functions {
 
     pub fn get(&self, name: &str) -> Option<&Arc<dyn Procedure>> {
         self.procs.get(name)
-    }
-
-    /// A function runnable no more.
-    pub fn forget(&mut self, name: &str) {
-        self.procs.remove(name);
     }
 
     /// Every name, in order.
@@ -465,7 +466,7 @@ impl Peer {
     /// A peer from empty; its origin named by its session's bytes until
     /// its driver gives it the one it drew ([`Origin`]).
     pub fn new(schema: Arc<Schema>, functions: Functions, role: Role, me: Who) -> Peer {
-        let store = started(Store::new(schema));
+        let store = started(Store::new(schema, Space::Durable));
         let origin = Origin::named(&me.session);
         Peer {
             store,
@@ -496,7 +497,7 @@ impl Peer {
 
     /// An empty store of this peer's space, its log empty.
     fn blank(&self) -> Store {
-        started(Store::new_in(self.store.schema_arc().clone(), self.space))
+        started(Store::new(self.store.schema_arc().clone(), self.space))
     }
 
     /// The log, as the store's table holds it (§1.6).
@@ -528,14 +529,14 @@ impl Peer {
     }
 
     fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
-        Store::from_rows_in(self.store.schema_arc().clone(), self.space, rows)
+        Store::from_rows(self.store.schema_arc().clone(), self.space, rows).map(|(s, _)| s)
     }
 
     /// A snapshot's rows as some schema wrote them, read under this
     /// peer's (§1.2), and a log standing on `log`; and whether the rows were
-    /// another schema's ([`Store::from_rows_fit`]).
+    /// another schema's ([`Store::from_rows`]).
     fn on_fit(&self, rows: &[(String, Vec<Vec<u8>>)], log: impl IntoIterator<Item = Vec<u8>>) -> Result<(Store, bool), Refusal> {
-        let (mut s, other) = Store::from_rows_fit(self.store.schema_arc().clone(), self.space, rows)?;
+        let (mut s, other) = Store::from_rows(self.store.schema_arc().clone(), self.space, rows)?;
         s.start_log(log)?;
         Ok((s, other))
     }
@@ -813,14 +814,7 @@ impl Peer {
     /// A scope's verdict on a row of `table`, for the connection it serves.
     fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
         let s = &self.served[session];
-        let ctx = Ctx {
-            draws: Default::default(),
-            id: EntryId::default(),
-            actor: s.who.actor.clone(),
-            session: s.who.session.clone(),
-            roles: s.who.roles.clone(),
-            now: 0,
-        };
+        let ctx = Ctx::new(&s.who, 0);
         let (scope, schema) = (self.functions.get(&s.scope).cloned(), self.store.schema_arc().clone());
         move |table, row| {
             let scope = scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?;

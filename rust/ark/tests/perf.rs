@@ -1043,7 +1043,7 @@ fn store_of(rows: &[Change]) -> Store {
         let Change::Add { table, row } = c else { panic!("a store is rows") };
         by.iter_mut().find(|(t, _)| t == table).unwrap().1.push(row.clone());
     }
-    Store::from_rows(schema.into(), &by).unwrap()
+    Store::from_rows(schema.into(), Space::Durable, &by).unwrap().0
 }
 
 type Made<T> = ark::plan::Make<Lib, T>;
@@ -1082,12 +1082,9 @@ fn group_source() -> Made<(String, i64)> {
 
 fn vctx() -> Ctx {
     Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
         actor: "alice".into(),
         session: "dev".into(),
-        roles: vec![],
-        now: 0,
+        ..Default::default()
     }
 }
 

@@ -422,18 +422,18 @@ fn run(seed: u64) -> (String, String, usize, usize) {
         .collect();
     assert_eq!(views.len(), 19);
     let (mut refused, mut moved) = (0, 0);
-    let mut a = Store::new(native.schema.clone());
+    let mut a = Store::new(native.schema.clone(), ark::schema::Space::Durable);
     let mut r = Rng(seed);
     let mut said: Vec<u8> = vec![];
     for i in 0..400 {
         let s = step(&mut r, &a);
         let ctx = Ctx {
-            draws: Default::default(),
             id: EntryId::of("port", i),
             actor: s.user.into(),
             session: s.device.into(),
             roles: s.roles.clone(),
             now: 10_000 + i * 977,
+            ..Default::default()
         };
         let f = native.get(s.name).unwrap_or_else(|| panic!("{}", s.name)).proc.clone().unwrap();
         match f.apply(&mut a, &ctx, &s.input) {

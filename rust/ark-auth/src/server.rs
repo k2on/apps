@@ -394,12 +394,10 @@ impl Auth {
 /// A context as session `id` at `now`: what judging reads under.
 fn at(id: &str, now: i64) -> Ctx {
     Ctx {
-        draws: Default::default(),
         id: EntryId::of(id, 0),
-        actor: String::new(),
         session: id.into(),
-        roles: vec![],
         now,
+        ..Default::default()
     }
 }
 

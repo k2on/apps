@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark::log::{EntryId, Seq};
+use ark::log::Seq;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
 use iced::widget::{column, container, text};
@@ -43,18 +43,17 @@ impl Loaded {
     /// A state as the server sent it, read.
     pub fn of(state: State) -> Result<Loaded, String> {
         let catalog = state.catalog.clone();
-        let store = Store::from_rows(Arc::new(catalog.schema.clone()), &state.rows).map_err(|e| format!("the store: {e}"))?;
+        let store = Store::from_rows(Arc::new(catalog.schema.clone()), ark::schema::Space::Durable, &state.rows)
+            .map_err(|e| format!("the store: {e}"))?
+            .0;
         Ok(Loaded { catalog, store, state })
     }
 
     fn source(&self) -> Source<'_> {
         let ctx = Ctx {
-            draws: Default::default(),
-            id: EntryId::default(),
             actor: self.state.who.clone(),
             session: "admin".into(),
-            roles: vec![],
-            now: 0,
+            ..Default::default()
         };
         Source {
             store: &self.store,

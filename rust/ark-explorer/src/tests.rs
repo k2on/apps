@@ -158,7 +158,7 @@ fn user(k: u8, name: &str, team: &str) -> User {
 }
 
 fn store() -> Store {
-    let mut st = Store::new(domain().schema.clone());
+    let mut st = Store::new(domain().schema.clone(), ark::schema::Space::Durable);
     for (name, size) in [("blue", 2), ("red", 1)] {
         st.put("team", Team { name: name.into(), size }.to_bytes()).unwrap();
     }
@@ -223,12 +223,10 @@ fn source(st: &Store) -> Source<'_> {
         ask: Some(domain()),
         log: &NoLog,
         ctx: Ctx {
-            draws: Default::default(),
             id: EntryId::of("s1", 0),
             actor: "alice".into(),
             session: "s1".into(),
-            roles: vec![],
-            now: 0,
+            ..Default::default()
         },
     }
 }
@@ -1109,7 +1107,7 @@ fn the_picker_filters_and_chooses() {
     assert!(ex.picker.is_none() && ex.screen == Screen::Call("teams.kick".into()));
     ex.update(Msg::FormText(vec![0], "0001".into()), &src, &mut w);
     assert_eq!(ex.form().unwrap().message("user"), Some("user: an id, 32 hex digits"));
-    let empty = Store::new(domain().schema.clone());
+    let empty = Store::new(domain().schema.clone(), ark::schema::Space::Durable);
     let src = source(&empty);
     let mut ex = Explorer::new();
     ex.update(Msg::Function(at("kick")), &src, &mut w);

@@ -124,7 +124,10 @@ impl Log {
         }
         let disk = Box::new(Files::new(copy.path()).unwrap());
         let mut p = Peer::serve(harken_server::hub_config(hosted(), 10_000), disk, 0);
-        let state = std::mem::replace(&mut p.log.store, Store::new(hosted().module.schema.clone()));
+        let state = std::mem::replace(
+            &mut p.log.store,
+            Store::new(hosted().module.schema.clone(), ark::schema::Space::Durable),
+        );
         Some(Log {
             base: state.log().base_seq(),
             entries: state.log().entries(),
@@ -1125,7 +1128,7 @@ impl Fleet {
             let log = self.server.log_on_disk().unwrap_or_else(|| Log {
                 base: 0,
                 entries: vec![],
-                state: Store::new(hosted().module.schema.clone()),
+                state: Store::new(hosted().module.schema.clone(), ark::schema::Space::Durable),
             });
             let head = log.head_seq();
             let hash = log.hash();

@@ -189,10 +189,6 @@ impl Peer {
         self.hub.conns.insert(c, conn);
     }
 
-    pub fn who(&self, c: ConnId) -> Option<&Who> {
-        self.hub.conns.get(&c).map(|c| &c.who)
-    }
-
     /// Every connection open, and who it is.
     pub fn connections(&self) -> impl Iterator<Item = (ConnId, &Who)> {
         self.hub.conns.iter().map(|(c, conn)| (*c, &conn.who))

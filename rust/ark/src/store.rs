@@ -303,15 +303,6 @@ impl<'a> Log<'a> {
     pub fn entries(&self) -> Vec<Logged> {
         self.after(Seq::MIN).collect()
     }
-
-    /// How many entries there are above the row the log stands on.
-    pub fn len(&self) -> usize {
-        self.0.len() - 1
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.len() <= 1
-    }
 }
 
 fn bound(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
@@ -339,13 +330,8 @@ fn ordered<'a, T: 'a>(it: impl DoubleEndedIterator<Item = T> + 'a, dir: Dir) -> 
 }
 
 impl Store {
-    /// An empty durable store.
-    pub fn new(schema: Arc<Schema>) -> Store {
-        Store::new_in(schema, Space::Durable)
-    }
-
     /// An empty store whose hash and snapshot are over `space`'s tables.
-    pub fn new_in(schema: Arc<Schema>, space: Space) -> Store {
+    pub fn new(schema: Arc<Schema>, space: Space) -> Store {
         let tables = schema
             .tables
             .iter()
@@ -726,34 +712,20 @@ impl Store {
         rows
     }
 
-    /// A store holding exactly these rows, each parsed; constraints are
-    /// judged once all are in, so the order tables come in does not matter.
-    pub fn from_rows(schema: Arc<Schema>, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
-        Store::from_rows_in(schema, Space::Durable, rows)
-    }
-
-    /// [`Store::from_rows`], a store of `space`.
-    pub fn from_rows_in(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
-        Store::rows_in(schema, space, rows, false).map(|(s, _)| s)
-    }
-
-    /// [`Store::from_rows_in`] of rows as some schema of this one wrote
-    /// them (§1.2): each read as it is, and only when it is not this
-    /// schema's completed or cut to its prefix ([`Table::fit`]); a table
-    /// this schema lacks dropped. And whether any was another schema's (a
-    /// table of this space missing counts).
-    pub fn from_rows_fit(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Store, bool), Refusal> {
-        Store::rows_in(schema, space, rows, true)
-    }
-
-    // Each row parsed once, unless it is fitted.
-    fn rows_in(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)], fit: bool) -> Result<(Store, bool), Refusal> {
-        let mut s = Store::new_in(schema.clone(), space);
-        let mut other = fit && schema.tables.iter().filter(|t| t.space == space).count() != rows.len();
+    /// A store of `space` holding exactly these rows, as some schema of this
+    /// one wrote them (§1.2): each read as it is, and only when it is not
+    /// this schema's completed or cut to its prefix ([`Table::fit`]); a
+    /// table this schema lacks dropped; constraints judged once all are in,
+    /// so the order tables come in does not matter. And whether any was
+    /// another schema's (a table of this space missing counts). Each row is
+    /// parsed once, unless it is fitted.
+    pub fn from_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Store, bool), Refusal> {
+        let mut s = Store::new(schema.clone(), space);
+        let mut other = schema.tables.iter().filter(|t| t.space == space).count() != rows.len();
         let mut parsed: Vec<Vec<Parsed>> = schema.tables.iter().map(|_| vec![]).collect();
         for (table, rs) in rows {
             let t = match s.find(table) {
-                Err(_) if fit => {
+                Err(_) => {
                     other = true;
                     continue;
                 }
@@ -763,7 +735,6 @@ impl Store {
             for row in rs {
                 let (row, p) = match tab.parse(row) {
                     Ok(p) => (Cow::Borrowed(&row[..]), p),
-                    Err(e) if !fit => return Err(e),
                     Err(e) => {
                         let (r, o) = tab.fit(row).map_err(|_| e)?;
                         other |= o;

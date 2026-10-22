@@ -106,7 +106,9 @@ fn scenario() -> Scenario {
     ];
     assert_eq!(
         server.store,
-        ark::store::Store::from_rows(demo::shared(), &rows).unwrap(),
+        ark::store::Store::from_rows(demo::shared(), ark::schema::Space::Durable, &rows)
+            .unwrap()
+            .0,
         "the rows the scenario says"
     );
     for p in [&server, &alice, &bob] {

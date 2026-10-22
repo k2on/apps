@@ -589,12 +589,8 @@ fn known_file(store: &Store, file: &str) -> bool {
 fn would_change(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> bool {
     let me = &peer.log.me;
     let ctx = Ctx {
-        draws: Default::default(),
         id: peer.log.next_id(),
-        actor: me.actor.clone(),
-        session: me.session.clone(),
-        roles: me.roles.clone(),
-        now: ark_peer::now_ms(),
+        ..Ctx::new(me, ark_peer::now_ms())
     };
     let Some(f) = peer.domain().get(name).and_then(|f| f.proc.clone()) else {
         return true;

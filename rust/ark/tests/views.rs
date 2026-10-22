@@ -19,12 +19,9 @@ use demo::*;
 
 fn ctx() -> Ctx {
     Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
         actor: "alice".into(),
         session: "dev".into(),
-        roles: vec![],
-        now: 0,
+        ..Default::default()
     }
 }
 
@@ -197,7 +194,7 @@ fn union_of(store: &Store, actor: &str) -> Store {
             (t, held)
         })
         .collect();
-    Store::from_rows(demo::shared(), &rows).unwrap()
+    Store::from_rows(demo::shared(), ark::schema::Space::Durable, &rows).unwrap().0
 }
 
 /// A peer's confirmed state: its store with its pending changes undone.
@@ -454,9 +451,11 @@ fn a_browse_is_kept_by_patches() {
     };
     let mut store = Store::from_rows(
         shared(),
+        ark::schema::Space::Durable,
         &[("playlist".into(), vec![playlist_row(&p, "P", "alice"), playlist_row(&q, "Q", "bob")])],
     )
-    .unwrap();
+    .unwrap()
+    .0;
     for c in [item(&p, "a", 1), item(&p, "b", 2), item(&p, "c", 3), item(&p, "d", 4), item(&q, "z", 9)] {
         store.apply(&c).unwrap();
     }

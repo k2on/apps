@@ -108,7 +108,7 @@ fn me() -> Who {
 
 /// A library of `n` media rows, and nothing else.
 fn library(n: u64) -> Store {
-    let mut st = Store::new(domain().schema.clone());
+    let mut st = Store::new(domain().schema.clone(), ark::schema::Space::Durable);
     for i in 0..n {
         st.put("media", media(i).to_bytes()).unwrap();
     }
@@ -319,7 +319,7 @@ fn perf_add_song() {
     header("add_song, one per file, into a library growing from 0 (peer alone, engine)");
     note(ALONE);
     for n in [500u64, 2000, 8000] {
-        let mut p = Alone::new(&Store::new(domain().schema.clone()));
+        let mut p = Alone::new(&Store::new(domain().schema.clone(), ark::schema::Space::Durable));
         let (mut whole, mut opt, mut commit, mut solo) = (vec![], vec![], vec![], vec![]);
         for i in 0..n {
             let (o, c, s) = p.mutate("library.add_song", song(i));
@@ -371,7 +371,7 @@ fn perf_playlists() {
     note("whole, as above");
     for n in [50u64, 200, 800] {
         for (shape, same) in [("distinct names", false), ("all \"Favorites\"", true)] {
-            let mut p = Alone::new(&Store::new(domain().schema.clone()));
+            let mut p = Alone::new(&Store::new(domain().schema.clone(), ark::schema::Space::Durable));
             let per: Vec<Duration> = (0..n)
                 .map(|j| {
                     let name = if same { "Favorites".to_string() } else { format!("List {j}") };
@@ -440,12 +440,12 @@ fn read_cases() -> Vec<(&'static str, &'static str, Make)> {
 
 fn ctx_of(n: i64) -> Ctx {
     Ctx {
-        draws: Default::default(),
         id: EntryId::of("local", n),
         actor: "alice".into(),
         session: "local".into(),
         roles: vec![LIBRARY.into()],
         now: 5,
+        ..Default::default()
     }
 }
 

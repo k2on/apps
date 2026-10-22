@@ -36,12 +36,6 @@ pub fn encode<T: Serialize + ?Sized>(v: &T) -> Result<Vec<u8>, Refusal> {
     postcard::to_stdvec(v).map_err(no)
 }
 
-/// A value's bytes appended to `out`.
-pub fn encode_into<T: Serialize + ?Sized>(v: &T, out: &mut Vec<u8>) -> Result<(), Refusal> {
-    *out = postcard::to_extend(v, std::mem::take(out)).map_err(no)?;
-    Ok(())
-}
-
 /// A value read by `seed` from bytes that are it whole: nothing after it.
 pub fn decode_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<S::Value, Refusal> {
     let (v, rest) = take_seed(seed, b)?;

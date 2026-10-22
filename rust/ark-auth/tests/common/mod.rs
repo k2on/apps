@@ -47,7 +47,7 @@ impl Default for Memory {
 
 impl Memory {
     pub fn new() -> Memory {
-        Memory(Arc::new(Mutex::new(Store::new(domain().schema.clone()))))
+        Memory(Arc::new(Mutex::new(Store::new(domain().schema.clone(), ark::schema::Space::Durable))))
     }
 
     pub fn sign_ins(&self) -> Vec<SignIn> {
@@ -69,11 +69,11 @@ impl Hub for Memory {
 /// A context as `user` on `session` holding `roles`, at `now`.
 pub fn on(user: &str, session: &str, roles: &[&str], now: i64) -> Ctx {
     Ctx {
-        draws: Default::default(),
         id: ark::log::EntryId::of(session, 1),
         actor: user.into(),
         session: session.into(),
         roles: roles.iter().map(|r| r.to_string()).collect(),
         now,
+        ..Default::default()
     }
 }

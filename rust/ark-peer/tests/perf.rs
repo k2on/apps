@@ -541,7 +541,9 @@ fn media(i: u64) -> Vec<u8> {
 }
 
 fn media_store(schema: &Schema, rows: std::ops::Range<u64>) -> Store {
-    Store::from_rows(Arc::new(schema.clone()), &[("media".into(), rows.map(media).collect())]).unwrap()
+    Store::from_rows(Arc::new(schema.clone()), Space::Durable, &[("media".into(), rows.map(media).collect())])
+        .unwrap()
+        .0
 }
 
 fn media_module() -> Module {
@@ -631,7 +633,7 @@ fn write_server(dir: &Path, n: u64) {
 /// A client alone that has authored `n` songs: its fork (the empty log)
 /// and the chain of `n` from it.
 fn write_alone(dir: &Path, n: u64) {
-    let mut st = Store::new(Arc::new(media_schema(true)));
+    let mut st = Store::new(Arc::new(media_schema(true)), Space::Durable);
     let mut f = Files::new(dir).unwrap();
     let fork = (0i64, EntryHash::default());
     ark_peer::local::preset(&mut f, |r| r.fork = Some(fork)).unwrap();
@@ -764,7 +766,7 @@ fn perf_d_open_child() {
                 panic!("the store's rows")
             };
             rows.retain(|(t, _)| t != LOG);
-            let st = Store::from_rows(Arc::new(media_schema(true)), &rows).unwrap();
+            let st = Store::from_rows(Arc::new(media_schema(true)), Space::Durable, &rows).unwrap().0;
             let r = st.rows("media").count();
             std::mem::forget(st);
             r
@@ -917,7 +919,7 @@ fn perf_d_bytes_child() {
 
 /// A store of `n` media rows, put one at a time.
 fn build(schema: &Schema, n: u64) -> Store {
-    let mut st = Store::new(Arc::new(schema.clone()));
+    let mut st = Store::new(Arc::new(schema.clone()), Space::Durable);
     for i in 0..n {
         st.put("media", media(i)).unwrap();
     }

@@ -95,12 +95,9 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
     n.settle().unwrap();
     let pid = EntryId::of(Origin::named("peer-0-session"), 1).draw(0);
     let ctx = Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
         actor: "peer-0".into(),
         session: "peer-0-session".into(),
-        roles: vec![],
-        now: 0,
+        ..Default::default()
     };
     n.watch(0, Space::Durable, "demo.items", Items { playlist_id: Id::new(pid) }.to_bytes(), ctx)
         .unwrap();
@@ -146,14 +143,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     };
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);
     n.deliver();
-    let ctx = Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
-        actor: "".into(),
-        session: "".into(),
-        roles: vec![],
-        now: 0,
-    };
+    let ctx = Ctx::default();
     n.watch(1, Space::Volatile, "room.present", vec![], ctx).unwrap();
     assert_eq!(n.clients[&1].values(0).unwrap().len(), 2, "both here");
     n.run(&Op::Call(0, "room.rename".into(), Rename { name: "kitchen".into() }.to_bytes()));

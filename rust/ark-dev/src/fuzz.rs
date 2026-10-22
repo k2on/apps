@@ -19,7 +19,6 @@
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::log::EntryId;
 use ark::peer::{Ctx, Feed, Who};
 use ark::prelude::Id;
 use ark::schema::Space;
@@ -142,14 +141,7 @@ fn login(i: i64, n: u64, admin: bool) -> Who {
 }
 
 fn ctx_of(w: &Who) -> Ctx {
-    Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
-        actor: w.actor.clone(),
-        session: w.session.clone(),
-        roles: w.roles.clone(),
-        now: 0,
-    }
+    Ctx::new(w, 0)
 }
 
 /// One session from its seed: the net it left, or the first check it failed.
@@ -278,7 +270,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
                 .filter(|row| holds.holds(&ctx, &[&[t as u8][..], row].concat()) == Ok(true));
             rows.push((name, held.collect()));
         }
-        let union = Store::from_rows(schema, &rows).map_err(|r| r.0)?;
+        let union = Store::from_rows(schema, Space::Durable, &rows).map_err(|r| r.0)?.0;
         if c.log.store != union || !c.log.pending.is_empty() {
             return Err("the partial client is not exactly its union".into());
         }

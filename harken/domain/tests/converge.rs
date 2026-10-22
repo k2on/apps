@@ -51,12 +51,10 @@ impl Fleet {
     /// What client `i` shows, as `user`: its optimistic view.
     fn query<T: Encode>(&self, i: i64, user: &str, name: &str, input: &impl Encode) -> T {
         let ctx = Ctx {
-            draws: Default::default(),
             id: EntryId::of("q", 0),
             actor: user.into(),
             session: "q".into(),
-            roles: vec![],
-            now: 0,
+            ..Default::default()
         };
         let b = domain()
             .ask(&self.net.clients[&i].log.store, &ctx, &full(name), &input.to_bytes())
