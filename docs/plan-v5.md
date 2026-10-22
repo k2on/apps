@@ -29,75 +29,7 @@ document disagree, this one is newer.
 
 ### 1.1 Types, and bytes under them
 
-> *Superseded (history).* §1.16 replaced this codec with serde: a value
-> is its bytes in the value format (`ark::format`, postcard or JSON by a
-> feature), a key the same value memcomparable, and there is no `Ty`, no
-> `parse` and no hand-written encoding; refinements are an input's
-> `#[derive(Input)]` checks. The order-preserving key and the distinct
-> hash spaces survive.
-
-
-There is no runtime value type. A value is bytes, and a **type** says how
-to read them. The type grammar has five constructors:
-
-```
-Ty = Int                 -- 8 bytes: the i64 with its sign bit flipped, big-endian
-   | Bytes               -- escaped: each 00 byte becomes 00 FF; terminated by 00 00
-   | List Ty             -- each element preceded by 01; terminated by 00
-   | Tuple [Ty]          -- the fields' encodings, concatenated
-   | Sum [Tuple [Ty]]    -- one byte, the variant's index; then that variant's tuple
-```
-
-This encoding is **canonical** (one value, one byte string), **prefix-free**
-(no value's bytes are a proper prefix of another's of the same type) and
-**order-preserving** (for two values of one type, bytewise order of their
-encodings is the spec's order of the values). Consequences, each used:
-
-- `compare(a, b)` is `memcmp`. An index key is column bytes concatenated.
-  The state hash is SHA-256 over row bytes with no re-encoding. There is
-  one codec and no separate order.
-- Tuples order by their first field, then their second — a row orders by
-  its key columns when they come first, which the schema makes so.
-- `Sum` orders by variant index: `None < Some`, `false < true`, an enum by
-  declaration.
-- There are **no mixed-type comparisons**, because the checker (§1.4)
-  guarantees both sides of every comparison and every row of every index
-  have one type. So there is no rank byte and no "total order over all
-  values": there is an order per type, and it is the bytes.
-
-Everything else is a **declaration** over the five, by name, in a
-module's type section:
-
-```
-Bool         = Sum [(), ()]
-Option<T>    = Sum [(), (T)]
-Enum         = Sum [(), (), …]              -- orders by declaration; append-only under compat
-Text         = Bytes   where utf8
-Id<t>        = Bytes   where len 16         -- "the row exists" is a store constraint, not a type (§1.3)
-NonEmpty<T>  = List<T> where len ≥ 1
-Name         = Text    where trim, len 1..=80, "a playlist needs a name"
-Row<t>       = Tuple of t's columns, in schema order; names live in the schema
-```
-
-A `where` clause is a **refinement**: a predicate on the values of a
-structural type. It is checked exactly once, at the boundary where bytes
-enter from outside — an input, a snapshot, a frame, a file — by one
-function, `parse(ty, bytes) -> Result<Typed, Refusal>`, whose refusal
-message is the one a form shows. Inside, the checker tracks refinements as
-types: `concat : Text, Text -> Text` keeps UTF-8 by its signature;
-`filter : NonEmpty<T>, … -> List<T>` loses non-emptiness by its
-signature; a literal in a module is checked by the verifier once and then
-covered by the module's hash. In the host language a refined type is a
-newtype with a private field whose only constructor is `parse`, so an
-unchecked one cannot exist.
-
-**Hash spaces are distinct types**: `FnHash`, `StateHash`, `ModuleHash`,
-`TypeHash`, `EntryHash`, each a newtype over 32 bytes. Comparing across
-them does not compile.
-
-**JSON** (`json.rs`'s dialect) stays as the human form of vectors and
-traces, printed under a type. It is the only self-describing form, and
-nothing on the data path reads it.
+> *Superseded (history, in git before T1).* §1.16: a value is its serde bytes in postcard, a key the same value memcomparable; the distinct hash spaces survive.
 
 ### 1.2 The schema
 
@@ -151,96 +83,11 @@ authority's memory. §1.9 is what it is for.
 
 ### 1.4 One language
 
-> *Superseded (history).* §1.16: the domain is plain Rust, so there is no
-> `Expr`, checker or interpreter; effects are the borrow checker's (`&Db`
-> reads, `&mut Db` writes) and a view is a typed `Plan`.
-
-
-The domain — every mutator, query, helper, guard, provider, scope and
-live transition — is one typed expression language. The relational
-subset is what a query is.
-
-```
-Expr = Lit(bytes)                     -- a value of the expression's type
-     | Var(sym) | Let(sym, Expr, Expr) | If | Match(Expr, [(variant, [sym], Expr)])
-     | Field(Expr, i) | Tuple([Expr]) | Variant(i, [Expr]) | List([Expr])
-     | Op(op, Expr, Expr) | Un(op, Expr)              -- checked arithmetic, comparison, bool
-     | Std(fn, [Expr])                                 -- the standard library, by name
-     | Call(FnHash, [Expr])                            -- a helper, by hash
-     | Ctx(field)                                      -- user, session, roles, now, device
-     | Lambda([sym], Expr)                             -- only as an operator's argument
-     | Scan(table) | Lookup(table, key: Expr)          -- Read
-     | Filter(Expr, Lambda) | Map(Expr, Lambda)
-     | Join(Expr, Expr, on: Lambda) | Group(Expr, by: Lambda, agg: Lambda)
-     | Sort(Expr, keys: Lambda, dirs) | Take(Expr, n)
-     | Insert(table, Expr) | Update(table, key: Expr, Lambda) | Delete(table, key: Expr)   -- Write
-     | Refuse(Expr)                                    -- the message
-     | Seq([Expr])
-```
-
-Every expression has a type and an **effect**, `Pure < Read < Write`.
-What v4 calls kinds are types and effect bounds:
-
-| v4 | v5 |
-|---|---|
-| mutator body (`Stmt`) | `(Ctx, Input) → [Change]`, effect `Write` |
-| query (`Plan`) | the relational subset, effect `Read`, result `List<T>` |
-| scope (`Pred`) | `(Ctx, Row<t>) → Bool`, effect `Pure` |
-| input `Check` | a refinement of the input type (§1.1) |
-| live transition | `(State, Input) → State`, effect `Pure` |
-| guard / provide / helper | ordinary functions with an effect bound |
-| router / middleware | a namespace prefix in the binding map; a call at the top of a body |
-
-**Effects are values.** A mutator evaluates to a list of changes; the
-interpreter does not mutate the store. The list is what the log keeps
-beside the intent, so "run it" and "record what it did" are one
-operation, and rebase re-evaluates pending intents and re-applies their
-lists. (A body that reads what it wrote earlier in the same body reads
-through its own list so far.)
-
-**Total by construction.** A function calls another only by `FnHash`,
-and a hash cannot contain itself, so the call graph is a DAG and every
-function terminates; the checker needs no termination rule. No runtime
-eval. Non-determinism enters at one door: `Ctx(now)` is drawn once at
-origin and frozen in the entry (§1.5). Arithmetic is checked and overflow
-is a refusal.
-
-**One checker** (types, effects, refinements by signature) and **one
-interpreter** replace v4's `verify.rs`, `eval.rs`, `view::pull`,
-`scope::admits`, `Eval.check` and the transition runner.
-
-**The IR is a value.** `Expr`, `Ty`, the schema and every frame are
-`Sum`s of `Tuple`s, so §1.1's codec encodes them, and `#[derive(Node)]`
-on their Rust definitions generates the `Ty` of each. There is no
-hand-written encoder, decoder, normaliser or hash walk for the IR.
-Alpha-normalisation is De Bruijn indices for `sym`, so a function's bytes
-do not depend on names.
+> *Superseded (history, in git before T1).* §1.16: the domain is plain Rust; a view is a typed `Plan`.
 
 ### 1.5 Functions by hash; a module is a binding map
 
-> *Superseded (history).* §1.16: an entry names its function by name, a
-> `Domain` maps names to Rust functions, and the CAS, `FnHash` and the
-> module are gone; the schema stays data, hashed and prefix-checked.
-
-
-`FnHash = sha256(enc(function))`, where the function's encoding names the
-hashes of what it calls. Function bodies live in a **content store**
-keyed by hash. A module is:
-
-```
-Module { spec: Int, schema: Schema, types: [(name, Ty)], bindings: [(name, FnHash)] }
-ModuleHash = sha256(enc(Module))
-```
-
-Two modules binding the same names to the same hashes are the same
-module. "Did this authority run this function?" is "is it in the store."
-Retiring old versions is garbage collection by reachability from retained
-log entries. Compatibility between versions is §1.2's prefix check on the
-schema plus one `verify` per new hash. Sending a function a peer lacks is
-a store fetch. `ran`, `retire`, `check_retained`, `need_closures` and the
-monolithic module codec are gone as separate things.
-
-A binding's name is a path: `playlists.create`. That is what a router is.
+> *Superseded (history, in git before T1).* §1.16: an entry names its function by name; the schema stays data, hashed and prefix-checked.
 
 ### 1.6 The log, chained
 
@@ -317,10 +164,10 @@ entries the authority itself authors, through the same `Mutate` input;
 there is no second door.
 
 **Going alone and joining.** An `Authority { journal }` sequences its own
-intents; `join` hands its chain to a server, which adopts it by applying
-its facts (a chain whose facts disagree with its own run is refused, as
-v4's `FactsDiffer` is) and answers with the sequences it assigned; the
-peer rebases its chain onto them. Both are the machine's own transitions.
+intents; `join` turns its chain above the fork into pending intents,
+pushed as after any connection, and the server judges each as the push it
+is — one refused loses that entry, not the chain; the peer rebases onto
+what it answers. Both are the machine's own transitions.
 
 ### 1.8 Partial sync is a view
 
@@ -394,38 +241,7 @@ the OpenID Connect client; a session is what `Hello` carries.
 
 ### 1.12 Authoring
 
-> *Superseded (history).* §1.16: the attributes only register plain Rust
-> functions by name; nothing is lowered. `spec/AUTHORING.md` is "Writing a
-> domain".
-
-
-Attribute macros over restricted Rust, producing §1.4's `Expr`:
-
-```rust
-#[ark::mutator]
-fn create(ctx: Ctx, db: Db, input: CreatePlaylist) -> Result<(), Refuse> {
-    if db.playlist.filter(|p| p.user_id == ctx.user && p.name == input.name).first().is_some() {
-        refuse!("a playlist with this name exists");
-    }
-    db.playlist.insert(Playlist { id: ctx.new_id(), user_id: ctx.user, name: input.name, added_ms: ctx.now() });
-    Ok(())
-}
-```
-
-The macro accepts `let`, `if`, `match` on declared sums, field access,
-the operators, calls to other `#[ark::*]` functions and the standard
-library, the relational combinators on `db.<table>`, and the writes; it
-refuses anything else with a compile error naming the construct. Field
-names are read from the struct, never from declaration order. There is
-one execution path, the interpreter. `spec5/AUTHORING.md` is the subset
-the macro accepts.
-
-Why a macro rather than v4's builders: the domain must become data
-(§1.4) either way, and every v4 authoring hazard the survey found —
-fields bound by position, variants named by string, `guard::<I>` untied
-from its transition — comes from a builder reconstructing by hand what
-the Rust source already says. A macro reads the source. The cost is
-that it is a parser; §1.14 says how that is kept small.
+> *Superseded (history, in git before T1).* §1.16: the attributes only register plain Rust functions by name (`spec/AUTHORING.md`).
 
 ### 1.13 What leaves, and why nothing is lost
 
@@ -466,59 +282,7 @@ that it is a parser; §1.14 says how that is kept small.
 
 ### 1.15 Authoring: the domain is written in ArkLang
 
-> *Superseded (history).* §1.16: ArkLang, `arkc`, `ark::gen`'s module
-> bindings and the binary module are gone; a domain is a crate.
-
-
-**The module** (§1.5) is what runtimes load, check, hash and call by name.
-**ArkLang** (`ark::sexp`, `spec/AUTHORING.md`) is the language a domain is
-written in: S-expressions, one reader rule, one spelling. The decisions:
-
-1. **A domain is a directory of `.ark` files** (`ark::sexp::build_dir`).
-   Every `**/*.ark` under it is read in sorted path order, all forms first,
-   then names resolved, so order and layout carry no meaning; files make no
-   namespaces, dotted names do; `(schema …)` forms merge; a name declared
-   twice is refused, both files and lines said.
-2. **The text is the source of truth; the binary module is derived.** No
-   module file is checked in. The server builds its module from
-   `HARKEN_MODULE` — a directory, an ArkLang file, or a module file for the
-   old modules it holds (`ark::sexp::load`) — and serves it by hash as
-   before; the flake's `harken-domain` is the directory, built and checked.
-3. **`arkc`** is a small CLI over library calls: `check MODULE…`, `print
-   MODULE [-o DIR]` (a file per dotted prefix, `schema.ark`, `types.ark`),
-   `compat OLD NEW`, `build MODULE -o FILE`.
-4. **Bindings are generated from the module, types only** (`ark::gen`): a
-   struct per row and record, an enum per sum, an alias per refinement, a
-   stub per function calling it by name through `Call`. An app's `build.rs`
-   writes them to `OUT_DIR` from the domain's directory. At load a module is
-   held to them (`fits`): its schema a prefix-extension of theirs, every
-   type and function they name of their structure, a row grown by appended
-   columns read by its prefix. No function body is ever generated.
-5. **No builders**: `ark::author` and the `Row`/`Input`/`Sum`/`Schema`
-   derives are gone (`Node` stays). harken's domain crate is its directory,
-   its tests, and `host.rs`, the host's Rust each app includes beside its
-   bindings (the session read model; the keys, by the domain's helpers).
-6. **The spec is readable**: `eval/`, `verify/`, `views/` vectors carry
-   their module as ArkLang beside the bytes, the text informative.
-
-**The language.** Top level: `(schema (table …)…)`, `(type N TY)`,
-`(mutator|live N ((P TY)…) BODY…)`, `(query|helper|guard N ((P TY)…) RET
-BODY…)`, `(scope N ((ROW TY)) BODY)`. Expressions: `let`, `if`, `match`,
-`record`, `tuple`, `list`, `some`/`none`, `as`, `(?? o.f d)` and `(?. o f)`
-(the matches through an option they stand for), the operators, `refuse`,
-`fn`, reads and writes by table, `ctx.*`, `new-id`, `has-role`, the
-standard functions, `(NAME ARG…)`. A place types what it wants: a `none`,
-a `(record …)`, a `map`'s element; `(as T e)` where none does.
-
-**Names are in the module**: a declaration keeps its fields and variants
-(A3), a function its binders' names (`Function::names`, in walk order), so
-the printer writes the author's. A name is in a function's hash: renaming a
-local is a new function, as renaming a field is; the body stays De Bruijn,
-and `port.rs` holds every harken function to its pre-A3 pin, names aside.
-**The layout**: one line when a form ends by column 100, its closing `)`s
-counted; else head and first argument (an atom, or one that fits) on the
-first line, the rest one per line two spaces in. `print(build(t)) == t`
-for every file of `harken/domain`, comments aside.
+> *Superseded (history, in git before T1).* §1.16: ArkLang, `arkc` and the binary module are gone; a domain is a crate.
 
 ### 1.16 Native: one runtime, the domain in Rust
 
@@ -553,11 +317,11 @@ kernel through FFI (N3); ArkLang, the checker and the interpreter go.
    disagrees anyway is healed as now: the authority's facts win.
 4. **serde everywhere.** Rows, inputs, entries, `Logged`, frames, snapshots
    and journal records are serde values written in one **value format**
-   (`ark::format`): **postcard** by default since N4 (a struct its fields
-   in declaration order, integers varints, an enum its variant's index),
-   or compact **JSON** with the `values-json` feature — no floats, maps as
-   `BTreeMap`, one encoding per value, the canonical form hashed. JSON is
-   the human form under both: what the explorer, the phones' bridge and
+   (`ark::format`): **postcard** since N4 (a struct its fields in
+   declaration order, integers varints, an enum its variant's index) — no
+   floats, maps as `BTreeMap`, one encoding per value, the canonical form
+   hashed (the `values-json` build is gone, T1). JSON is the human form:
+   what the explorer, the phones' bridge and
    the vectors read, a value of a `Type` read back from either
    (`ark::json`). Keys — a row's, an index entry's — are `memcomparable`
    bytes, so the store stays one `memcmp`-ordered map. A grown row is read
@@ -604,15 +368,17 @@ rust/ark/           the kernel: §1.1–§1.11 and §1.16 — format, json, hash
                     store, log, peer, frames, row, db, domain, plan, dynamic
 rust/ark-macros/    the derives (Row, Input, Describe, Schema) and the attributes
                     that register a function by name
-rust/ark-peer/      the one peer that dials and listens: storage, link, hub, the
-                    app kit, the server's socket, admin listener and web build;
-                    local instances and the peer's own schema (`local`)
+rust/ark-peer/      the one peer that dials and listens: storage, link, hub (on a
+                    thread, `handle`), the app kit; local instances and the
+                    peer's own schema (`local`); the server's socket and web
+                    build behind its `server` feature (axum, tokio)
 rust/ark-ffi/       ark-peer's app kit through UniFFI, for the phones
 rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer (with
                     the `views/` vectors' reference domains, `library`), and
                     `gen kotlin|swift` (a domain's types for the phones)
 rust/ark-auth/      dev sign-in and OpenID Connect
-rust/ark-explorer/  the admin page and the explorer over a replica
+rust/ark-explorer/  the admin page (its routes behind `server`) and the explorer
+                    over a replica
 rust/arkui/         the iced components
 harken/domain/      harken's domain, a crate of plain Rust
 harken/server/, harken/iced/, harken/ffi/ (with android/ and ios/)
@@ -1101,6 +867,64 @@ the rule ever changed what the house did on main (no run was seen to hit
 the window); the poll's own calls (`Speakers::heard`) are not gated, as
 they were not in the experiment.
 
+### Landed: T1, a deletion round
+
+Kernel and peer cut, each item its own commit (`e04380b`…). **A join
+pushes intents, never a chain**: `Join` makes the chain above the fork
+pending intents (with any intent that refused as the device went alone,
+kept unrun for the server so its `local`s have no gap), makes the log
+durable at the fork (ark-peer keeps the chain as pending rows first), and
+pushes them as after any connection; the server judges each as a push, so
+an entry it refuses loses that entry, not the chain. `adopt`, `refuse`,
+the peer's second kind of `Page`, `Peer::joining`, the re-handover in
+`connected` and the `joining` fields (`Replica`, `Act::Open`, `Status`,
+harken-peer's status) go; ark-ffi's status says `joining: false`. Found by
+the fuzzer on the way (seed 2464): without the durable truncation a device
+reopened after a join held its chain as its log. **Held keeps nothing**:
+`Held` has a live use — a function an older server's build lacks — so it
+stays; `Input::Loaded` (no sender but a test), the authority's queue
+behind a held intent and `Local`'s `waiting` table go: what comes after a
+held intent from its origin is a gap, answered by nothing and pushed again,
+after it, on the next connection (`connected` re-pushes every pending
+intent). Then one path for an authority's own intent (`decide`); the
+`values-json` build (35 cfg sites) and the JSON-only serializer arms of
+`ark::json`; uncalled API (`encode_into`, `db::write`, `Ctx::draw`,
+`Log::len`/`is_empty`, `Functions::forget`, `Peer::who`), `Store::new`
+and `from_rows` one each (`(schema, space)`; `from_rows` reads another
+schema's rows, §1.2), `Ctx::new` and `Default` for 28 hand-written
+literals; `Peer::hello`, one verdict send, `Store::undo`, one scan operator
+over stored keys; the log's ends taken from the entry, not postcard
+offsets; `EachOp` for `filter`/`map`/`sort` and `Members` as
+`btree_map::Values`; views made again by the peer under their number
+(`Update::Reset` now means read the rows afresh; the simulator and
+harken-iced lose their re-view; ark-ffi's is left); a scope its own kind
+in `Functions` (`Runs::Scope`, asked by table name); `Entry::new`. **No
+web server on a phone**: the admin routes are `ark_explorer::serve`,
+`Catalog` is `ark::domain`'s, ark-peer's hub thread is `handle` and its
+socket side (`serve`, `web`, axum, tokio) the `server` feature, as is
+ark-auth's routes'; ark-ffi, harken-ffi, harken-iced, harken-player and
+harken-domain turn it off — `cargo tree -p ark-ffi -e normal`: axum 0.
+Shared test support, one RNG (`ark_dev::sim::Rng`, sequences unchanged),
+one clock, one hex decoder, `ark::row::plural`; arkui's uncalled
+`Context::close`/`grid` and `Images::with_bound`; `plan-v4.md`,
+`plan-phones.md` and `scopes.md` deleted (`docs/README.md`), plan-v5's
+history sections a line each; the flake's `fuzz-smoke` check (the
+workflow still names it: drop it there by hand). **Not done**: the typed
+prefix machinery (item 12) — harken uses the by-reference forms (22 calls:
+`db.listening.has(&user)`, `.from(&input.file)`) and three-column whole
+keys (`db.credit.get((a, b, c))`), so there is no single form to keep.
+Source by `tools/loc.sh`: `ark` 4,975 → 4,517, `ark-peer` 2,555 → 2,392,
+`ark-dev` 2,142 → 2,108, `ark-explorer` 2,251 → 2,353 (the admin routes
+moved in), `arkui` 2,949 → 2,935, `ark-auth` 1,037 → 1,038, domain 2,429;
+the default set 19,395 → 18,829 source, tests 12,767 → 12,524; harken-server
+4,599 → 4,596, harken-iced 8,163 → 8,155. `Space::` 156 → 197 (the store's
+constructor names its space). Vectors: `trace/` re-derived (an open no
+longer says `joining`; a join's steps are a push), `protocol/client-chain-durable`
+gone; `hash/`, `rebase/`, `views/` and the rest of `protocol/` unchanged,
+no schema hash moved. Tests: 451 passed, 30 ignored (each crate's, one at a time for the disk); new ones falsified once each (`alone.rs` three, `joining.rs` two, `rebase.rs`'s gap, `ark-peer` `local.rs`'s reopen after a join and `views.rs`); clippy `-D warnings` clean; fmt clean but for `harken/server/tests/bridge.rs:1432`, as on main; the wasm32 check of `ark-peer`, `ark-auth`, `ark-explorer` and `harken-iced` passes. Fuzzer 1,000 sessions from seed 1 and
+1,000 from 2026, every trace replayed, none failed. Not verified: a crash
+between ark-peer's pre-write of the chain and the join's step (the merge
+drops a duplicate by id, by reading); the phones and a browser running it.
 ### Landed: typed views
 
 The experiment of one generator's recommendation, taken: **views are

@@ -8,7 +8,7 @@ description = "harken's players (docs/plan-v5.md §1.9, S3b): one reconciler tha
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-ark-peer = { path = "../../rust/ark-peer" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
 harken-domain = { path = "../domain" }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -19,7 +19,6 @@
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::log::EntryId;
 use ark::peer::{Ctx, Feed, Who};
 use ark::prelude::Id;
 use ark::schema::Space;
@@ -27,19 +26,8 @@ use ark::store::Store;
 use ark_peer::{Config, Live, Module, Peer};
 
 use crate::demo::{AddToPlaylist, CreatePlaylist, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
-use crate::sim::{lcg, Net, Op};
-
-pub struct Rng(pub u64);
-
-impl Rng {
-    pub fn below(&mut self, n: u64) -> u64 {
-        self.0 = lcg(self.0);
-        (self.0 >> 11) % n.max(1)
-    }
-    pub fn one_in(&mut self, n: u64) -> bool {
-        self.below(n) == 0
-    }
-}
+pub use crate::sim::Rng;
+use crate::sim::{Net, Op};
 
 /// The demo, and what a script can do with it.
 pub struct Gen {
@@ -142,14 +130,7 @@ fn login(i: i64, n: u64, admin: bool) -> Who {
 }
 
 fn ctx_of(w: &Who) -> Ctx {
-    Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
-        actor: w.actor.clone(),
-        session: w.session.clone(),
-        roles: w.roles.clone(),
-        now: 0,
-    }
+    Ctx::new(w, 0)
 }
 
 /// One session from its seed: the net it left, or the first check it failed.
@@ -243,9 +224,8 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
     let schema = hub.store.schema_arc().clone();
     let entries = hub.log().entries();
     let mut s = hub.store.clone();
-    for c in entries.iter().rev().flat_map(|l| l.facts.iter().rev()) {
-        s.apply(&c.inverse()).map_err(|r| format!("the log's facts do not undo: {r}"))?;
-    }
+    s.undo(entries.iter().flat_map(|l| &l.facts))
+        .map_err(|r| format!("the log's facts do not undo: {r}"))?;
     if s.state_hash() != hub.log().base().state {
         return Err("the store at the horizon is not the state the log stands on".into());
     }
@@ -269,16 +249,14 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
         return Err("the log replayed from its facts is not the store".into());
     }
     if let Some(c) = net.clients.get(&0).filter(|_| partial) {
-        let holds = g.module.functions.get(&g.scope).expect("the scope");
+        let holds = g.module.functions.scope(&g.scope).expect("the scope");
         let ctx = ctx_of(&c.log.me);
         let mut rows = vec![];
-        for (t, (name, rs)) in hub.store.snapshot_rows().into_iter().enumerate() {
-            let held = rs
-                .into_iter()
-                .filter(|row| holds.holds(&ctx, &[&[t as u8][..], row].concat()) == Ok(true));
-            rows.push((name, held.collect()));
+        for (name, rs) in hub.store.snapshot_rows() {
+            let held = rs.into_iter().filter(|row| holds(&ctx, &name, row) == Ok(true)).collect();
+            rows.push((name, held));
         }
-        let union = Store::from_rows(schema, &rows).map_err(|r| r.0)?;
+        let union = Store::from_rows(schema, Space::Durable, &rows).map_err(|r| r.0)?.0;
         if c.log.store != union || !c.log.pending.is_empty() {
             return Err("the partial client is not exactly its union".into());
         }

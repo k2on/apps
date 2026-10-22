@@ -19,17 +19,7 @@ use ark::peer::Ctx;
 use ark::store::Store;
 use harken_domain::*;
 
-struct Rng(u64);
-
-impl Rng {
-    fn below(&mut self, n: u64) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        (self.0 >> 11) % n.max(1)
-    }
-    fn pick<'a>(&mut self, xs: &[&'a str]) -> &'a str {
-        xs[self.below(xs.len() as u64) as usize]
-    }
-}
+use ark_dev::sim::Rng;
 
 /// One step: who, on which device, holding which roles, calls what with
 /// what.
@@ -334,20 +324,13 @@ fn step(r: &mut Rng, s: &Store) -> Step {
     }
 }
 
-/// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's).
-const SCHEMA: &str = match ark::format::NAME.as_bytes() {
-    b"json" => "edd9a96187efea9d3cd816afb5ffc383839bb2d246be32354e6a601bff012751",
-    _ => "748e53c5ffac28aa4f032b7b8496da2052231f57e47a5289dd8ba7bd8dade7dd",
-};
+/// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
+/// a build could write values as JSON).
+const SCHEMA: &str = "748e53c5ffac28aa4f032b7b8496da2052231f57e47a5289dd8ba7bd8dade7dd";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
-/// value format writes them: postcard (N4), and JSON as N1 pinned them.
-const PINS: [(u64, &str, &str); 12] = match ark::format::NAME.as_bytes() {
-    b"json" => PINS_JSON,
-    _ => PINS_POSTCARD,
-};
-
-const PINS_POSTCARD: [(u64, &str, &str); 12] = [
+/// value format writes them (postcard, N4).
+const PINS: [(u64, &str, &str); 12] = [
     (
         1,
         "b8db5481d025690ef3240fa4ffe20acfe4c91a43d448a1bd774e6d9c30fe6041",
@@ -410,69 +393,6 @@ const PINS_POSTCARD: [(u64, &str, &str); 12] = [
     ),
 ];
 
-const PINS_JSON: [(u64, &str, &str); 12] = [
-    (
-        1,
-        "2fce4484670ac1b7569a55629eafc93d43e7b846ced34ff698c1c38a53dd94ef",
-        "0e4559745b58ec0f580f3d40a56539f2813d4415e35a0c555f94a055ccde238a",
-    ),
-    (
-        2,
-        "c22c99d3b50d9082c9382053d70fd962d10f334126b5cdd74fd892ca6e0c7845",
-        "09ba9c822a842ec49bbfaa13a416c673cef65ad17500bf2f7ad1d9bead8875c7",
-    ),
-    (
-        3,
-        "d146635e694769f50d14824238cf7b747919b36a2eafc0acd2268d47d74b5cbf",
-        "5ddc6bfff3e0a4c7fcce2652a5af16bc4fb80a6803f9305f80259631ab885877",
-    ),
-    (
-        4,
-        "7fb2c255505fc0a8b79517e558968fe2aa2173c29c039982cd44241e8c5eed96",
-        "bb6441911cb525d68344659336f9377d7212c3b366706c01fd548304382329d2",
-    ),
-    (
-        5,
-        "12e81dddd75c70e9b97e309d9bd4866f661587fbe3dc4b37912a5211e0988db2",
-        "3e12576650c01a4aaa46de5f261bbcd209a232a01983bc376f0a13e2c9b14876",
-    ),
-    (
-        6,
-        "98acd2926b5026fc3bcf657cb60f90dd6970f0cbad96549ba3d00ae0be103773",
-        "e1ee63dd4db360d6bc8faf09054c3fa5b4148daa5d0edb6049b9302e1661f95c",
-    ),
-    (
-        7,
-        "6b54361e357c947e332e6e37c89fdc2cd4b6d1cef0ff766fa82bf85ab29f66be",
-        "d1b39eee5350cdfdac07b4b5a3bb5cce720f9f7577f06742face5c25d4437165",
-    ),
-    (
-        8,
-        "0b6b5c3861689a57a2e476c7e41b99a5b590b3fc8b8522ea6affc7613d7341d8",
-        "55c9e4cd19f151a62496e5085b3d8d628a0137f7c88fa9c20e5f27b39d605634",
-    ),
-    (
-        9,
-        "18966b40b913c2eba94a3d384571631b61156d12456929071c303b04b8d2da12",
-        "07af033a093bcbcf8aab6eb1707c100c73433f17d5bf4934122cb1cbdccbe8b5",
-    ),
-    (
-        10,
-        "ad38c47ba5dd115dadcbfa94806355575d54ccb1e8ffa91cfa73952aa1e804e7",
-        "8c5dc54248e83113128257cf90e1f8f317d8a06c6e1b56b0ff98162aee775088",
-    ),
-    (
-        11,
-        "1ac78295a5f4dcf86b8ec6dac03884e8c2fd8cbf5d4bfe40ff125c93a737855f",
-        "cc87b1458313de4802295e38b6bdb004ffc1fc734e77135e5d123206675eaa6e",
-    ),
-    (
-        12,
-        "35aa2fc37d4387f97ba1c63bf80f0fec72afe162eeaeb94f1df531eed1d898e5",
-        "a055d1becee91a1bfea9c9d3811ff8997afcda99638421fd8fcf8203989ebd54",
-    ),
-];
-
 /// The schema the structs derive hashes as the ArkLang schema did.
 /// Falsified by declaring `playlist`'s indexes in another order.
 #[test]
@@ -492,18 +412,18 @@ fn run(seed: u64) -> (String, String, usize, usize) {
         .collect();
     assert_eq!(views.len(), 19);
     let (mut refused, mut moved) = (0, 0);
-    let mut a = Store::new(native.schema.clone());
+    let mut a = Store::new(native.schema.clone(), ark::schema::Space::Durable);
     let mut r = Rng(seed);
     let mut said: Vec<u8> = vec![];
     for i in 0..400 {
         let s = step(&mut r, &a);
         let ctx = Ctx {
-            draws: Default::default(),
             id: EntryId::of("port", i),
             actor: s.user.into(),
             session: s.device.into(),
             roles: s.roles.clone(),
             now: 10_000 + i * 977,
+            ..Default::default()
         };
         let f = native.get(s.name).unwrap_or_else(|| panic!("{}", s.name)).proc.clone().unwrap();
         match f.apply(&mut a, &ctx, &s.input) {

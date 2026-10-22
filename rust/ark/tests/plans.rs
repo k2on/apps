@@ -6,8 +6,7 @@
 
 use std::sync::Arc;
 
-use ark::db::write;
-use ark::log::EntryId;
+use ark::db::{write_in, Durable};
 use ark::peer::Ctx;
 use ark::plan::{splice, Make, View};
 use ark::prelude::*;
@@ -84,12 +83,9 @@ pub struct V {
 
 fn ctx() -> Ctx {
     Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
         actor: "alice".into(),
         session: "dev".into(),
-        roles: vec![],
-        now: 0,
+        ..Default::default()
     }
 }
 
@@ -130,7 +126,12 @@ impl<T: Clone + PartialEq + Send + std::fmt::Debug + 'static> Check for (View<V,
 
 fn views() -> Vec<(&'static str, Box<dyn Check>)> {
     fn kept<T: Clone + PartialEq + Send + std::fmt::Debug + 'static>(name: &'static str, m: Make<V, T>) -> (&'static str, Box<dyn Check>) {
-        let v = View::new(m.clone(), ctx(), &Store::new(Arc::new(<V as Tables>::schema()))).unwrap();
+        let v = View::new(
+            m.clone(),
+            ctx(),
+            &Store::new(Arc::new(<V as Tables>::schema()), ark::schema::Space::Durable),
+        )
+        .unwrap();
         (name, Box::new((v, m)))
     }
     vec![
@@ -228,7 +229,7 @@ fn churn(r: &mut Rng, store: &mut Store) -> Vec<ark::store::Change> {
     let n = r.below(1000) as i64;
     let k = r.below(11);
     let pid = one(r.below(3) as u8 + 1);
-    let res = write::<V, ()>(store, |db| match k {
+    let res = write_in::<V, Durable, ()>(store, |db| match k {
         0 => db.playlist.put(Playlist {
             id: pid,
             name: format!("p{}", n % 4),
@@ -282,7 +283,7 @@ fn churn(r: &mut Rng, store: &mut Store) -> Vec<ark::store::Change> {
 #[test]
 fn every_view_is_a_fresh_run_and_its_patches_splice() {
     for seed in [1, 7, 42] {
-        let mut store = Store::new(Arc::new(<V as Tables>::schema()));
+        let mut store = Store::new(Arc::new(<V as Tables>::schema()), ark::schema::Space::Durable);
         let mut vs = views();
         let mut r = Rng(seed);
         for step in 0..400 {
@@ -303,7 +304,7 @@ fn every_view_is_a_fresh_run_and_its_patches_splice() {
 /// none once it is not.
 #[test]
 fn a_view_built_from_a_read_is_built_again_when_it_moves() {
-    let mut store = Store::new(Arc::new(<V as Tables>::schema()));
+    let mut store = Store::new(Arc::new(<V as Tables>::schema()), ark::schema::Space::Durable);
     let m: Make<V, Item> = Arc::new(|ctx: &Ctx, db: &Db<V>| {
         let p = db
             .playlist
@@ -313,7 +314,7 @@ fn a_view_built_from_a_read_is_built_again_when_it_moves() {
         Ok(scan::<V, Item>().filter(move |i| i.playlist_id == p.id))
     });
     let put = |store: &mut Store, user: &str| {
-        write::<V, ()>(store, |db| {
+        write_in::<V, Durable, ()>(store, |db| {
             db.playlist.put(Playlist {
                 id: one(1),
                 name: "Mix".into(),
@@ -325,7 +326,7 @@ fn a_view_built_from_a_read_is_built_again_when_it_moves() {
     };
     put(&mut store, "alice");
     let mut v = View::new(m, ctx(), &store).unwrap();
-    let cs = write::<V, ()>(&mut store, |db| {
+    let cs = write_in::<V, Durable, ()>(&mut store, |db| {
         db.item.insert(Item {
             playlist_id: one(1),
             track_id: "t".into(),
@@ -343,9 +344,9 @@ fn a_view_built_from_a_read_is_built_again_when_it_moves() {
 /// refusal is undone.
 #[test]
 fn a_refused_run_writes_nothing() {
-    let mut store = Store::new(Arc::new(<V as Tables>::schema()));
+    let mut store = Store::new(Arc::new(<V as Tables>::schema()), ark::schema::Space::Durable);
     let before = store.state_hash();
-    let r = write::<V, ()>(&mut store, |db| {
+    let r = write_in::<V, Durable, ()>(&mut store, |db| {
         db.person.insert(Person {
             name: "Bach".into(),
             born: 1685,

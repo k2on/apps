@@ -26,7 +26,10 @@ harken-domain = { path = "../domain" }
 harken-player = { path = "../player" }
 # The server is a peer that listens; the scanner and the house's speakers
 # are peers in this process that reach it through its handle, never a socket.
-ark-peer = { path = "../../rust/ark-peer" }
+ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
+# The admin page's routes (`ark_explorer::serve`), and its wire, which the
+# tests read back as the page reads it.
+ark-explorer = { path = "../../rust/ark-explorer", default-features = false, features = ["server"] }
 ark-auth = { path = "../../rust/ark-auth" }
 anyhow = "1"
 axum = { version = "0.7", features = ["ws"] }
@@ -54,5 +57,3 @@ ark-dev = { path = "../../rust/ark-dev" }
 libc = "0.2"
 tempfile = "3"
 ureq = { version = "2", default-features = false }
-# The admin page's wire, read back as the page reads it.
-ark-explorer = { path = "../../rust/ark-explorer", default-features = false }

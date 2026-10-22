@@ -9,16 +9,20 @@ description = "The ArkDB v5 peer (docs/plan-v5.md §1.7, §1.9, §1.11): the two
 ark = { path = "../ark" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-ark-auth = { path = "../ark-auth" }
+ark-auth = { path = "../ark-auth", default-features = false }
+
+# The server side (`serve`, `web`): a server's, which a phone or a browser
+# never links.
+[features]
+default = ["server"]
+server = ["ark-auth/server", "dep:anyhow", "dep:axum", "dep:tokio", "dep:tower-http"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
-# The admin page's wire (`admin`): the explorer without its window.
-ark-explorer = { path = "../ark-explorer", default-features = false }
-anyhow = "1"
-axum = { version = "0.7", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
-tower-http = { version = "0.5", features = ["fs"] }
+anyhow = { version = "1", optional = true }
+axum = { version = "0.7", features = ["ws"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"], optional = true }
+tower-http = { version = "0.5", features = ["fs"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"

@@ -26,17 +26,6 @@ fn dir(d: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../spec/vectors").join(d)
 }
 
-/// Whether this build's value format is the vectors': postcard, the
-/// default. A build of `values-json` runs everything but what holds bytes
-/// to them, and says so.
-pub fn held() -> bool {
-    let held = ark::format::NAME == "postcard";
-    if !held {
-        eprintln!("spec/vectors are postcard's; this build writes {}: not held", ark::format::NAME);
-    }
-    held
-}
-
 /// A vector written, or held to what is on disk.
 pub fn vector(d: &str, name: &str, text: &str) -> Result<(), String> {
     let path = dir(d).join(name);
@@ -231,12 +220,9 @@ pub fn op_json(op: &Op) -> Value {
 /// Who a view is read as, from the vector's `{"session", "user"}`.
 pub fn view_ctx(user: &str, session: &str) -> ark::peer::Ctx {
     ark::peer::Ctx {
-        draws: Default::default(),
-        id: EntryId::default(),
         actor: user.into(),
         session: session.into(),
-        roles: vec![],
-        now: 0,
+        ..Default::default()
     }
 }
 
@@ -396,7 +382,7 @@ pub fn run_view(text: &str) -> Result<(), String> {
             rows.iter().map(|r| row_of(&d.schema, &t.name, r)).collect::<Result<_, _>>()?,
         ));
     }
-    let store = Store::from_rows(d.schema.clone(), &by).map_err(|r| r.0)?;
+    let store = Store::from_rows(d.schema.clone(), ark::schema::Space::Durable, &by).map_err(|r| r.0)?.0;
     let batches = (v["batches"].as_array().ok_or("no batches")?.iter())
         .map(|b| {
             b.as_array()

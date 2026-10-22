@@ -32,7 +32,7 @@ fn store_of(items: &[(&str, i64)]) -> Store {
         ("playlist".into(), vec![playlist_row(&p, "Favorites", "alice")]),
         ("item".into(), items.iter().map(|(t, n)| item_row(&p, t, *n)).collect()),
     ];
-    Store::from_rows(demo::shared(), &rows).unwrap()
+    Store::from_rows(demo::shared(), ark::schema::Space::Durable, &rows).unwrap().0
 }
 
 /// The store as the dialect writes one: tables by name in code-point
@@ -49,9 +49,6 @@ fn dir() -> PathBuf {
 }
 
 fn vector(name: &str, text: String) {
-    if ark::format::NAME != "postcard" {
-        return eprintln!("spec/vectors are postcard's; this build writes {}: not held", ark::format::NAME);
-    }
     let path = dir().join(name);
     if std::env::var_os("ARK_WRITE_VECTORS").is_some() {
         std::fs::create_dir_all(dir()).unwrap();

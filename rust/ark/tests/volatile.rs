@@ -226,7 +226,7 @@ fn a_replica_folds_its_own_log() {
     }
     let pending = alice.step(waving("laptop"));
     alice.step(Input::Compact(i64::MAX));
-    assert_eq!((alice.log().len(), alice.log().base_seq()), (0, 5), "it stands on its head");
+    assert_eq!((alice.log().entries().len(), alice.log().base_seq()), (0, 5), "it stands on its head");
     let o = bob.step(waving("tablet"));
     let (_, f) = deliver_up(&mut server, &who("bob"), &o);
     alice.step(down(&f[0]));

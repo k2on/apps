@@ -7,53 +7,19 @@
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Duration;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::log::{Entry, EntryId, Origin};
 use ark::peer::Who;
 use ark::schema::Space;
-use ark_peer::link::{bell, socket, wait, Dial, Event, Pumped};
-use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
+use ark_peer::link::{socket, wait, Dial, Event};
+use ark_peer::{dev, now_ms, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
 
-/// `create_playlist`'s input.
-fn named(name: &str) -> Vec<u8> {
-    ark_dev::demo::CreatePlaylist { name: name.into() }.to_bytes()
-}
+mod support;
 
-fn config() -> Config {
-    Config::of(Arc::new(ark_dev::demo::demo()))
-}
-
-fn peer(who: Who) -> Peer {
-    Peer::open(config(), who, Box::new(Memory::default()), false)
-}
-
-/// `token`'s peer, dialling `url` through `dial`, and its bell.
-fn linked(token: &str, url: &str, dial: impl Dial + 'static) -> (Peer, Receiver<()>) {
-    let mut c = peer(dev(token).unwrap_or(dev("x@y").unwrap()));
-    let (wake, rx) = bell();
-    c.set_waker(wake);
-    c.link.backoff = (5, 20);
-    c.set_token(Some(token.into()));
-    c.connect_with(url, dial);
-    (c, rx)
-}
-
-/// Pumps a peer until `f` holds, or panics after two seconds.
-fn until(c: &mut (Peer, Receiver<()>), what: &str, f: impl Fn(&Peer, &Pumped) -> bool) {
-    for _ in 0..400 {
-        let p = c.0.pump();
-        if f(&c.0, &p) {
-            return;
-        }
-        wait(&c.0, &c.1, Duration::from_millis(5));
-    }
-    panic!("never: {what}");
-}
+use support::{config, device, linked, named, until};
 
 fn create(c: &mut Peer, name: &str) {
     let _ = c.author(Space::Durable, "demo.create_playlist", named(name), now_ms());
@@ -110,7 +76,7 @@ fn a_linked_round_trip_waits_on_nothing() {
             t.elapsed()
         })
         .collect();
-    let mut d = peer(dev("bob@phone").unwrap());
+    let mut d = device("bob@phone", Box::new(Memory::default()));
     let mut wire = hub.dialer(Arc::new(dev)).dial("", "bob@phone", None);
     let direct: Vec<Duration> = (0..100)
         .map(|i| {
@@ -225,18 +191,7 @@ impl Disk for Flaky {
 }
 
 fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
-    let entry = Entry {
-        id: EntryId::of(Origin::named(&who.session), local),
-        actor: who.actor.clone(),
-        session: who.session.clone(),
-        origin: Origin::named(&who.session),
-        local,
-        roles: vec![],
-        func: "demo.create_playlist".into(),
-        input: named(name),
-        now: 1,
-    };
-    Frame::push(Space::Durable, [entry]).enc()
+    support::push(who, local, "demo.create_playlist", named(name))
 }
 
 /// An acknowledgement follows the write: while the disk refuses, nothing a

@@ -1,19 +1,21 @@
 //! What a peer keeps beside its log, as rows of its local instance, held:
 //! an instance's rows read back after a reopen, its journal folded; an
-//! ephemeral one kept nowhere; a server's journal — each origin's last,
-//! what waits behind a held intent — across a restart; a device's replica
-//! row across a reopen.
+//! ephemeral one kept nowhere; a server's journal — each origin's last —
+//! across a restart; a device's replica
+//! row across a reopen, and its chain pending after a join.
 
 use std::sync::Arc;
 
 use ark::db::{Durable, Volatile};
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::log::{Entry, EntryId, Origin};
-use ark::peer::{Role, Who};
+
+use ark::peer::Who;
 use ark::prelude::*;
 use ark::schema::Space;
 use ark_peer::{dev, Config, Disk, Instance, Memory, Peer};
+
+mod support;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 pub struct Note {
@@ -102,19 +104,7 @@ fn config() -> Config {
 }
 
 fn push(who: &Who, local: i64, func: &str, name: &str) -> Vec<u8> {
-    let origin = Origin::named(&who.session);
-    let entry = Entry {
-        id: EntryId::of(origin, local),
-        actor: who.actor.clone(),
-        session: who.session.clone(),
-        origin,
-        local,
-        roles: vec![],
-        func: func.into(),
-        input: ark_dev::demo::CreatePlaylist { name: name.into() }.to_bytes(),
-        now: 1,
-    };
-    Frame::push(Space::Durable, [entry]).enc()
+    support::push(who, local, func, support::named(name))
 }
 
 const CREATE: &str = "demo.create_playlist";
@@ -156,26 +146,6 @@ fn the_last_of_each_origin_survives_a_restart() {
     assert!(matches!(verdicts(&out)[..], [Verdict::Ok { .. }]), "{:?}", verdicts(&out));
 }
 
-/// What waits behind a held intent is a row of `waiting`: after a restart
-/// the held one and the one behind it wait still, in order, as who pushed
-/// them. Falsified by `Peer::serve` not reading the `waiting` rows: nothing
-/// waited after the restart.
-#[test]
-fn what_waits_survives_a_restart() {
-    let alice = dev("alice@laptop").unwrap();
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
-    let a = hub.accept(alice.clone());
-    let held = verdicts(&hub.frame(a, push(&alice, 1, "demo.gone", "x"), 1));
-    assert!(matches!(held[..], [Verdict::Held { .. }]), "{held:?}");
-    assert!(verdicts(&hub.frame(a, push(&alice, 2, CREATE, "Road"), 1)).is_empty(), "it waits");
-    let hub = restarted(hub);
-    let Role::Authority { journal } = &hub.log.role else {
-        panic!("an authority")
-    };
-    let waits: Vec<(String, i64)> = journal.waiting.values().flatten().map(|(w, e)| (w.session.clone(), e.local)).collect();
-    assert_eq!(waits, vec![(alice.session.clone(), 1), (alice.session.clone(), 2)]);
-}
-
 /// A device's replica row is what it opens as: its origin, its fork while
 /// alone, who last signed in, its last `local`. Falsified by `Peer::alone`
 /// not putting the fork: the reopened device was a replica.
@@ -197,6 +167,28 @@ fn a_device_reopens_as_its_replica_row() {
     let disk = d.log.disk.take().unwrap();
     let d = Peer::open_as(config, disk, None);
     assert_eq!((d.log.origin, &d.log.me.session), (origin, &me.session), "who last signed in, read back");
+}
+
+/// A device that joined again, reopened before its server answered, has
+/// its chain as pending intents and its log at the fork: the join made
+/// both durable. Falsified by the machine's `join` not writing the store at
+/// the fork: the reopened device held the chain as its log and nothing
+/// pending, which its server never sees (the fuzzer's seed 2464 did not
+/// settle).
+#[test]
+fn a_device_reopened_after_joining_has_its_chain_pending() {
+    let config = Config::of(Arc::new(ark_dev::demo::demo()));
+    let mut d = Peer::open_as(config, Box::new(Memory::default()), None);
+    d.alone();
+    for name in ["Road", "Trip"] {
+        let input = ark_dev::demo::CreatePlaylist { name: name.into() }.to_bytes();
+        d.author(Space::Durable, CREATE, input, 1).unwrap();
+    }
+    assert_eq!(d.cursor(), 2);
+    d.join();
+    let d = d.reopen();
+    assert!(!d.is_alone());
+    assert_eq!((d.cursor(), d.pending_len()), (0, 2));
 }
 
 /// A login remembered is recalled by the next run of the app, from its

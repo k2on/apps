@@ -334,7 +334,7 @@ fn store_of(domain: &str, rows: &[Change]) -> Store {
         let Change::Add { table, row } = c else { panic!("a store is rows") };
         by.iter_mut().find(|(t, _)| t == table).unwrap().1.push(row.clone());
     }
-    Store::from_rows(schema, &by).unwrap()
+    Store::from_rows(schema, ark::schema::Space::Durable, &by).unwrap().0
 }
 
 fn library(view: &'static str, input: Value) -> Case {

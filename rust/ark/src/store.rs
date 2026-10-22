@@ -198,7 +198,8 @@ impl Undo {
 #[derive(Clone, Copy)]
 pub struct Log<'a>(&'a BTreeMap<Vec<u8>, LogRow>);
 
-/// A row of the log's table, and its sequence, state and hash read once.
+/// A row of the log's table, and its sequence, state and hash, taken from
+/// the entry it was read or written as.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LogRow {
     bytes: Vec<u8>,
@@ -206,8 +207,11 @@ struct LogRow {
 }
 
 impl LogRow {
-    fn of(bytes: Vec<u8>) -> LogRow {
-        LogRow { ends: ends(&bytes), bytes }
+    fn of(l: &Logged, bytes: Vec<u8>) -> LogRow {
+        LogRow {
+            ends: (l.seq, l.state, l.hash),
+            bytes,
+        }
     }
 }
 
@@ -225,35 +229,6 @@ impl std::fmt::Debug for Log<'_> {
 
 fn read(b: &LogRow) -> Logged {
     Logged::from_bytes(&b.bytes).expect("a row of the log reads")
-}
-
-/// A row's sequence, state and hash, read past its entry and facts.
-fn ends(b: &[u8]) -> (Seq, StateHash, EntryHash) {
-    #[cfg_attr(feature = "values-json", derive(Deserialize))]
-    struct Ends {
-        seq: Seq,
-        state: StateHash,
-        hash: EntryHash,
-    }
-    #[cfg(feature = "values-json")]
-    let e: Ends = serde_json::from_slice(b).expect("a row of the log reads");
-    // A row ends with its state and hash, each 32 bytes after their length.
-    #[cfg(not(feature = "values-json"))]
-    let e = {
-        let (seq, _) = postcard::take_from_bytes::<Seq>(b).expect("a row of the log reads");
-        let n = b.len();
-        assert!(
-            n >= 66 && b[n - 66] == 32 && b[n - 33] == 32,
-            "a row of the log ends with its state and hash"
-        );
-        let state = StateHash(b[n - 65..n - 33].try_into().unwrap());
-        Ends {
-            seq,
-            state,
-            hash: EntryHash(b[n - 32..].try_into().unwrap()),
-        }
-    };
-    (e.seq, e.state, e.hash)
 }
 
 /// A sequence's key in the log's table.
@@ -307,15 +282,6 @@ impl<'a> Log<'a> {
     pub fn entries(&self) -> Vec<Logged> {
         self.after(Seq::MIN).collect()
     }
-
-    /// How many entries there are above the row the log stands on.
-    pub fn len(&self) -> usize {
-        self.0.len() - 1
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.len() <= 1
-    }
 }
 
 fn bound(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
@@ -343,13 +309,8 @@ fn ordered<'a, T: 'a>(it: impl DoubleEndedIterator<Item = T> + 'a, dir: Dir) -> 
 }
 
 impl Store {
-    /// An empty durable store.
-    pub fn new(schema: Arc<Schema>) -> Store {
-        Store::new_in(schema, Space::Durable)
-    }
-
     /// An empty store whose hash and snapshot are over `space`'s tables.
-    pub fn new_in(schema: Arc<Schema>, space: Space) -> Store {
+    pub fn new(schema: Arc<Schema>, space: Space) -> Store {
         let tables = schema
             .tables
             .iter()
@@ -403,7 +364,7 @@ impl Store {
         }
         match c {
             Change::Add { .. } => {
-                self.log.insert(key, LogRow::of(row.clone()));
+                self.log.insert(key, LogRow::of(&l, row.clone()));
             }
             _ => {
                 self.log.remove(&key);
@@ -429,14 +390,14 @@ impl Store {
             return Err(Refusal(format!("{LOG}: entry {} does not link onto the head", l.seq)));
         }
         self.apply_all(facts)?;
-        self.log_push(l.seq, l.to_bytes());
+        self.log_push(l, l.to_bytes());
         Ok(())
     }
 
-    /// A row added at the head of the log by a peer that chained it onto
-    /// the head, or checked that it links there.
-    pub(crate) fn log_push(&mut self, seq: Seq, row: Vec<u8>) {
-        self.log.insert(seq_key(seq), LogRow::of(row));
+    /// An entry added at the head of the log as its row, `row`, by a peer
+    /// that chained it onto the head, or checked that it links there.
+    pub(crate) fn log_push(&mut self, l: &Logged, row: Vec<u8>) {
+        self.log.insert(seq_key(l.seq), LogRow::of(l, row));
     }
 
     /// The log's rows above `seq` deleted, newest first.
@@ -601,13 +562,29 @@ impl Store {
     pub fn apply_all(&mut self, cs: &[Change]) -> Result<(), Refusal> {
         for (i, c) in cs.iter().enumerate() {
             if let Err(e) = self.apply(c) {
-                for d in cs[..i].iter().rev() {
-                    self.apply(&d.inverse()).expect("an inverse applies");
-                }
+                self.undo(&cs[..i]).expect("an inverse applies");
                 return Err(e);
             }
         }
         Ok(())
+    }
+
+    /// Changes made, undone: each one's inverse applied, newest first, up
+    /// to the first that does not apply; the inverses, as applied.
+    pub fn undo<'c, I>(&mut self, cs: I) -> Result<Vec<Change>, Refusal>
+    where
+        I: IntoIterator<Item = &'c Change>,
+        I::IntoIter: DoubleEndedIterator,
+    {
+        cs.into_iter().rev().map(|c| c.inverse()).map(|c| self.apply(&c).map(|_| c)).collect()
+    }
+
+    /// A table's rows by their keys, in key order.
+    pub(crate) fn keyed(&self, table: &str) -> impl Iterator<Item = (&[u8], &[u8])> {
+        self.find(table)
+            .ok()
+            .into_iter()
+            .flat_map(move |t| self.tables[t].rows.iter().map(|(k, r)| (&k[..], &r[..])))
     }
 
     /// Puts a row, adding it or replacing the one under its key.
@@ -730,34 +707,20 @@ impl Store {
         rows
     }
 
-    /// A store holding exactly these rows, each parsed; constraints are
-    /// judged once all are in, so the order tables come in does not matter.
-    pub fn from_rows(schema: Arc<Schema>, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
-        Store::from_rows_in(schema, Space::Durable, rows)
-    }
-
-    /// [`Store::from_rows`], a store of `space`.
-    pub fn from_rows_in(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
-        Store::rows_in(schema, space, rows, false).map(|(s, _)| s)
-    }
-
-    /// [`Store::from_rows_in`] of rows as some schema of this one wrote
-    /// them (§1.2): each read as it is, and only when it is not this
-    /// schema's completed or cut to its prefix ([`Table::fit`]); a table
-    /// this schema lacks dropped. And whether any was another schema's (a
-    /// table of this space missing counts).
-    pub fn from_rows_fit(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Store, bool), Refusal> {
-        Store::rows_in(schema, space, rows, true)
-    }
-
-    // Each row parsed once, unless it is fitted.
-    fn rows_in(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)], fit: bool) -> Result<(Store, bool), Refusal> {
-        let mut s = Store::new_in(schema.clone(), space);
-        let mut other = fit && schema.tables.iter().filter(|t| t.space == space).count() != rows.len();
+    /// A store of `space` holding exactly these rows, as some schema of this
+    /// one wrote them (§1.2): each read as it is, and only when it is not
+    /// this schema's completed or cut to its prefix ([`Table::fit`]); a
+    /// table this schema lacks dropped; constraints judged once all are in,
+    /// so the order tables come in does not matter. And whether any was
+    /// another schema's (a table of this space missing counts). Each row is
+    /// parsed once, unless it is fitted.
+    pub fn from_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Store, bool), Refusal> {
+        let mut s = Store::new(schema.clone(), space);
+        let mut other = schema.tables.iter().filter(|t| t.space == space).count() != rows.len();
         let mut parsed: Vec<Vec<Parsed>> = schema.tables.iter().map(|_| vec![]).collect();
         for (table, rs) in rows {
             let t = match s.find(table) {
-                Err(_) if fit => {
+                Err(_) => {
                     other = true;
                     continue;
                 }
@@ -767,7 +730,6 @@ impl Store {
             for row in rs {
                 let (row, p) = match tab.parse(row) {
                     Ok(p) => (Cow::Borrowed(&row[..]), p),
-                    Err(e) if !fit => return Err(e),
                     Err(e) => {
                         let (r, o) = tab.fit(row).map_err(|_| e)?;
                         other |= o;

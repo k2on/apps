@@ -219,9 +219,7 @@ impl Instance {
         if facts.is_empty() {
             return Ok(t);
         }
-        self.machine
-            .store
-            .apply_all(&facts.iter().rev().map(Change::inverse).collect::<Vec<_>>())?;
+        self.machine.store.undo(&facts)?;
         let said = self.step(Input::Write { facts, now: now_ms() });
         match said.into_iter().find_map(|o| match o {
             Output::Refused { why, .. } => Some(why),

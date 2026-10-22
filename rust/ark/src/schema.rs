@@ -17,20 +17,13 @@
 //! A table is [`Space::Durable`] or [`Space::Volatile`] (§1.3, §1.9): a
 //! volatile table is not in snapshots and not in the state hash.
 
-#[cfg(feature = "values-json")]
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "values-json")]
-use serde_json::value::RawValue;
 use serde_json::{Map, Value as J};
 
 use crate::format::Encode;
-#[cfg(not(feature = "values-json"))]
 use crate::format::{encode, take_seed};
 use crate::hash::SchemaHash;
 use crate::json::{typed_bytes, typed_key};
-#[cfg(not(feature = "values-json"))]
 use crate::json::{Seed, Typed};
 use crate::row::Type;
 use crate::Refusal;
@@ -217,35 +210,6 @@ impl Table {
         need
     }
 
-    #[cfg(feature = "values-json")]
-    fn columns_of(&self, row: &[u8], check: bool) -> Result<Vec<Option<J>>, String> {
-        let raw: BTreeMap<&str, &RawValue> = serde_json::from_slice(row).map_err(|e| e.to_string())?;
-        let value = |c: &Column| -> Result<J, String> {
-            let r = raw.get(c.name.as_str()).ok_or_else(|| format!("a row without {}", c.name))?;
-            serde_json::from_str(r.get()).map_err(|e| e.to_string())
-        };
-        let need = self.needed(check);
-        let mut cols: Vec<Option<J>> = vec![None; self.columns.len()];
-        let mut want = Vec::with_capacity(if check { row.len() } else { 0 });
-        for (i, c) in self.columns.iter().enumerate().filter(|(i, _)| need[*i]) {
-            let v = value(c)?;
-            if check {
-                // The row's one encoding: its columns in order, each its own.
-                want.push(if i == 0 { b'{' } else { b',' });
-                serde_json::to_writer(&mut want, &c.name).map_err(|e| e.to_string())?;
-                want.push(b':');
-                want.extend(typed_bytes(&c.ty, &v).map_err(|e| e.0)?);
-            }
-            cols[i] = Some(v);
-        }
-        want.push(b'}');
-        if check && want != row {
-            return Err("not a row's one encoding".into());
-        }
-        Ok(cols)
-    }
-
-    #[cfg(not(feature = "values-json"))]
     fn columns_of(&self, row: &[u8], check: bool) -> Result<Vec<Option<J>>, String> {
         let need = self.needed(check);
         let upto = need.iter().rposition(|n| *n).map_or(0, |i| i + 1);
@@ -264,16 +228,9 @@ impl Table {
         Ok(cols)
     }
 
-    /// A row's columns as some schema of this table wrote them, by name
-    /// (JSON) or in order up to where its bytes end (postcard): a column
-    /// beyond them is missing, one beyond this table's dropped.
-    #[cfg(feature = "values-json")]
-    fn columns_as_written(&self, row: &[u8]) -> Result<Vec<Option<J>>, String> {
-        let mut v: Map<String, J> = serde_json::from_slice(row).map_err(|e| e.to_string())?;
-        Ok(self.columns.iter().map(|c| v.remove(&c.name)).collect())
-    }
-
-    #[cfg(not(feature = "values-json"))]
+    /// A row's columns as some schema of this table wrote them, in order up
+    /// to where its bytes end: a column beyond them is missing, one beyond
+    /// this table's dropped.
     fn columns_as_written(&self, row: &[u8]) -> Result<Vec<Option<J>>, String> {
         let mut rest = row;
         let mut out = vec![];

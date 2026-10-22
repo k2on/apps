@@ -14,9 +14,7 @@
 //! ([`Peer::login`]) makes its pending intents the signer's, as
 //! [`Peer::sign_in`] re-authors them, and dials. A device that joined a
 //! server while alone hands its history over as intents pending under the
-//! login that signs in there (§1.7's join hands a chain, which the server
-//! adopts only from the session that made it — a session nobody's alone
-//! history can have).
+//! login that signs in there (§1.7).
 
 use std::collections::BTreeMap;
 
@@ -43,7 +41,8 @@ pub enum Standing {
 pub enum Update {
     Unchanged,
     Patched(Vec<Patch>),
-    /// It could not be kept up: read it again.
+    /// It could not be kept up and was made again, under its number: read
+    /// its rows afresh.
     Reset,
 }
 
@@ -96,8 +95,6 @@ pub struct Status {
     pub epoch: u64,
     pub cursor: i64,
     pub pending: usize,
-    /// A chain joined and not answered yet.
-    pub joining: bool,
     pub user: String,
     pub alone: bool,
 }
@@ -151,9 +148,6 @@ impl Peer {
     /// Somebody signed in: every pending intent theirs, and the connection
     /// dialled with their token.
     pub fn login(&mut self, who: Who, token: String) {
-        // A joined history goes as intents under the login, not as a chain
-        // only nobody's session could hand over.
-        self.log.joining = None;
         let (actor, session) = (Some(who.actor.clone()), who.session.clone());
         self.replica(|r| (r.actor, r.session) = (actor, session));
         self.set_token(None);
@@ -183,12 +177,8 @@ impl Peer {
     pub fn ctx(&self) -> Ctx {
         let me = self.me();
         Ctx {
-            draws: Default::default(),
             id: EntryId::of(&me.session, 0),
-            actor: me.actor.clone(),
-            session: me.session.clone(),
-            roles: me.roles.clone(),
-            now: now_ms(),
+            ..Ctx::new(me, now_ms())
         }
     }
 
@@ -373,7 +363,6 @@ impl Peer {
             epoch: self.link.epoch,
             cursor: self.cursor(),
             pending: self.pending_len(),
-            joining: self.log.joining.is_some(),
             user: self.me().actor.clone(),
             alone: self.is_alone(),
         }

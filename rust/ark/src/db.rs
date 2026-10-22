@@ -12,7 +12,7 @@
 //! (a helper, a guard, a view's closure) cannot write. A write is judged by
 //! the store as it is made (a key taken, a unique index, a reference) and
 //! is a [`Change`] applied at once, so a function reads what it wrote; a
-//! run that refuses has every change it made undone ([`write`]).
+//! run that refuses has every change it made undone ([`write_in`]).
 //!
 //! **A run writes its own space's tables only, and rustc says so** (§1.9).
 //! A [`Db<S, P>`] is a durable run's (`P` = [`Durable`], the default) or a
@@ -211,13 +211,8 @@ impl<'t, S: Tables, P: Writes> DerefMut for Db<'t, S, P> {
     }
 }
 
-/// `f` over `store`, writing durable tables: its answer and the changes it
-/// made, left applied — or, when it refuses, none of them.
-pub fn write<S: Tables, T>(store: &mut Store, f: impl for<'t> FnOnce(&mut Db<'t, S>) -> Result<T, Refusal>) -> Result<(T, Vec<Change>), Refusal> {
-    write_in::<S, Durable, T>(store, f)
-}
-
-/// [`write`], in a run writing `P`'s tables.
+/// `f` over `store`, in a run writing `P`'s tables: its answer and the
+/// changes it made, left applied — or, when it refuses, none of them.
 pub fn write_in<S: Tables, P: Writes, T>(
     store: &mut Store,
     f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, Refusal>,
@@ -234,9 +229,7 @@ pub fn write_in<S: Tables, P: Writes, T>(
         Ok(t) => Ok((t, changes)),
         Err(e) => {
             if let Backing::Write(s) = &mut txn.store {
-                for c in changes.iter().rev() {
-                    s.apply(&c.inverse()).expect("an inverse applies");
-                }
+                s.undo(&changes).expect("an inverse applies");
             }
             Err(e)
         }

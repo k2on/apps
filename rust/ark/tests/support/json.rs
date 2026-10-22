@@ -46,15 +46,14 @@ pub fn int(n: i64) -> String {
     n.to_string()
 }
 
-/// A row: its JSON under its table, columns in schema order (under
-/// `values-json`, its bytes as they are).
+/// A row: its JSON under its table, columns in schema order.
 pub fn row(t: &Table, b: &[u8]) -> String {
     let v = ark::dynamic::row(t, b).expect("a row reads");
     serde_json::to_string(&ark::json::Typed(&t.row_type(), &v)).unwrap()
 }
 
 /// The schema: its JSON (its hash is taken over its bytes in the value
-/// format, which under `values-json` are this).
+/// format).
 pub fn schema(s: &Schema) -> String {
     serde_json::to_string(s).unwrap()
 }

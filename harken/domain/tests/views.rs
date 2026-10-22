@@ -305,12 +305,10 @@ fn hold(name: &str, input: &impl Encode) -> Tally {
     let (f, input) = (full(name), input.to_bytes());
     let fresh = |store: &Store, ctx: &Ctx| d.watch(store, ctx, &f, &input).unwrap().rows();
     let ctx = Ctx {
-        draws: Default::default(),
         id: EntryId::of("q", 0),
         actor: "alice".into(),
         session: "q".into(),
-        roles: vec![],
-        now: 0,
+        ..Default::default()
     };
     let mut sum = Tally::default();
     for seed in 0..SEEDS {
@@ -502,12 +500,10 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     let (f, input) = (full("library"), Library { playlist_id: favs }.to_bytes());
     let query = |store: &Store, ctx: &Ctx| d.watch(store, ctx, &f, &input).unwrap().rows();
     let ctx = Ctx {
-        draws: Default::default(),
         id: EntryId::of("q", 0),
         actor: "alice".into(),
         session: "q".into(),
-        roles: vec![],
-        now: 0,
+        ..Default::default()
     };
     let mut v = d.watch(&c.store, &ctx, &f, &input).unwrap();
     let mut shown = v.rows();

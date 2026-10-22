@@ -59,7 +59,7 @@ fn whys(s: &mut Store, c: Change) -> String {
 /// item of a playlist nobody created was taken.
 #[test]
 fn constraints_refuse() {
-    let mut s = Store::new(demo::shared());
+    let mut s = Store::new(demo::shared(), ark::schema::Space::Durable);
     let empty = s.clone();
     let item = |n, t: &str, p| Change::Add {
         table: "item".into(),
@@ -81,16 +81,11 @@ fn constraints_refuse() {
         row: row_of(&first, serde_json::json!({"playlist_id": hex(&id(1))})),
     };
     assert!(whys(&mut s, short).contains("item"));
-    // The row's bytes but not its one encoding: its columns out of order
-    // in JSON, its last varint (`pos`, 5) not the shortest in postcard.
+    // The row's bytes but not its one encoding: its last varint (`pos`, 5)
+    // not the shortest.
     let mut other = item_row(&id(1), "t5", 5);
-    match ark::format::NAME {
-        "json" => other = br#"{"track_id":"t5","playlist_id":"00000000000000000000000000000001","pos":5}"#.to_vec(),
-        _ => {
-            assert_eq!(other.pop(), Some(10));
-            other.extend([0x8a, 0x00]);
-        }
-    }
+    assert_eq!(other.pop(), Some(10));
+    other.extend([0x8a, 0x00]);
     let unordered = Change::Add {
         table: "item".into(),
         row: other,
@@ -125,7 +120,7 @@ fn constraints_refuse() {
 fn every_change_inverts_and_the_hash_is_the_rows() {
     let mut r = Rng(3);
     let schema = demo::shared();
-    let mut s = Store::new(schema.clone());
+    let mut s = Store::new(schema.clone(), ark::schema::Space::Durable);
     let empty = s.clone();
     let mut done = vec![];
     for k in 0..3000 {
@@ -153,7 +148,9 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
             done.push(c);
         }
         if k % 97 == 0 {
-            let fresh = Store::from_rows(schema.clone(), &s.snapshot_rows()).unwrap();
+            let fresh = Store::from_rows(schema.clone(), ark::schema::Space::Durable, &s.snapshot_rows())
+                .unwrap()
+                .0;
             assert_eq!(fresh.state_hash(), s.state_hash(), "at write {k}");
             assert_eq!(fresh, s);
         }
@@ -177,7 +174,7 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
 /// the next playlist's items were read too.
 #[test]
 fn scans_read_in_order() {
-    let mut s = Store::new(demo::shared());
+    let mut s = Store::new(demo::shared(), ark::schema::Space::Durable);
     for p in [1, 2] {
         s.put("playlist", playlist_row(&id(p), &format!("p{p}"), "u")).unwrap();
         for (t, pos) in [("t7", 1), ("t11", 3), ("t9", 2)] {
@@ -201,10 +198,13 @@ fn scans_read_in_order() {
 fn the_schema_is_in_the_hash_and_volatile_tables_are_not() {
     let mut other = demo::schema();
     other.tables[0].columns[1].name = "title".into();
-    assert_ne!(Store::new(demo::shared()).state_hash(), Store::new(Arc::new(other)).state_hash());
+    assert_ne!(
+        Store::new(demo::shared(), ark::schema::Space::Durable).state_hash(),
+        Store::new(Arc::new(other), ark::schema::Space::Durable).state_hash()
+    );
     let mut sch = demo::schema();
     sch.tables.push(Table::new("presence").col("who", Type::Text).volatile());
-    let mut s = Store::new(Arc::new(sch));
+    let mut s = Store::new(Arc::new(sch), ark::schema::Space::Durable);
     let h = s.state_hash();
     s.put("presence", presence("alice")).unwrap();
     assert_eq!(s.state_hash(), h);
@@ -219,7 +219,7 @@ fn the_schema_is_in_the_hash_and_volatile_tables_are_not() {
 fn a_volatile_store_hashes_its_own_space() {
     let mut sch = demo::schema();
     sch.tables.push(Table::new("presence").col("who", Type::Text).volatile());
-    let mut s = Store::new_in(Arc::new(sch), ark::schema::Space::Volatile);
+    let mut s = Store::new(Arc::new(sch), ark::schema::Space::Volatile);
     let h = s.state_hash();
     s.put("playlist", playlist_row(&id(1), "x", "alice")).unwrap();
     assert_eq!(s.state_hash(), h, "a durable row is not the volatile space's");
@@ -239,7 +239,7 @@ fn a_row_still_named_is_not_removed() {
     let mut sch = demo::schema();
     sch.tables
         .push(Table::new("pin").col("n", Type::Int).col("of", opt).refs("of", "playlist"));
-    let mut s = Store::new(Arc::new(sch));
+    let mut s = Store::new(Arc::new(sch), ark::schema::Space::Durable);
     s.put("playlist", playlist_row(&id(1), "x", "alice")).unwrap();
     s.put("playlist", playlist_row(&id(2), "y", "alice")).unwrap();
     s.put("item", item_row(&id(1), "t", 1)).unwrap();
@@ -307,7 +307,7 @@ fn the_log_is_a_table_whose_rows_are_a_chain() {
     use ark::hash::{EntryHash, StateHash};
     use ark::log::{Entry, Logged};
     use ark::store::LOG;
-    let mut s = Store::new(demo::shared());
+    let mut s = Store::new(demo::shared(), ark::schema::Space::Durable);
     let (hash, rows) = (s.state_hash(), s.snapshot_rows());
     let mut chain = vec![];
     let mut prev = EntryHash::default();

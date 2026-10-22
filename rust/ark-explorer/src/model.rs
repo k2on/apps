@@ -430,7 +430,7 @@ impl Explorer {
     /// asked of the host now, so a server's answer is said when it arrives.
     pub fn outcome(call: &Call, w: &dyn Writer) -> String {
         match &call.called {
-            Called::Answer(Value::List(xs)) => format!("{} row{}", xs.len(), if xs.len() == 1 { "" } else { "s" }),
+            Called::Answer(Value::List(xs)) => ark::row::plural(xs.len(), "row"),
             Called::Answer(_) => "one value".into(),
             Called::Failed(why) => why.clone(),
             Called::Authored(t) => w.verdict(t).describe(),
@@ -587,10 +587,7 @@ impl Explorer {
         });
         self.note = match self.pick_rows(src).0.len() {
             0 => format!("{table} holds no rows here"),
-            n => format!(
-                "{n} row{} of {table}: j and k walk, / filters, <Enter> chooses",
-                if n == 1 { "" } else { "s" }
-            ),
+            n => format!("{} of {table}: j and k walk, / filters, <Enter> chooses", ark::row::plural(n, "row")),
         };
     }
 

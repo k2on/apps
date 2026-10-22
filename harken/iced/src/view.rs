@@ -721,10 +721,8 @@ impl App {
                 (Some(l), None) => crate::auth::who(l),
                 (None, _) => "nobody".into(),
             };
-            let joining = p.client.status().joining;
             let link = match (&self.login, p.client.linked) {
                 (None, _) => "not signed in",
-                (Some(_), true) if joining => "joining",
                 (Some(_), true) => "online",
                 (Some(_), false) => "offline",
             };

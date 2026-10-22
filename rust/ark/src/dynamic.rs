@@ -22,7 +22,6 @@ use serde_json::Value as Json;
 
 use crate::db::Tables;
 use crate::json::{typed_bytes, typed_key, typed_value};
-use crate::log::EntryId;
 use crate::peer::Ctx;
 use crate::plan::{scan_raw, Desc, Make, Plan};
 use crate::schema::{Schema, Table};
@@ -170,14 +169,7 @@ impl Browse {
 
     /// Its rows over `store`, afresh.
     pub fn rows(&self, store: &Store) -> Result<Vec<Vec<u8>>, Refusal> {
-        let ctx = Ctx {
-            id: EntryId::default(),
-            actor: String::new(),
-            session: String::new(),
-            roles: vec![],
-            now: 0,
-            draws: Default::default(),
-        };
+        let ctx = Ctx::default();
         Ok(self.plan(store.schema_arc())?.run(store, &ctx))
     }
 }

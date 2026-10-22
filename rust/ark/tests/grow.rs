@@ -103,7 +103,9 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
         .collect();
     assert_eq!(rows(&wide, "playlist"), widened, "a row widened with None");
     assert_eq!(rows(&wide, "item"), rows(&server, "item"));
-    let fresh = Store::from_rows(wider(), &wide.store.snapshot_rows()).unwrap();
+    let fresh = Store::from_rows(wider(), ark::schema::Space::Durable, &wide.store.snapshot_rows())
+        .unwrap()
+        .0;
     assert_eq!(wide.store.state_hash(), fresh.state_hash(), "the digests are the wider schema's");
     assert_ne!(wide.store.state_hash(), server.store.state_hash());
 

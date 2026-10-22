@@ -51,7 +51,7 @@ impl Default for Lib {
 impl Lib {
     pub fn new() -> Lib {
         Lib {
-            store: Store::new(domain().schema.clone()),
+            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
             last: vec![],
             local: 0,
             now: 1_000,
@@ -64,12 +64,12 @@ impl Lib {
         self.local += 1;
         self.now += 1;
         Ctx {
-            draws: Default::default(),
             id: EntryId::of("s", self.local),
             actor: user.into(),
             session: "s".into(),
             roles: roles.iter().map(|r| r.to_string()).collect(),
             now: self.now,
+            ..Default::default()
         }
     }
 
@@ -98,12 +98,11 @@ impl Lib {
     /// Ask as `user`: the answer, or the refusal's text.
     pub fn query<T: Encode>(&self, user: &str, name: &str, input: &impl Encode) -> Result<T, String> {
         let ctx = Ctx {
-            draws: Default::default(),
             id: EntryId::of("q", 0),
             actor: user.into(),
             session: "q".into(),
-            roles: vec![],
             now: self.now,
+            ..Default::default()
         };
         let b = domain().ask(&self.store, &ctx, &full(name), &input.to_bytes()).map_err(|r| r.0)?;
         Ok(T::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))

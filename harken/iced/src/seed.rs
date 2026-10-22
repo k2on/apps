@@ -4268,17 +4268,17 @@ struct Seeder {
 impl Seeder {
     fn new() -> Seeder {
         Seeder {
-            store: Store::new(domain().schema.clone()),
+            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
             // The demo authors its own library, as a server's scanner does,
             // so it holds the role the library's guard asks
             // (`docs/plan-guards.md` D1).
             ctx: Ctx {
-                draws: Default::default(),
                 id: EntryId::of(LOCAL, 0),
                 actor: DEMO.into(),
                 session: LOCAL.into(),
                 roles: vec![crate::domain::LIBRARY.into()],
                 now: 1_700_000_000_000,
+                ..Default::default()
             },
             local: 0,
         }

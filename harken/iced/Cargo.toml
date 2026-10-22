@@ -16,10 +16,10 @@ demo = []
 [dependencies]
 ark = { path = "../../rust/ark" }
 harken-domain = { path = "../domain" }
-ark-peer = { path = "../../rust/ark-peer" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
-ark-auth = { path = "../../rust/ark-auth" }
+ark-auth = { path = "../../rust/ark-auth", default-features = false }
 arkui = { path = "../../rust/arkui" }
 # `E`: the database explorer over this device's replica (`docs/plan-guards.md`
 # D4), read-only but for the CRUD the domain exposes.

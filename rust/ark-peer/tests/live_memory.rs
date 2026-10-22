@@ -116,8 +116,8 @@ fn run(c: usize, n: u64) -> Held {
         Role::Replica => unreachable!("a server's live machine is an authority"),
     };
     Held {
-        device: ds.iter().map(|(d, _)| live(d).log().len()).max().unwrap_or(0),
-        server: live(&hub).log().len(),
+        device: ds.iter().map(|(d, _)| live(d).log().entries().len()).max().unwrap_or(0),
+        server: live(&hub).log().entries().len(),
         verdicts,
         per_call,
     }

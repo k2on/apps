@@ -28,7 +28,7 @@ fn domain() -> Domain {
 }
 
 fn store() -> Store {
-    let mut s = Store::new(Arc::new(Jobs::schema()));
+    let mut s = Store::new(Arc::new(Jobs::schema()), ark::schema::Space::Durable);
     let row = Fetch {
         id: "a".into(),
         owner: "alice".into(),
@@ -40,12 +40,11 @@ fn store() -> Store {
 
 fn ctx(actor: &str, roles: &[&str], now: i64) -> Ctx {
     Ctx {
-        id: Default::default(),
         actor: actor.into(),
         session: actor.into(),
         roles: roles.iter().map(|r| r.to_string()).collect(),
         now,
-        draws: Default::default(),
+        ..Default::default()
     }
 }
 

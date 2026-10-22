@@ -45,7 +45,7 @@ struct House {
 impl House {
     fn new() -> House {
         House {
-            store: Store::new(domain().schema.clone()),
+            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
             devices: BTreeMap::new(),
             local: 0,
             now: T0,
@@ -60,12 +60,11 @@ impl House {
     fn author(&mut self, user: &str, session: &str, name: &str, input: &impl Encode) -> Result<(), String> {
         self.local += 1;
         let ctx = Ctx {
-            draws: Default::default(),
             id: EntryId::of(session, self.local),
             actor: user.into(),
             session: session.into(),
-            roles: vec![],
             now: self.now,
+            ..Default::default()
         };
         let f = domain()
             .get(&format!("listening.{name}"))
@@ -80,12 +79,11 @@ impl House {
     fn author_bytes(&mut self, user: &str, session: &str, name: &str, input: &[u8]) -> Result<(), String> {
         self.local += 1;
         let ctx = Ctx {
-            draws: Default::default(),
             id: EntryId::of(session, self.local),
             actor: user.into(),
             session: session.into(),
-            roles: vec![],
             now: self.now,
+            ..Default::default()
         };
         let f = domain()
             .get(&format!("listening.{name}"))
@@ -777,7 +775,7 @@ fn a_restart_restores_the_session_paused_with_no_output_and_nobody_here() {
             .map(|t| (t.to_string(), h.store.rows(t).map(|r| r.to_vec()).collect()))
             .collect();
         let mut back = House::new();
-        back.store = Store::from_rows(domain().schema.clone(), &kept).unwrap();
+        back.store = Store::from_rows(domain().schema.clone(), ark::schema::Space::Durable, &kept).unwrap().0;
         back.now = later;
         back.author("authority", "authority", "on_restore", &()).unwrap();
         back

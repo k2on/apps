@@ -462,7 +462,9 @@ impl<T: Trim> Trim for Option<T> {
     }
 }
 
-fn many(n: usize, unit: &str) -> String {
+/// `1 field`, `2 fields`: a count and its unit, in English, for a unit
+/// that takes an `s`.
+pub fn plural(n: usize, unit: &str) -> String {
     format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }
 
@@ -470,9 +472,9 @@ fn many(n: usize, unit: &str) -> String {
 pub fn within<T: Length + ?Sized>(v: &T, lo: usize, hi: usize) -> Option<String> {
     let n = v.length();
     if n < lo {
-        Some(format!("at least {}", many(lo, v.unit())))
+        Some(format!("at least {}", plural(lo, v.unit())))
     } else if n > hi {
-        Some(format!("at most {}", many(hi, v.unit())))
+        Some(format!("at most {}", plural(hi, v.unit())))
     } else {
         None
     }

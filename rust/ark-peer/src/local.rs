@@ -1,11 +1,10 @@
 //! What a peer keeps beside its log, as rows (§1.3, §1.7, §1.9): the
 //! schema [`Local`], on a local instance under the `local.` names of the
 //! peer's disk ([`Shared`]): a server's journal — each origin's last
-//! `local` and actor (`origin`), the intents it refused (`verdict`), those
-//! waiting behind a held one (`waiting`) — and its volatile space as it
+//! `local` and actor (`origin`), the intents it refused (`verdict`) — and
+//! its volatile space as it
 //! last closed (`volatile`); a device's replica (`replica`: its origin,
-//! the last `local` drawn, who last signed in, its fork and the chain it
-//! hands over) and its pending intents (`pending`). And an app's logins
+//! the last `local` drawn, who last signed in, its fork) and its pending intents (`pending`). And an app's logins
 //! ([`Logins`]), a local instance of `ark-auth`'s schema.
 
 use std::io;
@@ -18,7 +17,7 @@ use ark::prelude::{Deserialize, Row, Schema, Serialize};
 use ark::row::Bytes;
 use ark_auth::remember::Remembered;
 
-use crate::{Disk, Instance, Joining};
+use crate::{Disk, Instance};
 
 /// A server's: an origin's last `local` judged, and the actor it is bound
 /// to.
@@ -40,21 +39,6 @@ pub struct Refused {
     pub why: String,
 }
 
-/// A server's: an intent waiting behind a held one of its origin, and who
-/// pushed it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "waiting")]
-pub struct Waits {
-    #[ark(key)]
-    pub origin: Origin,
-    #[ark(key)]
-    pub local: i64,
-    pub actor: String,
-    pub session: String,
-    pub roles: Vec<String>,
-    pub entry: Entry,
-}
-
 /// A server's: a row of its volatile space (its log's row among them) as
 /// it stood when the server last closed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
@@ -67,8 +51,7 @@ pub struct LiveRow {
 }
 
 /// A device's, one row: its origin and the last `local` drawn from it,
-/// who last signed in on it, its fork while alone, and the chain it hands
-/// over while joined unanswered.
+/// who last signed in on it, and its fork while alone.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[ark(table = "replica")]
 pub struct Replica {
@@ -81,7 +64,6 @@ pub struct Replica {
     pub actor: Option<String>,
     pub session: String,
     pub fork: Option<(Seq, EntryHash)>,
-    pub joining: Option<Joining>,
 }
 
 /// A device's: one of its own intents not yet confirmed, by its `local`.
@@ -98,7 +80,6 @@ pub struct Intent {
 pub struct Local {
     pub origin: Last,
     pub verdict: Refused,
-    pub waiting: Waits,
     pub volatile: LiveRow,
     pub replica: Replica,
     pub pending: Intent,

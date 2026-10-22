@@ -34,7 +34,7 @@ use ark::row::{Id, Type};
 use ark::schema::{Schema, Space, Table};
 use ark::store::{Change, Store, LOG};
 use ark_dev::demo::demo as domain;
-use ark_dev::demo::{AddToPlaylist, CreatePlaylist};
+use ark_dev::demo::AddToPlaylist;
 use ark_peer::link::{bell, wait, Dial, Event, Wire};
 use ark_peer::{dev, now_ms as now, Config, Disk, Files, Handle, Memory, Module, Peer, Server};
 
@@ -137,17 +137,9 @@ fn na(label: &str, n: usize, why: &str) {
 
 // The demo, from a client --------------------------------------------------------
 
-fn config() -> Config {
-    Config::of(Arc::new(domain()))
-}
+mod support;
 
-/// A client of `token`'s login, its origin seeded by its session.
-fn client(token: &str, mut disk: Box<dyn Disk>) -> Peer {
-    let who = dev(token).unwrap();
-    let origin = Origin::named(&who.session);
-    ark_peer::local::preset(&mut *disk, |r| r.origin = origin).unwrap();
-    Peer::open(config(), who, disk, false)
-}
+use support::{device as client, named};
 
 /// `demo.create_playlist` and `demo.add_to_playlist`, by name.
 fn fns() -> (&'static str, &'static str) {
@@ -171,24 +163,13 @@ fn add_input(pl: &[u8; 16], i: u64) -> Vec<u8> {
     .to_bytes()
 }
 
-/// `create_playlist`'s input.
-fn named(name: &str) -> Vec<u8> {
-    CreatePlaylist { name: name.into() }.to_bytes()
-}
-
 fn add(c: &mut Peer, pl: &[u8; 16], i: u64) {
     let _ = c.author(Space::Durable, fns().1, add_input(pl, i), now());
 }
 
 /// `token`'s peer dialling the server in this process, and its bell.
 fn linked(hub: &Handle, token: &str) -> (Peer, Receiver<()>) {
-    let mut c = client(token, Box::new(Memory::default()));
-    let (wake, rx) = bell();
-    c.set_waker(wake);
-    c.link.backoff = (5, 50);
-    c.set_token(Some(token.into()));
-    c.connect_with("", hub.dialer(Arc::new(dev)));
-    (c, rx)
+    support::linked(token, "", hub.dialer(Arc::new(dev)))
 }
 
 /// Pumps until `done`, or panics after a minute.
@@ -481,19 +462,7 @@ fn perf_g_hub_fanout() {
 /// A `Push` of the session's next entry, through the hub.
 fn push(hub: &mut Peer, conn: u64, w: &Who, local: &mut i64, func: &str, input: Vec<u8>) -> Vec<(u64, Vec<u8>)> {
     *local += 1;
-    let entry = Entry {
-        id: EntryId::of(Origin::named(&w.session), *local),
-        actor: w.actor.clone(),
-        session: w.session.clone(),
-        origin: Origin::named(&w.session),
-        local: *local,
-        roles: vec![],
-        func: func.into(),
-        input,
-        now: *local,
-    };
-    let f = Frame::push(Space::Durable, [entry]);
-    hub.frame(conn, f.enc(), 0)
+    hub.frame(conn, support::push(w, *local, func, input), 0)
 }
 
 // (d) Storage over harken's media rows -----------------------------------------------
@@ -541,7 +510,9 @@ fn media(i: u64) -> Vec<u8> {
 }
 
 fn media_store(schema: &Schema, rows: std::ops::Range<u64>) -> Store {
-    Store::from_rows(Arc::new(schema.clone()), &[("media".into(), rows.map(media).collect())]).unwrap()
+    Store::from_rows(Arc::new(schema.clone()), Space::Durable, &[("media".into(), rows.map(media).collect())])
+        .unwrap()
+        .0
 }
 
 fn media_module() -> Module {
@@ -631,7 +602,7 @@ fn write_server(dir: &Path, n: u64) {
 /// A client alone that has authored `n` songs: its fork (the empty log)
 /// and the chain of `n` from it.
 fn write_alone(dir: &Path, n: u64) {
-    let mut st = Store::new(Arc::new(media_schema(true)));
+    let mut st = Store::new(Arc::new(media_schema(true)), Space::Durable);
     let mut f = Files::new(dir).unwrap();
     let fork = (0i64, EntryHash::default());
     ark_peer::local::preset(&mut f, |r| r.fork = Some(fork)).unwrap();
@@ -764,7 +735,7 @@ fn perf_d_open_child() {
                 panic!("the store's rows")
             };
             rows.retain(|(t, _)| t != LOG);
-            let st = Store::from_rows(Arc::new(media_schema(true)), &rows).unwrap();
+            let st = Store::from_rows(Arc::new(media_schema(true)), Space::Durable, &rows).unwrap().0;
             let r = st.rows("media").count();
             std::mem::forget(st);
             r
@@ -917,7 +888,7 @@ fn perf_d_bytes_child() {
 
 /// A store of `n` media rows, put one at a time.
 fn build(schema: &Schema, n: u64) -> Store {
-    let mut st = Store::new(Arc::new(schema.clone()));
+    let mut st = Store::new(Arc::new(schema.clone()), Space::Durable);
     for i in 0..n {
         st.put("media", media(i)).unwrap();
     }

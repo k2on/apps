@@ -1,8 +1,8 @@
 //! §1.7 Going alone and joining: a peer with no server is its own
-//! authority from where it was; joining hands the chain it made to a
-//! server, which adopts it when its own run of each entry gives that
-//! entry's facts, refuses it whole when one does not, and sequences it
-//! anew when it has moved on since the fork.
+//! authority from where it was; joining makes the chain it made its
+//! pending intents, pushed to a server that judges each as a push — at
+//! the fork or after what it has since — so one refused loses that entry
+//! and not the chain.
 
 #[path = "demo.rs"]
 mod demo;
@@ -11,10 +11,8 @@ mod support {
 }
 
 use ark::frames::{Frame, Verdict};
-use ark::hash::EntryHash;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Input, Output, Peer, Role};
-use ark::store::Change;
 use demo::{create_input, pair_input, pos_of, ADD, CREATE};
 use support::wire::*;
 
@@ -39,11 +37,17 @@ fn eve_alone() -> Peer {
     eve
 }
 
-/// Hands eve's chain to `server`, `tamper` touching the `Join` on the wire,
+/// Hands eve's chain to `server`, `tamper` touching its pushes on the wire,
 /// and delivers what the server answers back to her.
 fn join(eve: &mut Peer, server: &mut Peer, tamper: impl Fn(&mut Frame)) -> Vec<Frame> {
+    let n = eve.log().entries().len();
     let o = eve.step(Input::Join);
-    assert!(matches!(eve.role, Role::Replica) && eve.pending.len() == 2);
+    assert!(matches!(eve.role, Role::Replica) && eve.pending.len() == n);
+    let mut paged = sends(&o).into_iter().flat_map(|f| match f {
+        Frame::Page { logged, .. } => logged,
+        _ => vec![],
+    });
+    assert!(paged.all(|l| l.seq == 0), "the chain goes as intents, not as a chain");
     let mut back = vec![];
     for mut f in sends(&o) {
         tamper(&mut f);
@@ -57,12 +61,12 @@ fn join(eve: &mut Peer, server: &mut Peer, tamper: impl Fn(&mut Frame)) -> Vec<F
     back
 }
 
-/// Going alone, then joining a server still at the fork: it adopts the
-/// chain as it is, and eve's chain is the server's. Falsified by `join` not
-/// truncating eve's log to the fork: the server's entries came back as ones
-/// she had, and hers stayed pending.
+/// Going alone, then joining a server still at the fork: each intent of
+/// the chain pushed is judged as it was alone, and eve's chain is the
+/// server's. Falsified by `join` not truncating eve's log to the fork: the
+/// server's entries came back as ones she had, and hers stayed pending.
 #[test]
-fn alone_then_adopted() {
+fn alone_then_joined_at_the_fork() {
     let mut eve = eve_alone();
     let chain = eve.log().entries();
     let mut server = authority(demo::cas());
@@ -71,66 +75,49 @@ fn alone_then_adopted() {
     assert!(eve.pending.is_empty() && eve.log() == server.log() && eve.store == server.store);
 }
 
-/// A chain whose facts were touched is refused whole: the server's log does
-/// not move, and eve's intents come off. Falsified by `adopt` checking
-/// nothing (`sequence` without `expect`): the tampered chain was adopted.
+/// A chain with one entry the server refuses loses that entry, not the
+/// chain: the entries around it are sequenced, and eve's store is the
+/// server's. The track's playlist is made unknown on the wire. Falsified by
+/// the server answering the rest of an origin's pushes after a refusal as a
+/// gap (`judged` not passing a refused `local`): the playlist after it
+/// stayed pending.
 #[test]
-fn a_chain_whose_facts_differ_is_refused() {
+fn a_chain_with_one_refused_entry_loses_that_entry() {
     let mut eve = eve_alone();
+    eve.step(mutate(CREATE, create_input("Trip"), 3));
     let mut server = authority(demo::cas());
     let back = join(&mut eve, &mut server, |f| {
         if let Frame::Page { logged, .. } = f {
-            if let Change::Add { row, .. } = &mut logged[1].facts[0] {
-                *row = demo::item_row(&road(), "t5", 99);
-            }
+            logged[1].entry.input = pair_input(&[9; 16], "t5");
         }
     });
-    let rejects: Vec<String> = back
-        .iter()
-        .filter_map(|f| match f {
-            Frame::Verdict {
-                verdict: Verdict::Refused { why },
-                ..
-            } => Some(why.clone()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(rejects.len(), 2, "{back:?}");
-    assert!(rejects[0].contains("facts at 2"));
-    assert_eq!(server.log().head(), (0, EntryHash::default()));
+    let refused = verdicts(&back)
+        .into_iter()
+        .flatten()
+        .filter(|v| matches!(v, Verdict::Refused { .. }))
+        .count();
+    assert_eq!(refused, 1, "{back:?}");
+    assert_eq!(server.log().head().0, 2, "the playlists before and after it");
+    assert_eq!(pos_of(&server.store, &road(), "t5"), None);
     assert!(eve.pending.is_empty() && eve.store == server.store);
 }
 
-/// A chain naming a function the server does not run is refused whole,
-/// never held: the server runs the functions it was built with. Falsified by `adopt` pushing an entry whose
-/// function it lacks as an intent: the server sent `Held` and nothing was
-/// refused.
+/// A chain naming a function the server does not run is pushed as intents
+/// like any other: what it runs is sequenced, and the one it lacks is
+/// `Held`, pending still on the device. Falsified by `push` refusing an
+/// intent whose function it lacks: the track came off eve's store.
 #[test]
-fn a_chain_naming_a_function_the_server_lacks_is_refused() {
+fn a_chain_naming_a_function_the_server_lacks_is_held() {
     let mut eve = eve_alone();
     let mut server = authority(demo::only(&[CREATE]));
     let back = join(&mut eve, &mut server, |_| {});
-    let rejects: Vec<&String> = back
-        .iter()
-        .filter_map(|f| match f {
-            Frame::Verdict {
-                verdict: Verdict::Refused { why },
-                ..
-            } => Some(why),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(rejects.len(), 2, "{back:?}");
-    assert!(rejects[0].contains("not one this authority runs"), "{rejects:?}");
-    assert!(!back.iter().any(|f| matches!(
-        f,
-        Frame::Verdict {
-            verdict: Verdict::Held { .. },
-            ..
-        }
-    )));
-    assert_eq!(server.log().head(), (0, EntryHash::default()));
-    assert!(eve.pending.is_empty() && eve.store == server.store);
+    assert!(
+        matches!(verdicts(&back).into_iter().flatten().last(), Some(Verdict::Held { .. })),
+        "{back:?}"
+    );
+    assert_eq!(server.log().head().0, 1);
+    assert_eq!(eve.pending.len(), 1);
+    assert_eq!(pos_of(&eve.store, &road(), "t5"), Some(1));
 }
 
 /// A server that moved on since the fork sequences the chain anew after

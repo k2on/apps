@@ -41,7 +41,7 @@
 //!
 //! **Alone, then a server, is one directory.** A directory used `--alone`
 //! and then opened with `--server` is a peer joining that server: the chain
-//! it sequenced alone is handed over on its first connection and is
+//! it sequenced alone is pushed as intents on its first connection and is
 //! pending until the server answers it — as the login `--user` signs in,
 //! or as nobody until `sign_in` — and the other way round a directory
 //! opened `--alone` after a server goes alone from where it is. `join` and
@@ -794,10 +794,6 @@ impl Headless {
             .set("link", json!(link))
             .set("opens", json!(self.client.link.epoch))
             .set("diverged", json!(self.client.log.diverged.len()))
-            .set(
-                "joining",
-                json!(self.client.log.joining.as_ref().map_or(0, |j| j.2.len())),
-            )
             .set("fork", json!(self.fork()))
     }
 
@@ -806,26 +802,18 @@ impl Headless {
         Some(Listening::of(&live.store, &self.client.log.me.actor))
     }
 
-    /// What is pending authored again as `who`. A chain a join was to
-    /// hand over goes with it: its entries are another session's, which a
-    /// server adopts from nobody but that session, so they are pushed as
-    /// this login's intents instead, in their order.
+    /// What is pending authored again as `who`.
     ///
     /// The same session is no new login: its intents are its own already,
     /// and authoring them again from its first `local` would name entries
     /// the server has answered.
     fn reauthor(&mut self, who: Who) {
         let log = &self.client.log;
-        let theirs = log.pending.iter().map(|p| &p.entry.session).chain(
-            log.joining
-                .iter()
-                .flat_map(|j| j.2.iter().map(|l| &l.entry.session)),
-        );
-        if who.session == log.me.session && theirs.into_iter().all(|s| *s == who.session) {
+        let mut theirs = log.pending.iter().map(|p| &p.entry.session);
+        if who.session == log.me.session && theirs.all(|s| *s == who.session) {
             return;
         }
         self.client.sign_in(who);
-        self.client.log.joining = None;
     }
 
     /// Signs in as `login`: the client authors as it, the link dials with it.
@@ -1011,8 +999,8 @@ impl Headless {
                     }
                 }
                 eprintln!(
-                    "harken-peer: joined {server}: {} handed over in {:?}",
-                    self.client.log.joining.as_ref().map_or(0, |j| j.2.len()),
+                    "harken-peer: joined {server}: {} pending in {:?}",
+                    self.client.pending_len(),
                     took.elapsed()
                 );
                 Answer::ok(true)
@@ -1457,8 +1445,8 @@ mod tests {
         let mut h = Headless::open(&online, harken()).unwrap();
         let status = line(&mut h, r#"{"cmd":"status"}"#);
         assert_eq!(
-            (&status["cursor"], &status["pending"], &status["joining"]),
-            (&json!(0), &json!(3), &json!(3)),
+            (&status["cursor"], &status["pending"]),
+            (&json!(0), &json!(3)),
             "joined, signed out: the three are pending: {status}"
         );
         let left = line(&mut h, r#"{"cmd":"leave"}"#);

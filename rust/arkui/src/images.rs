@@ -70,12 +70,6 @@ impl Images {
         }
     }
 
-    /// The same, with another bound.
-    pub fn with_bound(mut self, bound: u32) -> Self {
-        self.bound = bound;
-        self
-    }
-
     /// The handle to draw, if there is one yet.
     ///
     /// `None` covers "not asked", "still coming" and "there is no such image"
