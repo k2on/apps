@@ -12,9 +12,7 @@ use std::collections::BTreeSet;
 use std::sync::Mutex;
 
 use serde::de::{DeserializeSeed, EnumAccess, Error as _, MapAccess, SeqAccess, VariantAccess, Visitor};
-use serde::ser::{
-    Error as _, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
-};
+use serde::ser::{Error as _, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as J;
 
@@ -112,7 +110,6 @@ impl Serialize for Typed<'_> {
                 }
                 tup.end()
             }
-            (Type::Record(_, fs), J::Object(m)) if !positional(fs) && s.is_human_readable() => Obj(fs, m).serialize(s),
             (Type::Record(n, fs), J::Object(m)) if !positional(fs) => {
                 let mut st = s.serialize_struct(intern(n), fs.len())?;
                 for (f, t) in fs {
@@ -128,16 +125,6 @@ impl Serialize for Typed<'_> {
                 };
                 let i = vs.iter().position(|(x, _)| x == name).ok_or_else(bad)?;
                 let fs = &vs[i].1;
-                if s.is_human_readable() {
-                    // serde's externally tagged JSON, its names not interned.
-                    return match (fs.len(), payload) {
-                        (0, None) => s.serialize_str(name),
-                        (1, Some(p)) if positional(fs) => one(s, name, &Typed(&fs[0].1, p)),
-                        (k, Some(J::Array(xs))) if positional(fs) && k == xs.len() => one(s, name, &Tup(fs, xs)),
-                        (_, Some(J::Object(m))) if !positional(fs) => one(s, name, &Obj(fs, m)),
-                        _ => Err(bad()),
-                    };
-                }
                 let (sum, var) = (intern(n), intern(name));
                 match (fs.len(), payload) {
                     (0, None) => s.serialize_unit_variant(sum, i as u32, var),
@@ -161,41 +148,6 @@ impl Serialize for Typed<'_> {
             }
             _ => Err(bad()),
         }
-    }
-}
-
-/// A map of one entry: an enum variant with its payload, in JSON.
-fn one<S: Serializer, V: Serialize>(s: S, name: &str, v: &V) -> Result<S::Ok, S::Error> {
-    let mut m = s.serialize_map(Some(1))?;
-    m.serialize_entry(name, v)?;
-    m.end()
-}
-
-/// Positional fields' values, as a tuple.
-struct Tup<'a>(&'a [(String, Type)], &'a [J]);
-
-impl Serialize for Tup<'_> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let mut tup = s.serialize_tuple(self.0.len())?;
-        for ((_, t), x) in self.0.iter().zip(self.1) {
-            tup.serialize_element(&Typed(t, x))?;
-        }
-        tup.end()
-    }
-}
-
-/// Named fields' values in their order, as JSON writes a struct: an
-/// object, a missing field null.
-struct Obj<'a>(&'a [(String, Type)], &'a serde_json::Map<String, J>);
-
-impl Serialize for Obj<'_> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let null = J::Null;
-        let mut m = s.serialize_map(Some(self.0.len()))?;
-        for (f, t) in self.0 {
-            m.serialize_entry(f, &Typed(t, self.1.get(f).unwrap_or(&null)))?;
-        }
-        m.end()
     }
 }
 
