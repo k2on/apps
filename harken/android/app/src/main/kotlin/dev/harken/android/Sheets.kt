@@ -45,6 +45,7 @@ import dev.harken.android.ui.VolumeSlider
 import dev.harken.android.ui.quiet
 import dev.harken.android.ui.rememberTransientListState
 import dev.harken.android.ui.rememberTransientScrollState
+import dev.harken.screens.DeviceRow
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -236,7 +237,7 @@ private fun DeviceLine(r: DeviceRow, at: Boolean, actions: PickerActions) {
         r.volume?.let { level ->
             // Under the name, from where the name starts: the glyph's column and its gap.
             VolumeSlider(
-                level,
+                level.toInt(),
                 r.muted,
                 { actions.level(r, it) },
                 actions::levelDone,

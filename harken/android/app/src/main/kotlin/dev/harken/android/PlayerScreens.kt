@@ -74,6 +74,8 @@ import dev.harken.android.ui.quiet
 import dev.harken.android.ui.rememberTransientListState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import dev.harken.screens.Playing
+import dev.harken.screens.Where
 
 /** What the player's controls do. */
 interface Controls {
@@ -280,7 +282,7 @@ fun FullFace(
         }
         state.volume?.let { v ->
             Spacer(Modifier.height(Space.s))
-            VolumeSlider(v.level, v.muted, controls::volume, controls::volumeDone, controls::mute, Modifier.fillMaxWidth(), about = state.on?.name ?: "this phone")
+            VolumeSlider(v.level.toInt(), v.muted, controls::volume, controls::volumeDone, controls::mute, Modifier.fillMaxWidth(), about = state.on?.name ?: "this phone")
         }
         Spacer(Modifier.height(Space.l))
         val on = state.on

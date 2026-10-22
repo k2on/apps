@@ -1,12 +1,11 @@
-// The listening session's ends that are not the reconciler: the picker
-// (Session.kt's `Picker`), Home's last played (`lastPlayed`), the scrub
-// another device drags arriving here (`Listen`, over a real session), and
-// the lock screen's player (`RemotePlayer`), whose every command is a
-// transition — its volume too, which is what the phone's buttons and the
-// system's volume panel reach while the sound is on a speaker — and the
-// picker's volumes and groups. The session is the domain's, run by a harken
-// server in the process (`Hall`, `harken/ffi`), and the devices real peers of
-// the kernel.
+// The listening session's ends that are not harken's player: Home's last
+// played (`lastPlayed`) and the lock screen's player (`RemotePlayer`), whose
+// every command is a transition — its volume too, which is what the phone's
+// buttons and the system's volume panel reach while the sound is on a
+// speaker. The picker and the scrub are the player's screens, tested in Rust
+// (`harken/ffi/tests/screens.rs`). The session is the domain's, run by a
+// harken server in the process (`Hall`, `harken/ffi`), and the devices real
+// peers of the kernel.
 //
 // Each was falsified once by breaking what it holds; the comment beside
 // each says how, and what failed.
@@ -22,6 +21,7 @@ import dev.harken.android.gen.Equip
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Output
 import dev.harken.ffi.Hall
+import dev.harken.screens.Ask
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -39,52 +39,6 @@ class ListenTests {
     // of its own, so a press is previewed and published before it returns.
     private fun listen(hall: Hall, peer: Harken, session: String, name: String): Listen =
         Listen(ArkSession.inline(peer, "https://music.example.com", testLogin("alice", session)), name).also { hall.carry() }
-
-    /**
-     * The picker, as the desktop's: while nothing plays, this phone is the default — ticked, the
-     * cursor on it — and there is no row that stops it everywhere; while something plays, the
-     * output is ticked and the cursor on it; a device that cannot play is drawn and not
-     * selectable; the output that has gone is drawn, not answering; and picking a device is a
-     * hand-off, which the session shows as connecting until that device says it has started.
-     *
-     * Falsified by ticking the output alone, with no default: nothing was ticked while nothing
-     * played.
-     */
-    @Test
-    fun thePickerDefaultsToThisPhoneAndTransfers() {
-        val hall = Hall()
-        val desk = hall.device("desk", false, "computer")
-        val phone = hall.device("phone", true)
-        val laptop = hall.device("laptop", true, "computer")
-        val r = Presser("phone")
-
-        val idle = Picker.rows(r.session(phone)!!, "phone")
-        assertEquals("a row per device and no other", listOf("desk", "laptop", "phone"), idle.map { it.id })
-        assertEquals("nothing plays: this phone is ticked", listOf("phone"), idle.filter { it.ticked }.map { it.id })
-        assertEquals("and the cursor is on it", "phone", idle[Picker.cursor(idle)].id)
-        assertFalse("a desktop with no speakers is not selectable", idle.first { it.id == "desk" }.takeable)
-
-        assertNull(r.press(phone, Press.Start(queue, 0, 0, "")))
-        hall.carry()
-        val playing = Picker.rows(r.session(phone)!!, "phone")
-        assertEquals("the output is ticked", listOf("phone"), playing.filter { it.ticked }.map { it.id })
-        val to = Picker.pick(playing.first { it.id == "laptop" }, r.session(phone))
-        assertEquals(Press.Transfer("laptop"), to)
-        assertNull("picking the device that has it asks nothing", Picker.pick(playing.first { it.id == "phone" }, r.session(phone)))
-        assertNull("nor a device that cannot play", Picker.pick(playing.first { it.id == "desk" }, r.session(phone)))
-        assertNull(r.press(phone, to!!))
-        hall.carry()
-        val moving = Picker.rows(r.session(phone)!!, "phone")
-        assertTrue("connecting, until it says it has started", moving.first { it.id == "laptop" }.let { it.moving && it.ticked })
-        assertEquals("laptop", moving[Picker.cursor(moving)].id)
-
-        // The laptop's socket goes: it keeps the sound, and is drawn not answering.
-        hall.drop(laptop)
-        val away = Picker.rows(r.session(phone)!!, "phone")
-        val row = away.first { it.id == "laptop" }
-        assertTrue("drawn, away, ticked, and not selectable", row.away && row.ticked && !row.takeable)
-        assertTrue(desk.linked)
-    }
 
     /**
      * Home's last played is the session's track while there is a session with one — what is
@@ -125,41 +79,6 @@ class ListenTests {
         hall.drop(phone)
         assertEquals("offline: the log's again", "Air", lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!.track.title)
         assertNull("nothing anywhere: nothing", lastPlayed(heard(), null, emptyList(), noArt, "https://m", "Phone"))
-    }
-
-    /**
-     * A scrubber dragged on a tablet reaches this phone's `Listen` as the ephemeral slot it is —
-     * relayed at most every fifty milliseconds — and is what the phone's scrubber shows; its own
-     * slot is not another's, and letting go empties it.
-     *
-     * Falsified by `Heard.scrubbing` reading every slot, this phone's own included: the phone's
-     * own drag came back to it as somebody else's.
-     */
-    @Test
-    fun aScrubOnAnotherDeviceIsShownHere() {
-        val hall = Hall()
-        val phonePeer = hall.device("phone", true)
-        val tabletPeer = hall.device("tablet", true, "computer")
-        val phone = listen(hall, phonePeer, "phone", "Phone")
-        val tablet = listen(hall, tabletPeer, "tablet", "Tablet")
-        phone.press(Press.Start(queue, 0, 0, ""))
-        hall.carry()
-        tablet.press(Press.Scrub(61_000))
-        hall.carry()
-        phone.poke()
-        assertEquals("the tablet's scrubber, here", 61_000L, phone.heard.value.scrubbing)
-        phone.press(Press.Scrub(10_000))
-        hall.carry()
-        assertEquals("this phone's own slot is not another's", 61_000L, phone.heard.value.scrubbing)
-        tablet.press(Press.Scrub(null))
-        // Within the relay's window of the last: held, and sent by the next pump past it — the
-        // final value always goes.
-        Thread.sleep(THROTTLE_MS + 10)
-        hall.carry()
-        phone.press(Press.Scrub(null))
-        hall.carry()
-        phone.poke()
-        assertNull("let go: nobody is scrubbing", phone.heard.value.scrubbing)
     }
 
     /**
@@ -279,7 +198,7 @@ class ListenTests {
         show()
         assertEquals("nothing plays: the buttons are the phone's", DeviceInfo.PLAYBACK_TYPE_LOCAL, player.deviceInfo.playbackType)
         phone.press(Press.Start(queue, 0, 0, ""))
-        phone.press(Press.Transfer("kitchen"))
+        phone.ask(Ask.Pick("kitchen"))
         show()
         assertEquals("the sound on the kitchen: remote", DeviceInfo.PLAYBACK_TYPE_REMOTE, player.deviceInfo.playbackType)
         assertEquals(100, player.deviceInfo.maxVolume)
@@ -302,7 +221,7 @@ class ListenTests {
         assertEquals("the bedroom untouched", 60L, bedroomOf().volume)
 
         // The bedroom joins: the buttons are the group's.
-        phone.press(Press.Join("bedroom"))
+        phone.ask(Ask.RowJoin("bedroom"))
         show()
         assertEquals("bedroom follows the kitchen", "kitchen", bedroomOf().follows)
         assertEquals("the group's level, the mean of its members'", 65, player.deviceVolume)
@@ -323,77 +242,8 @@ class ListenTests {
         player.fromCar = { false }
 
         // The sound here: the buttons are the phone's own stream again.
-        phone.press(Press.Transfer("phone"))
+        phone.ask(Ask.Pick("phone"))
         show()
         assertEquals("with the sound here, the buttons are the phone's", DeviceInfo.PLAYBACK_TYPE_LOCAL, player.deviceInfo.playbackType)
-    }
-
-    /**
-     * The picker's volumes and groups: every row with a volume carries it, the group that plays
-     * comes first as a whole — "Kitchen + 1", every member ticked — and its slider is the group's
-     * (`set_group_volume`); a row's mute is that device's (`set_mute`); a speaker of the leader's
-     * family that is here and not in the group can join (`join`), one in it can leave (`unjoin`), and
-     * nothing else offers either — not the leader, not this phone, not a laptop.
-     *
-     * Falsified by the group row's controls being a device's: its slider asked `set_volume` of a
-     * device the session has not got, and was refused ("that device is not here, or has no
-     * volume"). And by offering a join to every speaker that can play, family or none: the phone,
-     * which has none, was offered one ("not this phone").
-     */
-    @Test
-    fun thePickerMovesVolumesAndJoinsSpeakers() {
-        val hall = Hall()
-        val phonePeer = hall.device("phone", true)
-        hall.device("laptop", true, "computer")
-        val r = Presser("phone")
-        phonePeer.equip(Equip(true, null, false, 50.toLong()))
-        hall.carry()
-        house(hall)
-        assertNull(r.press(phonePeer, Press.Start(queue, 0, 0, "")))
-        assertNull(r.press(phonePeer, Press.Transfer("kitchen")))
-        assertNull(r.press(phonePeer, Press.Join("bedroom")))
-        hall.carry()
-        fun rows() = Picker.rows(r.session(phonePeer)!!, "phone")
-
-        val rows = rows()
-        val group = rows.first()
-        assertTrue("the group first", group.group)
-        assertEquals("named for its leader and how many follow it", "kitchen + 1", group.name)
-        assertEquals("its level the mean of its members'", 50, group.volume)
-        assertEquals("every member ticked", setOf("kitchen", "bedroom"), rows.filter { it.ticked }.map { it.id }.toSet())
-        assertEquals("and the cursor on the output", "kitchen", rows[Picker.cursor(rows)].id)
-        fun row(id: String) = rows().first { it.id == id }
-        assertEquals("a speaker of the family, here, outside the group: join", true, row("study").join)
-        assertEquals("one in it: leave", false, row("bedroom").join)
-        assertNull("not the leader", row("kitchen").join)
-        assertNull("not this phone", row("phone").join)
-        assertNull("not a laptop", row("laptop").join)
-        assertEquals("a row with a volume carries it", 50, row("phone").volume)
-        assertNull("one without, none", row("laptop").volume)
-        assertNull("the group row hands nothing over", Picker.pick(group, r.session(phonePeer)))
-        val numbers = listeningNumbers(Heard(me = "phone", joined = true, listening = r.session(phonePeer)))
-        assertTrue("the diagnostics say the group", ("group" to "kitchen + bedroom · volume 50") in numbers)
-        assertTrue("and a member's leader", ("  volume" to "60 · family sonos · follows kitchen") in numbers)
-
-        assertNull(r.press(phonePeer, Picker.level(group, 50 + 20)!!))
-        hall.carry()
-        assertEquals("the group's slider is the group's", 70, hall.state().groupLevel("kitchen"))
-        assertEquals("both moved", listOf(56L, 84L), listOf(hall.state().devices.getValue("kitchen").volume, hall.state().devices.getValue("bedroom").volume))
-        assertNull(r.press(phonePeer, Picker.mute(row("bedroom"))!!))
-        hall.carry()
-        assertTrue("a row's mute is that device's", hall.state().devices.getValue("bedroom").muted)
-        assertFalse(hall.state().devices.getValue("kitchen").muted)
-        assertNull(r.press(phonePeer, Picker.level(row("study"), 35)!!))
-        hall.carry()
-        assertEquals("a row's slider that device's", 35L, hall.state().devices.getValue("study").volume)
-
-        assertNull(r.press(phonePeer, Picker.join(row("study"))!!))
-        hall.carry()
-        assertEquals("joined", "kitchen", hall.state().devices.getValue("study").follows)
-        assertEquals("kitchen + 2", rows().first().name)
-        assertNull(r.press(phonePeer, Picker.join(row("bedroom"))!!))
-        hall.carry()
-        assertNull("and left", hall.state().devices.getValue("bedroom").follows)
-        assertEquals(true, row("bedroom").join)
     }
 }

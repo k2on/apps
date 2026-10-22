@@ -75,6 +75,8 @@ import dev.harken.android.ui.destinations
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import dev.harken.screens.Ask
+import dev.harken.screens.DeviceRow
 
 /** The three tabs. */
 enum class Tab(val route: String, val title: String) {
@@ -500,11 +502,11 @@ fun HarkenApp(
                                         // Held by the entry, as a page's rows are, and read again when the
                                         // session reports a change, not on a clock: come back to, it has its
                                         // numbers on its first frame.
-                                        val reading = remember(back) { kept(back, "diagnostics") { Reading(library) } }
+                                        val reading = remember(back) { kept(back, "diagnostics") { Reading(library, listen) } }
                                         val d by reading.diagnostics.collectAsStateWithLifecycle()
                                         val moved by library.moved.collectAsStateWithLifecycle()
                                         LaunchedEffect(moved) { reading.read() }
-                                        Ready(d) { DiagnosticsScreen(it, onBack = act::back, heard = heard) }
+                                        Ready(d) { DiagnosticsScreen(it, onBack = act::back) }
                                     }
                                 }
                             }
@@ -592,28 +594,23 @@ fun HarkenApp(
                 ModalBottomSheet(onDismissRequest = { queue = false }) { QueueSheet(player, controls) }
             }
             if (devices) {
-                val rows = heard.listening?.let { Picker.rows(it, heard.me) }.orEmpty()
                 ModalBottomSheet(onDismissRequest = { devices = false }) {
                     DevicesSheet(
-                        rows,
-                        Picker.cursor(rows),
+                        heard.picker.rows,
+                        heard.picker.cursor.toInt(),
                         object : PickerActions {
                             override fun pick(row: DeviceRow) {
-                                Picker.pick(row, heard.listening)?.let { (it as? Press.Transfer)?.let { t -> playback.transfer(t.to) } }
+                                playback.ask(Ask.Pick(row.id))
                                 devices = false
                             }
 
-                            override fun level(row: DeviceRow, level: Int) = playback.level(row.level, level)
+                            override fun level(row: DeviceRow, level: Int) = playback.level(row.id, level)
 
                             override fun levelDone() = playback.volumeDone()
 
-                            override fun mute(row: DeviceRow) {
-                                Picker.mute(row)?.let(playback::ask)
-                            }
+                            override fun mute(row: DeviceRow) = playback.ask(Ask.RowMute(row.id))
 
-                            override fun join(row: DeviceRow) {
-                                Picker.join(row)?.let(playback::ask)
-                            }
+                            override fun join(row: DeviceRow) = playback.ask(Ask.RowJoin(row.id))
                         },
                     )
                 }
@@ -681,11 +678,11 @@ private fun held(library: Library, page: Page, entry: NavBackStackEntry): androi
 }
 
 /** The diagnostics' numbers, held by their entry as a page's rows are. */
-private class Reading(val library: Library) : ViewModel() {
+private class Reading(val library: Library, val listen: Listen) : ViewModel() {
     val diagnostics = kotlinx.coroutines.flow.MutableStateFlow<Diagnostics?>(null)
 
     suspend fun read() {
-        diagnostics.value = library.diagnostics()
+        diagnostics.value = library.diagnostics().copy(listening = listen.numbers())
     }
 }
 

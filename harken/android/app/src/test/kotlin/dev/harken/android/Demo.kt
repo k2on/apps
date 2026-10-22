@@ -8,6 +8,7 @@ package dev.harken.android
 
 import dev.arkdb.ffi.Id
 import dev.harken.android.gen.Playlist
+import dev.harken.screens.Playing
 
 object Demo {
     private class Row(

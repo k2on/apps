@@ -30,6 +30,7 @@ import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Playlist
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.SessionStatus
+import dev.harken.screens.Line
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -146,10 +147,11 @@ object Places {
 /** One change this phone made, and what to call it beside its standing. */
 data class Authored(val id: String, val what: String)
 
-/** Every number the diagnostics show. */
+/** Every number the diagnostics show; the listening session's are harken's player's (`Listen.numbers`). */
 data class Diagnostics(
     val status: Status?,
     val changes: List<Pair<String, String>>,
+    val listening: List<Line> = emptyList(),
 )
 
 /** `changes` made to `rows`, each row read by `of`. */

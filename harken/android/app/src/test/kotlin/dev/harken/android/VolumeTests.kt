@@ -47,15 +47,15 @@ class VolumeTests {
     fun aDraggedSliderSendsOnceAWindowAndTheLastAlways() {
         var now = 0L
         val timers = ArrayList<Pair<Long, () -> Unit>>()
-        val sent = ArrayList<Pair<Level, Int>>()
-        val drag = Drag({ now }, { ms, f -> timers += (now + ms) to f }) { of, level -> sent += of to level }
+        val sent = ArrayList<Pair<String, Int>>()
+        val drag = Drag<String>({ now }, { ms, f -> timers += (now + ms) to f }) { of, level -> sent += of to level }
         fun run(until: Long) {
             now = until
             val due = timers.filter { it.first <= now }
             timers.removeAll(due)
             due.forEach { it.second() }
         }
-        val kitchen = Level.Device("kitchen")
+        val kitchen = "kitchen"
 
         drag.to(kitchen, 10)
         assertEquals("the first at once", listOf(kitchen to 10), sent)
@@ -79,9 +79,9 @@ class VolumeTests {
         now = 300
         drag.to(kitchen, 50)
         drag.to(kitchen, 55)
-        drag.to(Level.Group, 70)
+        drag.to("", 70)
         assertEquals("another slider: the held one first", listOf(kitchen to 50, kitchen to 55), sent.drop(3).take(2))
         drag.done()
-        assertEquals(Level.Group to 70, sent.last())
+        assertEquals("" to 70, sent.last())
     }
 }

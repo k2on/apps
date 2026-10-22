@@ -48,6 +48,12 @@ import dev.harken.android.gen.Clock
 import dev.harken.android.gen.Output
 import dev.harken.android.gen.Present
 import dev.harken.android.gen.Track as Queued
+import dev.harken.ffi.harkenLines
+import dev.harken.ffi.harkenPicker
+import dev.harken.screens.Volume
+import dev.harken.screens.Where
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Rule
 import org.junit.Test
 
@@ -318,7 +324,8 @@ class Screens {
                 listOf("add Alla Hornpipe to Sunday morning" to "not synced yet", "make the playlist Sunday morning" to "saved"),
             )
         shot("numbers") { DiagnosticsScreen(d, {}) }
-        shot("listening") { DiagnosticsScreen(d, {}, heard(session(Output.Device("s-web", false), playing = false), scrub = mapOf("s-web" to 201_000L))) }
+        val lines = harkenLines(whole(devices, session(Output.Device("s-web", false), playing = false), scrub = mapOf("s-web" to 201_000L)), "s-phone")
+        shot("listening") { DiagnosticsScreen(d.copy(listening = lines), {}) }
     }
 
     // The listening session --------------------------------------------------
@@ -342,7 +349,21 @@ class Screens {
     }
 
     private fun heard(s: Active?, scrub: Map<String, Long> = emptyMap()): Heard =
-        Heard(me = "s-phone", joined = true, listening = Listening(devices, scrub, s), linked = true, epoch = 3)
+        Heard(me = "s-phone", joined = true, listening = Listening(devices, scrub, s))
+
+    /** A session given whole, as `harken_listening` writes it: what harken's player's screens read with no peer. */
+    private fun whole(devices: Map<String, Present>, s: Active?, scrub: Map<String, Long> = emptyMap()): String =
+        JSONObject()
+            .put("devices", JSONArray(devices.values.map { JSONObject(it.json()) }))
+            .put("scrub", JSONObject(scrub))
+            .put("session", s?.let { JSONObject(it.json()) } ?: JSONObject.NULL)
+            .toString()
+
+    @Composable
+    private fun picker(devices: Map<String, Present>, s: Active?) {
+        val p = harkenPicker(whole(devices, s), "s-phone")
+        Sheet { DevicesSheet(p.rows, p.cursor.toInt(), object : PickerActions {}) }
+    }
 
     @Test
     fun g1_listening() {
@@ -365,18 +386,9 @@ class Screens {
         // The picker while the browser plays; while nothing does, this phone ticked; and with the
         // laptop the sound belongs to gone.
         val playing = heard(session(Output.Device("s-web", false), playing = true))
-        shot("picker") {
-            val rows = Picker.rows(playing.listening!!, "s-phone")
-            Sheet { DevicesSheet(rows, Picker.cursor(rows), object : PickerActions {}) }
-        }
-        shot("picker-nothing-playing") {
-            val rows = Picker.rows(heard(null).listening!!, "s-phone")
-            Sheet { DevicesSheet(rows, Picker.cursor(rows), object : PickerActions {}) }
-        }
-        shot("picker-not-answering") {
-            val rows = Picker.rows(heard(session(Output.Away("s-laptop", "Laptop"), playing = false)).listening!!, "s-phone")
-            Sheet { DevicesSheet(rows, Picker.cursor(rows), object : PickerActions {}) }
-        }
+        shot("picker") { picker(devices, playing.active) }
+        shot("picker-nothing-playing") { picker(devices, null) }
+        shot("picker-not-answering") { picker(devices, session(Output.Away("s-laptop", "Laptop"), playing = false)) }
         // Home, while the browser is playing: last played is the session's track, and where.
         shot("home-last-played") {
             val live = lastPlayed(playing, null, Demo.playlists, { "" }, server, "Pixel 7")
@@ -403,25 +415,19 @@ class Screens {
     fun g2_volume() {
         // The sound on the kitchen: the slider is the kitchen's, as the phone's buttons are.
         shot("full-speaker") {
-            FullPlayer(player.copy(on = Where("Kitchen", "speaker", here = false), volume = Volume(Level.Device("media_player.kitchen"), 40, false, remote = true)), Still, at)
+            FullPlayer(player.copy(on = Where("Kitchen", "speaker", here = false), volume = Volume(40, false, remote = true)), Still, at)
         }
         // The kitchen leading the bedroom: the group's slider, at the mean of the two.
-        shot("full-group") { FullPlayer(player.copy(on = Where("Kitchen + 1", "speaker", here = false), volume = Volume(Level.Group, 50, false, remote = true)), Still, at) }
+        shot("full-group") { FullPlayer(player.copy(on = Where("Kitchen + 1", "speaker", here = false), volume = Volume(50, false, remote = true, group = true)), Still, at) }
         // …muted, every member of it.
-        shot("full-group-muted") { FullPlayer(player.copy(on = Where("Kitchen + 1", "speaker", here = false), volume = Volume(Level.Group, 50, true, remote = true)), Still, at) }
+        shot("full-group-muted") { FullPlayer(player.copy(on = Where("Kitchen + 1", "speaker", here = false), volume = Volume(50, true, remote = true, group = true)), Still, at) }
         // The picker: the group first, every member ticked, a slider and a mute on every row with a
         // volume, the bedroom's `−` and the study's `+` — and the study muted.
-        shot("picker-group") {
-            val s = Listening(house, emptyMap(), session(Output.Device("media_player.kitchen", false), playing = true))
-            val rows = Picker.rows(s, "s-phone")
-            Sheet { DevicesSheet(rows, Picker.cursor(rows), object : PickerActions {}) }
-        }
+        shot("picker-group") { picker(house, session(Output.Device("media_player.kitchen", false), playing = true)) }
         // Nothing grouped: each speaker its own slider, and the two that could join the kitchen.
         shot("picker-joinable") {
             val alone = house.mapValues { (_, d) -> d.copy(follows = null, muted = false) }
-            val s = Listening(alone, emptyMap(), session(Output.Device("media_player.kitchen", false), playing = true))
-            val rows = Picker.rows(s, "s-phone")
-            Sheet { DevicesSheet(rows, Picker.cursor(rows), object : PickerActions {}) }
+            picker(alone, session(Output.Device("media_player.kitchen", false), playing = true))
         }
     }
 }

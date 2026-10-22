@@ -131,7 +131,7 @@ private fun Line(title: String, under: String, onClick: (() -> Unit)? = null, ch
  * chain checks itself entry by entry, §1.6: there is no verify to ask for.)
  */
 @Composable
-fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, heard: Heard = Heard()) {
+fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Diagnostics", onBack)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("diagnostics")).padding(horizontal = Space.page)) {
@@ -139,7 +139,7 @@ fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, heard: Heard = Heard(
             Group("Peer") {
                 if (s == null) Line("Opening", "…") else for ((k, v) in numbers(s)) Number(k, v)
             }
-            Group("Listening") { for ((k, v) in listeningNumbers(heard)) Number(k, v) }
+            Group("Listening") { for (l in d?.listening.orEmpty()) Number(l.name, l.value) }
             Group("Changes from this phone") {
                 val changes = d?.changes.orEmpty()
                 if (changes.isEmpty()) Line("None yet", "What you change here is listed with where it stands")
@@ -165,56 +165,6 @@ fun numbers(s: Status): List<Pair<String, String>> =
         "disk" to (s.failure ?: "—"),
         "denied" to (s.denied ?: "—"),
     )
-
-/** The listening session's numbers, by name: what `D` draws on the desktop. */
-fun listeningNumbers(h: Heard): List<Pair<String, String>> {
-    val s = h.listening
-    val a = s?.active
-    val out =
-        mutableListOf(
-            "device" to h.me.ifEmpty { "—" },
-            "part of the session" to h.joined.toString(),
-            "linked" to h.linked.toString(),
-            "epoch" to h.epoch.toString(),
-            "calls" to h.stats.calls.toString(),
-            "refused" to h.stats.refused.toString(),
-            "plays recorded" to h.stats.plays.toString(),
-            "came back playing" to h.stats.cameBackPlaying.toString(),
-            "last refusal" to (h.refused ?: h.stats.lastRefusal ?: "—"),
-        )
-    out +=
-        "session" to
-            when {
-                s == null -> "—"
-                a == null -> "idle"
-                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${Media.clock(a.position(h.serverNow()))}"
-            }
-    out +=
-        "output" to
-            when (val o = a?.output) {
-                null -> "—"
-                is dev.harken.android.gen.Output.Device -> o.id + if (o.moving) " (moving)" else ""
-                is dev.harken.android.gen.Output.Away -> "${o.id} (away)"
-                dev.harken.android.gen.Output.Nowhere -> "nowhere"
-            }
-    for (d in s?.devices?.values.orEmpty()) {
-        out += "device ${d.name}" to "${d.kind}, ${if (d.canPlay) "can play" else "cannot play"}, ${d.id}"
-        // Its volume, its family and its leader: the desktop's `D`, a line per device.
-        val volume = if (!d.canVolume) "none" else if (d.muted) "${d.volume} (muted)" else "${d.volume}"
-        out += "  volume" to "$volume · family ${d.family ?: "none"} · follows ${d.follows ?: "nobody"}"
-    }
-    // The group that plays: its leader, who follows it, and its level.
-    if (s != null)
-        out +=
-            "group" to
-                (s.leader?.takeIf { s.grouped }?.let { l ->
-                    val level = s.groupLevel(l)?.toString() ?: "none"
-                    "$l + ${s.followers(l).joinToString(", ") { it.id }} · volume $level${if (s.groupMuted(l)) " (muted)" else ""}"
-                } ?: "none")
-    if (s != null && s.scrub.isEmpty()) out += "scrub" to "none"
-    for ((id, at) in s?.scrub.orEmpty()) out += "scrub ${if (id == h.me) "(this phone)" else id}" to Media.clock(at)
-    return out
-}
 
 @Composable
 private fun Number(name: String, value: String) {

@@ -34,3 +34,32 @@ final class Silent: PhoneSound, @unchecked Sendable {
 
     func setVolume(level: Int64, muted: Bool) {}
 }
+
+/// The player's screens as harken's player makes them (`harken/player/src/screens.rs`): one row
+/// for what plays, one for the device picker, the diagnostics' lines, and every control an `Ask`
+/// resolved there against the session. A SwiftUI player screen draws these and decides nothing;
+/// the app has none yet, so this is where one would read them.
+final class Screens {
+    private let player: Player
+    private let here: String
+    private let server: String
+
+    init(peer: Peer, me: String, here: String, server: String, dir: String?) {
+        player = Player(peer: peer, me: me, dir: dir)
+        player.attach(sound: Silent())
+        self.here = here
+        self.server = server
+    }
+
+    /// Reconcile, then the rows: what a change of the peer is answered with.
+    func step() -> (now: NowPlaying, devices: Devices) {
+        _ = player.step()
+        return (player.nowPlaying(here: here, server: server), player.picker())
+    }
+
+    func lines() -> [Line] { player.numbers() }
+
+    /// A control pressed: nil when it was taken, else why not ("not part of the session": the
+    /// app's own player's to do).
+    func ask(_ a: Ask) -> String? { player.ask(ask: a) }
+}

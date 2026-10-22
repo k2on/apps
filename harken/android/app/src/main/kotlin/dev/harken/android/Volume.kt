@@ -6,106 +6,18 @@
 // its own transition. Kept free of Android, as the reconciler is, so that a
 // test reads every rule with real peers and a stand-in stream.
 //
-// What is in this file is what the phone reads of it — the output's volume
-// (the group's while the output leads one), what a control moves, and the
-// phone's own media stream as the session's 0 to 100 — and the throttle a
-// dragged slider sends through. What becomes of the phone's own entry —
-// `equip`, the stream followed, a hand on the buttons said — is harken's one
-// reconciler's (`harken/player`); a control's transition is its [Press];
-// the picker's rows are Session.kt's.
+// What is in this file is the phone's own media stream as the session's 0
+// to 100, and the throttle a dragged slider sends through. What is playing's
+// volume, what a control moves and the picker's rows are harken's player's
+// screens (`harken/player/src/screens.rs`, read as `dev.harken.screens`);
+// what becomes of the phone's own entry — `equip`, the stream followed, a
+// hand on the buttons said — is its reconciler's.
 package dev.harken.android
 
-import dev.harken.android.gen.Output
-import dev.harken.android.gen.Present
 import kotlin.math.roundToInt
 
 /** How far a volume button moves a volume: one press, five of a hundred, as the desktop's `+` and `-`. */
 const val NUDGE = 5
-
-/** What a volume control moves. */
-sealed class Level {
-    /** The output's group, every member with a volume in proportion; a group of one is its leader. */
-    object Group : Level()
-
-    /** One device of the session. */
-    data class Device(val id: String) : Level()
-
-    /** This phone's own media stream, while it is its own session: moved here, and in no session. */
-    object Here : Level()
-}
-
-/** How a volume control moves what it moves. */
-sealed class Change {
-    data class To(val level: Int) : Change()
-
-    /** What a volume button sends: it knows which way, and not where to. */
-    data class By(val delta: Int) : Change()
-
-    data class Mute(val muted: Boolean) : Change()
-}
-
-/**
- * Whatever is playing's volume, as the full player's slider and the system's volume panel draw it:
- * what a control moves ([of]), where it is, and whether it is another device's — the phone a
- * remote for it, its buttons moving that device — or this phone's own.
- */
-data class Volume(val of: Level, val level: Int, val muted: Boolean, val remote: Boolean)
-
-/** The device the sound is on, where it is here: the leader of whatever group plays. */
-val Listening.leader: String?
-    get() = (active?.output as? Output.Device)?.id
-
-/** Who follows `leader`, by id. */
-fun Listening.followers(leader: String): List<Present> = devices.values.filter { it.follows == leader }.sortedBy { it.id }
-
-/** The group `leader` leads: it, then whoever follows it. */
-fun Listening.group(leader: String): List<Present> = listOfNotNull(devices[leader]) + followers(leader)
-
-/** Whether the output leads a group: something follows it. */
-val Listening.grouped: Boolean
-    get() = leader?.let { followers(it).isNotEmpty() } == true
-
-/**
- * The level of the group `leader` leads, as the domain reads it: the mean of its members' that have
- * a volume, rounded down. Null for a group in which nothing has one.
- */
-fun Listening.groupLevel(leader: String): Int? {
-    val levels = group(leader).filter { it.canVolume }.map { it.volume }
-    return if (levels.isEmpty()) null else (levels.sum() / levels.size).toInt()
-}
-
-/** Whether every member of `leader`'s group with a volume is muted. */
-fun Listening.groupMuted(leader: String): Boolean {
-    val members = group(leader).filter { it.canVolume }
-    return members.isNotEmpty() && members.all { it.muted }
-}
-
-/**
- * Whether `id` can be joined to the output's group now: the domain's `joinable`, read the same way —
- * a speaker that is here, can play, and is of the leader's family, which both have; not the leader,
- * and a leader that follows nobody.
- */
-fun Listening.joinable(id: String): Boolean {
-    val l = leader?.let { devices[it] } ?: return false
-    val d = devices[id] ?: return false
-    return l.follows == null && d.id != l.id && d.canPlay && d.family != null && d.family == l.family
-}
-
-/**
- * What is playing's volume: the output's group, where the output leads one; the output's own, where
- * it has one; and, while the sound is nowhere — or on this phone — this phone's, which is where the
- * next press plays. Null where nothing it could move has a volume. `remote` is the sound on another
- * device: what makes the phone's buttons that device's.
- */
-fun Listening.volume(me: String): Volume? {
-    val out = leader
-    if (out != null) {
-        val remote = out != me
-        if (grouped) return groupLevel(out)?.let { Volume(Level.Group, it, groupMuted(out), remote) }
-        return devices[out]?.takeIf { it.canVolume }?.let { Volume(Level.Device(out), it.volume.toInt(), it.muted, remote) }
-    }
-    return devices[me]?.takeIf { it.canVolume }?.let { Volume(Level.Device(me), it.volume.toInt(), it.muted, remote = false) }
-}
 
 /**
  * The phone's media stream, as Android's `AudioManager` has it — `STREAM_MUSIC`, an index between
@@ -197,16 +109,16 @@ class Throttle<T>(private val windowMs: Long = THROTTLE_MS) {
  * one is held sends the held one first. The caller owns the clock and the timer, so that a test
  * moves both.
  */
-class Drag(
+class Drag<K>(
     private val clock: () -> Long,
     private val later: (Long, () -> Unit) -> Unit,
-    private val send: (Level, Int) -> Unit,
+    private val send: (K, Int) -> Unit,
 ) {
-    private val throttle = Throttle<Pair<Level, Int>>()
+    private val throttle = Throttle<Pair<K, Int>>()
     private var armed = false
 
-    /** `of` dragged to `level`. */
-    fun to(of: Level, level: Int) {
+    /** `of` — a slider, by whatever names it — dragged to `level`. */
+    fun to(of: K, level: Int) {
         val held = throttle.held()
         if (held != null && held.first != of) done()
         val now = throttle.offer(clock(), of to level)

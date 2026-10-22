@@ -10,6 +10,7 @@ import dev.harken.android.gen.Device as Declared
 import dev.harken.android.gen.Harken
 import dev.harken.ffi.Hall
 import dev.harken.ffi.Player
+import dev.harken.android.gen.Output
 import dev.harken.ffi.harkenOpen
 import java.nio.file.Files
 
@@ -48,6 +49,13 @@ fun Hall.relink(h: Harken) {
 
 /** Alice's listening session as the hall holds it. */
 fun Hall.state(): Listening = Listening.parse(listening("alice"))
+
+/** Whether `id` is the output and is here. */
+fun Listening.outputs(id: String): Boolean = (active?.output as? Output.Device)?.id == id
+
+/** The level of the group `leader` leads, as the domain reads it: its members' with a volume, their mean. */
+fun Listening.groupLevel(leader: String): Int? =
+    devices.values.filter { (it.id == leader || it.follows == leader) && it.canVolume }.map { it.volume }.takeIf { it.isNotEmpty() }?.let { (it.sum() / it.size).toInt() }
 
 /** Whether a device's socket is up. */
 val Harken.linked: Boolean
