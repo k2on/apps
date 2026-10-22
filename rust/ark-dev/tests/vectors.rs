@@ -161,7 +161,10 @@ fn traces() {
         }
     }
     only("trace", &written);
-    for (n, text) in on_disk("trace") {
+    // Written over an empty spec/vectors (the flake's `vectors`), the
+    // replay is checks.rust's, of the tree's same files.
+    let writing = std::env::var_os("ARK_WRITE_VECTORS").is_some();
+    for (n, text) in on_disk("trace").into_iter().filter(|_| !writing) {
         replay(&text).unwrap_or_else(|e| panic!("{n}: {e}"));
     }
     let (_, text) = on_disk("trace").into_iter().find(|(n, _)| n == "the-demo-client-1.json").unwrap();
@@ -169,7 +172,7 @@ fn traces() {
     let flipped = if &text[at..at + 1] == "0" { "1" } else { "0" };
     let wrong = format!("{}{flipped}{}", &text[..at], &text[at + 1..]).replacen("{\"device\"", "{\"expect\":\"fail\",\"device\"", 1);
     vector("trace/falsify", "the-demo-client-1.json", &wrong).unwrap();
-    for (n, text) in on_disk("trace/falsify") {
+    for (n, text) in on_disk("trace/falsify").into_iter().filter(|_| !writing) {
         assert!(replay(&text).is_err(), "{n} replayed");
     }
 }
@@ -177,7 +180,7 @@ fn traces() {
 /// A trace corpus (`ark-fuzz N SEED traces DIR`, the flake's
 /// `trace-corpus`): every file under `ARK_TRACE_CORPUS` replays, and there
 /// is at least one; with the variable unset, nothing to do. What the
-/// flake's `traces` check runs beside `trace()` over `spec/vectors/trace/`.
+/// flake's `traces` check runs, and only it.
 /// Falsified by a corpus with one byte of one frame changed: that trace
 /// did not replay.
 #[test]

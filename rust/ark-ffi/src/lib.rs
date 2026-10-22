@@ -201,11 +201,7 @@ impl State {
         for k in self.views.values_mut() {
             match k.view.settle(&mut self.peer, true) {
                 Update::Unchanged => continue,
-                Update::Patched(ps) => match &mut k.update {
-                    u @ Update::Unchanged => *u = Update::Patched(ps),
-                    Update::Patched(old) => old.extend(ps),
-                    Update::Reset => {}
-                },
+                Update::Patched(ps) => k.update.patch(ps),
                 Update::Reset => k.update = Update::Reset,
             }
             moved = true;

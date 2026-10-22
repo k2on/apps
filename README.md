@@ -41,7 +41,7 @@ One command holds all of it:
                       # clippy: the workspace lint-clean, -D warnings;
                       # fmt: the workspace formatted;
                       # vectors: spec/vectors is what the writer writes;
-                      # traces: spec/vectors/trace/ and a fuzzed corpus replay;
+                      # traces: a fuzzed corpus replays (spec/vectors/trace/ is rust's);
                       # fuzz-smoke: 25 fuzzed sessions;
                       # versions: harken/server/tests/versions.rs over the
                       #   pinned revisions (none pinned now);

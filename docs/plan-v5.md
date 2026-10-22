@@ -578,24 +578,26 @@ separately. Generated Unicode tables are excluded from both.
 
 ### Speed
 
-The same shapes, the same sizes (four and sixteen times apart), the same
-columns (mean, first hundred, last hundred), reported per operation:
+The tables below were recorded by harnesses that printed every shape and
+asserted nothing (`tests/perf.rs` in `rust/ark`, `rust/ark-peer` — once
+`ark-server` — and `harken/domain`, each shape a v4 one: a local mutation,
+the round trip, offline pending, initial sync, the rebase, fan-out, frames,
+harken's mutations, views at 1k/4k/16k rows). T3 replaced them, and they
+are in the history up to its commit. What is measured now is held: each
+crate's `tests/costs.rs` asserts the counts that stay put as the data
+grows, and prints its timings from one ignored test, `timings`, run as
+`cargo test -p CRATE --release --test costs -- --ignored --nocapture`:
 
-| shape | v4 harness | what it measures |
+| crate | held (asserted, each falsified once) | printed by `timings` |
 |---|---|---|
-| a | `ark/tests/perf.rs::perf_a_mutate_alone` | a local mutation, alone, pending depth growing |
-| d | `perf_d_initial_sync` | a client catching up from empty; bytes and time per entry |
-| e | `perf_e_rebase` | a confirmed entry under N pending; per entry and per page |
-| g | `perf_g_authority_and_fanout` | the authority sequencing and fanning out to C connections |
-| h | `perf_h_frames` | encode/decode of each frame; allocations |
-| i | `perf_i_partial_fanout` | the authority serving scoped connections |
-| b, c | `ark-server/tests/perf.rs` | a round trip through the hub; the pump alone; offline pending; storage |
-| harken | `harken/domain/tests/perf.rs` | `add_song`, `playlists`, `playlist_name`, rows examined, allocations |
-| views | new in both | a change against `playlist-with-items`, `top-two-by-pos`, `group-source` at 1k/4k/16k rows: time, entries touched |
+| `ark` | a `Batch` of 256 decoded in ≤ 12 allocations an entry; a peer alone's step allocating the same over a log of 500 and of 8,000; one change on `playlist-with-items`, `top-two-by-pos`, `group-source` reading and allocating the same at 1k and 16k rows | a: a peer alone's add, log of 8,000; h: a `Batch` of 256 decoded; views: a change on each at 16k |
+| `ark-peer` | an offline device's intents writing the same bytes at 100 and 4,000 pending; a fan-out ≤ one allocation per connection; ≤ 400 live bytes per harken `media` row with its two indexes | b: a linked round trip through the hub in process; c: an offline intent at 4,000 pending |
+| `harken-domain` | the rows a mutation reads (`reads_are_bounded_by_what_they_need`); `add_to_playlist` allocating the same at a library of 500 and 8,000; `library` read whole in ≤ 32 allocations an entry | harken `add_song`, a library growing to 8,000 |
 
-The v5 harnesses are written to print the same lines so the two outputs
-diff. Where v5 has no counterpart to a v4 shape (the inbox, the
-`verify` round trip), the line says `n/a` and why.
+`ark-peer/tests/live_memory.rs` holds a live space's memory as before
+(Landed: live fold). The numbers of the tables are not those of the new
+benchmarks' shapes in every case (`a` is now a peer alone over playlists
+of ten): a comparison runs both trees' `timings`.
 
 ### The report
 
@@ -1063,6 +1065,58 @@ adapter's `asked`/`take_stalled` (an autoplay refusal, a stall said as
 `stalled`, the move on at a track's end while the output) is compiled for
 wasm32 and run by nothing; the phones and an iPhone over the changed
 ark-ffi views.
+### Landed: T3
+
+Six items, each its own commit (`9c4c36c`…). **ark-macros**: every derive
+and attribute returns `syn::Result`, `?` in place of the nine early-return
+matches, the error made `compile_error!` once in `lib.rs`; the expanded
+code of harken-domain (with `ffi`), ark-dev, ark-auth, ark-peer, ark's macro
+tests and ark-ffi's surface test is byte for byte what it was
+(`-Zunpretty=expanded` before and after). **One language table**: `gen`'s
+walk of types, reads, writes and stubs is `Lang` (`gen/mod.rs`), Kotlin and
+Swift a table each, their records and sums their own; `Harken.kt` and
+`Harken.swift` unchanged (harken-ffi's pin), `ark-dev gen` of demo and room
+too. Lines went up, not down (2,212 → 2,240 src): the tables spell each
+stub once per language, as the two copies did, and the walk they saved is
+smaller than the table. **The bridge's patch-merge** is ark-peer's
+`Update::patch`, which `Told::patched` calls. **An old data directory
+opens**: `rust/ark-peer/tests/data/server/` is a server's data directory
+written by this build — `log/kv`, `log/log`, `log/local.log`,
+`session.key`, and a device's replica in it (`replica/log`, `local.kv`,
+`local.log`; the hub's `local.kv` is not written by so small a run) — and
+`tests/old_data.rs` opens a copy: the old token judged alice's, the hub's
+head and state hash, seventy playlists, the replica's chain, origin and
+nothing pending; falsified by a byte changed in each of `log/kv`, `log/log`
+and `session.key`. `spec/README.md` § The data directory: a change to the
+on-disk format comes with a migration that opens the fixtures, or a new
+fixture beside them and a note; a fixture is never written over
+(`ARK_WRITE_DATA=1` writes one). **Perf files to bounds**: the three
+`perf.rs` (2,789 lines) go for `tests/costs.rs` in `ark`, `ark-peer` and
+harken-domain (Part 3, Speed, says what each holds); each new bound
+falsified once; one ignored `timings` per crate prints, in release: a peer
+alone's add over 8,000 17.9 µs, a `Batch` of 256 decoded 165.1 µs, views at
+16k 15.2 / 8.2 / 14.9 µs; a linked round trip 186.2 µs, an offline intent at
+4,000 pending 93.4 µs; harken `add_song` growing to 8,000 31.6 µs.
+`live_memory.rs` unchanged. **Trace replay** ran in five places: checks.rust
+(the trace vectors, the fleets', the fuzz sessions'), the `vectors`
+derivation (all of ark's and ark-dev's tests again), checks.traces (the
+trace vectors again, and the corpus), the `trace-corpus` derivation (each
+trace replayed as written) and `fuzz-smoke` (seeds 1–25 with `traces`,
+which `fuzz.rs` replays). The three pure repeats went: the `vectors`
+derivation runs only the writers (`hash`, `vectors`, `views`) and the trace
+writer replays nothing while writing; `ark-fuzz … traces DIR` writes
+without replaying; `fuzz-smoke` stays, without `traces`. checks.traces runs
+`trace_corpus` only. Not removed, as not pure repeats: `fleet.rs`'s replay
+of 41 fleets' clients (only seed 7's are vectors) and `fuzz.rs`'s of seeds
+1–200 (the corpus is seeds 2026–2325).
+
+*Measured* (`tools/loc.sh`): src `ark-macros` 730 → 687, `ark-dev` 2,212 →
+2,240, `ark-ffi` 634 → 630, `ark-peer` 2,392 → 2,397; tests `ark` 3,928 →
+3,205, `ark-peer` 1,759 → 1,274, harken-domain 4,003 → 3,723, `ark-dev` 975
+→ 976. Tests 462 passed, 7 ignored (`cargo test --workspace`); clippy
+`-D warnings` and fmt clean. nix `checks.{rust,vectors,traces,ffi}` with `--max-jobs 1` over `path:` after `rm -rf rust/target`: all four built (`traces`: 902 traces of the corpus replayed). Not verified: the release builds of
+the phones; the fixture against a build other than this one (there is
+none older to write it).
 
 ## Landed
 

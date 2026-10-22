@@ -46,6 +46,17 @@ pub enum Update {
     Reset,
 }
 
+impl Update {
+    /// `patches` after what this holds already; a reset stays one.
+    pub fn patch(&mut self, patches: Vec<Patch>) {
+        match self {
+            u @ Update::Unchanged => *u = Update::Patched(patches),
+            Update::Patched(ps) => ps.extend(patches),
+            Update::Reset => {}
+        }
+    }
+}
+
 /// What became of a device's own intents, and what its views did.
 #[derive(Default)]
 pub(crate) struct Told {
@@ -74,11 +85,7 @@ impl Told {
         if patches.is_empty() {
             return;
         }
-        match self.updates.entry(view).or_insert(Update::Unchanged) {
-            u @ Update::Unchanged => *u = Update::Patched(patches),
-            Update::Patched(ps) => ps.extend(patches),
-            Update::Reset => {}
-        }
+        self.updates.entry(view).or_insert(Update::Unchanged).patch(patches);
     }
 
     pub fn reset(&mut self, view: usize) {

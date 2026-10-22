@@ -327,7 +327,8 @@
           # spec/vectors is how they are written again without cargo.
           vectors = tests {
             pname = "ark-vectors";
-            flags = "-p ark -p ark-dev";
+            # The writers only: the rest of both crates' tests are checks.rust's.
+            flags = "-p ark -p ark-dev --test hash --test vectors --test views";
             # ark-dev's tests also hold spec/README.md and AUTHORING.md.
             src = only (rustDirs ++ [ "spec/README.md" "spec/AUTHORING.md" ]);
             # stdenv makes only the source root (rust/) writable, and the
@@ -348,6 +349,7 @@
           # and the session count, so not checked in, and moving either is a
           # deliberate edit; a run that finds anything exits 1 and there is
           # no corpus, since a trace is of correct behaviour.
+          # Written, not replayed: checks.traces replays them.
           trace-corpus = pkgs.runCommand "trace-corpus" { nativeBuildInputs = [ ark ]; } ''
             ark-fuzz 300 2026 traces $out
           '';
@@ -674,22 +676,24 @@
             vectors = pkgs.runCommand "check-vectors" { } ''
               diff -r ${vectors} ${./spec/vectors} && touch $out
             '';
-            # Every trace of the corpus and of spec/vectors/trace/ replays
-            # (rust/ark-dev/tests/vectors.rs, `traces` and `trace_corpus`).
-            # Its own check rather than part of checks.rust, so that the
+            # Every trace of the corpus replays (rust/ark-dev/tests/vectors.rs,
+            # `trace_corpus`; spec/vectors/trace/ and the fleets' and fuzz
+            # sessions' traces are replayed by checks.rust, once each). Its
+            # own check rather than part of checks.rust, so that the
             # workspace's tests do not wait on a fuzz run and a trace that
             # stops replaying is named as that.
             traces = tests {
               pname = "ark-traces";
               flags = "-p ark-dev --test vectors";
-              testArgs = "-- --nocapture";
+              testArgs = "trace_corpus -- --nocapture";
               src = only (rustDirs ++ [ "spec/vectors" ]);
               preCheck = "export ARK_TRACE_CORPUS=${trace-corpus}";
             };
-            # The fuzzer still runs and checks: a fixed seed and a few
-            # sessions, so that it cannot rot.
+            # The fuzzer's binary still runs and checks: a fixed seed and a
+            # few sessions, so that it cannot rot. Their traces are replayed
+            # by checks.rust (rust/ark-dev/tests/fuzz.rs, seeds 1-200).
             fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
-              ark-fuzz 25 1 traces
+              ark-fuzz 25 1
               touch $out
             '';
             # The Rust workspace's tests (which hold spec/README.md's index

@@ -22,6 +22,7 @@ pub mod kotlin;
 pub mod swift;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
 
 use ark::domain::Kind;
 use ark::row::Type;
@@ -86,13 +87,157 @@ pub fn camel(s: &str, upper: bool) -> String {
     out
 }
 
-/// A field's or a case's name: `camelCase`, quoted in backticks when it is
-/// one of `keywords`.
-pub fn ident(n: &str, keywords: &str) -> String {
-    let c = camel(n, false);
-    match keywords.split(' ').any(|k| k == c) {
-        true => format!("`{c}`"),
-        false => c,
+/// What a stub is written from: its method `m`, parameter `p`, function
+/// `name`, input as JSON `arg`, answer's type `t` and the answer read `rd`,
+/// a typed view's row type `r`.
+pub struct Hole<'a> {
+    pub m: &'a str,
+    pub p: &'a str,
+    pub name: &'a str,
+    pub arg: &'a str,
+    pub t: &'a str,
+    pub rd: &'a str,
+    pub r: &'a str,
+}
+
+/// What the two generators spell differently, as a table: the walk over
+/// types and stubs is one ([`Lang::ty`], [`Lang::rd`], [`Lang::wr`],
+/// [`Lang::stubs`]).
+pub struct Lang {
+    pub keywords: &'static str,
+    /// `Int`, `Bool` and `Unit` as types; `()` as a value; a closure's arrow.
+    pub int: &'static str,
+    pub bool: &'static str,
+    pub unit: &'static str,
+    pub unit_value: &'static str,
+    pub arrow: &'static str,
+    /// A list of a type; an `Int` or a `Bool` as JSON; a named type read
+    /// off a tree; a record or sum as JSON; a stub's parameter of a type.
+    pub list: fn(&str) -> String,
+    pub show: fn(&str) -> String,
+    pub read: fn(&str, &str) -> String,
+    pub write: fn(&str) -> String,
+    pub param: fn(&str) -> String,
+    /// The stubs, by kind, and a query's call (`name`, `arg`).
+    pub mutator: fn(&Hole) -> String,
+    pub live: fn(&Hole) -> String,
+    pub typed_view: fn(&Hole) -> String,
+    pub view: fn(&Hole) -> String,
+    pub query: fn(&Hole) -> String,
+    pub query_call: fn(&str, &str) -> String,
+    /// The adapter of a typed view of a row type; a live table's rows
+    /// (`table`, `row`, the method).
+    pub typed: fn(&str) -> String,
+    pub live_table: fn(&str, &str, &str) -> String,
+}
+
+impl Lang {
+    /// A field's or a case's name: `camelCase`, quoted in backticks when it
+    /// is a keyword.
+    pub fn ident(&self, n: &str) -> String {
+        let c = camel(n, false);
+        match self.keywords.split(' ').any(|k| k == c) {
+            true => format!("`{c}`"),
+            false => c,
+        }
+    }
+
+    /// `t` as a type, a named one as `name` spells it.
+    pub fn ty(&self, t: &Type, name: &dyn Fn(&str) -> String) -> String {
+        match t {
+            Type::Int => self.int.into(),
+            Type::Text | Type::Bytes => "String".into(),
+            Type::Bool => self.bool.into(),
+            Type::Unit => self.unit.into(),
+            Type::Id(_) => "Id".into(),
+            Type::Option(x) => format!("{}?", self.ty(x, name)),
+            Type::List(x) => (self.list)(&self.ty(x, name)),
+            Type::Record(n, _) | Type::Sum(n, _) => name(n),
+            Type::Tuple(_) => unreachable!("walked"),
+        }
+    }
+
+    /// An expression reading `e`, a JSON tree, as `t`.
+    pub fn rd(&self, t: &Type, e: &str, name: &dyn Fn(&str) -> String, d: usize) -> String {
+        let a = self.arrow;
+        match t {
+            Type::Int => format!("J.int({e})"),
+            Type::Text | Type::Bytes => format!("J.text({e})"),
+            Type::Bool => format!("J.bool({e})"),
+            Type::Unit => self.unit_value.into(),
+            Type::Id(_) => format!("Id(J.text({e}))"),
+            Type::Option(x) => format!("J.opt({e}) {{ v{d} {a} {} }}", self.rd(x, &format!("v{d}"), name, d + 1)),
+            Type::List(x) => format!("J.list({e}) {{ v{d} {a} {} }}", self.rd(x, &format!("v{d}"), name, d + 1)),
+            Type::Record(n, _) | Type::Sum(n, _) => (self.read)(&name(n), e),
+            Type::Tuple(_) => unreachable!("walked"),
+        }
+    }
+
+    /// An expression writing `e`, a value of `t`, as its JSON.
+    pub fn wr(&self, t: &Type, e: &str, d: usize) -> String {
+        let a = self.arrow;
+        match t {
+            Type::Int | Type::Bool => (self.show)(e),
+            Type::Text | Type::Bytes => format!("J.q({e})"),
+            Type::Unit => "\"null\"".into(),
+            Type::Id(_) => format!("J.q({e}.hex)"),
+            Type::Option(x) => format!("J.wopt({e}) {{ v{d} {a} {} }}", self.wr(x, &format!("v{d}"), d + 1)),
+            Type::List(x) => format!("J.wlist({e}) {{ v{d} {a} {} }}", self.wr(x, &format!("v{d}"), d + 1)),
+            Type::Record(..) | Type::Sum(..) => (self.write)(e),
+            Type::Tuple(_) => unreachable!("walked"),
+        }
+    }
+
+    /// The domain's functions, each a stub calling it by name, then the
+    /// typed views' adapters and the live tables, after `out`; the class or
+    /// struct they are in closed.
+    pub fn stubs(&self, mut out: String, w: &Walked) -> String {
+        let bare = |n: &str| n.to_string();
+        let views = w.typed_views();
+        for f in &w.fns {
+            let (p, arg) = match &f.input {
+                Type::Unit => (String::new(), "\"null\"".to_string()),
+                t => ((self.param)(&self.ty(t, &bare)), self.wr(t, "input", 0)),
+            };
+            let (m, name) = (f.method.as_str(), f.name.as_str());
+            let h = Hole {
+                m,
+                p: &p,
+                name,
+                arg: &arg,
+                t: "",
+                rd: "",
+                r: "",
+            };
+            let line = match (f.kind, &f.output) {
+                (Kind::Mutator, _) => (self.mutator)(&h),
+                (Kind::Live, _) => (self.live)(&h),
+                (Kind::View, Some(Type::Record(r, _))) if views.contains(r.as_str()) => (self.typed_view)(&Hole { r, ..h }),
+                (Kind::View, Some(o)) => (self.view)(&Hole {
+                    t: &self.ty(o, &bare),
+                    rd: &self.rd(o, "j", &bare, 0),
+                    ..h
+                }),
+                (_, Some(o)) => {
+                    let rd = self.rd(o, &(self.query_call)(name, &arg), &bare, 0);
+                    (self.query)(&Hole {
+                        t: &self.ty(o, &bare),
+                        rd: &rd,
+                        ..h
+                    })
+                }
+                (_, None) => continue,
+            };
+            let _ = writeln!(out, "    {line}\n");
+        }
+        for r in &views {
+            let _ = writeln!(out, "    {}\n", (self.typed)(r));
+        }
+        for (table, row) in &w.live {
+            let _ = writeln!(out, "    {}\n", (self.live_table)(table, row, &camel(&format!("live_{table}"), false)));
+        }
+        out.truncate(out.trim_end().len());
+        out + "\n}\n"
     }
 }
 
