@@ -16,10 +16,16 @@
 //!
 //! A domain is walked as the admin page describes it (`Catalog`): its
 //! schema — every table a row type, named as the table — and every
-//! function's name, kind, input and answer.
+//! function's name, kind, input and answer; that catalog is the compiled
+//! domain's, or the one read from its source ([`source`]), which `ark-dev
+//! gen` writes every generated file from in one run ([`app`]), UniFFI's
+//! own for the twins among them ([`uniffi`]).
 
+pub mod app;
 pub mod kotlin;
+pub mod source;
 pub mod swift;
+pub mod uniffi;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -152,10 +158,14 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
     }
 }
 
-/// `ark-dev gen kotlin|swift DOMAIN [NAME [PACKAGE]]`: DOMAIN is one of
-/// this crate's (`demo`, `room`) or a file of the catalog the admin page
-/// serves (`/admin/api/state`, or its `catalog`); the source to stdout.
+/// `ark-dev gen [--source DIR] [--check]` ([`app::main`]), or `ark-dev gen
+/// kotlin|swift DOMAIN [NAME [PACKAGE]]`: DOMAIN is one of this crate's
+/// (`demo`, `room`) or a file of the catalog the admin page serves
+/// (`/admin/api/state`, or its `catalog`); the source to stdout.
 pub fn main(args: &[String]) -> Result<String, String> {
+    if !matches!(args.first().map(String::as_str), Some("kotlin" | "swift")) {
+        return app::main(args);
+    }
     let [lang, domain, rest @ ..] = args else {
         return Err("ark-dev gen kotlin|swift DOMAIN [NAME [PACKAGE]]".into());
     };

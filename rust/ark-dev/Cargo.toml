@@ -12,3 +12,14 @@ ark-peer = { path = "../ark-peer" }
 ark-explorer = { path = "../ark-explorer", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# `ark-dev gen` from a domain's source (`gen::source`): its files parsed,
+# lines kept for what it refuses, and ark-auth's part read as it is built.
+syn = { version = "2", default-features = false, features = ["clone-impls", "full", "derive", "parsing", "printing", "extra-traits"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+ark-auth = { path = "../ark-auth" }
+# UniFFI's own Kotlin and Swift for a domain's twins (`gen::twins`), from
+# metadata made of its source rather than read out of a built library.
+uniffi_bindgen = { version = "=0.32.2", default-features = false }
+uniffi_meta = "=0.32.2"
+camino = "1"

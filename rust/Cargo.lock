@@ -167,10 +167,17 @@ name = "ark-dev"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-auth",
  "ark-explorer",
  "ark-peer",
+ "camino",
+ "proc-macro2",
+ "quote",
  "serde",
  "serde_json",
+ "syn 2.0.119",
+ "uniffi_bindgen",
+ "uniffi_meta",
 ]
 
 [[package]]

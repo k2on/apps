@@ -67,9 +67,18 @@
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
       rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" ];
-      # The typed Kotlin and Swift `ark-dev gen` writes, which harken/ffi's
-      # tests hold to the domain (harken/ffi/tests/gen.rs).
+      # What `ark-dev gen` writes from the domain's source, which harken/ffi's
+      # tests hold to the compiled domain (harken/ffi/tests/gen.rs): the
+      # typed Kotlin and Swift, and UniFFI's own for the domain's twins
+      # (`uniffi/harken_domain.kt`, `harken_domain.swift`), which the
+      # library's bindings below leave out and `checks.ffi` holds to them.
       genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
+      # The domain's UniFFI bindings, as they are checked in: where each
+      # language's is under the bindings UniFFI writes, and in the tree.
+      domainBindings = {
+        kotlin = { written = "kotlin/uniffi/harken_domain"; file = "harken_domain.kt"; tree = "harken/android/app/src/main/kotlin/dev/harken/android/gen/uniffi"; };
+        swift = { written = "swift"; file = "harken_domain.swift"; tree = "harken/ios/Harken/Gen"; };
+      };
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
@@ -425,9 +434,12 @@
               cargoWithProfile build --locked -p harken-ffi --lib
               ${ffiBindings { lib = "target/release/libharken_ffi.so"; language = "kotlin"; }}
             '';
+            # The domain's own (`uniffi.harken_domain`) is the app's, checked
+            # in where `ark-dev gen` writes it, so it is not here twice.
             installPhaseCommand = ''
               mkdir -p $out/kotlin/dev/arkdb/ffi
               cp -r bindings/kotlin/. $out/kotlin/
+              rm -r $out/kotlin/uniffi/harken_domain
               install -Dm755 target/release/libharken_ffi.so $out/host/libharken_ffi.so
               cp ark-ffi/kotlin/Typed.kt $out/kotlin/dev/arkdb/ffi/
             '';
@@ -580,7 +592,9 @@
             installPhaseCommand = ''
               mkdir -p $out/swift
               cp -r HarkenFFI.xcframework $out/
+              # The domain's Swift is the app's (Harken/Gen/harken_domain.swift).
               cp bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
+              rm $out/swift/${domainBindings.swift.file}
             '';
             meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
           });
@@ -744,6 +758,11 @@
                 grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
                 grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                 ls "$TMPDIR/bindings/swift/"*FFI.h "$TMPDIR/bindings/swift/"*.modulemap
+                # The domain's, which `ark-dev gen` wrote from its source and
+                # the apps read checked in, are UniFFI's from the library.
+                ${lib.concatStrings (lib.mapAttrsToList (_: b: ''
+                  diff -u "$TMPDIR/bindings/${b.written}/${b.file}" ../${b.tree}/${b.file}
+                '') domainBindings)}
               '';
               # The bindings it wrote, which the iOS type-check reads.
               installPhase = "cp -r $TMPDIR/bindings $out";
