@@ -867,6 +867,65 @@ the rule ever changed what the house did on main (no run was seen to hit
 the window); the poll's own calls (`Speakers::heard`) are not gated, as
 they were not in the experiment.
 
+### Landed: T1, a deletion round
+
+Kernel and peer cut, each item its own commit (`e04380b`…). **A join
+pushes intents, never a chain**: `Join` makes the chain above the fork
+pending intents (with any intent that refused as the device went alone,
+kept unrun for the server so its `local`s have no gap), makes the log
+durable at the fork (ark-peer keeps the chain as pending rows first), and
+pushes them as after any connection; the server judges each as a push, so
+an entry it refuses loses that entry, not the chain. `adopt`, `refuse`,
+the peer's second kind of `Page`, `Peer::joining`, the re-handover in
+`connected` and the `joining` fields (`Replica`, `Act::Open`, `Status`,
+harken-peer's status) go; ark-ffi's status says `joining: false`. Found by
+the fuzzer on the way (seed 2464): without the durable truncation a device
+reopened after a join held its chain as its log. **Held keeps nothing**:
+`Held` has a live use — a function an older server's build lacks — so it
+stays; `Input::Loaded` (no sender but a test), the authority's queue
+behind a held intent and `Local`'s `waiting` table go: what comes after a
+held intent from its origin is a gap, answered by nothing and pushed again,
+after it, on the next connection (`connected` re-pushes every pending
+intent). Then one path for an authority's own intent (`decide`); the
+`values-json` build (35 cfg sites) and the JSON-only serializer arms of
+`ark::json`; uncalled API (`encode_into`, `db::write`, `Ctx::draw`,
+`Log::len`/`is_empty`, `Functions::forget`, `Peer::who`), `Store::new`
+and `from_rows` one each (`(schema, space)`; `from_rows` reads another
+schema's rows, §1.2), `Ctx::new` and `Default` for 28 hand-written
+literals; `Peer::hello`, one verdict send, `Store::undo`, one scan operator
+over stored keys; the log's ends taken from the entry, not postcard
+offsets; `EachOp` for `filter`/`map`/`sort` and `Members` as
+`btree_map::Values`; views made again by the peer under their number
+(`Update::Reset` now means read the rows afresh; the simulator and
+harken-iced lose their re-view; ark-ffi's is left); a scope its own kind
+in `Functions` (`Runs::Scope`, asked by table name); `Entry::new`. **No
+web server on a phone**: the admin routes are `ark_explorer::serve`,
+`Catalog` is `ark::domain`'s, ark-peer's hub thread is `handle` and its
+socket side (`serve`, `web`, axum, tokio) the `server` feature, as is
+ark-auth's routes'; ark-ffi, harken-ffi, harken-iced, harken-player and
+harken-domain turn it off — `cargo tree -p ark-ffi -e normal`: axum 0.
+Shared test support, one RNG (`ark_dev::sim::Rng`, sequences unchanged),
+one clock, one hex decoder, `ark::row::plural`; arkui's uncalled
+`Context::close`/`grid` and `Images::with_bound`; `plan-v4.md`,
+`plan-phones.md` and `scopes.md` deleted (`docs/README.md`), plan-v5's
+history sections a line each; the flake's `fuzz-smoke` check (the
+workflow still names it: drop it there by hand). **Not done**: the typed
+prefix machinery (item 12) — harken uses the by-reference forms (22 calls:
+`db.listening.has(&user)`, `.from(&input.file)`) and three-column whole
+keys (`db.credit.get((a, b, c))`), so there is no single form to keep.
+Source by `tools/loc.sh`: `ark` 4,975 → 4,517, `ark-peer` 2,555 → 2,392,
+`ark-dev` 2,142 → 2,108, `ark-explorer` 2,251 → 2,353 (the admin routes
+moved in), `arkui` 2,949 → 2,935, `ark-auth` 1,037 → 1,038, domain 2,429;
+the default set 19,395 → 18,829 source, tests 12,767 → 12,524; harken-server
+4,599 → 4,596, harken-iced 8,163 → 8,155. `Space::` 156 → 197 (the store's
+constructor names its space). Vectors: `trace/` re-derived (an open no
+longer says `joining`; a join's steps are a push), `protocol/client-chain-durable`
+gone; `hash/`, `rebase/`, `views/` and the rest of `protocol/` unchanged,
+no schema hash moved. Tests: 451 passed, 30 ignored (each crate's, one at a time for the disk); new ones falsified once each (`alone.rs` three, `joining.rs` two, `rebase.rs`'s gap, `ark-peer` `local.rs`'s reopen after a join and `views.rs`); clippy `-D warnings` clean; fmt clean but for `harken/server/tests/bridge.rs:1432`, as on main; the wasm32 check of `ark-peer`, `ark-auth`, `ark-explorer` and `harken-iced` passes. Fuzzer 1,000 sessions from seed 1 and
+1,000 from 2026, every trace replayed, none failed. Not verified: a crash
+between ark-peer's pre-write of the chain and the join's step (the merge
+drops a duplicate by id, by reading); the phones and a browser running it.
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
