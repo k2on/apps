@@ -229,9 +229,7 @@ pub fn write_in<S: Tables, P: Writes, T>(
         Ok(t) => Ok((t, changes)),
         Err(e) => {
             if let Backing::Write(s) = &mut txn.store {
-                for c in changes.iter().rev() {
-                    s.apply(&c.inverse()).expect("an inverse applies");
-                }
+                s.undo(&changes).expect("an inverse applies");
             }
             Err(e)
         }

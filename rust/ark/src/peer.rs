@@ -512,9 +512,7 @@ impl Peer {
             return self.store.kv_rows();
         }
         let mut s = self.store.clone();
-        for c in self.pending.iter().rev().flat_map(|p| p.changes.iter().rev()) {
-            s.apply(&c.inverse()).expect("a pending change undoes");
-        }
+        s.undo(self.pending.iter().flat_map(|p| &p.changes)).expect("a pending change undoes");
         s.kv_rows()
     }
 
@@ -619,9 +617,7 @@ impl Peer {
         let changes = p.apply(&mut self.store, &Ctx::of(e), &e.input)?;
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
-            for c in changes.iter().rev() {
-                self.store.apply(&c.inverse()).expect("an inverse applies");
-            }
+            self.store.undo(&changes).expect("an inverse applies");
             return Err(Refusal(format!("{} is not in this space", c.table())));
         }
         o.told.extend(changes.iter().cloned());
@@ -629,11 +625,8 @@ impl Peer {
     }
 
     fn undo_pending(&mut self, o: &mut Out) {
-        for c in self.pending.iter().rev().flat_map(|p| p.changes.iter().rev()) {
-            let c = c.inverse();
-            self.store.apply(&c).expect("a pending change undoes");
-            o.told.push(c);
-        }
+        let undone = self.store.undo(self.pending.iter().flat_map(|p| &p.changes));
+        o.told.extend(undone.expect("a pending change undoes"));
     }
 
     /// Runs the pending intents again, in order, over the store as it is;
@@ -898,49 +891,54 @@ impl Peer {
         }
     }
 
-    fn push(&mut self, who: &Who, mut entry: Entry, o: &mut Out) {
-        let (id, space) = (entry.id, self.space);
-        let j = self.journal();
-        if let Some(verdict) = j.verdicts.get(&id).cloned() {
-            return o.send(Frame::Verdict { space, id, verdict });
+    /// A pushed intent judged, and the verdict sent back; nothing for one
+    /// past a gap.
+    fn push(&mut self, who: &Who, entry: Entry, o: &mut Out) {
+        let id = entry.id;
+        if let Some(verdict) = self.verdict_on(who, entry, o) {
+            o.send(Frame::Verdict {
+                space: self.space,
+                id,
+                verdict,
+            });
+        }
+    }
+
+    fn verdict_on(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Option<Verdict> {
+        let (space, j) = (self.space, self.journal());
+        if let Some(verdict) = j.verdicts.get(&entry.id) {
+            return Some(verdict.clone());
         }
         if !entry.id_checks() || j.others(&entry.origin, &who.actor) {
             let why = "an id that is not its own, or from an origin of another actor".into();
-            return o.send(Frame::Verdict {
-                space,
-                id,
-                verdict: Verdict::Refused { why },
-            });
+            return Some(Verdict::Refused { why });
         }
-        // A gap: the ones before it come first, pushed again after a Hello.
         let last = j.last_of(&entry.origin);
         // At or below the last and judged by no verdict here: in the log's
         // space, sequenced below the horizon by a log opened since (a
         // refusal's verdict is journaled); in the volatile, overtaken.
         if entry.local <= last {
-            let verdict = match space {
+            return Some(match space {
                 Space::Durable => Verdict::Ok { seq: self.log().base_seq() },
                 Space::Volatile => Verdict::Refused {
                     why: "overtaken by a later one of its origin".into(),
                 },
-            };
-            return o.send(Frame::Verdict { space, id, verdict });
+            });
         }
         // Past a gap (behind a held one, too): nothing, until it is pushed
-        // again after the ones before it.
+        // again after the ones before it, after a `Hello`.
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
-            return;
+            return None;
         }
-        let verdict = match self.functions.get(&entry.func) {
-            None => Verdict::Held { func: entry.func },
-            Some(_) => {
-                (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-                let run = self.attempt(&entry, o);
-                self.judged(entry, run, o)
-                    .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq })
-            }
-        };
-        o.send(Frame::Verdict { space, id, verdict });
+        if self.functions.get(&entry.func).is_none() {
+            return Some(Verdict::Held { func: entry.func });
+        }
+        (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
+        let run = self.attempt(&entry, o);
+        Some(
+            self.judged(entry, run, o)
+                .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq }),
+        )
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.
@@ -1030,14 +1028,19 @@ impl Peer {
         let (n, h) = self.log().head();
         if self.asked != Some(n) {
             self.asked = Some(n);
-            o.send(Frame::Hello {
-                space: self.space,
-                cursor: n,
-                hash: Some(h),
-                device: self.device.clone(),
-                schema: self.store.schema_hash(),
-                version: self.version.clone(),
-            });
+            o.send(self.hello(n, Some(h)));
+        }
+    }
+
+    /// A `Hello` at `cursor`: where this peer stands, and what it runs.
+    fn hello(&self, cursor: Seq, hash: Option<EntryHash>) -> Frame {
+        Frame::Hello {
+            space: self.space,
+            cursor,
+            hash,
+            device: self.device.clone(),
+            schema: self.store.schema_hash(),
+            version: self.version.clone(),
         }
     }
 
@@ -1054,14 +1057,7 @@ impl Peer {
         self.store = fresh;
         self.redo_pending(o);
         self.asked = Some(cursor);
-        o.send(Frame::Hello {
-            space: self.space,
-            cursor,
-            hash: None,
-            device: self.device.clone(),
-            schema: self.store.schema_hash(),
-            version: self.version.clone(),
-        });
+        o.send(self.hello(cursor, None));
     }
 
     /// A snapshot: the store becomes its rows, the log stands on it, the

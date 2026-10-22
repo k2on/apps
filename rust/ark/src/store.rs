@@ -583,13 +583,29 @@ impl Store {
     pub fn apply_all(&mut self, cs: &[Change]) -> Result<(), Refusal> {
         for (i, c) in cs.iter().enumerate() {
             if let Err(e) = self.apply(c) {
-                for d in cs[..i].iter().rev() {
-                    self.apply(&d.inverse()).expect("an inverse applies");
-                }
+                self.undo(&cs[..i]).expect("an inverse applies");
                 return Err(e);
             }
         }
         Ok(())
+    }
+
+    /// Changes made, undone: each one's inverse applied, newest first, up
+    /// to the first that does not apply; the inverses, as applied.
+    pub fn undo<'c, I>(&mut self, cs: I) -> Result<Vec<Change>, Refusal>
+    where
+        I: IntoIterator<Item = &'c Change>,
+        I::IntoIter: DoubleEndedIterator,
+    {
+        cs.into_iter().rev().map(|c| c.inverse()).map(|c| self.apply(&c).map(|_| c)).collect()
+    }
+
+    /// A table's rows by their keys, in key order.
+    pub(crate) fn keyed(&self, table: &str) -> impl Iterator<Item = (&[u8], &[u8])> {
+        self.find(table)
+            .ok()
+            .into_iter()
+            .flat_map(move |t| self.tables[t].rows.iter().map(|(k, r)| (&k[..], &r[..])))
     }
 
     /// Puts a row, adding it or replacing the one under its key.

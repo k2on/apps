@@ -235,9 +235,8 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
     let schema = hub.store.schema_arc().clone();
     let entries = hub.log().entries();
     let mut s = hub.store.clone();
-    for c in entries.iter().rev().flat_map(|l| l.facts.iter().rev()) {
-        s.apply(&c.inverse()).map_err(|r| format!("the log's facts do not undo: {r}"))?;
-    }
+    s.undo(entries.iter().flat_map(|l| &l.facts))
+        .map_err(|r| format!("the log's facts do not undo: {r}"))?;
     if s.state_hash() != hub.log().base().state {
         return Err("the store at the horizon is not the state the log stands on".into());
     }
