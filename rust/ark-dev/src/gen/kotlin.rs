@@ -1,6 +1,7 @@
 //! A domain in Kotlin: a data class per record and row, a sealed class per
 //! sum, each read from the JSON tree Android's `org.json` parses (`of`) and
 //! written as the kernel's JSON (`json`); the stubs over `dev.arkdb.ffi`.
+//! Of a type UniFFI declares, its JSON as extensions, and its views typed.
 
 use std::fmt::Write;
 
@@ -9,39 +10,62 @@ use ark::row::Type;
 
 use super::{camel, ident, Walked};
 
+/// How a named type is spelt: bare, or qualified by its package (where a
+/// variant's name could hide it) — the generated package's, or UniFFI's
+/// for a type it declares.
+#[derive(Clone, Copy)]
+struct Q<'a> {
+    w: &'a Walked,
+    package: &'a str,
+    qualified: bool,
+}
+
+impl Q<'_> {
+    fn name(&self, n: &str) -> String {
+        match (self.qualified, self.w.typed.contains(n)) {
+            (false, _) => n.into(),
+            (true, true) => format!("{}.{n}", self.w.typed_package),
+            (true, false) => format!("{}.{n}", self.package),
+        }
+    }
+
+    fn bare(self) -> Self {
+        Q { qualified: false, ..self }
+    }
+}
+
 const KEYWORDS: &str = "as break class continue do else false for fun if in interface is null object package return super this throw true try typealias typeof val var when while";
 
 fn field(n: &str) -> String {
     ident(n, KEYWORDS)
 }
 
-/// `t` as a Kotlin type, a named one under `q` (the package, where a
-/// variant's name could hide it).
-fn ty(t: &Type, q: &str) -> String {
+/// `t` as a Kotlin type, a named one as `q` spells it.
+fn ty(t: &Type, q: Q) -> String {
     match t {
         Type::Int => "Long".into(),
         Type::Text | Type::Bytes => "String".into(),
         Type::Bool => "Boolean".into(),
         Type::Unit => "Unit".into(),
-        Type::Id(_) => format!("{q}Id"),
+        Type::Id(_) => "Id".into(),
         Type::Option(x) => format!("{}?", ty(x, q)),
         Type::List(x) => format!("List<{}>", ty(x, q)),
-        Type::Record(n, _) | Type::Sum(n, _) => format!("{q}{n}"),
+        Type::Record(n, _) | Type::Sum(n, _) => q.name(n),
         Type::Tuple(_) => unreachable!("walked"),
     }
 }
 
 /// An expression reading `e`, a JSON tree, as `t`.
-fn rd(t: &Type, e: &str, q: &str, d: usize) -> String {
+fn rd(t: &Type, e: &str, q: Q, d: usize) -> String {
     match t {
         Type::Int => format!("J.int({e})"),
         Type::Text | Type::Bytes => format!("J.text({e})"),
         Type::Bool => format!("J.bool({e})"),
         Type::Unit => "Unit".into(),
-        Type::Id(_) => format!("{q}Id(J.text({e}))"),
+        Type::Id(_) => format!("Id(J.text({e}))"),
         Type::Option(x) => format!("J.opt({e}) {{ v{d} -> {} }}", rd(x, &format!("v{d}"), q, d + 1)),
         Type::List(x) => format!("J.list({e}) {{ v{d} -> {} }}", rd(x, &format!("v{d}"), q, d + 1)),
-        Type::Record(n, _) | Type::Sum(n, _) => format!("{q}{n}.of({e})"),
+        Type::Record(n, _) | Type::Sum(n, _) => format!("{}.of({e})", q.name(n)),
         Type::Tuple(_) => unreachable!("walked"),
     }
 }
@@ -72,7 +96,7 @@ fn object(fields: &[(String, Type)]) -> String {
     format!("\"{{\" + {} + \"}}\"", parts.join(" + \",\" + "))
 }
 
-fn params(fields: &[(String, Type)], q: &str) -> String {
+fn params(fields: &[(String, Type)], q: Q) -> String {
     fields
         .iter()
         .map(|(n, t)| format!("val {}: {}", field(n), ty(t, q)))
@@ -80,7 +104,7 @@ fn params(fields: &[(String, Type)], q: &str) -> String {
         .join(", ")
 }
 
-fn args(fields: &[(String, Type)], o: &str, q: &str) -> String {
+fn args(fields: &[(String, Type)], o: &str, q: Q) -> String {
     fields
         .iter()
         .map(|(n, t)| rd(t, &format!("{o}.opt(\"{n}\")"), q, 0))
@@ -88,22 +112,56 @@ fn args(fields: &[(String, Type)], o: &str, q: &str) -> String {
         .join(", ")
 }
 
-fn record(out: &mut String, n: &str, fields: &[(String, Type)]) {
+fn record(out: &mut String, n: &str, fields: &[(String, Type)], q: Q) {
+    if q.w.typed.contains(n) {
+        let _ = writeln!(out, "\n/** The record `{n}` (UniFFI's): its JSON, for the functions called by name. */");
+        let _ = writeln!(out, "fun {n}.json(): String = {}\n", object(fields));
+        let of = args(fields, "o", q.bare());
+        let _ = writeln!(out, "fun {n}.Companion.of(j: Any?): {n} = (j as JSONObject).let {{ o -> {n}({of}) }}");
+        return;
+    }
     let _ = writeln!(out, "\n/** The record `{n}`. */");
     match fields.is_empty() {
         true => drop(writeln!(out, "class {n} {{")),
-        false => drop(writeln!(out, "data class {n}({}) {{", params(fields, ""))),
+        false => drop(writeln!(out, "data class {n}({}) {{", params(fields, q.bare()))),
     }
     let _ = writeln!(out, "    fun json(): String = {}\n", object(fields));
     let _ = writeln!(out, "    companion object {{");
     let _ = writeln!(
         out,
         "        fun of(j: Any?): {n} = (j as JSONObject).let {{ o -> {n}({}) }}\n    }}\n}}",
-        args(fields, "o", "")
+        args(fields, "o", q.bare())
     );
 }
 
-fn sum(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)], q: &str) {
+/// A sum UniFFI declares: its JSON, as extensions.
+fn sum_json(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)], q: Q) {
+    let _ = writeln!(out, "\n/** The sum `{n}` (UniFFI's): its JSON, for the functions called by name. */");
+    let _ = writeln!(out, "fun {n}.json(): String =\n    when (val v = this) {{");
+    for (v, fs) in variants {
+        match fs.is_empty() {
+            true => drop(writeln!(out, "        is {n}.{v} -> \"\\\"{v}\\\"\"")),
+            false => drop(writeln!(
+                out,
+                "        is {n}.{v} -> with(v) {{ \"{{\\\"{v}\\\":\" + {} + \"}}\" }}",
+                object(fs)
+            )),
+        }
+    }
+    let _ = writeln!(out, "    }}\n\nfun {n}.Companion.of(j: Any?): {n} = J.sum(j) {{ t, o ->\n    when (t) {{");
+    for (v, fs) in variants {
+        match fs.is_empty() {
+            true => drop(writeln!(out, "        \"{v}\" -> {n}.{v}")),
+            false => drop(writeln!(out, "        \"{v}\" -> {n}.{v}({})", args(fs, "o!!", q))),
+        }
+    }
+    let _ = writeln!(out, "        else -> throw IllegalArgumentException(\"{n}: no variant $t\")\n    }}\n}}");
+}
+
+fn sum(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)], q: Q) {
+    if q.w.typed.contains(n) {
+        return sum_json(out, n, variants, q);
+    }
     let _ = writeln!(out, "\n/** The sum `{n}`. */\nsealed class {n} {{\n    abstract fun json(): String");
     let mut arms = vec![];
     for (v, fs) in variants {
@@ -140,11 +198,18 @@ fn sum(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)], q:
 pub fn write(w: &Walked, package: &str) -> String {
     let mut out = format!("// Generated by `ark-dev gen kotlin` from the domain {}: its types and its functions by name, over\n// dev.arkdb.ffi. Never edit; regenerate.\npackage {package}\n\n", w.name);
     out += "import dev.arkdb.ffi.Id\nimport dev.arkdb.ffi.J\nimport dev.arkdb.ffi.Peer\nimport dev.arkdb.ffi.View\nimport org.json.JSONObject\n";
-    let q = format!("{package}.");
+    let views = w.typed_views();
+    for n in &w.typed {
+        let _ = writeln!(out, "import {}.{n}", w.typed_package);
+    }
+    for n in &views {
+        let _ = writeln!(out, "import {}.{n}View", w.typed_package);
+    }
+    let q = Q { w, package, qualified: true };
     for (n, t) in &w.types {
         match t {
-            Type::Record(_, fs) => record(&mut out, n, fs),
-            Type::Sum(_, vs) => sum(&mut out, n, vs, &q),
+            Type::Record(_, fs) => record(&mut out, n, fs, q),
+            Type::Sum(_, vs) => sum(&mut out, n, vs, q),
             _ => unreachable!("named"),
         }
     }
@@ -156,25 +221,34 @@ pub fn write(w: &Walked, package: &str) -> String {
     for f in &w.fns {
         let (p, arg) = match &f.input {
             Type::Unit => (String::new(), "\"null\"".to_string()),
-            t => (format!("input: {}", ty(t, "")), wr(t, "input", 0)),
+            t => (format!("input: {}", ty(t, q.bare())), wr(t, "input", 0)),
         };
         let (m, name) = (&f.method, &f.name);
         let line = match (f.kind, &f.output) {
             (Kind::Mutator, _) => format!("/** `{name}`: its intent's id. */\n    fun {m}({p}): String = peer.mutate(\"{name}\", {arg})"),
             (Kind::Live, _) => format!("/** `{name}`, on the live space. */\n    fun {m}({p}) = peer.call(\"{name}\", {arg})"),
+            (Kind::View, Some(Type::Record(n, _))) if views.contains(n.as_str()) => {
+                format!("/** `{name}`, kept, its rows UniFFI's. */\n    fun {m}({p}): View<{n}> = typed({n}View(peer, \"{name}\", {arg}))")
+            }
             (Kind::View, Some(o)) => format!(
                 "/** `{name}`, kept. */\n    fun {m}({p}): View<{}> = View(peer.view(\"{name}\", {arg})) {{ j -> {} }}",
-                ty(o, ""),
-                rd(o, "j", "", 0)
+                ty(o, q.bare()),
+                rd(o, "j", q.bare(), 0)
             ),
             (_, Some(o)) => format!(
                 "/** `{name}`. */\n    fun {m}({p}): {} = {}",
-                ty(o, ""),
-                rd(o, &format!("J.parse(peer.query(\"{name}\", {arg}))"), "", 0)
+                ty(o, q.bare()),
+                rd(o, &format!("J.parse(peer.query(\"{name}\", {arg}))"), q.bare(), 0)
             ),
             (_, None) => continue,
         };
         let _ = writeln!(out, "    {line}\n");
+    }
+    for n in &views {
+        let _ = writeln!(
+            out,
+            "    private fun typed(v: {n}View): View<{n}> = View.typed(v::rows, {{ v.take().let {{ it.update to it.rows }} }}, v::close)\n"
+        );
     }
     for (table, row) in &w.live {
         let _ = writeln!(

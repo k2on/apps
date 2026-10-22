@@ -9,6 +9,11 @@
 //! stands on — `Id`, `View` and JSON — is the bridge's own typed half,
 //! written once (`rust/ark-ffi/kotlin/Typed.kt`, `rust/ark-ffi/swift/Typed.swift`).
 //!
+//! A type UniFFI declares — a view's row with its twin (`#[ark(ffi_view)]`,
+//! `ark_ffi::typed`) — is not declared again: only its JSON is written, as
+//! extensions, and a view of its rows is read typed, through its view
+//! object (`<T>View`), with no JSON per row ([`Walked::typed`]).
+//!
 //! A domain is walked as the admin page describes it (`Catalog`): its
 //! schema — every table a row type, named as the table — and every
 //! function's name, kind, input and answer.
@@ -16,7 +21,7 @@
 pub mod kotlin;
 pub mod swift;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ark::domain::Kind;
 use ark::row::Type;
@@ -30,6 +35,30 @@ pub struct Walked {
     pub types: BTreeMap<String, Type>,
     pub fns: Vec<Stub>,
     pub live: Vec<(String, String)>,
+    /// The types UniFFI declares, and its Kotlin package.
+    pub typed: BTreeSet<String>,
+    pub typed_package: String,
+}
+
+impl Walked {
+    /// `names` declared by UniFFI in the Kotlin package `package`, each
+    /// that is a view's row with its view object.
+    pub fn typed(mut self, package: &str, names: &[&str]) -> Walked {
+        self.typed = names.iter().map(|n| n.to_string()).collect();
+        self.typed_package = package.into();
+        self
+    }
+
+    /// The typed row types some view reads.
+    fn typed_views(&self) -> BTreeSet<&str> {
+        self.fns
+            .iter()
+            .filter_map(|f| match (&f.kind, &f.output) {
+                (Kind::View, Some(Type::Record(n, _))) if self.typed.contains(n) => Some(n.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 /// One function, as a stub calls it: its name, the method's, its kind,
@@ -118,6 +147,8 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
         types,
         fns: stubs,
         live,
+        typed: BTreeSet::new(),
+        typed_package: String::new(),
     }
 }
 

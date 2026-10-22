@@ -535,21 +535,8 @@ public struct Library: Equatable {
     public var json: String { J.obj(["\"playlist_id\":" + J.q(playlistId.hex)]) }
 }
 
-/// The record `LibraryEntry`.
-public struct LibraryEntry: Equatable {
-    public var addedMs: Int64
-    public var creator: String
-    public var durationMs: Int64
-    public var file: String
-    public var id: Id
-    public var kind: String
-    public var playlistPos: Int64?
-    public var pos: Int64
-    public var title: String
-    public var userId: String
-
-    public init(addedMs: Int64, creator: String, durationMs: Int64, file: String, id: Id, kind: String, playlistPos: Int64?, pos: Int64, title: String, userId: String) { self.addedMs = addedMs; self.creator = creator; self.durationMs = durationMs; self.file = file; self.id = id; self.kind = kind; self.playlistPos = playlistPos; self.pos = pos; self.title = title; self.userId = userId; }
-
+/// The record `LibraryEntry` (UniFFI's): its JSON, for the functions called by name.
+extension LibraryEntry {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(addedMs: J.int(o["added_ms"]), creator: J.text(o["creator"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), id: Id(J.text(o["id"])), kind: J.text(o["kind"]), playlistPos: J.opt(o["playlist_pos"]) { v0 in J.int(v0) }, pos: J.int(o["pos"]), title: J.text(o["title"]), userId: J.text(o["user_id"]))
@@ -886,16 +873,8 @@ public struct Play: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"user_id\":" + J.q(userId), "\"track\":" + J.q(track), "\"title\":" + J.q(title), "\"creator\":" + J.q(creator), "\"album\":" + J.q(album), "\"duration_ms\":" + String(durationMs), "\"file\":" + J.q(file), "\"played_ms\":" + String(playedMs), "\"from\":" + J.q(from)]) }
 }
 
-/// The record `Playlist`.
-public struct Playlist: Equatable {
-    public var id: Id
-    public var name: String
-    public var pos: Int64
-    public var createdMs: Int64
-    public var userId: String
-
-    public init(id: Id, name: String, pos: Int64, createdMs: Int64, userId: String) { self.id = id; self.name = name; self.pos = pos; self.createdMs = createdMs; self.userId = userId; }
-
+/// The record `Playlist` (UniFFI's): its JSON, for the functions called by name.
+extension Playlist {
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), name: J.text(o["name"]), pos: J.int(o["pos"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
@@ -1486,14 +1465,14 @@ public struct Harken {
     /// `library.add_song`: its intent's id.
     @discardableResult public func addSong(_ input: AddSong) throws -> String { try peer.mutate(name: "library.add_song", input: input.json) }
 
-    /// `library.album`, kept.
-    public func album(_ input: AlbumInput) throws -> View<LibraryEntry> { View(try peer.view(name: "library.album", input: input.json)) { j in LibraryEntry(json: j) } }
+    /// `library.album`, kept, its rows UniFFI's.
+    public func album(_ input: AlbumInput) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.album", input: input.json)) }
 
     /// `library.albums`, kept.
     public func albums() throws -> View<AlbumsEntry> { View(try peer.view(name: "library.albums", input: "null")) { j in AlbumsEntry(json: j) } }
 
-    /// `library.artist`, kept.
-    public func artist(_ input: Artist) throws -> View<LibraryEntry> { View(try peer.view(name: "library.artist", input: input.json)) { j in LibraryEntry(json: j) } }
+    /// `library.artist`, kept, its rows UniFFI's.
+    public func artist(_ input: Artist) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.artist", input: input.json)) }
 
     /// `library.artists`, kept.
     public func artists() throws -> View<ArtistsEntry> { View(try peer.view(name: "library.artists", input: "null")) { j in ArtistsEntry(json: j) } }
@@ -1516,14 +1495,14 @@ public struct Harken {
     /// `library.describe_work`: its intent's id.
     @discardableResult public func describeWork(_ input: DescribeWork) throws -> String { try peer.mutate(name: "library.describe_work", input: input.json) }
 
-    /// `library.library`, kept.
-    public func library(_ input: Library) throws -> View<LibraryEntry> { View(try peer.view(name: "library.library", input: input.json)) { j in LibraryEntry(json: j) } }
+    /// `library.library`, kept, its rows UniFFI's.
+    public func library(_ input: Library) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.library", input: input.json)) }
 
     /// `library.look`: its intent's id.
     @discardableResult public func look(_ input: LookAt) throws -> String { try peer.mutate(name: "library.look", input: input.json) }
 
-    /// `library.recording`, kept.
-    public func recording(_ input: RecordingInput) throws -> View<LibraryEntry> { View(try peer.view(name: "library.recording", input: input.json)) { j in LibraryEntry(json: j) } }
+    /// `library.recording`, kept, its rows UniFFI's.
+    public func recording(_ input: RecordingInput) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.recording", input: input.json)) }
 
     /// `library.recordings`, kept.
     public func recordings(_ input: Recordings) throws -> View<RecordingsEntry> { View(try peer.view(name: "library.recordings", input: input.json)) { j in RecordingsEntry(json: j) } }
@@ -1531,8 +1510,8 @@ public struct Harken {
     /// `library.remove_media`: its intent's id.
     @discardableResult public func removeMedia(_ input: RemoveMedia) throws -> String { try peer.mutate(name: "library.remove_media", input: input.json) }
 
-    /// `library.search`, kept.
-    public func search(_ input: Search) throws -> View<LibraryEntry> { View(try peer.view(name: "library.search", input: input.json)) { j in LibraryEntry(json: j) } }
+    /// `library.search`, kept, its rows UniFFI's.
+    public func search(_ input: Search) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.search", input: input.json)) }
 
     /// `library.track_details`, kept.
     public func trackDetails() throws -> View<TrackDetailsEntry> { View(try peer.view(name: "library.track_details", input: "null")) { j in TrackDetailsEntry(json: j) } }
@@ -1669,14 +1648,14 @@ public struct Harken {
     /// `playlists.create_playlist`: its intent's id.
     @discardableResult public func createPlaylist(_ input: CreatePlaylist) throws -> String { try peer.mutate(name: "playlists.create_playlist", input: input.json) }
 
-    /// `playlists.playlist`, kept.
-    public func playlist(_ input: PlaylistInput) throws -> View<LibraryEntry> { View(try peer.view(name: "playlists.playlist", input: input.json)) { j in LibraryEntry(json: j) } }
+    /// `playlists.playlist`, kept, its rows UniFFI's.
+    public func playlist(_ input: PlaylistInput) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "playlists.playlist", input: input.json)) }
 
-    /// `playlists.playlists`, kept.
-    public func playlists() throws -> View<Playlist> { View(try peer.view(name: "playlists.playlists", input: "null")) { j in Playlist(json: j) } }
+    /// `playlists.playlists`, kept, its rows UniFFI's.
+    public func playlists() throws -> View<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists", input: "null")) }
 
-    /// `playlists.playlists_of`, kept.
-    public func playlistsOf(_ input: PlaylistsOf) throws -> View<Playlist> { View(try peer.view(name: "playlists.playlists_of", input: input.json)) { j in Playlist(json: j) } }
+    /// `playlists.playlists_of`, kept, its rows UniFFI's.
+    public func playlistsOf(_ input: PlaylistsOf) throws -> View<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists_of", input: input.json)) }
 
     /// `playlists.remove_from_playlist`: its intent's id.
     @discardableResult public func removeFromPlaylist(_ input: RemoveFromPlaylist) throws -> String { try peer.mutate(name: "playlists.remove_from_playlist", input: input.json) }
@@ -1695,6 +1674,10 @@ public struct Harken {
 
     /// `session.revoke`: its intent's id.
     @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
+
+    private func typed(_ v: LibraryEntryView) -> View<LibraryEntry> { View.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+
+    private func typed(_ v: PlaylistView) -> View<Playlist> { View.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
     /// The live table `listening`, as this device holds it.
     public func liveListening() -> [Listening] { peer.liveRows(table: "listening").map { Listening(json: J.parse($0)) } }

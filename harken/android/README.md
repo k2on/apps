@@ -12,6 +12,11 @@ per function (`app/src/main/kotlin/dev/harken/android/gen/Harken.kt`, never
 edited: `ARK_WRITE_GEN=1 cargo test -p harken-ffi --test gen` writes it,
 and the same test fails when it is not what the domain generates) — over
 UniFFI's bindings and the bridge's typed half (`dev.arkdb.ffi`).
+Views are typed and functions are by name: the views whose rows are
+`LibraryEntry` or `Playlist` (the library, its pages, the playlists) hand
+over UniFFI's own records (`uniffi.harken_domain`, `#[ark(ffi_view)]`), with
+no JSON per row, while every mutation, query and live call goes by name
+with JSON through the generated stubs.
 What it looks like and how it behaves is `docs/plan-android.md`.
 
 **Assembled and tested on the JVM, not run.** `nix build .#harken-apk`

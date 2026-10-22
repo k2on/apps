@@ -6,6 +6,7 @@
 use proc_macro::TokenStream;
 
 mod domain;
+mod ffi;
 
 /// `#[derive(Row)]`: a struct as a table's row — `#[ark(key)]` on its
 /// leading fields, `#[ark(refs(Row))]` on a column naming another row,
@@ -27,7 +28,9 @@ pub fn input(input: TokenStream) -> TokenStream {
 }
 
 /// `#[derive(Describe)]`: what a struct or an enum is, as `ark::row::Type`.
-#[proc_macro_derive(Describe)]
+/// `#[ark(ffi_view)]` on a view's row type (any of these derives) adds its
+/// UniFFI twin and view object, `#[ark(ffi)]` the twin alone (`ffi.rs`).
+#[proc_macro_derive(Describe, attributes(ark))]
 pub fn describe(input: TokenStream) -> TokenStream {
     domain::describe_derive(syn::parse_macro_input!(input as syn::DeriveInput)).into()
 }
