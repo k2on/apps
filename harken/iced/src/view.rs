@@ -800,7 +800,7 @@ impl App {
                 "calls \u{b7} refused \u{b7} plays \u{b7} came back playing".into(),
                 format!(
                     "{} \u{b7} {} \u{b7} {} \u{b7} {}",
-                    stats.calls, stats.refused, stats.plays, stats.came_back_playing
+                    stats.calls, stats.refused, stats.plays, stats.came_back
                 ),
             ),
             ("last refusal".into(), stats.last_refusal.clone().unwrap_or_else(|| "none".into())),

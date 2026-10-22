@@ -2178,6 +2178,7 @@ dependencies = [
  "ark-peer",
  "arkui",
  "harken-domain",
+ "harken-player",
  "iced",
  "js-sys",
  "tungstenite",

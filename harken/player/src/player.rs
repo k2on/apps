@@ -115,8 +115,8 @@ impl Player {
     }
 
     /// Make the player agree with the session, and say what happened to it;
-    /// what the server refused since, taken.
-    pub fn step(&mut self, p: &mut Peer, sound: &mut dyn Sound) {
+    /// what the server refused since, taken and answered.
+    pub fn step(&mut self, p: &mut Peer, sound: &mut dyn Sound) -> Vec<String> {
         let s = Player::listening(p);
         let v = View {
             me: &self.me,
@@ -133,7 +133,7 @@ impl Player {
                 stats: &mut self.stats,
             },
         );
-        self.refusals(p);
+        self.refusals(p)
     }
 
     /// What the server refused of this device's calls since the last ask.

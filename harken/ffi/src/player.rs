@@ -174,7 +174,7 @@ impl Player {
         let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(mut inner) = self.busy() else { return self.last() };
         self.peer.with(|p| match &sound {
-            Some(s) => inner.step(p, &mut Phone(&**s)),
+            Some(s) => drop(inner.step(p, &mut Phone(&**s))),
             None => drop(inner.refusals(p)),
         });
         self.view_of(&inner, sound.as_deref())

@@ -282,45 +282,105 @@ pub enum Press {
     Start(usize),
 }
 
-/// This device's player, as the listening reconciler drives it.
-struct Sounding<'a> {
+/// This device's player as harken's one reconciler drives it
+/// (`harken_player::Sound`): the window's [`Player`], which sounds one track,
+/// over the window's queue, which it plays through on its own
+/// ([`App::react`] moves it on at a track's end) — the browser's `<audio>`,
+/// or on the desktop nothing at all, which never plays.
+pub struct Sounding<'a> {
     player: &'a mut Player,
     server: &'a str,
+    queue: &'a mut Vec<listening::Track>,
+    /// Where the queue was taken from, as whoever set it said.
+    from: &'a mut String,
+    /// The volume, read once a look: reading it may make the element.
+    volume: Option<harken_player::Vol>,
 }
 
-impl listening::Sound for Sounding<'_> {
-    fn loaded(&self) -> Option<Id> {
-        self.player.track().map(|t| t.id)
+impl<'a> Sounding<'a> {
+    pub fn new(player: &'a mut Player, server: &'a str, queue: &'a mut Vec<listening::Track>, from: &'a mut String) -> Sounding<'a> {
+        let volume = player.volume().map(|(level, muted)| harken_player::Vol { level, muted });
+        Sounding {
+            player,
+            server,
+            queue,
+            from,
+            volume,
+        }
     }
-    fn playing(&self) -> bool {
-        self.player.is_playing()
-    }
-    fn buffering(&self) -> bool {
-        self.player.buffering()
-    }
-    fn position_ms(&self) -> i64 {
+
+    fn ms(&self) -> i64 {
         (self.player.position() * 1000.0) as i64
     }
-    fn ended(&self) -> bool {
-        self.player.ended()
+}
+
+/// Where in `queue` the player's track is: where it was put, or, the queue
+/// edited since, where that track is now.
+fn loaded_at(player: &Player, queue: &[listening::Track]) -> Option<usize> {
+    let id = player.track()?.id;
+    match queue.get(player.at()) {
+        Some(t) if t.id.0 == id => Some(player.at()),
+        _ => queue.iter().position(|t| t.id.0 == id),
     }
-    fn load(&mut self, track: &listening::Track, position_ms: i64, playing: bool) {
-        self.player.play(
-            Track {
-                id: track.id.0,
-                title: track.title.clone(),
-                creator: track.creator.clone(),
-                album: track.album.clone(),
-                ms: track.duration_ms,
+}
+
+/// Put `player` on `at` in `queue`, at this point, playing or not: the one
+/// place a queued track becomes a sound. Whether it has a file to stream.
+fn play_at(player: &mut Player, server: &str, queue: &[listening::Track], at: usize, position_ms: i64, playing: bool) -> bool {
+    let Some(track) = queue.get(at) else { return false };
+    player.play(
+        Track {
+            id: track.id.0,
+            title: track.title.clone(),
+            creator: track.creator.clone(),
+            album: track.album.clone(),
+            ms: track.duration_ms,
+        },
+        at,
+        &media_url(server, &track.file),
+    );
+    if position_ms > 0 {
+        player.seek(position_ms as f64 / 1000.0);
+    }
+    if !playing {
+        player.pause();
+    }
+    !track.file.is_empty()
+}
+
+impl harken_player::Sound for Sounding<'_> {
+    fn heard(&self) -> harken_player::Heard {
+        use harken_player::Place;
+        let at = loaded_at(self.player, self.queue);
+        let ms = self.ms();
+        harken_player::Heard {
+            queue: self.queue.iter().map(|t| t.id).collect(),
+            at,
+            playing: self.player.asked(),
+            ready: at.is_some(),
+            place: match self.player.buffering() {
+                true => Place::Believed(ms),
+                false => Place::Measured { ms, at: client::now_ms() },
             },
-            &media_url(self.server, &track.file),
-        );
-        if position_ms > 0 {
-            self.player.seek(position_ms as f64 / 1000.0);
+            ended: self.player.ended() && at.is_some_and(|i| i + 1 >= self.queue.len()),
+            from: self.from.clone(),
         }
-        if !playing {
-            self.player.pause();
-        }
+    }
+    fn take(&mut self) -> Option<harken_player::Event> {
+        let at_ms = self.ms();
+        self.player.take_stalled().then_some(harken_player::Event::Stalled { at_ms })
+    }
+    fn tracks(&self) -> Vec<listening::Track> {
+        self.queue.clone()
+    }
+    fn load(&mut self, queue: &[listening::Track], at: usize, position_ms: i64, playing: bool, from: &str) {
+        *self.queue = queue.to_vec();
+        *self.from = from.into();
+        play_at(self.player, self.server, self.queue, at, position_ms, playing);
+    }
+    fn jump(&mut self, at: usize, position_ms: i64) {
+        let playing = self.player.asked();
+        play_at(self.player, self.server, self.queue, at, position_ms, playing);
     }
     fn resume(&mut self) {
         self.player.resume();
@@ -328,21 +388,16 @@ impl listening::Sound for Sounding<'_> {
     fn pause(&mut self) {
         self.player.pause();
     }
-    fn seek(&mut self, position_ms: i64) {
-        self.player.seek(position_ms as f64 / 1000.0);
+    fn seek(&mut self, ms: i64) {
+        self.player.seek(ms as f64 / 1000.0);
     }
-    fn volume(&mut self) -> Option<(i64, bool)> {
-        self.player.volume()
+    fn volume(&self) -> Option<harken_player::Vol> {
+        self.volume
     }
-    fn set_volume(&mut self, level: i64, muted: bool) {
-        self.player.set_volume(level, muted);
+    fn set_volume(&mut self, v: harken_player::Vol) {
+        self.player.set_volume(v.level, v.muted);
+        self.volume = self.player.volume().map(|(level, muted)| harken_player::Vol { level, muted });
     }
-}
-
-/// This device's own clock, in milliseconds: how long its player has sat
-/// paused while asked to play.
-fn clock_ms() -> f64 {
-    client::monotonic_ms() as f64
 }
 
 /// One row of the device picker: a device standing in the session, the
@@ -465,6 +520,8 @@ pub struct App {
     /// as the tracks a hand-off carries — this device's own while it is its
     /// own session, and the session's copied here while it is the output.
     pub queue: Vec<listening::Track>,
+    /// Where that queue was taken from: the page it was pressed on.
+    pub queued_from: String,
     /// This device's end of the account's listening session.
     pub listening: listening::Remote,
     /// The session as it stood after the last update, when this device is
@@ -541,6 +598,7 @@ impl App {
             cursor: Point::ORIGIN,
             player: Player::new(),
             queue: Vec::new(),
+            queued_from: String::new(),
             listening: listening::Remote::new(),
             session: None,
             scrubbing: None,
@@ -1230,12 +1288,11 @@ impl App {
     fn enqueue(&mut self, id: Id, next: bool) {
         let Some(track) = self.queued(id) else { return };
         if self.listening.session(&self.peer.client).is_some() {
-            if let Err(why) = self
-                .listening
-                .call(&mut self.peer.client, "enqueue", listening::input::enqueue(&[track], next))
-            {
-                self.note = why;
-            }
+            let tracks = vec![track];
+            self.call(&match next {
+                true => harken_player::Press::Next { tracks },
+                false => harken_player::Press::Append { tracks },
+            });
             return;
         }
         if self.player.track().is_none() {
@@ -1252,11 +1309,15 @@ impl App {
 
     /// The session's transition for an edit of the queue: what `<Enter>`,
     /// `x`, `J` and `K` in the queue panel call, part of a session.
-    pub fn queue_call(message: &Message) -> Option<(&'static str, Vec<u8>)> {
+    pub fn queue_call(message: &Message) -> Option<harken_player::Press> {
+        use harken_player::Press;
         Some(match *message {
-            Message::QueueJump(i) => ("jump", listening::input::jump(i)),
-            Message::QueueRemove(i) => ("remove", listening::input::remove(i)),
-            Message::QueueMove(from, to) => ("move", listening::input::move_track(from, to)),
+            Message::QueueJump(i) => Press::Jump { index: i as i64 },
+            Message::QueueRemove(i) => Press::Remove { index: i as i64 },
+            Message::QueueMove(from, to) => Press::Move {
+                from: from as i64,
+                to: to as i64,
+            },
             _ => return None,
         })
     }
@@ -1265,9 +1326,8 @@ impl App {
     /// device's own queue otherwise.
     fn edit_queue(&mut self, message: &Message) {
         if self.listening.session(&self.peer.client).is_some() {
-            let Some((transition, input)) = Self::queue_call(message) else { return };
-            if let Err(why) = self.listening.call(&mut self.peer.client, transition, input) {
-                self.note = why;
+            if let Some(press) = Self::queue_call(message) {
+                self.call(&press);
             }
             return;
         }
@@ -1407,32 +1467,30 @@ impl App {
         }
     }
 
-    /// The transition a volume control calls: to this level, by so much, or
-    /// muted the other way. `None` for this device's own player, which is
-    /// moved here and not in the session.
-    pub fn volume_call(&self, v: &Volumed, change: Change) -> Option<(&'static str, Vec<u8>)> {
-        use listening::input;
+    /// The press a volume control is: to this level, by so much, or muted
+    /// the other way. `None` for this device's own player, which is moved
+    /// here and not in the session.
+    pub fn volume_call(&self, v: &Volumed, change: Change) -> Option<harken_player::Press> {
+        use harken_player::Change as To;
         let muted = self.level_of(v).is_some_and(|(_, m)| m);
-        Some(match (v, change) {
-            (Volumed::Local, _) => return None,
-            (Volumed::Group, Change::To(level)) => ("set_group_volume", input::set_group_volume(level)),
-            (Volumed::Group, Change::By(delta)) => ("nudge_group_volume", input::nudge_group_volume(delta)),
-            (Volumed::Group, Change::Mute) => ("set_group_mute", input::set_group_mute(!muted)),
-            (Volumed::Device(id), Change::To(level)) => ("set_volume", input::set_volume(id, level)),
-            (Volumed::Device(id), Change::By(delta)) => ("nudge_volume", input::nudge_volume(id, delta)),
-            (Volumed::Device(id), Change::Mute) => ("set_mute", input::set_mute(id, !muted)),
-        })
+        let level = match v {
+            Volumed::Local => return None,
+            Volumed::Group => harken_player::Level::Group,
+            Volumed::Device(id) => harken_player::Level::Device { id: id.clone() },
+        };
+        let change = match change {
+            Change::To(level) => To::To { level },
+            Change::By(delta) => To::By { delta },
+            Change::Mute => To::Mute { muted: !muted },
+        };
+        Some(harken_player::Press::Loud { level, change })
     }
 
     /// Move a volume: a transition, or this device's own player alone.
     fn change_volume(&mut self, level: &Level, change: Change) {
         let Some(v) = self.volumed(level) else { return };
         match self.volume_call(&v, change) {
-            Some((transition, input)) => {
-                if let Err(why) = self.listening.call(&mut self.peer.client, transition, input) {
-                    self.note = why;
-                }
-            }
+            Some(press) => self.call(&press),
             None => {
                 let (was, muted) = self.player.level();
                 match change {
@@ -1618,35 +1676,13 @@ impl App {
 
     /// Where in the queue the player is; zero when nothing is playing.
     fn playing_at(&self) -> usize {
-        let Some(id) = self.player.track().map(|t| t.id) else {
-            return 0;
-        };
-        self.queue.iter().position(|t| t.id.0 == id).unwrap_or(0)
+        loaded_at(&self.player, &self.queue).unwrap_or(0)
     }
 
     /// Put this device's player on `at` in the queue: the one place a queued
     /// track becomes a sound, so a hand-off and a click land in the same code.
     fn start_at(&mut self, at: usize, position_ms: i64, playing: bool) {
-        let Some(track) = self.queue.get(at).cloned() else {
-            return;
-        };
-        self.player.play(
-            Track {
-                id: track.id.0,
-                title: track.title.clone(),
-                creator: track.creator.clone(),
-                album: track.album.clone(),
-                ms: track.duration_ms,
-            },
-            &media_url(&self.server, &track.file),
-        );
-        if position_ms > 0 {
-            self.player.seek(position_ms as f64 / 1000.0);
-        }
-        if !playing {
-            self.player.pause();
-        }
-        if track.file.is_empty() {
+        if at < self.queue.len() && !play_at(&mut self.player, &self.server, &self.queue, at, position_ms, playing) {
             self.note = "nothing to stream — this one has no file".into();
         }
     }
@@ -1659,31 +1695,45 @@ impl App {
     /// — through nothing but the session ([`App::react`] reconciles). Its own
     /// session, unlinked, it is done here, to this device's player.
     fn press(&mut self, press: Press) -> Task<Message> {
-        let Some(session) = self.listening.session(&self.peer.client) else {
+        use harken_player::Press as P;
+        let p = match press {
+            Press::PlayPause => P::Toggle,
+            Press::Play => P::Play,
+            Press::Pause => P::Pause,
+            Press::Skip(by) => P::Skip { by: by as i64 },
+            Press::Seek(ms) => P::Seek { ms },
+            Press::Start(at) => P::Start {
+                queue: self.queue.clone(),
+                at: at as i64,
+                position_ms: 0,
+                from: self.from(),
+            },
+        };
+        if self.listening.session(&self.peer.client).is_none() {
             self.obey(press);
-            return Task::none();
-        };
-        let (transition, input) = match press {
-            Press::PlayPause if session.sounding() => ("pause", listening::input::none()),
-            Press::PlayPause | Press::Play if session.session.is_some() => ("play", listening::input::none()),
-            Press::PlayPause | Press::Play => {
-                // Nothing queued in the session: what this device last had,
-                // pressed again.
-                if self.queue.is_empty() {
-                    return Task::none();
-                }
-                let at = self.playing_at();
-                ("start", listening::input::start(&self.queue, at, 0, &self.from()))
-            }
-            Press::Pause => ("pause", listening::input::none()),
-            Press::Skip(by) => ("skip", listening::input::skip(by.signum() as i64)),
-            Press::Seek(ms) => ("seek", listening::input::seek(ms)),
-            Press::Start(at) => ("start", listening::input::start(&self.queue, at, 0, &self.from())),
-        };
-        if let Err(why) = self.listening.call(&mut self.peer.client, transition, input) {
-            self.note = why;
+        } else {
+            self.call(&p);
         }
         Task::none()
+    }
+
+    /// A press, as the session's transition, a refusal noted; this device's
+    /// own player is what a play presses when the session has none.
+    fn call(&mut self, press: &harken_player::Press) {
+        let App {
+            listening,
+            peer,
+            player,
+            server,
+            queue,
+            queued_from,
+            note,
+            ..
+        } = self;
+        let local = Sounding::new(player, server, queue, queued_from);
+        if let Err(why) = listening.call(&mut peer.client, press, Some(&local)) {
+            *note = why;
+        }
     }
 
     /// Where a queue was pressed from: the page it was on, as the address
@@ -1955,17 +2005,14 @@ impl App {
             Message::Seek(secs) => {
                 self.scrubbing = Some(secs);
                 if self.listening.joined(&self.peer.client) {
-                    let _ = self.listening.call(
-                        &mut self.peer.client,
-                        "scrub",
-                        listening::input::scrub(Some((secs as f64 * 1000.0) as i64)),
-                    );
+                    let at_ms = Some((secs as f64 * 1000.0) as i64);
+                    self.call(&harken_player::Press::Scrub { at_ms });
                 }
             }
             Message::SeekDone => {
                 if let Some(secs) = self.scrubbing.take() {
                     if self.listening.joined(&self.peer.client) {
-                        let _ = self.listening.call(&mut self.peer.client, "scrub", listening::input::scrub(None));
+                        self.call(&harken_player::Press::Scrub { at_ms: None });
                     }
                     return self.press(Press::Seek((secs as f64 * 1000.0) as i64));
                 }
@@ -1992,6 +2039,7 @@ impl App {
                     })
                     .collect();
                 let at = self.queue.iter().position(|t| t.id.0 == id).unwrap_or(0);
+                self.queued_from = self.from();
                 return self.press(Press::Start(at));
             }
             Message::OpenQueue if self.queue_panel.is_some() => self.queue_panel = None,
@@ -2030,9 +2078,7 @@ impl App {
             }
             Message::DeviceAt(at) => self.devices = Some(at),
             Message::PickDevice(to) => {
-                if let Err(why) = self.listening.call(&mut self.peer.client, "transfer", listening::input::transfer(&to)) {
-                    self.note = why;
-                }
+                self.call(&harken_player::Press::Transfer { to });
                 self.devices = None;
             }
             Message::CloseDevices => self.devices = None,
@@ -2052,14 +2098,10 @@ impl App {
             Message::Mute(level) => self.change_volume(&level, Change::Mute),
             Message::Nudge(level, by) => self.change_volume(&level, Change::By(by)),
             Message::Join(id) => {
-                if let Err(why) = self.listening.call(&mut self.peer.client, "join", listening::input::member(&id)) {
-                    self.note = why;
-                }
+                self.call(&harken_player::Press::Join { device: id });
             }
             Message::Unjoin(id) => {
-                if let Err(why) = self.listening.call(&mut self.peer.client, "unjoin", listening::input::member(&id)) {
-                    self.note = why;
-                }
+                self.call(&harken_player::Press::Unjoin { device: id });
             }
             Message::Swallow => {}
             Message::Select(source) => {
@@ -2131,24 +2173,24 @@ impl App {
                 tasks.push(self.press(press));
             }
         }
-        // The listening session. Its own session, a track that ran out moves
-        // on here; part of the session, the reconciler says it ended.
-        if self.player.ended() && !self.listening.joined(&self.peer.client) {
+        // The listening session. A track that ran out moves on through the
+        // queue, as a phone's player does — its own session, or the output,
+        // whose move the reconciler says — and never on a silent device.
+        let s = self.listening.session(&self.peer.client);
+        if self.player.ended() && s.is_none_or(|s| self.listening.outputs_here(&s)) {
             self.skip(1);
         }
-        let at = self.playing_at();
-        let from = self.from();
         let App {
             listening,
             peer,
             player,
             server,
             queue,
+            queued_from,
             ..
         } = self;
-        let mut sound = Sounding { player, server };
-        listening.reconcile(&mut peer.client, &mut sound, queue, at, &from, clock_ms());
-        if let Some(why) = self.listening.refusals(&mut self.peer.client).pop() {
+        let mut sound = Sounding::new(player, server, queue, queued_from);
+        if let Some(why) = listening.reconcile(&mut peer.client, &mut sound).pop() {
             self.note = format!("the session refused that: {why}");
         }
         self.session = self.listening.session(&self.peer.client);

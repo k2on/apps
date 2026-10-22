@@ -1,7 +1,8 @@
 //! harken's players (`docs/plan-v5.md` §1.9, S3b): **one reconciler** that
 //! makes a player agree with the account's listening session and says what
 //! happened to it, over any [`Sound`] — a phone's ExoPlayer through
-//! `harken/ffi`, a Home Assistant speaker in `harken-server`, a test's.
+//! `harken/ffi`, a Home Assistant speaker in `harken-server`, the browser's
+//! `<audio>` (and the desktop's silence) in `harken-iced`, a test's.
 //!
 //! The session is the domain's live state (`harken_domain::listening`,
 //! `queue`, `devices`, `groups`), read as one value per account

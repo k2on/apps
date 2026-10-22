@@ -9,7 +9,7 @@ use arkui::vim;
 use crate::domain::Id;
 
 use super::{alone, device, song};
-use crate::listening::{input, Active, Clock, Kind, Listening, Output, Track};
+use crate::listening::{Active, Clock, Kind, Listening, Output, Track};
 use crate::places::Focus;
 use crate::{App, Message};
 
@@ -81,9 +81,10 @@ fn the_keys_on_a_queue_row_take_it_out_move_it_or_play_it() {
     );
     assert!(matches!(app.queue_key('x'), Some(Message::QueueRemove(1))), "but can be taken out");
     assert!(matches!(app.queue_key('q'), Some(Message::CloseQueue)));
-    assert_eq!(App::queue_call(&Message::QueueRemove(2)), Some(("remove", input::remove(2))));
-    assert_eq!(App::queue_call(&Message::QueueMove(3, 2)), Some(("move", input::move_track(3, 2))));
-    assert_eq!(App::queue_call(&Message::QueueJump(3)), Some(("jump", input::jump(3))));
+    use harken_player::Press;
+    assert_eq!(App::queue_call(&Message::QueueRemove(2)), Some(Press::Remove { index: 2 }));
+    assert_eq!(App::queue_call(&Message::QueueMove(3, 2)), Some(Press::Move { from: 3, to: 2 }));
+    assert_eq!(App::queue_call(&Message::QueueJump(3)), Some(Press::Jump { index: 3 }));
     assert_eq!(App::queue_call(&Message::CloseQueue), None);
 }
 

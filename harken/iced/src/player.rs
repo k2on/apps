@@ -200,6 +200,9 @@ export function take_remote() {
         /// muted: kept, so an element made after it was set still has it.
         level: f64,
         muted: bool,
+        /// Asked to play — `play()` since the last `pause()` — whatever the
+        /// element did since: what tells a stop by itself from one asked for.
+        asked: bool,
         /// Whether the element's volume can be set at all, found out once.
         /// iOS keeps a media element's volume at 1 and hands the volume to
         /// the hardware buttons, so there a page can mute and not much else.
@@ -216,6 +219,7 @@ export function take_remote() {
                 timed: -1,
                 level: 1.0,
                 muted: false,
+                asked: false,
                 settable: None,
             }
         }
@@ -275,6 +279,7 @@ export function take_remote() {
         }
 
         pub fn play(&mut self, url: &str) {
+            self.asked = true;
             if let Some(el) = self.el() {
                 el.set_src(url);
                 let _ = el.play();
@@ -282,12 +287,14 @@ export function take_remote() {
         }
 
         pub fn resume(&mut self) {
+            self.asked = true;
             if let Some(el) = self.el() {
                 let _ = el.play();
             }
         }
 
         pub fn pause(&mut self) {
+            self.asked = false;
             if let Some(el) = self.el() {
                 el.pause().ok();
             }
@@ -295,6 +302,22 @@ export function take_remote() {
 
         pub fn is_playing(&self) -> bool {
             self.el.as_ref().is_some_and(|el| !el.paused() && !el.ended())
+        }
+
+        /// Asked to play, and not at its end.
+        pub fn asked(&self) -> bool {
+            self.asked && !self.ended()
+        }
+
+        /// Whether it stopped by itself since the last ask — an autoplay
+        /// policy, a stream gone, the platform's own pause: said once.
+        pub fn take_stalled(&mut self) -> bool {
+            let stopped = self.el.as_ref().is_some_and(|el| el.paused() && !el.ended());
+            if self.asked && stopped {
+                self.asked = false;
+                return true;
+            }
+            false
         }
 
         /// Asked to play and waiting for data: `readyState` short of
@@ -374,6 +397,12 @@ mod imp {
         pub fn is_playing(&self) -> bool {
             false
         }
+        pub fn asked(&self) -> bool {
+            false
+        }
+        pub fn take_stalled(&mut self) -> bool {
+            false
+        }
         pub fn buffering(&self) -> bool {
             false
         }
@@ -401,6 +430,8 @@ mod imp {
 /// The selection and the thing that sounds it, together.
 pub struct Player {
     track: Option<Track>,
+    /// Where in the queue it was put: what tells a track queued twice apart.
+    at: usize,
     sink: imp::Sink,
 }
 
@@ -411,6 +442,7 @@ impl Player {
     pub fn new() -> Player {
         Player {
             track: None,
+            at: 0,
             sink: imp::Sink::new(),
         }
     }
@@ -418,8 +450,8 @@ impl Player {
     /// Start something. A track with no file is still *selected* — the bar
     /// shows it and says there is nothing to stream, which is what the library
     /// looks like when a song was typed in rather than seeded.
-    pub fn play(&mut self, track: Track, url: &str) {
-        self.track = Some(track);
+    pub fn play(&mut self, track: Track, at: usize, url: &str) {
+        (self.track, self.at) = (Some(track), at);
         if url.is_empty() {
             self.sink.pause();
         } else {
@@ -468,6 +500,22 @@ impl Player {
 
     pub fn track(&self) -> Option<&Track> {
         self.track.as_ref()
+    }
+
+    /// Where in its queue it was put.
+    pub fn at(&self) -> usize {
+        self.at
+    }
+
+    /// Asked to play — whether or not the stream has started — and not at
+    /// its end: what a reconciler hears as playing.
+    pub fn asked(&self) -> bool {
+        self.track.is_some() && self.sink.asked()
+    }
+
+    /// Whether it stopped by itself since the last ask, said once.
+    pub fn take_stalled(&mut self) -> bool {
+        self.sink.take_stalled()
     }
 
     pub fn is_playing(&self) -> bool {
