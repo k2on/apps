@@ -1,6 +1,6 @@
-//! The ArkDB v5 peer: a driver of the one machine (§1.7), twice — the
-//! log's and, when the module has live state, the volatile space's (§1.9)
-//! — over one disk. A device and a server are the same [`Peer`] in two
+//! The ArkDB v5 peer: a driver of the log's machine (§1.7) and, when the
+//! module has live state, the volatile space's lighter one (`ark::live`,
+//! §1.9), over one disk. A device and a server are the same [`Peer`] in two
 //! roles:
 //!
 //! - **a device** ([`Peer::open`]) is a replica, or an authority alone
@@ -43,9 +43,10 @@
 //! every token by the row it names and closes what is revoked or expired,
 //! as `ark_auth::server::Auth` says (`serve`).
 //!
-//! **A peer is three instances** (`instance`: a machine and what keeps
-//! it) wired together: the log's, the live space's, and the local one
-//! beside them on the same disk, whose rows (`local`) are what a peer keeps
+//! **A peer is two instances** (`instance`: a machine and what keeps
+//! it) and the live space's machine wired together: the log's instance, the
+//! live machine, which keeps nothing, and the local instance beside them on
+//! the same disk, whose rows (`local`) are what a peer keeps
 //! beside its log — a server's journal and volatile space, a device's
 //! replica and pending intents.
 //!
@@ -78,11 +79,12 @@ use std::sync::Arc;
 
 use ark::frames::Frame;
 use ark::hash::EntryHash;
+use ark::live::Live as LiveMachine;
 use ark::log::{Durable, Entry, EntryId, Logged, Origin, Seq};
 use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Who};
 use ark::plan::Maintained;
 use ark::schema::{Schema, Space};
-use ark::store::Change;
+use ark::store::{Change, Store};
 use ark::{Domain, Refusal};
 
 pub use app::{nobody, Standing, Status, Update};
@@ -121,7 +123,7 @@ pub type Arrive = Arc<dyn Fn(&Who, &[u8]) -> Option<Vec<u8>> + Send + Sync>;
 /// The live space: its module; as a device, what its `Hello` says it is
 /// and the functions relayed as ephemeral, and how often; as a server, the
 /// functions it authors as devices come and go and the input it authors
-/// them with, and the entries kept above the horizon.
+/// them with.
 #[derive(Clone)]
 pub struct Live {
     pub module: Module,
@@ -132,7 +134,6 @@ pub struct Live {
     pub on_leave: Option<String>,
     pub on_restore: Option<String>,
     pub arrive: Arrive,
-    pub keep: Option<usize>,
 }
 
 impl Live {
@@ -146,7 +147,6 @@ impl Live {
             on_leave: None,
             on_restore: None,
             arrive: Arc::new(|_, _| None),
-            keep: None,
         }
     }
 }
@@ -219,17 +219,26 @@ impl At {
             pending: p.pending.iter().map(|x| x.entry.id).collect(),
         }
     }
+
+    /// The live machine's: its `seq`, no hash.
+    pub fn live(p: &LiveMachine) -> At {
+        At {
+            head: p.head(),
+            state: p.store.state_hash(),
+            pending: p.pending.iter().map(|x| x.entry.id).collect(),
+        }
+    }
 }
 
 /// One recorded act, what it said, and where its machine stood after.
 pub type Recorded = (Act, Vec<Output>, Option<At>);
 
-/// Three instances wired: the log's machine on the disk, the live one, and
-/// the local instance beside them on the same disk; and what wires them.
+/// The log's machine on the disk, the live one, and the local instance
+/// beside them on the same disk; and what wires them.
 pub struct Peer {
     pub config: Config,
     pub log: Instance,
-    pub live: Option<Instance>,
+    pub live: Option<LiveMachine>,
     /// Every input given, when recording.
     pub record: Option<Vec<Recorded>>,
     /// Whether a connection to its server is up.
@@ -266,19 +275,22 @@ pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
     }
 }
 
-fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
-    let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone()).in_space(space);
+fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>) -> Instance {
+    let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone());
     if let Some(o) = origin {
         p.origin = o;
     }
     Instance::new(p, None)
 }
 
-/// A device's live machine as `me`.
-fn live_of(config: &Config, me: &Who, origin: Origin) -> Option<Instance> {
+/// A live machine as `me`: a device's replica, or a server's authority.
+fn live_of(config: &Config, me: &Who, origin: Option<Origin>, authority: bool) -> Option<LiveMachine> {
     let l = config.live.as_ref()?;
-    let mut p = machine(&l.module, Role::Replica, me, Some(origin), Space::Volatile);
-    p.device = l.device.clone();
+    let mut p = LiveMachine::new(l.module.schema.clone(), l.module.functions.clone(), authority, me.clone());
+    if let Some(o) = origin {
+        p.origin = o;
+    }
+    p.device = l.device.clone().filter(|_| !authority);
     Some(p)
 }
 
@@ -331,7 +343,7 @@ pub fn who(l: &ark_auth::Login) -> Who {
 }
 
 impl Peer {
-    fn with(config: Config, log: Instance, live: Option<Instance>, local: Instance) -> Peer {
+    fn with(config: Config, log: Instance, live: Option<LiveMachine>, local: Instance) -> Peer {
         Peer {
             config,
             log,
@@ -382,9 +394,9 @@ impl Peer {
             rec.push((Act::Open(me.clone(), origin, r.fork, r.joining.clone()), vec![], None));
         }
         let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
-        let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
+        let mut log = machine(&config.log, role, &me, Some(origin));
         (log.disk, log.joining) = (Some(disk), r.joining);
-        let live = live_of(&config, &me, origin);
+        let live = live_of(&config, &me, Some(origin), false);
         let mut p = Peer::with(config, log, live, local);
         (p.record, p.link, p.joined) = (record, link, p.log.joining.is_some());
         p.saved = (r.local, pending.iter().map(|e| (e.local, e.id)).collect());
@@ -407,10 +419,19 @@ impl Peer {
         Peer::opened(self.config, me, self.log.into_disk(), local, self.record, link)
     }
 
-    pub fn machine(&self, space: Space) -> Option<&Machine> {
+    /// The store of `space`'s machine, the optimistic state.
+    pub fn store(&self, space: Space) -> Option<&Store> {
         match space {
-            Space::Durable => Some(&self.log),
-            Space::Volatile => self.live.as_deref(),
+            Space::Durable => Some(&self.log.store),
+            Space::Volatile => self.live.as_ref().map(|l| &l.store),
+        }
+    }
+
+    /// Where `space`'s machine stands: its head.
+    pub fn head(&self, space: Space) -> Option<Seq> {
+        match space {
+            Space::Durable => Some(self.log.log().head().0),
+            Space::Volatile => self.live.as_ref().map(|l| l.seq),
         }
     }
 
@@ -418,13 +439,6 @@ impl Peer {
     /// its local instance's.
     pub fn failure(&self) -> Option<&str> {
         self.log.failure.as_deref().or(self.local.failure.as_deref())
-    }
-
-    fn instance(&mut self, space: Space) -> Option<&mut Instance> {
-        match space {
-            Space::Durable => Some(&mut self.log),
-            Space::Volatile => self.live.as_mut(),
-        }
     }
 
     /// One input to one machine of a device, and what it says, routed.
@@ -438,8 +452,11 @@ impl Peer {
     /// record to the disk; changes to the views; verdicts kept.
     fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Vec<Output> {
         let rec = self.record.is_some().then(|| input.clone());
-        let Some(m) = self.instance(space) else { return vec![] };
-        let out = m.step(input);
+        let out = match (space, &mut self.live) {
+            (Space::Durable, _) => self.log.step(input),
+            (Space::Volatile, Some(l)) => l.step(input),
+            (Space::Volatile, None) => return vec![],
+        };
         for o in &out {
             match o {
                 Output::Send(b) => match from {
@@ -466,7 +483,10 @@ impl Peer {
             }
         }
         if let Some(i) = rec {
-            let at = At::of(self.machine(space).expect("a machine that spoke"));
+            let at = match (space, &self.live) {
+                (Space::Volatile, Some(l)) => At::live(l),
+                _ => At::of(&self.log),
+            };
             self.record
                 .as_mut()
                 .expect("recording")
@@ -577,7 +597,7 @@ impl Peer {
     /// One input of this peer's own, routed, and the verdict it was given
     /// here and now.
     fn verdict(&mut self, space: Space, input: Input) -> Result<(), String> {
-        if self.machine(space).is_none() {
+        if self.store(space).is_none() {
             return Err(format!("no {space:?} machine here"));
         }
         let said = self.route(space, None, input);
@@ -670,7 +690,7 @@ impl Peer {
             r.push((Act::SignIn(who.clone(), origin), vec![], None));
         }
         self.log.me = who.clone();
-        if let Some(mut p) = live_of(&self.config, &who, origin) {
+        if let Some(mut p) = live_of(&self.config, &who, Some(origin), false) {
             // The origin goes on counting in the live space too, unless new.
             p.local = self.live.as_ref().filter(|_| !other).map_or(0, |x| x.local);
             self.live = Some(p);
@@ -701,7 +721,7 @@ impl Peer {
             Space::Volatile => self.config.live.as_ref().map(|l| &l.module),
         };
         let d = m.and_then(|m| m.domain.clone()).ok_or_else(|| Refusal::new("no domain here"))?;
-        let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;
+        let store = self.store(space).ok_or_else(|| Refusal::new("no machine of that space"))?;
         let view = d.watch(store, &ctx, name, input)?;
         self.views.push((space, Some(view)));
         Ok(self.views.len() - 1)

@@ -427,7 +427,6 @@ pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
         on_leave: get("on_leave"),
         on_restore: get("on_restore"),
         arrive: Arc::new(crate::domain::host::arrive),
-        keep: Some(256),
         ..Live::new(hosted.module.clone())
     });
     c.keep = Some(keep);

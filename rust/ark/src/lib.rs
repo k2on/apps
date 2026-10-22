@@ -30,6 +30,7 @@ pub mod format;
 pub mod frames;
 pub mod hash;
 pub mod json;
+pub mod live;
 pub mod log;
 pub mod peer;
 pub mod plan;

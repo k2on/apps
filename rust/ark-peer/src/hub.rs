@@ -20,7 +20,7 @@
 //! `on_join` (`Live::arrive`), and the server authors `on_join` when a
 //! session's first such connection says it and `on_leave` when its last
 //! closes, so a device on two connections is one device. On a restart the
-//! volatile space is what the server wrote of it when it last closed
+//! volatile space is the rows the server wrote of it when it last closed
 //! (its local instance's `volatile` rows), and `on_restore` is authored
 //! over it.
 //!
@@ -36,13 +36,13 @@
 use std::collections::BTreeMap;
 
 use ark::frames::{Frame, Verdict};
-use ark::log::{Durable, Snapshot};
+use ark::log::Durable;
 use ark::peer::{Feed, Input, Journal, Peer as Machine, Role, Who};
 use ark::row::Bytes;
 use ark::schema::Space;
 
 use crate::local::{Last, LiveRow, Refused, Waits};
-use crate::{machine, Config, Disk, Fold, Instance, Peer};
+use crate::{live_of, machine, Config, Disk, Fold, Peer};
 
 pub type ConnId = u64;
 
@@ -111,7 +111,7 @@ impl Peer {
         let (disk, local) = crate::local::beside(disk);
         let me = authority();
         let auth = || Role::Authority { journal: Journal::default() };
-        let mut log = machine(&config.log, auth(), &me, None, Space::Durable);
+        let mut log = machine(&config.log, auth(), &me, None);
         (log.disk, log.fold) = (Some(disk), Fold::keep(config.keep));
         let stored = log.stored();
         if let Some(e) = &log.failure {
@@ -131,10 +131,7 @@ impl Peer {
             j.waiting.entry(w.origin).or_default().push((Who { actor, session, roles }, w.entry));
         }
         log.local = log.local.max(journal(&mut log).last_of(&origin));
-        let live = config.live.as_ref().map(|l| Instance {
-            fold: Fold::keep(l.keep),
-            ..machine(&l.module, auth(), &me, None, Space::Volatile)
-        });
+        let live = live_of(&config, &me, None, true);
         let mut p = Peer::with(config, log, live, local);
         (p.hub.serving, p.hub.next) = (true, 1);
         if let (false, Some(live)) = (kept.is_empty(), &mut p.live) {
@@ -155,12 +152,10 @@ impl Peer {
     }
 
     /// Writes the volatile space as it stands, whole, for the next open:
-    /// its rows, and its log's.
+    /// its rows.
     pub fn close(&mut self) {
         let Some(live) = &self.live else { return };
-        let (seq, hash) = live.log().head();
-        let (state, rows) = (live.store.state_hash(), live.store.snapshot_rows());
-        let rows = Snapshot { seq, hash, state, rows }.kv_rows();
+        let rows = live.store.snapshot_rows();
         self.keep(|db| {
             db.volatile.scan().iter().try_for_each(|k| db.volatile.remove(k))?;
             let rows = rows.into_iter().flat_map(|(table, rs)| rs.into_iter().map(move |r| (table.clone(), r)));

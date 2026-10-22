@@ -1020,3 +1020,138 @@ fn perf_d_frame_child() {
     assert_eq!(c.log.store.rows("media").count() as u64, n, "every row adopted");
     println!("FRAME {} {high} {held} {rss}", ms(took));
 }
+
+// (v) The live space -------------------------------------------------------------
+
+/// The room's live space over the wire, by hand: a hub serving it and `C`
+/// devices linked to it, each frame carried at once. `N` calls of
+/// `room.point` (not relayed) from one device, each delivered to every
+/// device: the round trip and the hub's step per call, first and last
+/// hundred; what the hub and the devices hold after them that they did not
+/// before (live bytes, the process's); and a
+/// device joining after them: its `Hello`'s answer, in bytes and time.
+#[test]
+#[ignore]
+fn perf_v_live() {
+    use ark_dev::demo::{arrival, room, Point};
+    eprintln!("\n== (v) the live space: N calls from one device of C, every frame carried");
+    eprintln!(
+        "{:<14} {:>6} {:>10} {:>10} {:>10} {:>12} {:>10} {:>10}",
+        "C", "N", "call µs", "first100", "last100", "held KB", "join B", "join µs"
+    );
+    let r = room();
+    let hub_config = || {
+        let mut c = Config::new(Module::of(&domain()));
+        c.live = Some(ark_peer::Live {
+            on_join: Some("room.on_join".into()),
+            on_leave: Some("room.on_leave".into()),
+            arrive: Arc::new(arrival),
+            ..ark_peer::Live::new(Module::of(&r))
+        });
+        c
+    };
+    let device = |k: usize| {
+        let mut c = Config::new(Module::of(&domain()));
+        c.live = Some(ark_peer::Live {
+            device: Some(format!("d{k}").into_bytes()),
+            ..ark_peer::Live::new(Module::of(&r))
+        });
+        let who = dev(&format!("u{k}@d{k}")).unwrap();
+        let mut p = Peer::open(c, who, Box::new(Memory::default()), false);
+        p.linked = true;
+        p
+    };
+    // Every frame each side has, carried until none is left.
+    fn carry(hub: &mut Peer, ds: &mut [(Peer, u64)]) -> usize {
+        let mut moved = 0;
+        loop {
+            let mut any = false;
+            for (d, c) in ds.iter_mut() {
+                for f in d.take_frames() {
+                    any = true;
+                    moved += f.len();
+                    for (to, b) in hub.frame(*c, f, 0) {
+                        DELIVER.with(|q| q.borrow_mut().push((to, b)));
+                    }
+                }
+            }
+            let q: Vec<(u64, Vec<u8>)> = DELIVER.with(|q| std::mem::take(&mut *q.borrow_mut()));
+            for (to, b) in q {
+                any = true;
+                if let Some((d, _)) = ds.iter_mut().find(|(_, c)| *c == to) {
+                    d.receive(b);
+                }
+            }
+            if !any {
+                return moved;
+            }
+        }
+    }
+    thread_local! {
+        static DELIVER: std::cell::RefCell<Vec<(u64, Vec<u8>)>> = const { std::cell::RefCell::new(vec![]) };
+    }
+    for c in [2usize, 10] {
+        for n in [1000u64, 10_000] {
+            let mut hub = Peer::serve(hub_config(), Box::new(Memory::default()), 0);
+            let mut ds: Vec<(Peer, u64)> = (0..c)
+                .map(|k| {
+                    let d = device(k);
+                    let conn = hub.accept(d.me().clone());
+                    (d, conn)
+                })
+                .collect();
+            for (d, _) in ds.iter_mut() {
+                d.connected();
+            }
+            carry(&mut hub, &mut ds);
+            let before = live_bytes();
+            let mut per = vec![];
+            for i in 0..n {
+                let t = Instant::now();
+                ds[0]
+                    .0
+                    .author(Space::Volatile, "room.point", Point { x: i as i64 }.to_bytes(), i as i64)
+                    .unwrap();
+                carry(&mut hub, &mut ds);
+                per.push(t.elapsed());
+            }
+            let held = live_bytes() - before;
+            let mut late = device(c);
+            let conn = hub.accept(late.me().clone());
+            late.connected();
+            let mut one = vec![(late, conn)];
+            let t = Instant::now();
+            let _ = carry(&mut hub, &mut one);
+            let join = t.elapsed();
+            let f = one[0].0.take_frames();
+            assert!(f.is_empty());
+            let k = per.len().min(100);
+            eprintln!(
+                "{:<14} {:>6} {:>10.2} {:>10.2} {:>10.2} {:>12.1} {:>10} {:>10.1}",
+                c,
+                n,
+                us(mean(&per)),
+                us(mean(&per[..k])),
+                us(mean(&per[per.len() - k..])),
+                held as f64 / 1024.0,
+                joined_bytes(&mut hub, c),
+                us(join)
+            );
+        }
+    }
+}
+
+/// What a device joining now is sent in answer to its live `Hello`.
+fn joined_bytes(hub: &mut Peer, k: usize) -> usize {
+    let who = dev(&format!("u{k}x@late")).unwrap();
+    let c = hub.accept(who);
+    let hello = Frame::Hello {
+        space: Space::Volatile,
+        cursor: 0,
+        hash: None,
+        device: None,
+        schema: Default::default(),
+        version: String::new(),
+    };
+    hub.frame(c, hello.enc(), 0).iter().filter(|(to, _)| *to == c).map(|(_, b)| b.len()).sum()
+}

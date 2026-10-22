@@ -146,7 +146,6 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         on_join: Some("room.on_join".into()),
         on_leave: Some("room.on_leave".into()),
         arrive: Arc::new(arrival),
-        keep: Some(4),
         ..Live::new(Module::of(&room))
     });
     let device = |name: &str| Config {

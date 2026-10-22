@@ -200,7 +200,7 @@ impl Handle {
     }
 
     fn sequenced(&self, space: Space, f: impl FnOnce(&mut Peer) -> Result<(), String> + Send + 'static) -> Option<Result<Seq, String>> {
-        self.with(move |p| f(p).map(|_| p.machine(space).map_or(0, |m| m.log().head().0)))
+        self.with(move |p| f(p).map(|_| p.head(space).unwrap_or(0)))
     }
 
     /// The in-process transport: a device's link dialling this server in

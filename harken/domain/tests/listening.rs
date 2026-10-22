@@ -21,11 +21,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use ark::format::Encode;
+use ark::frames::Frame;
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::{Ctx, Input, Who};
+use ark::schema::Space;
 use ark::store::Store;
 use ark_dev::sim::{Net, Op};
-use ark_peer::{Config, Live, Module};
+use ark_peer::{Act, Config, Live, Module};
 use common::domain;
 use harken_domain::host::Listening;
 use harken_domain::Id;
@@ -1195,8 +1197,8 @@ fn a_report_of_a_volume_is_heard_in_order() {
     w.call("media_player.kitchen", "equip", &equip);
     w.call("media_player.kitchen", "report_volume", &ReportVolume { level: 20, muted: true });
     assert_eq!(w.heard(phone).last().map(String::as_str), Some("report_volume"), "the phone hears it");
-    let live = |i: i64| w.net.clients[&i].live.as_ref().unwrap().log().head();
-    assert_eq!(live(phone), w.net.hub.live.as_ref().unwrap().log().head(), "in order: at the hub's head");
+    let live = |i: i64| w.net.clients[&i].live.as_ref().unwrap().seq;
+    assert_eq!(live(phone), w.net.hub.live.as_ref().unwrap().seq, "in order: at the hub's head");
     assert_eq!(live(kitchen), live(phone));
     let d = w.seen_by(phone).device("media_player.kitchen").cloned().unwrap();
     assert_eq!((d.volume, d.muted), (20, true));
@@ -1229,7 +1231,6 @@ impl Wire {
             on_leave: get("on_leave"),
             on_restore: get("on_restore"),
             arrive: Arc::new(harken_domain::host::arrive),
-            keep: Some(64),
             ..Live::new(module())
         });
         Wire {
@@ -1289,10 +1290,18 @@ impl Wire {
         Listening::of(&self.net.clients[&i].live.as_ref().unwrap().store, "alice")
     }
 
-    /// The transitions client `i`'s volatile machine applied, in order.
+    /// The transitions client `i`'s volatile machine was sent, in order:
+    /// its recording's (the machine keeps no history).
     fn heard(&self, i: i64) -> Vec<String> {
-        let log = self.net.clients[&i].live.as_ref().unwrap().log().entries();
-        log.iter().map(|l| l.entry.func.trim_start_matches("listening.").to_string()).collect()
+        let frames = self.net.clients[&i].record.iter().flatten().filter_map(|(a, _, _)| match a {
+            Act::Step(Space::Volatile, Input::Frame { bytes, .. }) => Frame::dec(bytes).ok(),
+            _ => None,
+        });
+        let logged = frames.flat_map(|f| match f {
+            Frame::Page { logged, .. } => logged,
+            _ => vec![],
+        });
+        logged.map(|l| l.entry.func.trim_start_matches("listening.").to_string()).collect()
     }
 
     fn converged(&self) {

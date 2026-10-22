@@ -80,18 +80,13 @@
 //! the chain, a new connection hands it over again rather than pushing its
 //! entries one by one, which a gap would hold.
 //!
-//! **Live state is a second machine** (§1.9): a peer [`Peer::in_space`]
-//! `Volatile` is this machine over the volatile tables, sharing the
-//! connection, every frame of its log naming its space. Its store hashes and
-//! snapshots those tables only; it makes nothing durable; an intent whose
-//! changes touch a table of the other space is refused, in either space.
-//! A device says what it is in its `Hello` ([`Peer::device`]); its
-//! `on_join` and `on_leave` are entries the authority authors through
-//! `Mutate`, as the driver sees connections come and go. `resync` is a
-//! `Hello` with a hash the authority lacks, answered with a snapshot. A
-//! volatile authority forgets on restart what each origin last pushed, so
-//! there a push past a gap is taken, and one that comes after it is
-//! refused as overtaken: what was live then is gone.
+//! **Live state is its own machine** (§1.9, [`crate::live`]), lighter than
+//! this one, sharing the connection, every frame naming its space. What
+//! both judge an intent by is one function (`peer::run`: an intent whose
+//! changes touch a table of the other space is refused, in either space),
+//! and both rebase by `undo` and `redo`. A peer [`Peer::in_space`]
+//! `Volatile` is this machine over the volatile tables, which only an
+//! unwired local instance is.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -223,7 +218,7 @@ pub struct Pending {
     pub entry: Entry,
     pub changes: Vec<Change>,
     /// What undoing `changes` does to the digests, worked out once.
-    undo: Memo<Undo>,
+    pub(crate) undo: Memo<Undo>,
 }
 
 impl Pending {
@@ -238,7 +233,7 @@ impl Pending {
 
 /// A value worked out when first asked for, not part of what holds it.
 #[derive(Clone, Debug, Default)]
-struct Memo<T>(std::sync::OnceLock<T>);
+pub(crate) struct Memo<T>(pub(crate) std::sync::OnceLock<T>);
 
 impl<T> PartialEq for Memo<T> {
     fn eq(&self, _: &Memo<T>) -> bool {
@@ -357,13 +352,13 @@ pub enum Output {
 }
 
 #[derive(Default)]
-struct Out {
-    out: Vec<Output>,
-    told: Vec<Change>,
+pub(crate) struct Out {
+    pub(crate) out: Vec<Output>,
+    pub(crate) told: Vec<Change>,
 }
 
 impl Out {
-    fn send(&mut self, f: Frame) {
+    pub(crate) fn send(&mut self, f: Frame) {
         self.out.push(Output::Send(f.enc()));
     }
     fn persist(&mut self, r: Record) {
@@ -447,6 +442,62 @@ fn fit(schema: &Schema, facts: &[Change]) -> (Vec<Change>, bool) {
         });
     }
     (out, other.get())
+}
+
+/// Runs an intent over `store` and leaves what it did applied, all or
+/// none, or its refusal: no function by its name here, the function's own,
+/// or a change to a table of another space than the store's (§1.9). The
+/// one judgment of an intent, whichever machine of a peer runs it.
+pub(crate) fn run(functions: &Functions, store: &mut Store, e: &Entry) -> Result<Vec<Change>, Refusal> {
+    let p = functions
+        .get(&e.func)
+        .cloned()
+        .ok_or_else(|| Refusal(format!("no function {}", e.func)))?;
+    let changes = p.apply(store, &Ctx::of(e), &e.input)?;
+    let (schema, space) = (store.schema_arc().clone(), store.space());
+    if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != space)) {
+        for c in changes.iter().rev() {
+            store.apply(&c.inverse()).expect("an inverse applies");
+        }
+        return Err(Refusal(format!("{} is not in this space", c.table())));
+    }
+    Ok(changes)
+}
+
+/// The pending intents' changes undone from `store`, newest first, each
+/// undoing told.
+pub(crate) fn undo(store: &mut Store, pending: &[Pending], told: &mut Vec<Change>) {
+    for c in pending.iter().rev().flat_map(|p| p.changes.iter().rev()) {
+        let c = c.inverse();
+        store.apply(&c).expect("a pending change undoes");
+        told.push(c);
+    }
+}
+
+/// The pending intents run again, in order, over `store` as it is; one that
+/// now refuses stays pending with no changes, the authority's to judge.
+pub(crate) fn redo(functions: &Functions, store: &mut Store, pending: &mut Vec<Pending>, told: &mut Vec<Change>) {
+    for p in std::mem::take(pending) {
+        let changes = run(functions, store, &p.entry).unwrap_or_default();
+        told.extend(changes.iter().cloned());
+        pending.push(Pending::new(p.entry, changes));
+    }
+}
+
+/// An intent of `me`'s, the `local`-th of `origin`.
+pub(crate) fn intent(me: &Who, origin: Origin, local: i64, func: String, input: Vec<u8>, now: i64) -> Entry {
+    Entry {
+        id: EntryId::of(origin, local),
+        actor: me.actor.clone(),
+        session: me.session.clone(),
+        origin,
+        local,
+        roles: me.roles.clone(),
+        func,
+        // An input is its encoding; no bytes are `()`'s.
+        input: if input.is_empty() { ().to_bytes() } else { input },
+        now,
+    }
 }
 
 /// A store with an empty log: one standing on the empty chain.
@@ -608,9 +659,6 @@ impl Peer {
         if !o.told.is_empty() {
             o.out.insert(0, Output::Changes(o.told));
         }
-        if self.space == Space::Volatile {
-            o.out.retain(|x| !matches!(x, Output::Persist(_)));
-        }
         o.out
     }
 
@@ -618,39 +666,20 @@ impl Peer {
 
     /// Runs an intent over the store and applies what it did, all or none.
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
-        let p = self
-            .functions
-            .get(&e.func)
-            .cloned()
-            .ok_or_else(|| Refusal(format!("no function {}", e.func)))?;
-        let changes = p.apply(&mut self.store, &Ctx::of(e), &e.input)?;
-        let schema = self.store.schema_arc().clone();
-        if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
-            for c in changes.iter().rev() {
-                self.store.apply(&c.inverse()).expect("an inverse applies");
-            }
-            return Err(Refusal(format!("{} is not in this space", c.table())));
-        }
+        let changes = run(&self.functions, &mut self.store, e)?;
         o.told.extend(changes.iter().cloned());
         Ok(changes)
     }
 
     fn undo_pending(&mut self, o: &mut Out) {
-        for c in self.pending.iter().rev().flat_map(|p| p.changes.iter().rev()) {
-            let c = c.inverse();
-            self.store.apply(&c).expect("a pending change undoes");
-            o.told.push(c);
-        }
+        undo(&mut self.store, &self.pending, &mut o.told);
     }
 
     /// Runs the pending intents again, in order, over the store as it is;
     /// one that now refuses stays pending with no changes, the authority's
     /// to judge.
     fn redo_pending(&mut self, o: &mut Out) {
-        for p in std::mem::take(&mut self.pending) {
-            let changes = self.attempt(&p.entry, o).unwrap_or_default();
-            self.pending.push(Pending::new(p.entry, changes));
-        }
+        redo(&self.functions, &mut self.store, &mut self.pending, &mut o.told);
     }
 
     /// Takes an intent out of the pending ones, the rest rebased.
@@ -666,19 +695,7 @@ impl Peer {
 
     /// The next intent of this peer's own.
     fn entry(&self, func: String, input: Vec<u8>, now: i64) -> Entry {
-        let local = self.local + 1;
-        Entry {
-            id: EntryId::of(self.origin, local),
-            actor: self.me.actor.clone(),
-            session: self.me.session.clone(),
-            origin: self.origin,
-            local,
-            roles: self.me.roles.clone(),
-            func,
-            // An input is its encoding; no bytes are `()`'s.
-            input: if input.is_empty() { ().to_bytes() } else { input },
-            now,
-        }
+        intent(&self.me, self.origin, self.local + 1, func, input, now)
     }
 
     fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, o: &mut Out) {
@@ -923,16 +940,11 @@ impl Peer {
         }
         // A gap: the ones before it come first, pushed again after a Hello.
         let last = j.last_of(&entry.origin);
-        // At or below the last and judged by no verdict here: in the log's
-        // space, sequenced below the horizon by a log opened since (a
-        // refusal's verdict is journaled); in the volatile, overtaken.
+        // At or below the last and judged by no verdict here: sequenced
+        // below the horizon by a log opened since (a refusal's verdict is
+        // journaled).
         if entry.local <= last {
-            let verdict = match space {
-                Space::Durable => Verdict::Ok { seq: self.log().base_seq() },
-                Space::Volatile => Verdict::Refused {
-                    why: "overtaken by a later one of its origin".into(),
-                },
-            };
+            let verdict = Verdict::Ok { seq: self.log().base_seq() };
             return o.send(Frame::Verdict { space, id, verdict });
         }
         // Behind a held one of its origin: it waits, in order; the held one
@@ -948,14 +960,12 @@ impl Peer {
             }
             return;
         }
-        if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
+        if entry.local != last + 1 {
             return;
         }
         if self.functions.get(&entry.func).is_none() {
             let func = entry.func.clone();
-            if space == Space::Durable {
-                self.journal().waiting.insert(origin, vec![(who.clone(), entry)]);
-            }
+            self.journal().waiting.insert(origin, vec![(who.clone(), entry)]);
             return o.send(Frame::Verdict {
                 space,
                 id,
@@ -1212,10 +1222,8 @@ impl Peer {
     /// A snapshot: the store becomes its rows, the log stands on it, the
     /// pending intents run again on top and are pushed again.
     fn reset(&mut self, s: Snapshot, o: &mut Out) {
-        // One this history passed is a late copy, but a volatile authority
-        // that restarted is behind its replicas: they go back to it.
-        let (n, _) = self.log().head();
-        if (s.seq == n || s.seq < n && self.space == Space::Durable) && self.log().has(s.seq, &s.hash) {
+        // One this history passed is a late copy.
+        if s.seq <= self.log().head().0 && self.log().has(s.seq, &s.hash) {
             return;
         }
         let new = self.on_fit(&s.rows, [s.base().to_bytes()]);

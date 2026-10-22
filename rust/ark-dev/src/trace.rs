@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::hash::{hex, unhex};
+use ark::live::Live as LiveMachine;
 use ark::log::{Durable, EntryId, Logged, Origin};
 use ark::peer::{Input, Output, Peer, Role, Who};
 use ark::schema::{Schema, Space};
@@ -115,7 +116,7 @@ pub fn record(from: &str, c: &ark_peer::Peer) -> String {
 pub struct Player {
     config: Config,
     log: Option<Peer>,
-    live: Option<Peer>,
+    live: Option<LiveMachine>,
 }
 
 impl Player {
@@ -127,26 +128,25 @@ impl Player {
         }
     }
 
-    fn fresh(&self, who: &Who, origin: Origin, space: Space) -> Option<Peer> {
-        let m = match space {
-            Space::Durable => &self.config.log,
-            Space::Volatile => &self.config.live.as_ref()?.module,
-        };
-        let mut p = Peer::new(m.schema.clone(), m.functions.clone(), Role::Replica, who.clone()).in_space(space);
+    fn fresh(&self, who: &Who, origin: Origin) -> Peer {
+        let m = &self.config.log;
+        let mut p = Peer::new(m.schema.clone(), m.functions.clone(), Role::Replica, who.clone());
         p.origin = origin;
-        p.device = self
-            .config
-            .live
-            .as_ref()
-            .and_then(|l| l.device.clone())
-            .filter(|_| space == Space::Volatile);
+        p
+    }
+
+    fn fresh_live(&self, who: &Who, origin: Origin) -> Option<LiveMachine> {
+        let l = self.config.live.as_ref()?;
+        let mut p = LiveMachine::new(l.module.schema.clone(), l.module.functions.clone(), false, who.clone());
+        (p.origin, p.device) = (origin, l.device.clone());
         Some(p)
     }
 
-    pub fn peer(&self, s: Space) -> Option<&Peer> {
+    /// Where `s`'s machine stands.
+    pub fn at(&self, s: Space) -> Option<At> {
         match s {
-            Space::Durable => self.log.as_ref(),
-            Space::Volatile => self.live.as_ref(),
+            Space::Durable => self.log.as_ref().map(At::of),
+            Space::Volatile => self.live.as_ref().map(At::live),
         }
     }
 
@@ -154,7 +154,7 @@ impl Player {
     pub fn act(&mut self, a: &Act) -> Vec<Output> {
         match a {
             Act::Open(w, o, f, j) => {
-                (self.log, self.live) = (self.fresh(w, *o, Space::Durable), self.fresh(w, *o, Space::Volatile));
+                (self.log, self.live) = (Some(self.fresh(w, *o)), self.fresh_live(w, *o));
                 if let Some(l) = &mut self.log {
                     if f.is_some() {
                         l.role = ark_peer::alone_at(*f);
@@ -173,18 +173,13 @@ impl Player {
                     l.me = w.clone();
                 }
                 let local = self.live.as_ref().filter(|_| same).map_or(0, |x| x.local);
-                self.live = self.fresh(w, *o, Space::Volatile);
+                self.live = self.fresh_live(w, *o);
                 if let Some(x) = &mut self.live {
                     x.local = local;
                 }
             }
-            Act::Step(s, i) => {
-                let p = match s {
-                    Space::Durable => self.log.as_mut(),
-                    Space::Volatile => self.live.as_mut(),
-                };
-                return p.expect("a machine opened").step(i.clone());
-            }
+            Act::Step(Space::Durable, i) => return self.log.as_mut().expect("a machine opened").step(i.clone()),
+            Act::Step(Space::Volatile, i) => return self.live.as_mut().expect("a machine opened").step(i.clone()),
         }
         vec![]
     }
@@ -327,7 +322,7 @@ pub fn replay(text: &str) -> Result<usize, String> {
         if said != want {
             return Err(format!("step {n}: said {said:?}, recorded {want:?}"));
         }
-        if p.peer(sp).map(|x| state(&At::of(x))).as_ref() != Some(&s["after"]) {
+        if p.at(sp).map(|x| state(&x)).as_ref() != Some(&s["after"]) {
             return Err(format!("step {n}: stands elsewhere than recorded"));
         }
     }

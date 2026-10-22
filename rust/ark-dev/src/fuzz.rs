@@ -174,7 +174,6 @@ pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
             on_join: Some("room.on_join".into()),
             on_leave: Some("room.on_leave".into()),
             arrive: Arc::new(crate::demo::arrival),
-            keep: Some(4),
             ..Live::new(Module::of(&room))
         });
     }

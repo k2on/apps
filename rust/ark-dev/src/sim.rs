@@ -341,7 +341,7 @@ impl Net {
                 Space::Durable => c.config.log.domain.as_ref(),
                 Space::Volatile => c.config.live.as_ref().and_then(|l| l.module.domain.as_ref()),
             };
-            let store = &c.machine(*space).unwrap().store;
+            let store = c.store(*space).unwrap();
             let fresh = d.expect("a domain").watch(store, ctx, f, input).map_err(|r| r.0)?.rows();
             if c.values(*v).as_ref() != Some(&fresh) || *mirror != fresh {
                 return Err(format!("client {i}'s view {v} is not a fresh evaluation"));
@@ -395,25 +395,26 @@ impl Net {
     }
 
     /// One head, one state, nothing pending, and one chain where both hold
-    /// it (a horizon moves a log's base), on every whole client, in each
-    /// space.
+    /// it (a horizon moves a log's base), on every whole client; and the
+    /// live space at the hub's `seq` with its rows.
     pub fn converged(&self) -> Result<(), String> {
         for (i, c) in &self.clients {
-            let pairs = [(Some(&c.log), Some(&self.hub.log)), (c.live.as_ref(), self.hub.live.as_ref())];
-            for (space, (p, a)) in [Space::Durable, Space::Volatile].into_iter().zip(pairs) {
-                let (Some(p), Some(a)) = (p, a) else { continue };
-                if p.feed != ark::peer::Feed::Whole {
-                    continue;
-                }
+            let (p, a) = (&c.log, &self.hub.log);
+            if p.feed == ark::peer::Feed::Whole {
                 let from = p.log().base_seq().max(a.log().base_seq());
                 let chain = p.log().head().0 < from || p.log().after(from).eq(a.log().after(from));
                 if p.log().head() != a.log().head() || !chain || p.store != a.store || !p.pending.is_empty() {
+                    let (n, at) = (p.pending.len(), a.log().head());
                     return Err(format!(
-                        "client {i} {space:?} at {:?} with {} pending; the server at {:?}",
-                        p.log().head(),
-                        p.pending.len(),
-                        a.log().head()
+                        "client {i} Durable at {:?} with {n} pending; the server at {at:?}",
+                        p.log().head()
                     ));
+                }
+            }
+            if let (Some(p), Some(a)) = (&c.live, &self.hub.live) {
+                if p.seq != a.seq || p.store != a.store || !p.pending.is_empty() {
+                    let n = p.pending.len();
+                    return Err(format!("client {i} Volatile at {} with {n} pending; the server at {}", p.seq, a.seq));
                 }
             }
         }

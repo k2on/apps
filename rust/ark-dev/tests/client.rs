@@ -11,13 +11,13 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Who};
+use ark::peer::{Ctx, Input, Who};
 use ark::row::Id;
 use ark::schema::Space;
 use ark_dev::demo::{arrival, live, room};
 use ark_dev::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
 use ark_dev::sim::{who, Net, Op};
-use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
+use ark_peer::{Act, Config, Disk, Live, Memory, Module, Peer};
 
 fn demo() -> Config {
     Config::of(Arc::new(ark_dev::demo::demo()))
@@ -127,7 +127,7 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
 /// The room: two devices arrive and are here, by `on_join` the hub authored;
 /// a rename is heard; three pointer moves inside one relay interval go up
 /// as two calls; a device leaving is gone from every view. Falsified by the
-/// client relaying every call at once: the hub's volatile chain held three
+/// client relaying every call at once: the phone's machine was given three
 /// moves.
 #[test]
 fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
@@ -137,7 +137,6 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
         on_join: Some("room.on_join".into()),
         on_leave: Some("room.on_leave".into()),
         arrive: std::sync::Arc::new(arrival),
-        keep: Some(8),
         ..Live::new(Module::of(&r))
     });
     let config = |name: &str| Config {
@@ -163,16 +162,11 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     n.run(&Op::Wait(100));
     n.deliver();
     n.views_hold().unwrap();
-    let moves = n
-        .hub
-        .live
-        .as_ref()
-        .unwrap()
-        .log()
-        .entries()
-        .iter()
-        .filter(|l| l.entry.func == "room.point")
-        .count();
+    let moves = n.clients[&0].record.iter().flatten().filter(|(a, _, _)| match a {
+        Act::Step(Space::Volatile, Input::Mutate { func, .. }) => func == "room.point",
+        _ => false,
+    });
+    let moves = moves.count();
     assert_eq!(moves, 2, "the second and third coalesced");
     n.converged().unwrap();
     n.run(&Op::Partition(0));

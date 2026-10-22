@@ -43,7 +43,8 @@ the functions its machine runs; `steps`, one per line, are `open` (who,
 the origin drawn once, a fork when alone, a chain handed over and not
 answered), `sign_in`, and `step` — `space`, `in` (a frame, a mutate, a
 lifecycle input, an open's `Durable`), `out` (every output, bytes as hex)
-and `after` (head, hash, state hash, pending ids). The runner replays
+and `after` (head, hash, state hash, pending ids; the live machine's
+head is its `seq` and its hash zero, for it keeps no chain). The runner replays
 every step into fresh machines (`ark_dev::trace`) and fails at the first
 that says other than `out` or stands other than `after`. The corpus
 beyond these files — every client of every fleet and fuzz session — is

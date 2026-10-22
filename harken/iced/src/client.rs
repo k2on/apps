@@ -113,7 +113,7 @@ pub fn present(r: &Replica) -> bool {
 pub fn live_status(r: &Replica) -> Option<LiveStatus> {
     let l = r.live.as_ref()?;
     Some(LiveStatus {
-        seq: l.log().head().0,
+        seq: l.seq,
         pending: l.pending.len(),
         synced: present(r),
     })

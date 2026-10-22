@@ -1067,7 +1067,7 @@ impl Headless {
                     .client
                     .live
                     .as_ref()
-                    .map_or((0, 0), |l| (l.log().head().0, l.pending.len()));
+                    .map_or((0, 0), |l| (l.seq, l.pending.len()));
                 Answer::default()
                     .set(
                         "value",

@@ -3,13 +3,14 @@
 //! ([`Fold`]).
 //!
 //! Two concepts make every kind of instance. A table is durable or
-//! volatile (§1.3). An instance is wired — one of a [`Peer`](crate::Peer)'s
-//! three, linked to its server or serving one — or it is not: a machine in
-//! the authority role never offered a link. So a schema's tables are
-//! durable and synced (the app's log), volatile and synced (its live
-//! state), durable and **local** ([`Instance::open`]: the log's own format
-//! on a disk, `kv` and `log`), or volatile and **ephemeral**
-//! ([`Instance::ephemeral`]: no disk). The instance is over the machine, not
+//! volatile (§1.3). An instance is wired — the log's of a
+//! [`Peer`](crate::Peer), linked to its server or serving one — or it is
+//! not: a machine in the authority role never offered a link. So a
+//! schema's tables are durable and synced (the app's log), durable and
+//! **local** ([`Instance::open`]: the log's own format on a disk, `kv` and
+//! `log`), or volatile and **ephemeral** ([`Instance::ephemeral`]: no
+//! disk); volatile and synced (live state) is no instance but the live
+//! machine (`ark::live`), which keeps nothing. The instance is over the machine, not
 //! a schema: a peer's synced machines are built from a domain at run time;
 //! an unwired one is read and written through a `Db<S>` of its schema's
 //! struct ([`Instance::read`], [`Instance::write`]).
@@ -58,9 +59,10 @@ impl Fold {
 /// One machine and what keeps it (§1.7): its disk, when it has one —
 /// opened from what the disk holds, every `Persist` written in order (and,
 /// while a write fails, kept to write again, the failure said), its log
-/// folded as its [`Fold`] says. A [`Peer`](crate::Peer) is three of these
-/// wired together; one alone is a schema's tables on a machine never
-/// linked, read and written through a `Db<S>` of its schema's struct.
+/// folded as its [`Fold`] says. A [`Peer`](crate::Peer) is two of these
+/// and the live machine wired together; one alone is a schema's tables on
+/// a machine never linked, read and written through a `Db<S>` of its
+/// schema's struct.
 pub struct Instance {
     pub machine: Machine,
     pub disk: Option<Box<dyn Disk>>,

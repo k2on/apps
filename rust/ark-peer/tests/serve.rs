@@ -346,7 +346,6 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         on_leave: Some("room.on_leave".into()),
         on_restore: Some("room.on_restore".into()),
         arrive: Arc::new(arrival),
-        keep: Some(8),
         ..Live::new(Module::of(&r))
     });
     let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
@@ -377,6 +376,5 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         vec![1, 0],
         "here kept, the pointer let go"
     );
-    let l = hub.live.as_ref().unwrap();
-    assert_eq!(l.log().head().0, l.log().base_seq() + 1, "on_restore, the one entry since the open");
+    assert_eq!(hub.live.as_ref().unwrap().seq, 1, "on_restore, the one entry since the open");
 }

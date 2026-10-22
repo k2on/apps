@@ -118,7 +118,6 @@ impl Hall {
             on_leave: get("on_leave"),
             on_restore: get("on_restore"),
             arrive: Arc::new(host::arrive),
-            keep: Some(256),
             ..Live::new(Module::of(&d))
         });
         let hub = Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), now_ms()));

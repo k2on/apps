@@ -690,7 +690,6 @@ mod tests {
                 on_leave: get("on_leave"),
                 on_restore: get("on_restore"),
                 arrive: Arc::new(crate::domain::host::arrive),
-                keep: Some(64),
                 ..Live::new(m)
             });
             Net {

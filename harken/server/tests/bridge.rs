@@ -740,7 +740,7 @@ const SONGS: usize = ark::peer::PAGE + 44;
 
 /// How far into the session's volatile log a client has heard.
 fn live_head(p: &Peer) -> i64 {
-    p.client.live.as_ref().unwrap().log().head().0
+    p.client.live.as_ref().unwrap().seq
 }
 
 /// The whole way round: a phone arrives and the kitchen stands beside it;

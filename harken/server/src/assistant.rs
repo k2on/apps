@@ -2791,8 +2791,8 @@ pub mod ha {
     use crate::domain::{Device, Output as Sound};
     use crate::domain::{Listening as Row, ListeningDevice};
     use ark::format::Encode;
-    use ark::peer::{Input, Output, Peer, Role, Who};
-    use ark::schema::Space;
+    use ark::live::Live;
+    use ark::peer::{Input, Output, Who};
     use ark::store::{Read, Scan};
     use ark_peer::Handle;
     use ark_peer::{now_ms, ConnId};
@@ -3014,7 +3014,7 @@ pub mod ha {
         entities: Vec<String>,
         /// Each speaker's volatile machine in each session it has stood
         /// in, by (account, entity): kept, so its `local` goes on.
-        machines: HashMap<(String, String), Peer>,
+        machines: HashMap<(String, String), Live>,
         /// The connections of those standing now.
         standing: HashMap<(String, String), ConnId>,
         /// Frames the hub sent a speaker, and the thread woken for them.
@@ -3037,13 +3037,12 @@ pub mod ha {
             };
             let module = &self.hosted.module;
             let peer = self.machines.entry(k.clone()).or_insert_with(|| {
-                let mut p = Peer::new(
+                let mut p = Live::new(
                     module.schema.clone(),
                     module.functions.clone(),
-                    Role::Replica,
+                    false,
                     who.clone(),
-                )
-                .in_space(Space::Volatile);
+                );
                 let said = Device {
                     can_play: true,
                     id: entity.into(),
