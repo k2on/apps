@@ -36,7 +36,8 @@ use crate::{alone_at, draw_origin, now_ms, Disk};
 /// holds, when `rows`), all but the last `keep` are folded. A server keeps
 /// `keep` entries and folds at twice that; a local instance keeps none and
 /// folds once its entries outnumber its rows (and 64), so a fold, which
-/// writes every row, is paid for by as many writes.
+/// writes every row, is paid for by as many writes; a device's live machine
+/// keeps none and folds at 64 ([`Fold::REPLICA`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fold {
     pub keep: usize,
@@ -45,6 +46,14 @@ pub struct Fold {
 }
 
 impl Fold {
+    /// A device's live machine's, a replica's: none kept, folded once 64
+    /// are held — a replica reads no entry below its head again.
+    pub const REPLICA: Fold = Fold {
+        keep: 0,
+        slack: 64,
+        rows: false,
+    };
+
     /// A server's: `keep` entries above the horizon (none kept when none).
     pub fn keep(keep: Option<usize>) -> Option<Fold> {
         keep.map(|keep| Fold {

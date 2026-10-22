@@ -278,7 +278,7 @@ fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Spac
 fn live_of(config: &Config, me: &Who, origin: Origin) -> Option<Instance> {
     let l = config.live.as_ref()?;
     let mut p = machine(&l.module, Role::Replica, me, Some(origin), Space::Volatile);
-    p.device = l.device.clone();
+    (p.device, p.fold) = (l.device.clone(), Some(Fold::REPLICA));
     Some(p)
 }
 

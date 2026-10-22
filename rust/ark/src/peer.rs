@@ -91,7 +91,14 @@
 //! `Hello` with a hash the authority lacks, answered with a snapshot. A
 //! volatile authority forgets on restart what each origin last pushed, so
 //! there a push past a gap is taken, and one that comes after it is
-//! refused as overtaken: what was live then is gone.
+//! refused as overtaken: what was live then is gone. It keeps the verdicts
+//! of each origin's last [`WINDOW`] `local`s only: one pushed again inside
+//! them is answered as it was, one below them refused as overtaken.
+//!
+//! **The horizon** (`Compact`) is moved by its driver, in either role, up
+//! to the head (a device alone, up to its fork): a replica's pending
+//! intents are rebased by their own changes over the head, never by an
+//! entry below it, so a replica folds as an authority does.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -107,6 +114,11 @@ use crate::Refusal;
 
 /// How many logged entries a `Page` carries at most.
 pub const PAGE: usize = 256;
+
+/// How many of an origin's last `local`s a volatile authority keeps the
+/// verdicts of: one pushed again inside them is answered as it was, one
+/// below them is refused as overtaken.
+pub const WINDOW: i64 = 64;
 
 /// What a function knows of the intent it runs for: all frozen in the
 /// entry, so every run of it, anywhere, is the same.
@@ -508,6 +520,9 @@ impl Peer {
     /// The store's rows as confirmed — the pending intents' changes
     /// undone — and the log's: what this peer makes durable whole.
     pub fn confirmed_rows(&self) -> Rows {
+        if self.pending.is_empty() {
+            return self.store.kv_rows();
+        }
         let mut s = self.store.clone();
         for c in self.pending.iter().rev().flat_map(|p| p.changes.iter().rev()) {
             s.apply(&c.inverse()).expect("a pending change undoes");
@@ -727,8 +742,7 @@ impl Peer {
     /// An intent judged: logged with its facts and told everyone, or
     /// refused; the verdict kept.
     fn judged(&mut self, entry: Entry, r: Result<Vec<Change>, Refusal>, o: &mut Out) -> Result<Seq, String> {
-        let id = entry.id;
-        self.journal().pass(entry.origin, &entry.actor, entry.local);
+        let (id, origin, local, actor) = (entry.id, entry.origin, entry.local, entry.actor.clone());
         let v = match r {
             Err(why) => Err(why.0),
             Ok(facts) => {
@@ -756,8 +770,24 @@ impl Peer {
             }
         };
         let verdict = v.clone().map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq });
-        self.journal().verdicts.insert(id, verdict);
+        self.verdict(origin, &actor, local, id, verdict);
         v
+    }
+
+    /// A verdict kept, its origin's `local` passed. In the volatile space
+    /// only an origin's last [`WINDOW`] are kept: as the window moves, the
+    /// verdicts it leaves (at most a window's) are forgotten.
+    fn verdict(&mut self, origin: Origin, actor: &str, local: i64, id: EntryId, verdict: Verdict) {
+        let space = self.space;
+        let j = self.journal();
+        let was = j.last_of(&origin);
+        j.pass(origin, actor, local);
+        j.verdicts.insert(id, verdict);
+        if space == Space::Volatile {
+            for k in (was - WINDOW).max(0) + 1..=(local - WINDOW).min(was) {
+                j.verdicts.remove(&EntryId::of(origin, k));
+            }
+        }
     }
 
     // * Frames
@@ -1079,8 +1109,7 @@ impl Peer {
     /// An intent refused without being run: its verdict kept, its `local`
     /// passed.
     fn refuse(&mut self, e: &Entry, why: String, o: &mut Out) {
-        self.journal().pass(e.origin, &e.actor, e.local);
-        self.journal().verdicts.insert(e.id, Verdict::Refused { why: why.clone() });
+        self.verdict(e.origin, &e.actor, e.local, e.id, Verdict::Refused { why: why.clone() });
         o.send(Frame::Verdict {
             space: self.space,
             id: e.id,
@@ -1310,18 +1339,26 @@ impl Peer {
         });
     }
 
-    /// Moves the horizon to `n` (an authority's; a device alone keeps what
-    /// is above its fork): the log's rows below it deleted, and the store
-    /// made durable whole, which folds every write before.
+    /// Moves the horizon to `n`, at most the head (a device alone keeps
+    /// what is above its fork): the log's rows below it deleted, and the
+    /// store as confirmed made durable whole, which folds every write
+    /// before. A replica may move its own: its pending intents stand on
+    /// the head and are rebased by their own changes, so no entry below
+    /// the head is read again; a `Hello` says the head.
     fn compact(&mut self, n: Seq, o: &mut Out) {
-        let Role::Authority { journal } = &self.role else { return };
         let (head, base) = (self.log().head().0, self.log().base_seq());
-        let n = n.clamp(base, journal.fork.map_or(head, |(f, _)| f.min(head)));
+        let fork = match &self.role {
+            Role::Authority { journal } => journal.fork,
+            Role::Replica => None,
+        };
+        let n = n.clamp(base, fork.map_or(head, |(f, _)| f.min(head)));
         if n == base {
             return;
         }
         self.store.log_horizon(n);
-        o.persist(Record::Rows(self.store.kv_rows()));
+        if self.space == Space::Durable {
+            o.persist(Record::Rows(self.confirmed_rows()));
+        }
     }
 
     /// Opens what was made durable, under this peer's schema, which may be a
