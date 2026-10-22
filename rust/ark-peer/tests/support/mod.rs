@@ -54,12 +54,12 @@ pub fn linked(token: &str, url: &str, dial: impl Dial + 'static) -> (Peer, Recei
 
 /// Pumps a peer until `f` holds, or panics after two seconds.
 pub fn until(c: &mut (Peer, Receiver<()>), what: &str, f: impl Fn(&Peer, &Pumped) -> bool) {
-    for _ in 0..400 {
+    let held = ark_peer::link::until(Duration::from_secs(2), Duration::ZERO, || {
         let p = c.0.pump();
-        if f(&c.0, &p) {
-            return;
+        f(&c.0, &p) || {
+            wait(&c.0, &c.1, Duration::from_millis(5));
+            false
         }
-        wait(&c.0, &c.1, Duration::from_millis(5));
-    }
-    panic!("never: {what}");
+    });
+    assert!(held, "never: {what}");
 }

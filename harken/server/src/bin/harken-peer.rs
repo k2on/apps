@@ -607,24 +607,15 @@ impl Headless {
         self.unasked.extend(fresh);
     }
 
-    /// Looks until `done`, or the timeout; with `step`, `done` is asked
-    /// once a step. Whether it was done.
+    /// Looks at the peer every `step` until `done`, or the timeout:
+    /// whether it was done.
     fn until(
         &self,
         timeout: Duration,
         step: Duration,
         mut done: impl FnMut(&mut Peer) -> bool,
     ) -> bool {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if self.peer.with(&mut done) {
-                return true;
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(step.min(deadline - Instant::now()));
-        }
+        ark_peer::link::until(timeout, step, || self.peer.with(&mut done))
     }
 
     fn status(&self) -> Answer {
