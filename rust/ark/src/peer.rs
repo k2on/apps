@@ -387,8 +387,6 @@ pub struct Peer {
     asked: Option<Seq>,
     /// An authority's connections fed by a scope, by session.
     pub served: BTreeMap<String, Served>,
-    /// What this device says it is, in every `Hello` (§1.9).
-    pub device: Option<Vec<u8>>,
     /// The version of the domain this peer runs, in every `Hello` beside
     /// its schema's hash: what an operator reads a fleet's spread by.
     pub version: String,
@@ -531,7 +529,6 @@ impl Peer {
             diverged: vec![],
             asked: None,
             served: BTreeMap::new(),
-            device: None,
             version: String::new(),
             joining: None,
             foreign: None,
@@ -1189,7 +1186,7 @@ impl Peer {
                 space: self.space,
                 cursor: n,
                 hash: Some(h),
-                device: self.device.clone(),
+                device: None,
                 schema: self.store.schema_hash(),
                 version: self.version.clone(),
             });
@@ -1213,7 +1210,7 @@ impl Peer {
             space: self.space,
             cursor,
             hash: None,
-            device: self.device.clone(),
+            device: None,
             schema: self.store.schema_hash(),
             version: self.version.clone(),
         });
@@ -1306,7 +1303,7 @@ impl Peer {
             space: self.space,
             cursor: at,
             hash: Some(hash),
-            device: self.device.clone(),
+            device: None,
             schema: self.store.schema_hash(),
             version: self.version.clone(),
         });
