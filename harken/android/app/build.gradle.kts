@@ -11,8 +11,10 @@ plugins {
 /**
  * harken's library for the phone (`packages.harken-android-lib`): `jniLibs/<abi>/libharken_ffi.so`,
  * the Rust kernel with harken's domain linked in, and `kotlin/`, the Kotlin UniFFI writes for it with
- * the bridge's typed half (`dev.arkdb.ffi`). `harken-apk` passes the store path as `-PharkenLib`; a
- * laptop builds it once (`nix build .#harken-android-lib -o ../ffi/android`) and is pointed at that.
+ * the bridge's typed half (`dev.arkdb.ffi`) — but for the domain's own (`uniffi.harken_domain`), which
+ * is checked in under `src/main/kotlin/.../gen/uniffi/`, where `ark-dev gen` writes it from the domain's
+ * source, and which the library leaves out so it is not compiled twice. `harken-apk` passes the store
+ * path as `-PharkenLib`; a laptop builds it once (`nix build .#harken-android-lib -o ../ffi/android`) and is pointed at that.
  */
 val harkenLib: String = providers.gradleProperty("harkenLib").getOrElse(rootProject.file("../ffi/android").path)
 

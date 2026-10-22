@@ -34,6 +34,20 @@ the media session, the Custom Tab's redirect, JNA's loading on a device and
 the notification permission are the parts only a phone can say anything
 about.
 
+## Developer loop
+
+Every generated file the app compiles of the domain — `gen/Harken.kt` and
+UniFFI's own Kotlin for its twins, `gen/uniffi/harken_domain.kt`
+(`uniffi.harken_domain`, which the library's `kotlin/` leaves out) — is
+checked in and written from the domain's source by one command, with no
+compiler: `ark-dev gen` (built once, `cargo build --release -p ark-dev`;
+`--check` writes nothing and fails on a file that differs). It takes about
+40 ms, so it runs on save and the IDE's Kotlin sees a changed domain type
+at once:
+
+    autocmd BufWritePost harken/domain/src/*.rs silent !ark-dev gen
+    watchexec -w harken/domain/src -e rs -- ark-dev gen    # or: ls harken/domain/src/*.rs | entr ark-dev gen
+
 ## Building
 
 From the repository root, with nothing but nix:

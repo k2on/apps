@@ -1152,6 +1152,73 @@ own `Hashable` redundant). Not verified: an APK, a phone, an iPhone; a
 typed sum in Kotlin (UniFFI writes an all-unit enum as an `enum class`,
 which the extension's `is` would not match; harken has none).
 
+### Landed G1: generated files from the domain's source
+
+Save a domain file and the phones' IDEs see its types at once: **`ark-dev
+gen`**, one run with no compiler, writes every generated file they read
+of the domain — `Harken.kt` and `Harken.swift` as before, and now UniFFI's
+own Kotlin and Swift for the domain's twins, checked in beside them
+(`gen/uniffi/harken_domain.kt`, `Gen/harken_domain.swift`) — only those
+that changed; `--check` writes none and fails on any that differs. An
+editor's on-save hook or any file watcher calls it (the phones' READMEs,
+"Developer loop"). Three parts, in `ark-dev` (its dependencies are built
+before a domain edit and none of it is in a domain rebuild, so no new
+crate): **the source reader** (`gen/source.rs`) parses the crate with
+`syn` — items split at the top level, function bodies left as tokens but
+for the domain's builder — and mirrors the derives' rules into the
+compiled domain's `Catalog`, whole (columns, keys, indexes, references,
+spaces, every function's kind, input, answer and refinements); names
+resolve as within the crate (modules, `use`s, globs, `crate`/`self`/
+`super`, generic aliases), to `ark`'s and the standard library's known
+types, and to `ark-auth`'s as it is built (its rows, and
+`ark_auth::register`'s functions registered on a schema of its two
+tables); a job's `Effect::register` is mirrored. It refuses, with the file
+and line, any type outside what it knows, a `serde` attribute but
+`default`, a `cfg` but `feature`/`test`/`all`/`any`/`not`, an item macro
+but `uniffi::setup_scaffolding!`, `ark_auth::install!` and `macro_rules!`,
+a generic domain type, a `.with(..)` but a function's, `ark_auth`'s or an
+`Effect`'s `register`. **The same emitters** walk that catalog.
+**UniFFI's bindings** (`gen/uniffi.rs`): the twins' metadata (`ffi.rs`'s
+records and enums, `<T>View` with `new`, `rows`, `take`, `<T>Taken`, the
+bridge's `Peer`, `Refusal`, `Taken` and `RowId` by name) is encoded as
+UniFFI's macros encode it, so its checksums are theirs, laid in a minimal
+ELF's symbols, and read by UniFFI's own generators as any library
+(`generate --library`, crate roots for each `uniffi.toml` instead of
+`cargo metadata`); of the bridge only its namespace is needed. The nix
+library leaves its copies of the two files out (gradle's `kotlin/`, the
+xcframework's `swift/`), `checks.ffi` diffs them against the release
+library's `uniffi-bindgen` output, and the iOS type-check reads `Gen/`'s.
+`ark_ffi`'s and `harken_ffi`'s bindings change only with the bridge and
+stay the build's.
+
+*Measured* (one machine, 4 cores, shared with other builds at a load of
+1.6 to 5; a one-line edit in `schema.rs`):
+
+| what the IDE waits for | before | after (`ark-dev gen`, release) |
+|---|---|---|
+| `Harken.kt`, `Harken.swift` | `ARK_WRITE_GEN=1 cargo test -p harken-ffi --test gen`: 17.0, 17.3 s (34 s the first) | p50 38 ms, p95 50 ms, process start to files written, 20 saves; 51 ms cold |
+| UniFFI's `harken_domain` Kotlin and Swift | `cargo build -p harken-ffi --lib` and `uniffi-bindgen generate --library` twice: 17.0 to 19.0 s (the bindgen 1.4 s a language, mostly `cargo metadata`); in the IDE only after the nix library | the same run |
+
+Of a run (p50, p95, ms): reading the source 20, 30 — of which lexing
+(`proc-macro2` with span locations, for the lines a refusal names) is
+4 to 9 — the typed Kotlin and Swift 4, 6, UniFFI's two at once 7, 13,
+writing 2.6, 2.9. The domain alone, dev, `CARGO_INCREMENTAL=0`: `cargo
+check` 3.9, 4.0 s, `cargo build` 13.3, 15.4 s here, so codegen is most of
+a rebuild; a check cannot replace the compiled pin, which runs. Source:
+`ark-dev` 2,246 → 4,454 (`source.rs`, the reader, is most of it); tests:
+harken-ffi's `gen.rs` 28 → 119 and `twins.rs` 71 non-blank. Pins: the
+source's catalog equals the compiled one whole; `ark-dev gen`'s four
+files equal the compiled path's and the tree's; an unknown type is
+refused with its line; and, ignored as they need the host library
+(`cargo build -p harken-ffi --lib`, run here), the twins' metadata equals
+the library's, checksums and all, every one of the library's 83 items
+re-encodes byte for byte, and UniFFI's generators over the built library
+write the checked-in files — each falsified once. Not verified: an APK or
+the xcframework built over the checked-in files (the nix evaluation is;
+`checks.ffi` and `harken-module` ran), an editor's hook in use, a twin
+enum against a library (harken has none; the encoding is held by the
+bridge's enums), a domain using what the reader refuses.
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a

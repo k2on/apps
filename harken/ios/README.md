@@ -34,6 +34,19 @@ written). That check found two things a Mac would have: the app's own
 views were written against iOS 17's SwiftUI and read, not compiled. Expect
 the first build in Xcode to want small fixes.
 
+## Developer loop
+
+Every generated file the app compiles of the domain — `Harken/Gen/Harken.swift`
+and UniFFI's own Swift for its twins, `Harken/Gen/harken_domain.swift`
+(which the xcframework's `swift/` leaves out) — is checked in and written
+from the domain's source by one command, with no compiler: `ark-dev gen`
+(built once, `cargo build --release -p ark-dev`; `--check` writes nothing
+and fails on a file that differs). It takes about 40 ms, so it runs on save
+and Xcode or sourcekit-lsp sees a changed domain type at once:
+
+    autocmd BufWritePost harken/domain/src/*.rs silent !ark-dev gen
+    watchexec -w harken/domain/src -e rs -- ark-dev gen    # or: ls harken/domain/src/*.rs | entr ark-dev gen
+
 ## Generating the project
 
 ```
