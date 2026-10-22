@@ -1006,6 +1006,67 @@ comment added to `harken/domain/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
+### Landed: live fold
+
+The one-machine experiment's finding, fixed with the one machine: a
+device's live `Instance` was never folded (`Compact` was an authority's
+only), so every replica held every live entry for its life, and the
+authority's live verdicts grew by one per entry. **A replica moves its own
+horizon**: `Compact(n)` is taken in either role, clamped to the head (a
+device alone, to its fork as before), the store made durable whole as
+confirmed (`confirmed_rows`, its pending intents' changes undone; nothing
+in the volatile space). A replica needs no entry below its head — the
+rebase undoes and re-runs its pending intents by their own changes, a
+`Hello` says the head, and going alone forks at the head — so a device's
+live instance folds as `Fold::REPLICA` (`{0, 64, no rows}`): none kept,
+folded once 64 are held. **Volatile verdicts are a window**: a volatile
+authority keeps the verdicts of each origin's last 64 `local`s
+(`peer::WINDOW`), forgetting those the window leaves as it moves (at most
+64 per verdict, even past a gap); a push again inside it is answered as it
+was, one below it is refused as overtaken by the rule that was already
+there — so a live call from more than 64 calls ago, pushed again, is
+refused though it was taken, as in the experiment. Durable verdicts are
+unchanged. The server's live log was already folded at harken-server's
+`keep` 256 (at most 512 held).
+
+Measured by `ark-peer/tests/live_memory.rs` (`live_held_measured`,
+debug profile with the kernel at `opt-level 2`; 10,000 `room.point` calls
+from `C` devices in turn, every frame carried by hand; counted, not RSS):
+
+| | before | after |
+|---|---:|---:|
+| `C` = 2: entries a device holds; the server's; live verdicts | 10,002; 493; 10,002 | 57; 493; 130 |
+| `C` = 10: the same | 10,010; 501; 10,010 | 0; 501; 650 |
+| a call's round trip, `C` = 2; `C` = 10 (µs) | 68.3; 171.9 | 68.5; 167.3 |
+
+(A device holds 0 to 64, folding every 65th; the experiment measured
+~575 B an entry.) The per-call time is unchanged: a fold is a split of the
+log's map, and the chain is still hashed per live entry, which is the
+speed the experiment's second machine bought and this does not.
+
+Still growing, not changed: **a device's durable log** is never folded
+either (its `Instance` has no `Fold`; its disk's `log` blob grows until a
+snapshot writes `kv`) — the same `Fold::REPLICA` with `rows` would fold
+it, once `reset`'s check for a late snapshot (`log().has(seq)`) also
+takes one below the horizon as late; **the authority's durable verdicts**
+keep an `Ok` per entry for the server's life (the refusals are rows of
+the journal, rewritten whole at each refusal) — an `Ok` at or below the
+horizon could be forgotten as the log folds, since a push there is
+already answered `Ok { seq: base }`, as after a restart; a device's
+`Standing` per durable intent, and its live refusals until the app takes
+them. A device's relay and its frames to send are bounded; the hub's
+deliveries are taken at each release. Source: `ark` 4,956 → 4,975,
+`ark-peer` 2,550 → 2,555; tests `ark` 3,961 → 4,038 (three in
+`tests/volatile.rs`), `ark-peer` 1,620 → 1,742 (`live_memory.rs`), each
+falsified once. Protocol, vectors and traces unchanged. Tests 456 passed
+(each crate's, one target at a time for the disk), clippy and fmt clean,
+the fuzzer 4,000 sessions (seeds from 1, and from 2026 with every trace
+replayed), none failed. Not verified: a fold under a pending live intent
+in a fuzzed session (a session's live log reaches 26 entries at most over
+seeds 1–300, below the 64 a fold waits for; `tests/volatile.rs` folds
+under one by hand); the
+release profile; a phone or a browser.
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
