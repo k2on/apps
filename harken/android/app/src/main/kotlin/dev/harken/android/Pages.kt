@@ -6,7 +6,7 @@
 // is shown (`Library.hold`), spliced as the log moves.
 package dev.harken.android
 
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height

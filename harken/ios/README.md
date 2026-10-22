@@ -65,7 +65,8 @@ outputs; regenerate rather than edit.
   last notice, and the sign-in (dev auth: the code read off the server's
   redirect, exchanged through the kernel).
 - **`Phone`** (Rows.swift) reads harken's views as the domain's own rows
-  (`LibraryEntry`, `Playlist`) and makes each write one of the domain's
+  (`LibraryEntry`, `Playlist`: UniFFI's records, read typed with no JSON;
+  the generated Swift gives them only their JSON, as an extension) and makes each write one of the domain's
   functions through the generated stubs, returning the entry's id so that
   its standing can be asked later.
 

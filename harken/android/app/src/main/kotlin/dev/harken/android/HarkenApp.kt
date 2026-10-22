@@ -57,7 +57,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
-import dev.harken.android.gen.Playlist
+import uniffi.harken_domain.Playlist
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.ui.LifecycleCapped
 import dev.harken.android.ui.LocalCoverLoader

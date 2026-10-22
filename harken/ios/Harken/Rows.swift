@@ -7,20 +7,17 @@
 import Foundation
 
 /// Something playable as a list draws it: a row of the `library` or
-/// `playlist` view as the domain answers it. `playlistPos` is where it sits
+/// `playlist` view as the domain answers it — UniFFI's record, read with no
+/// JSON, and Hashable as UniFFI declares it. `playlistPos` is where it sits
 /// on the playlist the list was read against, when it is on it.
-extension LibraryEntry: Identifiable, Hashable {
-    public func hash(into h: inout Hasher) { h.combine(id) }
-
+extension LibraryEntry: Identifiable {
     var duration: String {
         let s = Int(durationMs / 1000)
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 
-extension Playlist: Identifiable, Hashable {
-    public func hash(into h: inout Hasher) { h.combine(id) }
-}
+extension Playlist: Identifiable {}
 
 /// What a write came to: the entry, whose standing the peer answers, or the local refusal.
 enum Wrote: Equatable {

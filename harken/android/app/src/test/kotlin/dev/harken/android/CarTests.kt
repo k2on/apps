@@ -50,7 +50,7 @@ class CarTests {
 
     private fun titles(items: List<MediaItem>): List<String> = items.map { it.mediaMetadata.title.toString() }
 
-    private fun tracks(of: () -> dev.arkdb.ffi.View<dev.harken.android.gen.LibraryEntry>): List<Track> = Phone.once(of, Track::of)
+    private fun tracks(of: () -> dev.arkdb.ffi.View<uniffi.harken_domain.LibraryEntry>): List<Track> = Phone.once(of, Track::of)
 
     /**
      * The root is four tabs, a fifth only for a car that draws five; Home ends with every song when
