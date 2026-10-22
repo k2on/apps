@@ -22,6 +22,8 @@ let
   failing = c: map (a: a.message) (lib.filter (a: !a.assertion) c.assertions);
   unit = c: c.systemd.services.harken;
   env = c: (unit c).environment;
+  houseUnit = c: c.systemd.services.harken-house;
+  houseEnv = c: (houseUnit c).environment;
   says = c: needle: lib.any (m: lib.hasInfix needle m) (failing c);
   warns = c: needle: lib.any (w: lib.hasInfix needle w) c.warnings;
 
@@ -67,9 +69,16 @@ let
     [ (says loopbackSpeaker "talking to itself") "a speaker handed the default loopback URL is refused" ]
     [ (says loopbackMedia "talking to itself") "a speaker handed an explicit loopback mediaUrl is refused" ]
     [ (failing lanUnbound == [ ] && warns lanUnbound "answers on this machine and nowhere else") "a LAN mediaUrl on a loopback bind is a warning" ]
-    [ ((env lanUnbound).HARKEN_HA_TOKEN_FILE == "%d/ha-token" && lib.elem "ha-token:/run/secrets/ha" (unit lanUnbound).serviceConfig.LoadCredential) "the house's token is a credential" ]
-    [ ((env lanUnbound).HARKEN_HA_MEDIA == "http://10.0.0.2:8787") "and speakers fetch from the LAN" ]
-    [ ((env traced).HARKEN_BRIDGE_TRACE == "1" && !(env lanUnbound ? HARKEN_BRIDGE_TRACE)) "the bridge's trace is on only when asked for" ]
+    [ (!(dev.systemd.services ? harken-house) && !(env dev ? HARKEN_HOUSE_KEY)) "no house, no house unit and no key" ]
+    [ ((houseEnv lanUnbound).HARKEN_HA_TOKEN_FILE == "%d/ha-token" && (houseUnit lanUnbound).serviceConfig.LoadCredential == [ "ha-token:/run/secrets/ha" ]) "the house's token is the house unit's credential" ]
+    [ (!(env lanUnbound ? HARKEN_HA_URL) && (unit lanUnbound).serviceConfig.LoadCredential == [ ]) "and nothing of the house is the server's" ]
+    [ ((env lanUnbound).HARKEN_HOUSE_KEY == "%S/harken/house.key" && (houseEnv lanUnbound).HARKEN_HOUSE_KEY == "%S/harken/house.key") "but the key, which both read where the server keeps it" ]
+    [ ((houseUnit lanUnbound).serviceConfig.User == "harken" && (houseUnit lanUnbound).serviceConfig.StateDirectory == "harken") "as the server's own dynamic user" ]
+    [ (lib.hasSuffix "/bin/harken-peer --house --server http://127.0.0.1:8787" (houseUnit lanUnbound).serviceConfig.ExecStart) "the house dials the server where it listens" ]
+    [ (lib.hasSuffix "--server http://127.0.0.1:8787" (houseUnit bound).serviceConfig.ExecStart) "and on loopback when it listens everywhere" ]
+    [ ((houseUnit lanUnbound).bindsTo == [ "harken.service" ]) "and goes when the server goes" ]
+    [ ((houseEnv lanUnbound).HARKEN_HA_MEDIA == "http://10.0.0.2:8787") "and speakers fetch from the LAN" ]
+    [ ((houseEnv traced).HARKEN_BRIDGE_TRACE == "1" && !(houseEnv lanUnbound ? HARKEN_BRIDGE_TRACE)) "the bridge's trace is on only when asked for" ]
     [ (failing bound == [ ] && bound.warnings == [ ]) "bound to every interface, nothing to warn about" ]
     [ (!(lib.any (lib.hasInfix "/srv/media") noMedia.systemd.tmpfiles.rules) && !(env noMedia ? HARKEN_MEDIA) && (unit noMedia).serviceConfig.BindReadOnlyPaths == [ ]) "no media path, no media" ]
     [ ((env roles).HARKEN_ROLES == "admin=alice;library=alice,bob") "roles reach the server, role by role" ]

@@ -20,7 +20,7 @@ const USAGE: &str = "usage: harken-server [ADDR]   (default 127.0.0.1:8787)
 Everything else is the environment:
   HARKEN_DEV_AUTH=1, or HARKEN_OIDC_ISSUER + HARKEN_OIDC_CLIENT_ID + HARKEN_OIDC_CLIENT_SECRET_FILE
   HARKEN_DATA  HARKEN_PUBLIC_URL  HARKEN_REDIRECTS  HARKEN_MEDIA  HARKEN_WEB  HARKEN_WEB_MODULE
-  HARKEN_HA_URL + HARKEN_HA_TOKEN_FILE + HARKEN_HA_PLAYERS  HARKEN_HA_MEDIA
+  HARKEN_HOUSE_KEY      the house's key's file: `harken-peer --house` signs in with it
   HARKEN_KEEPALIVE_MS  HARKEN_KEEPALIVE_MISSED  HARKEN_ROLES
   HARKEN_ADMIN_BIND  HARKEN_ADMIN_WEB    the admin page: loopback asks nothing, wider asks for the admin role";
 
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 }
 
 /// Ctrl-C on a laptop, or `SIGTERM` from systemd: either is a request to
-/// stop, answered by taking the scanner and the house off the hub first.
+/// stop, answered by taking the scanner off the hub first.
 #[cfg(unix)]
 async fn stopped() -> Result<()> {
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;

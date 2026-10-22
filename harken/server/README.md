@@ -56,62 +56,13 @@ crates'; what is here is what only harken has:
   and restored by `on_restore`. This crate holds no rule of it.
 - **`hosted.rs`** — the domain the hub runs: harken's, as this build
   compiled it, its functions by name (§1.16).
-- **`assistant.rs`** — Home Assistant's media players as devices of that
-  session. A pure `Bridge`, handed the session and what the house said:
-  who holds a speaker, what a change of the session becomes (a hand-off of
-  the whole queue from where it was, a pause, a play, a seek), what the
-  speaker did that the session does not know said as its own transition
-  (`started`, `advance`, `jump`, `stalled`, `play`, `seek`,
-  `report_position`) — where a playing speaker is being its
-  `media_position` counted on from `media_position_updated_at`, which is
-  when the house last refreshed it, read against the house's own clock as
-  its answers' `Date`s narrow it down (`when::Skew`); an undated one is no
-  position at all, and one dated before the bridge last told the speaker
-  something is not believed for `STALE` polls; a speaker more than
-  `SYNC_MS` (600 ms, every output's bound) from where the session counts it
-  is said where it is (`report_position`, the clock re-anchored and no
-  player told anything), more than `DRIFT_MS` its own `seek`, and a
-  session that moved by more than the bound is told to it; a stall is two
-  silent polls in a row (`STALL`), at a point the house dated since it last
-  played; which track it is on read from the URL it reports
-  compared as an address, never as a string (`address`: decoded, entities
-  and all, the scheme and host in one case, a default port dropped), or
-  from its `queue_position` where the URL names its queue; a hand-off from
-  half way through a track that the speaker starts from the beginning (the
-  seek after the enqueue dropped before it loaded) is sought again once it
-  has the track, `SEEKS` times at most, and `started` is said only once it
-  is there and the house has dated where — at that measured point, counted
-  on to when it is said (`as_of`), on the track handed or any after it
-  (`advance` or `jump` first), never at the point handed; `WAIT` polls of
-  fetching before it stops waiting — `SETTLE` polls
-  of grace after a hand-off, `LAPSE` polls before letting a playing speaker
-  go (`release`, said as it), `QUIET` polls after telling it anything, and
-  the second taker releasing the first. Its volume and its group are
-  reconciled the same way (`tune`): what the house says it supports is said
-  once as the speaker's `equip`; a volume or a group that moved in the
-  session is told to the house (`volume_set`, `volume_mute`, `join`,
-  `unjoin`), and one that moved in the house while the session stood still
-  is said as the speaker (`report_volume`, `report_group`), outside `QUIET`;
-  a member is never handed a queue. Tracks put into the session's queue
-  after the one playing or at its end reach the speaker's own queue in
-  place (`play_media` with `enqueue: next`, last first, and `enqueue:
-  add`), so nothing stops; a track taken out or moved is a fresh hand-off
-  from where the track playing is. And `ha`, the thread: each speaker a
-  device — a connection to the hub in this process — in each session a client
-  is in;
-  where no client is, the speakers making the sound — the output and
-  whoever follows it — go on standing, reconciled and reporting, while it
-  sounds and for `IDLE` (ten minutes) after it stops, and then go, pausing
-  what they held, the session kept paused as any is; a speaker that is not
-  making the sound never keeps a session's presence open — the
-  service calls, polling every speaker standing anywhere (its volume and
-  group; what it plays only where it is held), the integration it groups
-  in read once through the template API, and every hand-off, release,
-  pause, join and unjoin said out loud. Everything it tells the house goes
-  before the next poll, so a reading is always of what was told; a handed
-  queue's first track and its seek go at once and the rest `ha::PUSH` at a
-  time between polls; and with `HARKEN_BRIDGE_TRACE=1` each poll of each
-  speaker is a line (below).
+- **`house.rs`** — the house's door, `POST /house/sign-in`: a peer holding
+  the key the server keeps in `HARKEN_HOUSE_KEY`'s file is handed the
+  house's own login (`the house@house`, which watches) or a speaker's in
+  an account's session (`user@entity`, written as any sign-in is, and
+  renewed with a day left). The house itself — Home Assistant's players
+  as devices — is `harken-peer --house` (`harken/peer`), a peer of this
+  server's socket like any other.
 - **`lib.rs`** — `Config` from the environment, `start`, and `/healthz`
   in front of the hub's: `ok`, the connections, the log's `head` and
   `horizon`, `module <hash> current` and each module held, and a `room`
@@ -134,9 +85,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_WEB`, `HARKEN_WEB_MODULE` | the browser client, with the build as its validator; the module names the file whose change is a rebuild off the store |
 | `HARKEN_RETAIN_ENTRIES` | entries the log keeps above its snapshot (10000); `HARKEN_RETAIN_DAYS` is read and keeps nothing on v5 |
 | `HARKEN_KEEPALIVE_MS` | how often the sync socket pings (20000); it closes after three unanswered |
-| `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |
-| `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |
-| `HARKEN_BRIDGE_TRACE=1` | a line per poll per speaker: what the house said of it and what the bridge did (below) |
+| `HARKEN_HOUSE_KEY` | the file the house's key is kept in, made at first start: set, `/house/sign-in` hands `harken-peer --house` its logins. The house's own variables (`HARKEN_HA_*`, `HARKEN_BRIDGE_TRACE`) are `harken-peer --house`'s now (`harken/peer/README.md`); a server given one refuses to start |
 | `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice`; an `admin` grants more as rows (`role.grant`) |
 | `HARKEN_SCOPED=1` | every connection fed `session.feed`: the library whole, its person's sign-ins and roles only (off: the log whole, as the fleet holds it) |
 | `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark_peer::admin`, its raw writes and mutations authored by the authority as itself |
@@ -150,6 +99,7 @@ whose it is:
 | `log/kv`, `log/log` | the log: the library, every playlist, every person's work, every sign-in (a `sign_in` row) and granted role — the rows it stands on and the entries above them. This *is* the database |
 | `log/local.kv`, `log/local.log` | the hub's own rows (`ark_peer::Local`), in the log's format: each origin's last intent and its actor, the intents refused and those waiting behind a held one, so a push after a restart is judged as before; and the listening sessions' volatile space as the hub last closed it, restored by `on_restore` |
 | `session.key` | the key every token is signed with (`ark-auth`); made at first start, never leaves the machine |
+| `house.key` | the house's key (`HARKEN_HOUSE_KEY` under the NixOS module): what `harken-house` signs its speakers in with |
 | `library/` | the scanner's replica, a peer like any other |
 | `library-files/` | the scanner's prints and the index of the pictures it took out of files (`HarkenLocal`, a local instance); never the log's |
 | `art/` | the pictures taken out of files, by hash |
@@ -173,48 +123,19 @@ signed in dials nothing, and pushes its re-stamped work once somebody does;
 an entry authored under an older login of the same person is accepted
 (`Auth::owns`, through `.auth(..)`).
 
-### When a speaker is not where the bars say
-
-The bridge is tested against a stand-in Home Assistant, and a real house
-with a real Sonos has differed from it each time something went wrong. The
-trace is what shows the difference: one line per poll of each speaker
-standing, saying exactly what the house said and what the bridge made of
-it. Turn it on with `services.harken.homeAssistant.trace = true;` (which
-sets `HARKEN_BRIDGE_TRACE=1`) and rebuild, or set that variable by hand
-for a server run any other way. Then:
-
-1. Play something on a browser or a phone, half a minute into a track.
-2. Note the time, and pick the speaker.
-3. Wait half a minute with the speaker playing; if the bars are behind or
-   jumped back, say by how much and when.
-4. Send back the journal from a few seconds before the time noted to the
-   end — `journalctl -u harken --since "HH:MM:SS" | grep 'house:'` — and
-   what you saw and when.
-
-A line reads:
-
-```
-harken-server: house: trace: media_player.kitchen: state "playing", media_content_id "http://10.0.0.2:8787/media/music/a.mp3", media_position 41.0, media_position_updated_at "2026-10-18T21:07:23.112000+00:00", Date Sun, 18 Oct 2026 21:07:24 GMT; speaker 41934 ms; session 41890 ms; track 0 of 12 (handed 0); started; quiet 0, waited 3, sought 1, silent 0; nothing done
-```
-
-— the house's answer as it gave it, then where the bridge counts the
-speaker (`(dated before the last command)` when the house has not yet
-dated anything since it was told something; `undated` when it gave no
-position), where it has the session (`standing` while the hand-off is in
-flight, at the point handed), where in the queue, and what it did:
-`started`, `report_position`, `seek`, `stalled` with the point each was
-said at, `media_seek` and the rest told to the house. Turn it off again
-afterwards: it is a line a second for every speaker standing.
-
 ## Nix
 
 - `nix/module.nix` — the NixOS service, `services.harken`: dev auth or an
   OpenID Connect provider whose secret is a systemd credential, the media
   directory made by tmpfiles and bound read-only, the state in
-  `StateDirectory` (`HARKEN_DATA=%S/harken`), the house with its token as a
-  credential, the assertion that a speaker is never handed a URL on this
-  machine, the warning when it is handed a LAN URL this server is not
-  bound to, and `homeAssistant.trace` for the bridge's trace. `web` defaults to null: which build a server should serve is the
+  `StateDirectory` (`HARKEN_DATA=%S/harken`); with `homeAssistant` a
+  second unit, `harken-house` (`harken-peer --house --server` this
+  server on this machine, bound to `harken.service`), with Home
+  Assistant's token as its credential and the server's dynamic user, so
+  it reads the `house.key` the server writes; the assertion that a
+  speaker is never handed a URL on this machine, the warning when it is
+  handed a LAN URL this server is not bound to, and `homeAssistant.trace`
+  for the bridge's trace. The option names are as they were. `web` defaults to null: which build a server should serve is the
   flake's to say. `admin.bind` is the admin page's listener,
   `127.0.0.1:8788` by default and null for none, and `admin.page` its
   build, `ark-admin` by default; a bind wider than loopback that nobody in
@@ -226,8 +147,8 @@ afterwards: it is a line a second for every speaker standing.
 
 ## Tests
 
-`cargo test -p harken-server`: the bridge's rules against values
-(`assistant.rs`); the session over real sockets — the bridge the whole way
+`cargo test -p harken-server`: the session over real sockets — the house
+(`harken_peer::house`, against this server's socket) the whole way
 round against a stand-in Home Assistant, two accounts taking one speaker,
 paging under a library of two batches, and a browser, a desktop and a
 speaker sharing one session through transfers, a dropped socket and both
@@ -235,8 +156,10 @@ ways of coming back, and a cast to a stand-in that takes a queue the way a
 Sonos does through Home Assistant — idle, buffering, playing with no
 position, then a position, an early seek dropped — never drawn at the
 beginning on any device and within the bound of the speaker from the
-moment it starts, a drift followed without a command, and the trace
-(`tests/bridge.rs`); the session's own rules are the
+moment it starts, a drift followed without a command, the trace, the
+house as a process of its own, the door's key, and a press timed to the
+house (`tests/bridge.rs`; the bridge's rules against values are
+`harken/peer`'s); the session's own rules are the
 domain's transition tests (`harken/domain/tests/listening.rs`); the scanner
 over real WAV files, tags written and read by lofty, covers beside a
 record and inside its tracks fetched where the log says, a retagged file

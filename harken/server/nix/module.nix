@@ -45,6 +45,36 @@ let
     if cfg.homeAssistant == null then cfg.publicUrl
     else if cfg.homeAssistant.mediaUrl != null then cfg.homeAssistant.mediaUrl
     else cfg.publicUrl;
+
+  # Where the house's peer dials the server: this machine, at the address
+  # bound — loopback for a wildcard, which is no address to dial.
+  dialled =
+    let host = if lib.elem cfg.address [ "0.0.0.0" "::" "[::]" ] then "127.0.0.1" else cfg.address;
+    in "http://${host}:${toString cfg.port}";
+
+  # The key the server keeps for the house, in the state directory both
+  # units share (`User = "harken"`, one dynamic user for the two).
+  houseKey = "%S/harken/house.key";
+
+  # What neither unit needs.
+  hardening = {
+    NoNewPrivileges = true;
+    PrivateDevices = true;
+    PrivateTmp = true;
+    ProtectClock = true;
+    ProtectControlGroups = true;
+    ProtectHome = true;
+    ProtectHostname = true;
+    ProtectKernelLogs = true;
+    ProtectKernelModules = true;
+    ProtectKernelTunables = true;
+    ProtectSystem = "strict";
+    RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+    RestrictNamespaces = true;
+    RestrictRealtime = true;
+    SystemCallArchitectures = "native";
+    SystemCallFilter = [ "@system-service" "~@privileged" ];
+  };
 in
 {
   options.services.harken = {
@@ -237,7 +267,13 @@ in
     homeAssistant = lib.mkOption {
       default = null;
       description = ''
-        The house's media players, as devices in every listening session.
+        The house's media players, as devices in every listening session —
+        run as a unit of their own, `harken-house` (`harken-peer --house`),
+        a peer that dials this server, is handed each speaker's login with
+        a key the server keeps in its state directory (`house.key`), and
+        stands each speaker in every account's session as a connection of
+        its own. Stopping it takes the speakers out of every session;
+        restarting the server restarts it.
 
         A speaker is a *device*: it joins a session, becomes the output, is
         told things and reports what it is doing, exactly as a phone does.
@@ -270,18 +306,18 @@ in
               A file holding a long-lived access token, handed over as a
               systemd credential for the reason the OpenID Connect secret is.
 
-              Missing when the unit starts, it takes the whole server down
-              before the binary runs, and says only
+              Missing when the unit starts, it takes the house down (the
+              server is another unit, and keeps running) before the binary
+              runs, and says only
 
               ```
-              harken.service: Failed to set up credentials: No such file or directory
-              harken.service: Failed at step CREDENTIALS spawning …/harken-server
+              harken-house.service: Failed to set up credentials: No such file or directory
+              harken-house.service: Failed at step CREDENTIALS spawning …/harken-peer
               ```
 
-              which names neither the credential nor the path. Both this and
-              `oidc.clientSecretFile` load the same way, so
-              `systemctl show harken -p LoadCredential` and then `ls` on each
-              source is what tells them apart. Setting this is what makes a
+              which names neither the credential nor the path:
+              `systemctl show harken-house -p LoadCredential` and then `ls`
+              on its source is what tells. Setting this is what makes a
               speaker's token able to stop the music.
             '';
           };
@@ -309,7 +345,7 @@ in
               the session, and what it did about it. Off by default, being a
               line a second for every speaker standing; turned on for as long
               as it takes to see a speaker go wrong, then read with
-              `journalctl -u harken | grep 'house: trace'`. Sets
+              `journalctl -u harken-house | grep 'house: trace'`. Sets
               `HARKEN_BRIDGE_TRACE=1`.
             '';
           };
@@ -469,21 +505,14 @@ in
       } // lib.optionalAttrs cfg.devAuth {
         HARKEN_DEV_AUTH = "1";
       } // lib.optionalAttrs (cfg.homeAssistant != null) {
-        HARKEN_HA_URL = cfg.homeAssistant.url;
-        HARKEN_HA_TOKEN_FILE = "%d/ha-token";
-        HARKEN_HA_PLAYERS = lib.concatStringsSep "," cfg.homeAssistant.players;
-      } // lib.optionalAttrs (cfg.homeAssistant != null && cfg.homeAssistant.mediaUrl != null) {
-        HARKEN_HA_MEDIA = cfg.homeAssistant.mediaUrl;
-      } // lib.optionalAttrs (cfg.homeAssistant != null && cfg.homeAssistant.trace) {
-        HARKEN_BRIDGE_TRACE = "1";
+        # The door the house signs in at, and the key it opens to.
+        HARKEN_HOUSE_KEY = houseKey;
       };
 
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/harken-server ${cfg.address}:${toString cfg.port}";
         Restart = "on-failure";
-        LoadCredential =
-          lib.optional (cfg.oidc != null) "oidc-secret:${cfg.oidc.clientSecretFile}"
-          ++ lib.optional (cfg.homeAssistant != null) "ha-token:${cfg.homeAssistant.tokenFile}";
+        LoadCredential = lib.optional (cfg.oidc != null) "oidc-secret:${cfg.oidc.clientSecretFile}";
 
         DynamicUser = true;
         StateDirectory = "harken";
@@ -493,25 +522,40 @@ in
         # and a library under there would simply not be visible — a bind
         # overrides that for the one directory without opening the rest.
         BindReadOnlyPaths = lib.optional (cfg.mediaPath != null) cfg.mediaPath;
+      } // hardening;
+    };
 
-        # Nothing here needs any of it.
-        NoNewPrivileges = true;
-        PrivateDevices = true;
-        PrivateTmp = true;
-        ProtectClock = true;
-        ProtectControlGroups = true;
-        ProtectHome = true;
-        ProtectHostname = true;
-        ProtectKernelLogs = true;
-        ProtectKernelModules = true;
-        ProtectKernelTunables = true;
-        ProtectSystem = "strict";
-        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
-        RestrictNamespaces = true;
-        RestrictRealtime = true;
-        SystemCallArchitectures = "native";
-        SystemCallFilter = [ "@system-service" "~@privileged" ];
+    # The house: a peer of the server's, on this machine, that keeps
+    # nothing of its own on disk — its speakers' machines are volatile, and
+    # their logins the server hands it again on every start.
+    systemd.services.harken-house = lib.mkIf (cfg.homeAssistant != null) {
+      description = "Harken's house: Home Assistant's media players as devices";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "harken.service" ];
+      bindsTo = [ "harken.service" ];
+
+      environment = {
+        HARKEN_HA_URL = cfg.homeAssistant.url;
+        HARKEN_HA_TOKEN_FILE = "%d/ha-token";
+        HARKEN_HA_PLAYERS = lib.concatStringsSep "," cfg.homeAssistant.players;
+        HARKEN_HA_MEDIA = mediaBase;
+        HARKEN_HOUSE_KEY = houseKey;
+      } // lib.optionalAttrs cfg.homeAssistant.trace {
+        HARKEN_BRIDGE_TRACE = "1";
       };
+
+      serviceConfig = {
+        ExecStart = "${cfg.package}/bin/harken-peer --house --server ${dialled}";
+        # Until the server has written the key, and whenever it restarts.
+        Restart = "always";
+        RestartSec = 2;
+        LoadCredential = [ "ha-token:${cfg.homeAssistant.tokenFile}" ];
+        # The server's dynamic user, by name, for the key in its state
+        # directory.
+        DynamicUser = true;
+        User = "harken";
+        StateDirectory = "harken";
+      } // hardening;
     };
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];

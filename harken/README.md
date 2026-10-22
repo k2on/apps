@@ -13,9 +13,11 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            listening.rs, queue.rs, devices.rs and groups.rs, the listening
            session as volatile tables (never the log); plays.rs (the log);
            host.rs, what an app knows of it beside its functions
-server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
-           bridge, sign-in, /media, the web build, the admin page's listener;
+server/    an ark-peer that listens, with harken's own parts: the scanner, sign-in,
+           /media, the web build, the admin page's listener, the house's door;
            the NixOS module (server/README.md)
+peer/      harken-peer, the peer with no screen: the fleet's JSON-lines replica, and
+           --house, Home Assistant's speakers as devices (peer/README.md)
 iced/      the desktop and browser client, on arkui and ark-peer; the `demo`
            feature is the seeded library GitHub Pages publishes
 ffi/       the phones' library: ark-ffi (the kernel through UniFFI) with the
@@ -129,13 +131,14 @@ position itself and nothing heartbeats.
   what it was doing becomes the session.
 - **The desktop cannot make a sound** (no audio device is wired up), so it
   is a remote control and never the output; the browser can be.
-- **A speaker in the house is a device of the session**: the server's Home
-  Assistant bridge stands each configured `media_player` in every session
+- **A speaker in the house is a device of the session**: the house
+  (`harken-peer --house`, a peer of the server's socket, its own unit under
+  the NixOS module) stands each configured `media_player` in every session
   a client is in, hands it the queue, and says what it does — and a
   speaker that is playing goes on playing the queue with every browser
   closed, standing in the session alone until it has been silent ten
   minutes
-  (`server/README.md`). Where it is in the queue is read from the URL it
+  (`peer/README.md`). Where it is in the queue is read from the URL it
   says it is playing, compared as an address: a speaker spells back what
   it was handed its own way.
 - **Volume is the session's, per device.** A device that has a volume
@@ -307,8 +310,17 @@ server's is not otherwise promised to be one moment.)
 
 ## harken-peer, and the fleet
 
-`harken-peer` is a peer with no screen, built beside the server (the
-`harken-server` package ships both). It opens a replica in a directory,
+`harken-peer` is a peer with no screen (`peer/`), built beside the server
+(the `harken-server` package ships both). With `--house` it is the house
+instead (`peer/README.md`): no replica and no stdin, Home Assistant's
+speakers standing in the server's sessions. **Moved:** the house was the
+server's until `harken-peer --house`; its variables (`HARKEN_HA_URL`,
+`HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS`, `HARKEN_HA_MEDIA`,
+`HARKEN_BRIDGE_TRACE`) keep their names and are the house's now, a
+server given one refuses to start, and both read `HARKEN_HOUSE_KEY` (new):
+the file the server keeps the house's key in. `services.harken`'s options
+are as they were; with `homeAssistant` set it writes a second unit,
+`harken-house`. It opens a replica in a directory,
 signs in the way the desktop does in dev auth, dials the sync socket and
 pumps when the socket wakes it, after a command that asks something of it,
 and at the redial deadline — never on a clock, as the desktop does not
@@ -450,5 +462,8 @@ no browser has played a track through it and no speaker has been handed
 one, nor had its volume set or been joined to another: the volume and the
 groups are held against a stand-in house's `volume_set`, `volume_mute`,
 `join`, `unjoin` and template API, written from Home Assistant's
-documentation. A speaker's plays are not recorded, since the bridge is not
-a peer of the account.
+documentation. A speaker's plays are not recorded: the house's speakers
+have no log (`ha::Speakers`' `Say::play` is a no-op). The house as its
+own unit has been evaluated (`checks.harken-module`), never started by
+systemd; that the two units share one dynamic user, and so `house.key`, is
+read from systemd's documentation, not seen.
