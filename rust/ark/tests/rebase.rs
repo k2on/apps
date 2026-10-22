@@ -490,14 +490,13 @@ fn a_page_rebases_once() {
     assert_eq!(wrong.diverged, vec![4], "the third entry's state is checked");
 }
 
-/// What a session pushes behind a held intent waits on the authority, in
-/// order: held again on a reconnect while the function is unknown, then
-/// judged after it once the authority has the function — told to the session's
-/// connections, and pushed again it is answered back. Falsified by `push`
-/// dropping what comes behind a held one as a gap (no `waiting`): after
-/// the load nothing was answered and the log stayed at 1.
+/// What a session pushes behind a held intent is a gap: the authority
+/// keeps nothing of the held one, answers what comes after it with
+/// nothing, and once it runs the function the next connection's pushes
+/// are judged in order. Falsified by a `Held` passing its `local`: the
+/// playlist after it was sequenced at 2, before the track.
 #[test]
-fn what_comes_behind_a_held_intent_waits_for_it() {
+fn what_comes_behind_a_held_intent_is_a_gap() {
     let mut server = authority(demo::only(&[CREATE]));
     let mut alice = replica("alice", demo::cas());
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));
@@ -507,29 +506,20 @@ fn what_comes_behind_a_held_intent_waits_for_it() {
     assert!(matches!(verdicts(&s)[..], [Some(Verdict::Held { .. })]), "{s:?}");
     let o = alice.step(mutate(CREATE, create_input("Sea"), 3));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(s.is_empty() && f.is_empty(), "it waits: {s:?}");
-    let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
-    assert!(
-        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Held { .. })]),
-        "held again, the third waits: {s:?}"
-    );
+    assert!(s.is_empty() && f.is_empty(), "a gap: {s:?}");
+    assert_eq!(server.log().head().0, 1);
     server.functions.insert(ADD, demo::cas().get(ADD).unwrap().clone());
-    let to: Vec<Frame> = server
-        .step(Input::Loaded)
-        .iter()
-        .filter_map(|x| match x {
-            Output::To { session, bytes } if session == "alice-session" => Frame::dec(bytes).ok(),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        matches!(verdicts(&to)[..], [Some(Verdict::Ok { seq: 2 }), Some(Verdict::Ok { seq: 3 })]),
-        "{to:?}"
-    );
-    assert_eq!(server.log().head().0, 3);
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
-        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 2 }), Some(Verdict::Ok { seq: 3 })]),
+        matches!(
+            verdicts(&s)[..],
+            [
+                ..,
+                Some(Verdict::Ok { seq: 1 }),
+                Some(Verdict::Ok { seq: 2 }),
+                Some(Verdict::Ok { seq: 3 })
+            ]
+        ),
         "{s:?}"
     );
 }

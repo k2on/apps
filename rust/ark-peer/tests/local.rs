@@ -1,7 +1,7 @@
 //! What a peer keeps beside its log, as rows of its local instance, held:
 //! an instance's rows read back after a reopen, its journal folded; an
-//! ephemeral one kept nowhere; a server's journal — each origin's last,
-//! what waits behind a held intent — across a restart; a device's replica
+//! ephemeral one kept nowhere; a server's journal — each origin's last —
+//! across a restart; a device's replica
 //! row across a reopen, and its chain pending after a join.
 
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use ark::db::{Durable, Volatile};
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::log::{Entry, EntryId, Origin};
-use ark::peer::{Role, Who};
+use ark::peer::Who;
 use ark::prelude::*;
 use ark::schema::Space;
 use ark_peer::{dev, Config, Disk, Instance, Memory, Peer};
@@ -154,26 +154,6 @@ fn the_last_of_each_origin_survives_a_restart() {
     let a = hub.accept(alice.clone());
     let out = hub.frame(a, push(&alice, 3, CREATE, "A3"), 1);
     assert!(matches!(verdicts(&out)[..], [Verdict::Ok { .. }]), "{:?}", verdicts(&out));
-}
-
-/// What waits behind a held intent is a row of `waiting`: after a restart
-/// the held one and the one behind it wait still, in order, as who pushed
-/// them. Falsified by `Peer::serve` not reading the `waiting` rows: nothing
-/// waited after the restart.
-#[test]
-fn what_waits_survives_a_restart() {
-    let alice = dev("alice@laptop").unwrap();
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
-    let a = hub.accept(alice.clone());
-    let held = verdicts(&hub.frame(a, push(&alice, 1, "demo.gone", "x"), 1));
-    assert!(matches!(held[..], [Verdict::Held { .. }]), "{held:?}");
-    assert!(verdicts(&hub.frame(a, push(&alice, 2, CREATE, "Road"), 1)).is_empty(), "it waits");
-    let hub = restarted(hub);
-    let Role::Authority { journal } = &hub.log.role else {
-        panic!("an authority")
-    };
-    let waits: Vec<(String, i64)> = journal.waiting.values().flatten().map(|(w, e)| (w.session.clone(), e.local)).collect();
-    assert_eq!(waits, vec![(alice.session.clone(), 1), (alice.session.clone(), 2)]);
 }
 
 /// A device's replica row is what it opens as: its origin, its fork while

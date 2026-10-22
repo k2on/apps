@@ -38,11 +38,10 @@
 //! runs it, and logs it with its facts. An origin is bound to the actor
 //! whose intents first came from it; another's pushed from it is refused. It runs exactly the functions its program
 //! was built with, by name (§1.16): nothing it is sent is code. An intent naming any other is `Held` — the device keeps
-//! it pending and pushes it again on its next connection. A held intent keeps its `local`: those
-//! pushed after it from its origin wait on the authority, in order, and are
-//! judged when it is — pushed again once the function is there, or when
-//! the driver says it has more (`Input::Loaded`), each answer then
-//! sent to the connections of the session that last pushed (`Output::To`).
+//! it pending and pushes it again on its next connection. The authority
+//! keeps nothing of a held intent: its `local` is not passed, so one
+//! pushed after it from its origin is a gap, answered by nothing and
+//! pushed again, after it, on the next connection.
 //!
 //! **A schema grows** (§1.2). Facts and snapshot rows another schema of a
 //! table wrote are read under this one ([`crate::schema::Table::fit`]). A
@@ -258,15 +257,13 @@ impl<T> PartialEq for Memo<T> {
 impl<T> Eq for Memo<T> {}
 
 /// What an authority keeps beside its log: every intent it judged and how;
-/// each origin's last `local` and the actor it is bound to; for a device
-/// alone, where it forked from the log it will join again; and, by origin,
-/// a held intent and those pushed after it, in order, with who pushed them.
+/// each origin's last `local` and the actor it is bound to; and, for a
+/// device alone, where it forked from the log it will join again.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Journal {
     pub fork: Option<(Seq, EntryHash)>,
     pub verdicts: BTreeMap<EntryId, Verdict>,
     pub last: BTreeMap<Origin, (String, i64)>,
-    pub waiting: BTreeMap<Origin, Vec<(Who, Entry)>>,
 }
 
 impl Journal {
@@ -337,9 +334,6 @@ pub enum Input {
         facts: Vec<Change>,
         now: i64,
     },
-    /// The driver gave the peer more functions: what waits behind a held
-    /// intent is judged again.
-    Loaded,
     /// How the connection verified as `who` is fed (an authority's).
     Feed {
         who: Who,
@@ -592,13 +586,6 @@ impl Peer {
                 o.out.push(v.map_or_else(|why| Output::Refused { id, why }, |_| Output::Confirmed(id)));
             }
             Input::Write { .. } => {}
-            Input::Loaded => {
-                let origins: Vec<Origin> = match &self.role {
-                    Role::Authority { journal } => journal.waiting.keys().copied().collect(),
-                    Role::Replica => vec![],
-                };
-                origins.into_iter().for_each(|x| self.unhold(x, false, &mut o));
-            }
             Input::Feed { who, feed } => match feed {
                 Feed::Whole => drop(self.served.remove(&who.session)),
                 Feed::Scoped(scope) => {
@@ -923,7 +910,7 @@ impl Peer {
         }
     }
 
-    fn push(&mut self, who: &Who, entry: Entry, o: &mut Out) {
+    fn push(&mut self, who: &Who, mut entry: Entry, o: &mut Out) {
         let (id, space) = (entry.id, self.space);
         let j = self.journal();
         if let Some(verdict) = j.verdicts.get(&id).cloned() {
@@ -951,90 +938,20 @@ impl Peer {
             };
             return o.send(Frame::Verdict { space, id, verdict });
         }
-        // Behind a held one of its origin: it waits, in order; the held one
-        // pushed again is judged again.
-        let origin = entry.origin;
-        if let Some(q) = self.journal().waiting.get_mut(&origin) {
-            if q[0].1.id == id {
-                q[0].0 = who.clone();
-                return self.unhold(origin, true, o);
-            }
-            if q.last().is_some_and(|(_, e)| e.local + 1 == entry.local) {
-                q.push((who.clone(), entry));
-            }
-            return;
-        }
+        // Past a gap (behind a held one, too): nothing, until it is pushed
+        // again after the ones before it.
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             return;
         }
-        if self.functions.get(&entry.func).is_none() {
-            let func = entry.func.clone();
-            if space == Space::Durable {
-                self.journal().waiting.insert(origin, vec![(who.clone(), entry)]);
+        let verdict = match self.functions.get(&entry.func) {
+            None => Verdict::Held { func: entry.func },
+            Some(_) => {
+                (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
+                self.sequence(entry, o)
+                    .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq })
             }
-            return o.send(Frame::Verdict {
-                space,
-                id,
-                verdict: Verdict::Held { func },
-            });
-        }
-        let f = self.judge(who, entry, o);
-        o.send(f);
-    }
-
-    /// One intent stamped by who pushed it and sequenced: the answer.
-    fn judge(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Frame {
-        let (id, space) = (entry.id, self.space);
-        (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-        let verdict = match self.sequence(entry, o) {
-            Ok(seq) => Verdict::Ok { seq },
-            Err(why) => Verdict::Refused { why },
         };
-        Frame::Verdict { space, id, verdict }
-    }
-
-    /// What waits behind `origin`'s held intent, judged in order while this
-    /// authority runs its function: each answer, and the `Held` of one it
-    /// does not, sent back (`pushed`, the held one pushed again) or to the
-    /// connections of the session that pushed it.
-    fn unhold(&mut self, origin: Origin, pushed: bool, o: &mut Out) {
-        let mut first = true;
-        while let Some((who, e)) = self.journal().waiting.get(&origin).and_then(|q| q.first().cloned()) {
-            let f = match self.functions.get(&e.func) {
-                None if first && !pushed => return,
-                None => Frame::Verdict {
-                    space: self.space,
-                    id: e.id,
-                    verdict: Verdict::Held { func: e.func.clone() },
-                },
-                Some(_) => {
-                    let q = self.journal().waiting.get_mut(&origin).expect("it waits");
-                    q.remove(0);
-                    if q.is_empty() {
-                        self.journal().waiting.remove(&origin);
-                    }
-                    self.judge(&who, e, o)
-                }
-            };
-            let held = matches!(
-                f,
-                Frame::Verdict {
-                    verdict: Verdict::Held { .. },
-                    ..
-                }
-            );
-            match pushed {
-                true => o.send(f),
-                false => o.out.push(Output::To {
-                    session: who.session.clone(),
-                    bytes: f.enc(),
-                }),
-            }
-            if held {
-                return;
-            }
-            first = false;
-        }
+        o.send(Frame::Verdict { space, id, verdict });
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.

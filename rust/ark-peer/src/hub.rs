@@ -25,9 +25,9 @@
 //! over it.
 //!
 //! **The journal** beside the log keeps what the log cannot, as rows of the
-//! peer's local instance (`origin`, `verdict`, `waiting`): each origin's
-//! last `local` and actor, the intents refused and those waiting behind a
-//! held one, written when a refusal, the horizon or what waits moves, so that after a restart a push past a refusal is not
+//! peer's local instance (`origin`, `verdict`): each origin's last `local`
+//! and actor and the intents refused, written when a refusal or the
+//! horizon moves, so that after a restart a push past a refusal is not
 //! taken for a gap, a refused intent pushed again is answered again, and
 //! one sequenced below the horizon is acknowledged there. **The horizon**
 //! moves as `keep` says: the log keeps that many entries above its
@@ -41,7 +41,7 @@ use ark::peer::{Feed, Input, Journal, Peer as Machine, Role, Who};
 use ark::row::Bytes;
 use ark::schema::Space;
 
-use crate::local::{Last, LiveRow, Refused, Waits};
+use crate::local::{Last, LiveRow, Refused};
 use crate::{machine, Config, Disk, Fold, Instance, Peer};
 
 pub type ConnId = u64;
@@ -65,9 +65,8 @@ pub(crate) struct Hub {
     next: ConnId,
     /// Deliveries waiting for what is unwritten.
     pub held: Vec<Deliver>,
-    /// The refusals, the horizon and what waits the journal was last
-    /// written at.
-    mark: (usize, i64, usize),
+    /// The refusals and the horizon the journal was last written at.
+    mark: (usize, i64),
     /// What the log's entries changed since the hub's watch last looked,
     /// kept while one watches (`serve`).
     pub watched: bool,
@@ -121,15 +120,10 @@ impl Peer {
         let origin = log.origin;
         let mine = log.log().entries().into_iter().filter(|l| l.entry.origin == origin);
         log.local = mine.map(|l| l.entry.local).max().unwrap_or(0);
-        let (last, refused, waiting, kept) =
-            local.read::<crate::Local, _>(|db| (db.origin.scan(), db.verdict.scan(), db.waiting.scan(), db.volatile.scan()));
+        let (last, refused, kept) = local.read::<crate::Local, _>(|db| (db.origin.scan(), db.verdict.scan(), db.volatile.scan()));
         let j = journal(&mut log);
         last.into_iter().for_each(|l| j.pass(l.origin, &l.actor, l.last));
         j.verdicts.extend(refused.into_iter().map(|r| (r.entry, Verdict::Refused { why: r.why })));
-        for w in waiting {
-            let (actor, session, roles) = (w.actor, w.session, w.roles);
-            j.waiting.entry(w.origin).or_default().push((Who { actor, session, roles }, w.entry));
-        }
         log.local = log.local.max(journal(&mut log).last_of(&origin));
         let live = config.live.as_ref().map(|l| Instance {
             fold: Fold::keep(l.keep),
@@ -261,7 +255,7 @@ impl Peer {
     }
 
     /// After a server's step on its log: the journal written when a
-    /// refusal, the horizon or what waits moved.
+    /// refusal or the horizon moved.
     pub(crate) fn kept(&mut self) {
         let mark = self.mark();
         if mark != self.hub.mark {
@@ -270,16 +264,15 @@ impl Peer {
         }
     }
 
-    /// What the journal moves with: the refusals, the horizon, what waits.
-    fn mark(&mut self) -> (usize, i64, usize) {
+    /// What the journal moves with: the refusals, the horizon.
+    fn mark(&mut self) -> (usize, i64) {
         let base = self.log.log().base_seq();
         let j = journal(&mut self.log);
         let refused = j.verdicts.values().filter(|v| matches!(v, Verdict::Refused { .. })).count();
-        (refused, base, j.waiting.values().map(Vec::len).sum())
+        (refused, base)
     }
 
-    /// The journal as rows: each origin's last and what it refused put,
-    /// what waits written whole.
+    /// The journal as rows: each origin's last and what it refused put.
     fn keep_journal(&mut self) {
         let j = journal(&mut self.log);
         let refused: Vec<Refused> = (j.verdicts.iter())
@@ -291,27 +284,12 @@ impl Peer {
                 _ => None,
             })
             .collect();
-        let (last, waiting) = (j.last.clone(), j.waiting.clone());
+        let last = j.last.clone();
         self.keep(|db| {
             for (origin, (actor, last)) in last {
                 db.origin.put(Last { origin, actor, last })?;
             }
-            refused.into_iter().try_for_each(|r| db.verdict.put(r))?;
-            db.waiting.scan().iter().try_for_each(|w| db.waiting.remove(w))?;
-            for (origin, q) in waiting {
-                for (who, entry) in q {
-                    let (actor, session, roles, local) = (who.actor, who.session, who.roles, entry.local);
-                    db.waiting.put(Waits {
-                        origin,
-                        local,
-                        actor,
-                        session,
-                        roles,
-                        entry,
-                    })?;
-                }
-            }
-            Ok(())
+            refused.into_iter().try_for_each(|r| db.verdict.put(r))
         });
     }
 
