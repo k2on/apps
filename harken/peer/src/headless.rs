@@ -1242,6 +1242,18 @@ mod tests {
         .is_err());
     }
 
+    /// `--house` stands in a server's sessions and keeps nothing on disk:
+    /// it needs `--server` and no `--dir`, and is never alone. Falsified by
+    /// checking `--dir` before `--house`: the first case was refused.
+    #[test]
+    fn the_house_needs_a_server_and_no_directory() {
+        let f = flags(&a(&["--house", "--server", "http://h:1/"])).unwrap();
+        assert!(f.house);
+        assert_eq!(f.server.as_deref(), Some("http://h:1"));
+        assert!(flags(&a(&["--house"])).is_err());
+        assert!(flags(&a(&["--house", "--alone"])).is_err());
+    }
+
     /// Every command reads, an entry's id as its hex; what is not a
     /// command says why. Falsified by reading `cursor` as text:
     /// `wait` fails to parse.

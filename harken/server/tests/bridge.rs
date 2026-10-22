@@ -2211,3 +2211,200 @@ fn the_queue_edited_reaches_the_speaker_without_a_gap() {
     assert!(!fake.take().iter().any(|(c, _)| c == "media_pause"));
     rt.block_on(server.stop());
 }
+
+/// How long a press on a phone takes to become a service call to the house:
+/// a phone's `pause` or `play`, previewed and pushed, sequenced by the hub,
+/// fanned out to the speaker's connection, reconciled, and said to Home
+/// Assistant — measured from the phone's call to the stand-in being asked,
+/// forty times, the phone pumping all the while as a phone's loop does.
+/// Printed, not held to a number: what it says is what `docs/plan-v5.md`'s
+/// experiment note quotes. Held only to a second, which a press that waited
+/// for the next poll (`tick`, 40 ms here, a second outside a test) would
+/// still pass — it is the median printed that tells the two apart.
+/// Not a pass or a fail, so falsified by what it prints: with the wake
+/// dropped from the house's sockets, a frame waits for the thread's next
+/// turn and the median went from 11.6 to 22.6 ms.
+#[test]
+fn a_press_reaches_the_house_measured() {
+    let rt = runtime();
+    let fake = Fake::default();
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = with_house(&rt, data.path(), house(url));
+    let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
+    told(&mut phone, "the kitchen beside the phone", |s| {
+        s.devices.len() == 2
+    });
+    call(&mut phone, "start", input::start(&queue(&["a"]), 0, 0, ""));
+    told(&mut phone, "the phone as the output", |s| {
+        s.session.is_some()
+    });
+    call(&mut phone, "transfer", input::transfer(KITCHEN));
+    fake.calls(3);
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 0.0);
+    told(&mut phone, "the kitchen started", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    fake.take();
+    let mut took = vec![];
+    for n in 0..40 {
+        let (transition, service) = match n % 2 {
+            0 => ("pause", "media_pause"),
+            _ => ("play", "media_play"),
+        };
+        let from = std::time::Instant::now();
+        call(&mut phone, transition, input::none());
+        loop {
+            phone.pump();
+            if fake.take().iter().any(|(s, _)| s == service) {
+                break;
+            }
+            assert!(
+                from.elapsed() < Duration::from_secs(1),
+                "{service} never asked for"
+            );
+            std::thread::sleep(Duration::from_micros(200));
+        }
+        took.push(from.elapsed());
+        told(&mut phone, "the press settled", |s| {
+            s.sounding() == (n % 2 == 1)
+        });
+        std::thread::sleep(Duration::from_millis(60));
+        fake.take();
+    }
+    took.sort();
+    eprintln!(
+        "press → house: median {:?}, p90 {:?}, worst {:?}, best {:?} (n = {})",
+        took[took.len() / 2],
+        took[took.len() * 9 / 10],
+        took[took.len() - 1],
+        took[0],
+        took.len()
+    );
+    rt.block_on(server.stop());
+}
+
+/// The house as it is deployed: `harken-peer --house`, a process of its
+/// own, told everything by the environment as the NixOS module's
+/// `harken-house` unit tells it — a phone arrives and the kitchen stands
+/// beside it, named and a speaker; handed the sound, the house is asked to
+/// play the queue; and when the process dies its sockets close, which is
+/// the kitchen's `on_leave`. Falsified by not giving it `HARKEN_HOUSE_KEY`:
+/// it exited at once, and the kitchen never stood.
+#[test]
+fn the_house_is_a_process_of_its_own() {
+    let rt = runtime();
+    let fake = Fake::default();
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let key = data.path().join("house.key");
+    let server = serve(&rt, data.path(), |c| c.house_key = Some(key.clone()));
+    let token = data.path().join("ha-token");
+    std::fs::write(&token, format!("{TOKEN}\n")).unwrap();
+    /// Killed however the test ends, so a failure leaves no house behind.
+    struct Process(std::process::Child);
+    impl Drop for Process {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let house = std::process::Command::new(env!("CARGO_BIN_EXE_harken-peer"))
+        .args(["--house", "--server", &server.url()])
+        .env("HARKEN_HA_URL", url)
+        .env("HARKEN_HA_TOKEN_FILE", &token)
+        .env("HARKEN_HA_PLAYERS", format!("{KITCHEN}=Kitchen"))
+        .env("HARKEN_HA_MEDIA", MEDIA)
+        .env("HARKEN_HOUSE_KEY", &key)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("harken-peer --house starts");
+    let house = Process(house);
+
+    let mut phone = device(&server, "max", Kind::Phone, "Pixel", true);
+    let s = told(&mut phone, "the kitchen standing beside the phone", |s| {
+        s.devices.len() == 2
+    });
+    let kitchen = s.device(KITCHEN).expect("the speaker is in the picker");
+    assert_eq!(
+        (kitchen.name.as_str(), Kind::parse(&kitchen.kind)),
+        ("Kitchen", Kind::Speaker)
+    );
+    call(
+        &mut phone,
+        "start",
+        input::start(&queue(&["a", "b"]), 0, 0, ""),
+    );
+    told(&mut phone, "the phone as the output", |s| {
+        s.session.is_some()
+    });
+    call(&mut phone, "transfer", input::transfer(KITCHEN));
+    // From where it had got to: a seek between the two when that is past
+    // the track's first millisecond.
+    let calls = fake.calls(3);
+    let names: Vec<&str> = calls.iter().map(|(s, _)| s.as_str()).collect();
+    assert_eq!(names[..2], ["clear_playlist", "play_media"], "{calls:#?}");
+    assert_eq!(
+        calls
+            .last()
+            .map(|(s, b)| (s.as_str(), b["media_content_id"].clone())),
+        Some(("play_media", json!(media_url("music/b.mp3")))),
+        "{calls:#?}"
+    );
+
+    drop(house);
+    told(&mut phone, "the kitchen gone with its process", |s| {
+        s.device(KITCHEN).is_none()
+    });
+    rt.block_on(server.stop());
+}
+
+/// The house's door opens to its key alone: no key, or another, is turned
+/// away; the key buys a speaker's login whose session is the speaker's id
+/// in that account's session, and asking again within its life is the same
+/// session and writes nothing more to the log. Falsified by comparing the
+/// key's first half only: a key that shared it was let in.
+#[test]
+fn the_door_opens_to_the_house_key_alone() {
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let file = data.path().join("house.key");
+    let server = serve(&rt, data.path(), |c| c.house_key = Some(file.clone()));
+    let key = std::fs::read_to_string(&file).unwrap().trim().to_string();
+    let door = format!("{}/house/sign-in", server.url());
+    let ask = |bearer: Option<&str>, body: &str| {
+        let mut r = ureq::post(&door).set("Content-Type", "application/json");
+        if let Some(b) = bearer {
+            r = r.set("Authorization", &format!("Bearer {b}"));
+        }
+        match r.send_string(body) {
+            Ok(r) => (200, r.into_string().unwrap()),
+            Err(ureq::Error::Status(n, r)) => (n, r.into_string().unwrap()),
+            Err(e) => panic!("{e}"),
+        }
+    };
+    let speaker = format!(r#"{{"user":"max","speaker":"{KITCHEN}"}}"#);
+    assert_eq!(ask(None, &speaker).0, 401);
+    let mut other = key.clone();
+    other.replace_range(key.len() - 1.., if key.ends_with('0') { "1" } else { "0" });
+    assert_eq!(ask(Some(&other), &speaker).0, 401, "a key one digit off");
+    assert_eq!(ask(Some(&key), r#"{"user":"max"}"#).0, 400);
+    let (n, body) = ask(Some(&key), &speaker);
+    assert_eq!(n, 200, "{body}");
+    let login: Json_ = serde_json::from_str(&body).unwrap();
+    assert_eq!(login["session"], json!(ha::speaker("max", KITCHEN)));
+    let before = head(&server);
+    let (_, again) = ask(Some(&key), &speaker);
+    let again: Json_ = serde_json::from_str(&again).unwrap();
+    assert_eq!(again["session"], login["session"]);
+    assert_eq!(head(&server), before, "a live login is not written again");
+    let (n, own) = ask(Some(&key), "{}");
+    assert_eq!(n, 200);
+    assert_eq!(
+        serde_json::from_str::<Json_>(&own).unwrap()["session"],
+        json!("the house@house")
+    );
+    rt.block_on(server.stop());
+}

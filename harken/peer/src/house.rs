@@ -6,8 +6,9 @@
 //! happens to it — and nothing in that says the far end has to be
 //! somebody's screen. So nothing here extends the session; what is here is
 //! the thing that is a device on a speaker's behalf: a connection to the
-//! hub in this process ([`ha`]), a volatile machine of its own saying in
-//! its `Hello` that it is a speaker, standing in each account's session for
+//! server's socket ([`ha`]; `harken-peer --house`), a volatile machine of
+//! its own saying in its `Hello` that it is a speaker, signed in through
+//! the server's `/house/sign-in`, standing in each account's session for
 //! each configured speaker, reconciled against the state by **the same
 //! reconciler a phone's player is** (`harken-player`, S3b), which says what
 //! the speaker does as the output's own transitions.
@@ -2760,10 +2761,12 @@ mod tests {
 /// that the server hands the house ([`Wires::login`]), which says in its
 /// `Hello` that it is a speaker — so the hub authors its `on_join`, and its
 /// `on_leave` when the connection closes. It has no log. **The house's own
-/// connection** watches: a volatile machine that says no device, fed every
-/// session as every connection in the volatile space is, read for where to
-/// stand; a speaker standing reads its session off its own machine, so what
-/// it says is previewed over what it acted on.
+/// connection** watches: a volatile machine that says no device and authors
+/// nothing, fed every session as every connection in the volatile space is,
+/// so its store is the hub's as of what it has heard; the sessions are read
+/// off it, and a session is acted on once every speaker standing in it has
+/// heard as much ([`Wires::caught_up`]) — what the in-process bridge had by
+/// construction.
 ///
 /// A device is a session (`harken/domain/devices.ark`), so a speaker's id
 /// in the session is its connection's session, `user@entity`, which two
@@ -3156,14 +3159,28 @@ pub mod ha {
             }
         }
 
-        /// `user`'s session as the speaker `entity`'s own machine holds it,
-        /// once it stands there.
-        fn session(&self, user: &str, entity: &str) -> Option<Listening> {
-            let k = (user.to_string(), entity.to_string());
-            let _ = self.standing.get(&k).filter(|l| l.open)?;
-            let s = Listening::of(&self.machines.get(&k)?.store, user);
-            let s = as_entities(s, user, &self.entities);
-            s.device(entity).is_some().then_some(s)
+        /// Whether every speaker standing in `user`'s session has heard what
+        /// the house's own connection has, no more and no less, and has
+        /// nothing of its own still unanswered: then the session as the
+        /// house's connection holds it is what the bridge acts on, it holds
+        /// everything the speakers said, and what a speaker says over it is
+        /// previewed over the same and not refused for being behind. What
+        /// the in-process bridge had by the hub's order, had here by
+        /// waiting: all of them are fed the same frames, so one apart is a
+        /// moment from agreeing, and the frame that makes it wakes the
+        /// thread.
+        fn caught_up(&self, user: &str) -> bool {
+            let head = self.watch.log().head().0;
+            self.standing
+                .iter()
+                .filter(|((u, _), _)| u == user)
+                .all(|(k, line)| {
+                    line.open
+                        && self
+                            .machines
+                            .get(k)
+                            .is_some_and(|m| m.pending.is_empty() && m.log().head().0 == head)
+                })
         }
 
         fn stands(&self, k: &(String, String)) -> bool {
@@ -3345,11 +3362,12 @@ pub mod ha {
             // volume and its group before its queue, so that a member about
             // to lead is made the leader in the house before anything is
             // handed to it: a queue handed to a member is its leader's.
-            for (key, _, es) in &stood {
+            for (key, state, es) in &stood {
+                if !wires.caught_up(key) {
+                    continue;
+                }
                 for entity in es {
-                    if let Some(state) = wires.session(key, entity) {
-                        acts.extend(bridge.wants(key, entity, &state, now));
-                    }
+                    acts.extend(bridge.wants(key, entity, state, now));
                 }
             }
             // Told before anything is read back, so that what a poll below
@@ -3947,8 +3965,8 @@ mod config {
 
     /// The house is all three or nothing, its token and the house's key are
     /// files, and neither is ever printed. Moved from the server's
-    /// configuration with the house; falsified there by reading the token
-    /// as the variable's value: `sekrit` was the path.
+    /// configuration with the house. Falsified by reading the key as the
+    /// variable's value rather than its file's: the key was the path.
     #[test]
     fn the_house_is_all_three_and_the_tokens_are_files() {
         let dir = tempfile::tempdir().unwrap();
