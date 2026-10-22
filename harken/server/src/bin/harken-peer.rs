@@ -98,16 +98,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ark::format::Encode as Bytes;
 use ark::hash::hex;
 use ark::log::EntryId;
 use ark::peer::{Journal, Role, Who};
 use ark_auth::client::Patience;
 use ark_auth::Login;
 use ark_ffi::Standing;
-use ark_peer::{Config, Files, Live, Peer};
+use ark_peer::{Config, Files, Peer};
 use harken_server::domain::host::Listening;
-use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
 use serde_json::{json, Map, Value};
 
@@ -494,24 +492,12 @@ impl Headless {
             (None, false) => nobody(""),
         };
         with_roles(&mut who, &f.roles);
-        let live = f.device.as_ref().map(|d| Live {
-            device: Some(
-                Device {
-                    can_play: d.can_play,
-                    id: String::new(),
-                    kind: d.kind.clone(),
-                    name: d.name.clone(),
-                    user: String::new(),
-                }
-                .to_bytes(),
-            ),
-            ephemeral: hosted.get("listening.scrub").into_iter().collect(),
-            every_ms: 250,
-            ..Live::new(hosted.module.clone())
-        });
-        let config = Config {
-            live,
-            ..Config::of(hosted.domain.clone())
+        let config = match &f.device {
+            Some(d) => {
+                let said = harken_player::config::device(d.can_play, &d.kind, &d.name);
+                harken_player::config::peer(&hosted.domain, said, 250)
+            }
+            None => Config::of(hosted.domain.clone()),
         };
         let disk = Files::new(f.dir.join("replica"))
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
@@ -1027,6 +1013,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark::format::Encode;
 
     fn a(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use ark::peer::Who;
 use ark_ffi::{Login, Peer, Refusal};
-use ark_peer::{now_ms, Config, Handle, Live, Memory, Module};
+use ark_peer::{now_ms, Config, Handle, Memory};
 use harken_domain::host::{self, Listening};
 use serde_json::json;
 
@@ -21,25 +21,11 @@ uniffi::setup_scaffolding!();
 mod player;
 pub use player::{Loudness, PhoneSound, Player, SoundState};
 
-/// The milliseconds between two ephemeral calls the relay sends — a
-/// scrubber dragged — twenty a second; the last always goes.
-pub const THROTTLE_MS: i64 = 50;
-
-/// harken's peer as a phone is made of it: the domain for the log and the
-/// listening session, saying `device` (a `Device`'s JSON) in its volatile
-/// `Hello`, `scrub` relayed as ephemeral.
+/// harken's peer as a phone is made of it (`harken_player::config::peer`):
+/// the domain for the log and the listening session, saying `device` in its
+/// volatile `Hello`, `scrub` relayed as ephemeral.
 pub fn config(device: Vec<u8>) -> Config {
-    let d = harken_domain::shared();
-    let live = Live {
-        device: Some(device),
-        ephemeral: ["listening.scrub".to_string()].into(),
-        every_ms: THROTTLE_MS,
-        ..Live::new(Module::of(&d))
-    };
-    Config {
-        live: Some(live),
-        ..Config::of(d)
-    }
+    harken_player::config::peer(&harken_domain::shared(), device, harken_player::config::THROTTLE_MS)
 }
 
 /// What a device says it is, from its JSON: a `Device` in the value format.
@@ -110,17 +96,7 @@ pub struct Hall {
 impl Hall {
     #[uniffi::constructor]
     pub fn new() -> Arc<Hall> {
-        let d = harken_domain::shared();
-        let get = |n: &str| d.binding(&format!("listening.{n}")).map(String::from);
-        let mut c = Config::of(d.clone());
-        c.live = Some(Live {
-            on_join: get("on_join"),
-            on_leave: get("on_leave"),
-            on_restore: get("on_restore"),
-            arrive: Arc::new(host::arrive),
-            keep: Some(256),
-            ..Live::new(Module::of(&d))
-        });
+        let c = harken_player::config::hub(&harken_domain::shared(), None);
         let hub = Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), now_ms()));
         Arc::new(Hall {
             hub,

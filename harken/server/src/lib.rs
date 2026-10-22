@@ -39,13 +39,12 @@ pub mod library;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use ark_auth::oidc::Provider;
 use ark_auth::server::{Auth, Mode};
 use ark_auth::Account;
-use ark_peer::{Config as HubConfig, Live, Running};
+use ark_peer::{Config as HubConfig, Running};
 
 use assistant::ha;
 use hosted::Hosted;
@@ -54,161 +53,55 @@ use library::Scanner;
 /// The phone's URL scheme: a login may always send its code back there.
 pub const PHONE_SCHEME: &str = "harken://";
 
-/// How people sign in.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SignIn {
-    /// Anyone is whoever they say. A laptop, and nowhere else.
-    Dev,
-    /// Through an OpenID Connect provider, with the client secret in a file
-    /// — a systemd credential — so it is never in a process listing, a unit
-    /// file or the store.
-    Oidc {
-        issuer: String,
-        client_id: String,
-        secret_file: PathBuf,
-        scopes: Vec<String>,
-    },
-}
+pub use ark_peer::{Keepalive, Retention, SignIn};
 
-/// How often the sync socket pings, and how many may go unanswered before
-/// a connection is closed. `ark-server` closes after three unanswered, so
-/// `missed` is read and held to that ([`Config::from_vars`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Keepalive {
-    pub every: Duration,
-    pub missed: u32,
-}
-
-impl Default for Keepalive {
-    fn default() -> Keepalive {
-        Keepalive {
-            every: Duration::from_secs(20),
-            missed: 3,
-        }
-    }
-}
-
-/// How much of the log the server keeps: `entries` above the snapshot the
-/// log stands on (`ark_peer::Config::keep`); a device further behind is
-/// sent the snapshot and rebases onto it. `days` is read and checked, and
-/// kept nothing by: v5's horizon is a count of entries, not a device's
-/// place.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Retention {
-    pub entries: usize,
-    pub days: u64,
-}
-
-impl Default for Retention {
-    fn default() -> Retention {
-        Retention {
-            entries: 10_000,
-            days: 30,
-        }
-    }
-}
-
-/// Everything the server is told, from the environment or a test.
+/// Everything the server is told, from the environment or a test: any
+/// server's (`ark_peer::Serve`, read under `HARKEN_`, which it derefs to)
+/// and harken's own beside it.
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// `host:port`; port 0 takes an ephemeral one.
-    pub listen: String,
-    /// The log (sign-ins among its rows), the kept listening sessions, the
-    /// key tokens are signed with (`session.key`), and the scanner's
-    /// replica.
-    pub data: PathBuf,
-    /// Whether every connection is fed `session.feed` (`HARKEN_SCOPED=1`):
-    /// the library whole and only its person's sign-ins and roles. Off,
-    /// every connection holds the log whole, every person's sign-ins among
-    /// it, as it holds every person's playlists.
-    pub scoped: bool,
-    /// Where a browser reaches this server — the proxy's address behind one.
-    /// The provider sends people back under it, and the page it serves
-    /// signs in against it. `http://{listen}` when unset.
-    pub public_url: Option<String>,
-    pub sign_in: SignIn,
-    /// Where else a login may send its code, besides loopback, the phone's
-    /// scheme and `public_url`.
-    pub redirects: Vec<String>,
+    pub serve: ark_peer::Serve,
     /// The media root: `music/` under it is scanned, all of it is served at
     /// `/media`.
     pub media: Option<PathBuf>,
-    /// A built browser client to serve at `/`.
-    pub web: Option<PathBuf>,
-    /// The file whose change is a rebuild off the store
-    /// (`pkg/harken_iced_bg.wasm`); unset, every file is.
-    pub web_module: Option<String>,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
-    /// How often the sync socket pings. The default everywhere but a test:
-    /// the process fleet shortens it (`HARKEN_KEEPALIVE_MS`) so a
-    /// black-holed socket is closed in a second rather than a minute
-    /// (`docs/plan-fleet.md` §2, scenario 10).
-    pub keepalive: Keepalive,
-    /// How much of the log the server keeps (`HARKEN_RETAIN_ENTRIES`,
-    /// 10,000; `HARKEN_RETAIN_DAYS`, 30, read and unused: [`Retention`]).
-    pub retain: Retention,
-    /// `docs/plan-auth.md` Who holds which role: role → account ids
-    /// (`HARKEN_ROLES`, what `services.harken.roles` sets). Asked at every
-    /// connection, so a restart with another configuration grants or
-    /// revokes at once. The scanner's account holds `library` whatever this
-    /// says.
-    pub roles: std::collections::BTreeMap<String, Vec<String>>,
-    /// `docs/plan-guards.md` D4 Where the admin page listens
-    /// (`HARKEN_ADMIN_BIND`, what `services.harken.admin.bind` sets; none
-    /// without it): nothing asked on loopback and a login holding `admin`
-    /// anywhere wider (`ark_explorer::serve`).
-    pub admin_bind: Option<String>,
-    /// The admin page's static build (`HARKEN_ADMIN_WEB`): `ark-admin`
-    /// compiled to wasm. Without it the admin listener serves its API alone.
-    pub admin_web: Option<PathBuf>,
+}
+
+impl std::ops::Deref for Config {
+    type Target = ark_peer::Serve;
+    fn deref(&self) -> &ark_peer::Serve {
+        &self.serve
+    }
+}
+
+impl std::ops::DerefMut for Config {
+    fn deref_mut(&mut self) -> &mut ark_peer::Serve {
+        &mut self.serve
+    }
 }
 
 impl Config {
     /// A dev server on `listen` keeping its data in `data`, and nothing else.
     pub fn dev(listen: &str, data: &Path) -> Config {
         Config {
-            listen: listen.into(),
-            data: data.into(),
-            scoped: false,
-            public_url: None,
-            sign_in: SignIn::Dev,
-            redirects: vec![],
+            serve: ark_peer::Serve::dev(listen, data),
             media: None,
-            web: None,
-            web_module: None,
             house: None,
-            keepalive: Keepalive::default(),
-            retain: Retention::default(),
-            roles: Default::default(),
-            admin_bind: None,
-            admin_web: None,
         }
     }
 
-    /// Read the environment: what the NixOS module sets.
+    /// Read the environment: what the NixOS module sets. Every
+    /// `ark_peer::Serve` reads, under `HARKEN_` (`HARKEN_DATA`,
+    /// `HARKEN_OIDC_*`, `HARKEN_KEEPALIVE_MS`, `HARKEN_ROLES`, …), and
+    /// harken's own:
     ///
     /// ```text
-    /// HARKEN_DATA                   where the state lives (default: the temp dir)
-    /// HARKEN_SCOPED=1               each connection fed its person's sign-ins only
-    /// HARKEN_PUBLIC_URL             where a browser reaches this server
-    /// HARKEN_DEV_AUTH=1             anyone is whoever they say
-    /// HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID, HARKEN_OIDC_CLIENT_SECRET_FILE
-    ///                               all three, or none; HARKEN_OIDC_SCOPES
-    /// HARKEN_REDIRECTS              comma-separated prefixes
     /// HARKEN_MEDIA                  the media root
-    /// HARKEN_WEB, HARKEN_WEB_MODULE the browser client
     /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
     ///                               all three, or none; HARKEN_HA_MEDIA
     /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
     ///                               house said and what the bridge did
-    /// HARKEN_KEEPALIVE_MS           the sync socket's ping interval (20000)
-    /// HARKEN_KEEPALIVE_MISSED       pings unanswered before it closes (3, and only 3)
-    /// HARKEN_RETAIN_DAYS            read and checked; kept nothing by
-    /// HARKEN_RETAIN_ENTRIES         entries kept above the snapshot (10000)
-    /// HARKEN_ROLES                  who holds which role: `library=alice,bob;admin=alice`
-    /// HARKEN_ADMIN_BIND             where the admin page listens (none without it)
-    /// HARKEN_ADMIN_WEB              the admin page's build
     /// ```
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
@@ -216,118 +109,20 @@ impl Config {
 
     /// [`Config::from_env`] over any lookup; blank is unset.
     pub fn from_vars(listen: &str, var: impl Fn(&str) -> Option<String>) -> Result<Config> {
+        let serve = ark_peer::Serve::from_vars("HARKEN", listen, &var)?;
         let env = |k: &str| var(k).filter(|v| !v.trim().is_empty());
-        let sign_in = match (
-            env("HARKEN_OIDC_ISSUER"),
-            env("HARKEN_OIDC_CLIENT_ID"),
-            env("HARKEN_OIDC_CLIENT_SECRET_FILE"),
-        ) {
-            (Some(issuer), Some(client_id), Some(file)) => SignIn::Oidc {
-                issuer,
-                client_id,
-                secret_file: file.into(),
-                scopes: env("HARKEN_OIDC_SCOPES")
-                    .unwrap_or_else(|| "openid profile email".into())
-                    .split_whitespace()
-                    .map(str::to_string)
-                    .collect(),
-            },
-            (None, None, None) if env("HARKEN_DEV_AUTH").is_some() => SignIn::Dev,
-            (None, None, None) => bail!(
-                "nobody can sign in: set HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID and \
-                 HARKEN_OIDC_CLIENT_SECRET_FILE, or HARKEN_DEV_AUTH=1 on a laptop"
-            ),
-            _ => bail!("HARKEN_OIDC_ISSUER, HARKEN_OIDC_CLIENT_ID and HARKEN_OIDC_CLIENT_SECRET_FILE go together; set all three"),
-        };
-        let house = house(&env)?;
-        let mut keepalive = Keepalive::default();
-        if let Some(ms) = env("HARKEN_KEEPALIVE_MS") {
-            let ms: u64 = ms.trim().parse().ok().filter(|n| *n > 0).ok_or_else(|| {
-                anyhow!("HARKEN_KEEPALIVE_MS is milliseconds, more than none: {ms}")
-            })?;
-            keepalive.every = Duration::from_millis(ms);
-        }
-        if let Some(n) = env("HARKEN_KEEPALIVE_MISSED") {
-            keepalive.missed = n
-                .trim()
-                .parse()
-                .map_err(|_| anyhow!("HARKEN_KEEPALIVE_MISSED is a count: {n}"))?;
-            if keepalive.missed != 3 {
-                bail!("HARKEN_KEEPALIVE_MISSED: the sync socket closes after 3 unanswered pings, not {n}");
-            }
-        }
-        let mut retain = Retention::default();
-        if let Some(d) = env("HARKEN_RETAIN_DAYS") {
-            retain.days = d
-                .trim()
-                .parse()
-                .map_err(|_| anyhow!("HARKEN_RETAIN_DAYS is a count of days: {d}"))?;
-        }
-        if let Some(n) = env("HARKEN_RETAIN_ENTRIES") {
-            retain.entries = n
-                .trim()
-                .parse()
-                .map_err(|_| anyhow!("HARKEN_RETAIN_ENTRIES is a count of entries: {n}"))?;
-        }
-        let list = |k: &str| -> Vec<String> {
-            env(k)
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-                .map(str::to_string)
-                .collect()
-        };
         Ok(Config {
-            listen: listen.into(),
-            data: env("HARKEN_DATA")
-                .map_or_else(|| std::env::temp_dir().join("harken-server"), PathBuf::from),
-            scoped: env("HARKEN_SCOPED").is_some(),
-            public_url: env("HARKEN_PUBLIC_URL"),
-            sign_in,
-            redirects: list("HARKEN_REDIRECTS"),
+            serve,
             media: env("HARKEN_MEDIA").map(PathBuf::from),
-            web: env("HARKEN_WEB").map(PathBuf::from),
-            web_module: env("HARKEN_WEB_MODULE"),
-            house,
-            keepalive,
-            retain,
-            roles: roles_of(&env("HARKEN_ROLES").unwrap_or_default())?,
-            admin_bind: env("HARKEN_ADMIN_BIND"),
-            admin_web: env("HARKEN_ADMIN_WEB").map(PathBuf::from),
+            house: house(&env)?,
         })
-    }
-
-    pub fn public_url(&self) -> String {
-        self.public_url
-            .clone()
-            .unwrap_or_else(|| format!("http://{}", self.listen))
     }
 }
 
-/// `docs/plan-auth.md` `library=alice,bob;admin=alice` — each role, then the
-/// account ids holding it — as role → accounts. What `services.harken.roles`
-/// writes from an attrset; empty is no role at all.
+/// `docs/plan-auth.md` `library=alice,bob;admin=alice`, as role →
+/// accounts: what `services.harken.roles` writes from an attrset.
 pub fn roles_of(text: &str) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
-    let mut out: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
-    for part in text.split(';').map(str::trim).filter(|p| !p.is_empty()) {
-        let Some((role, accounts)) = part.split_once('=') else {
-            bail!("HARKEN_ROLES: `{part}` is not role=account,account");
-        };
-        let role = role.trim();
-        if role.is_empty() {
-            bail!("HARKEN_ROLES: a role with no name in `{part}`");
-        }
-        out.entry(role.to_string()).or_default().extend(
-            accounts
-                .split(',')
-                .map(str::trim)
-                .filter(|a| !a.is_empty())
-                .map(str::to_string),
-        );
-    }
-    Ok(out)
+    ark_peer::settings::roles_of("HARKEN_ROLES", text)
 }
 
 /// The house, from the environment, or nothing.
@@ -415,23 +210,10 @@ pub fn pretty(entity: &str) -> String {
 /// What the scanner's session says signed in.
 const SCANNER: &str = "the scanner";
 
-/// The hub's configuration for `hosted`: the log and the listening
-/// session's volatile space over the one domain, `on_join`, `on_leave` and
-/// `on_restore` the domain's, `host::arrive` reading a device, and `keep`
-/// entries above the log's snapshot.
+/// The hub's configuration for `hosted` (`harken_player::config::hub`),
+/// keeping `keep` entries above the log's snapshot.
 pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
-    let mut c = HubConfig::new(hosted.module.clone());
-    let get = |n: &str| hosted.get(&format!("listening.{n}"));
-    c.live = Some(Live {
-        on_join: get("on_join"),
-        on_leave: get("on_leave"),
-        on_restore: get("on_restore"),
-        arrive: Arc::new(crate::domain::host::arrive),
-        keep: Some(256),
-        ..Live::new(hosted.module.clone())
-    });
-    c.keep = Some(keep);
-    c
+    harken_player::config::hub(&hosted.domain, Some(keep))
 }
 
 /// What `/healthz` says, a line each: `ok`; the connections open; the
@@ -776,7 +558,7 @@ mod tests {
     fn the_admin_page_is_there_when_asked_for() {
         let dev = ("HARKEN_DEV_AUTH", "1");
         let c = Config::from_vars("x:1", vars(&[dev])).unwrap();
-        assert_eq!((c.admin_bind, c.admin_web), (None, None));
+        assert_eq!((c.admin_bind.clone(), c.admin_web.clone()), (None, None));
         let c = Config::from_vars(
             "x:1",
             vars(&[

@@ -29,6 +29,7 @@
 //! presses, its plays authored in the log, and the one view a phone draws,
 //! alone or joined.
 
+pub mod config;
 pub mod memory;
 pub mod player;
 pub mod press;

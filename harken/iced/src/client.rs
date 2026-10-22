@@ -12,19 +12,17 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::domain::Device;
 use ark::domain::Domain;
-use ark::format::Encode;
 use ark::peer::Who;
 pub use ark_peer::link::Wake;
 #[cfg_attr(all(feature = "demo", not(test)), allow(unused_imports))]
 pub use ark_peer::nobody;
 pub use ark_peer::{monotonic_ms, now_ms, Peer as Replica, Standing, Update};
-use ark_peer::{Config, Disk, Live, Memory};
+use ark_peer::{Config, Disk, Memory};
 
 /// The milliseconds between two ephemeral calls the relay sends — a
 /// scrubber dragged — twenty a second; the last always goes.
-pub const THROTTLE_MS: u64 = 50;
+pub const THROTTLE_MS: u64 = harken_player::config::THROTTLE_MS as u64;
 
 /// harken's domain, registered once.
 pub fn domain() -> &'static Arc<Domain> {
@@ -32,33 +30,14 @@ pub fn domain() -> &'static Arc<Domain> {
     D.get_or_init(harken_domain::shared)
 }
 
-/// What this device says it is in its volatile `Hello` (§1.9): the server
-/// makes it `on_join`'s input with the login's user and session.
+/// What this device says it is in its volatile `Hello`: a computer.
 pub fn device(can_play: bool, name: &str) -> Vec<u8> {
-    Device {
-        can_play,
-        id: String::new(),
-        kind: crate::domain::host::Kind::Computer.name().into(),
-        name: name.into(),
-        user: String::new(),
-    }
-    .to_bytes()
+    harken_player::config::device(can_play, crate::domain::host::Kind::Computer.name(), name)
 }
 
-/// The peer's two modules, and the relay: `scrub` is the one ephemeral
-/// transition.
+/// The peer's two modules, and the relay (`harken_player::config::peer`).
 pub fn config(device: Vec<u8>) -> Config {
-    let d = domain();
-    let live = Live {
-        device: Some(device),
-        ephemeral: ["listening.scrub".to_string()].into(),
-        every_ms: THROTTLE_MS as i64,
-        ..Live::new(ark_peer::Module::of(d))
-    };
-    Config {
-        live: Some(live),
-        ..Config::of(d.clone())
-    }
+    harken_player::config::peer(domain(), device, THROTTLE_MS as i64)
 }
 
 /// The peer `disk` holds ([`Replica::open_as`]), saying `device` in its
