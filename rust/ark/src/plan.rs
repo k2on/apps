@@ -15,8 +15,7 @@
 //! | operator | keeps | on a delta |
 //! |---|---|---|
 //! | `scan` | nothing | the table's changes, net per key |
-//! | `filter`, `map` | its input and output | the closure again on each element touched |
-//! | `sort` | each element's place | each element touched placed again |
+//! | `filter`, `map`, `sort` | each element's place and output (and input, when the closure reads) | the closure again on each element touched, placed again |
 //! | `take` | its input, in order | the window again |
 //! | `group` | each group's members | the touched groups' aggregates again |
 //! | `join` | each side by its key | for an element of one side, probe the other |
@@ -239,157 +238,71 @@ impl<S: Tables, T: Elem> Op<S, T> for ScanOp<T> {
     }
 }
 
-struct FilterOp<S: Tables, T> {
+/// One element at a time: `f` makes of each input element what goes
+/// before its place and what it puts out, if anything — a filter keeps or
+/// drops it, a map makes another of it, a sort puts its sort key first.
+struct EachOp<S: Tables, T, U> {
     input: Box<dyn Op<S, T>>,
-    f: F<S, T, bool>,
-    /// Every input element, and whether it is kept.
-    kept: BTreeMap<Okey, (T, bool)>,
+    f: F<S, T, (Okey, Option<U>)>,
+    /// Per input element: itself (when `f` reads, to run it again), and its
+    /// output's place and value.
+    kept: BTreeMap<Okey, (Option<T>, Okey, Option<U>)>,
     deps: Deps,
 }
 
-impl<S: Tables, T: Elem> Op<S, T> for FilterOp<S, T> {
-    fn hydrate(&mut self, cx: &Cx, keep: bool) -> Vec<(Okey, T)> {
-        let mut out = vec![];
-        for (k, t) in self.input.hydrate(cx, keep) {
-            let (yes, deps) = self.f.run(cx.store, &t);
-            if keep {
-                self.deps.set(&k, deps);
-                self.kept.insert(k.clone(), (t.clone(), yes));
-            }
-            if yes {
-                out.push((k, t));
-            }
+impl<S: Tables, T: Elem, U: Elem> EachOp<S, T, U> {
+    /// The element at `k` through `f`: its output's place and value, kept
+    /// when `keep`.
+    fn run(&mut self, store: &Store, k: &Okey, t: T, keep: bool) -> (Okey, Option<U>) {
+        let ((mut at, u), deps) = self.f.run(store, &t);
+        at.extend_from_slice(k);
+        if keep {
+            self.deps.set(k, deps);
+            let reads = matches!(self.f, F::With(_));
+            self.kept.insert(k.clone(), (reads.then_some(t), at.clone(), u.clone()));
         }
-        out
+        (at, u)
     }
 
-    fn push(&mut self, cx: &Cx, p: &Pushed) -> Delta<T> {
-        let d = self.input.push(cx, p);
-        let mut dirty = self.deps.hit(p);
-        let mut out = Delta::new();
-        for (k, (_, new)) in d {
-            dirty.remove(&k);
-            let was = self.kept.remove(&k).and_then(|(t, yes)| yes.then_some(t));
-            self.deps.clear(&k);
-            let now = new.and_then(|t| {
-                let (yes, deps) = self.f.run(cx.store, &t);
-                self.deps.set(&k, deps);
-                self.kept.insert(k.clone(), (t.clone(), yes));
-                yes.then_some(t)
-            });
-            put(&mut out, k, was, now);
+    /// The element at `k` gone from the output, and `new` put in its place.
+    fn place(&mut self, store: &Store, out: &mut Delta<U>, k: Okey, new: Option<T>) {
+        if let Some((_, at, Some(u))) = self.kept.remove(&k) {
+            put(out, at, Some(u), None);
         }
-        for k in dirty {
-            let Some((t, was)) = self.kept.get(&k).cloned() else { continue };
-            let (yes, deps) = self.f.run(cx.store, &t);
-            self.deps.set(&k, deps);
-            self.kept.insert(k.clone(), (t.clone(), yes));
-            put(&mut out, k, was.then(|| t.clone()), yes.then_some(t));
+        self.deps.clear(&k);
+        if let Some(t) = new {
+            if let (at, Some(u)) = self.run(store, &k, t, true) {
+                put(out, at, None, Some(u));
+            }
         }
-        prune(out)
     }
 }
 
-struct MapOp<S: Tables, T, U> {
-    input: Box<dyn Op<S, T>>,
-    f: F<S, T, U>,
-    /// Every element: its input (when the closure reads, to run it again)
-    /// and its output.
-    kept: BTreeMap<Okey, (Option<T>, U)>,
-    deps: Deps,
-}
-
-impl<S: Tables, T: Elem, U: Elem> Op<S, U> for MapOp<S, T, U> {
+impl<S: Tables, T: Elem, U: Elem> Op<S, U> for EachOp<S, T, U> {
     fn hydrate(&mut self, cx: &Cx, keep: bool) -> Vec<(Okey, U)> {
-        let reads = matches!(self.f, F::With(_));
-        let mut out = vec![];
-        for (k, t) in self.input.hydrate(cx, keep) {
-            let (u, deps) = self.f.run(cx.store, &t);
-            if keep {
-                self.deps.set(&k, deps);
-                self.kept.insert(k.clone(), (reads.then_some(t), u.clone()));
-            }
-            out.push((k, u));
-        }
-        out
-    }
-
-    fn push(&mut self, cx: &Cx, p: &Pushed) -> Delta<U> {
-        let reads = matches!(self.f, F::With(_));
-        let d = self.input.push(cx, p);
-        let mut dirty = self.deps.hit(p);
-        let mut out = Delta::new();
-        for (k, (_, new)) in d {
-            dirty.remove(&k);
-            let was = self.kept.remove(&k).map(|(_, u)| u);
-            self.deps.clear(&k);
-            let now = new.map(|t| {
-                let (u, deps) = self.f.run(cx.store, &t);
-                self.deps.set(&k, deps);
-                self.kept.insert(k.clone(), (reads.then_some(t), u.clone()));
-                u
-            });
-            put(&mut out, k, was, now);
-        }
-        for k in dirty {
-            let Some((Some(t), was)) = self.kept.get(&k).cloned() else { continue };
-            let (u, deps) = self.f.run(cx.store, &t);
-            self.deps.set(&k, deps);
-            self.kept.insert(k.clone(), (Some(t), u.clone()));
-            put(&mut out, k, Some(was), Some(u));
-        }
-        prune(out)
-    }
-}
-
-struct SortOp<S: Tables, T> {
-    input: Box<dyn Op<S, T>>,
-    f: F<S, T, Vec<u8>>,
-    /// Each input element's place in the output, and the element.
-    at: BTreeMap<Okey, (Okey, T)>,
-    deps: Deps,
-}
-
-impl<S: Tables, T: Elem> Op<S, T> for SortOp<S, T> {
-    fn hydrate(&mut self, cx: &Cx, keep: bool) -> Vec<(Okey, T)> {
-        let mut out = vec![];
-        for (k, t) in self.input.hydrate(cx, keep) {
-            let (mut s, deps) = self.f.run(cx.store, &t);
-            s.extend_from_slice(&k);
-            if keep {
-                self.deps.set(&k, deps);
-                self.at.insert(k, (s.clone(), t.clone()));
-            }
-            out.push((s, t));
-        }
+        let input = self.input.hydrate(cx, keep);
+        let mut out: Vec<(Okey, U)> = input
+            .into_iter()
+            .filter_map(|(k, t)| match self.run(cx.store, &k, t, keep) {
+                (at, Some(u)) => Some((at, u)),
+                _ => None,
+            })
+            .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
 
-    fn push(&mut self, cx: &Cx, p: &Pushed) -> Delta<T> {
+    fn push(&mut self, cx: &Cx, p: &Pushed) -> Delta<U> {
         let d = self.input.push(cx, p);
         let mut dirty = self.deps.hit(p);
         let mut out = Delta::new();
-        let place = |me: &mut Self, out: &mut Delta<T>, k: Okey, new: Option<T>| {
-            if let Some((s, t)) = me.at.remove(&k) {
-                put(out, s, Some(t), None);
-            }
-            me.deps.clear(&k);
-            if let Some(t) = new {
-                let (mut s, deps) = me.f.run(cx.store, &t);
-                s.extend_from_slice(&k);
-                me.deps.set(&k, deps);
-                put(out, s.clone(), None, Some(t.clone()));
-                me.at.insert(k, (s, t));
-            }
-        };
         for (k, (_, new)) in d {
             dirty.remove(&k);
-            place(self, &mut out, k, new);
+            self.place(cx.store, &mut out, k, new);
         }
         for k in dirty {
-            let Some((_, t)) = self.at.get(&k).cloned() else { continue };
-            place(self, &mut out, k, Some(t));
+            let Some((Some(t), ..)) = self.kept.get(&k).cloned() else { continue };
+            self.place(cx.store, &mut out, k, Some(t));
         }
         prune(out)
     }
@@ -434,23 +347,7 @@ impl<S: Tables, T: Elem> Op<S, T> for TakeOp<S, T> {
 }
 
 /// A group's members, in their input's order: what an aggregate reads.
-pub struct Members<'a, T>(btree_map::Values<'a, Okey, T>);
-
-impl<'a, T> Iterator for Members<'a, T> {
-    type Item = &'a T;
-    fn next(&mut self) -> Option<&'a T> {
-        self.0.next()
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-}
-impl<T> ExactSizeIterator for Members<'_, T> {}
-impl<T> Clone for Members<'_, T> {
-    fn clone(&self) -> Self {
-        Members(self.0.clone())
-    }
-}
+pub type Members<'a, T> = btree_map::Values<'a, Okey, T>;
 
 type Agg<S, K, T, A> = Box<dyn for<'t, 'm> Fn(&Db<'t, S>, &K, Members<'m, T>) -> A + Send>;
 
@@ -482,7 +379,7 @@ impl<S: Tables, T: Elem, K: Key + Clone + Send + 'static, A: Elem> Op<S, A> for 
         }
         let mut out = vec![];
         for (g, (key, members)) in groups {
-            let (a, deps) = recorded::<S, A>(cx.store, |db| (self.agg)(db, &key, Members(members.values())));
+            let (a, deps) = recorded::<S, A>(cx.store, |db| (self.agg)(db, &key, members.values()));
             out.push((g.clone(), a.clone()));
             if keep {
                 self.deps.set(&g, deps);
@@ -529,7 +426,7 @@ impl<S: Tables, T: Elem, K: Key + Clone + Send + 'static, A: Elem> Op<S, A> for 
                 put(&mut out, g, was, None);
                 continue;
             };
-            let (a, deps) = recorded::<S, A>(cx.store, |db| (self.agg)(db, &grp.key, Members(grp.members.values())));
+            let (a, deps) = recorded::<S, A>(cx.store, |db| (self.agg)(db, &grp.key, grp.members.values()));
             self.deps.set(&g, deps);
             self.groups.get_mut(&g).unwrap().agg = Some(a.clone());
             put(&mut out, g, was, Some(a));
@@ -687,8 +584,8 @@ impl<S: Tables, T: Elem> Plan<S, T> {
         Plan { op: Box::new(op) }
     }
 
-    fn filtered(self, f: F<S, T, bool>) -> Plan<S, T> {
-        Plan::<S, T>::with(FilterOp {
+    fn each<U: Elem>(self, f: F<S, T, (Okey, Option<U>)>) -> Plan<S, U> {
+        Plan::<S, T>::with(EachOp {
             input: self.op,
             f,
             kept: BTreeMap::new(),
@@ -698,50 +595,32 @@ impl<S: Tables, T: Elem> Plan<S, T> {
 
     /// The elements `f` keeps.
     pub fn filter(self, f: impl Fn(&T) -> bool + Send + 'static) -> Plan<S, T> {
-        self.filtered(F::Pure(Box::new(f)))
+        self.each(F::Pure(Box::new(move |t| (vec![], f(t).then(|| t.clone())))))
     }
 
     /// The elements `f` keeps, reading the store.
     pub fn filter_with(self, f: impl for<'t> Fn(&Db<'t, S>, &T) -> bool + Send + 'static) -> Plan<S, T> {
-        self.filtered(F::With(Box::new(f)))
-    }
-
-    fn mapped<U: Elem>(self, f: F<S, T, U>) -> Plan<S, U> {
-        Plan::<S, T>::with(MapOp {
-            input: self.op,
-            f,
-            kept: BTreeMap::new(),
-            deps: Deps::new(),
-        })
+        self.each(F::With(Box::new(move |db, t| (vec![], f(db, t).then(|| t.clone())))))
     }
 
     /// Each element as `f` makes it.
     pub fn map<U: Elem>(self, f: impl Fn(&T) -> U + Send + 'static) -> Plan<S, U> {
-        self.mapped(F::Pure(Box::new(f)))
+        self.each(F::Pure(Box::new(move |t| (vec![], Some(f(t))))))
     }
 
     /// Each element as `f` makes it, reading the store.
     pub fn map_with<U: Elem>(self, f: impl for<'t> Fn(&Db<'t, S>, &T) -> U + Send + 'static) -> Plan<S, U> {
-        self.mapped(F::With(Box::new(f)))
-    }
-
-    fn sorted(self, f: F<S, T, Vec<u8>>) -> Plan<S, T> {
-        Plan::<S, T>::with(SortOp {
-            input: self.op,
-            f,
-            at: BTreeMap::new(),
-            deps: Deps::new(),
-        })
+        self.each(F::With(Box::new(move |db, t| (vec![], Some(f(db, t))))))
     }
 
     /// The elements in the order of `f`'s key, ties in the order they came.
     pub fn sort<K: Key>(self, f: impl Fn(&T) -> K + Send + 'static) -> Plan<S, T> {
-        self.sorted(F::Pure(Box::new(move |t| f(t).key())))
+        self.each(F::Pure(Box::new(move |t| (f(t).key(), Some(t.clone())))))
     }
 
     /// The elements in the order of `f`'s key, reading the store.
     pub fn sort_with<K: Key>(self, f: impl for<'t> Fn(&Db<'t, S>, &T) -> K + Send + 'static) -> Plan<S, T> {
-        self.sorted(F::With(Box::new(move |db, t| f(db, t).key())))
+        self.each(F::With(Box::new(move |db, t| (f(db, t).key(), Some(t.clone())))))
     }
 
     /// The first `n`.
