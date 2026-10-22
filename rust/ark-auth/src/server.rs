@@ -24,7 +24,7 @@ use hmac::{Hmac, Mac};
 
 use ark::db::read;
 use ark::format::Encode;
-use ark::hash::hex;
+use ark::hash::{hex, unhex};
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::row::Row;
@@ -450,14 +450,6 @@ fn random_hex<const N: usize>() -> String {
     let mut b = [0u8; N];
     getrandom::getrandom(&mut b).expect("the OS gives no randomness");
     hex(&b)
-}
-
-/// Hex's bytes, when it is hex.
-pub fn unhex(s: &str) -> Option<Vec<u8>> {
-    let pairs = (0..s.len())
-        .step_by(2)
-        .map(|i| s.get(i..i + 2).and_then(|p| u8::from_str_radix(p, 16).ok()));
-    (s.len() & 1 == 0).then(|| pairs.collect()).flatten()
 }
 
 pub(crate) fn now_ms() -> i64 {

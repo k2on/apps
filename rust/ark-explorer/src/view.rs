@@ -3,6 +3,7 @@
 //! anything: what the cursor is on, what an edit goes through and what the
 //! switch says are answered in [`crate::model`].
 
+use ark::row::plural;
 use arkui::{fit, style, table};
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, text, text_input, Column, Row, Space};
@@ -33,10 +34,6 @@ fn link<'a>(label: impl Into<String>, msg: Msg) -> Element<'a, Msg> {
         .padding([2, 6])
         .on_press(msg)
         .into()
-}
-
-fn plural(n: usize, what: &str) -> String {
-    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
 }
 
 impl Explorer {

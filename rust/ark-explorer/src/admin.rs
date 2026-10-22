@@ -310,7 +310,7 @@ impl Page {
     pub fn observe(&mut self) {
         let Some(l) = &self.loaded else { return };
         let src = l.source();
-        self.explorer.observe(&src, self.generation, now_ms());
+        self.explorer.observe(&src, self.generation, ark_peer::monotonic_ms());
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -458,20 +458,5 @@ fn sign_in(server: Option<String>) -> Task<Message> {
         Task::done(Message::Token(Err(format!(
             "this admin page asks for a login holding admin: sign in at {server} and set ARK_ADMIN_TOKEN"
         ))))
-    }
-}
-
-/// Milliseconds from some start, for what fades: the browser's clock, or a
-/// monotonic one natively (`Instant` panics on wasm32-unknown-unknown).
-fn now_ms() -> u64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        js_sys::Date::now() as u64
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use std::sync::OnceLock;
-        static START: OnceLock<std::time::Instant> = OnceLock::new();
-        START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
     }
 }

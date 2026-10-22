@@ -19,17 +19,7 @@ use ark::peer::Ctx;
 use ark::store::Store;
 use harken_domain::*;
 
-struct Rng(u64);
-
-impl Rng {
-    fn below(&mut self, n: u64) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        (self.0 >> 11) % n.max(1)
-    }
-    fn pick<'a>(&mut self, xs: &[&'a str]) -> &'a str {
-        xs[self.below(xs.len() as u64) as usize]
-    }
-}
+use ark_dev::sim::Rng;
 
 /// One step: who, on which device, holding which roles, calls what with
 /// what.

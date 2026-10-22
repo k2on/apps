@@ -22,9 +22,30 @@ use ark::plan::splice;
 use ark::schema::Space;
 use ark_peer::{Config, ConnId, Deliver, Memory, Peer, Update};
 
-/// Knuth's MMIX constants: the whole of the simulation's randomness.
-pub fn lcg(s: u64) -> u64 {
-    s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
+/// The whole of a seeded run's randomness — the simulator's network, the
+/// fuzzer's script, harken's port — one generator: an LCG of Knuth's MMIX
+/// constants, read by its top 53 bits.
+#[derive(Clone, Debug)]
+pub struct Rng(pub u64);
+
+impl Rng {
+    pub fn roll(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 11
+    }
+
+    /// Below `n` (0 for none).
+    pub fn below(&mut self, n: u64) -> u64 {
+        self.roll() % n.max(1)
+    }
+
+    pub fn one_in(&mut self, n: u64) -> bool {
+        self.below(n) == 0
+    }
+
+    pub fn pick<T: Copy>(&mut self, xs: &[T]) -> T {
+        xs[self.below(xs.len() as u64) as usize]
+    }
 }
 
 /// Client `i`'s first login, as K1's simulator named it.
@@ -60,7 +81,7 @@ pub struct Net {
     pub conns: BTreeMap<i64, ConnId>,
     pub to_server: BTreeMap<i64, Vec<Vec<u8>>>,
     pub to_client: BTreeMap<i64, Vec<Vec<u8>>>,
-    pub seed: u64,
+    pub rng: Rng,
     pub now: i64,
     /// Every refusal a client was told; how many frames the network
     /// dropped and how many it delivered twice.
@@ -98,7 +119,7 @@ impl Net {
             conns: BTreeMap::new(),
             to_server: BTreeMap::new(),
             to_client: BTreeMap::new(),
-            seed,
+            rng: Rng(seed),
             now: 0,
             refused: vec![],
             dropped: 0,
@@ -132,11 +153,6 @@ impl Net {
         while !(self.to_server.values().all(|m| m.is_empty()) && self.to_client.values().all(|m| m.is_empty())) {
             self.drain();
         }
-    }
-
-    fn roll(&mut self) -> u64 {
-        self.seed = lcg(self.seed);
-        self.seed >> 11
     }
 
     fn client(&mut self, i: i64) -> &mut Peer {
@@ -292,14 +308,14 @@ impl Net {
     /// with a one-in-eight chance of arriving twice and one in sixteen of
     /// not arriving at all.
     pub fn step(&mut self) {
-        let r = self.roll();
+        let r = self.rng.roll();
         let mut candidates: Vec<Result<i64, i64>> = self.to_server.iter().filter(|(_, ms)| !ms.is_empty()).map(|(i, _)| Ok(*i)).collect();
         candidates.extend(self.to_client.iter().filter(|(_, ms)| !ms.is_empty()).map(|(i, _)| Err(*i)));
         if candidates.is_empty() {
             return;
         }
         let pick = candidates[(r % candidates.len() as u64) as usize];
-        let times = match self.roll() % 16 {
+        let times = match self.rng.roll() % 16 {
             0 => 0,
             1 | 2 => 2,
             _ => 1,

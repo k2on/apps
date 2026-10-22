@@ -28,7 +28,7 @@ use iced::Size;
 
 use crate::menu::{self, Menu};
 use crate::picker::{self, Picked, Picker};
-use crate::vim::{self, Motion};
+use crate::vim::Motion;
 
 /// Which layer has the keyboard, when one does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,13 +103,6 @@ impl<M: Clone, T: Clone> Context<M, T> {
 
     /// Close the picker, and only it. The menu, if any, has the keys again.
     pub fn close_picker(&mut self) {
-        self.picker = None;
-        self.showing = false;
-    }
-
-    /// Close everything.
-    pub fn close(&mut self) {
-        self.menu = None;
         self.picker = None;
         self.showing = false;
     }
@@ -277,14 +270,6 @@ impl<M: Clone, T: Clone> Context<M, T> {
         self.showing = false;
         Some(message)
     }
-
-    /// The menu's grid and cursor, or the picker's, for whichever has the keys.
-    pub fn grid(&self) -> Option<(vim::Grid, usize)> {
-        match self.focus()? {
-            Layer::Menu => self.menu.as_ref().map(|m| (m.grid(), m.at)),
-            Layer::Picker => self.picker.as_ref().map(|p| (p.grid(), p.at)),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -294,6 +279,7 @@ mod tests {
     use crate::menu::{Anchor, Entry, SUBMENU_OVERLAP};
     use crate::panel::{EDGE, PADDING};
     use crate::picker::Choice;
+    use crate::vim;
     use iced::{Point, Size};
 
     /// A stand-in for an app's messages.

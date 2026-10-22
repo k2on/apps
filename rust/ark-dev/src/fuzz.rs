@@ -26,19 +26,8 @@ use ark::store::Store;
 use ark_peer::{Config, Live, Module, Peer};
 
 use crate::demo::{AddToPlaylist, CreatePlaylist, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
-use crate::sim::{lcg, Net, Op};
-
-pub struct Rng(pub u64);
-
-impl Rng {
-    pub fn below(&mut self, n: u64) -> u64 {
-        self.0 = lcg(self.0);
-        (self.0 >> 11) % n.max(1)
-    }
-    pub fn one_in(&mut self, n: u64) -> bool {
-        self.below(n) == 0
-    }
-}
+pub use crate::sim::Rng;
+use crate::sim::{Net, Op};
 
 /// The demo, and what a script can do with it.
 pub struct Gen {
