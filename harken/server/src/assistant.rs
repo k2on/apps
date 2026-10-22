@@ -2966,10 +2966,12 @@ pub mod ha {
     }
 
     /// Every session, as the hub holds it now: each account with a row in
-    /// the session's tables, its speakers named by their entities.
-    fn sessions(hub: &Handle, entities: &[String]) -> Vec<(String, Listening)> {
+    /// the session's tables, its speakers named by their entities; and the
+    /// head of the volatile log they were read at.
+    fn sessions(hub: &Handle, entities: &[String]) -> (i64, Vec<(String, Listening)>) {
         let read = hub.with(|h| {
-            let store = &h.live.as_ref()?.store;
+            let live = h.live.as_ref()?;
+            let (head, store) = (live.log().head().0, &live.store);
             let mut users: Vec<String> = store
                 .scan("listening", &Scan::all())
                 .iter()
@@ -2986,21 +2988,23 @@ pub mod ha {
             users.dedup();
             users.sort();
             users.dedup();
-            Some(
+            Some((
+                head,
                 users
                     .into_iter()
                     .map(|u| (u.clone(), Listening::of(store, &u)))
                     .collect::<Vec<_>>(),
-            )
+            ))
         });
-        read.flatten()
-            .unwrap_or_default()
+        let (head, read) = read.flatten().unwrap_or_default();
+        let read = read
             .into_iter()
             .map(|(u, s)| {
                 let s = as_entities(s, &u, entities);
                 (u, s)
             })
-            .collect()
+            .collect();
+        (head, read)
     }
 
     /// A frame the hub sent the speaker at (account, entity).
@@ -3023,6 +3027,27 @@ pub mod ha {
     }
 
     impl Wires {
+        /// Whether every speaker standing in `user`'s session has heard the
+        /// hub's volatile log to `head` — the head the sessions were read at
+        /// ([`sessions`]) — no more and no less, and has nothing of its own
+        /// unanswered: only then is the session acted on, so that every
+        /// speaker in it acts on that one moment and what each says is
+        /// previewed over it. Otherwise the session waits for the next frame,
+        /// which wakes the thread. In this process the hub's order of jobs
+        /// leaves a speaker no further behind than its last unanswered call
+        /// (a job's frames are delivered before the next job, the read
+        /// among them), but not never ahead: [`Handle::with`] answers from
+        /// inside its job, so the next job's frames can reach one speaker's
+        /// channel and not yet another's before [`Wires::receive`] takes
+        /// them. The rule is kept here, not left to that order.
+        fn agree(&self, user: &str, head: i64) -> bool {
+            self.standing.keys().filter(|(u, _)| u == user).all(|k| {
+                self.machines
+                    .get(k)
+                    .is_some_and(|m| m.pending.is_empty() && m.log().head().0 == head)
+            })
+        }
+
         fn stands(&self, k: &(String, String)) -> bool {
             self.standing.contains_key(k)
         }
@@ -3153,7 +3178,7 @@ pub mod ha {
             let now = now_ms();
             let mut acts = vec![];
             let entities: Vec<String> = bridge.players().iter().map(|(e, _)| e.clone()).collect();
-            let states = sessions(&wires.hub, &entities);
+            let (head, states) = sessions(&wires.hub, &entities);
             // Every frame the hub sent the speakers before it was read is in
             // their channel by now (the hub delivers a step's frames before
             // it takes the next job): each speaker's machine holds at least
@@ -3231,7 +3256,12 @@ pub mod ha {
             // volume and its group before its queue, so that a member about
             // to lead is made the leader in the house before anything is
             // handed to it: a queue handed to a member is its leader's.
+            // Only a session every speaker standing in it agrees on
+            // ([`Wires::agree`]).
             for (key, state, es) in &stood {
+                if !wires.agree(key, head) {
+                    continue;
+                }
                 for entity in es {
                     acts.extend(bridge.wants(key, entity, state, now));
                 }
@@ -3714,5 +3744,90 @@ pub mod ha {
                 said,
             })
         }
+    }
+
+    /// The rule a session is acted on by ([`Wires::agree`]), with the hub's
+    /// order perturbed as it can be in this process: the sessions read at
+    /// one head, and the next job's frames reaching the kitchen's channel
+    /// before the study's. Two speakers stand in max's session; a third, in
+    /// ann's, moves the volatile log, which every speaker hears.
+    ///
+    /// Falsified by `agree` not comparing heads: the kitchen, a frame past
+    /// the reading, was taken as agreeing; and by its not looking at what a
+    /// speaker has unanswered: the kitchen's own call, not yet confirmed.
+    #[cfg(test)]
+    #[test]
+    fn a_session_is_acted_on_only_when_its_speakers_have_heard_what_was_read() {
+        use crate::domain::Scrub;
+        const KITCHEN: &str = "media_player.kitchen";
+        const STUDY: &str = "media_player.study";
+        let hosted = Hosted::harken();
+        let hub = Handle::spawn(ark_peer::Peer::serve(
+            crate::hub_config(&hosted, 1_000),
+            Box::new(ark_peer::Memory::default()),
+            now_ms(),
+        ));
+        let mut w = Wires {
+            hub,
+            hosted,
+            entities: vec![KITCHEN.into(), STUDY.into()],
+            machines: HashMap::new(),
+            standing: HashMap::new(),
+            frames: channel(),
+            waker: channel().0,
+        };
+        // Read and heard, as the thread does, until max's speakers agree.
+        let settled = |w: &mut Wires| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let (head, _) = sessions(&w.hub, &w.entities);
+                w.receive();
+                if w.agree("max", head) {
+                    return head;
+                }
+                assert!(Instant::now() < deadline, "max's speakers never agreed");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        let scrub = |at_ms| Scrub { at_ms: Some(at_ms) }.to_bytes();
+        w.stand("max", KITCHEN, "Kitchen");
+        w.stand("max", STUDY, "Study");
+        w.stand("ann", KITCHEN, "Kitchen");
+        let first = settled(&mut w);
+
+        // A call of the kitchen's own, unanswered.
+        w.call("max", KITCHEN, "scrub", scrub(1));
+        assert!(!w.agree("max", first), "the kitchen's call is unanswered");
+        let read = settled(&mut w);
+        assert!(read > first);
+
+        // Read at `read`; then ann's kitchen moves the log, and its frames
+        // reach max's kitchen and not yet max's study.
+        assert_eq!(sessions(&w.hub, &w.entities).0, read);
+        w.call("ann", KITCHEN, "scrub", scrub(2));
+        w.hub.with(|_| ());
+        let (study, rest): (Vec<Framed>, Vec<Framed>) = w
+            .frames
+            .1
+            .try_iter()
+            .partition(|((u, e), _)| u == "max" && e == STUDY);
+        assert!(!study.is_empty(), "the study is sent ann's change");
+        assert!(rest.iter().any(|((u, e), _)| u == "max" && e == KITCHEN));
+        for f in rest {
+            w.frames.0.send(f).unwrap();
+        }
+        w.receive();
+        assert!(
+            !w.agree("max", read),
+            "the kitchen has heard past what was read"
+        );
+        let now = sessions(&w.hub, &w.entities).0;
+        assert!(now > read);
+        assert!(!w.agree("max", now), "the study has not heard it yet");
+        for f in study {
+            w.frames.0.send(f).unwrap();
+        }
+        w.receive();
+        assert!(w.agree("max", now), "both have heard what was read");
     }
 }
