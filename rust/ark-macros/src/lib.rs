@@ -6,6 +6,7 @@
 use proc_macro::TokenStream;
 
 mod domain;
+mod ffi;
 
 /// `#[derive(Row)]`: a struct as a table's row — `#[ark(key)]` on its
 /// leading fields, `#[ark(refs(Row))]` on a column naming another row,
@@ -27,7 +28,7 @@ pub fn input(input: TokenStream) -> TokenStream {
 }
 
 /// `#[derive(Describe)]`: what a struct or an enum is, as `ark::row::Type`.
-#[proc_macro_derive(Describe)]
+#[proc_macro_derive(Describe, attributes(ark))]
 pub fn describe(input: TokenStream) -> TokenStream {
     domain::describe_derive(syn::parse_macro_input!(input as syn::DeriveInput)).into()
 }
@@ -77,4 +78,12 @@ pub fn view(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
     domain::register("scope", attr.into(), item.into()).into()
+}
+
+/// `#[ffi]` above `#[mutator("name")]`, `#[view("name")]` or
+/// `#[query("name")]`: the function as UniFFI calls it with its typed
+/// input, beside it (`ark_ffi::typed`; the experiment of one generator).
+#[proc_macro_attribute]
+pub fn ffi(_: TokenStream, item: TokenStream) -> TokenStream {
+    ffi::function(item.into()).into()
 }

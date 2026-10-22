@@ -14,6 +14,14 @@ ark = { path = "../../rust/ark" }
 ark-auth = { path = "../../rust/ark-auth" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The typed path to the phones (docs/plan-v5.md, Experiment: one generator):
+# the domain's types as UniFFI records, its functions as UniFFI functions.
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+ark-ffi = { path = "../../rust/ark-ffi", optional = true }
+ark-macros = { path = "../../rust/ark-macros", optional = true }
+
+[features]
+ffi = ["dep:uniffi", "dep:ark-ffi", "dep:ark-macros"]
 
 [dev-dependencies]
 ark-peer = { path = "../../rust/ark-peer" }

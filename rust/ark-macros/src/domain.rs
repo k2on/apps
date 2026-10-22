@@ -32,7 +32,7 @@ fn snake(s: &str) -> String {
 }
 
 /// One item of an `#[ark(..)]` attribute.
-enum Item {
+pub(crate) enum Item {
     Flag(Ident),
     Is(Ident, Expr),
     /// `index(a, b)` / `unique(a, b)`, maybe `as NAME`.
@@ -66,7 +66,7 @@ impl Parse for Item {
     }
 }
 
-fn items(attrs: &[syn::Attribute]) -> syn::Result<Vec<Vec<Item>>> {
+pub(crate) fn items(attrs: &[syn::Attribute]) -> syn::Result<Vec<Vec<Item>>> {
     items_of(attrs, "ark")
 }
 
@@ -171,7 +171,22 @@ pub fn effect(input: DeriveInput) -> TokenStream {
             _ => return err(name.span(), "#[effect(..)]: lease_ms = .., retry_ms = .., role = \"..\", owner = field"),
         }
     }
+    let table = items(&input.attrs)
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .find_map(|i| match i {
+            Item::Is(n, Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. })) if n == "table" => Some(s.value()),
+            _ => None,
+        })
+        .unwrap_or_else(|| snake(&name.to_string()));
+    let job = match &outcome {
+        syn::GenericArgument::Type(t) => crate::ffi::job(&input, t, key_ty, &table),
+        _ => err(name.span(), "a job's outcome is a type"),
+    };
     quote! {
+        #job
+
         impl ::ark::effect::Effect for #name {
             type Outcome = #outcome;
             const LEASE_MS: i64 = #lease;
@@ -196,7 +211,8 @@ pub fn effect(input: DeriveInput) -> TokenStream {
 }
 
 pub fn describe_derive(input: DeriveInput) -> TokenStream {
-    describe(&input)
+    let (describe, twin) = (describe(&input), crate::ffi::twin(&input));
+    quote!(#describe #twin)
 }
 
 pub fn row(input: DeriveInput) -> TokenStream {
@@ -213,6 +229,7 @@ pub fn row(input: DeriveInput) -> TokenStream {
     for it in top.into_iter().flatten() {
         match it {
             Item::Flag(f) if f == "volatile" => volatile = true,
+            Item::Flag(f) if f == "ffi" || f == "ffi_view" => {}
             Item::Is(n, Expr::Lit(l)) if n == "table" => match &l.lit {
                 syn::Lit::Str(s) => table = s.value(),
                 _ => return err(n.span(), "table = \"name\""),
@@ -284,9 +301,10 @@ pub fn row(input: DeriveInput) -> TokenStream {
     let ref_defs = refs
         .iter()
         .map(|(i, t)| quote!(::ark::schema::Ref { column: #i, table: <#t as ::ark::row::Row>::TABLE.into() }));
-    let describe = describe(&input);
+    let (describe, twin) = (describe(&input), crate::ffi::twin(&input));
     quote! {
         #describe
+        #twin
 
         impl ::ark::row::Row for #name {
             const TABLE: &'static str = #table;
@@ -490,9 +508,10 @@ pub fn input(input: DeriveInput) -> TokenStream {
             Err(e) => return e,
         }
     }
-    let describe = describe(&input);
+    let (describe, twin) = (describe(&input), crate::ffi::twin(&input));
     quote! {
         #describe
+        #twin
 
         impl ::ark::row::Input for #name {
             fn checks() -> ::std::vec::Vec<(::std::string::String, ::std::vec::Vec<::std::string::String>)> {

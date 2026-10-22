@@ -1,3 +1,15 @@
 # The bridge's Kotlin package; the Swift module is the crate's name.
 [bindings.kotlin]
 package_name = "dev.arkdb.ffi"
+
+# An id crosses the typed path as its hex (`RowId`), which the apps hold as
+# their `Id` (Typed.kt, Typed.swift).
+[bindings.kotlin.custom_types.RowId]
+type_name = "Id"
+lift = "Id({})"
+lower = "{}.hex"
+
+[bindings.swift.custom_types.RowId]
+type_name = "Id"
+lift = "Id({})"
+lower = "{}.hex"

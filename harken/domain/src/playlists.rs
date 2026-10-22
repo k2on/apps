@@ -54,6 +54,7 @@ pub fn playlist_name(names: &[String], name: &str) -> String {
 /// reaches the same name in log order; of theirs, only the names from
 /// `name` up to `name )` are read — the name and its numbered siblings.
 /// The same entry twice is one playlist: its id is the key.
+#[cfg_attr(feature = "ffi", ark_macros::ffi)]
 #[mutator("playlists.create_playlist")]
 pub fn create_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: CreatePlaylist) -> Result<(), Refusal> {
     let id = ctx.new_id();
@@ -129,6 +130,7 @@ pub fn remove_from_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveFromPla
 }
 
 /// The caller's playlists, in the order they were made.
+#[cfg_attr(feature = "ffi", ark_macros::ffi)]
 #[view("playlists.playlists")]
 pub fn playlists(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Playlist>, Refusal> {
     let user = ctx.user().to_string();
@@ -147,6 +149,7 @@ pub fn playlists_of(ctx: &Ctx, _: &Db<Harken>, input: PlaylistsOf) -> Result<Pla
 
 /// One playlist's contents, in playlist order, as the library's own rows;
 /// an entry whose media has gone is dropped.
+#[cfg_attr(feature = "ffi", ark_macros::ffi)]
 #[view("playlists.playlist")]
 pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<LibraryEntry>, Refusal> {
     let playlist = owned(ctx, db, input.playlist_id)?;

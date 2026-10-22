@@ -33,6 +33,9 @@ use ark_peer::{monotonic_ms, Config, Files, Update};
 
 uniffi::setup_scaffolding!();
 
+mod typed;
+pub use typed::{Op, RowId, Taken, Twin, Typed};
+
 /// Why something was not done, as a sentence: what a form shows.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
 pub enum Refusal {
@@ -172,11 +175,12 @@ pub trait Listener: Send + Sync {
 }
 
 /// A view as the bridge keeps it: the peer's view number (none while it
-/// cannot be read), what it was made from, and what it did since taken.
+/// cannot be read), what it was made from (its input's bytes), and what it
+/// did since taken.
 struct Kept {
     at: Option<usize>,
     name: String,
-    args: String,
+    args: Vec<u8>,
     update: Update,
 }
 
@@ -206,7 +210,7 @@ impl State {
                 },
                 Update::Reset => {
                     self.peer.unwatch(at);
-                    k.at = self.peer.view(&k.name, k.args.as_bytes()).ok();
+                    k.at = self.peer.view(&k.name, &k.args).ok();
                     k.update = Update::Reset;
                 }
             }
@@ -382,6 +386,27 @@ impl Peer {
     pub fn pump(&self) -> bool {
         self.shared.pump()
     }
+
+    /// A maintained view of `name` on its input's bytes.
+    pub fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
+        let id = self.shared.act(|s| -> Result<u64, String> {
+            let at = s.peer.view(&name, &args)?;
+            let kept = Kept {
+                at: Some(at),
+                name,
+                args,
+                update: Update::Unchanged,
+            };
+            let id = s.next;
+            s.views.insert(id, kept);
+            s.next += 1;
+            Ok(id)
+        })?;
+        Ok(Arc::new(ViewHandle {
+            shared: self.shared.clone(),
+            id,
+        }))
+    }
 }
 
 #[uniffi::export]
@@ -450,25 +475,8 @@ impl Peer {
 
     /// A maintained view of the function `name` on its input's JSON.
     pub fn view(&self, name: String, input: String) -> Result<Arc<ViewHandle>, Refusal> {
-        let id = self.shared.act(|s| -> Result<u64, String> {
-            let at = s.peer.view(&name, &s.peer.input_json(&name, &input)?)?;
-            let (id, kept) = (
-                s.next,
-                Kept {
-                    at: Some(at),
-                    name,
-                    args: input,
-                    update: Update::Unchanged,
-                },
-            );
-            s.views.insert(id, kept);
-            s.next += 1;
-            Ok(id)
-        })?;
-        Ok(Arc::new(ViewHandle {
-            shared: self.shared.clone(),
-            id,
-        }))
+        let args = self.shared.lock().peer.input_json(&name, &input)?;
+        self.view_bytes(name, args)
     }
 
     /// A call on the live space (§1.9) on its input's JSON: an ephemeral
@@ -618,6 +626,51 @@ impl ViewHandle {
             Update::Reset => {
                 drop(s);
                 ViewUpdate::Reset { rows: self.rows() }
+            }
+        }
+    }
+}
+
+impl ViewHandle {
+    /// Its rows as they stand, each its bytes.
+    pub fn rows_bytes(&self) -> Vec<Vec<u8>> {
+        let s = self.shared.lock();
+        match s.views.get(&self.id).and_then(|k| k.at) {
+            Some(at) => s.peer.rows(at),
+            None => vec![],
+        }
+    }
+
+    /// What it did since last taken, and the rows that came with it, each
+    /// its bytes ([`Taken`]).
+    pub fn take_bytes(&self) -> (Taken, Vec<Vec<u8>>) {
+        let mut s = self.shared.lock();
+        s.settle();
+        let Some(k) = s.views.get_mut(&self.id) else {
+            return (Taken::Unchanged, vec![]);
+        };
+        match std::mem::replace(&mut k.update, Update::Unchanged) {
+            Update::Unchanged => (Taken::Unchanged, vec![]),
+            Update::Patched(ps) => {
+                let (mut ops, mut rows) = (vec![], vec![]);
+                for p in ps {
+                    ops.push(match p {
+                        ark::plan::Patch::Insert { at, node } => {
+                            rows.push(node);
+                            Op::Insert { at: at as u64 }
+                        }
+                        ark::plan::Patch::Remove { at } => Op::Remove { at: at as u64 },
+                        ark::plan::Patch::Update { at, node } => {
+                            rows.push(node);
+                            Op::Update { at: at as u64 }
+                        }
+                    });
+                }
+                (Taken::Patched { ops }, rows)
+            }
+            Update::Reset => {
+                drop(s);
+                (Taken::Reset, self.rows_bytes())
             }
         }
     }

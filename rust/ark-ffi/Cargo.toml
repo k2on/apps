@@ -10,6 +10,7 @@ ark = { path = "../ark" }
 ark-peer = { path = "../ark-peer" }
 ark-auth = { path = "../ark-auth" }
 serde_json = { workspace = true }
+serde = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 
 # `uniffi-bindgen`, which writes the Kotlin and Swift for an app's library

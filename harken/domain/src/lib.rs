@@ -27,6 +27,9 @@ pub mod queue;
 pub mod schema;
 pub mod types;
 
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
+
 pub use ark::row::Id;
 pub use schema::*;
 pub use types::*;

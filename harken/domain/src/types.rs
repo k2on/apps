@@ -101,6 +101,7 @@ pub struct LookAt {
 /// What a look came to: the files whose tags it read, the entries it
 /// authored.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Looked {
     pub read: i64,
     pub authored: i64,
@@ -165,6 +166,7 @@ pub struct RecordingInput {
 /// Something playable as a list renders it, and where it sits on the
 /// playlist the list was read against, if it is on it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct LibraryEntry {
     pub added_ms: i64,
     pub creator: String,
@@ -259,6 +261,7 @@ pub struct CreditsEntry {
 
 /// A playlist's name: trimmed, and something.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct CreatePlaylist {
     #[ark(trim, non_empty, why = "a playlist needs a name")]
     #[ark(len = "0..=120")]
@@ -288,6 +291,7 @@ pub struct PlaylistsOf {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct PlaylistInput {
     pub playlist_id: Id<Playlist>,
 }
