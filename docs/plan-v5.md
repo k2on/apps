@@ -774,6 +774,50 @@ comment added to `harken/domain/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
+### Landed: kernel layer
+
+Each target's Rust is now three layers rather than two: its dependencies
+(over the manifests' dummy, as before), **the kernel** over them, and
+harken's crates over that. The kernel layer builds the workspace members
+under `rust/` from a source that is `rust/` as it is with harken's crates
+still the dependency layer's dummies, so it is keyed on `rust/**` and the
+manifests, and it runs the same cargo commands as the layer above it (the
+same units, the same features): over it cargo finds every kernel crate
+fresh and compiles only harken's. Host: `arkdb-deps` → `arkdb-kernel`
+(the kernel's libraries, binaries and test targets) → `arkdb-workspace` →
+`arkdb-tests`; wasm: `arkdb-wasm-deps` → `arkdb-wasm-kernel` → the pages;
+each Android ABI `harken-android-<abi>-deps` → `-kernel` → the library;
+iOS `harken-ios-deps` → `harken-ios-kernel` → the xcframework. The APK's
+host part (the Kotlin bindings and the host library its JVM tests load)
+is a chain of its own, `harken-android-host-deps` → `-kernel` →
+`harken-android-host`, built as an ABI is (`-p harken-ffi`, without the
+workspace's feature unification, under which ark-explorer's `ui` — and so
+iced — is on for harken-ffi too); UniFFI's bindgen binary is built over
+it. `harken-android-lib` no longer has `arkdb-deps` or `arkdb-workspace`
+in its closure, and compiling its host part compiles no `wgpu`, `winit`
+or `iced` crate (the old `arkdb-deps` it waited on compiled 22).
+
+Measured with `--max-jobs 1`, a comment added to
+`harken/domain/src/schema.rs`, the layers below already built:
+
+| | before | after |
+|---|---:|---:|
+| `checks.rust` (workspace, tests, the run): `Compiling ark `; any `Compiling`; wall | 2; 27; 729 s | 0; 11; 288 s |
+| `harken-web` (the page): `Compiling ark `; any `Compiling`; wall | 1; 8; 119 s | 0; 2; 113 s |
+
+The page's time is mostly wasm-bindgen and `wasm-opt`, not the compile.
+The kernel layer itself, after a kernel edit: 16 `Compiling` on the host
+(each crate's library and its tests), 13 for wasm.
+
+Not done: splitting the host dependency layer around harken-iced. iced
+is not harken-iced's alone — `arkui` (a kernel crate) depends on it, and
+ark-explorer's `ui` is on workspace-wide — so `--workspace --exclude
+harken-iced` still compiled `wgpu` and its stack, and a layer on top
+re-runs whenever the one below moves, so it could not keep `wgpu` across
+a kernel or domain feature change either. Not built here: the Android
+and iOS layers (evaluated; CI builds Android), and nothing is through
+Cachix yet.
+
 ### Landed: live fold
 
 The one-machine experiment's finding, fixed with the one machine: a

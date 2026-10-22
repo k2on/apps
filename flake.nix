@@ -97,8 +97,10 @@
           # compiled once per target rather than once per derivation: a
           # target's dependencies (`buildDepsOnly`, over a dummy of the
           # workspace that is only its manifests, so an edit to the Rust
-          # does not rebuild them), then for the host the workspace over
-          # them, then its test targets over that, which every check runs
+          # does not rebuild them), then the kernel over them (`rust/` real
+          # and harken's crates still dummies, so an edit to harken does
+          # not rebuild it), then harken's crates over that; on the host the
+          # workspace's test targets over that again, which every check runs
           # from. A crane library per toolchain, since compiled code is per
           # target.
           craneFor = toolchain: (crane.mkLib pkgs).overrideToolchain toolchain;
@@ -142,6 +144,25 @@
           depsArgs = common // {
             extraDummyScript = "cp ${./rust/Cargo.lock} $out/rust/Cargo.lock";
           };
+          # The kernel: the workspace's members under rust/ (harken's join
+          # from ../harken), built from a source that is rust/ as it is and
+          # harken's crates as the dependency layer's dummies, so that the
+          # layer is keyed on rust/ and harken's manifests alone. Every
+          # target's kernel layer runs the cargo commands of the layer over
+          # it, which compile the same kernel units (the same crates, the same
+          # features), so that over it cargo finds the kernel fresh — its
+          # files are the same, at the store's one mtime — and compiles only
+          # harken's crates, whose manifests are not the dummies' (crane
+          # gives each dummy a build script).
+          kernelCrates = lib.filter (m: !lib.hasPrefix "../" m)
+            (builtins.fromTOML (builtins.readFile ./rust/Cargo.toml)).workspace.members;
+          kernelFlags = lib.concatMapStringsSep " " (c: "-p ${c}") kernelCrates;
+          kernelSrc = pkgs.runCommand "source" { } ''
+            cp -r ${craneLib.mkDummySrc depsArgs} $out
+            chmod -R u+w $out
+            rm -rf $out/rust
+            cp -r ${only [ "rust" ]}/rust $out/rust
+          '';
           # On the host every cargo command resolves features once for the
           # whole workspace (cargo's `feature-unification = "workspace"`),
           # so that `-p ark` and `--workspace` compile the same units and a
@@ -156,38 +177,29 @@
           };
           host = common // { env = hostEnv; };
           # The host's dependencies: built, checked (for clippy), and their
-          # test-only ones, and the CLI feature UniFFI's bindgen binary adds.
+          # test-only ones.
           hostDeps = craneLib.buildDepsOnly (depsArgs // host // {
             pname = "arkdb";
             cargoExtraArgs = "--locked --workspace";
-            postBuild = "cargoWithProfile build --locked -p ark-ffi --features bindgen --bin uniffi-bindgen";
           });
-          # UniFFI's bindgen binary (rust/ark-ffi/src/bin/uniffi-bindgen.rs),
-          # which is UniFFI's main and nothing of the workspace: built over
-          # the dummy source with that one file real, so the workspace is
-          # not compiled again under the features its CLI adds.
-          uniffiBindgen = craneLib.buildPackage (host // {
-            pname = "uniffi-bindgen";
-            src = craneLib.mkDummySrc (depsArgs // {
-              extraDummyScript = depsArgs.extraDummyScript + ''
-
-                install -m644 ${./rust/ark-ffi/src/bin/uniffi-bindgen.rs} $out/rust/ark-ffi/src/bin/uniffi-bindgen.rs
-              '';
-            });
+          # The host's kernel over them: its libraries, binaries and test
+          # targets, under the workspace's features.
+          hostKernel = craneLib.mkCargoDerivation (host // {
+            pname = "arkdb-kernel";
+            src = kernelSrc;
             cargoArtifacts = hostDeps;
-            cargoExtraArgs = "--locked -p ark-ffi --features bindgen --bin uniffi-bindgen";
-            # The dummy layer built a stub at the same path, and every file
-            # in the store is as old as every other, so cargo would take the
-            # stub for this file's build.
-            preBuild = "touch ark-ffi/src/bin/uniffi-bindgen.rs";
-            doCheck = false;
+            buildPhaseCargoCommand = ''
+              cargoWithProfile build --locked ${kernelFlags}
+              cargoWithProfile test --locked ${kernelFlags} --no-run
+            '';
           });
-          # The workspace over the dependencies, once: every library and
-          # binary under `bin/` and `lib/`, and the target directory the
-          # packages and the tests are built from.
+          # The workspace over the kernel, once: every library and binary
+          # under `bin/` and `lib/` (harken's crates the only ones compiled),
+          # and the target directory the packages and the tests are built
+          # from.
           hostWorkspace = craneLib.buildPackage (host // {
             pname = "arkdb-workspace";
-            cargoArtifacts = hostDeps;
+            cargoArtifacts = hostKernel;
             cargoExtraArgs = "--locked --workspace";
             doCheck = false;
             doInstallCargoArtifacts = true;
@@ -241,16 +253,24 @@
           # The pages' dependencies for wasm32, once for all three: the
           # browser peer with and without its demo, and the admin page.
           wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
+          wasmBuilds = lib.concatMapStringsSep "\n" wasmBuild [
+            "-p harken-iced" "-p harken-iced --features demo" "-p ark-explorer"
+          ];
           wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
             pname = "arkdb-wasm";
             doCheck = false;
-            buildPhaseCargoCommand = lib.concatMapStringsSep "\n" wasmBuild [
-              "-p harken-iced" "-p harken-iced --features demo" "-p ark-explorer"
-            ];
+            buildPhaseCargoCommand = wasmBuilds;
+          });
+          # The kernel for wasm32 over them, under the same three builds.
+          wasmKernel = wasmCrane.mkCargoDerivation (common // {
+            pname = "arkdb-wasm-kernel";
+            src = kernelSrc;
+            cargoArtifacts = wasmDeps;
+            buildPhaseCargoCommand = wasmBuilds;
           });
           wasmPage = { pname, crate, bin ? crate, features ? "", files }: wasmCrane.mkCargoDerivation (common // {
             inherit pname;
-            cargoArtifacts = wasmDeps;
+            cargoArtifacts = wasmKernel;
             doInstallCargoArtifacts = false;
             nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ];
             buildPhaseCargoCommand = ''
@@ -393,7 +413,8 @@
             '';
           # `harken_ffi` for one Android ABI against API 26 (the app's
           # minSdk), stripped, as `jniLibs/<abi>/libharken_ffi.so`: its
-          # dependencies for that target, and the library over them.
+          # dependencies for that target, the kernel over them, and the
+          # library over that.
           androidLib = t: a:
             let
               build = "cargoWithProfile build --locked -p harken-ffi --lib --target ${t}";
@@ -403,10 +424,17 @@
                 preBuild = androidEnv t a;
                 buildPhaseCargoCommand = build;
               });
+              kernel = androidCrane.mkCargoDerivation (common // {
+                pname = "harken-android-${a.abi}-kernel";
+                src = kernelSrc;
+                cargoArtifacts = deps;
+                preBuild = androidEnv t a;
+                buildPhaseCargoCommand = build;
+              });
             in
             androidCrane.mkCargoDerivation (common // {
               pname = "harken-android-${a.abi}";
-              cargoArtifacts = deps;
+              cargoArtifacts = kernel;
               doInstallCargoArtifacts = false;
               preBuild = androidEnv t a;
               buildPhaseCargoCommand = build;
@@ -418,13 +446,53 @@
           # The Kotlin the app compiles with the library, UniFFI's bindings
           # and the typed half, under `kotlin/`; and the library built for
           # this machine as `host/libharken_ffi.so`, which the app's JVM
-          # tests load: from the host's workspace layer, which has built it.
-          androidHost = craneLib.mkCargoDerivation (host // {
+          # tests load. Built as an Android ABI's is, on a chain of its own
+          # (dependencies, kernel, library) and not under the workspace's
+          # features: under those ark-explorer's `ui` is on for every crate
+          # that uses it, and `-p harken-ffi` would compile iced's stack
+          # (wgpu, winit, …) and wait on the workspace's dependency layer.
+          # The dependencies have UniFFI's bindgen binary's too.
+          ffiHostBuild = "cargoWithProfile build --locked -p harken-ffi --lib";
+          ffiHostDeps = craneLib.buildDepsOnly (depsArgs // {
             pname = "harken-android-host";
-            cargoArtifacts = hostWorkspace;
+            doCheck = false;
+            buildPhaseCargoCommand = ''
+              ${ffiHostBuild}
+              cargoWithProfile build --locked -p ark-ffi --features bindgen --bin uniffi-bindgen
+            '';
+          });
+          ffiHostKernel = craneLib.mkCargoDerivation (common // {
+            pname = "harken-android-host-kernel";
+            src = kernelSrc;
+            cargoArtifacts = ffiHostDeps;
+            buildPhaseCargoCommand = ffiHostBuild;
+          });
+          # UniFFI's bindgen binary (rust/ark-ffi/src/bin/uniffi-bindgen.rs),
+          # which is UniFFI's main and nothing of the workspace: built over
+          # the dummy source with that one file real, so the workspace is
+          # not compiled again under the features its CLI adds.
+          uniffiBindgen = craneLib.buildPackage (common // {
+            pname = "uniffi-bindgen";
+            src = craneLib.mkDummySrc (depsArgs // {
+              extraDummyScript = depsArgs.extraDummyScript + ''
+
+                install -m644 ${./rust/ark-ffi/src/bin/uniffi-bindgen.rs} $out/rust/ark-ffi/src/bin/uniffi-bindgen.rs
+              '';
+            });
+            cargoArtifacts = ffiHostDeps;
+            cargoExtraArgs = "--locked -p ark-ffi --features bindgen --bin uniffi-bindgen";
+            # The dummy layer built a stub at the same path, and every file
+            # in the store is as old as every other, so cargo would take the
+            # stub for this file's build.
+            preBuild = "touch ark-ffi/src/bin/uniffi-bindgen.rs";
+            doCheck = false;
+          });
+          androidHost = craneLib.mkCargoDerivation (common // {
+            pname = "harken-android-host";
+            cargoArtifacts = ffiHostKernel;
             doInstallCargoArtifacts = false;
             buildPhaseCargoCommand = ''
-              cargoWithProfile build --locked -p harken-ffi --lib
+              ${ffiHostBuild}
               ${ffiBindings { lib = "target/release/libharken_ffi.so"; language = "kotlin"; }}
             '';
             installPhaseCommand = ''
@@ -564,9 +632,18 @@
             buildPhaseCargoCommand = iosBuild;
             meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
           });
+          # The kernel over them.
+          iosKernel = iosCrane.mkCargoDerivation (common // {
+            pname = "harken-ios-kernel";
+            src = kernelSrc;
+            cargoArtifacts = iosDeps;
+            __noChroot = true;
+            buildPhaseCargoCommand = iosBuild;
+            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+          });
           harken-ios-xcframework = iosCrane.mkCargoDerivation (common // {
             pname = "harken-ios-xcframework";
-            cargoArtifacts = iosDeps;
+            cargoArtifacts = iosKernel;
             doInstallCargoArtifacts = false;
             __noChroot = true;
             buildPhaseCargoCommand = iosBuild + ''
