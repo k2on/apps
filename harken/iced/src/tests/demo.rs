@@ -24,16 +24,16 @@ fn fresh() -> Peer {
 #[test]
 fn the_seeded_art_reaches_a_fetch() {
     let peer = fresh();
-    let albums: Vec<&str> = peer.albums.iter().filter(|a| !a.art.is_empty()).map(|a| a.name.as_str()).collect();
-    let artists: Vec<&str> = peer.artists.iter().filter(|a| !a.art.is_empty()).map(|a| a.name.as_str()).collect();
+    let albums: Vec<&str> = peer.albums().iter().filter(|a| !a.art.is_empty()).map(|a| a.name.as_str()).collect();
+    let artists: Vec<&str> = peer.artists().iter().filter(|a| !a.art.is_empty()).map(|a| a.name.as_str()).collect();
     assert!(albums.contains(&"Water Music"), "albums with art: {albums:?}");
     assert!(artists.contains(&"George Frideric Handel"), "artists with art: {artists:?}");
     let mut want = Images::new("harken-test");
     let asked = peer
-        .albums
+        .albums()
         .iter()
         .map(|a| a.art.clone())
-        .chain(peer.artists.iter().map(|a| a.art.clone()))
+        .chain(peer.artists().iter().map(|a| a.art.clone()))
         .filter(|art| !art.is_empty())
         .filter(|art| want.want(media_url("", art)).is_some())
         .count();
@@ -50,7 +50,7 @@ fn the_window_asks_for_the_covers_the_lists_carry() {
     assert_eq!(app.art_seen, 0);
     let _ = app.update(crate::Message::Wake);
     assert_eq!(app.art_seen, app.peer.art_gen, "the generation was seen");
-    let url = media_url("", &app.peer.albums.iter().find(|a| a.name == "Water Music").unwrap().art);
+    let url = media_url("", &app.peer.albums().iter().find(|a| a.name == "Water Music").unwrap().art);
     assert!(app.covers.want(url).is_none(), "…because it was already asked for");
 }
 
@@ -68,8 +68,8 @@ fn a_scanned_cover_is_asked_for_at_the_media_route_and_drawn() {
     let mut app = super::demo_app();
     app.server = "https://harken.example.com".into();
     let (extracted, beside) = (".art/5f3c.png", ".cover/0123456789abcdef/music/Handel/Water Music/cover.jpg");
-    app.peer.albums.iter_mut().find(|a| a.name == "Water Music").unwrap().art = extracted.into();
-    app.peer.artists.iter_mut().find(|a| a.name == "George Frideric Handel").unwrap().art = beside.into();
+    app.peer.albums().iter_mut().find(|a| a.name == "Water Music").unwrap().art = extracted.into();
+    app.peer.artists().iter_mut().find(|a| a.name == "George Frideric Handel").unwrap().art = beside.into();
     let _ = app.want_covers();
     let at = |path: &str| format!("https://harken.example.com/media/{path}");
     let beside_url = at(".cover/0123456789abcdef/music/Handel/Water%20Music/cover.jpg");
@@ -99,12 +99,12 @@ fn a_scanned_cover_is_asked_for_at_the_media_route_and_drawn() {
 fn the_demo_is_composers_with_works() {
     let peer = fresh();
     assert!(
-        peer.composers.len() >= 5,
+        peer.composers().len() >= 5,
         "{:?}",
-        peer.composers.iter().map(|c| &c.name).collect::<Vec<_>>()
+        peer.composers().iter().map(|c| &c.name).collect::<Vec<_>>()
     );
     let bach = peer
-        .composers
+        .composers()
         .iter()
         .find(|c| c.name == "Johann Sebastian Bach")
         .expect("Bach is in the demo");
@@ -210,7 +210,7 @@ fn a_compilation_carries_six_works_and_two_performers() {
 fn nobody_is_named_after_a_licence() {
     let peer = fresh();
     let mut credited = Vec::new();
-    for c in &peer.composers {
+    for c in &peer.composers() {
         for w in peer.works_of(&c.name) {
             for take in peer.recordings_of(&w.id) {
                 credited.extend(peer.credits(&take.id).into_iter().map(|c| c.name));
@@ -267,12 +267,12 @@ fn the_whole_path_from_a_composer_to_a_movement() {
     let mut peer = fresh();
     peer.source = Source::Composers;
     peer.open_page();
-    assert!(peer.composers.iter().any(|c| c.name == "Johann Sebastian Bach"));
+    assert!(peer.composers().iter().any(|c| c.name == "Johann Sebastian Bach"));
 
     peer.source = Source::Works("Johann Sebastian Bach".into());
     peer.open_page();
     let goldbergs = peer
-        .works
+        .works()
         .iter()
         .find(|w| w.catalogue == "BWV 988")
         .expect("Bach's page lists the Goldbergs")
@@ -281,16 +281,16 @@ fn the_whole_path_from_a_composer_to_a_movement() {
 
     peer.source = Source::Work(goldbergs.id.clone(), goldbergs.title.clone());
     peer.open_page();
-    assert_eq!(peer.works.len(), 1, "the work's own row, for the header");
-    assert_eq!(peer.works[0].catalogue, "BWV 988");
-    assert_eq!(peer.recordings.len(), 1);
-    let take = peer.recordings[0].clone();
+    assert_eq!(peer.works().len(), 1, "the work's own row, for the header");
+    assert_eq!(peer.works()[0].catalogue, "BWV 988");
+    assert_eq!(peer.recordings().len(), 1);
+    let take = peer.recordings()[0].clone();
 
     peer.source = Source::Recording(take.id.clone(), String::new());
     peer.open_page();
     assert!(peer.rows().len() > 20, "{}", peer.rows().len());
     assert_eq!(
-        peer.recordings.iter().find(|r| r.id == take.id).map(|r| r.tracks),
+        peer.recordings().iter().find(|r| r.id == take.id).map(|r| r.tracks),
         Some(peer.rows().len() as i64)
     );
     assert_eq!(

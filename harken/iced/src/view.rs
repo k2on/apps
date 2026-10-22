@@ -301,7 +301,7 @@ impl App {
         let p = &self.peer;
         match &p.source {
             Source::Albums => self.view_cards(
-                p.albums
+                p.albums()
                     .iter()
                     .map(|a| self.card(&a.name, a.creator.clone(), a.tracks, Source::Album(a.name.clone()), false, &a.art))
                     .collect(),
@@ -309,14 +309,14 @@ impl App {
             ),
             // A person is a circle and a record is a square.
             Source::Artists => self.view_cards(
-                p.artists
+                p.artists()
                     .iter()
                     .map(|a| self.card(&a.name, String::new(), a.tracks, Source::Artist(a.name.clone()), true, &a.art))
                     .collect(),
                 "Nobody yet.",
             ),
             Source::Composers => self.view_cards(
-                p.composers
+                p.composers()
                     .iter()
                     .map(|c| {
                         let mut card = self.card(&c.name, span(c.born, c.died), c.works, Source::Works(c.name.clone()), true, &c.art);
@@ -329,7 +329,7 @@ impl App {
                 "Nobody yet.",
             ),
             Source::Album(name) => {
-                let album = p.albums.iter().find(|a| a.name == *name);
+                let album = p.albums().iter().find(|a| a.name == *name);
                 let creator = album.map(|a| a.creator.clone()).unwrap_or_default();
                 let open = (!creator.is_empty()).then(|| Source::Artist(creator.clone()));
                 with_header(
@@ -338,7 +338,7 @@ impl App {
                 )
             }
             Source::Artist(name) => {
-                let art_path = p.artists.iter().find(|a| a.name == *name).map(|a| a.art.as_str()).unwrap_or_default();
+                let art_path = p.artists().iter().find(|a| a.name == *name).map(|a| a.art.as_str()).unwrap_or_default();
                 with_header(
                     self.view_record(name, "", None, Some(p.albums_by(name).len()), art_path),
                     self.view_list(),
@@ -347,13 +347,13 @@ impl App {
             // One composer's works, as cards: the catalogue number under each,
             // the one name a work has that survives translation.
             Source::Works(name) => {
-                let composer = p.composers.iter().find(|c| c.name == *name);
-                let works = p.works.len() as i64;
-                let tracks: i64 = p.works.iter().map(|w| w.tracks).sum();
+                let composer = p.composers().iter().find(|c| c.name == *name);
+                let works = p.works().len() as i64;
+                let tracks: i64 = p.works().iter().map(|w| w.tracks).sum();
                 let facts = format!("{works} {}  \u{b7}  {tracks} {}", plural(works, "work"), plural(tracks, "track"));
                 let life = composer.map(|c| span(c.born, c.died)).unwrap_or_default();
                 let cards = p
-                    .works
+                    .works()
                     .iter()
                     .map(|w| {
                         self.card(
@@ -374,8 +374,8 @@ impl App {
             // One work and every performance of it: the rows are the same
             // music, and what tells them apart is who played it.
             Source::Work(id, title) => {
-                let work = p.works.iter().find(|w| w.id == *id);
-                let takes = p.recordings.len() as i64;
+                let work = p.works().iter().find(|w| w.id == *id);
+                let takes = p.recordings().len() as i64;
                 let mut facts = match work.map(|w| w.catalogue.clone()).unwrap_or_default() {
                     c if c.is_empty() => String::new(),
                     c => format!("{c}  \u{b7}  "),
@@ -397,7 +397,7 @@ impl App {
             }
             // One performance, in the order the work goes.
             Source::Recording(id, who) => {
-                let take = p.recordings.iter().find(|r| r.id == *id);
+                let take = p.recordings().iter().find(|r| r.id == *id);
                 let rows = p.rows();
                 let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
                 let mut facts = format!("{} {}", rows.len(), plural(rows.len() as i64, "track"));
@@ -430,13 +430,13 @@ impl App {
     /// of identical squares. What tells them apart is text.
     fn view_takes(&self) -> Element<'_, Message> {
         let p = &self.peer;
-        if p.recordings.is_empty() {
+        if p.recordings().is_empty() {
             return cards::empty_page("No recordings of it yet.", PAGE_PADDING);
         }
         let focused = self.has_keys(Pane::Tracks);
         let cursor = focused.then_some(self.at(Pane::Tracks));
         let mut list = column![];
-        for (at, take) in p.recordings.iter().enumerate() {
+        for (at, take) in p.recordings().iter().enumerate() {
             let on_cursor = Some(at) == cursor;
             // A recording nobody is credited on — the demo has one — says so,
             // rather than guessing who played it.
@@ -707,7 +707,7 @@ impl App {
         let p = &self.peer;
         let mut line = format!(
             "{} songs \u{b7} cursor {} \u{b7} {} pending",
-            p.items.len(),
+            p.items().len(),
             p.client.cursor(),
             p.client.pending_len()
         );
@@ -914,7 +914,7 @@ impl App {
         rows.push((String::new(), String::new()));
         rows.push((
             "log cursor \u{b7} pending \u{b7} songs".into(),
-            format!("{} \u{b7} {} \u{b7} {}", status.cursor, status.pending, self.peer.items.len()),
+            format!("{} \u{b7} {} \u{b7} {}", status.cursor, status.pending, self.peer.items().len()),
         ));
         // What this window did, and what became of each: pending, in the log,
         // or refused and why — the sentence every replica reaches.

@@ -30,7 +30,7 @@ use std::time::Duration;
 use ark::log::EntryId;
 use ark::peer::Who;
 use ark_peer::link::{bell, Dial, Wake};
-use ark_peer::{monotonic_ms, Config, Files, Update};
+use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
 
 uniffi::setup_scaffolding!();
 
@@ -175,13 +175,10 @@ pub trait Listener: Send + Sync {
     fn changed(&self);
 }
 
-/// A view as the bridge keeps it: the peer's view number (none while it
-/// cannot be read), what it was made from (its input's bytes), and what it
-/// did since taken.
+/// A view as the bridge keeps it (`ark_peer::Watched`, its rows read from
+/// the peer as they are asked for), and what it did since taken.
 struct Kept {
-    at: Option<usize>,
-    name: String,
-    args: Vec<u8>,
+    view: Watched<()>,
     update: Update,
 }
 
@@ -197,27 +194,29 @@ struct State {
 
 impl State {
     /// Every view's updates taken from the peer into what the app has not
-    /// taken; a view that could not be kept up made again. Whether any did.
+    /// taken; a view opened for another login, or refused, opened again.
+    /// Whether any moved.
     fn settle(&mut self) -> bool {
         let mut moved = false;
         for k in self.views.values_mut() {
-            let Some(at) = k.at else { continue };
-            match self.peer.update(at) {
+            match k.view.settle(&mut self.peer, true) {
                 Update::Unchanged => continue,
                 Update::Patched(ps) => match &mut k.update {
                     u @ Update::Unchanged => *u = Update::Patched(ps),
                     Update::Patched(old) => old.extend(ps),
                     Update::Reset => {}
                 },
-                Update::Reset => {
-                    self.peer.unwatch(at);
-                    k.at = self.peer.view(&k.name, &k.args).ok();
-                    k.update = Update::Reset;
-                }
+                Update::Reset => k.update = Update::Reset,
             }
             moved = true;
         }
         moved
+    }
+
+    /// A view's number and name, while it answers.
+    fn kept(&self, id: u64) -> Option<(usize, String)> {
+        let k = self.views.get(&id)?;
+        Some((k.view.view()?, k.view.name().to_string()))
     }
 }
 
@@ -396,16 +395,13 @@ impl Peer {
     /// A maintained view of `name` on its input's bytes.
     pub fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
         let id = self.shared.act(|s| -> Result<u64, String> {
-            let at = s.peer.view(&name, &args)?;
+            let view = Watched::try_open(&mut s.peer, &name, args, |_| ())?;
             let id = s.next;
-            let update = Update::Unchanged;
             s.views.insert(
                 id,
                 Kept {
-                    at: Some(at),
-                    name,
-                    args,
-                    update,
+                    view,
+                    update: Update::Unchanged,
                 },
             );
             s.next += 1;
@@ -612,7 +608,7 @@ impl ViewHandle {
     /// Its rows as they stand, each its JSON.
     pub fn rows(&self) -> Vec<String> {
         let s = self.shared.lock();
-        let Some((at, name)) = s.views.get(&self.id).and_then(|k| Some((k.at?, k.name.clone()))) else {
+        let Some((at, name)) = s.kept(self.id) else {
             return vec![];
         };
         s.peer.rows(at).iter().map(|r| text(s.peer.element_json(&name, r))).collect()
@@ -625,7 +621,7 @@ impl ViewHandle {
         let Some(k) = s.views.get_mut(&self.id) else {
             return ViewUpdate::Unchanged;
         };
-        let (update, name) = (std::mem::replace(&mut k.update, Update::Unchanged), k.name.clone());
+        let (update, name) = (std::mem::replace(&mut k.update, Update::Unchanged), k.view.name().to_string());
         let elem = |b: &[u8]| text(s.peer.element_json(&name, b));
         match update {
             Update::Unchanged => ViewUpdate::Unchanged,
@@ -644,7 +640,7 @@ impl ViewHandle {
     /// Its rows as they stand, each its bytes.
     pub fn rows_bytes(&self) -> Vec<Vec<u8>> {
         let s = self.shared.lock();
-        s.views.get(&self.id).and_then(|k| k.at).map_or(vec![], |at| s.peer.rows(at))
+        s.kept(self.id).map_or(vec![], |(at, _)| s.peer.rows(at))
     }
 
     /// What it did since last taken, and the rows that came with it, each
@@ -685,8 +681,8 @@ impl ViewHandle {
 impl Drop for ViewHandle {
     fn drop(&mut self) {
         let mut s = self.shared.lock();
-        if let Some(Kept { at: Some(at), .. }) = s.views.remove(&self.id) {
-            s.peer.unwatch(at);
+        if let Some(k) = s.views.remove(&self.id) {
+            k.view.close(&mut s.peer);
         }
     }
 }

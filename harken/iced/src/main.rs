@@ -974,11 +974,11 @@ impl App {
             // of cards. A work's recordings are rows, so a column: `h` there
             // hands the cursor back to the sidebar.
             Pane::Tracks => match &p.source {
-                Source::Albums => SHELF.grid(p.albums.len(), self.pane_width()),
-                Source::Artists => SHELF.grid(p.artists.len(), self.pane_width()),
-                Source::Composers => SHELF.grid(p.composers.len(), self.pane_width()),
-                Source::Works(_) => SHELF.grid(p.works.len(), self.pane_width()),
-                Source::Work(..) => vim::Grid::column(p.recordings.len()),
+                Source::Albums => SHELF.grid(p.albums().len(), self.pane_width()),
+                Source::Artists => SHELF.grid(p.artists().len(), self.pane_width()),
+                Source::Composers => SHELF.grid(p.composers().len(), self.pane_width()),
+                Source::Works(_) => SHELF.grid(p.works().len(), self.pane_width()),
+                Source::Work(..) => vim::Grid::column(p.recordings().len()),
                 _ => vim::Grid::column(p.rows().len()),
             },
         }
@@ -991,11 +991,11 @@ impl App {
         match pane {
             Pane::Sidebar => p.choices.iter().map(|c| c.label.clone()).collect(),
             Pane::Tracks => match &p.source {
-                Source::Albums => p.albums.iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
-                Source::Artists => p.artists.iter().map(|a| a.name.clone()).collect(),
-                Source::Composers => p.composers.iter().map(|c| c.name.clone()).collect(),
-                Source::Works(_) => p.works.iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
-                Source::Work(..) => p.recordings.iter().map(|r| r.performers.clone()).collect(),
+                Source::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
+                Source::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
+                Source::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
+                Source::Works(_) => p.works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
+                Source::Work(..) => p.recordings().iter().map(|r| r.performers.clone()).collect(),
                 _ => p.rows().iter().map(|i| format!("{} {}", i.title, i.creator)).collect(),
             },
         }
@@ -1633,12 +1633,12 @@ impl App {
     fn want_covers(&mut self) -> Task<Message> {
         let p = &self.peer;
         let urls: Vec<String> = p
-            .albums
+            .albums()
             .iter()
             .map(|a| a.art.clone())
-            .chain(p.artists.iter().map(|a| a.art.clone()))
-            .chain(p.composers.iter().map(|c| c.art.clone()))
-            .chain(p.works.iter().map(|w| w.art.clone()))
+            .chain(p.artists().iter().map(|a| a.art.clone()))
+            .chain(p.composers().iter().map(|c| c.art.clone()))
+            .chain(p.works().iter().map(|w| w.art.clone()))
             .filter(|art| !art.is_empty())
             .map(|art| media_url(&self.server, &art))
             .collect();
@@ -1655,11 +1655,11 @@ impl App {
     pub fn card_under_cursor(&self, at: usize) -> Option<Source> {
         let p = &self.peer;
         match &p.source {
-            Source::Albums => p.albums.get(at).map(|a| Source::Album(a.name.clone())),
-            Source::Artists => p.artists.get(at).map(|a| Source::Artist(a.name.clone())),
-            Source::Composers => p.composers.get(at).map(|c| Source::Works(c.name.clone())),
-            Source::Works(_) => p.works.get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
-            Source::Work(..) => p.recordings.get(at).map(|r| Source::Recording(r.id.clone(), r.performers.clone())),
+            Source::Albums => p.albums().get(at).map(|a| Source::Album(a.name.clone())),
+            Source::Artists => p.artists().get(at).map(|a| Source::Artist(a.name.clone())),
+            Source::Composers => p.composers().get(at).map(|c| Source::Works(c.name.clone())),
+            Source::Works(_) => p.works().get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
+            Source::Work(..) => p.recordings().get(at).map(|r| Source::Recording(r.id.clone(), r.performers.clone())),
             _ => None,
         }
     }

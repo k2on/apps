@@ -22,7 +22,8 @@
 //! is on the disk — **written before delivered**, and while a write fails
 //! every delivery waits with it, in order ([`Peer::failure`]); every change
 //! is pushed into the views watching its space; and every verdict on its
-//! own intents is kept (`app`: what a UI asks by name).
+//! own intents is kept (`app`: what a UI asks by name). A UI holds a view's
+//! rows as its own type, patched as the view moves (`watched`).
 //!
 //! **The relay** of ephemeral calls is the driver's policy, as §1.9 says:
 //! a call to a function the module names ephemeral goes to the volatile
@@ -66,6 +67,7 @@ mod jobs;
 pub mod link;
 pub mod local;
 pub mod signed;
+pub mod watched;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod handle;
@@ -96,6 +98,7 @@ pub use link::{Event, Pumped, Wake};
 pub use local::{Local, Logins, Shared};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use serve::{Running, Server};
+pub use watched::Watched;
 
 /// One space's module: its schema, the functions a peer runs by name, and
 /// the domain its views are made by.
@@ -248,7 +251,7 @@ pub struct Peer {
     hub: hub::Hub,
     /// Frames for its server.
     frames: Vec<Vec<u8>>,
-    views: Vec<Option<Watched>>,
+    views: Vec<Option<Kept>>,
     relay: BTreeMap<String, (Vec<u8>, i64)>,
     relayed: Option<i64>,
     /// What became of its own intents, and what its views did.
@@ -268,7 +271,7 @@ pub struct Peer {
 /// A view a peer keeps (§1.10): what it is made of — its space, the
 /// domain's function, its input and who reads — and the view, while it
 /// can be made.
-struct Watched {
+struct Kept {
     space: Space,
     name: String,
     input: Vec<u8>,
@@ -729,7 +732,7 @@ impl Peer {
         let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;
         let view = Some(d.watch(store, &ctx, name, input)?);
         let (name, input) = (name.into(), input.to_vec());
-        self.views.push(Some(Watched {
+        self.views.push(Some(Kept {
             space,
             name,
             input,
