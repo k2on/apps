@@ -1432,7 +1432,7 @@ fn two_speakers_of_one_session_act_on_one_moment_of_it() {
         let mut seen: Vec<String> = vec![];
         let mut since: Option<std::time::Instant> = None;
         loop {
-            let press = if presses % 2 == 0 { "pause" } else { "play" };
+            let press = if presses.is_multiple_of(2) { "pause" } else { "play" };
             if other.call(press, input::none()).is_ok() {
                 presses += 1;
             }

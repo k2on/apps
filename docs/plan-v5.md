@@ -1006,6 +1006,40 @@ comment added to `harken/domain/src/lib.rs`, dependencies already built:
 `Compiling ark ` 8 → 2 lines (`Compiling` of any crate 2,142 → 27), 1,731 s
 → 399 s. From nothing but the fetched crates the new layers take 1,006 s.
 
+### Landed: speakers agree
+
+In the server-split experiment, over sockets, each speaker read its
+session off its own machine, and two speakers of one session acted on two
+moments of it: a group joined, unjoined and joined again, one run in two.
+**It does not reproduce on main**, and cannot in that form: the house
+reads every session in one `hub.with` job off the hub's own live store
+(`assistant.rs`, `ha::sessions`) and hands that one reading to every
+speaker's reconciler (`Speakers::wants`); a speaker's machine is read only
+to preview what it says. A bridge test
+(`two_speakers_of_one_session_act_on_one_moment_of_it`: the study joined
+and unjoined four times while another account presses pause and play as
+fast as it can) passes on main, 20 runs of the bridge's tests in a row;
+deciding for the study on the reading before fails it with join, unjoin,
+join, two runs in three. What main had by job order and not by rule: a
+speaker is never behind the reading after `Wires::receive` (a job's frames
+go out before the next job, the read among them), but can be ahead, and
+two speakers apart — `Handle::with` answers from inside its job
+(`ark-peer/src/serve.rs`), so the next job's frames can reach one
+speaker's channel and not yet another's before they are taken. Now a rule:
+**a session is acted on only when every speaker standing in it has heard
+the volatile log to the head it was read at, no more, and has nothing
+unanswered** (`Wires::agree`); otherwise it waits for the next frame. It
+is the house's, not `harken-player`'s: a phone's `Player` reads and calls
+through one peer's machine, so it has nothing to agree with. A unit test
+perturbs the order by hand (the kitchen given a frame the study is not)
+and is falsified by not comparing heads and by not looking at what is
+pending. Bridge runs, 20 in a row: before 20/20, after 20/20.
+`harken-server` 4,517 → 4,599 by `tools/loc.sh` (the rule a dozen lines,
+its in-file test the rest), its tests 6,675 → 6,748. Not verified: that
+the rule ever changed what the house did on main (no run was seen to hit
+the window); the poll's own calls (`Speakers::heard`) are not gated, as
+they were not in the experiment.
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
