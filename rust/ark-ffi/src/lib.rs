@@ -204,11 +204,7 @@ impl State {
             let Some(at) = k.at else { continue };
             match self.peer.update(at) {
                 Update::Unchanged => continue,
-                Update::Patched(ps) => match &mut k.update {
-                    u @ Update::Unchanged => *u = Update::Patched(ps),
-                    Update::Patched(old) => old.extend(ps),
-                    Update::Reset => {}
-                },
+                Update::Patched(ps) => k.update.patch(ps),
                 Update::Reset => {
                     self.peer.unwatch(at);
                     k.at = self.peer.view(&k.name, &k.args).ok();
