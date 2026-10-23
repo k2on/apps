@@ -2200,6 +2200,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower-http",
+ "tracing",
  "ureq",
 ]
 

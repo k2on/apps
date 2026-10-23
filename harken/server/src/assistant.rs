@@ -3005,6 +3005,7 @@ pub mod ha {
                     entities: config.players.iter().map(|(e, _)| e.clone()).collect(),
                     machines: HashMap::new(),
                     standing: HashMap::new(),
+                    woke: HashMap::new(),
                     frames: channel(),
                     waker,
                 };
@@ -3021,6 +3022,11 @@ pub mod ha {
     /// and so its id there.
     pub fn speaker(user: &str, entity: &str) -> String {
         format!("{user}@{entity}")
+    }
+
+    /// Who a speaker's machine is among the events: its id in the session.
+    fn label(k: &(String, String)) -> String {
+        speaker(&k.0, &k.1)
     }
 
     /// `user`'s session with each of `entities`' ids ([`speaker`]) read as
@@ -3108,6 +3114,11 @@ pub mod ha {
         machines: HashMap<(String, String), Peer>,
         /// The connections of those standing now.
         standing: HashMap<(String, String), ConnId>,
+        /// The span of the entry whose change each speaker was last told:
+        /// what it says in answer is authored under it, as a device's peer
+        /// does (`ark_peer::Peer::cause`), and what the house is told for it
+        /// is said inside it.
+        woke: HashMap<(String, String), ark::log::Span>,
         /// Frames the hub sent a speaker, and the thread woken for them.
         frames: (Sender<Framed>, Receiver<Framed>),
         waker: Sender<()>,
@@ -3210,8 +3221,40 @@ pub mod ha {
                 else {
                     continue;
                 };
-                let out = peer.step(Input::Frame { from: None, bytes });
+                let input = Input::Frame { from: None, bytes };
+                let seen = input.clone();
+                let out = peer.step(input);
+                ark_peer::observe::step(&label(&k), Space::Volatile, None, &seen, &out);
+                for o in &out {
+                    if let Output::Changes(told) = o {
+                        if let Some(by) = told.iter().rev().find_map(|t| t.by) {
+                            self.woke.insert(k.clone(), by);
+                        }
+                    }
+                }
                 self.send(c, out);
+            }
+        }
+
+        /// The span `k`'s speaker answers under at `now`: what woke it, while
+        /// that trace lasts.
+        fn cause(&self, k: &(String, String), now: i64) -> Option<ark::log::Span> {
+            self.woke.get(k).copied().filter(|w| now - w.began < ark_peer::TRACE_MS)
+        }
+
+        /// The span what the house is told for `entity` is said inside: the
+        /// newest a speaker of it was woken by.
+        fn span_of(&self, entity: &str) -> tracing::Span {
+            let woke = self.woke.iter().filter(|(k, _)| k.1 == entity).map(|(k, s)| (k, *s)).max_by_key(|(_, s)| s.began);
+            match woke {
+                Some((k, s)) => tracing::info_span!(
+                    target: "ark",
+                    "house",
+                    peer = %label(k),
+                    trace = %ark::hash::hex(&s.trace.0),
+                    span = %ark::hash::hex(&s.id)
+                ),
+                None => tracing::info_span!(target: "ark", "house", entity),
             }
         }
 
@@ -3224,15 +3267,15 @@ pub mod ha {
             let Some(func) = self.hosted.get(&format!("listening.{transition}")) else {
                 return;
             };
+            let now = now_ms();
+            let cause = self.cause(&k, now);
+            let input = Input::Mutate { func, input, now, cause };
+            let seen = input.clone();
             let Some(peer) = self.machines.get_mut(&k) else {
                 return;
             };
-            let out = peer.step(Input::Mutate {
-                func,
-                input,
-                now: now_ms(),
-                cause: None,
-            });
+            let out = peer.step(input);
+            ark_peer::observe::step(&label(&k), Space::Volatile, None, &seen, &out);
             self.send(c, out);
         }
 
@@ -3461,6 +3504,19 @@ pub mod ha {
         pushing: &mut HashMap<String, VecDeque<String>>,
         act: Act,
     ) {
+        // What the house is told is said in the trace it answers.
+        let entity = match &act {
+            Act::Start { entity, .. }
+            | Act::Enqueue { entity, .. }
+            | Act::Verb { entity, .. }
+            | Act::Seek { entity, .. }
+            | Act::Volume { entity, .. }
+            | Act::Mute { entity, .. }
+            | Act::Unjoin { entity }
+            | Act::Call { entity, .. } => entity.clone(),
+            Act::Join { leader, .. } => leader.clone(),
+        };
+        let _in = wires.span_of(&entity).entered();
         match act {
             Act::Call {
                 key,
@@ -3711,6 +3767,7 @@ pub mod ha {
             {
                 map.extend(extra);
             }
+            let began = now_ms();
             let sent = self
                 .agent
                 .post(&format!(
@@ -3719,8 +3776,13 @@ pub mod ha {
                 ))
                 .set("Authorization", &self.bearer)
                 .send_json(body);
-            if let Err(e) = &sent {
-                eprintln!("harken-server: house: {entity}: {service} failed: {e}");
+            let ms = now_ms() - began;
+            match &sent {
+                Ok(_) => tracing::info!(target: "ark", entity, service, ms, "house"),
+                Err(e) => {
+                    tracing::warn!(target: "ark", entity, service, ms, why = %e, "house failed");
+                    eprintln!("harken-server: house: {entity}: {service} failed: {e}");
+                }
             }
             sent.is_ok()
         }
@@ -3861,6 +3923,7 @@ pub mod ha {
             entities: vec![KITCHEN.into(), STUDY.into()],
             machines: HashMap::new(),
             standing: HashMap::new(),
+            woke: HashMap::new(),
             frames: channel(),
             waker: channel().0,
         };

@@ -92,7 +92,7 @@ fn verdict_of(peer: &str, sp: Space, dir: &str, conn: Option<ConnId>, e: &EntryI
 }
 
 /// One step of a machine: its input, and what it said.
-pub(crate) fn step(peer: &str, sp: Space, from: Option<ConnId>, input: &Input, out: &[Output]) {
+pub fn step(peer: &str, sp: Space, from: Option<ConnId>, input: &Input, out: &[Output]) {
     if !event_enabled!(target: "ark", Level::WARN) {
         return;
     }
