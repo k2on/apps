@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
 use crate::hash::{EntryHash, StateHash};
-use crate::log::{Entry, EntryId, Logged, Origin};
+use crate::log::{Entry, EntryId, Logged, Origin, Span, TraceId};
 use crate::schema::{Column, Table};
 use crate::store::Change;
 use crate::Refusal;
@@ -161,7 +161,7 @@ pub struct Bytes(pub Vec<u8>);
 // origin and an entry's id are sixteen bytes as an `Id` is (hex in JSON and
 // in a key); a hash is bytes, hex in JSON, which `json`'s `Bytes` does not
 // read: no schema holding one is read through JSON.
-leaf!(Bytes => Type::Bytes, Origin => Type::Id("origin".into()), EntryId => Type::Id("entry".into()), EntryHash => Type::Bytes, StateHash => Type::Bytes);
+leaf!(Bytes => Type::Bytes, Origin => Type::Id("origin".into()), EntryId => Type::Id("entry".into()), TraceId => Type::Id("trace".into()), EntryHash => Type::Bytes, StateHash => Type::Bytes);
 
 macro_rules! fields {
     ($($f:ident: $t:expr),*) => { vec![$((stringify!($f).to_string(), $t)),*] };
@@ -171,8 +171,15 @@ impl Describe for Entry {
     fn describe() -> Type {
         use Type::{Bytes as B, Int, Text};
         let (id, origin, roles) = (EntryId::describe(), Origin::describe(), Vec::<String>::describe());
-        let fs = fields! { id: id, actor: Text, session: Text, origin: origin, local: Int, roles: roles, func: Text, input: B, now: Int };
+        let fs = fields! { id: id, actor: Text, session: Text, origin: origin, local: Int, roles: roles, func: Text, input: B, now: Int, cause: Option::<Span>::describe() };
         Type::Record("Entry".into(), fs)
+    }
+}
+
+impl Describe for Span {
+    fn describe() -> Type {
+        let fs = fields! { trace: TraceId::describe(), id: Type::Id("span".into()) };
+        Type::Record("Span".into(), fs)
     }
 }
 

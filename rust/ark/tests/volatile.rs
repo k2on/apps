@@ -83,6 +83,7 @@ fn waving(name: &str) -> Input {
         func: "waves.wave".into(),
         input: Wave { name: name.into() }.to_bytes(),
         now: 1,
+        cause: None,
     }
 }
 

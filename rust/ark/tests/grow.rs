@@ -113,6 +113,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
         func: TAG.into(),
         input: ark::dynamic::row_bytes(&wider().tables[2], &serde_json::json!({"name": "loud"})).unwrap(),
         now: 3,
+        cause: None,
     });
     let fan = fanouts(&o);
     assert_eq!(logged(&fan[0]).state, wide.store.state_hash(), "a new entry carries the wider hash");

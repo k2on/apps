@@ -3,9 +3,9 @@
 //!
 //! ```text
 //! Role  = Replica | Authority { journal }   -- "alone" is an authority whose journal has a fork
-//! Input = Frame { from, bytes } | Mutate { fn, input, now } | Tick | Persisted | Open
+//! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Tick | Persisted | Open
 //!       | Connected | Alone | Join | Compact
-//! Output= Send | Fanout | Changes | Persist | Refused { id, why } | Confirmed(id)
+//! Output= Send | Fanout | Changes(by span) | Persist | Refused { id, why } | Confirmed(id)
 //! ```
 //!
 //! Sans-io: [`Peer::step`] takes one input and says what to do — no
@@ -103,7 +103,7 @@ use std::sync::Arc;
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
-use crate::log::{Durable, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Snapshot};
+use crate::log::{Durable, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Snapshot, Span};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Log, Store, Undo, LOG};
 use crate::Refusal;
@@ -125,6 +125,9 @@ pub struct Ctx {
     pub session: String,
     pub roles: Vec<String>,
     pub now: i64,
+    /// The entry's own span (none outside an entry): what a function, a job
+    /// or a view may say it acted under.
+    pub span: Option<Span>,
     /// How many row ids this run has drawn ([`Ctx::new_id`]).
     pub draws: std::cell::Cell<i64>,
 }
@@ -137,6 +140,7 @@ impl Ctx {
             session: e.session.clone(),
             roles: e.roles.clone(),
             now: e.now,
+            span: Some(e.span()),
             ..Ctx::default()
         }
     }
@@ -347,6 +351,8 @@ pub enum Input {
         func: String,
         input: Vec<u8>,
         now: i64,
+        /// The span it is authored under, frozen in the entry.
+        cause: Option<Span>,
     },
     Tick(i64),
     Persisted(Seq),
@@ -378,7 +384,8 @@ pub enum Output {
         session: String,
         bytes: Vec<u8>,
     },
-    Changes(Vec<Change>),
+    /// What changed, each change with the span of the entry that made it.
+    Changes(Vec<Told>),
     Persist(Vec<u8>),
     Refused {
         id: EntryId,
@@ -387,15 +394,27 @@ pub enum Output {
     Confirmed(EntryId),
 }
 
+/// A change as a machine tells it: with the span of the entry that made it
+/// (the one run, the one confirmed, the pending one undone), and none for
+/// a whole state's difference (a snapshot, a divergence, an open).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Told {
+    pub by: Option<Span>,
+    pub change: Change,
+}
+
 #[derive(Default)]
 struct Out {
     out: Vec<Output>,
-    told: Vec<Change>,
+    told: Vec<Told>,
 }
 
 impl Out {
     fn send(&mut self, f: Frame) {
         self.out.push(Output::Send(f.enc()));
+    }
+    fn tell(&mut self, by: Option<Span>, changes: impl IntoIterator<Item = Change>) {
+        self.told.extend(changes.into_iter().map(|change| Told { by, change }));
     }
     fn persist(&mut self, r: Record) {
         self.out.push(Output::Persist(r.enc()));
@@ -595,7 +614,7 @@ impl Peer {
                     self.frame(from, f, &mut o)
                 }
             }
-            Input::Mutate { func, input, now } => self.mutate(func, input, now, &mut o),
+            Input::Mutate { func, input, now, cause } => self.mutate(func, input, now, cause, &mut o),
             Input::Tick(_) | Input::Persisted(_) => {}
             Input::Open(d) => self.open(d, &mut o),
             Input::Connected => self.connected(&mut o),
@@ -605,7 +624,7 @@ impl Peer {
             Input::Write { facts, now } if self.is_authority() => {
                 let entry = self.entry(String::new(), vec![], now);
                 let given = self.store.apply_all(&facts).map(|_| facts);
-                o.told.extend(given.iter().flatten().cloned());
+                o.tell(Some(entry.span()), given.iter().flatten().cloned());
                 self.decide(entry, given, &mut o);
             }
             Input::Write { .. } => {}
@@ -647,13 +666,15 @@ impl Peer {
             self.store.undo(&changes).expect("an inverse applies");
             return Err(Refusal(format!("{} is not in this space", c.table())));
         }
-        o.told.extend(changes.iter().cloned());
+        o.tell(Some(e.span()), changes.iter().cloned());
         Ok(changes)
     }
 
     fn undo_pending(&mut self, o: &mut Out) {
-        let undone = self.store.undo(self.pending.iter().flat_map(|p| &p.changes));
-        o.told.extend(undone.expect("a pending change undoes"));
+        for p in self.pending.iter().rev() {
+            let undone = self.store.undo(&p.changes).expect("a pending change undoes");
+            o.tell(Some(p.entry.span()), undone);
+        }
     }
 
     /// Runs the pending intents again, in order, over the store as it is;
@@ -685,8 +706,11 @@ impl Peer {
         Entry::new(&self.me, self.origin, self.local + 1, func, input, now)
     }
 
-    fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, o: &mut Out) {
-        let entry = self.entry(func, input, now);
+    fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, cause: Option<Span>, o: &mut Out) {
+        let entry = Entry {
+            cause,
+            ..self.entry(func, input, now)
+        };
         let (id, local) = (entry.id, entry.local);
         if self.is_authority() {
             let run = self.attempt(&entry, o);
@@ -1018,7 +1042,7 @@ impl Peer {
                     return self.diverge(l.seq, o);
                 }
                 self.faith = other || self.faith && !same;
-                o.told.extend(facts);
+                o.tell(Some(l.entry.span()), facts);
                 if let Some(i) = self.pending.iter().position(|p| p.entry.id == l.entry.id) {
                     self.pending.remove(i);
                 }
@@ -1063,7 +1087,7 @@ impl Peer {
         self.diverged.push(seq);
         self.undo_pending(o);
         let fresh = self.blank();
-        o.told.extend(self.store.diff(&fresh));
+        o.tell(None, self.store.diff(&fresh));
         self.store = fresh;
         self.redo_pending(o);
         self.asked = Some(cursor);
@@ -1090,7 +1114,7 @@ impl Peer {
         }
         (self.faith, self.foreign) = (!same, (!same).then_some(s.seq));
         self.undo_pending(o);
-        o.told.extend(self.store.diff(&new));
+        o.tell(None, self.store.diff(&new));
         self.store = new;
         o.persist(Record::Rows(self.store.kv_rows()));
         self.asked = None;
@@ -1217,7 +1241,7 @@ impl Peer {
             }
             let foreign = foreign(&store, &entries);
             (self.foreign, self.faith) = (foreign, foreign.is_some_and(|f| f == store.log().head().0));
-            o.told.extend(self.store.diff(&store));
+            o.tell(None, self.store.diff(&store));
             self.store = store;
             if let Role::Authority { journal } = &mut self.role {
                 for l in &entries {

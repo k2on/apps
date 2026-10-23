@@ -55,7 +55,7 @@ pub fn fanouts(outs: &[Output]) -> Vec<Frame> {
 pub fn changes(outs: &[Output]) -> Vec<Change> {
     outs.iter()
         .flat_map(|o| match o {
-            Output::Changes(cs) => cs.clone(),
+            Output::Changes(cs) => cs.iter().map(|t| t.change.clone()).collect(),
             _ => vec![],
         })
         .collect()
@@ -79,6 +79,7 @@ pub fn mutate(name: &str, input: Vec<u8>, now: i64) -> Input {
         func: super::super::demo::h(name),
         input,
         now,
+        cause: None,
     }
 }
 
