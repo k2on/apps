@@ -311,6 +311,36 @@
           # What harken-server serves as its web directory.
           harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
 
+          # The server (harken/server: the server and harken-peer), on a
+          # chain of its own as the APK's host part is below — dependencies,
+          # kernel, the crate — and not over the workspace's layers: under
+          # their feature unification ark-explorer's `ui`, and so iced's
+          # stack (wgpu, winit, …), is on for every crate, and the server
+          # would wait on the workspace's dependency layer for a GUI it
+          # never links. The same command at each layer, `-p harken-server`
+          # alone, so that the kernel crates are compiled under the server's
+          # features (ark-explorer without `ui`) and found fresh above; the
+          # kernel layer is keyed on `rust/**` and the manifests, the crate
+          # on harken's sources too.
+          serverBuild = "cargoWithProfile build --locked -p harken-server";
+          serverDeps = craneLib.buildDepsOnly (depsArgs // {
+            pname = "harken-server";
+            doCheck = false;
+            buildPhaseCargoCommand = serverBuild;
+          });
+          serverKernel = craneLib.mkCargoDerivation (common // {
+            pname = "harken-server-kernel";
+            src = kernelSrc;
+            cargoArtifacts = serverDeps;
+            buildPhaseCargoCommand = serverBuild;
+          });
+          harken-server = craneLib.buildPackage (common // {
+            pname = "harken-server";
+            cargoArtifacts = serverKernel;
+            cargoExtraArgs = "--locked -p harken-server";
+            doCheck = false;
+          });
+
           # The desktop window. winit and wgpu open the display and the GPU
           # by dlopen at run time, so the libraries go on the library path.
           harken-iced = crate {
@@ -749,10 +779,10 @@
         {
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
-            harken-server = crate { pname = "harken-server"; };
+            inherit harken-server;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
-            harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { harken-server = crate { pname = "harken-server"; }; };
+            harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced ark-admin;
             default = ark;
             inherit harken-apk harken-android-screens;
@@ -778,7 +808,7 @@
               inherit pkgs;
               module = import ./harken/server/nix/module.nix { packages = self.packages; };
               # Both binaries: the server, and harken-peer beside it.
-              harken-server = crate { pname = "harken-server"; };
+              inherit harken-server;
               # The previous pinned revision's, for the machines run mixed
               # (docs/plan-db.md D1); none while nix/versions.nix is empty,
               # and the mixed machines and subtests are left out.
