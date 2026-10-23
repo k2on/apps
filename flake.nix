@@ -633,6 +633,29 @@
             note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
           };
 
+          # Both apps as one F-Droid repository (nix/fdroid.nix): each app is
+          # its id, its APK, its metadata and its icon.
+          fdroid = import ./nix/fdroid.nix {
+            inherit lib pkgs;
+            apps = [
+              {
+                appid = "dev.harken.android";
+                apk = harken-apk;
+                apkName = "harken.apk";
+                metadata = ./harken/android/fdroid/metadata/dev.harken.android.yml;
+                # The trumpet the browser's tab draws.
+                icon = ./harken/iced/web/favicon.svg;
+              }
+              {
+                appid = "dev.revelation.android";
+                apk = revelation.apk;
+                apkName = "revelation.apk";
+                metadata = ./revelation/android/fdroid/metadata/dev.revelation.android.yml;
+                icon = ./revelation/android/fdroid/icon.svg;
+              }
+            ];
+          };
+
           # The same library for iOS — `aarch64-apple-ios` for a phone and
           # `aarch64-apple-ios-sim` for the simulator on an Apple-silicon Mac —
           # as `HarkenFFI.xcframework`, with UniFFI's Swift and the typed half
@@ -741,28 +764,10 @@
             inherit aapt2;
             android-sdk = androidSdk;
             # The APKs' F-Droid repository, one for both apps, and a key for
-            # it (nix/fdroid.nix). Each app is its id, its APK, its metadata
-            # and its icon.
-            inherit (import ./nix/fdroid.nix {
-              inherit lib pkgs;
-              apps = [
-                {
-                  appid = "dev.harken.android";
-                  apk = harken-apk;
-                  apkName = "harken.apk";
-                  metadata = ./harken/android/fdroid/metadata/dev.harken.android.yml;
-                  # The trumpet the browser's tab draws.
-                  icon = ./harken/iced/web/favicon.svg;
-                }
-                {
-                  appid = "dev.revelation.android";
-                  apk = revelation.apk;
-                  apkName = "revelation.apk";
-                  metadata = ./revelation/android/fdroid/metadata/dev.revelation.android.yml;
-                  icon = ./revelation/android/fdroid/icon.svg;
-                }
-              ];
-            }) fdroid-repo apps-fdroid fdroid-keygen;
+            # it (nix/fdroid.nix). `harken-fdroid` is the tool's old name,
+            # kept while a workflow on main still calls it.
+            inherit (fdroid) fdroid-repo apps-fdroid fdroid-keygen;
+            harken-fdroid = fdroid.apps-fdroid;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an

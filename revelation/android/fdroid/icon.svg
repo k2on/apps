@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- The launcher icon's mark at F-Droid's size: the whole Bible zoomed all
+       the way out, one thin white line on the dark page
+       (app/src/main/res/drawable/ic_launcher_*.xml, scaled from 108 to 512). -->
+  <rect width="512" height="512" fill="#0B0B0C"/>
+  <rect x="251.26" y="142.22" width="9.48" height="227.56" fill="#FFFFFF"/>
+</svg>

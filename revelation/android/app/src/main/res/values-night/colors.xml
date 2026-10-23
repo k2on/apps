@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dark theme's ground (Theme.kt, Palette.Dark). -->
+    <color name="ground">#FF0B0B0C</color>
+    <color name="icon_ground">#FF0B0B0C</color>
+    <color name="icon_line">#FFFFFFFF</color>
+</resources>

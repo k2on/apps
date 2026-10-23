@@ -1,0 +1,18 @@
+Categories:
+  - Reading
+License: MIT OR Apache-2.0
+WebSite: https://k2on.github.io/apps/
+SourceCode: https://github.com/k2on/apps
+IssueTracker: https://github.com/k2on/apps/issues
+
+Name: Revelation
+Summary: The Bible as one scroll, zoomed like a map
+Description: |-
+    Revelation is the whole Bible as one continuous column of text, Genesis 1:1 at the top and Revelation 22:21 at the bottom. It scrolls the way the phone scrolls and zooms the way a map does: pinch out and the words become lines, the lines a column, and the column, at the far end, one white line the height of the screen. Pinch in and it comes back. Going anywhere, from the book picker, a search or a label beside the column, is a map's camera move: out, across, and in.
+
+    The text is the Berean Standard Bible, which its translators have dedicated to the public domain; it is in the app, so nothing is fetched and nothing is synced. The app's own code is MIT OR Apache-2.0.
+
+    This is a release build signed with a key committed to the source repository, so anyone could sign an APK as this app.
+
+AutoUpdateMode: None
+UpdateCheckMode: None

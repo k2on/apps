@@ -1,0 +1,7 @@
+# Gradle's and the build's own, and the screenshots Paparazzi records,
+# which are output rather than source.
+.gradle/
+.kotlin/
+build/
+local.properties
+app/src/test/snapshots/

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The page before Compose draws anything: the light theme's ground
+         (Theme.kt, Palette.Light). -->
+    <color name="ground">#FFF7F6F2</color>
+    <!-- The launcher icon's, whatever the phone's theme: the dark page and
+         the white line, the app's own image. -->
+    <color name="icon_ground">#FF0B0B0C</color>
+    <color name="icon_line">#FFFFFFFF</color>
+</resources>

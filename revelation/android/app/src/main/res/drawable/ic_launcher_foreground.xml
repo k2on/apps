@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's mark: the whole Bible zoomed all the way out, a thin
+     white vertical line. On the adaptive icon's 108dp canvas it is 2dp wide
+     and runs from 30dp to 78dp, inside the 33dp safe zone's circle (a radius
+     of 33dp about the centre reaches 54±33, and the line's ends are 24dp
+     from it), so no launcher mask cuts it. Also the themed (monochrome)
+     layer, which the system tints by alpha alone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/icon_line"
+        android:pathData="M53 30H55V78H53Z" />
+</vector>

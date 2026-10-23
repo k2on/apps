@@ -349,3 +349,46 @@ the JVM is, and what only a phone can show is named.
 - The translation: KJV, WEB, or both from the start.
 - Verse-per-line, as planned, or paragraphs where the source marks them.
 - Whether a pinch past reading size reflows (as planned) or stops.
+
+## Landed
+
+The app is **Revelation**, `revelation/` (`revelation/README.md`), and
+it is Kotlin and nothing else, by the owner's decision: no Rust, no
+native library, no build tool for the text. The sharing question raised
+between this plan and the build — a Rust core over UniFFI drawing
+natively on each platform, or Kotlin Multiplatform with Skia everywhere
+— is answered for now by that decision: the engine is pure Kotlin with
+no Android types in it (`Bible`, `Layout`, `Camera`, `FlyTo`, `Levels`,
+`Gestures`), so it is the part a later port would carry.
+
+Of the open points: the translation is the Berean Standard Bible,
+public domain, shipped as the file it was published as and parsed at
+launch; each verse is its own paragraph; a pinch past reading size
+rubber-bands back rather than reflowing.
+
+What landed, against the pieces above: the text (1), the layout (2),
+the surface with the platform's scroller and edge effects (3), the
+levels down to the one-pixel line with their fades and labels (4), the
+fly-to, the header, the picker and search (5), the two themes and the
+saved place (6, without the font-size setting), and the build (7):
+`revelation-apk`, `revelation-apk-deps` and `revelation-android-screens`
+beside harken's, and one F-Droid repository for both apps (`fdroid-repo`,
+`apps-fdroid`, `nix/fdroid.nix`). Forty-seven JVM tests and eleven
+screenshot pairs; the whole text lays out in about a hundred
+milliseconds with the fake measurer, as 99,563 lines and 2,761,398 dp at
+a Pixel 5's width, from 34,883 distinct tokens.
+
+Three choices made in the building: the header and the saved place read
+from a point a quarter of the way down the screen below the header, not
+its centre, since a fly-to lands a chapter just under the header and a
+short psalm can end before the centre; the header shows a range once
+more than two books are on screen; and `BibleView` keeps the last
+layout for the process, which is what makes the screenshots take under
+a minute under layoutlib.
+
+Not yet, and still as planned: reflow by pinch and the font size
+setting, a bundled serif (`Typeface.SERIF` for now), accessibility,
+selection, bookmarks, a second translation. No phone has run it: the
+touch routing, the fling against `ScrollView`'s, the stretch effect,
+frame times during a pinch over reading text and the layout's time with
+the real `Paint` are the first things to look at with the first APK.
