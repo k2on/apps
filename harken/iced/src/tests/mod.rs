@@ -5,6 +5,7 @@
 mod account;
 mod explorer;
 mod geometry;
+mod now_playing;
 mod queue;
 mod signing_in;
 mod volume;

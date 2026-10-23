@@ -34,17 +34,6 @@ const TIME: Length = Length::Fixed(56.0);
 /// transport's gutter.
 const SECTION_INDENT: f32 = 35.0;
 
-/// What the now-playing bar draws, from wherever it came: this device's
-/// element, or what the session says another device is doing. One struct, so
-/// a view that branched on that twice cannot branch differently.
-struct Bar {
-    title: String,
-    creator: String,
-    playing: bool,
-    position: f64,
-    duration: f64,
-}
-
 /// The one shape in the table, on the row making a sound: play or pause, in
 /// the accent — and a button, because the place you look to see what is
 /// playing is the place you reach to stop it.
@@ -500,8 +489,7 @@ impl App {
     /// The track table.
     fn view_list(&self) -> Element<'_, Message> {
         let p = &self.peer;
-        let playing_id = self.player.track().map(|t| t.id);
-        let sounding = self.player.is_playing();
+        let (playing_id, sounding) = self.highlighted().map_or((None, false), |(id, sounding)| (Some(id), sounding));
         // Only drawn while this pane has the keyboard: the sidebar's highlight
         // is a selection and persists, this one only means "where the next
         // `j` goes".
@@ -912,32 +900,10 @@ impl App {
             .into()
     }
 
-    /// What the bar is drawing, whichever device is making it: the
-    /// *session* when this device is part of one with something in it — its
-    /// track, and its clock counted against the server's — so a laptop
-    /// watching a phone draws the phone's track; and the local player while
-    /// this device is its own session. A scrubber being dragged draws where
-    /// it is being dragged to.
-    fn bar(&self) -> Option<Bar> {
-        if let Some(a) = self.session.as_ref().and_then(|s| s.session.as_ref()) {
-            let track = a.now();
-            let counted = listening::Remote::position_ms(a) as f64 / 1000.0;
-            return Some(Bar {
-                title: track.title.clone(),
-                creator: track.creator.clone(),
-                playing: a.clock.playing(),
-                position: self.scrubbing.map_or(counted, f64::from),
-                duration: track.duration_ms as f64 / 1000.0,
-            });
-        }
-        let track = self.player.track()?;
-        Some(Bar {
-            title: track.title.clone(),
-            creator: track.creator.clone(),
-            playing: self.player.is_playing(),
-            position: self.scrubbing.map_or(self.player.position(), f64::from),
-            duration: self.player.duration(),
-        })
+    /// The row the list lights, and whether it sounds: [`App::now`]'s
+    /// track, as the bar and the title read it.
+    pub(crate) fn highlighted(&self) -> Option<(crate::rows::Id, bool)> {
+        self.now().map(|n| (n.track().id.0, n.playing))
     }
 
     /// Which device has the sound, as the button that opens the picker —
@@ -1058,7 +1024,7 @@ impl App {
     /// The now-playing bar, honest about silence: a build with no audio
     /// device says so rather than drawing a transport that does nothing.
     fn view_bar(&self) -> Element<'_, Message> {
-        let Some(bar) = self.bar() else {
+        let Some(bar) = self.now() else {
             let idle = text(match Player::AUDIBLE {
                 true => "nothing playing \u{2014} pick a track",
                 false => "nothing playing \u{2014} pick a track (the desktop build has no audio device; the browser one streams)",
@@ -1079,6 +1045,9 @@ impl App {
                 .into();
         };
         let duration = bar.duration.max(0.1);
+        // A scrubber being dragged draws where it is being dragged to.
+        let position = self.scrubbing.map_or(bar.position, f64::from);
+        let track = bar.track();
         // Enabled whenever there is a session to send it to: being a remote
         // control is a use, and `AUDIBLE` only decides whether *this* device
         // can be the one playing.
@@ -1096,11 +1065,14 @@ impl App {
         .align_y(Alignment::Center);
         let mut line = row![
             transport,
-            column![text(bar.title).size(14), text(bar.creator).size(12).style(style::dim)]
-                .spacing(2)
-                .width(Length::Fixed(260.0)),
-            text(clock(bar.position)).size(11).style(style::dim),
-            slider(0.0..=duration as f32, bar.position as f32, Message::Seek)
+            column![
+                text(track.title.as_str()).size(14),
+                text(track.creator.as_str()).size(12).style(style::dim)
+            ]
+            .spacing(2)
+            .width(Length::Fixed(260.0)),
+            text(clock(position)).size(11).style(style::dim),
+            slider(0.0..=duration as f32, position as f32, Message::Seek)
                 .on_release(Message::SeekDone)
                 .style(style::seek)
                 .width(Length::Fill),
