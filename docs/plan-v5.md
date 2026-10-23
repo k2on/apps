@@ -818,6 +818,33 @@ a kernel or domain feature change either. Not built here: the Android
 and iOS layers (evaluated; CI builds Android), and nothing is through
 Cachix yet.
 
+### Landed: server layer
+
+`harken-server` (the server and harken-peer; also `harken-serve`, the
+fleet VM and the NixOS module's default package) was `crate` over the
+host's workspace layer, so a server rebuild built `arkdb-deps` and
+`arkdb-workspace` — iced's stack (`wgpu`, `winit`, `iced`) for a GUI the
+server never links. It is now a chain of its own, built as the APK's host
+part is (without the workspace's feature unification, so ark-explorer's
+`ui` and with it arkui's iced stay off): `harken-server-deps` (the
+manifests' dummy and the lockfile) → `harken-server-kernel` (rust/ as it
+is, harken's crates dummies: keyed on `rust/**` and the manifests) →
+`harken-server`, every layer `cargo build -p harken-server`, so the
+kernel crates compile under the server's features and are fresh above.
+`-p` of each kernel crate would not do: selected by itself ark-explorer
+takes its default features, `ui` among them. The closure of
+`harken-server` no longer has `arkdb-deps`, `arkdb-kernel` or
+`arkdb-workspace`; the wasm pages (`harken-web-server`, `ark-admin`) were
+already on the wasm layers alone. The checks, and every Rust layer and
+package but the server's, are the same derivations as before.
+
+Measured with `--max-jobs 1`, the fetched crates in the store: from
+nothing, 275 s (232 `Compiling` in the dependency layer, 9 in the kernel
+layer, 3 in the crate; none of them `wgpu`, `winit` or `iced`). After a
+comment added to `harken/server/src/lib.rs`: 38 s, only the crate
+layer rebuilt, `Compiling ark ` 0 and 3 `Compiling` in all
+(harken-domain, harken-player, harken-server).
+
 ### Landed: live fold
 
 The one-machine experiment's finding, fixed with the one machine: a
