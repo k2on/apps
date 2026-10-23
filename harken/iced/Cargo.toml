@@ -23,13 +23,10 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # own address in a browser; and the logins a device remembers.
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
 arkui = { path = "../../rust/arkui" }
-# `E`: the database explorer over this device's replica (`docs/plan-guards.md`
-# D4), read-only but for the CRUD the domain exposes.
-ark-explorer = { path = "../../rust/ark-explorer" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced an executor and the clock that runs while audio plays or a
-# highlight fades — and only then (`docs/plan-reactive.md`). `svg` is every
+# submenu dwells — and only then (`docs/plan-reactive.md`). `svg` is every
 # glyph, `image` a cover, `advanced` the scroll operation that keeps the cursor
 # on screen and the recipes `tests/wake.rs` runs.
 # `fira-sans` is the typeface (the port leaves the vendored Inter behind).

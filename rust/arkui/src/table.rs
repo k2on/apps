@@ -87,7 +87,7 @@ pub fn heading<'a, M: 'a>(label: impl Into<String>, width: Length) -> Element<'a
 /// A line in a column of `width`, with the table's gap after it.
 ///
 /// A `Shrink` column is as wide as what is in it, so whatever sized it owns
-/// the gap after it — the explorer's grid, which spaces its own — and it gets
+/// the gap after it — a grid that spaces its own — and it gets
 /// none here.
 fn in_column<'a, M: 'a>(line: Line<'a>, width: Length) -> Element<'a, M> {
     let trailing = match width {

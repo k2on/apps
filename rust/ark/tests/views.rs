@@ -105,7 +105,7 @@ fn a_view_follows_a_replica_through_a_rebase() {
         let o = alice.step(input);
         let cs: Vec<Change> = o
             .iter()
-            .flat_map(|x| if let Output::Changes(cs) = x { cs.clone() } else { vec![] })
+            .flat_map(|x| if let Output::Changes(cs) = x { cs.iter().map(|t| t.change.clone()).collect() } else { vec![] })
             .collect();
         told.set(told.get() + cs.len());
         for (name, input, v) in views.iter_mut() {
@@ -176,6 +176,7 @@ fn mutate_input(name: &str, input: Vec<u8>) -> Input {
         func: h(name),
         input,
         now: 0,
+        cause: None,
     }
 }
 

@@ -216,8 +216,6 @@ pub struct Server {
     /// stdout and stderr, both, one line each, across every start.
     pub log: PathBuf,
     pub port: u16,
-    /// The admin page's port, where `HARKEN_ADMIN_BIND` asks for one.
-    pub admin_port: Option<u16>,
     upstream: Upstream,
     pub env: Vec<(String, String)>,
     pub starts: usize,
@@ -239,7 +237,6 @@ impl Server {
             media: root.join("media"),
             log: root.join("server.log"),
             port: 0,
-            admin_port: None,
             upstream,
             env,
             starts: 0,
@@ -274,7 +271,7 @@ impl Server {
             cmd.env(k, v);
         }
         let mut child = cmd.spawn().expect("harken-server starts");
-        let (port_tx, port_rx) = channel::<(bool, u16)>();
+        let (port_tx, port_rx) = channel::<u16>();
         for (tag, out) in [
             (
                 "out",
@@ -292,18 +289,13 @@ impl Server {
                 for line in BufReader::new(out).lines() {
                     let Ok(line) = line else { break };
                     let _ = writeln!(file, "{tag}: {line}");
-                    for (admin, said) in [
-                        (false, "listening on http://127.0.0.1:"),
-                        (true, "the admin page on http://127.0.0.1:"),
-                    ] {
-                        if let Some(rest) = line.split(said).nth(1) {
-                            if let Some(port) = rest
-                                .split(|c: char| !c.is_ascii_digit())
-                                .next()
-                                .and_then(|p| p.parse::<u16>().ok())
-                            {
-                                let _ = port_tx.send((admin, port));
-                            }
+                    if let Some(rest) = line.split("listening on http://127.0.0.1:").nth(1) {
+                        if let Some(port) = rest
+                            .split(|c: char| !c.is_ascii_digit())
+                            .next()
+                            .and_then(|p| p.parse::<u16>().ok())
+                        {
+                            let _ = port_tx.send(port);
                         }
                     }
                 }
@@ -311,20 +303,9 @@ impl Server {
         }
         self.child = Some(child);
         self.port = match port_rx.recv_timeout(PATIENCE) {
-            Ok((false, p)) => p,
+            Ok(p) => p,
             _ => panic!("the server said no port:\n{}", tail(&self.log, 30)),
         };
-        // Said next, when there is one.
-        let admin = self.env.iter().any(|(k, _)| k == "HARKEN_ADMIN_BIND");
-        self.admin_port = admin
-            .then(|| {
-                port_rx
-                    .recv_timeout(PATIENCE)
-                    .ok()
-                    .filter(|(a, _)| *a)
-                    .map(|(_, p)| p)
-            })
-            .flatten();
         *self.upstream.lock().unwrap() = format!("127.0.0.1:{}", self.port).parse().unwrap();
         self.starts += 1;
         assert!(
@@ -1214,8 +1195,7 @@ impl Fleet {
         );
         for l in &log.entries {
             let e = &l.entry;
-            // The scanner's, and the authority's own (the admin page's raw
-            // writes), are no peer's.
+            // The scanner's, and the authority's own, are no peer's.
             let unowned = e.actor == harken_server::library::ACCOUNT || e.actor == "authority";
             if !unowned && !accepted.contains_key(&e.id.0) && !self.seeded.contains(&e.id.0) {
                 panic!(
@@ -1234,18 +1214,6 @@ impl Fleet {
             took,
             entries,
             log,
-        }
-    }
-
-    /// A raw write through the admin page (`/admin/api/raw`), as the
-    /// authority: the sequence it was logged at, or the refusal.
-    pub fn edit_raw(&self, change: &Change) -> Result<i64, String> {
-        let port = self.server.admin_port.expect("the admin page listens");
-        let body = ark_explorer::wire::raw_body(change);
-        match ureq::post(&format!("http://127.0.0.1:{port}/admin/api/raw")).send_string(&body) {
-            Ok(r) => Ok(r.into_string().unwrap().trim().parse().unwrap()),
-            Err(ureq::Error::Status(_, r)) => Err(r.into_string().unwrap()),
-            Err(e) => panic!("the admin page: {e}"),
         }
     }
 

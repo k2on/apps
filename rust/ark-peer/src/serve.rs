@@ -8,7 +8,6 @@
 //!      ── /*      (a web build, `web`)                                       │    live one; the log on disk,
 //!      ── /media, … (the app's own routes)                                │    written before anything
 //!                                                                          ─┘    said of it is delivered
-//! <admin bind> ── /admin (the admin page's routes, `ark_explorer::serve`, on a listener of its own)
 //! ```
 //!
 //! A token proving nobody is closed with code 4401. The server
@@ -31,18 +30,11 @@ use tokio::sync::oneshot;
 use crate::handle::{dev, Authenticate, Handle};
 use crate::{now_ms, web, Config, Disk, Files, Memory, Peer};
 
-/// The admin page's routes, made once the hub is there: from its handle and
-/// how a token is read (`ark_explorer::serve::Admin::routes`).
-pub type AdminRoutes = Box<dyn FnOnce(Handle, Authenticate) -> Router + Send>;
-
-/// The admin page's bind and routes, made.
-pub type Admin = (String, Router);
-
 /// What a server is made of: its peer's configuration, and where it keeps
 /// its log (in memory without one), how it signs people in (`auth`; or
 /// `authenticate`, the dev reading by default), a web build at `/` and the
-/// file whose change is a rebuild, the app's own routes,
-/// how often it pings, and the admin page: its bind and its routes.
+/// file whose change is a rebuild, the app's own routes, and how often it
+/// pings.
 pub struct Server {
     pub config: Config,
     pub data: Option<PathBuf>,
@@ -51,14 +43,11 @@ pub struct Server {
     pub web: Option<(PathBuf, Option<String>)>,
     pub routes: Router,
     pub keepalive: Duration,
-    pub admin: Option<(String, AdminRoutes)>,
 }
 
 /// A server listening, until [`Running::stop`].
 pub struct Running {
     pub addr: SocketAddr,
-    /// Where the admin page listens, when there is one.
-    pub admin_addr: Option<SocketAddr>,
     pub hub: Handle,
     serving: Vec<(oneshot::Sender<()>, tokio::task::JoinHandle<()>)>,
 }
@@ -80,7 +69,6 @@ impl Server {
             web: None,
             routes: Router::new(),
             keepalive: Duration::from_secs(20),
-            admin: None,
         }
     }
 
@@ -92,9 +80,8 @@ impl Server {
         self
     }
 
-    /// The peer started on its thread: its handle, the routes, and the
-    /// admin page's bind and routes.
-    pub fn build(mut self) -> Result<(Handle, Router, Option<Admin>)> {
+    /// The peer started on its thread: its handle and the routes.
+    pub fn build(mut self) -> Result<(Handle, Router)> {
         let disk: Box<dyn Disk> = match &self.data {
             Some(d) => {
                 let mut f = Files::new(d.join("log"))?;
@@ -122,14 +109,13 @@ impl Server {
         if let Some((dir, module)) = self.web {
             router = router.merge(web::router(dir, module));
         }
-        let admin = self.admin.map(|(bind, routes)| (bind, routes(hub.clone(), self.authenticate.clone())));
-        Ok((hub, router, admin))
+        Ok((hub, router))
     }
 
     /// Built and listening on `addr`.
     pub async fn listen(self, addr: &str) -> Result<Running> {
-        let (hub, router, admin) = self.build()?;
-        Running::listen(hub, router, admin, addr).await
+        let (hub, router) = self.build()?;
+        Running::listen(hub, router, addr).await
     }
 }
 
@@ -158,23 +144,14 @@ fn serving(listener: tokio::net::TcpListener, router: Router) -> (oneshot::Sende
 }
 
 impl Running {
-    /// `router` (and the admin page's) served for `hub`.
-    pub async fn listen(hub: Handle, router: Router, admin: Option<Admin>, addr: &str) -> Result<Running> {
+    /// `router` served for `hub`.
+    pub async fn listen(hub: Handle, router: Router, addr: &str) -> Result<Running> {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let addr = listener.local_addr()?;
-        let mut admin_addr = None;
-        let mut all = vec![];
-        if let Some((bind, router)) = admin {
-            let l = tokio::net::TcpListener::bind(&bind).await?;
-            admin_addr = Some(l.local_addr()?);
-            all.push(serving(l, router));
-        }
-        all.push(serving(listener, router));
         Ok(Running {
             addr,
-            admin_addr,
             hub,
-            serving: all,
+            serving: vec![serving(listener, router)],
         })
     }
 

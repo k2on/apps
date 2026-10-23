@@ -980,9 +980,6 @@ applies one as any confirmed entry, a partial one by its facts; a replica
 refuses to author one, and a pushed one is refused as `Forbidden` whoever it
 claims to be by. That is what an operator's edit is: an entry like any
 other, in the log, served to everyone — not a write behind the log's back.
-`ark-explorer` is the tool that makes one (§3.17): over a client's replica
-it writes only through the exposed CRUD, as the person; over the authority,
-as the server's admin page, through the CRUD or raw.
 
 ### 3.12 Versioning: functions by hash, retained above the horizon
 
@@ -1122,10 +1119,7 @@ apps/
   rust/           ark (the runtime and the specification: value, canon, store, eval,
                   hash, verify, log, peer, view, live, protocol, sim, compat, and
                   ark::authoring, the vocabulary; the binaries arkc, ark-vectors and
-                  gen-unicode); ark-client, ark-server, ark-auth, arkui, and
-                  ark-explorer (a database explorer for any module, one iced
-                  component: hosted by harken's desktop on a key, and by
-                  ark-server as its admin page, compiled to wasm as ark-admin)
+                  gen-unicode); ark-client, ark-server, ark-auth and arkui
   swift/          ArkDB (the runtime, a client) · ArkDBClient · ArkDBTests ·
                   harken-peer-swift
   kotlin/         ark-runtime (the runtime, a client) · ark-client · ark-ui ·
@@ -1133,8 +1127,7 @@ apps/
   harken/         the app, one directory per program (harken/README.md):
     domain/       the domain, written once in Rust (src/), and harken.ark, its emit,
                   which every peer loads
-    server/       ark-server with harken's scanner, listening desk and house bridge;
-                  the admin page on its own listener, loopback by default
+    server/       ark-server with harken's scanner, listening desk and house bridge
     iced/         the desktop and browser client on arkui and ark-client; its demo
                   build is published to GitHub Pages
     ios/          SwiftUI over ArkDBClient, interpreting harken.ark; never built

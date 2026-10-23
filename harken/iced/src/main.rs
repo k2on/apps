@@ -29,7 +29,6 @@
 mod auth;
 mod client;
 mod domain;
-mod explore;
 mod listening;
 mod palette;
 mod peer;
@@ -207,7 +206,7 @@ pub enum Message {
     /// the second of quiet [`App::default_playlist`] waits for.
     Due,
     /// A clock, running only while something on screen moves by itself: 50
-    /// ms while the explorer fades a highlight or a submenu's dwell counts,
+    /// ms while a submenu's dwell counts,
     /// 250 ms while audio plays (the scrubber and the media session) —
     /// [`App::clock`]. At rest there is none.
     Tick,
@@ -215,16 +214,6 @@ pub enum Message {
     /// reach the page: a menu is pinned to a window coordinate, and a list
     /// scrolling under it would leave it beside a row it is not about.
     Swallow,
-    /// For the explorer, while it is open (`E`; `docs/plan-guards.md` D4).
-    Explore(ark_explorer::Msg),
-    /// The panel's close button.
-    CloseExplorer,
-    /// The pointer, anywhere in the window, and a button pressed or let go:
-    /// seen whatever widget took them, so the keys follow the last click into
-    /// either half and the panel's edge can be dragged (`explore::Dock`).
-    Pointer(Point),
-    Pressed,
-    Released,
 }
 
 /// What a volume control moves.
@@ -511,12 +500,6 @@ pub struct App {
     pub help: bool,
     /// `D` — every number the session holds.
     pub debug: bool,
-    /// `E` — the explorer over this device's replica (`explore.rs`).
-    pub explore: Option<explore::Explore>,
-    /// …docked beside the app: its width, and which half has the keys.
-    pub dock: explore::Dock,
-    /// The whole window; `window` is the app's part of it.
-    pub screen: Size,
     /// A row's menu, and the playlist picker that is its submenu — or the one
     /// `a` opens alone. arkui holds the rules; the playlists are the values.
     pub ctx: Context<Message, Id>,
@@ -606,15 +589,12 @@ impl App {
             search: String::new(),
             help: false,
             debug: false,
-            explore: None,
             ctx: Context::new(),
             menu_about: None,
             picker_about: None,
             devices: None,
             queue_panel: None,
             window: Size::new(860.0, 600.0),
-            screen: Size::new(860.0, 600.0),
-            dock: explore::Dock::default(),
             router: Router::new(),
             cursor: Point::ORIGIN,
             player: Player::new(),
@@ -983,12 +963,7 @@ impl App {
     /// whether its cursor is drawn: a context window over it has the keys, and
     /// a cursor drawn where the next `j` will not go is a lie.
     pub fn has_keys(&self, pane: Pane) -> bool {
-        self.focus() == Focus::Pane(pane) && !self.explorer_has_keys()
-    }
-
-    /// Whether the docked explorer has the keyboard rather than the app.
-    pub fn explorer_has_keys(&self) -> bool {
-        self.explore.is_some() && self.dock.keys
+        self.focus() == Focus::Pane(pane)
     }
 
     /// How wide the page beside the sidebar is: the window less its padding
@@ -1127,14 +1102,6 @@ impl App {
                 }
                 'D' => {
                     self.debug = !self.debug;
-                    Task::none()
-                }
-                // Beside `D`: the explorer — every table this device holds,
-                // the log as it knows it, a query console. Writes only
-                // through the CRUD the domain exposes, as whoever is signed
-                // in; never raw (`docs/plan-guards.md` D4).
-                'E' => {
-                    self.toggle_explorer();
                     Task::none()
                 }
                 // "Which lists is this on", which is the one question left
@@ -1943,47 +1910,6 @@ impl App {
                     self.menu_about = None;
                 }
             }
-            // While the explorer is open, `E` closes it from either half and
-            // `` ` `` moves the keys between them; otherwise the keys go to
-            // whichever has them — the explorer's own grammar, its own
-            // cursor, `<Esc>` from its top closing it — or to the app as ever.
-            Message::Key(iced::keyboard::Key::Character(c), mods)
-                if self.explore.is_some() && !mods.control() && (c == "E" || c == explore::SWITCH) =>
-            {
-                match c.as_str() {
-                    "E" => self.toggle_explorer(),
-                    _ => self.explorer_keys(!self.dock.keys),
-                }
-                return Task::none();
-            }
-            Message::Key(key, mods) if self.explore.is_some() && self.dock.keys => {
-                self.explore(ark_explorer::Msg::Key(key, mods));
-                return Task::none();
-            }
-            // A message from the explorer is not a click into it — hovering
-            // a row sends one — so it moves no keys: the press does.
-            Message::Explore(m) => {
-                self.explore(m);
-                return Task::none();
-            }
-            Message::CloseExplorer => {
-                if self.explore.is_some() {
-                    self.toggle_explorer();
-                }
-                return Task::none();
-            }
-            Message::Pointer(at) => {
-                self.pointer(at);
-                return Task::none();
-            }
-            Message::Pressed => {
-                self.pressed();
-                return Task::none();
-            }
-            Message::Released => {
-                self.dock.dragging = false;
-                return Task::none();
-            }
             Message::Key(key, mods) => {
                 // `None` is still typing: a count, a `g`, a search — drawn in
                 // the status line so nothing swallowed is a mystery.
@@ -2002,8 +1928,7 @@ impl App {
                 return Task::none();
             }
             Message::Resized(size) => {
-                self.screen = size;
-                self.sync_window();
+                self.window = size;
             }
             Message::HoverAt(at) => {
                 // Not while a context window is up. A backdrop stops a click
@@ -2269,9 +2194,9 @@ impl App {
     /// (`docs/plan-reactive.md`): the peer pumped — frames in, the
     /// settle, what this window authored sent — the deadlines looked at, the
     /// listening session moved both ways, the player's own changes noticed,
-    /// the explorer shown what moved, and the address bar read. It used to
-    /// be the 50 ms tick's work; it is done when something has happened,
-    /// which is the only time any of it has anything to do.
+    /// and the address bar read. It used to be the 50 ms tick's work; it is
+    /// done when something has happened, which is the only time any of it
+    /// has anything to do.
     fn react(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         self.due_at(client::monotonic_ms());
@@ -2313,8 +2238,6 @@ impl App {
             self.note = format!("the session refused that: {why}");
         }
         self.session = self.listening.session(&self.peer.client);
-        // The explorer lights what changed in the store and fades it.
-        self.observe_explorer();
         // The back button, and a link somebody was sent — consumed only once
         // the sidebar has something to resolve it against, which is why it is
         // asked after every update and not only when the bar moved.
@@ -2352,17 +2275,16 @@ impl App {
     }
 
     /// How often the window needs a clock, if at all: only while something on
-    /// screen moves without anything having happened. A highlight fading in
-    /// the explorer and a submenu's dwell are animations (50 ms); audio
+    /// screen moves without anything having happened. A submenu's dwell is
+    /// an animation (50 ms); audio
     /// playing here, or on another device this one is drawing, moves the
     /// scrubber and the media session's position, and `D` counts how long ago
     /// the room spoke (250 ms). `None` is a window at rest, which runs no
     /// timer at all.
     pub fn clock(&self) -> Option<Duration> {
-        let fading = self.explore.as_ref().is_some_and(|x| x.ui.fading());
         // A volume the throttle holds is sent by the clock, the last value
         // of a drag that stopped moving without being let go.
-        if fading || self.ctx.dwelling() || self.volume_held.is_some() {
+        if self.ctx.dwelling() || self.volume_held.is_some() {
             return Some(Duration::from_millis(50));
         }
         let sounding = self.now().is_some_and(|n| n.playing);
@@ -2420,14 +2342,6 @@ impl App {
             // Only the presses no widget took: a focused text box consumes its
             // own, so typing a playlist's name cannot walk the cursor.
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),
-            // The pointer and its presses, whatever took them: which half
-            // has the keys, and the docked explorer's edge.
-            iced::event::listen_with(|event, _status, _window| match event {
-                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::Pointer(position)),
-                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => Some(Message::Pressed),
-                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_)) => Some(Message::Released),
-                _ => None,
-            }),
         ];
         // One timer for the next deadline, keyed by it: the same deadline on
         // every call is the timer already running. Two milliseconds late

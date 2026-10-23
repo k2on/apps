@@ -2,7 +2,7 @@
 //! Rust value of every shape a column may have — ints, text, bools, bytes,
 //! ids, options, lists, tuples, records, sums of every kind of variant —
 //! serializes to the same JSON and the same key as its JSON read under its
-//! described `Type` (`ark::json::Typed`, what the store and the explorer
+//! described `Type` (`ark::json::Typed`, what the store and a host
 //! use); keys order as the values do and none is a prefix of another; and
 //! a `Desc` key orders last first.
 

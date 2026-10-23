@@ -248,20 +248,18 @@
             or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
           # One wasm page: a binary of the workspace compiled to wasm32 and
           # bound by wasm-bindgen, beside the static files it is loaded from —
-          # the browser peer, and the admin page (docs/plan-guards.md D4),
-          # which is the same mechanism with another binary and another page.
-          # The pages' dependencies for wasm32, once for all three: the
-          # browser peer with and without its demo, and the admin page.
+          # the browser peer, with and without its demo.
+          # The pages' dependencies for wasm32, once for both.
           wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
           wasmBuilds = lib.concatMapStringsSep "\n" wasmBuild [
-            "-p harken-iced" "-p harken-iced --features demo" "-p ark-explorer"
+            "-p harken-iced" "-p harken-iced --features demo"
           ];
           wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
             pname = "arkdb-wasm";
             doCheck = false;
             buildPhaseCargoCommand = wasmBuilds;
           });
-          # The kernel for wasm32 over them, under the same three builds.
+          # The kernel for wasm32 over them, under the same two builds.
           wasmKernel = wasmCrane.mkCargoDerivation (common // {
             pname = "arkdb-wasm-kernel";
             src = kernelSrc;
@@ -297,15 +295,6 @@
             features = lib.optionalString demo "--features demo";
             files = "../harken/iced/web/index.html ../harken/iced/web/favicon.svg";
           };
-          # The admin page: `ark-explorer`'s `ark-admin` over a server's
-          # authority, which ark-peer serves on its admin listener
-          # (`services.harken.admin.page`).
-          ark-admin = wasmPage {
-            pname = "ark-admin";
-            crate = "ark-explorer";
-            bin = "ark-admin";
-            files = "ark-explorer/web/index.html";
-          };
           # What GitHub Pages publishes.
           harken-web = icedWeb { pname = "harken-web"; demo = true; };
           # What harken-server serves as its web directory.
@@ -313,15 +302,14 @@
 
           # The server (harken/server: the server and harken-peer), on a
           # chain of its own as the APK's host part is below — dependencies,
-          # kernel, the crate — and not over the workspace's layers: under
-          # their feature unification ark-explorer's `ui`, and so iced's
-          # stack (wgpu, winit, …), is on for every crate, and the server
-          # would wait on the workspace's dependency layer for a GUI it
-          # never links. The same command at each layer, `-p harken-server`
-          # alone, so that the kernel crates are compiled under the server's
-          # features (ark-explorer without `ui`) and found fresh above; the
-          # kernel layer is keyed on `rust/**` and the manifests, the crate
-          # on harken's sources too.
+          # kernel, the crate — and not over the workspace's layers: their
+          # dependency layer is every member's, iced's stack (wgpu, winit, …)
+          # for harken-iced among them, and the server would wait on it for
+          # a GUI it never links. The same command at each layer,
+          # `-p harken-server` alone, so that the kernel crates are compiled
+          # under the server's features and found fresh above; the kernel
+          # layer is keyed on `rust/**` and the manifests, the crate on
+          # harken's sources too.
           serverBuild = "cargoWithProfile build --locked -p harken-server";
           serverDeps = craneLib.buildDepsOnly (depsArgs // {
             pname = "harken-server";
@@ -477,10 +465,9 @@
           # and the typed half, under `kotlin/`; and the library built for
           # this machine as `host/libharken_ffi.so`, which the app's JVM
           # tests load. Built as an Android ABI's is, on a chain of its own
-          # (dependencies, kernel, library) and not under the workspace's
-          # features: under those ark-explorer's `ui` is on for every crate
-          # that uses it, and `-p harken-ffi` would compile iced's stack
-          # (wgpu, winit, …) and wait on the workspace's dependency layer.
+          # (dependencies, kernel, library) and not over the workspace's
+          # layers, whose dependency layer is every member's, iced's stack
+          # (wgpu, winit, …) among them: `-p harken-ffi` would wait on it.
           # The dependencies have UniFFI's bindgen binary's too.
           ffiHostBuild = "cargoWithProfile build --locked -p harken-ffi --lib";
           ffiHostDeps = craneLib.buildDepsOnly (depsArgs // {
@@ -697,8 +684,20 @@
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           # The library for each iOS target and for the host, which UniFFI
           # reads the Swift from.
+          # The iOS targets compile and link with the builder's Xcode: its
+          # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
+          # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
+          # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
+          # fails under them: both are taken back for these two targets, and
+          # the host build keeps nix's toolchain.
           iosBuild = ''
-            export PATH=/usr/bin:$PATH DEVELOPER_DIR=''${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}
+            export PATH=/usr/bin:$PATH
+            export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+            unset SDKROOT
+            ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
+              export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
+              export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
+            '') iosTargets}
             ${lib.concatMapStrings (t: "cargoWithProfile build --locked -p harken-ffi --lib --target ${t}\n") iosTargets}
             cargoWithProfile build --locked -p harken-ffi --lib
           '';
@@ -783,7 +782,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced ark-admin;
+            inherit harken-web harken-web-server harken-iced;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;

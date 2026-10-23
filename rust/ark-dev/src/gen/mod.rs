@@ -14,7 +14,7 @@
 //! extensions, and a view of its rows is read typed, through its view
 //! object (`<T>View`), with no JSON per row ([`Walked::typed`]).
 //!
-//! A domain is walked as the admin page describes it (`Catalog`): its
+//! A domain is walked as `ark::domain::Catalog` describes it: its
 //! schema — every table a row type, named as the table — and every
 //! function's name, kind, input and answer.
 
@@ -24,10 +24,9 @@ pub mod swift;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use ark::domain::Kind;
+use ark::domain::{Catalog, Described, Kind};
 use ark::row::Type;
 use ark::schema::Space;
-use ark_explorer::Catalog;
 
 /// What a generator writes from: the domain's name, every named type by
 /// name, its functions, and its volatile tables with their row types.
@@ -270,7 +269,7 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
         }
         named(&row, &mut types);
     }
-    let fns: Vec<&ark_explorer::Described> = catalog.functions.iter().filter(|f| f.kind != Kind::Scope).collect();
+    let fns: Vec<&Described> = catalog.functions.iter().filter(|f| f.kind != Kind::Scope).collect();
     let last = |n: &str| n.rsplit('.').next().unwrap_or(n).to_string();
     let stubs = fns
         .iter()
@@ -298,8 +297,8 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
 }
 
 /// `ark-dev gen kotlin|swift DOMAIN [NAME [PACKAGE]]`: DOMAIN is one of
-/// this crate's (`demo`, `room`) or a file of the catalog the admin page
-/// serves (`/admin/api/state`, or its `catalog`); the source to stdout.
+/// this crate's (`demo`, `room`) or a file holding a domain's `Catalog` as
+/// JSON (`{"catalog": …}` or the catalog alone); the source to stdout.
 pub fn main(args: &[String]) -> Result<String, String> {
     let [lang, domain, rest @ ..] = args else {
         return Err("ark-dev gen kotlin|swift DOMAIN [NAME [PACKAGE]]".into());

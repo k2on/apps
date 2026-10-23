@@ -21,7 +21,6 @@ use ark::hash::{hex, unhex};
 use ark::log::{Durable, EntryId, Origin};
 use ark::peer::{Input, Output, Peer, Role, Who};
 use ark::schema::{Schema, Space};
-use ark::store::Change;
 use ark_peer::{Act, At, Config, Live};
 use serde_json::{json, Value};
 
@@ -47,7 +46,7 @@ fn space(s: Space) -> &'static str {
 fn input(i: &Input) -> Value {
     match i {
         Input::Frame { bytes, .. } => json!({"t": "frame", "bytes": hex(bytes)}),
-        Input::Mutate { func, input, now } => json!({"t": "mutate", "fn": func, "input": hex(input), "now": now}),
+        Input::Mutate { func, input, now, cause } => json!({"t": "mutate", "cause": cause, "fn": func, "input": hex(input), "now": now}),
         Input::Connected => json!({"t": "connected"}),
         Input::Alone => json!({"t": "alone"}),
         Input::Join => json!({"t": "join"}),
@@ -252,6 +251,7 @@ fn input_of(v: &Value) -> Result<Input, String> {
             func: v["fn"].as_str().ok_or("no fn")?.into(),
             input: bytes(&v["input"])?,
             now: n("now")?,
+            cause: serde_json::from_value(v["cause"].clone()).map_err(|e| e.to_string())?,
         },
         "connected" => Input::Connected,
         "alone" => Input::Alone,
@@ -273,7 +273,7 @@ fn output_of(v: &Value) -> Result<Output, String> {
             session: v["session"].as_str().unwrap_or_default().into(),
             bytes: bytes(&v["bytes"])?,
         },
-        "changes" => Output::Changes(Vec::<Change>::from_bytes(&bytes(&v["changes"])?).map_err(|r| r.0)?),
+        "changes" => Output::Changes(Vec::<ark::peer::Told>::from_bytes(&bytes(&v["changes"])?).map_err(|r| r.0)?),
         "persist" => Output::Persist(bytes(&v["bytes"])?),
         "refused" => Output::Refused {
             id: id()?,

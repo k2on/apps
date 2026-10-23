@@ -8,7 +8,5 @@ description = "ArkDB v5's development tools (docs/plan-v5.md D1): the simulator 
 [dependencies]
 ark = { path = "../ark" }
 ark-peer = { path = "../ark-peer" }
-# A domain as the admin page describes it (`Catalog`): what `ark-dev gen` reads.
-ark-explorer = { path = "../ark-explorer", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }

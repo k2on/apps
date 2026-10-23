@@ -3,7 +3,7 @@
 //!
 //! A domain's rows are Rust types and its views typed plans, run by name
 //! ([`crate::Domain`]). What has no Rust type of a table — a vector's rows,
-//! a host speaking JSON, the explorer's grid — holds a row as a JSON object
+//! a host speaking JSON — holds a row as a JSON object
 //! of its columns, read under the types the schema gives them ([`row`]),
 //! written back as its row type's bytes in the value format ([`row_bytes`]),
 //! its key the schema's types' key bytes ([`key_bytes`]).

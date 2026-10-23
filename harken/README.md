@@ -14,7 +14,7 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            session as volatile tables (never the log); plays.rs (the log);
            host.rs, what an app knows of it beside its functions
 server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
-           bridge, sign-in, /media, the web build, the admin page's listener;
+           bridge, sign-in, /media, the web build;
            the NixOS module (server/README.md)
 iced/      the desktop and browser client, on arkui and ark-peer; the `demo`
            feature is the seeded library GitHub Pages publishes
@@ -189,7 +189,6 @@ Everything is `nix`, from the repository root:
     nix build .#harken-iced        # the desktop window
     nix build .#harken-web         # the browser demo, as a static directory (Pages)
     nix build .#harken-web-server  # the browser client harken-server serves
-    nix build .#ark-admin          # the admin page the server's admin listener serves
     nix build .#harken-domain      # the domain crate, its schema hash held to its pin
     nix flake check                # fmt, clippy and every Rust test; the domain
                                    # builds, its schema hash pinned;
@@ -252,39 +251,6 @@ start opens there. Leaving a server is not yet a control.
 
 `harken-peer` does the same from a shell: `--alone` and later `--server
 URL` over one `--dir` is the join, and `join` and `leave` are commands.
-
-### The explorer, on the desktop and on the server
-
-`E` on the desktop opens the explorer (`ark-explorer`, `docs/plan-guards.md`
-D4) over this device's own replica, beside `D`'s numbers: every table it
-holds, a page of rows at a time with every column, read under the module's
-types (an id labelled by its table, a field by its refinement's name); the
-log as this client knows it — its confirmed chain, its pending intents,
-where it is and how it is linked; a read-only console; and every query and
-mutation of the module as a form, whose checks are the module's own
-refinements run by `parse` with the module's words. `j`/`k`, `h`/`l`,
-`gg`/`G` and counts move; `<Enter>` opens a table or edits a cell, `x`
-deletes a row, `<Tab>` goes between the tables, the log, the console and
-the functions, and `<Esc>` goes back, and out from the top. A client
-writes only through the CRUD a domain exposes (`insert_<t>`,
-`update_<t>`, …), as the signed-in person, and never raw — alone too.
-harken exposes none, so here its tables are read-only, and it says so; its
-mutations are callable from their forms as a button would author them.
-
-The server's admin page is the same component compiled to wasm, served by
-`ark_peer::admin` on a listener of its own (`HARKEN_ADMIN_BIND`;
-`services.harken.admin.bind`, `127.0.0.1:8788` by default) over the
-authority's store and its log, with who is connected. It writes as the
-authority: through a table's CRUD where the domain exposes one, unless `R`
-flips the switch, and raw otherwise — a raw write is a function of no input
-the authority authors through the same door as any mutation, which checks
-the row it replaces is the one there, judged by the constraints and served
-to every peer like any entry. harken exposes no
-CRUD, so every edit there is raw. On loopback it asks nothing (reach it
-from elsewhere through an SSH tunnel); bound wider it asks for a login
-holding the `admin` role (`services.harken.roles.admin`), signed in
-through this server's own `/auth`. `nix build .#ark-admin` is the page;
-the NixOS module serves it by default.
 
 ### Asking a running server, and backing it up
 

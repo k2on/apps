@@ -7,6 +7,10 @@
 //! never again by a test. A change to what is on disk either reads this
 //! directory as it is, or comes with a migration that does, or writes a
 //! new fixture beside it with a note of what moved; this one stays.
+//!
+//! Written again once, when entries took their cause (`Entry::cause`,
+//! docs/plan-observe.md): that change started every log afresh, by
+//! decision, rather than migrating one.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -46,9 +50,9 @@ fn config() -> Config {
 /// The token the writer's sign-in was given, and what the fixture holds:
 /// the hub's head and state hash, and `N` playlists, `p0`… — enough that
 /// the device's local instance folds into its `local.kv` too.
-const TOKEN: &str = "3f1e73eac2e4107e5f1a7740de5a9c28.a5e0fbc3f8bafea65ae3e110d9c2bf7832140f0e4c21dbafadefb98357363f97";
+const TOKEN: &str = "c3d0755a76b5a48571c12ae1b690ebed.e0d2394e21051a98976bd9d4d1f10569192f49f49b56c0d235ed92ed3273d0a1";
 const HEAD: i64 = 72;
-const STATE: &str = "9be2597ff3cf7ad83354410cfabba12560c1efbc5b00ee2e8aecafc5f8d5f314";
+const STATE: &str = "9781dcf488c5df53e9f7a28cfdf17fa345565dcd57c04ae8b40c27f8ef3d67d9";
 const N: usize = 70;
 
 fn fixture() -> PathBuf {

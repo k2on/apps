@@ -3,7 +3,7 @@
 //! nothing. `ARK_WRITE_GEN=1` writes them instead.
 
 use ark_dev::gen::{kotlin, swift, walk};
-use ark_explorer::Catalog;
+use ark::domain::Catalog;
 
 const KOTLIN: &str = "../android/app/src/main/kotlin/dev/harken/android/gen/Harken.kt";
 const SWIFT: &str = "../ios/Harken/Gen/Harken.swift";

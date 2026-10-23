@@ -46,10 +46,7 @@ let
   traced = house { mediaUrl = "http://10.0.0.2:8787"; trace = true; };
   noMedia = eval { devAuth = true; mediaPath = null; };
   roles = eval { devAuth = true; roles = { library = [ "alice" "bob" ]; admin = [ "alice" ]; }; };
-  adminWide = eval { devAuth = true; admin.bind = "0.0.0.0:8788"; };
-  adminWideHeld = eval { devAuth = true; admin.bind = "0.0.0.0:8788"; roles.admin = [ "alice" ]; };
-  adminOff = eval { devAuth = true; admin.bind = null; };
-  adminPage = eval { devAuth = true; admin.page = hello; };
+  adminSet = eval { devAuth = true; admin.bind = "127.0.0.1:8788"; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -74,11 +71,8 @@ let
     [ (!(lib.any (lib.hasInfix "/srv/media") noMedia.systemd.tmpfiles.rules) && !(env noMedia ? HARKEN_MEDIA) && (unit noMedia).serviceConfig.BindReadOnlyPaths == [ ]) "no media path, no media" ]
     [ ((env roles).HARKEN_ROLES == "admin=alice;library=alice,bob") "roles reach the server, role by role" ]
     [ (!(env dev ? HARKEN_ROLES)) "and none, nothing" ]
-    [ ((env dev).HARKEN_ADMIN_BIND == "127.0.0.1:8788" && dev.warnings == [ ]) "the admin page is on loopback by default, asking nothing" ]
-    [ ((env adminPage).HARKEN_ADMIN_WEB == "${hello}") "its page is served from the build named" ]
-    [ (warns adminWide "names nobody holding it") "an admin page bound wider that nobody holds admin for is a warning" ]
-    [ ((env adminWideHeld).HARKEN_ADMIN_BIND == "0.0.0.0:8788" && adminWideHeld.warnings == [ ]) "and with somebody holding it, none" ]
-    [ (!(env adminOff ? HARKEN_ADMIN_BIND) && !(env adminOff ? HARKEN_ADMIN_WEB)) "no bind, no admin page" ]
+    [ (!(env dev ? HARKEN_ADMIN_BIND) && dev.warnings == [ ]) "no admin listener, and nothing to warn about" ]
+    [ (says adminSet "the admin page and its explorer were removed") "an admin option set says it is gone" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
 in

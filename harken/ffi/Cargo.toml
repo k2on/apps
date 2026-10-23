@@ -25,4 +25,3 @@ serde_json = { workspace = true }
 # The typed Kotlin and Swift the apps call the domain with, held to what the
 # generator writes now (tests/gen.rs).
 ark-dev = { path = "../../rust/ark-dev" }
-ark-explorer = { path = "../../rust/ark-explorer", default-features = false }

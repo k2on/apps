@@ -3231,6 +3231,7 @@ pub mod ha {
                 func,
                 input,
                 now: now_ms(),
+                cause: None,
             });
             self.send(c, out);
         }

@@ -6,7 +6,7 @@ mod demo;
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::{EntryHash, SchemaHash, StateHash};
-use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot};
+use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot, Span, TraceId};
 use ark::schema::Space;
 use ark::store::Change;
 
@@ -21,6 +21,10 @@ fn every_frame() -> Vec<Frame> {
         func: demo::h(demo::ADD),
         input: br#"{"name":"a\u0000b","n":-1}"#.to_vec(),
         now: -5,
+        cause: Some(Span {
+            trace: TraceId([1; 16]),
+            id: [2; 16],
+        }),
     };
     let facts = vec![
         Change::Add {

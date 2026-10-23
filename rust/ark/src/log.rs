@@ -87,6 +87,43 @@ impl Origin {
     }
 }
 
+/// What a trace is named by: everything one tap, one scan, one job caused.
+/// A trace begun by an entry is named by that entry's id.
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct TraceId(#[serde(with = "crate::format::hex_bytes")] pub [u8; 16]);
+
+impl std::fmt::Debug for TraceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "TraceId({})", crate::hash::hex(&self.0[..6]))
+    }
+}
+
+/// One step of a trace: an entry, whose span is named by its id, or a span
+/// a peer or an app opened around what it did (a tap, a job's run).
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Span {
+    pub trace: TraceId,
+    #[serde(with = "crate::format::hex_bytes")]
+    pub id: [u8; 16],
+}
+
+impl std::fmt::Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Span({}/{})", crate::hash::hex(&self.trace.0[..6]), crate::hash::hex(&self.id[..6]))
+    }
+}
+
+impl Span {
+    /// A span of its own inside this one's trace, named by `bytes` (a run
+    /// of a job, a call through the bridge).
+    pub fn child(&self, bytes: impl AsRef<[u8]>) -> Span {
+        Span {
+            trace: self.trace,
+            id: first16(sha256(&[&self.id, bytes.as_ref()])),
+        }
+    }
+}
+
 impl EntryId {
     /// The id of the `local`-th intent from `origin` (an [`Origin`]; any
     /// bytes name an id outside the log, as a query's context does).
@@ -118,6 +155,9 @@ pub struct Entry {
     #[serde(with = "crate::format::raw")]
     pub input: Vec<u8>,
     pub now: i64,
+    /// The span it was authored under: a tap, a job's run, the entry whose
+    /// change woke what authored it. None begins a trace of its own.
+    pub cause: Option<Span>,
 }
 
 impl Default for Entry {
@@ -132,6 +172,7 @@ impl Default for Entry {
             func: String::new(),
             input: ().to_bytes(),
             now: 0,
+            cause: None,
         }
     }
 }
@@ -151,6 +192,7 @@ impl Entry {
             func: func.into(),
             input: if input.is_empty() { ().to_bytes() } else { input },
             now,
+            cause: None,
         }
     }
 
@@ -158,6 +200,15 @@ impl Entry {
     /// taken on trust.
     pub fn id_checks(&self) -> bool {
         self.id == EntryId::of(self.origin, self.local)
+    }
+
+    /// Its own span: named by its id, in its cause's trace, or beginning one
+    /// named by its id.
+    pub fn span(&self) -> Span {
+        Span {
+            trace: self.cause.map_or(TraceId(self.id.0), |c| c.trace),
+            id: self.id.0,
+        }
     }
 }
 

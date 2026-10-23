@@ -42,7 +42,7 @@ A column is an `i64`, `String`, `bool`, `Vec<u8>`, `Id<T>`, `Option`,
 is its bytes in the value format, a key the same value memcomparable
 (§1.1). A schema grows only by appending tables, and columns to the end
 of a table, each an `Option` or `#[serde(default)]`; it is hashed, said in
-every `Hello`, prefix-checked when a log opens and read by the explorer.
+every `Hello`, prefix-checked when a log opens.
 
 ## Inputs
 
@@ -141,5 +141,5 @@ Each operator is kept per element, and a change re-runs a closure only
 for the elements whose recorded reads it hits; the view's own reads (the
 playlist's owner) rebuild it when they move. After every change the
 answer is a fresh run's and the patches splice the old list into the new.
-Rows without a Rust type (the explorer, the `views/` vectors) use the
+Rows without a Rust type (the `views/` vectors, a host speaking JSON) use the
 same plans over JSON, written as JSON (`ark::dynamic`).

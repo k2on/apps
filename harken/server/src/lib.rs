@@ -359,18 +359,6 @@ pub async fn start(config: Config) -> Result<Server> {
     for prefix in &config.redirects {
         auth = auth.allow_redirect(prefix);
     }
-    // An admin page bound wider than loopback signs in through this server
-    // and comes back to its own address with the code: that address may be
-    // sent one when it names a host. A wildcard bind names none, and the
-    // address the page is reached at goes in `HARKEN_REDIRECTS`.
-    if let Some(bind) = &config.admin_bind {
-        if !ark_explorer::serve::is_loopback(bind)
-            && !bind.starts_with("0.0.0.0:")
-            && !bind.starts_with("[::]:")
-        {
-            auth = auth.allow_redirect(&format!("http://{bind}/admin/"));
-        }
-    }
     let auth = Arc::new(auth);
 
     let mut hub = hub_config(&hosted, config.retain.entries);
@@ -405,32 +393,19 @@ pub async fn start(config: Config) -> Result<Server> {
         );
         server.routes = covers::routes(dir, &art);
     }
-    // `docs/plan-guards.md` D4 The admin page, where one is asked for.
-    if let Some(bind) = &config.admin_bind {
-        let admin = ark_explorer::serve::Admin {
-            bind: bind.clone(),
-            page: config.admin_web.clone(),
-            server: Some(public_url.clone()),
-            catalog: ark::domain::Catalog::of(&hosted.domain),
-        };
-        server.admin = Some(admin.routes());
-    }
     // Everything the routes above do not match falls through to the page,
     // with the build as its validator: a store path cannot be one, since nix
     // dates every file in it 1970.
     if let Some(dir) = &config.web {
         server.web = Some((dir.clone(), config.web_module.clone()));
     }
-    let (hub, router, admin) = server.build()?;
+    let (hub, router) = server.build()?;
     let router = router.layer(axum::middleware::from_fn_with_state(
         (hub.clone(), hosted.clone()),
         healthz,
     ));
-    let running = Running::listen(hub.clone(), router, admin, &config.listen).await?;
+    let running = Running::listen(hub.clone(), router, &config.listen).await?;
     eprintln!("harken-server: listening on http://{}", running.addr);
-    if let Some(a) = running.admin_addr {
-        eprintln!("harken-server: the admin page on http://{a}/admin/");
-    }
 
     // Every `media_player` named becomes a device in every listening
     // session somebody is in: a connection of its own in that session,
@@ -548,28 +523,6 @@ mod tests {
         assert_eq!(c.redirects, ["https://a/", "https://b/"]);
         assert_eq!(c.keepalive, Keepalive::default());
         assert_eq!(c.public_url(), "https://harken.example.com");
-    }
-
-    /// `docs/plan-guards.md` D4 The admin page's two variables are read as
-    /// the NixOS module sets them, and nothing listens on a port nobody
-    /// named. Falsified by reading `HARKEN_ADMIN_WEB` into the bind: the bind was
-    /// the page's directory.
-    #[test]
-    fn the_admin_page_is_there_when_asked_for() {
-        let dev = ("HARKEN_DEV_AUTH", "1");
-        let c = Config::from_vars("x:1", vars(&[dev])).unwrap();
-        assert_eq!((c.admin_bind.clone(), c.admin_web.clone()), (None, None));
-        let c = Config::from_vars(
-            "x:1",
-            vars(&[
-                dev,
-                ("HARKEN_ADMIN_BIND", "127.0.0.1:8788"),
-                ("HARKEN_ADMIN_WEB", "/nix/store/x-ark-admin"),
-            ]),
-        )
-        .unwrap();
-        assert_eq!(c.admin_bind.as_deref(), Some("127.0.0.1:8788"));
-        assert_eq!(c.admin_web, Some(PathBuf::from("/nix/store/x-ark-admin")));
     }
 
     /// The keepalive a test shortens, and nothing a typo could make of it;
