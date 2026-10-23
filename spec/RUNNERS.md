@@ -39,7 +39,9 @@ client's chain made alone, an authority's log), `Snapshot`, `Verdict`
 One client's life in one session: `{device, from, live, log, steps}`.
 `log` and `live` name each space's domain, its schema's bytes (hex) and
 the functions its machine runs; `steps`, one per line, are `open` (who,
-the origin drawn once, a fork when alone), `sign_in`, and `step` — `space`, `in` (a frame, a mutate, a
+the log's origin, drawn once, a fork when alone, and `live_origin`, the live
+machine's, drawn at every open so that a reopened device is not refused as
+overtaken by what it said before), `sign_in` (who, both origins), and `step` — `space`, `in` (a frame, a mutate, a
 lifecycle input, an open's `Durable`), `out` (every output, bytes as hex)
 and `after` (head, hash, state hash, pending ids). The runner replays
 every step into fresh machines (`ark_dev::trace`) and fails at the first

@@ -93,8 +93,8 @@ pub fn record(from: &str, c: &ark_peer::Peer) -> String {
         .flatten()
         .map(|(act, out, at)| {
             let step = match act {
-                Act::Open(w, o, f) => json!({"fork": f.map(|(n, h)| json!([n, h.hex()])), "origin": hex(&o.0), "t": "open", "who": who(w)}),
-                Act::SignIn(w, o) => json!({"origin": hex(&o.0), "t": "sign_in", "who": who(w)}),
+                Act::Open(w, o, f, l) => json!({"fork": f.map(|(n, h)| json!([n, h.hex()])), "live_origin": l.map(|l| hex(&l.0)), "origin": hex(&o.0), "t": "open", "who": who(w)}),
+                Act::SignIn(w, o, l) => json!({"live_origin": l.map(|l| hex(&l.0)), "origin": hex(&o.0), "t": "sign_in", "who": who(w)}),
                 Act::Step(s, i) => {
                     let out: Vec<Value> = out.iter().map(output).collect();
                     json!({"after": at.as_ref().map(state), "in": input(i), "out": out, "space": space(*s), "t": "step"})
@@ -150,23 +150,24 @@ impl Player {
     /// One act; for a step, what the machine says.
     pub fn act(&mut self, a: &Act) -> Vec<Output> {
         match a {
-            Act::Open(w, o, f) => {
-                (self.log, self.live) = (self.fresh(w, *o, Space::Durable), self.fresh(w, *o, Space::Volatile));
+            Act::Open(w, o, f, l) => {
+                self.log = self.fresh(w, *o, Space::Durable);
+                self.live = l.and_then(|l| self.fresh(w, l, Space::Volatile));
                 if let Some(l) = self.log.as_mut().filter(|_| f.is_some()) {
                     l.role = ark_peer::alone_at(*f);
                 }
             }
-            Act::SignIn(w, o) => {
+            Act::SignIn(w, o, l) => {
                 let mut same = true;
-                if let Some(l) = &mut self.log {
-                    same = l.origin == *o;
+                if let Some(log) = &mut self.log {
+                    same = log.origin == *o;
                     if !same {
-                        (l.origin, l.local) = (*o, 0);
+                        (log.origin, log.local) = (*o, 0);
                     }
-                    l.me = w.clone();
+                    log.me = w.clone();
                 }
                 let local = self.live.as_ref().filter(|_| same).map_or(0, |x| x.local);
-                self.live = self.fresh(w, *o, Space::Volatile);
+                self.live = l.and_then(|l| self.fresh(w, l, Space::Volatile));
                 if let Some(x) = &mut self.live {
                     x.local = local;
                 }
@@ -191,6 +192,14 @@ fn bytes(v: &Value) -> Result<Vec<u8>, String> {
 
 fn origin_of(v: &Value) -> Result<Origin, String> {
     Ok(Origin(bytes(v)?.try_into().map_err(|_| "an origin is 16 bytes")?))
+}
+
+/// The live machine's origin, or none where there is no live space.
+fn live_origin_of(v: &Value) -> Result<Option<Origin>, String> {
+    if v.is_null() {
+        return Ok(None);
+    }
+    origin_of(v).map(Some)
 }
 
 /// The domain a trace names, as the machine held it: its schema as
@@ -300,9 +309,9 @@ pub fn replay(text: &str) -> Result<usize, String> {
                 } else {
                     Some((f[0].as_i64().ok_or("no fork")?, hash(&f[1], ark::hash::EntryHash)?))
                 };
-                Act::Open(who_of(&s["who"]), origin_of(&s["origin"])?, fork)
+                Act::Open(who_of(&s["who"]), origin_of(&s["origin"])?, fork, live_origin_of(&s["live_origin"])?)
             }
-            "sign_in" => Act::SignIn(who_of(&s["who"]), origin_of(&s["origin"])?),
+            "sign_in" => Act::SignIn(who_of(&s["who"]), origin_of(&s["origin"])?, live_origin_of(&s["live_origin"])?),
             _ => Act::Step(
                 if s["space"] == "volatile" { Space::Volatile } else { Space::Durable },
                 input_of(&s["in"])?,

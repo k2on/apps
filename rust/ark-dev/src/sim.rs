@@ -15,6 +15,8 @@
 //! patches ([`Net::watch`], [`Net::views_hold`]).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use ark::frames::Frame;
 use ark::peer::{Ctx, Who};
@@ -136,13 +138,21 @@ impl Net {
     }
 
     /// One more client, linked: its number.
-    pub fn add(&mut self, who: Who, config: Config) -> i64 {
+    pub fn add(&mut self, who: Who, mut config: Config) -> i64 {
         let i = self.clients.keys().last().map_or(0, |n| n + 1);
         self.logins.insert(who.session.clone(), who.clone());
         // The origin a device draws once, seeded: its first session's.
         let mut disk = Memory::default();
         let origin = ark::log::Origin::named(&who.session);
         let _ = ark_peer::local::preset(&mut disk, |r| r.origin = origin);
+        // And its live machine's, drawn at every open: the session's, counted.
+        if let Some(live) = &mut config.live {
+            let (session, opens) = (who.session.clone(), Arc::new(AtomicU64::new(0)));
+            live.origin = Arc::new(move || {
+                let n = opens.fetch_add(1, Ordering::Relaxed);
+                ark::log::Origin::named(format!("{session} live {n}"))
+            });
+        }
         self.clients.insert(i, Peer::open(config, who, Box::new(disk), true));
         self.heal(i);
         i

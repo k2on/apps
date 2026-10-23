@@ -143,7 +143,13 @@ pub struct Live {
     pub on_restore: Option<String>,
     pub arrive: Arrive,
     pub keep: Option<usize>,
+    /// Where a device's live machine draws its origin from, once per open
+    /// ([`draw_origin`]; a simulator's is seeded).
+    pub origin: Draw,
 }
+
+/// Where an origin is drawn from.
+pub type Draw = Arc<dyn Fn() -> Origin + Send + Sync>;
 
 impl Live {
     pub fn new(module: Module) -> Live {
@@ -157,6 +163,7 @@ impl Live {
             on_restore: None,
             arrive: Arc::new(|_, _| None),
             keep: None,
+            origin: Arc::new(draw_origin),
         }
     }
 }
@@ -208,11 +215,12 @@ pub type Patch = ark::plan::Patch<Vec<u8>>;
 /// One input to one machine; or both machines opened afresh as a login,
 /// as at [`Peer::open`] — the log's alone from its fork when it was
 /// alone; or a sign-in: the log's machine authoring as the login from its first
-/// `local`, the live one afresh.
+/// `local`, the live one afresh. Each names the log's origin and the live
+/// machine's, which is drawn at every open.
 #[derive(Clone, Debug)]
 pub enum Act {
-    Open(Who, Origin, Option<(Seq, EntryHash)>),
-    SignIn(Who, Origin),
+    Open(Who, Origin, Option<(Seq, EntryHash)>, Option<Origin>),
+    SignIn(Who, Origin, Option<Origin>),
     Step(Space, Input),
 }
 
@@ -298,10 +306,14 @@ fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Spac
     Instance::new(p, None)
 }
 
-/// A device's live machine as `me`.
-fn live_of(config: &Config, me: &Who, origin: Origin) -> Option<Instance> {
+/// A device's live machine as `me`, from an origin drawn for it. The live
+/// space keeps nothing across an open, so its `local`s start again at 1;
+/// under the log's origin, which the disk keeps, a reloaded page's calls
+/// were refused as overtaken by what the page before it had said, for as
+/// long as the server ran.
+fn live_of(config: &Config, me: &Who) -> Option<Instance> {
     let l = config.live.as_ref()?;
-    let mut p = machine(&l.module, Role::Replica, me, Some(origin), Space::Volatile);
+    let mut p = machine(&l.module, Role::Replica, me, Some((l.origin)()), Space::Volatile);
     (p.device, p.fold) = (l.device.clone(), Some(Fold::REPLICA));
     Some(p)
 }
@@ -401,13 +413,13 @@ impl Peer {
             }
         };
         let pending: Vec<Entry> = intents.into_iter().map(|i| i.entry).collect();
+        let live = live_of(&config, &me);
         if let Some(rec) = &mut record {
-            rec.push((Act::Open(me.clone(), origin, r.fork), vec![], None));
+            rec.push((Act::Open(me.clone(), origin, r.fork, live.as_ref().map(|l| l.origin)), vec![], None));
         }
         let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
         let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
         log.disk = Some(disk);
-        let live = live_of(&config, &me, origin);
         let mut p = Peer::with(config, log, live, local);
         (p.record, p.link) = (record, link);
         p.saved = (r.local, pending.iter().map(|e| (e.local, e.id)).collect());
@@ -701,14 +713,16 @@ impl Peer {
             }
             (e.actor, e.session, e.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
         }
-        if let Some(r) = &mut self.record {
-            r.push((Act::SignIn(who.clone(), origin), vec![], None));
-        }
         self.log.me = who.clone();
-        if let Some(mut p) = live_of(&self.config, &who, origin) {
-            // The origin goes on counting in the live space too, unless new.
-            p.local = self.live.as_ref().filter(|_| !other).map_or(0, |x| x.local);
+        if let Some(mut p) = live_of(&self.config, &who) {
+            // The live origin goes on counting, unless the actor is new.
+            if let Some(x) = self.live.as_ref().filter(|_| !other) {
+                (p.origin, p.local) = (x.origin, x.local);
+            }
             self.live = Some(p);
+        }
+        if let Some(r) = &mut self.record {
+            r.push((Act::SignIn(who.clone(), origin, self.live.as_ref().map(|l| l.origin)), vec![], None));
         }
         let durable = Durable {
             rows: self.log.confirmed_rows(),
