@@ -1,61 +1,87 @@
+// The iOS peer: SwiftUI over harken's peer — the Rust kernel with harken's
+// domain linked in (`HarkenFFI.xcframework`, `harken/ffi`), called through
+// the generated types (`Gen/Harken.swift`). One `Model` for the app's life;
+// every screen reads it. The onboarding until a session is open, then the
+// app (Shell.swift); the sign-in's browser sheet run whenever the model asks
+// for one; `harken://auth` links handed to the model; and the app coming
+// back to the front said, which is when a sign-in that came back empty may
+// go again (Onboarding.swift).
+import AuthenticationServices
 import SwiftUI
+import UIKit
 
-/// The iOS peer: SwiftUI over harken's peer — the Rust kernel with
-/// harken's domain linked in (`HarkenFFI.xcframework`, `harken/ffi`), called
-/// through the generated types (`Gen/Harken.swift`). One `Model` for the
-/// app's life; every screen reads it.
 @main
 struct HarkenApp: App {
-    @StateObject private var model = Model()
+    @StateObject private var model: Model
+    @Environment(\.scenePhase) private var phase
+    @State private var wasAway = false
+    private let nowPlaying: NowPlayingHolder
+
+    init() {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let m = Model(shelf: DefaultsShelf(), root: support, deviceName: UIDevice.current.name, engine: AVEngine())
+        _model = StateObject(wrappedValue: m)
+        nowPlaying = NowPlayingHolder(NowPlaying(model: m))
+    }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Root()
                 .environmentObject(model)
+                .tint(.gold)
+                .onOpenURL { model.open(url: $0) }
+        }
+        .onChange(of: phase) { _, now in
+            if now == .background { wasAway = true }
+            if now == .active && wasAway {
+                wasAway = false
+                model.send(.foreground)
+            }
         }
     }
 }
 
-struct RootView: View {
-    @EnvironmentObject private var model: Model
-
-    var body: some View {
-        VStack(spacing: 0) {
-            TabView {
-                LibraryView()
-                    .tabItem { Label("Library", systemImage: "music.note.list") }
-                PlaylistsView()
-                    .tabItem { Label("Playlists", systemImage: "text.badge.plus") }
-                SettingsView()
-                    .tabItem { Label("Settings", systemImage: "gearshape") }
-            }
-            StatusBar()
-        }
-    }
+/// The lock screen's end, kept for the app's life.
+final class NowPlayingHolder {
+    let held: NowPlaying
+    init(_ n: NowPlaying) { held = n }
 }
 
-/// One line under everything: where the session stands, and the last note.
-struct StatusBar: View {
+/// The onboarding's step, drawn; the app once it is running.
+struct Root: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.webAuthenticationSession) private var web
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(model.linkColor)
-                .frame(width: 8, height: 8)
-            Text(model.statusLine)
-                .font(.caption)
-                .lineLimit(1)
-            Spacer()
-            if let note = model.notice {
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        Group {
+            switch model.step {
+            case let .server(typed, checking, error): ServerScreen(typed: typed, checking: checking, error: error)
+            case let .signIn(server, phase, error): SignInScreen(server: server, phase: phase, error: error)
+            case let .opening(server, _): OpeningScreen(server: server)
+            case .running: Shell()
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.bar)
+        .animation(Springs.fade, value: stepKind)
+        // The sign-in, in the system's browser sheet, back on `harken://auth`.
+        .task(id: model.browse) {
+            guard let url = model.browse else { return }
+            do {
+                let back = try await web.authenticate(using: url, callbackURLScheme: Onboarding.scheme)
+                model.signInReturned(back, error: nil)
+            } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
+                model.signInReturned(nil, error: "The sign-in was closed before it finished.")
+            } catch {
+                model.signInReturned(nil, error: "Signing in didn't finish: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private var stepKind: Int {
+        switch model.step {
+        case .server: return 0
+        case .signIn: return 1
+        case .opening: return 2
+        case .running: return 3
+        }
     }
 }

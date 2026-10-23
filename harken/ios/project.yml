@@ -1,18 +1,32 @@
 # XcodeGen project for the iOS peer. `xcodegen generate` here writes
 # Harken.xcodeproj; nothing under it is committed.
 #
-# One target over harken's library for iOS — `nix build
-# .#harken-ios-xcframework -o ../ffi/ios` on a Mac: `HarkenFFI.xcframework`
-# (the Rust kernel with harken's domain linked in, for a phone and the
-# simulator) and `swift/`, the Swift UniFFI writes for it with the bridge's
-# typed half — and the app's own sources, the generated types in
-# `Harken/Gen/` among them.
+# One app over harken's library for iOS — `nix build
+# .#harken-ios-xcframework -o …` on a Mac, copied to ../ffi/ios:
+# `HarkenFFI.xcframework` (the Rust kernel with harken's domain linked in, a
+# static library for a phone and the simulator) and `swift/`, the Swift
+# UniFFI writes for it with the bridge's typed half — and the app's own
+# sources, the generated types in `Harken/Gen/` among them; and its tests,
+# the model's rules and the player against an in-process harken server.
+#
+# Swift 5 language mode, not 6: the bridge's typed half (`Typed.swift`,
+# shared with Android's and not this project's) declares `Id.none` a static
+# of a public type that is not `Sendable`, which Swift 6 refuses; and the
+# kernel calls back on its own threads (`Listener`, `PhoneSound`), which the
+# app meets with queues rather than actors. The compiler is Xcode 26's.
 name: Harken
 options:
   bundleIdPrefix: dev.arkdb
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
   createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
 targets:
   Harken:
     type: application
@@ -23,19 +37,56 @@ targets:
     dependencies:
       - framework: ../ffi/ios/HarkenFFI.xcframework
         embed: false
+      # What the Rust standard library and its random numbers reach for on iOS.
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
     info:
       path: Harken/Info.plist
       properties:
         CFBundleDisplayName: Harken
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        # The dev server speaks plain http:// and ws://; a development peer is allowed to.
+        # The player plays on with the screen locked and the app in the background.
+        UIBackgroundModes: [audio]
+        # Where the server's sign-in sends its code back to: harken://auth?code=…
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.arkdb.harken.auth
+            CFBundleURLSchemes: [harken]
+        # Only the system's TLS and ring's, which are exempt: no export question on upload.
+        ITSAppUsesNonExemptEncryption: false
+        # A server on the home network, found by its address.
+        NSLocalNetworkUsageDescription: Harken plays from your own music server, which may be on this network.
+        # A server at home often speaks plain http:// and ws://; the person typed its address.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.arkdb.harken
-        SWIFT_VERSION: "5.9"
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: false
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  HarkenTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: HarkenTests
+    dependencies:
+      - target: Harken
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.arkdb.harken.tests
+        GENERATE_INFOPLIST_FILE: true
+schemes:
+  Harken:
+    build:
+      targets:
+        Harken: all
+        HarkenTests: [test]
+    test:
+      targets: [HarkenTests]
+    archive:
+      config: Release
