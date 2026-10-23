@@ -151,6 +151,18 @@ impl Player {
     /// caller does it to the player. `local` is that player, whose queue a
     /// play presses when the session has none. None when it was taken.
     pub fn press(&mut self, p: &mut Peer, press: &Press, local: Option<&dyn Sound>) -> Option<String> {
+        // A press is somebody's hand: the root of what it causes, everywhere,
+        // unless the app opened one around it already.
+        if p.open_span().is_some() {
+            return self.pressed(p, press, local);
+        }
+        p.begin(&format!("press {press:?}"));
+        let out = self.pressed(p, press, local);
+        p.end();
+        out
+    }
+
+    fn pressed(&mut self, p: &mut Peer, press: &Press, local: Option<&dyn Sound>) -> Option<String> {
         let s = Player::listening(p);
         if !self.joined(p, &s) {
             return Some(NOT_PART.into());

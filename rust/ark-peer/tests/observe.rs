@@ -132,7 +132,7 @@ fn a_job_runs_in_the_trace_of_what_made_it_due() {
     let seen: Arc<Mutex<Option<Span>>> = Arc::default();
     let s = seen.clone();
     net.d(0).handle::<Fetch>(move |p, _| {
-        *s.lock().unwrap() = p.cause(Space::Durable);
+        *s.lock().unwrap() = p.cause(Space::Durable, now_ms());
         Ok("body".into())
     });
     let tap = net.d(1).begin("tap");
@@ -149,4 +149,24 @@ fn a_job_runs_in_the_trace_of_what_made_it_due() {
     assert_eq!(*seen.lock().unwrap(), Some(claim.span()), "the handler ran under the claim");
     assert_eq!(finish.cause, Some(claim.span()), "the finish is the claim's child");
     assert!([a.span(), claim.span(), finish.span()].iter().all(|s| s.trace == tap.trace), "one trace, from the tap");
+}
+
+/// A trace is what one hand caused, for [`ark_peer::TRACE_MS`]: an answer
+/// made after that begins a trace of its own, where one made inside it
+/// joins. Falsified by `Peer::cause` taking the waking span at any age: the
+/// late answer was the tap's child.
+#[test]
+fn an_answer_after_the_trace_is_over_begins_its_own() {
+    use ark::format::Encode;
+    let mut net = Net::new(2);
+    let tap = net.d(0).begin("tap");
+    asks(&mut net, 0, "a");
+    net.d(0).end();
+    let f = net.d(1).binding("fetch.ask").unwrap();
+    let late = tap.began + ark_peer::TRACE_MS + 1;
+    net.d(1).author(Space::Durable, &f, Ask { id: "late".into() }.to_bytes(), late).unwrap();
+    net.carry();
+    let b = net.logged("fetch.ask").pop().unwrap();
+    assert_eq!(b.cause, None, "late, it is a trace of its own");
+    assert_ne!(b.span().trace, tap.trace);
 }

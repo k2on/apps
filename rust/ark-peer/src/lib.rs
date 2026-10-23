@@ -152,6 +152,10 @@ pub struct Live {
 /// Where an origin is drawn from.
 pub type Draw = Arc<dyn Fn() -> Origin + Send + Sync>;
 
+/// How long a trace an answer joins lasts, from its beginning: what one
+/// hand caused is over by then ([`Peer::cause`]).
+pub const TRACE_MS: i64 = 30_000;
+
 impl Live {
     pub fn new(module: Module) -> Live {
         Live {
@@ -617,19 +621,23 @@ impl Peer {
     pub fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
         let ephemeral = self.config.live.as_ref().is_some_and(|l| l.ephemeral.contains(func));
         if space == Space::Volatile && ephemeral {
-            let cause = self.cause(space);
+            let cause = self.cause(space, now);
             self.relay.insert(func.into(), (input, now, cause));
             self.tick(now);
             return Ok(());
         }
-        let (func, cause) = (func.into(), self.cause(space));
+        let (func, cause) = (func.into(), self.cause(space, now));
         self.verdict(space, Input::Mutate { func, input, now, cause })
     }
 
-    /// The span an intent of `space` is authored under now: the one opened,
-    /// or — not serving — the span of the entry whose change woke it.
-    pub fn cause(&self, space: Space) -> Option<Span> {
-        self.span.or(self.woke[space as usize].filter(|_| !self.hub.serving))
+    /// The span an intent of `space` authored at `now` is under: the one
+    /// opened, or — not serving — the span of the entry whose change woke
+    /// it, while that trace is younger than [`TRACE_MS`]. A trace is what one
+    /// hand caused: an answer to an answer to a press, minutes on (a
+    /// player's position, reported each second), is a trace of its own.
+    pub fn cause(&self, space: Space, now: i64) -> Option<Span> {
+        let woke = self.woke[space as usize].filter(|w| !self.hub.serving && now - w.began < TRACE_MS);
+        self.span.or(woke)
     }
 
     /// A trace of its own begun, named `name` (a tap, a scan), and authored
@@ -638,10 +646,24 @@ impl Peer {
         let span = Span {
             trace: ark::log::TraceId(draw_origin().0),
             id: draw_origin().0,
+            began: now_ms(),
         };
         tracing::info!(target: "ark", peer = %self.label(), span = ?span, name, "begin");
         self.span = Some(span);
         span
+    }
+
+    /// An intent of its own just authored on the log: pending, or — an
+    /// authority's, decided as it was made — at the head.
+    pub fn authored(&self, id: &EntryId) -> Option<Entry> {
+        let pending = self.log.pending.iter().map(|p| &p.entry).find(|e| e.id == *id).cloned();
+        let head = self.log.log().head().0;
+        pending.or_else(|| (head.saturating_sub(8)..=head).rev().filter_map(|s| self.log.log().at(s)).map(|l| l.entry).find(|e| e.id == *id))
+    }
+
+    /// The span opened ([`Peer::begin`], [`Peer::under`]), if one is.
+    pub fn open_span(&self) -> Option<Span> {
+        self.span
     }
 
     /// The span opened by [`Peer::begin`] closed: it authors under what woke

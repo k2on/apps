@@ -83,10 +83,11 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
             // The claim is a child of what made the row due.
             let claim = Claim::<R> { id, by: self.by.clone() };
             if let Ok(e) = p.under(by, |p| p.mutate(&format!("{}.claim", R::TABLE), &claim)) {
-                let span = Span {
+                let span = p.authored(&e).map(|c| c.span()).unwrap_or(Span {
                     trace: by.map_or(TraceId(e.0), |b| b.trace),
                     id: e.0,
-                };
+                    began: by.map_or(now, |b| b.began),
+                });
                 self.claims.insert(k, (e, span));
             }
         }

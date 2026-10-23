@@ -11,6 +11,7 @@ ark-peer = { path = "../ark-peer", default-features = false }
 ark-auth = { path = "../ark-auth", default-features = false }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 # `uniffi-bindgen`, which writes the Kotlin and Swift for an app's library
 # (`cargo run -p ark-ffi --features bindgen --bin uniffi-bindgen -- generate

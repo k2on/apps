@@ -430,6 +430,7 @@ impl Peer {
     /// An intent of the function `name` on its input's JSON: its id, or why
     /// its preview — or, alone, its sequencing — refused it.
     pub fn mutate(&self, name: String, input: String) -> Result<String, Refusal> {
+        let _call = tracing::debug_span!(target: "ark", "ffi", call = "mutate", name = %name).entered();
         let id = self.shared.act(|s| {
             let input = s.peer.input_json(&name, &input)?;
             s.peer.mutate_bytes(&name, input)
@@ -483,11 +484,34 @@ impl Peer {
     /// A call on the live space (§1.9) on its input's JSON: an ephemeral
     /// one through the relay, any other at once.
     pub fn call(&self, name: String, input: String) -> Result<(), Refusal> {
+        let _call = tracing::debug_span!(target: "ark", "ffi", call = "call", name = %name).entered();
         Ok(self.shared.act(|s| {
             s.hurry = monotonic_ms() + 1000;
             let input = s.peer.input_json(&name, &input)?;
             s.peer.call(&name, input)
         })?)
+    }
+
+    /// A trace begun here, named `name` — what a tap, a gesture, a scan in
+    /// the app opens — and everything this peer authors under it until
+    /// [`Peer::end`]: what it caused, everywhere, is one trace. Its span, as
+    /// `trace/span` in hex.
+    pub fn begin(&self, name: String) -> String {
+        let s = self.shared.act(|s| s.peer.begin(&name));
+        format!("{}/{}", ark::hash::hex(&s.trace.0), ark::hash::hex(&s.id))
+    }
+
+    /// The span [`Peer::begin`] opened, closed.
+    pub fn end(&self) {
+        self.shared.act(|s| s.peer.end());
+    }
+
+    /// Something the app saw, said among this peer's events under the span
+    /// it authors under now: `name`, and `detail` as the app writes it.
+    pub fn event(&self, name: String, detail: String) {
+        let s = self.shared.lock();
+        let span = s.peer.cause(ark::schema::Space::Durable, ark_peer::now_ms()).map(|s| ark::hash::hex(&s.id)).unwrap_or_default();
+        tracing::info!(target: "ark", peer = %s.peer.label(), span = %span, name = %name, detail = %detail, "app");
     }
 
     /// The rows of the live space's `table` this device holds, as JSON.

@@ -105,6 +105,8 @@ pub struct Span {
     pub trace: TraceId,
     #[serde(with = "crate::format::hex_bytes")]
     pub id: [u8; 16],
+    /// When its trace began, on the clock entries are dated by.
+    pub began: i64,
 }
 
 impl std::fmt::Debug for Span {
@@ -120,6 +122,7 @@ impl Span {
         Span {
             trace: self.trace,
             id: first16(sha256(&[&self.id, bytes.as_ref()])),
+            began: self.began,
         }
     }
 }
@@ -203,11 +206,12 @@ impl Entry {
     }
 
     /// Its own span: named by its id, in its cause's trace, or beginning one
-    /// named by its id.
+    /// named by its id, at its `now`.
     pub fn span(&self) -> Span {
         Span {
             trace: self.cause.map_or(TraceId(self.id.0), |c| c.trace),
             id: self.id.0,
+            began: self.cause.map_or(self.now, |c| c.began),
         }
     }
 }

@@ -178,7 +178,7 @@ impl Describe for Entry {
 
 impl Describe for Span {
     fn describe() -> Type {
-        let fs = fields! { trace: TraceId::describe(), id: Type::Id("span".into()) };
+        let fs = fields! { trace: TraceId::describe(), id: Type::Id("span".into()), began: Type::Int };
         Type::Record("Span".into(), fs)
     }
 }

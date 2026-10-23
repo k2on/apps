@@ -24,6 +24,7 @@ fn every_frame() -> Vec<Frame> {
         cause: Some(Span {
             trace: TraceId([1; 16]),
             id: [2; 16],
+            began: -9,
         }),
     };
     let facts = vec![
