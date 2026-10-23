@@ -9,7 +9,7 @@
 use arkui::fit::Cut;
 use arkui::format::{clock, plural, span, spell};
 use arkui::line::Line;
-use arkui::{art, cards, fit, glyphs, icon, layer, menu, panel, picker, style, table};
+use arkui::{account, art, cards, fit, glyphs, icon, layer, menu, panel, picker, style, table};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row};
 use iced::{Alignment, Element, Length, Padding};
 
@@ -81,9 +81,13 @@ impl App {
             column![
                 // The sidebar and the page share the height left once the bar
                 // has taken its own, so the bar stays at the bottom.
-                row![self.view_sidebar(), rule::vertical(1), self.view_page()]
-                    .spacing(PANE_GAP)
-                    .height(Length::Fill),
+                row![
+                    self.view_sidebar(),
+                    rule::vertical(1),
+                    column![self.view_top(), self.view_page()].spacing(10)
+                ]
+                .spacing(PANE_GAP)
+                .height(Length::Fill),
                 rule::horizontal(1),
                 self.view_bar(),
             ]
@@ -612,9 +616,6 @@ impl App {
                 .align_y(Alignment::Center),
             );
         }
-        if let Some(actions) = self.view_actions() {
-            main = main.push(actions);
-        }
         if self.help {
             // The status line stays: which pane has the cursor is exactly what
             // somebody reading the keymap is trying to work out.
@@ -630,62 +631,33 @@ impl App {
             .into()
     }
 
-    /// Signing in and out, and going offline. The demo has none of it.
-    fn view_actions(&self) -> Option<Element<'_, Message>> {
-        if cfg!(feature = "demo") {
-            return None;
-        }
-        let sign_in = |label: &'static str| {
-            button(label)
-                .style(style::action)
-                .on_press_maybe((!self.signing_in).then_some(Message::SignIn))
-        };
-        if self.peer.client.is_alone() {
+    /// The top of the page, on every page: joining a server while this
+    /// window is alone on the left, and at the right-hand end the account —
+    /// who, and the menu that goes offline and signs out (`App::account`).
+    /// Exactly [`arkui::account::HEIGHT`] tall, because the menu hangs off
+    /// its bottom before anything is laid out.
+    fn view_top(&self) -> Element<'_, Message> {
+        let left: Element<'_, Message> = match !cfg!(feature = "demo") && self.peer.client.is_alone() {
             // Alone: everything works here, and this is how it starts
             // syncing — a server, then its sign-in (`docs/plan-alone.md` §4).
-            return Some(
-                row![
-                    text_input("server address", &self.connect)
-                        .on_input(Message::ConnectUrl)
-                        .on_submit(Message::Connect)
-                        .size(12)
-                        .width(Length::Fixed(220.0)),
-                    button("connect").style(style::action).on_press(Message::Connect),
-                    text("alone \u{2014} what you do is kept on this device").size(12).style(style::dim),
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center)
-                .into(),
-            );
-        }
-        let actions: Element<'_, Message> = match &self.login {
-            // Nobody yet: everything works, and this is how it starts syncing.
-            None => row![
-                sign_in(if self.signing_in { "signing in\u{2026}" } else { "sign in" }),
-                text("not signed in \u{2014} what you do is kept on this device")
+            true => row![
+                text_input("server address", &self.connect)
+                    .on_input(Message::ConnectUrl)
+                    .on_submit(Message::Connect)
                     .size(12)
-                    .style(style::dim),
+                    .width(Length::Fixed(220.0)),
+                button("connect").style(style::action).on_press(Message::Connect),
             ]
             .spacing(12)
             .align_y(Alignment::Center)
             .into(),
-            // Turned away by the server: the one button that helps.
-            Some(login) if login.token.is_empty() => row![
-                sign_in("sign in again"),
-                button("sign out").style(button::text).on_press(Message::SignOut)
-            ]
-            .spacing(12)
-            .into(),
-            Some(_) => row![
-                button(if self.offline { "go online" } else { "go offline" })
-                    .style(style::action)
-                    .on_press(Message::ToggleLink),
-                button("sign out").style(button::text).on_press(Message::SignOut),
-            ]
-            .spacing(12)
-            .into(),
+            false => text("").into(),
         };
-        Some(actions)
+        let mut bar = row![container(left).width(Length::Fill)].align_y(Alignment::Center);
+        if let Some(account) = self.account() {
+            bar = bar.push(account::button(&account, Message::AccountMenu));
+        }
+        container(bar).height(Length::Fixed(account::HEIGHT)).width(Length::Fill).into()
     }
 
     /// The engine showing through: how much of the log is applied, what this
@@ -707,14 +679,18 @@ impl App {
                 (Some(_), Some(s)) if !s.name.is_empty() => s.name,
                 (Some(_), Some(s)) => s.user,
                 (Some(l), None) => crate::auth::who(l),
-                (None, _) => "nobody".into(),
+                (None, _) => String::new(),
             };
+            // Nobody yet is a sign-in on its way, or one the note says
+            // came back refused: there is no one to name.
             let link = match (&self.login, p.client.linked) {
-                (None, _) => "not signed in",
-                (Some(_), true) => "online",
-                (Some(_), false) => "offline",
+                (None, _) => None,
+                (Some(_), true) => Some("online"),
+                (Some(_), false) => Some("offline"),
             };
-            line = format!("{who} \u{b7} {link} \u{b7} {line}");
+            if let Some(link) = link {
+                line = format!("{who} \u{b7} {link} \u{b7} {line}");
+            }
         }
         if !self.note.is_empty() {
             line = format!("{line}  \u{b7}  {}", self.note);

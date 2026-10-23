@@ -200,6 +200,65 @@ pub fn open_alone() -> Result<Replica, String> {
     Ok(r)
 }
 
+/// What a window on a server, with nobody signed in, does as it opens.
+///
+/// **Nobody is asked.** There is no sign-in button: a window that has a
+/// server and no login goes to sign in — the page to the server's
+/// `/auth/login` and back, the desktop through its browser hand-off — and
+/// the only question is whether this load is already the way back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Arrival {
+    /// Back from signing in with a code: trade it for the login.
+    Exchange(String),
+    /// Back from signing in without one — the provider refused, or the back
+    /// button. Said, and not tried again until a reload: going again would
+    /// come back the same way, for ever.
+    CameBack,
+    /// Neither: go.
+    Go,
+}
+
+/// The code in the address, if any, and whether this load is one that went
+/// to sign in and came back ([`came_back`]).
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn arrival(code: Option<String>, returned: bool) -> Arrival {
+    match (code, returned) {
+        (Some(code), _) => Arrival::Exchange(code),
+        (None, true) => Arrival::CameBack,
+        (None, false) => Arrival::Go,
+    }
+}
+
+/// The mark a page leaves as it goes to sign in: in the tab's own
+/// `sessionStorage`, so a reload in another tab is not mistaken for coming
+/// back, and taken by the load that comes back.
+#[cfg(target_arch = "wasm32")]
+const LEAVING: &str = "harken:signing-in";
+
+#[cfg(target_arch = "wasm32")]
+fn session() -> Option<web_sys::Storage> {
+    web_sys::window()?.session_storage().ok()?
+}
+
+/// This page is going to sign in.
+#[cfg(all(target_arch = "wasm32", not(feature = "demo")))]
+pub fn leaving() {
+    if let Some(s) = session() {
+        let _ = s.set_item(LEAVING, "1");
+    }
+}
+
+/// Whether this load is the way back from signing in — taken, so the reload
+/// after it is not.
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(feature = "demo", allow(dead_code))]
+pub fn came_back() -> bool {
+    let Some(s) = session() else { return false };
+    let back = s.get_item(LEAVING).ok().flatten().is_some();
+    let _ = s.remove_item(LEAVING);
+    back
+}
+
 /// Who a login is, as the server verifies it and an entry carries it.
 pub fn who_of(l: &Login) -> Who {
     ark_peer::who(l)

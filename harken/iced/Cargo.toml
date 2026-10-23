@@ -44,8 +44,9 @@ tungstenite = { version = "0.24", default-features = false, features = ["handsha
 iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
 # `HtmlAudioElement` is the now-playing bar: handing a URL to the platform
 # buys streaming, buffering, range requests and seeking.
-# `WebSocket` is the sync socket in a browser.
-web-sys = { version = "0.3", features = ["Window", "Location", "Document", "Element", "HtmlAudioElement", "HtmlMediaElement", "WebSocket", "MessageEvent", "CloseEvent", "BinaryType", "Event"] }
+# `WebSocket` is the sync socket in a browser. `Storage` is the tab's mark
+# that it went to sign in (`auth::came_back`).
+web-sys = { version = "0.3", features = ["Window", "Location", "Storage", "Document", "Element", "HtmlAudioElement", "HtmlMediaElement", "WebSocket", "MessageEvent", "CloseEvent", "BinaryType", "Event"] }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 
