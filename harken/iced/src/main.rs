@@ -50,6 +50,7 @@ use std::time::Duration;
 
 use ark::log::EntryId;
 use ark_auth::Login;
+use arkui::account::{Account, Link, Who};
 use arkui::cards::Shelf;
 use arkui::context::{Context, Layer};
 use arkui::glyphs;
@@ -123,7 +124,6 @@ pub enum Message {
     Seek(f32),
     /// …and let go: a seek, there.
     SeekDone,
-    SignIn,
     /// What the connect entry says: the server a window alone would join.
     ConnectUrl(String),
     /// Join that server, in place, and sign in there
@@ -135,6 +135,9 @@ pub enum Message {
     /// The sign-in came back, one way or the other.
     SignedIn(Result<Login, String>),
     SignOut,
+    /// The account button at the top right: its menu, whose entries send
+    /// `ToggleLink` and `SignOut`.
+    AccountMenu,
     /// Where the pointer is, in the window: tracked on the root so a menu's
     /// `pin` shares its origin.
     Hover(Point),
@@ -465,6 +468,9 @@ pub const DEVICES_WIDTH: f32 = 336.0;
 /// Where a menu asked for with `m` opens, down the window: by key there is no
 /// pointer, and nothing can say where the cursor's row currently is.
 pub const MENU_BY_KEY_Y: f32 = 120.0;
+/// Where the account button's bottom is, down the window: the top bar is the
+/// page's first line, [`arkui::account::HEIGHT`] tall.
+pub const ACCOUNT_BOTTOM: f32 = PAGE_PADDING + arkui::account::HEIGHT;
 /// The two scrollables a cursor keeps itself inside of.
 pub const SIDEBAR: &str = "sidebar";
 pub const TRACKS: &str = "tracks";
@@ -550,8 +556,9 @@ pub struct App {
     /// Where logins are remembered — `None` in a test, which must not write
     /// into the config directory of whoever runs it.
     pub logins: Option<ark_peer::Logins>,
-    /// A sign-in is in flight.
-    pub signing_in: bool,
+    /// This load has already gone to sign in, or come back from doing so,
+    /// and does not go again by itself (`App::sign_in_unasked`).
+    pub sign_in_tried: bool,
     /// What the connect entry holds, while this window is alone.
     pub connect: String,
     /// Offline on purpose.
@@ -611,7 +618,7 @@ impl App {
             user: None,
             login,
             logins: None,
-            signing_in: false,
+            sign_in_tried: false,
             connect: String::new(),
             offline: false,
             quiet: None,
@@ -785,32 +792,59 @@ impl App {
                 app.listening.open(&login.session);
                 return (app, Task::none());
             }
-            // A page that just came back from signing in has the code in its
-            // address; a desktop given a name can ask straight away.
+            // Nobody to sign in as is not a state anybody is left in: the
+            // page goes to the server's sign-in, or trades the code it came
+            // back with, and the desktop hands off to a browser.
             let task = app.sign_in();
             (app, task)
         }
     }
 
-    /// Start a sign-in, if one can be started from here without a person.
+    /// The sign-in a window on a server opens into, with nobody signed in.
     #[cfg(not(feature = "demo"))]
     fn sign_in(&mut self) -> Task<Message> {
         #[cfg(target_arch = "wasm32")]
-        {
-            if let Some(code) = ark_auth::web::take_code() {
-                self.signing_in = true;
-                self.note = "signing in…".into();
-                let server = self.server.clone();
-                return Task::perform(async move { ark_auth::web::exchange(&server, &code).await }, Message::SignedIn);
-            }
-            Task::none()
-        }
+        let (code, returned) = (ark_auth::web::take_code(), auth::came_back());
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            if self.user.is_none() {
-                return Task::none();
+        let (code, returned) = (None, false);
+        self.arrive_signing_in(auth::arrival(code, returned))
+    }
+
+    /// What [`auth::arrival`] said, done.
+    #[cfg_attr(feature = "demo", allow(dead_code))]
+    pub fn arrive_signing_in(&mut self, arrival: auth::Arrival) -> Task<Message> {
+        match arrival {
+            auth::Arrival::Exchange(code) => {
+                self.sign_in_tried = true;
+                self.note = "signing in\u{2026}".into();
+                let server = self.server.clone();
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Task::perform(async move { ark_auth::web::exchange(&server, &code).await }, Message::SignedIn)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    off_thread(move || ark_auth::client::exchange(&server, &code))
+                }
             }
-            self.start_sign_in()
+            auth::Arrival::CameBack => {
+                self.sign_in_tried = true;
+                self.note = "the sign-in came back without a login \u{2014} reload to try again".into();
+                Task::none()
+            }
+            auth::Arrival::Go => self.sign_in_unasked(),
+        }
+    }
+
+    /// Go to sign in without being asked — at launch, and when the server
+    /// turns the login away — unless this load already has. A sign-in that
+    /// came back refused or empty, or a login turned away again straight
+    /// after it was made, would otherwise send the window round and round;
+    /// the reason is in the status line, and a reload starts afresh.
+    pub fn sign_in_unasked(&mut self) -> Task<Message> {
+        match self.sign_in_tried {
+            true => Task::none(),
+            false => self.start_sign_in(),
         }
     }
 
@@ -823,27 +857,20 @@ impl App {
         #[cfg(all(not(feature = "demo"), target_arch = "wasm32"))]
         {
             // The page goes away and comes back with a code; `boot` finishes.
-            self.signing_in = true;
+            // The mark says it went, so the load it comes back as does not
+            // go again if it comes back with nothing.
+            self.sign_in_tried = true;
+            auth::leaving();
             ark_auth::web::go_sign_in(&self.server, self.user.as_deref());
             Task::none()
         }
         #[cfg(all(not(feature = "demo"), not(target_arch = "wasm32")))]
         {
-            // Blocking for as long as a person takes, so on a thread of its
-            // own, with the answer handed back as a message.
-            self.signing_in = true;
+            self.sign_in_tried = true;
             self.note = "signing in — look for a browser tab if one opened".into();
             let server = self.server.clone();
             let user = self.user.clone();
-            let (tx, rx) = iced::futures::channel::oneshot::channel();
-            std::thread::spawn(move || {
-                let outcome = ark_auth::client::login(&server, user.as_deref(), ark_auth::client::open_browser);
-                let _ = tx.send(outcome);
-            });
-            Task::perform(
-                async move { rx.await.unwrap_or_else(|_| Err("the sign-in thread went away".into())) },
-                Message::SignedIn,
-            )
+            off_thread(move || ark_auth::client::login(&server, user.as_deref(), ark_auth::client::open_browser))
         }
     }
 
@@ -1539,6 +1566,37 @@ impl App {
         Some((item.title.clone(), entries))
     }
 
+    /// What the account button at the top right says and offers — or
+    /// nothing while nobody is signed in to a server, which is only ever on
+    /// the way to a sign-in, or after one came back refused and the status
+    /// line says why.
+    pub fn account(&self) -> Option<Account<Message>> {
+        if cfg!(feature = "demo") {
+            return Some(Account::alone("A demo \u{2014} what you do stays on this device"));
+        }
+        if self.peer.client.is_alone() {
+            return Some(Account::alone("Alone \u{2014} what you do is kept on this device"));
+        }
+        let login = self.login.as_ref()?;
+        let who = Who {
+            name: login.user.name.clone(),
+            id: login.user.id.clone(),
+        };
+        let link = match self.offline {
+            true => Link::Offline,
+            false => Link::Online,
+        };
+        Some(match login.token.is_empty() {
+            true => Account::turned_away(&who, Message::SignOut),
+            false => Account::signed_in(&who, link, Message::ToggleLink, Message::SignOut),
+        })
+    }
+
+    /// Where the account button ends: the page's right-hand edge.
+    pub fn account_right(window: Size) -> f32 {
+        window.width - PAGE_PADDING
+    }
+
     /// Where the ⋯ column ends: the list's right-hand edge, less the page's
     /// padding and the scrollbar — so a menu opened from it ends where the
     /// button is.
@@ -1778,11 +1836,13 @@ impl App {
     fn step(&mut self, message: Message) -> Task<Message> {
         // An entry that goes somewhere was picked: the menu has said all it
         // had to say, and its submenu goes with it.
-        if matches!(message, Message::PlayItem(_) | Message::Select(_)) {
+        if matches!(
+            message,
+            Message::PlayItem(_) | Message::Select(_) | Message::ToggleLink | Message::SignOut
+        ) {
             self.ctx.close_menu();
         }
         match message {
-            Message::SignIn => return self.start_sign_in(),
             Message::ConnectUrl(url) => self.connect = url,
             Message::Started(server) => {
                 #[cfg(not(feature = "demo"))]
@@ -1800,13 +1860,15 @@ impl App {
                 let _ = server;
             }
             Message::Connect => return self.connect(),
-            Message::SignedIn(outcome) => {
-                self.signing_in = false;
-                match outcome {
-                    Ok(login) => self.signed_in(login),
-                    Err(e) => self.note = format!("could not sign in: {e}"),
+            Message::SignedIn(outcome) => match outcome {
+                Ok(login) => self.signed_in(login),
+                // Said once, and not tried again until a reload: going
+                // straight back would be a loop the person cannot stop.
+                Err(e) => {
+                    self.sign_in_tried = true;
+                    self.note = format!("could not sign in: {e} \u{2014} reload to try again");
                 }
-            }
+            },
             Message::SignOut => {
                 // The session revoked through the domain (pushed while
                 // online, pending until the next sign-in otherwise), and
@@ -1822,7 +1884,14 @@ impl App {
                 // A device is a login, so signing out is leaving the session.
                 self.listening.close();
                 self.devices = None;
-                self.note = "signed out — what you do now stays on this device until you sign in".into();
+                self.note = "signed out — what you do now stays on this device; reload to sign in".into();
+            }
+            Message::AccountMenu => {
+                if let Some(account) = self.account() {
+                    self.ctx
+                        .open_menu(account.menu(Self::account_right(self.window), ACCOUNT_BOTTOM, self.window));
+                    self.menu_about = None;
+                }
             }
             // While the explorer is open, `E` closes it from either half and
             // `` ` `` moves the keys between them; otherwise the keys go to
@@ -2156,7 +2225,7 @@ impl App {
     fn react(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         self.due_at(client::monotonic_ms());
-        self.pump();
+        tasks.push(self.pump());
         // A lock-screen button leaves a note and rings; it goes where every
         // transport button goes.
         #[cfg(target_arch = "wasm32")]
@@ -2249,8 +2318,9 @@ impl App {
 
     /// Move frames, and bring the lists up to date with whatever moved —
     /// what this window authored, or what arrived.
-    fn pump(&mut self) {
+    fn pump(&mut self) -> Task<Message> {
         let pumped = self.peer.client.pump();
+        let mut turned_away = Task::none();
         // The link opened, or something arrived while waiting: the quiet
         // starts again.
         if pumped.opened || (pumped.moved && self.quiet.is_some()) {
@@ -2267,6 +2337,11 @@ impl App {
             if let Some(login) = &mut self.login {
                 login.token.clear();
             }
+            // Straight back to sign in, once a load (`sign_in_unasked`).
+            if self.sign_in_tried {
+                self.note = format!("{} \u{2014} reload to sign in again", self.note);
+            }
+            turned_away = self.sign_in_unasked();
         }
         for (id, reason) in self.peer.client.take_rejections() {
             let what = self
@@ -2279,6 +2354,7 @@ impl App {
             self.refused.push((what, reason));
         }
         self.peer.refresh();
+        turned_away
     }
 
     /// Everything that can start an update, and no clock unless one is
@@ -2312,6 +2388,20 @@ impl App {
         }
         Subscription::batch(subs)
     }
+}
+
+/// A blocking sign-in on a thread of its own — it takes as long as a person
+/// does — with the answer handed back as a message.
+#[cfg(not(target_arch = "wasm32"))]
+fn off_thread(work: impl FnOnce() -> Result<Login, String> + Send + 'static) -> Task<Message> {
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(work());
+    });
+    Task::perform(
+        async move { rx.await.unwrap_or_else(|_| Err("the sign-in thread went away".into())) },
+        Message::SignedIn,
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
