@@ -226,6 +226,7 @@ dependencies = [
  "ark-dev",
  "axum",
  "js-sys",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",

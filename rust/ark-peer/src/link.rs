@@ -322,8 +322,13 @@ pub fn socket(url: &str, token: &str, wake: Option<Wake>) -> Box<dyn Wire> {
             Ok((ws, _)) => ws,
             Err(e) => return closed(e.to_string()),
         };
-        if let MaybeTlsStream::Plain(s) = ws.get_mut() {
-            let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(5)));
+        // A read waits at most this long, so that what the peer has to
+        // send goes out between reads, over TLS as over a plain socket.
+        let every = Some(std::time::Duration::from_millis(5));
+        match ws.get_mut() {
+            MaybeTlsStream::Plain(s) => _ = s.set_read_timeout(every),
+            MaybeTlsStream::Rustls(s) => _ = s.get_ref().set_read_timeout(every),
+            _ => {}
         }
         if ws.send(Message::Binary(token.into_bytes())).is_err() || !said(Event::Open) {
             return;

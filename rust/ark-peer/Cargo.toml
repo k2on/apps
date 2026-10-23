@@ -18,7 +18,10 @@ default = ["server"]
 server = ["ark-auth/server", "dep:anyhow", "dep:axum", "dep:tokio", "dep:tower-http"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+# `wss://` natively: rustls with ring and Mozilla's roots, the TLS the
+# sign-in client (ureq) already links. The browser brings its own.
+tungstenite = { version = "0.24", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 anyhow = { version = "1", optional = true }
 axum = { version = "0.7", features = ["ws"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"], optional = true }
