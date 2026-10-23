@@ -1189,6 +1189,47 @@ of 41 fleets' clients (only seed 7's are vectors) and `fuzz.rs`'s of seeds
 the phones; the fixture against a build other than this one (there is
 none older to write it).
 
+### Landed: iOS app
+
+`harken/ios` is the app, not a sketch: SwiftUI for iOS 26 in Liquid Glass,
+at parity with the Android app, which is its spec (`harken/ios/PARITY.md`:
+every Android screen, sheet, control, gesture, animation and background
+behaviour beside its iOS counterpart and API, or why there is none). The
+system tab bar (Home, Library, Search in its own place) minimizing on
+scroll; the mini player as the tab view's bottom accessory, zooming into
+the full player; pages zooming out of the cover that opened them; the
+song's menu, playlists (create, add, remove — the domain has no reorder),
+the queue (play next, add, remove, move, jump), the device picker
+(transfer, volume, groups) — every one of them a press of harken's one
+reconciler through the FFI's `Player`, as Android's since S3b; the player a
+`PhoneSound` (`SoundCore`) over an `AVPlayer` in the playback audio
+session, background audio, interruptions and route changes said as stalls;
+the lock screen and Control Center a remote for the account's session;
+covers cached on the disk and decoded small; the sign-in by itself in the
+system's browser sheet, back on `harken://auth`, once a launch and never
+looped (the browser's rule); the server step as Android's; the account
+menu at the top right. Android's springs (`Springs.kt`) are SwiftUI's
+`spring(response: 0.2375, dampingFraction: 0.88 | 1)`; the pages' and the
+player's moves are the system's zoom. Not built, and why: Android Auto's
+twin (CarPlay needs Apple's `carplay-audio` entitlement — a follow-up), the
+volume keys moving a remote device (no iOS API), back from a tab's root to
+Home (no iOS idiom), the notification permission (none needed). No FFI or
+domain change.
+
+*Measured*: hand-written Swift 4,911 lines in `Harken/` (the Foundation-only
+half — rows, session, what plays, onboarding, the player's core, bridge,
+model — 2,782; the SwiftUI, AVFoundation, MediaPlayer, ImageIO and
+AuthenticationServices half 2,129), 705 in `HarkenTests/`, against
+Android's 11,800 and 5,265. `checks.harken-ios-typecheck` now picks every
+file whose imports are Foundation and Combine only and type-checks
+HarkenTests with them; handed the host library it runs them: 32 passed on
+Linux (Swift 5.8, a stand-in XCTest), two of them the player end to end
+against a `Hall` — the real reconciler driving `SoundCore` over a stand-in
+engine — each new test falsified once. Not verified: everything that needs
+Xcode — the SwiftUI, the engine, the lock screen, the sign-in sheet, the
+covers, the project, the xcframework's link, an archive, a device, a real
+server (`harken/ios/README.md`, "First build").
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
