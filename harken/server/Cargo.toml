@@ -27,6 +27,8 @@ harken-player = { path = "../player" }
 # The server is a peer that listens; the scanner and the house's speakers
 # are peers in this process that reach it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
+# What the house is told, among the system's events (docs/plan-observe.md).
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 ark-auth = { path = "../../rust/ark-auth" }
 # harken-peer drives its peer as a phone does: on a thread, in JSON.
 ark-ffi = { path = "../../rust/ark-ffi" }

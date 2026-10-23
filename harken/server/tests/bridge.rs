@@ -2268,3 +2268,50 @@ fn the_queue_edited_reaches_the_speaker_without_a_gap() {
     assert!(!fake.take().iter().any(|(c, _)| c == "media_pause"));
     rt.block_on(server.stop());
 }
+
+/// A tap is the root of everything it causes, across the system: a
+/// desktop's transfer of the browser's sound to the kitchen, the server's
+/// verdict on it, the kitchen speaker's `started` in answer, and Home
+/// Assistant told to play — one trace, which `arkdb trace` prints as a tree
+/// from the tap down. Falsified by the house's speaker machines authoring
+/// under no cause: their `started` began a trace of its own, and the house
+/// was told to play outside the tap's.
+#[test]
+fn a_transfer_is_one_trace_from_the_tap_to_the_speaker() {
+    let kept = ark_peer::observe::memory();
+    let rt = runtime();
+    let fake = Fake::default();
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    let mut desktop = device(&server, "max", Kind::Computer, "Desktop", false);
+    let b = browser.me();
+    told_among(&mut [&mut desktop, &mut browser], 0, "three devices", |s| s.devices.len() == 3);
+    told_among(&mut [&mut browser, &mut desktop], 0, "three devices, to the browser", |s| s.devices.len() == 3);
+    call(&mut browser, "start", input::start(&queue(&["a", "b"]), 0, 10_000, "album/Water Music"));
+    told_among(&mut [&mut desktop, &mut browser], 0, "the browser playing", |s| s.outputs(&b) && s.sounding());
+
+    fake.playing(KITCHEN, "playing", &media_url("music/a.mp3"), 10.0);
+    let tap = desktop.client.begin("tap transfer");
+    call(&mut desktop, "transfer", input::transfer(KITCHEN));
+    desktop.client.end();
+    told_among(&mut [&mut desktop, &mut browser], 0, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
+    });
+
+    let trace = ark::hash::hex(&tap.trace.0);
+    let all = kept.lock().unwrap().clone();
+    let tree = arkdb::events::render_trace(&all, &trace).unwrap();
+    let at = |what: &str| tree.lines().position(|l| l.contains(what)).unwrap_or_else(|| panic!("no {what} in\n{tree}"));
+    let (root, transfer, started) = (at("tap transfer"), at("listening.transfer"), at("listening.started"));
+    assert!(root < transfer && transfer < started, "the tap, its transfer, the speaker's answer:\n{tree}");
+    let depth = |i: usize| tree.lines().nth(i).unwrap().len() - tree.lines().nth(i).unwrap().trim_start().len();
+    assert!(depth(started) > depth(transfer), "the speaker's answer under the transfer:\n{tree}");
+    assert!(tree.lines().nth(started).unwrap().contains(KITCHEN), "said by the kitchen:\n{tree}");
+    let field = |e: &ark::frames::Event, k: &str| e.fields.iter().find(|(f, _)| f == k).map(|(_, v)| v.clone());
+    let played = all
+        .iter()
+        .any(|e| e.msg == "house" && field(e, "trace").as_deref() == Some(&trace) && field(e, "service").as_deref() == Some("play_media"));
+    assert!(played, "the house told to play, inside the tap's trace:\n{tree}");
+}

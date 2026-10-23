@@ -88,8 +88,10 @@ pub fn read(from: &str) -> Result<Vec<Event>, String> {
     Ok(lines.iter().filter_map(|l| parse(l)).collect())
 }
 
+/// An event's field `k`: its own, which come after those of the spans
+/// around it (a speaker's entry said inside the `house` span it answers).
 fn field<'a>(e: &'a Event, k: &str) -> Option<&'a str> {
-    e.fields.iter().find(|(f, _)| f == k).map(|(_, v)| v.as_str())
+    e.fields.iter().rev().find(|(f, _)| f == k).map(|(_, v)| v.as_str())
 }
 
 /// An id as it prints: its first 8 digits.

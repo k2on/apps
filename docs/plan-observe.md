@@ -1,7 +1,7 @@
 # Observing a system of peers: one trace from a tap to a job
 
-Status: **decided**, not yet built. Replaces `ark-explorer` (the admin page
-and the in-app explorer), which is deleted.
+Status: **built**, steps 1–7 (see "Landed", last). Replaces `ark-explorer`
+(the admin page and the in-app explorer), which is deleted.
 
 ## Why
 
@@ -101,3 +101,31 @@ agent alike.
 6. `arkdb`: the rename, `tail`, `trace`, `peer`.
 7. The test collector, and a harken test from a press to the speaker's
    hand-off.
+
+## Landed
+
+All seven steps, each a commit on main. What differs from the plan:
+
+- **A trace lasts `TRACE_MS` (30 s)** from its beginning, which a span
+  carries (`Span::began`). Without it an answer to an answer to a press —
+  a player's position, reported each second in answer to the last change —
+  grew one press's trace for as long as it played. Opened spans and jobs
+  are not bounded.
+- **Roots need no app code.** `harken_player::Player::press` opens one for
+  every press (the phone, the web, the desktop), and an app's `mutate`
+  through the bridge is a root unless the app opened a span; a job's
+  `claim`, `finish` and `cancel` still answer what made the job due.
+- **The house's speakers** are raw machines in harken-server (`ha::Wires`),
+  not `ark_peer::Peer`s: they keep the span of what woke them and author
+  under it, say their steps through `observe::step`, and what Home
+  Assistant is told is said inside a `house` span in the trace it answers.
+- **Not built: replay from the stream.** Events carry no input bytes, so
+  `arkdb peer P --at SEQ` (a peer replayed to a moment) is not there; the
+  recorder (`Peer::open(…, record: true)`, `arkdb::trace`) still is, apart.
+- **Retention** is the server's eight files of 8 MiB, the oldest dropped;
+  a device's outbox keeps 4096 events while it is away.
+- `harken/server/tests/bridge.rs`'s
+  `a_transfer_is_one_trace_from_the_tap_to_the_speaker` holds the whole
+  path: a desktop's tap, its transfer, the server's verdict, Home Assistant
+  told to play, and the kitchen's `started`, printed by `arkdb trace` as
+  one tree.
