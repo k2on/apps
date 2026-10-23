@@ -10,6 +10,9 @@ ark = { path = "../ark" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ark-auth = { path = "../ark-auth", default-features = false }
+# What a peer does, as events and spans (docs/plan-observe.md): emitted
+# here, collected wherever a subscriber is.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 # The server side (`serve`, `web`): a server's, which a phone or a browser
 # never links.

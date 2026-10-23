@@ -211,6 +211,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower-http",
+ "tracing",
  "tungstenite",
  "wasm-bindgen",
  "web-sys",

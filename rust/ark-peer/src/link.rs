@@ -200,8 +200,10 @@ impl Peer {
         let mut p = Pumped::default();
         if self.link.due.is_some_and(|d| now >= d) {
             self.link.due = None;
+            let label = self.label();
             if let (Some(url), Some(token), false) = (&self.link.url, &self.link.token, self.link.offline) {
                 let dial = self.link.dial.get_or_insert_with(|| Box::new(socket));
+                crate::observe::link(&label, "dial", Some(url));
                 self.link.wire = Some(dial.dial(url, token, self.link.waker.clone()));
             }
         }
@@ -213,6 +215,7 @@ impl Peer {
             match e {
                 Event::Open => {
                     p.opened = true;
+                    crate::observe::link(&self.label(), "up", None);
                     self.connected();
                 }
                 Event::Frame(b) => {
@@ -221,6 +224,7 @@ impl Peer {
                     self.receive(b);
                 }
                 Event::Closed(why) => {
+                    crate::observe::link(&self.label(), "down", Some(&why));
                     self.disconnected();
                     self.link.wire = None;
                     match why.strip_prefix("denied: ") {

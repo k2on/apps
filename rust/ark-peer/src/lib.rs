@@ -65,6 +65,7 @@ mod hub;
 pub mod instance;
 mod jobs;
 pub mod link;
+mod observe;
 pub mod local;
 pub mod signed;
 pub mod watched;
@@ -83,8 +84,8 @@ use std::sync::Arc;
 
 use ark::frames::Frame;
 use ark::hash::EntryHash;
-use ark::log::{Durable, Entry, EntryId, Origin, Seq};
-use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Who};
+use ark::log::{Durable, Entry, EntryId, Origin, Seq, Span};
+use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::{Schema, Space};
 use ark::store::Change;
@@ -264,8 +265,15 @@ pub struct Peer {
     /// Frames for its server.
     frames: Vec<Vec<u8>>,
     views: Vec<Option<Kept>>,
-    relay: BTreeMap<String, (Vec<u8>, i64)>,
+    relay: BTreeMap<String, (Vec<u8>, i64, Option<Span>)>,
     relayed: Option<i64>,
+    /// The span it authors under: the one opened ([`Peer::begin`],
+    /// [`Peer::under`]), or else, in each space, the span of the entry whose
+    /// change it was last told, so that what it does in answer (a
+    /// reconciler, a view's reader) is a child of what it answered. A server
+    /// authors under the opened one only.
+    span: Option<Span>,
+    woke: [Option<Span>; 2],
     /// What became of its own intents, and what its views did.
     told: app::Told,
     /// What it keeps beside its log, on the same disk.
@@ -275,7 +283,7 @@ pub struct Peer {
     saved: (i64, Vec<(i64, EntryId)>),
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
-    missed: Option<Vec<Change>>,
+    missed: Option<Vec<Told>>,
     /// The reconcilers, by their view.
     reconcilers: BTreeMap<usize, jobs::Reconciler>,
 }
@@ -380,6 +388,8 @@ impl Peer {
             views: vec![],
             relay: BTreeMap::new(),
             relayed: None,
+            span: None,
+            woke: [None, None],
             told: app::Told::default(),
             local,
             saved: (0, vec![]),
@@ -473,8 +483,12 @@ impl Peer {
     /// record to the disk; changes to the views; verdicts kept.
     fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Vec<Output> {
         let rec = self.record.is_some().then(|| input.clone());
+        let seen = tracing::event_enabled!(target: "ark", tracing::Level::WARN).then(|| input.clone());
         let Some(m) = self.instance(space) else { return vec![] };
         let out = m.step(input);
+        if let Some(i) = &seen {
+            observe::step(&self.label(), space, from, i, &out);
+        }
         for o in &out {
             match o {
                 Output::Send(b) => match from {
@@ -485,11 +499,14 @@ impl Peer {
                 Output::Fanout(b) => self.hub.fanout(space, b),
                 Output::To { session, bytes } => self.hub.to(session, bytes),
                 Output::Changes(told) => {
+                    if let Some(by) = told.iter().rev().find_map(|t| t.by) {
+                        self.woke[space as usize] = Some(by);
+                    }
                     let cs: &Vec<Change> = &told.iter().map(|t| t.change.clone()).collect();
                     self.changed(space, cs);
                     if space == Space::Durable {
-                        self.runners.iter_mut().for_each(|r| r.changed(cs));
-                        self.missed.iter_mut().for_each(|m| m.extend(cs.iter().cloned()));
+                        self.runners.iter_mut().for_each(|r| r.changed(told));
+                        self.missed.iter_mut().for_each(|m| m.extend(told.iter().cloned()));
                         self.signs(cs);
                         if self.hub.watched {
                             self.hub.seen.extend(cs.iter().cloned());
@@ -600,12 +617,52 @@ impl Peer {
     pub fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
         let ephemeral = self.config.live.as_ref().is_some_and(|l| l.ephemeral.contains(func));
         if space == Space::Volatile && ephemeral {
-            self.relay.insert(func.into(), (input, now));
+            let cause = self.cause(space);
+            self.relay.insert(func.into(), (input, now, cause));
             self.tick(now);
             return Ok(());
         }
-        let func = func.into();
-        self.verdict(space, Input::Mutate { func, input, now, cause: None })
+        let (func, cause) = (func.into(), self.cause(space));
+        self.verdict(space, Input::Mutate { func, input, now, cause })
+    }
+
+    /// The span an intent of `space` is authored under now: the one opened,
+    /// or — not serving — the span of the entry whose change woke it.
+    pub fn cause(&self, space: Space) -> Option<Span> {
+        self.span.or(self.woke[space as usize].filter(|_| !self.hub.serving))
+    }
+
+    /// A trace of its own begun, named `name` (a tap, a scan), and authored
+    /// under until [`Peer::end`]: its root span.
+    pub fn begin(&mut self, name: &str) -> Span {
+        let span = Span {
+            trace: ark::log::TraceId(draw_origin().0),
+            id: draw_origin().0,
+        };
+        tracing::info!(target: "ark", peer = %self.label(), span = ?span, name, "begin");
+        self.span = Some(span);
+        span
+    }
+
+    /// The span opened by [`Peer::begin`] closed: it authors under what woke
+    /// it again.
+    pub fn end(&mut self) {
+        self.span = None;
+    }
+
+    /// `f` with this peer authoring under `span` (none: under what woke it),
+    /// the span it had put back after.
+    pub fn under<T>(&mut self, span: Option<Span>, f: impl FnOnce(&mut Peer) -> T) -> T {
+        let was = std::mem::replace(&mut self.span, span);
+        let out = f(self);
+        self.span = was;
+        out
+    }
+
+    /// Who it is in what it says of itself: its session, and its origin's
+    /// first bytes.
+    pub fn label(&self) -> String {
+        format!("{}/{}", self.log.me.session, ark::hash::hex(&self.log.origin.0[..4]))
     }
 
     /// Facts the authority writes itself, raw: an entry naming no function
@@ -636,8 +693,8 @@ impl Peer {
             return;
         }
         self.relayed = Some(now);
-        for (func, (input, now)) in std::mem::take(&mut self.relay) {
-            self.step(Space::Volatile, Input::Mutate { func, input, now, cause: None });
+        for (func, (input, now, cause)) in std::mem::take(&mut self.relay) {
+            self.step(Space::Volatile, Input::Mutate { func, input, now, cause });
         }
     }
 

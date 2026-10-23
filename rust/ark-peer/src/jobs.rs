@@ -22,7 +22,8 @@
 use std::collections::BTreeMap;
 
 use ark::effect::{Claim, Effect, Finish};
-use ark::log::EntryId;
+use ark::log::{EntryId, Span, TraceId};
+use ark::peer::Told;
 use ark::row::Value;
 use ark::schema::Space;
 use ark::store::Change;
@@ -33,7 +34,7 @@ use crate::{monotonic_ms, now_ms, Peer};
 
 /// One registration of a handler, over its job's rows.
 pub(crate) trait Runner: Sendable {
-    fn changed(&mut self, cs: &[Change]);
+    fn changed(&mut self, cs: &[Told]);
     /// When the next row not claimed here is due.
     fn next(&self) -> Option<i64>;
     fn run(&mut self, p: &mut Peer, now: i64);
@@ -42,15 +43,16 @@ pub(crate) trait Runner: Sendable {
 struct Handler<R: Effect, F> {
     f: F,
     by: String,
-    /// The rows not over, by key, and when each is due.
-    open: BTreeMap<Vec<u8>, (R, i64)>,
-    /// The claims made, until their verdict.
-    claims: BTreeMap<Vec<u8>, EntryId>,
+    /// The rows not over, by key: when each is due, and the span of the
+    /// entry that last changed it, which its claim and its run are under.
+    open: BTreeMap<Vec<u8>, (R, i64, Option<Span>)>,
+    /// The claims made, until their verdict: each the claim's id, and its span.
+    claims: BTreeMap<Vec<u8>, (EntryId, Span)>,
 }
 
 impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable> Runner for Handler<R, F> {
-    fn changed(&mut self, cs: &[Change]) {
-        for c in cs.iter().filter(|c| c.table() == R::TABLE) {
+    fn changed(&mut self, cs: &[Told]) {
+        for Told { by, change: c } in cs.iter().filter(|t| t.change.table() == R::TABLE) {
             let row = match c {
                 Change::Add { row, .. } | Change::Edit { new: row, .. } => R::decode(row).ok(),
                 Change::Remove { row, .. } => {
@@ -60,7 +62,7 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
             };
             let Some(r) = row else { continue };
             match r.job().due(R::LEASE_MS) {
-                Some(due) => drop(self.open.insert(r.key_bytes(), (r, due))),
+                Some(due) => drop(self.open.insert(r.key_bytes(), (r, due, *by))),
                 None => drop(self.open.remove(&r.key_bytes())),
             }
         }
@@ -70,30 +72,44 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
         self.open
             .iter()
             .filter(|(k, _)| !self.claims.contains_key(*k))
-            .map(|(_, (_, d))| *d)
+            .map(|(_, (_, d, _))| *d)
             .min()
     }
 
     fn run(&mut self, p: &mut Peer, now: i64) {
-        let due = self.open.iter().filter(|(k, (_, d))| *d <= now && !self.claims.contains_key(*k));
-        let due: Vec<(Vec<u8>, R::Id)> = due.map(|(k, (r, _))| (k.clone(), r.id())).collect();
-        for (k, id) in due {
-            if let Ok(e) = p.mutate(&format!("{}.claim", R::TABLE), &Claim::<R> { id, by: self.by.clone() }) {
-                self.claims.insert(k, e);
+        let due = self.open.iter().filter(|(k, (_, d, _))| *d <= now && !self.claims.contains_key(*k));
+        let due: Vec<(Vec<u8>, R::Id, Option<Span>)> = due.map(|(k, (r, _, by))| (k.clone(), r.id(), *by)).collect();
+        for (k, id, by) in due {
+            // The claim is a child of what made the row due.
+            let claim = Claim::<R> { id, by: self.by.clone() };
+            if let Ok(e) = p.under(by, |p| p.mutate(&format!("{}.claim", R::TABLE), &claim)) {
+                let span = Span {
+                    trace: by.map_or(TraceId(e.0), |b| b.trace),
+                    id: e.0,
+                };
+                self.claims.insert(k, (e, span));
             }
         }
-        for (k, e) in std::mem::take(&mut self.claims) {
+        for (k, (e, span)) in std::mem::take(&mut self.claims) {
             // An authority's own claim is decided as it is made.
             match if p.hub.serving { Standing::Confirmed } else { p.standing(&e) } {
-                Standing::Pending => drop(self.claims.insert(k, e)),
+                Standing::Pending => drop(self.claims.insert(k, (e, span))),
                 Standing::Confirmed => {
-                    let Some((r, _)) = self.open.get(&k) else { continue };
+                    let Some((r, _, _)) = self.open.get(&k) else { continue };
+                    // The run, and all it authors, under the claim.
+                    let run = tracing::info_span!(target: "ark", "job", peer = %p.label(), table = R::TABLE, span = ?span);
+                    let _in = run.enter();
+                    let outcome = p.under(Some(span), |p| (self.f)(p, r));
+                    match &outcome {
+                        Ok(_) => tracing::info!(target: "ark", "done"),
+                        Err(why) => tracing::warn!(target: "ark", why = %why, "failed"),
+                    }
                     let finish = Finish::<R> {
                         id: r.id(),
                         by: self.by.clone(),
-                        outcome: (self.f)(p, r),
+                        outcome,
                     };
-                    let _ = p.mutate(&format!("{}.finish", R::TABLE), &finish);
+                    let _ = p.under(Some(span), |p| p.mutate(&format!("{}.finish", R::TABLE), &finish));
                 }
                 // Another's claim came first.
                 _ => {}
@@ -117,13 +133,16 @@ impl Peer {
             open: BTreeMap::new(),
             claims: BTreeMap::new(),
         };
-        let rows: Vec<Change> = self
+        let rows: Vec<Told> = self
             .log
             .store
             .rows(R::TABLE)
-            .map(|r| Change::Add {
-                table: R::TABLE.into(),
-                row: r.to_vec(),
+            .map(|r| Told {
+                by: None,
+                change: Change::Add {
+                    table: R::TABLE.into(),
+                    row: r.to_vec(),
+                },
             })
             .collect();
         h.changed(&rows);
