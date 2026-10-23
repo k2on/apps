@@ -1,0 +1,158 @@
+# harken for iOS, to TestFlight, on every push to main that touches what the
+# app is built from. Its own workflow: nothing here depends on build.yaml.
+#
+# The Rust kernel with harken's domain linked in is built by nix as
+# HarkenFFI.xcframework (`.#harken-ios-xcframework`), the Xcode project is
+# generated from harken/ios/project.yml by XcodeGen, and the archive is
+# signed and uploaded by xcodebuild itself: automatic signing with an App
+# Store Connect API key (Xcode makes or reuses the distribution certificate
+# and the App Store profile in the cloud) and `destination: upload`, which
+# sends the exported build straight to App Store Connect, where it appears
+# in TestFlight once Apple has processed it.
+#
+# Repository secrets (Settings > Secrets and variables > Actions > Secrets):
+#   ASC_KEY_ID          the API key's Key ID
+#   ASC_ISSUER_ID       the Issuer ID shown above the keys list
+#   ASC_KEY_P8          the .p8 file's whole contents, BEGIN/END lines included
+#   APPLE_TEAM_ID       the ten-character Team ID
+# Repository variable (the Variables tab), optional:
+#   IOS_BUNDLE_ID       the app's bundle ID; dev.arkdb.harken when unset
+#   CACHIX_NAME         a Cachix cache, as in build.yaml, if you use one
+#   (and the secret CACHIX_AUTH_TOKEN with it)
+name: ios
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "harken/ios/**"
+      - "harken/ffi/**"
+      - "harken/domain/**"
+      - "harken/player/**"
+      - "rust/**"
+      - "flake.nix"
+      - "flake.lock"
+      - ".github/workflows/ios.yaml"
+
+permissions:
+  contents: read
+
+# A newer push supersedes a build still running; TestFlight only wants the
+# latest.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'dev.arkdb.harken' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The newest Xcode 26 on the image: Liquid Glass needs the iOS 26 SDK.
+      - name: Select Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          if [ -z "$xcode" ]; then
+            echo "::error::no Xcode 26 on this runner image"; exit 1
+          fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+
+      # The xcframework derivation asks for the builder's Xcode outside the
+      # store (`__noChroot`), which a relaxed sandbox allows.
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            sandbox = relaxed
+
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Build the kernel for iOS
+        run: |
+          nix build .#harken-ios-xcframework --print-build-logs -o result-ios
+          rm -rf harken/ffi/ios
+          mkdir -p harken/ffi/ios
+          cp -RL result-ios/. harken/ffi/ios/
+          chmod -R u+w harken/ffi/ios
+
+      - name: Generate the Xcode project
+        working-directory: harken/ios
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate
+
+      - name: Write the API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
+
+      # The build number is the commit's time in seconds: always rising, and
+      # never the same twice, which App Store Connect insists on. The
+      # marketing version stays what project.yml says.
+      - name: Archive
+        working-directory: harken/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          build=$(git log -1 --format=%ct)
+          xcodebuild archive \
+            -project Harken.xcodeproj \
+            -scheme Harken \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Harken.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CURRENT_PROJECT_VERSION="$build"
+
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Harken.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
