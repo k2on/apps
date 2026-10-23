@@ -1,22 +1,24 @@
 # Everything a push to main publishes, in one run: the browser peer at
-# https://k2on.github.io/apps/harken/ and the Android app's F-Droid repository
-# at https://k2on.github.io/apps/fdroid/repo. A `v*` tag builds the APK alone
-# and attaches it to a release.
+# https://k2on.github.io/apps/harken/ and the Android apps' F-Droid repository
+# at https://k2on.github.io/apps/fdroid/repo, harken's and Revelation's
+# (revelation/, plain Kotlin and none of ArkDB). A `v*` tag builds the APKs
+# alone and attaches them to a release.
 #
-# Three jobs. `web` and `apk` build in parallel and `deploy` publishes once,
-# after both. They used to be two workflows, apk.yml and pages.yml, with
-# pages.yml running again when apk.yml finished: every push deployed twice and
-# built the browser peer twice.
+# `web`, `checks`, `apk` (harken) and `revelation-apk` build in parallel and
+# `deploy` publishes once, after the page and both APKs. They used to be two
+# workflows, apk.yml and pages.yml, with pages.yml running again when apk.yml
+# finished: every push deployed twice and built the browser peer twice.
 #
 # A build is skipped when its inputs have not moved. Each job hashes the files
 # its nix derivation reads (the flake's source filters: `rustDirs` for the
 # page; the Rust workspace, harken's domain and ffi crates and the Android
-# app for the APK, which embeds the kernel through harken/ffi) and asks the
-# actions cache whether that hash was built before. The page's output is the
-# cache entry, so a hit restores it in seconds. The APK's version code is the
-# commit time, so its derivation moves on every commit even when nothing in
-# it did: a hit there means "this APK was already published", and the
-# repository keeps offering it rather than gaining a copy under a new number.
+# app for harken's APK, which embeds the kernel through harken/ffi; the app
+# alone for Revelation's) and asks the actions cache whether that hash was
+# built before. The page's output is the cache entry, so a hit restores it in
+# seconds. An APK's version code is the commit time, so its derivation moves
+# on every commit even when nothing in it did: a hit there means "this APK
+# was already published", and the repository keeps offering it rather than
+# gaining a copy under a new number.
 #
 # The nix store comes from Cachix when the repository variable CACHIX_NAME is
 # set (with the secret CACHIX_AUTH_TOKEN to push): every path is pushed once by
@@ -24,7 +26,7 @@
 # browser peer are never built twice. Until then, nix-community/cache-nix-action
 # keeps the store in GitHub's actions cache as before (10 GB per repository).
 # The Android SDK is Google's and its licence does not allow redistributing
-# it, so it is never pushed to Cachix; the APK job keeps it in the actions
+# it, so it is never pushed to Cachix; the APK jobs keep it in the actions
 # cache either way.
 name: build
 
@@ -203,20 +205,109 @@ jobs:
           path: apk-seen
           key: ${{ steps.seen.outputs.cache-primary-key }}
 
-      # A tag is a release: the same APK, attached to it. Its key is public, so
-      # it installs anywhere and belongs nowhere public
-      # (harken/android/README.md).
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  # Revelation (revelation/android): the same shape as `apk` without the
+  # kernel, since the app is plain Kotlin with no native library. Its inputs
+  # are the app, the flake and nix/ (aapt2, the SDK, the F-Droid tooling).
+  revelation-apk:
+    runs-on: ubuntu-latest
+    outputs:
+      built: ${{ steps.build.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: seen
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        uses: actions/cache/restore@v4
         with:
-          files: harken.apk
+          path: apk-seen
+          key: revelation-apk-${{ hashFiles('revelation/**', 'flake.nix', 'flake.lock', 'nix/**') }}
+          lookup-only: true
+
+      # The nix store, a JDK, gradle's state and the aapt2 build want the
+      # room the hosted image's unused toolchains take.
+      - name: Free disk space
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - if: steps.seen.outputs.cache-hit != 'true'
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - if: steps.seen.outputs.cache-hit != 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Google's SDK and the zips it is assembled from stay out of a
+          # public cache (see the top of this file).
+          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
+
+      - if: steps.seen.outputs.cache-hit != 'true'
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-revelation-apk-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'revelation/android/deps.json') }}
+          restore-prefixes-first-match: nix-revelation-apk-${{ runner.os }}-
+          gc-max-store-size-linux: 4G
+          purge: true
+          purge-prefixes: nix-revelation-apk-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Build aapt2 and the SDK (kept as gc roots)
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: nix build .#aapt2 .#android-sdk --out-link "$RUNNER_TEMP/android" --print-build-logs
+
+      - name: Build the APK
+        id: build
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: |
+          nix build .#revelation-apk --print-build-logs
+          cp result/revelation.apk revelation.apk
+
+      - if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: revelation-apk
+          path: revelation.apk
+          if-no-files-found: error
+
+      # Remember these inputs as published, once the APK exists.
+      - name: Mark these inputs as built
+        if: steps.build.outcome == 'success' && !startsWith(github.ref, 'refs/tags/v')
+        run: mkdir -p apk-seen && git rev-parse HEAD > apk-seen/commit
+      - if: steps.build.outcome == 'success' && !startsWith(github.ref, 'refs/tags/v')
+        uses: actions/cache/save@v4
+        with:
+          path: apk-seen
+          key: ${{ steps.seen.outputs.cache-primary-key }}
+
+  # A tag is a release: both APKs, attached to it, by one job so the two
+  # builds never race to create the same release. The keys are public, so
+  # the APKs install anywhere and belong nowhere public
+  # (harken/android/README.md).
+  release:
+    needs: [apk, revelation-apk]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: harken-apk
+          path: apks
+      - uses: actions/download-artifact@v4
+        with:
+          name: revelation-apk
+          path: apks
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: apks/*.apk
           generate_release_notes: true
 
   deploy:
-    needs: [web, apk]
+    needs: [web, apk, revelation-apk]
     # A failed APK does not hold the page back: the site goes up with the
-    # repository as it was.
+    # repository as it was, plus whichever APK did build.
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.web.result == 'success' }}
     runs-on: ubuntu-latest
     # One deployment at a time; a deploy in flight finishes before the next.
@@ -234,11 +325,16 @@ jobs:
           name: harken-web
           path: _site/harken
 
-      - id: apk
-        if: needs.apk.outputs.built == 'true'
+      - if: needs.apk.outputs.built == 'true'
         uses: actions/download-artifact@v4
         with:
           name: harken-apk
+          path: ${{ runner.temp }}/apk
+
+      - if: needs.revelation-apk.outputs.built == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: revelation-apk
           path: ${{ runner.temp }}/apk
 
       - uses: DeterminateSystems/nix-installer-action@main
@@ -249,14 +345,15 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # The phone's F-Droid repository (harken/android/fdroid/README.md).
+      # The phones' F-Droid repository, one for both apps
+      # (harken/android/fdroid/README.md).
       #
       # Pages deploys the site whole, so the versions the live repository
-      # already offers are fetched back and kept, the newest three by
-      # version code, and the index is signed again over all of them: with
-      # the committed key, or with FDROID_KEYSTORE when that secret is set
-      # (nix/fdroid.nix says why). With no new APK (its inputs had not
-      # moved) the repository is what it was.
+      # already offers are fetched back and kept, of each app the newest
+      # three by version code, and the index is signed again over all of
+      # them: with the committed key, or with FDROID_KEYSTORE when that
+      # secret is set (nix/fdroid.nix says why). An app with no new APK (its
+      # inputs had not moved, or its build failed) is offered as it was.
       #
       # Nothing here fails the deploy. No APK anywhere, the live repository
       # unreachable, or fdroid itself failing, and the site goes up without
@@ -267,16 +364,15 @@ jobs:
           FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS }}
           FDROID_KEY_ALIAS: ${{ secrets.FDROID_KEY_ALIAS }}
         run: |
-          apks=()
-          if [ -f "$RUNNER_TEMP/apk/harken.apk" ]; then
-            apks=("$RUNNER_TEMP/apk/harken.apk")
-          else
+          shopt -s nullglob
+          apks=("$RUNNER_TEMP"/apk/*.apk)
+          if [ ${#apks[@]} -eq 0 ]; then
             echo "::notice::No new APK in this run; the F-Droid repository offers what it already had."
           fi
           if [ -z "$FDROID_KEYSTORE" ]; then
             echo "Signing the F-Droid index with the committed key; FDROID_KEYSTORE is not set."
           fi
-          if nix run .#harken-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo \
+          if nix run .#apps-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo \
             "$RUNNER_TEMP/fdroid" "${apks[@]}"; then
             mkdir -p _site/fdroid
             cp -r "$RUNNER_TEMP/fdroid" _site/fdroid/repo
@@ -301,11 +397,13 @@ jobs:
           compiled to wasm. Open it <em>alone</em> to run it entirely in this
           tab, or point it at a harken server. The source is at
           <a href="https://github.com/k2on/apps">github.com/k2on/apps</a>.</p>
+          <p>Revelation, the second app, is the Bible as one scroll zoomed
+          like a map: an Android app in plain Kotlin, on none of ArkDB.</p>
           </body>
           </html>
           HTML
           if [ -d _site/fdroid/repo ]; then
-            sed -i 's|^</body>|<p><a href="fdroid/repo/">fdroid/repo</a> is the Android app as an F-Droid repository: add that address in F-Droid and each APK built from main arrives as an update.</p>\n</body>|' _site/index.html
+            sed -i 's|^</body>|<p><a href="fdroid/repo/">fdroid/repo</a> is both Android apps as an F-Droid repository: add that address in F-Droid and each APK built from main arrives as an update.</p>\n</body>|' _site/index.html
           fi
 
       - uses: actions/configure-pages@v5
