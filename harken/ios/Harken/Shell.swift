@@ -17,7 +17,6 @@ struct Shell: View {
     @State private var tab: Pane = .home
     @State private var libraryTab: LibraryTab = .playlists
     @State private var paths: [Pane: [Route]] = [.home: [], .library: [], .search: []]
-    @State private var sheet: Sheet? = nil
     @Namespace private var zoom
 
     private func path(_ t: Pane) -> Binding<[Route]> {
@@ -42,22 +41,18 @@ struct Shell: View {
                 .matchedTransitionSource(id: "player", in: zoom)
         }
         .fullScreenCover(isPresented: $model.fullPlayer) {
+            // Its own sheets: the tab view under it is already presenting it.
             FullPlayer(close: { model.fullPlayer = false })
+                .modifier(SheetHost())
                 .environmentObject(model)
                 .navigationTransition(.zoom(sourceID: "player", in: zoom))
-                .environment(\.present) { s in present(s) }
                 .environment(\.open) { r in
                     model.fullPlayer = false
                     open(r)
                 }
         }
-        .sheet(item: $sheet) { s in
-            sheetView(s)
-                .environmentObject(model)
-                .environment(\.present) { next in present(next) }
-        }
+        .modifier(SheetHost())
         .environment(\.zoom, zoom)
-        .environment(\.present) { s in present(s) }
         .environment(\.showTab) { t, lib in
             if let l = lib { libraryTab = l }
             tab = t
@@ -83,7 +78,24 @@ struct Shell: View {
 
     private func open(_ r: Route) { paths[tab, default: []].append(r) }
 
-    // One sheet at a time: a sheet asking for another hands over to it.
+}
+
+/// Where the sheets rise from: whatever under it asks (`\.present`), one at a
+/// time — a sheet asking for another hands over to it.
+struct SheetHost: ViewModifier {
+    @EnvironmentObject private var model: Model
+    @State private var sheet: Sheet? = nil
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.present) { s in present(s) }
+            .sheet(item: $sheet) { s in
+                sheetView(s)
+                    .environmentObject(model)
+                    .environment(\.present) { next in present(next) }
+            }
+    }
+
     private func present(_ s: Sheet) {
         if sheet == nil {
             sheet = s
