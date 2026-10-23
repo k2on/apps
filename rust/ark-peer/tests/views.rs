@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::prelude::*;
 use ark::schema::Space;
-use ark_dev::demo::{add_to_playlist, create_playlist, rename_playlist, AddToPlaylist, CreatePlaylist, Demo, Item, Playlist, RenamePlaylist};
+use arkdb::demo::{add_to_playlist, create_playlist, rename_playlist, AddToPlaylist, CreatePlaylist, Demo, Item, Playlist, RenamePlaylist};
 use ark_peer::{Config, Memory, Peer, Update};
 
 /// The items of the playlist of this name of the reader's: refused when

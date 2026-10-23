@@ -15,20 +15,20 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   relay) and a server that listens (the connections, the log written
   before delivered, the sync socket, the web build).
 - `rust/ark-ffi` — `ark-peer`'s app kit through UniFFI for an app in
-  another language; `ark-dev gen kotlin|swift` writes a domain's types
+  another language; `arkdb gen kotlin|swift` writes a domain's types
   and stubs for it. The phones run the Rust kernel; there is no Kotlin or
   Swift runtime.
-- `rust/ark-dev` — the demo, the simulator over real peers in both roles,
-  the trace recorder and player, the fuzzer (`ark-fuzz`), the vector
+- `rust/arkdb` — the demo, the simulator over real peers in both roles,
+  the trace recorder and player, the fuzzer (`arkdb fuzz`), the vector
   writer, `gen`. Beside it `ark-auth` (dev sign-in and OpenID Connect)
   and `arkui` (the iced components).
 - `spec/` — the vectors the kernel is held to (the bytes, the machine, the
-  frames, the views), `RUNNERS.md` (how `ark-dev` runs them) and
+  frames, the views), `RUNNERS.md` (how `arkdb` runs them) and
   `AUTHORING.md` (writing a domain).
 - `harken/` — the app: `domain/` (a crate of plain Rust), `server/` and
   `iced/` (desktop and browser), and the phones: `ffi/` (the kernel with
   the domain linked in, one native library) under `android/` (Compose)
-  and `ios/` (SwiftUI), each over the types `ark-dev gen` writes.
+  and `ios/` (SwiftUI), each over the types `arkdb gen` writes.
   `harken/README.md` says how to run them together.
 - `docs/plan-v5.md` — the design, how it landed and what it measures
   (Part 3); `docs/arkdb.md` is the history it superseded.

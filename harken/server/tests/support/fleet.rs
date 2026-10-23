@@ -27,7 +27,7 @@ use ark::hash::hex;
 use ark::log::Logged;
 use ark::peer::Who;
 use ark::store::{Change, Store};
-use ark_dev::sim::{Net, Op};
+use arkdb::sim::{Net, Op};
 use ark_peer::{Config, Files, Peer};
 use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
@@ -874,7 +874,7 @@ impl Drop for PeerProc {
 
 /// A log made in this process and written where the server will read it,
 /// for a scenario that needs a long log and not the minute it takes to
-/// push one through a peer: `ark-dev`'s simulator, its server over the
+/// push one through a peer: `arkdb`'s simulator, its server over the
 /// server's own directory, with a device of it authoring as each user asked
 /// for, holding the library's role.
 pub struct Seeder {

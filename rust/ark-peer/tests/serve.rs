@@ -293,7 +293,7 @@ fn a_web_build_is_its_own_validator() {
 /// not reading what `close` wrote: the room came back empty.
 #[test]
 fn the_live_space_is_restored_and_on_restore_authored() {
-    use ark_dev::demo::{arrival, room};
+    use arkdb::demo::{arrival, room};
     let r = room();
     let mut config = config();
     config.live = Some(Live {
@@ -316,7 +316,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         version: String::new(),
     };
     hub.frame(c, hello.enc(), 1);
-    hub.author(Space::Volatile, "room.point", ark_dev::demo::Point { x: 7 }.to_bytes(), 2)
+    hub.author(Space::Volatile, "room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2)
         .unwrap();
     let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(

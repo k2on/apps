@@ -1,4 +1,4 @@
-//! What the fuzzer (`ark-dev`) found in going alone, joining and the
+//! What the fuzzer (`arkdb`) found in going alone, joining and the
 //! horizon, each held here at the machine: an intent refused alone draws
 //! no `local`, and one pending that refuses as the device goes alone is
 //! kept for its server, so a joined chain has no gap; a `Join` lost on the

@@ -1,5 +1,5 @@
 //! The demo of `spec/AUTHORING.md`, in plain Rust (§1.16): the same
-//! domain as `ark-dev`'s, here because the kernel's tests cannot link the
+//! domain as `arkdb`'s, here because the kernel's tests cannot link the
 //! dev crate. Its functions are registered by name, and its inputs encode
 //! as the byte helpers below write them.
 //!

@@ -163,23 +163,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-dev"
-version = "0.1.0"
-dependencies = [
- "ark",
- "ark-peer",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ark-ffi"
 version = "0.1.0"
 dependencies = [
  "ark",
  "ark-auth",
- "ark-dev",
  "ark-peer",
+ "arkdb",
  "serde",
  "serde_json",
  "tempfile",
@@ -203,7 +193,7 @@ dependencies = [
  "anyhow",
  "ark",
  "ark-auth",
- "ark-dev",
+ "arkdb",
  "axum",
  "js-sys",
  "rustls",
@@ -217,6 +207,16 @@ dependencies = [
  "tungstenite",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "arkdb"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-peer",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2127,9 +2127,9 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-auth",
- "ark-dev",
  "ark-ffi",
  "ark-peer",
+ "arkdb",
  "serde",
  "serde_json",
  "uniffi",
@@ -2140,9 +2140,9 @@ name = "harken-ffi"
 version = "0.1.0"
 dependencies = [
  "ark",
- "ark-dev",
  "ark-ffi",
  "ark-peer",
+ "arkdb",
  "harken-domain",
  "harken-player",
  "serde_json",
@@ -2185,9 +2185,9 @@ dependencies = [
  "anyhow",
  "ark",
  "ark-auth",
- "ark-dev",
  "ark-ffi",
  "ark-peer",
+ "arkdb",
  "axum",
  "harken-domain",
  "harken-player",

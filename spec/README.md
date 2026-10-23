@@ -20,11 +20,11 @@ The vectors are the kernel's regression suite and the contract its other
 builds keep: the wasm build the browser runs and the FFI library the
 phones embed are the same source, and a vector that moves is a change to
 every peer that will ever read an older one's bytes. `rust/ark/tests` and
-`rust/ark-dev/tests` write them (`ARK_WRITE_VECTORS=1`) and otherwise hold
+`rust/arkdb/tests` write them (`ARK_WRITE_VECTORS=1`) and otherwise hold
 them to what is on disk; written over an empty `vectors/` they are the
 tree byte for byte (the flake's `vectors` check). Each module's doc
 comment is the prose; where a module and this file disagree, the module
-is right. `RUNNERS.md` says what `ark-dev` does with `protocol/`, `trace/`,
+is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 `rebase/` and `views/`; `AUTHORING.md` is writing a domain.
 
 ## The modules
@@ -48,7 +48,7 @@ is right. `RUNNERS.md` says what `ark-dev` does with `protocol/`, `trace/`,
 
 The drivers are the reference reading, not the specification:
 `rust/ark-peer` (the one peer, dialling or listening: storage, the link,
-the hub, the app kit) and `rust/ark-dev` (the demo, the simulator, the
+the hub, the app kit) and `rust/arkdb` (the demo, the simulator, the
 trace player, the fuzzer, the vector writer).
 
 ## The vectors
@@ -60,10 +60,10 @@ writer's own runner must fail.
 | directory | written by | one vector is | holds |
 |---|---|---|---|
 | `hash/` | `rust/ark/tests/hash.rs` | a store under its schema: each row's bytes and leaf, each table's digest, the state hash | §1.1, §1.3 |
-| `views/` | `rust/ark-dev/tests/views.rs` | a view named in a reference domain (`rust/ark-dev/src/library.rs`), its input, a store and batches of row changes: after each, the answer and the patches | §1.10 |
-| `protocol/` | `rust/ark-dev/tests/vectors.rs` | one frame of each kind each side writes in each space: its bytes, and its JSON | §1.11 |
-| `trace/` | `rust/ark-dev/tests/vectors.rs` | one client's life in one session: what its two machines were given and said, and where they stood | §1.7, §1.9 |
-| `rebase/` | `rust/ark-dev/tests/vectors.rs` | a fleet run by the simulator from a seed, and the fuzzer's sessions that once found a bug: where each stands settled | §1.6, §1.7 |
+| `views/` | `rust/arkdb/tests/views.rs` | a view named in a reference domain (`rust/arkdb/src/library.rs`), its input, a store and batches of row changes: after each, the answer and the patches | §1.10 |
+| `protocol/` | `rust/arkdb/tests/vectors.rs` | one frame of each kind each side writes in each space: its bytes, and its JSON | §1.11 |
+| `trace/` | `rust/arkdb/tests/vectors.rs` | one client's life in one session: what its two machines were given and said, and where they stood | §1.7, §1.9 |
+| `rebase/` | `rust/arkdb/tests/vectors.rs` | a fleet run by the simulator from a seed, and the fuzzer's sessions that once found a bug: where each stands settled | §1.6, §1.7 |
 
 ## The data directory
 

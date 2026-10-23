@@ -8,7 +8,7 @@ use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::row::Input;
 use ark::store::Store;
-use ark_dev::demo::{demo, CreatePlaylist};
+use arkdb::demo::{demo, CreatePlaylist};
 
 fn ctx() -> Ctx {
     Ctx {

@@ -98,7 +98,7 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
                 Standing::Confirmed => {
                     let Some((r, _, _)) = self.open.get(&k) else { continue };
                     // The run, and all it authors, under the claim.
-                    let run = tracing::info_span!(target: "ark", "job", peer = %p.label(), table = R::TABLE, span = ?span);
+                    let run = tracing::info_span!(target: "ark", "job", peer = %p.label(), table = R::TABLE, trace = %ark::hash::hex(&span.trace.0), span = %ark::hash::hex(&span.id));
                     let _in = run.enter();
                     let outcome = p.under(Some(span), |p| (self.f)(p, r));
                     match &outcome {

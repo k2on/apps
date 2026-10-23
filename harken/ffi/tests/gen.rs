@@ -1,8 +1,8 @@
 //! The typed Kotlin and Swift the phones call harken with are what the
-//! generator writes from the domain now (`ark-dev gen`): regenerating moves
+//! generator writes from the domain now (`arkdb gen`): regenerating moves
 //! nothing. `ARK_WRITE_GEN=1` writes them instead.
 
-use ark_dev::gen::{kotlin, swift, walk};
+use arkdb::gen::{kotlin, swift, walk};
 use ark::domain::Catalog;
 
 const KOTLIN: &str = "../android/app/src/main/kotlin/dev/harken/android/gen/Harken.kt";

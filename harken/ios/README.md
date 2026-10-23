@@ -6,7 +6,7 @@ same code the server, the desktop, the browser and the Android app run. The
 kernel keeps the replica, dials the server, keeps the views and, through
 harken's one reconciler (`harken/player`, the FFI's `Player`), decides what
 this phone's player does; the app's code is its screens, its model, and the
-player itself. It calls the domain by name through the Swift `ark-dev gen
+player itself. It calls the domain by name through the Swift `arkdb gen
 swift` writes (`Harken/Gen/Harken.swift`, never edited: `ARK_WRITE_GEN=1
 cargo test -p harken-ffi --test gen` writes it) over UniFFI's Swift and the
 bridge's typed half (`rust/ark-ffi/swift/Typed.swift`).

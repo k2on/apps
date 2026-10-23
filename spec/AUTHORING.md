@@ -4,9 +4,9 @@ A domain is a crate of plain Rust (`docs/plan-v5.md` §1.16): its rows,
 its inputs and its functions, registered by name in a `Domain` the kernel
 runs. There is one runtime; a peer finds a function by the name an entry
 carries, and code never crosses the wire. Everything below comes from
-`ark::prelude::*`. Every example is cut from `rust/ark-dev/src/demo.rs`
+`ark::prelude::*`. Every example is cut from `rust/arkdb/src/demo.rs`
 or `harken/domain/src/` (a line `// …` skips some), and
-`rust/ark-dev/tests/authoring.rs` holds each to its source.
+`rust/arkdb/tests/authoring.rs` holds each to its source.
 
 ## Rows and the schema
 

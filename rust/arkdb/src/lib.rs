@@ -6,6 +6,7 @@
 //! and stubs for an app over the bridge ([`gen`]).
 
 pub mod demo;
+pub mod events;
 pub mod fuzz;
 pub mod gen;
 pub mod library;

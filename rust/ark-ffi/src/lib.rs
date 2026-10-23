@@ -11,7 +11,7 @@
 //! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
 //! and whether it is alone (`alone`, `join`).
 //! The typed Kotlin and Swift over these names is generated from the domain
-//! (`ark-dev gen`), types only; a view whose row type has a twin is read
+//! (`arkdb gen`), types only; a view whose row type has a twin is read
 //! typed instead, its rows UniFFI's records ([`typed`]).
 //!
 //! **It drives itself.** A peer has a thread of its own that pumps its link

@@ -2,7 +2,7 @@
 // views read into the types the screens draw — the library's and the
 // playlists' typed, UniFFI's own records with no JSON (`LibraryEntry`,
 // `Playlist`) — and every write one of the domain's functions by name — the generated, typed calls over the bridge
-// (`gen/Harken.kt`, `ark-dev gen kotlin`), run by the Rust kernel the phone
+// (`gen/Harken.kt`, `arkdb gen kotlin`), run by the Rust kernel the phone
 // embeds — returning the entry's id so that where it stands can be asked
 // later. Kept free of Android so that it can be driven off a phone.
 package dev.harken.android

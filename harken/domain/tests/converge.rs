@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
-use ark_dev::sim::{Net, Op};
+use arkdb::sim::{Net, Op};
 use ark_peer::Config;
 use common::{domain, full, song};
 use harken_domain::Id;
@@ -33,7 +33,7 @@ fn who(actor: &str, session: &str, roles: &[&str]) -> Who {
 }
 
 impl Fleet {
-    /// `ark-dev`'s simulator: a device per login, each its connection's
+    /// `arkdb`'s simulator: a device per login, each its connection's
     /// verified identity.
     fn new(seed: u64, logins: Vec<Who>) -> Fleet {
         let config = Config::of(std::sync::Arc::new(harken_domain::domain()));

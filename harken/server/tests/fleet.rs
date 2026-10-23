@@ -5,7 +5,7 @@
 //! confirmed state hashes as the server's log does, and every accepted
 //! intent is in that log exactly once.
 //!
-//! `ark-dev`'s simulator already holds the machines to this in one
+//! `arkdb`'s simulator already holds the machines to this in one
 //! process. What only processes can reach is everything outside it: the
 //! WebSocket and its keepalive, a server killed and restarted from its data
 //! directory, a peer killed between writing its intent and pumping, a

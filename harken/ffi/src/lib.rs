@@ -1,7 +1,7 @@
 //! harken's library for its phones (`docs/plan-v5.md` §1.16, N3): the
 //! bridge (`ark-ffi`) with harken's domain linked in. The apps load this
 //! one shared library, open their peer with [`harken_open`] and call every
-//! function of the domain by name through it — typed by what `ark-dev gen`
+//! function of the domain by name through it — typed by what `arkdb gen`
 //! writes from the domain — and read the listening session with
 //! [`harken_listening`], which is the domain's own reading of it. A
 //! [`Hall`] is a harken server in the same process — the hub

@@ -1,6 +1,6 @@
 //! `spec/vectors/views/` (§1.10), written by the vector writer and run as
 //! `spec/RUNNERS.md` § views says: each vector is a view named in a
-//! reference domain (`ark_dev::library`), its input, a store and batches of
+//! reference domain (`arkdb::library`), its input, a store and batches of
 //! row changes, and the rows and patches after each batch. v4's scenarios —
 //! the library (playlists, people, works, movements, songs), the tracks of
 //! `kept-max` and `has-search`, the two fuzz findings on a maintained sum —
@@ -20,9 +20,9 @@ use ark::hash::hex;
 use ark::row::Value as _;
 use ark::row::{Bytes, Id};
 use ark::store::{Change, Store};
-use ark_dev::library::colors::{self, Color};
-use ark_dev::library::{pairs, Item, Movement, Person, Playlist, Song, Track, Work};
-use ark_dev::vectors::{on_disk, run_view, vector, view_ctx, view_vector};
+use arkdb::library::colors::{self, Color};
+use arkdb::library::{pairs, Item, Movement, Person, Playlist, Song, Track, Work};
+use arkdb::vectors::{on_disk, run_view, vector, view_ctx, view_vector};
 use serde_json::{json, Value};
 
 // * Rows and changes
@@ -328,7 +328,7 @@ struct Case {
 }
 
 fn store_of(domain: &str, rows: &[Change]) -> Store {
-    let schema = ark_dev::library::named(domain).unwrap().schema;
+    let schema = arkdb::library::named(domain).unwrap().schema;
     let mut by: Vec<(String, Vec<Vec<u8>>)> = schema.tables.iter().map(|t| (t.name.clone(), vec![])).collect();
     for c in rows {
         let Change::Add { table, row } = c else { panic!("a store is rows") };
@@ -464,7 +464,7 @@ fn vectors() {
 
 /// What one push of `c` costs a view: the reads it made.
 fn cost(view: &str, input: Value, mut store: Store, c: Change) -> ark::db::Reads {
-    let d = ark_dev::library::library();
+    let d = arkdb::library::library();
     let input = d.input_json(view, &input.to_string()).unwrap();
     let mut v = d.watch(&store, &view_ctx("alice", "dev"), view, &input).unwrap();
     store.apply(&c).unwrap();

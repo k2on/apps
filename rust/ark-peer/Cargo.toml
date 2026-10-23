@@ -38,4 +38,4 @@ web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "CloseEven
 
 [dev-dependencies]
 tempfile = "3"
-ark-dev = { path = "../ark-dev" }
+arkdb = { path = "../arkdb" }

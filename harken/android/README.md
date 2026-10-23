@@ -6,7 +6,7 @@ the server, the desktop and the browser run. The phone is a **client** of
 it: the kernel keeps the replica on the phone's disk, dials the server,
 rebases, keeps the views, and holds the listening session; the app's own
 code is its screens, its player, its car and its onboarding. It calls the
-domain by name through the Kotlin `ark-dev gen kotlin` writes from the
+domain by name through the Kotlin `arkdb gen kotlin` writes from the
 registered domain — data classes for every record, row and sum, and a stub
 per function (`app/src/main/kotlin/dev/harken/android/gen/Harken.kt`, never
 edited: `ARK_WRITE_GEN=1 cargo test -p harken-ffi --test gen` writes it,

@@ -57,7 +57,7 @@
 //!
 //! Every input either machine of a device is given is recorded, when asked
 //! (`record`), as an [`Act`]: a device is a pure function of these, which
-//! the trace player (`ark-dev`) holds it to.
+//! the trace player (`arkdb`) holds it to.
 
 pub mod app;
 pub mod disk;
@@ -648,7 +648,7 @@ impl Peer {
             id: draw_origin().0,
             began: now_ms(),
         };
-        tracing::info!(target: "ark", peer = %self.label(), span = ?span, name, "begin");
+        tracing::info!(target: "ark", peer = %self.label(), trace = %ark::hash::hex(&span.trace.0), span = %ark::hash::hex(&span.id), name, "begin");
         self.span = Some(span);
         span
     }

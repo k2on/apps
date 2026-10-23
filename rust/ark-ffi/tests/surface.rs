@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_dev::demo::{arrival, demo, live, room, Playlist};
+use arkdb::demo::{arrival, demo, live, room, Playlist};
 use ark_ffi::{Listener, Login, Patch, Peer, Refusal, Standing, ViewUpdate};
 use ark_peer::{dev, Config, Handle, Live, Memory, Module};
 

@@ -196,8 +196,8 @@ fn a_jobs_own_words_are_collected_in_its_trace() {
     let said = all.iter().find(|e| e.msg == "fetching" && e.fields.iter().any(|(k, v)| k == "id" && v == "words"));
     let said = said.expect("the job's line was collected");
     assert_eq!(said.peer, me, "as the peer that ran it");
-    let span = said.fields.iter().find(|(k, _)| k == "span").map(|(_, v)| v.clone()).unwrap();
-    assert!(span.contains(&trace[..12]), "inside the tap's trace: {span}");
+    let at = said.fields.iter().find(|(k, _)| k == "trace").map(|(_, v)| v.clone()).unwrap();
+    assert_eq!(at, trace, "inside the tap's trace");
     // A refusal, said where it was refused.
     let _ = net.d(1).mutate("fetch.ask", &Ask { id: "words".into() });
     let refused = kept.lock().unwrap().iter().any(|e| e.msg == "refused" && e.level == "warn");

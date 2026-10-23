@@ -14,13 +14,13 @@ use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
 use ark::row::Id;
 use ark::schema::Space;
-use ark_dev::demo::{arrival, live, room};
-use ark_dev::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
-use ark_dev::sim::{who, Net, Op};
+use arkdb::demo::{arrival, live, room};
+use arkdb::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
+use arkdb::sim::{who, Net, Op};
 use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
 
 fn demo() -> Config {
-    Config::of(Arc::new(ark_dev::demo::demo()))
+    Config::of(Arc::new(arkdb::demo::demo()))
 }
 
 fn net(n: i64) -> Net {

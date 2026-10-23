@@ -2,7 +2,7 @@
 //! feed. A view told a replica's `Output::Changes` holds through a rebase,
 //! and a replica fed by a scope holds exactly its union after every
 //! delivery. The `views/` vectors — a named view of a reference domain over
-//! a store and batches of changes — are `ark-dev`'s (`tests/views.rs`).
+//! a store and batches of changes — are `arkdb`'s (`tests/views.rs`).
 
 #[path = "demo.rs"]
 mod demo;

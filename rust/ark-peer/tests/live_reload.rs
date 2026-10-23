@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::schema::Space;
-use ark_dev::demo::demo as domain;
-use ark_dev::demo::{arrival, room, Point};
+use arkdb::demo::demo as domain;
+use arkdb::demo::{arrival, room, Point};
 use ark_peer::{dev, Config, Memory, Module, Peer};
 
 fn hub() -> Peer {

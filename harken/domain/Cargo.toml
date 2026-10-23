@@ -24,4 +24,4 @@ ffi = ["dep:uniffi", "dep:ark-ffi"]
 
 [dev-dependencies]
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
-ark-dev = { path = "../../rust/ark-dev" }
+arkdb = { path = "../../rust/arkdb" }

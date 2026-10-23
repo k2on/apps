@@ -51,7 +51,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 # The simulator, for a log written before the server starts.
-ark-dev = { path = "../../rust/ark-dev" }
+arkdb = { path = "../../rust/arkdb" }
 # The fleet stops the server with SIGTERM, which std cannot send.
 libc = "0.2"
 tempfile = "3"

@@ -1,5 +1,5 @@
 // The typed half of the bridge (`docs/plan-v5.md` §1.16, N3), beside the
-// bindings UniFFI writes: what the Kotlin `ark-dev gen` writes for a domain
+// bindings UniFFI writes: what the Kotlin `arkdb gen` writes for a domain
 // stands on — a row id, a view's rows read as their type with what it did
 // (from their JSON, or a typed view's records as UniFFI hands them over),
 // and JSON as the kernel reads and writes it (Android's `org.json`).

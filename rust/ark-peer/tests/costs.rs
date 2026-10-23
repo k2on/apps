@@ -4,7 +4,7 @@
 //! and the live bytes a store holds per row of harken's `media` table
 //! (key `id`, indexes `file` and `pos`, written out here as a schema,
 //! since this crate does not depend on harken). Over the demo of
-//! `ark-dev`; allocations and bytes counted on the test's own thread.
+//! `arkdb`; allocations and bytes counted on the test's own thread.
 //!
 //! [`timings`] is the benchmark Part 3's measurement protocol reads
 //! (`docs/plan-v5.md`): ignored by default; run with
@@ -22,7 +22,7 @@ use ark::log::{EntryId, Origin};
 use ark::row::{Id, Type};
 use ark::schema::{Schema, Space, Table};
 use ark::store::Store;
-use ark_dev::demo::{demo as domain, AddToPlaylist};
+use arkdb::demo::{demo as domain, AddToPlaylist};
 use ark_peer::link::wait;
 use ark_peer::{dev, now_ms, Config, Disk, Memory, Module, Peer, Server};
 

@@ -99,7 +99,7 @@ fn an_ephemeral_instance_holds_volatile_rows() {
 fn config() -> Config {
     Config {
         keep: Some(1),
-        ..Config::of(Arc::new(ark_dev::demo::demo()))
+        ..Config::of(Arc::new(arkdb::demo::demo()))
     }
 }
 
@@ -151,13 +151,13 @@ fn the_last_of_each_origin_survives_a_restart() {
 /// not putting the fork: the reopened device was a replica.
 #[test]
 fn a_device_reopens_as_its_replica_row() {
-    let config = Config::of(Arc::new(ark_dev::demo::demo()));
+    let config = Config::of(Arc::new(arkdb::demo::demo()));
     let mut d = Peer::open_as(config.clone(), Box::new(Memory::default()), None);
     d.alone();
     let _ = d.author(
         Space::Durable,
         CREATE,
-        ark_dev::demo::CreatePlaylist { name: "Road".into() }.to_bytes(),
+        arkdb::demo::CreatePlaylist { name: "Road".into() }.to_bytes(),
         1,
     );
     let (origin, me, local) = (d.log.origin, d.log.me.clone(), d.log.local);
@@ -177,11 +177,11 @@ fn a_device_reopens_as_its_replica_row() {
 /// settle).
 #[test]
 fn a_device_reopened_after_joining_has_its_chain_pending() {
-    let config = Config::of(Arc::new(ark_dev::demo::demo()));
+    let config = Config::of(Arc::new(arkdb::demo::demo()));
     let mut d = Peer::open_as(config, Box::new(Memory::default()), None);
     d.alone();
     for name in ["Road", "Trip"] {
-        let input = ark_dev::demo::CreatePlaylist { name: name.into() }.to_bytes();
+        let input = arkdb::demo::CreatePlaylist { name: name.into() }.to_bytes();
         d.author(Space::Durable, CREATE, input, 1).unwrap();
     }
     assert_eq!(d.cursor(), 2);

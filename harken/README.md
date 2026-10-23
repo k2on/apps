@@ -21,9 +21,9 @@ iced/      the desktop and browser client, on arkui and ark-peer; the `demo`
 ffi/       the phones' library: ark-ffi (the kernel through UniFFI) with the
            domain linked in — `harken_open`, the listening session as JSON,
            and a Hall, a harken server in the process for the apps' tests
-android/   the phone: Compose over ffi/, through the Kotlin `ark-dev gen
+android/   the phone: Compose over ffi/, through the Kotlin `arkdb gen
            kotlin` writes from the domain (android/README.md)
-ios/       SwiftUI over ffi/, through the Swift `ark-dev gen swift` writes
+ios/       SwiftUI over ffi/, through the Swift `arkdb gen swift` writes
            (ios/README.md); never built for iOS
 ```
 
@@ -33,7 +33,7 @@ it inside one native library, `libharken_ffi` (`ffi/`, `docs/plan-v5.md`
 §1.16) — the kernel, the link, the disk and the views are the same code on
 every device. A phone's own code is its screens, its player and its
 onboarding; it calls the domain by function name with JSON, typed by the
-data classes and structs `ark-dev gen` writes from the registered domain
+data classes and structs `arkdb gen` writes from the registered domain
 (`android/.../gen/Harken.kt`, `ios/Harken/Gen/Harken.swift`, held to the
 domain by `ffi/tests/gen.rs`).
 

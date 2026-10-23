@@ -6,8 +6,8 @@
 //! every client of every fleet session, recorded and replayed into fresh
 //! machines to the same outputs.
 
-use ark_dev::trace::{record, replay};
-use ark_dev::vectors::fleet;
+use arkdb::trace::{record, replay};
+use arkdb::vectors::fleet;
 
 /// K1's pin (`rust/ark/tests/fleet.rs`, now moved here): twenty entries,
 /// this state. N1 moved the state (`ff04f56d…` before): rows are their

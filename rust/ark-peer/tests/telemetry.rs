@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::schema::Space;
-use ark_dev::demo::{demo, CreatePlaylist};
+use arkdb::demo::{demo, CreatePlaylist};
 use ark_peer::observe::{install, Sink};
 use ark_peer::{dev, Config, Memory, Peer};
 

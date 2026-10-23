@@ -17,12 +17,12 @@ use ark_peer::link::{bell, wait, Dial, Pumped};
 use ark_peer::{dev, Config, Disk, Memory, Peer};
 
 pub fn config() -> Config {
-    Config::of(Arc::new(ark_dev::demo::demo()))
+    Config::of(Arc::new(arkdb::demo::demo()))
 }
 
 /// `create_playlist`'s input.
 pub fn named(name: &str) -> Vec<u8> {
-    ark_dev::demo::CreatePlaylist { name: name.into() }.to_bytes()
+    arkdb::demo::CreatePlaylist { name: name.into() }.to_bytes()
 }
 
 /// `who`'s `local`-th intent calling `func` on `input`, its origin named

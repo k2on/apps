@@ -19,7 +19,7 @@ use ark::peer::Ctx;
 use ark::store::Store;
 use harken_domain::*;
 
-use ark_dev::sim::Rng;
+use arkdb::sim::Rng;
 
 /// One step: who, on which device, holding which roles, calls what with
 /// what.

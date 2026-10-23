@@ -10,7 +10,7 @@
 //! and its driver's: those tests run over the wire ([`Wire`]), the hub
 //! (`ark-server`) holding the session in its volatile machine and each
 //! device a client (`ark-client`) of it, through the simulator's network
-//! (`ark-dev`) with every frame delivered.
+//! (`arkdb`) with every frame delivered.
 //!
 //! Each test was falsified once by breaking the rule it holds; its doc
 //! comment says how, and what failed.
@@ -24,7 +24,7 @@ use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::store::Store;
-use ark_dev::sim::{Net, Op};
+use arkdb::sim::{Net, Op};
 use ark_peer::{Config, Live, Module};
 use common::domain;
 use harken_domain::host::Listening;

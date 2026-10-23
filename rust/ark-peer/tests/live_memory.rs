@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use ark::format::Encode;
 use ark::peer::Role;
 use ark::schema::Space;
-use ark_dev::demo::demo as domain;
-use ark_dev::demo::{arrival, room, Point};
+use arkdb::demo::demo as domain;
+use arkdb::demo::{arrival, room, Point};
 use ark_peer::{dev, Config, Memory, Module, Peer};
 
 /// harken-server's live `keep`.

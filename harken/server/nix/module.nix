@@ -338,6 +338,17 @@ in
       default = false;
       description = "Open {option}`services.harken.port` in the firewall.";
     };
+
+    arkdb = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = harken.arkdb or null;
+      defaultText = lib.literalExpression "harken.packages.\${system}.arkdb";
+      description = ''
+        `arkdb`, installed reading the server's events by default, so that `sudo arkdb tail --follow` or `sudo arkdb trace ID`
+        reads the system — this server and every device of it
+        (docs/plan-observe.md). `null` installs nothing.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -473,5 +484,13 @@ in
     };
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
+
+    # `arkdb`, reading the events harken-server keeps in its data directory
+    # unless told otherwise (a dynamic user's: /var/lib/harken is the way
+    # in, for root; `sudo` keeps no environment, so it is the default here).
+    environment.systemPackages = lib.optional (cfg.arkdb != null) (pkgs.writeShellScriptBin "arkdb" ''
+      export ARKDB_EVENTS="''${ARKDB_EVENTS:-/var/lib/harken/events}"
+      exec ${cfg.arkdb}/bin/arkdb "$@"
+    '');
   };
 }

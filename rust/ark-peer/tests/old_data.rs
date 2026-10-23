@@ -19,7 +19,7 @@ use ark::prelude::*;
 use ark::schema::Space;
 use ark_auth::server::{Auth, Mode};
 use ark_auth::{Role, SignIn};
-use ark_dev::demo::{CreatePlaylist, Playlist};
+use arkdb::demo::{CreatePlaylist, Playlist};
 use ark_peer::link::{bell, wait};
 use ark_peer::{Config, Files, Peer, Server};
 

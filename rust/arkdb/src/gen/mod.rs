@@ -296,12 +296,12 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
     }
 }
 
-/// `ark-dev gen kotlin|swift DOMAIN [NAME [PACKAGE]]`: DOMAIN is one of
+/// `arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]`: DOMAIN is one of
 /// this crate's (`demo`, `room`) or a file holding a domain's `Catalog` as
 /// JSON (`{"catalog": …}` or the catalog alone); the source to stdout.
 pub fn main(args: &[String]) -> Result<String, String> {
     let [lang, domain, rest @ ..] = args else {
-        return Err("ark-dev gen kotlin|swift DOMAIN [NAME [PACKAGE]]".into());
+        return Err("arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]".into());
     };
     let catalog = match crate::demo::named(domain) {
         Some(d) => Catalog::of(&d),

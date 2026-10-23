@@ -1,8 +1,8 @@
 # Running the vectors
 
-What `rust/ark-dev` does with `vectors/protocol/`, `vectors/trace/`,
+What `rust/arkdb` does with `vectors/protocol/`, `vectors/trace/`,
 `vectors/rebase/` (`tests/vectors.rs` is the runner) and `vectors/views/`
-(`ark_dev::vectors::run_view`, run by `tests/views.rs`); where it and this
+(`arkdb::vectors::run_view`, run by `tests/views.rs`); where it and this
 file disagree, the code is right. A port of the kernel — the wasm build,
 the FFI library — runs the same code, so it is held by the same runner;
 the forms below are what a reader of a failure needs.
@@ -13,7 +13,7 @@ lowercase hex, a row inside a frame among them. A vector under `falsify/` carrie
 runner must fail. The runner reports each file by name; a file the writer
 did not write is stale.
 
-**The domains** are `rust/ark-dev/src/demo.rs`: the demo (`playlist`,
+**The domains** are `rust/arkdb/src/demo.rs`: the demo (`playlist`,
 `item`; `demo.create_playlist`, `demo.add_to_playlist`,
 `demo.rename_playlist`, `demo.remove_from_playlist`, the view
 `demo.items`, the scope `demo.top_two`) and the room, live state over
@@ -21,7 +21,7 @@ volatile tables (`here`, `pointer`; `room.on_join`, `room.on_leave`,
 `room.on_restore`, `room.rename`, `room.point`, the ephemeral one). An
 entry names its function; a trace is replayed with these domains, found
 by the name the trace gives. The `views/` vectors' are
-`rust/ark-dev/src/library.rs`: `library` (the demo's two tables, `person`,
+`rust/arkdb/src/library.rs`: `library` (the demo's two tables, `person`,
 `work`, `movement`, `song`, `track`, and a view per v4 scenario), `colors`
 and `pairs` (a fuzz finding each).
 
@@ -44,20 +44,20 @@ machine's, drawn at every open so that a reopened device is not refused as
 overtaken by what it said before), `sign_in` (who, both origins), and `step` — `space`, `in` (a frame, a mutate, a
 lifecycle input, an open's `Durable`), `out` (every output, bytes as hex)
 and `after` (head, hash, state hash, pending ids). The runner replays
-every step into fresh machines (`ark_dev::trace`) and fails at the first
+every step into fresh machines (`arkdb::trace`) and fails at the first
 that says other than `out` or stands other than `after`. The corpus
 beyond these files — every client of every fleet and fuzz session — is
-replayed by `ark-dev`'s tests and by `ark-fuzz N FIRST traces`, and
-written by `ark-fuzz N FIRST traces DIR` for `trace_corpus` to replay; not
+replayed by `arkdb`'s tests and by `arkdb fuzz N FIRST traces`, and
+written by `arkdb fuzz N FIRST traces DIR` for `trace_corpus` to replay; not
 checked in.
 
 ## rebase
 
 `fleet-seed-7.json`: three clients and the hub under the simulator's
-seeded scheduler (`ark_dev::sim`): client 0 creates `playlist`, the
+seeded scheduler (`arkdb::sim`): client 0 creates `playlist`, the
 `script` runs (`mutate`, `partition`, `heal`, `step`), all settle; the hub
 stands at `head` with state `hash`. `fleet-fuzz-seed-N.json`: a fuzzer
-session (`ark_dev::fuzz::session`) once a bug, and where it stands
+session (`arkdb::fuzz::session`) once a bug, and where it stands
 settled. To run one is to run the simulator and the fuzzer themselves.
 
 ## views

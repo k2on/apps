@@ -4,7 +4,7 @@
 // `Playlist`), the rest as the generated types (`AlbumsEntry`,
 // `ArtistsEntry`, `TrackDetailsEntry`, `Play`) — and every write one of the
 // domain's functions by name, through the generated, typed calls
-// (`Gen/Harken.swift`, `ark-dev gen swift`), run by the Rust kernel the
+// (`Gen/Harken.swift`, `arkdb gen swift`), run by the Rust kernel the
 // phone embeds (`harken/ffi`), returning the entry's id so that where it
 // stands can be asked later. Where a page is, how a track's file and a
 // length are said. The twin of `harken/android/.../Phone.kt`, `Library.kt`'s

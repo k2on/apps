@@ -67,7 +67,7 @@
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
       rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" ];
-      # The typed Kotlin and Swift `ark-dev gen` writes, which harken/ffi's
+      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to the domain (harken/ffi/tests/gen.rs).
       genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
 
@@ -328,6 +328,14 @@
             cargoExtraArgs = "--locked -p harken-server";
             doCheck = false;
           });
+          # `arkdb` for a server to read its system's events with
+          # (docs/plan-observe.md), on the server's chain: no GUI stack.
+          arkdb = craneLib.buildPackage (common // {
+            pname = "arkdb";
+            cargoArtifacts = serverKernel;
+            cargoExtraArgs = "--locked -p arkdb";
+            doCheck = false;
+          });
 
           # The desktop window. winit and wgpu open the display and the GPU
           # by dlopen at run time, so the libraries go on the library path.
@@ -342,23 +350,24 @@
           };
 
           # The specification is `rust/ark` (spec/README.md), and the tools
-          # over it are `rust/ark-dev`: one build of both, whose binary is
-          # `ark-fuzz`, the fuzzer; `fuzz` is that build under the name
-          # `nix run` takes.
-          ark = crate { pname = "ark"; flags = "-p ark -p ark-dev"; };
+          # over it are `rust/arkdb`: one build of both, whose binary is
+          # `arkdb` (`gen`, `fuzz`, and reading a system's events: `tail`,
+          # `trace`, `peer`); `fuzz` is its fuzzer under the name `nix run`
+          # takes.
+          ark = crate { pname = "ark"; flags = "-p ark -p arkdb"; };
           # `nix run .#fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]`: the
-          # fuzzer (rust/ark-dev/src/bin/ark-fuzz.rs), ten thousand sessions
+          # fuzzer (rust/arkdb/src/fuzz.rs, `arkdb fuzz`), ten thousand sessions
           # from seed 1 by default, each checked for convergence, replay
           # from facts and every frame's bytes; `traces` replays every
           # client's trace too and writes them under DIR. A failure prints
           # its seed and the run exits 1.
           fuzz = pkgs.writeShellApplication {
-            name = "ark-fuzz";
+            name = "arkdb-fuzz";
             runtimeInputs = [ ark ];
-            text = ''exec ark-fuzz "$@"'';
+            text = ''exec arkdb fuzz "$@"'';
           };
           # The vectors as the writer writes them now: the kernel's tests
-          # (hash/) and ark-dev's
+          # (hash/) and arkdb's
           # (protocol/, trace/, rebase/, views/) run with ARK_WRITE_VECTORS over an
           # empty spec/vectors, which is then the output. checks.vectors
           # holds the tree's to it; `nix build .#vectors` and a copy over
@@ -366,8 +375,8 @@
           vectors = tests {
             pname = "ark-vectors";
             # The writers only: the rest of both crates' tests are checks.rust's.
-            flags = "-p ark -p ark-dev --test hash --test vectors --test views";
-            # ark-dev's tests also hold spec/README.md and AUTHORING.md.
+            flags = "-p ark -p arkdb --test hash --test vectors --test views";
+            # arkdb's tests also hold spec/README.md and AUTHORING.md.
             src = only (rustDirs ++ [ "spec/README.md" "spec/AUTHORING.md" ]);
             # stdenv makes only the source root (rust/) writable, and the
             # writer writes beside it.
@@ -389,7 +398,7 @@
           # no corpus, since a trace is of correct behaviour.
           # Written, not replayed: checks.traces replays them.
           trace-corpus = pkgs.runCommand "trace-corpus" { nativeBuildInputs = [ ark ]; } ''
-            ark-fuzz 300 2026 traces $out
+            arkdb fuzz 300 2026 traces $out
           '';
 
           # The phones (docs/plan-v5.md §1.16, N3): the Rust kernel through
@@ -778,7 +787,7 @@
         {
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
-            inherit harken-server;
+            inherit harken-server arkdb;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
@@ -838,7 +847,7 @@
             vectors = pkgs.runCommand "check-vectors" { } ''
               diff -r ${vectors} ${./spec/vectors} && touch $out
             '';
-            # Every trace of the corpus replays (rust/ark-dev/tests/vectors.rs,
+            # Every trace of the corpus replays (rust/arkdb/tests/vectors.rs,
             # `trace_corpus`; spec/vectors/trace/ and the fleets' and fuzz
             # sessions' traces are replayed by checks.rust, once each). Its
             # own check rather than part of checks.rust, so that the
@@ -846,16 +855,16 @@
             # stops replaying is named as that.
             traces = tests {
               pname = "ark-traces";
-              flags = "-p ark-dev --test vectors";
+              flags = "-p arkdb --test vectors";
               testArgs = "trace_corpus -- --nocapture";
               src = only (rustDirs ++ [ "spec/vectors" ]);
               preCheck = "export ARK_TRACE_CORPUS=${trace-corpus}";
             };
             # The fuzzer's binary still runs and checks: a fixed seed and a
             # few sessions, so that it cannot rot. Their traces are replayed
-            # by checks.rust (rust/ark-dev/tests/fuzz.rs, seeds 1-200).
+            # by checks.rust (rust/arkdb/tests/fuzz.rs, seeds 1-200).
             fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
-              ark-fuzz 25 1
+              arkdb fuzz 25 1
               touch $out
             '';
             # The Rust workspace's tests (which hold spec/README.md's index

@@ -1,5 +1,5 @@
 //! `spec/vectors/{protocol,trace,rebase}/`, written by the vector writer
-//! (`ark_dev::vectors`) and run as `spec/RUNNERS.md` says: each must be
+//! (`arkdb::vectors`) and run as `spec/RUNNERS.md` says: each must be
 //! what the writer writes now, nothing else may sit beside them, each
 //! passes its runner, and each `falsify/` one fails it.
 
@@ -10,9 +10,9 @@ use ark::hash::{hex, EntryHash, StateHash};
 use ark::log::EntryId;
 use ark::peer::{Input, Output};
 use ark::schema::Space;
-use ark_dev::fuzz::session;
-use ark_dev::trace::{record, replay};
-use ark_dev::vectors::{fleet, fleet_script, on_disk, op_json, sessions, vector};
+use arkdb::fuzz::session;
+use arkdb::trace::{record, replay};
+use arkdb::vectors::{fleet, fleet_script, on_disk, op_json, sessions, vector};
 use ark_peer::Act;
 use serde_json::{json, Value};
 
@@ -177,7 +177,7 @@ fn traces() {
     }
 }
 
-/// A trace corpus (`ark-fuzz N SEED traces DIR`, the flake's
+/// A trace corpus (`arkdb fuzz N SEED traces DIR`, the flake's
 /// `trace-corpus`): every file under `ARK_TRACE_CORPUS` replays, and there
 /// is at least one; with the variable unset, nothing to do. What the
 /// flake's `traces` check runs, and only it.
