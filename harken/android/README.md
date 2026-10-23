@@ -117,10 +117,10 @@ the browser peer by GitHub Pages:
     https://k2on.github.io/apps/fdroid/repo?fingerprint=E48F7E6E1AB9C74C4F0404835580DE590334C636EAF654680E1BF0D250BEF3DD
 
 Add it in F-Droid (Settings → Repositories → **+**) and every later build
-arrives as an update. `nix build .#harken-fdroid-repo` is the repository
-for this flake's APK, signed and checked; `fdroid/README.md` is how it is
-published, why its index key is committed, and how to move to a private
-one.
+arrives as an update. `nix build .#fdroid-repo` is the repository for
+this flake's APKs, this app's and Revelation's, signed and checked;
+`fdroid/README.md` is how it is published, why its index key is
+committed, and how to move to a private one.
 
 The first install from F-Droid over a copy installed by hand works without
 an uninstall, because both are signed with the committed debug key — as

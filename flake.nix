@@ -527,84 +527,111 @@
               buildToolsVersions = [ "35.0.0" ];
             }).androidsdk}/libexec/android-sdk";
 
-          # The phone (harken/android/README.md): gradle over the SDK, the app
-          # — its onboarding and its look are its own code — over
-          # `harken-android-lib` (the kernel per ABI, and the Kotlin over it),
-          # assembled offline from a recorded Maven graph
-          # (harken/android/deps.json; `nix run .#harken-apk-deps` re-records
-          # it). The app's JVM tests run first, so an APK is not built over a
-          # screen or a rule that fails them.
+          # An Android app of this tree (`<name>/android`, a gradle project
+          # with one `:app`): gradle over the SDK, assembled offline from a
+          # recorded Maven graph (`<name>/android/deps.json`; `nix run
+          # .#<name>-apk-deps` re-records it). The app's JVM tests run first,
+          # so an APK is not built over a screen or a rule that fails them.
           #
-          # The release build, `harken.apk`: not debuggable, so ART compiles
+          # The release build, `<name>.apk`: not debuggable, so ART compiles
           # it as it would any app, with the baseline profiles Compose's
           # libraries ship. Not minified: R8 is not in the recorded graph.
-          # Signed with harken/android/debug.keystore, committed and public on
-          # purpose (app/build.gradle.kts says why), so each build installs
-          # over the last; and a version code that rises with each commit, the
-          # flake's own source time in minutes.
-          harken-apk = pkgs.stdenv.mkDerivation (final: {
-            pname = "harken-apk";
-            version = "0.1.0";
-            src = only [ "harken/android" ];
-            sourceRoot = "source/harken/android";
-            postUnpack = "chmod -R u+w source";
-            nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
-            mitmCache = pkgs.gradle.fetchDeps {
-              pkg = final.finalPackage;
-              data = ./harken/android/deps.json;
-            };
-            __darwinAllowLocalNetworking = true;
-            ANDROID_HOME = sdkRoot;
-            ANDROID_SDK_ROOT = sdkRoot;
-            gradleFlags = [
-              "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
-              "-Porg.gradle.java.installations.auto-detect=false"
-              "-Porg.gradle.java.installations.auto-download=false"
-              "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
-              # AGP would fetch its own aapt2 from Maven, an unpatched binary
-              # that cannot run here; the SDK's is patched and can.
-              "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
-              "-PharkenLib=${harken-android-lib}"
-            ] ++ final.versionFlags;
-            # Read by app/build.gradle.kts; a local build falls back to 1.
-            versionFlags = [
-              "-PversionCode=${toString (self.lastModified / 60)}"
-              "-PversionName=0.1.${self.lastModifiedDate}"
-            ];
-            # AGP keeps its state under ~/.android, and the builder has no home.
-            preBuild = ''
-              export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
-              mkdir -p "$ANDROID_USER_HOME"
-            '';
-            gradleBuildTask = ":app:testDebugUnitTest :app:assembleRelease";
-            # The recording runs the same tasks, and the screenshots' and a
-            # laptop's debug build, so that one recording serves all three.
-            gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
-            doCheck = false;
-            installPhase = ''
-              mkdir -p $out
-              cp app/build/outputs/apk/release/app-release.apk $out/harken.apk
-            '';
-          });
+          # Signed with the app's own `debug.keystore`, committed and public
+          # on purpose (harken/android/app/build.gradle.kts says why), so each
+          # build installs over the last; and a version code that rises with
+          # each commit, the flake's own source time in minutes.
+          #
+          # `screens` is the same build recording its Paparazzi screenshots
+          # (every screen and state, light and dark, rendered on the JVM
+          # through layoutlib) and an index.html laying them out light beside
+          # dark (nix/screens-index.py). `flags` are the app's own gradle
+          # properties; `title` and `note` head that page.
+          androidApp = { name, appid, flags ? [ ], title, note }:
+            let
+              dir = "${name}/android";
+              apk = pkgs.stdenv.mkDerivation (final: {
+                pname = "${name}-apk";
+                version = "0.1.0";
+                src = only [ dir ];
+                sourceRoot = "source/${dir}";
+                postUnpack = "chmod -R u+w source";
+                nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
+                mitmCache = pkgs.gradle.fetchDeps {
+                  pkg = final.finalPackage;
+                  data = ./. + "/${dir}/deps.json";
+                };
+                __darwinAllowLocalNetworking = true;
+                ANDROID_HOME = sdkRoot;
+                ANDROID_SDK_ROOT = sdkRoot;
+                gradleFlags = [
+                  "-Dorg.gradle.java.home=${pkgs.jdk21.home}"
+                  "-Porg.gradle.java.installations.auto-detect=false"
+                  "-Porg.gradle.java.installations.auto-download=false"
+                  "-Porg.gradle.java.installations.paths=${pkgs.jdk21.home}"
+                  # AGP would fetch its own aapt2 from Maven, an unpatched binary
+                  # that cannot run here; the SDK's is patched and can.
+                  "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+                ] ++ flags ++ final.versionFlags;
+                # Read by app/build.gradle.kts; a local build falls back to 1.
+                versionFlags = [
+                  "-PversionCode=${toString (self.lastModified / 60)}"
+                  "-PversionName=0.1.${self.lastModifiedDate}"
+                ];
+                # AGP keeps its state under ~/.android, and the builder has no home.
+                preBuild = ''
+                  export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
+                  mkdir -p "$ANDROID_USER_HOME"
+                '';
+                gradleBuildTask = ":app:testDebugUnitTest :app:assembleRelease";
+                # The recording runs the same tasks, and the screenshots' and a
+                # laptop's debug build, so that one recording serves all three.
+                gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
+                doCheck = false;
+                installPhase = ''
+                  mkdir -p $out
+                  cp app/build/outputs/apk/release/app-release.apk $out/${name}.apk
+                '';
+              });
+              screens = apk.overrideAttrs (old: {
+                pname = "${name}-android-screens";
+                gradleBuildTask = ":app:recordPaparazziDebug";
+                versionFlags = [ ];
+                installPhase = ''
+                  mkdir -p $out
+                  shots=app/src/test/snapshots/images
+                  for f in $shots/*.png; do
+                    b=$(basename "$f" .png)
+                    cp "$f" "$out/''${b#${appid}_Screens_}.png"
+                  done
+                  ${pkgs.python3}/bin/python3 ${./nix/screens-index.py} $out ${lib.escapeShellArg title} ${lib.escapeShellArg note} > $out/index.html
+                '';
+              });
+            in
+            { inherit apk screens; deps = apk.mitmCache.updateScript; };
 
-          # The phone's screens as images: every screen and state, light and
-          # dark, at a Pixel 5's size, rendered on the JVM by Paparazzi through
-          # layoutlib from a fixed library (harken/android/app/src/test), and
-          # an index.html laying them out light beside dark.
-          harken-android-screens = harken-apk.overrideAttrs (old: {
-            pname = "harken-android-screens";
-            gradleBuildTask = ":app:recordPaparazziDebug";
-            versionFlags = [ ];
-            installPhase = ''
-              mkdir -p $out
-              shots=app/src/test/snapshots/images
-              for f in $shots/*.png; do
-                b=$(basename "$f" .png)
-                cp "$f" "$out/''${b#dev.harken.android_Screens_}.png"
-              done
-              ${pkgs.python3}/bin/python3 ${./harken/android/screens-index.py} $out > $out/index.html
-            '';
-          });
+          # The phone (harken/android/README.md): the app — its onboarding
+          # and its look are its own code — over `harken-android-lib` (the
+          # kernel per ABI, and the Kotlin over it). Its screens are rendered
+          # from a fixed library (harken/android/app/src/test).
+          harken = androidApp {
+            name = "harken";
+            appid = "dev.harken.android";
+            flags = [ "-PharkenLib=${harken-android-lib}" ];
+            title = "Harken";
+            note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
+          };
+          harken-apk = harken.apk;
+          harken-android-screens = harken.screens;
+
+          # The Bible as one scroll, zoomed like a map (revelation/README.md,
+          # docs/plan-bible.md): plain Kotlin, no native library and none of
+          # ArkDB, so it is the SDK and gradle alone.
+          revelation = androidApp {
+            name = "revelation";
+            appid = "dev.revelation.android";
+            title = "Revelation";
+            note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
+          };
 
           # The same library for iOS — `aarch64-apple-ios` for a phone and
           # `aarch64-apple-ios-sim` for the simulator on an Apple-silicon Mac —
@@ -706,12 +733,36 @@
             inherit harken-web harken-web-server harken-iced ark-admin;
             default = ark;
             inherit harken-apk harken-android-screens;
-            harken-apk-deps = harken-apk.mitmCache.updateScript;
+            harken-apk-deps = harken.deps;
+            revelation-apk = revelation.apk;
+            revelation-android-screens = revelation.screens;
+            revelation-apk-deps = revelation.deps;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
             android-sdk = androidSdk;
-            # The APK's F-Droid repository, and a key for it (nix/fdroid.nix).
-            inherit (import ./nix/fdroid.nix { inherit lib pkgs harken-apk; }) harken-fdroid-repo harken-fdroid fdroid-keygen;
+            # The APKs' F-Droid repository, one for both apps, and a key for
+            # it (nix/fdroid.nix). Each app is its id, its APK, its metadata
+            # and its icon.
+            inherit (import ./nix/fdroid.nix {
+              inherit lib pkgs;
+              apps = [
+                {
+                  appid = "dev.harken.android";
+                  apk = harken-apk;
+                  apkName = "harken.apk";
+                  metadata = ./harken/android/fdroid/metadata/dev.harken.android.yml;
+                  # The trumpet the browser's tab draws.
+                  icon = ./harken/iced/web/favicon.svg;
+                }
+                {
+                  appid = "dev.revelation.android";
+                  apk = revelation.apk;
+                  apkName = "revelation.apk";
+                  metadata = ./revelation/android/fdroid/metadata/dev.revelation.android.yml;
+                  icon = ./revelation/android/fdroid/icon.svg;
+                }
+              ];
+            }) fdroid-repo apps-fdroid fdroid-keygen;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an

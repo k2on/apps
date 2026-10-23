@@ -1,4 +1,4 @@
-"""What harken-fdroid (nix/fdroid.nix) asks of an APK and of an index.
+"""What apps-fdroid (nix/fdroid.nix) asks of an APK and of an index.
 
     fdroid.py apkid APK              the application id and the version code
     fdroid.py listed INDEX APPID N   the newest N of APPID's APKs in an

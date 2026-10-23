@@ -204,7 +204,7 @@ options). The phones:
 
 One workflow builds from `main` (`.github/workflows/build.yaml`): it
 publishes `harken-web` at <https://k2on.github.io/apps/harken/>; the
-F-Droid repository is `nix build .#harken-fdroid-repo` over the APK. That
+F-Droid repository is `nix build .#fdroid-repo` over the APKs. That
 is the workflow once `.github/workflows/build.yaml` is updated for the native tree (its cache keys name files that no longer exist), and the
 patch predates the APK's return: its APK job is not in it.
 

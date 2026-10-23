@@ -34,6 +34,12 @@ a crate of plain Rust every peer links — and harken, the first app on it.
 - `docs/plan-v5.md` — the design, how it landed and what it measures
   (Part 3); `docs/arkdb.md` is the history it superseded.
 
+`revelation/` is a second app, and not on ArkDB: an Android app in plain
+Kotlin, no Rust and no native library, that is the Bible as one scroll
+zoomed like a map. `revelation/README.md` says how to build and run it and
+`docs/plan-bible.md` is its plan. Both apps' APKs are published through one
+F-Droid repository.
+
 One command holds all of it:
 
     nix flake check   # rust: every test of the workspace
@@ -55,6 +61,10 @@ One command holds all of it:
                                 # ark-admin, ark, vectors, trace-corpus
     nix build .#harken-apk      # the kernel for three ABIs and the APK over it,
                                 # its JVM tests run on the real kernel
+    nix build .#revelation-apk  # Revelation's APK, its JVM tests run first;
+                                # *-android-screens are either app's screens
+    nix build .#fdroid-repo     # both APKs as the F-Droid repository, signed
+                                # and checked; apps-fdroid is what CI runs
     nix run .#fuzz -- 1000 1 traces
 
 What is verified: the kernel, the peer, harken's domain and server by

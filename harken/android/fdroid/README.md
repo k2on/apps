@@ -33,9 +33,10 @@ No secret is needed for any of this.
 
 ## What it is
 
-`nix build .#harken-fdroid-repo` is the repository for the APK this flake
-builds, exactly as it is served: `dev.harken.android_<versionCode>.apk`,
-the trumpet as the app's icon and the repository's, the metadata from
+`nix build .#fdroid-repo` is the repository for the APKs this flake
+builds (Revelation's beside this app's), exactly as it is served:
+`dev.harken.android_<versionCode>.apk`, the trumpet as the app's icon and
+the repository's, the metadata from
 `metadata/dev.harken.android.yml`, and `entry.jar`, `index-v2.json` and
 the v1 indexes, signed. The build ends by checking what the client checks —
 `entry.jar`'s signature and signer, the index's hash in `entry.json`, and
@@ -44,7 +45,7 @@ not a package. `nix/fdroid.nix` is all of it.
 
 What `build.yaml`'s deploy runs is the same layout with one difference. Pages deploys
 the site whole, so a repository built from the newest APK alone would
-offer nothing to go back to: `harken-fdroid repo --keep` fetches the APKs
+offer nothing to go back to: `apps-fdroid repo --keep` fetches the APKs
 the live repository already lists, checks each against the hash the index
 gave it, and keeps the newest three by version code — about 14 MB each,
 well under Pages' 1 GB site and 100 MB file. An unreachable or empty live
@@ -53,8 +54,8 @@ repository is the new APK alone, never a failed deploy.
 On a laptop, the first of these does what CI does and the second checks
 any repository against a fingerprint:
 
-    nix run .#harken-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo out result/harken.apk
-    nix run .#harken-fdroid -- check out E48F7E6E1AB9C74C4F0404835580DE590334C636EAF654680E1BF0D250BEF3DD
+    nix run .#apps-fdroid -- repo --keep https://k2on.github.io/apps/fdroid/repo out result/harken.apk
+    nix run .#apps-fdroid -- check out E48F7E6E1AB9C74C4F0404835580DE590334C636EAF654680E1BF0D250BEF3DD
 
 ## The index key is public, on purpose
 
