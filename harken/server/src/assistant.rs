@@ -201,6 +201,12 @@ pub const QUIET: u8 = 2;
 /// the beginning, and the session — told `started` at 0 — went back with it.
 pub const SEEKS: u8 = 3;
 
+/// How many times a speaker handed a paused session and found playing it
+/// is told again to pause, before it is believed. The house has no call
+/// that loads a track without playing it, so a paused hand-off is a play
+/// with a pause after it, and a Sonos drops the pause as it drops the seek.
+pub const PAUSES: u8 = 3;
+
 /// How far a playing speaker may be from where the session counts it
 /// before one is told the other ([`SYNC_MS`], the same bound every output
 /// is held to): the speaker is right about where it is, so the session is
@@ -545,6 +551,10 @@ struct Holding {
     /// polls to wait before the next.
     sought: u8,
     seek_wait: u8,
+    /// Pauses told again to a paused hand-off found playing ([`PAUSES`]),
+    /// and polls to wait before the next.
+    paused: u8,
+    pause_wait: u8,
     /// When it was handed the queue, and when it was last told anything that
     /// moves where it is (the queue, a seek, a play or a pause) — the server's
     /// clock — and how many polls since: a position dated before that is
@@ -672,6 +682,8 @@ impl Hand<'_> {
             from_ms: position_ms,
             sought: 0,
             seek_wait: 0,
+            paused: 0,
+            pause_wait: 0,
             handed_ms: self.now,
             told_ms: self.now,
             since_told: 0,
@@ -1327,6 +1339,22 @@ fn fetching(
         }
         return vec![];
     };
+    // Handed paused and playing it: the pause after the play was dropped.
+    // It is told again, and the hand-off has not landed until it is paused
+    // there; waited out instead, it is believed paused while it plays, and
+    // its playing is then said to the session as a hand on the speaker.
+    if !h.playing && p.says() == Says::Playing && h.paused < PAUSES {
+        if h.pause_wait > 0 {
+            h.pause_wait -= 1;
+            return vec![];
+        }
+        (h.paused, h.pause_wait, h.told_ms, h.since_told) = (h.paused + 1, QUIET, now, 0);
+        return vec![Act::Verb {
+            entity: entity.into(),
+            verb: "media_pause",
+            why: "the session was handed over paused",
+        }];
+    }
     if p.says() != wanted {
         wait(room, Some(at), now);
         return vec![];
@@ -1956,6 +1984,65 @@ mod tests {
         let acts = b.heard(KITCHEN, Some(&playing(&url_of("music/b.mp3"), 1_200)), NOW);
         assert_eq!(calls(&acts), [("alice", "started")]);
         assert_eq!(input_of(&acts, 0), input::at(1_200));
+    }
+
+    /// A session handed over paused stays paused. The house has no call
+    /// that loads a track without playing it, so a paused hand-off is a
+    /// play followed at once by a pause, and a Sonos drops a command that
+    /// reaches it before it has read the stream, as it drops the seek. A
+    /// speaker that plays a hand-off it was handed paused is told to pause
+    /// again, and the hand-off has landed when it is paused there; nothing
+    /// it does meanwhile is said to the session, which is not told `play`.
+    ///
+    /// Falsified by waiting out a speaker that says it plays (`wait` where
+    /// the pause is said again): no pause is told, the hand-off is believed
+    /// to have landed paused after [`WAIT`] polls, and the next poll's
+    /// playing is said to the session as `play`, which then sought the
+    /// speaker back to where the session stood: the track restarted.
+    #[test]
+    fn a_session_handed_over_paused_is_paused_on_the_speaker() {
+        let mut b = bridge();
+        let files = ["music/a.mp3", "music/b.mp3"];
+        let paused = Clock::Paused { at_ms: 0 };
+        let acts = b.wants(
+            "alice",
+            KITCHEN,
+            &session(&files, 0, paused, kitchen(true)),
+            NOW,
+        );
+        assert!(
+            matches!(acts.as_slice(), [Act::Start { playing: false, .. }]),
+            "{acts:?}"
+        );
+        let pauses = |acts: &[Act]| {
+            acts.iter()
+                .filter(|a| {
+                    matches!(
+                        a,
+                        Act::Verb {
+                            verb: "media_pause",
+                            ..
+                        }
+                    )
+                })
+                .count()
+        };
+        let mut told = 0;
+        for poll in 0..(WAIT as i64 + 5) {
+            let at = NOW + poll * 1_000;
+            let acts = b.heard(KITCHEN, Some(&playing(&url_of(files[0]), poll * 1_000)), at);
+            assert!(
+                !calls(&acts).iter().any(|(_, t)| *t == "play"),
+                "the session was told play: {acts:?}"
+            );
+            told += pauses(&acts);
+        }
+        assert!(told >= 1, "the speaker was never told to pause again");
+        let mut stopped = playing(&url_of(files[0]), 3_000);
+        stopped.state = "paused".into();
+        let at = NOW + (WAIT as i64 + 6) * 1_000;
+        let acts = b.heard(KITCHEN, Some(&stopped), at);
+        assert!(!calls(&acts).iter().any(|(_, t)| *t == "play"), "{acts:?}");
     }
 
     /// The house says a speaker is playing before it says where: the Sonos
