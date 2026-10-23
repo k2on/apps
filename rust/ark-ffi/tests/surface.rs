@@ -314,3 +314,25 @@ fn a_tap_begun_through_the_bridge_is_the_servers_cause() {
         .expect("the server's entry has a cause");
     assert_eq!(format!("{}/{}", ark::hash::hex(&cause.trace.0), ark::hash::hex(&cause.id)), span);
 }
+
+/// An app's mutate with no span opened is somebody's doing too: it reaches
+/// the server as the root of a trace of its own, not as an answer to
+/// whatever the device was last told. Falsified by `mutate` authoring
+/// under the peer's waking span: the entry had no root of its own.
+#[test]
+fn an_apps_mutate_is_the_root_of_its_trace() {
+    let hub = server();
+    let d = tempfile::tempdir().unwrap();
+    let alice = device(&d, "phone", Some(login("alice@phone")));
+    alice.connect_with("", hub.dialer(Arc::new(dev)));
+    until("alice linked", || alice.status().linked);
+    let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
+    until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
+    let entry = hub
+        .with(move |p| p.log.log().entries().into_iter().find(|l| ark::hash::hex(&l.entry.id.0) == made).map(|l| l.entry))
+        .flatten()
+        .unwrap();
+    let cause = entry.cause.expect("a root span");
+    assert_eq!(entry.span().trace, cause.trace, "in the root's trace");
+    assert_ne!(cause.trace.0, entry.id.0, "a trace begun by the app, not by the entry");
+}

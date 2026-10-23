@@ -433,7 +433,17 @@ impl Peer {
         let _call = tracing::debug_span!(target: "ark", "ffi", call = "mutate", name = %name).entered();
         let id = self.shared.act(|s| {
             let input = s.peer.input_json(&name, &input)?;
-            s.peer.mutate_bytes(&name, input)
+            // An app's mutate is somebody's doing — a tap — and the root of
+            // what it causes, unless the app opened a span around it; a
+            // job's own steps answer what made the job due instead.
+            let job = [".claim", ".finish", ".cancel"].iter().any(|v| name.ends_with(v));
+            if job || s.peer.open_span().is_some() {
+                return s.peer.mutate_bytes(&name, input);
+            }
+            s.peer.begin(&name);
+            let out = s.peer.mutate_bytes(&name, input);
+            s.peer.end();
+            out
         })?;
         Ok(ark::hash::hex(&id.0))
     }
