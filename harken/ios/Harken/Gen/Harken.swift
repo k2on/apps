@@ -1466,25 +1466,25 @@ public struct Harken {
     @discardableResult public func addSong(_ input: AddSong) throws -> String { try peer.mutate(name: "library.add_song", input: input.json) }
 
     /// `library.album`, kept, its rows UniFFI's.
-    public func album(_ input: AlbumInput) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.album", input: input.json)) }
+    public func album(_ input: AlbumInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.album", input: input.json)) }
 
     /// `library.albums`, kept.
-    public func albums() throws -> View<AlbumsEntry> { View(try peer.view(name: "library.albums", input: "null")) { j in AlbumsEntry(json: j) } }
+    public func albums() throws -> LiveView<AlbumsEntry> { LiveView(try peer.view(name: "library.albums", input: "null")) { j in AlbumsEntry(json: j) } }
 
     /// `library.artist`, kept, its rows UniFFI's.
-    public func artist(_ input: Artist) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.artist", input: input.json)) }
+    public func artist(_ input: Artist) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.artist", input: input.json)) }
 
     /// `library.artists`, kept.
-    public func artists() throws -> View<ArtistsEntry> { View(try peer.view(name: "library.artists", input: "null")) { j in ArtistsEntry(json: j) } }
+    public func artists() throws -> LiveView<ArtistsEntry> { LiveView(try peer.view(name: "library.artists", input: "null")) { j in ArtistsEntry(json: j) } }
 
     /// `library.composers`, kept.
-    public func composers() throws -> View<ComposersEntry> { View(try peer.view(name: "library.composers", input: "null")) { j in ComposersEntry(json: j) } }
+    public func composers() throws -> LiveView<ComposersEntry> { LiveView(try peer.view(name: "library.composers", input: "null")) { j in ComposersEntry(json: j) } }
 
     /// `library.credit_recording`: its intent's id.
     @discardableResult public func creditRecording(_ input: CreditRecording) throws -> String { try peer.mutate(name: "library.credit_recording", input: input.json) }
 
     /// `library.credits`, kept.
-    public func credits(_ input: Credits) throws -> View<CreditsEntry> { View(try peer.view(name: "library.credits", input: input.json)) { j in CreditsEntry(json: j) } }
+    public func credits(_ input: Credits) throws -> LiveView<CreditsEntry> { LiveView(try peer.view(name: "library.credits", input: input.json)) { j in CreditsEntry(json: j) } }
 
     /// `library.describe_person`: its intent's id.
     @discardableResult public func describePerson(_ input: DescribePerson) throws -> String { try peer.mutate(name: "library.describe_person", input: input.json) }
@@ -1496,31 +1496,31 @@ public struct Harken {
     @discardableResult public func describeWork(_ input: DescribeWork) throws -> String { try peer.mutate(name: "library.describe_work", input: input.json) }
 
     /// `library.library`, kept, its rows UniFFI's.
-    public func library(_ input: Library) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.library", input: input.json)) }
+    public func library(_ input: Library) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.library", input: input.json)) }
 
     /// `library.look`: its intent's id.
     @discardableResult public func look(_ input: LookAt) throws -> String { try peer.mutate(name: "library.look", input: input.json) }
 
     /// `library.recording`, kept, its rows UniFFI's.
-    public func recording(_ input: RecordingInput) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.recording", input: input.json)) }
+    public func recording(_ input: RecordingInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.recording", input: input.json)) }
 
     /// `library.recordings`, kept.
-    public func recordings(_ input: Recordings) throws -> View<RecordingsEntry> { View(try peer.view(name: "library.recordings", input: input.json)) { j in RecordingsEntry(json: j) } }
+    public func recordings(_ input: Recordings) throws -> LiveView<RecordingsEntry> { LiveView(try peer.view(name: "library.recordings", input: input.json)) { j in RecordingsEntry(json: j) } }
 
     /// `library.remove_media`: its intent's id.
     @discardableResult public func removeMedia(_ input: RemoveMedia) throws -> String { try peer.mutate(name: "library.remove_media", input: input.json) }
 
     /// `library.search`, kept, its rows UniFFI's.
-    public func search(_ input: Search) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.search", input: input.json)) }
+    public func search(_ input: Search) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.search", input: input.json)) }
 
     /// `library.track_details`, kept.
-    public func trackDetails() throws -> View<TrackDetailsEntry> { View(try peer.view(name: "library.track_details", input: "null")) { j in TrackDetailsEntry(json: j) } }
+    public func trackDetails() throws -> LiveView<TrackDetailsEntry> { LiveView(try peer.view(name: "library.track_details", input: "null")) { j in TrackDetailsEntry(json: j) } }
 
     /// `library.work`, kept.
-    public func work(_ input: WorkInput) throws -> View<WorkSummary> { View(try peer.view(name: "library.work", input: input.json)) { j in WorkSummary(json: j) } }
+    public func work(_ input: WorkInput) throws -> LiveView<WorkSummary> { LiveView(try peer.view(name: "library.work", input: input.json)) { j in WorkSummary(json: j) } }
 
     /// `library.works`, kept.
-    public func works(_ input: Works) throws -> View<WorkSummary> { View(try peer.view(name: "library.works", input: input.json)) { j in WorkSummary(json: j) } }
+    public func works(_ input: Works) throws -> LiveView<WorkSummary> { LiveView(try peer.view(name: "library.works", input: input.json)) { j in WorkSummary(json: j) } }
 
     /// `listening.advance`, on the live space.
     public func advance(_ input: Advance) throws { try peer.call(name: "listening.advance", input: input.json) }
@@ -1541,7 +1541,7 @@ public struct Harken {
     public func jump(_ input: Jump) throws { try peer.call(name: "listening.jump", input: input.json) }
 
     /// `listening.last_played`, kept.
-    public func lastPlayed() throws -> View<Play> { View(try peer.view(name: "listening.last_played", input: "null")) { j in Play(json: j) } }
+    public func lastPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.last_played", input: "null")) { j in Play(json: j) } }
 
     /// `listening.move`, on the live space.
     public func move(_ input: Move) throws { try peer.call(name: "listening.move", input: input.json) }
@@ -1568,7 +1568,7 @@ public struct Harken {
     public func play() throws { try peer.call(name: "listening.play", input: "null") }
 
     /// `listening.recently_played`, kept.
-    public func recentlyPlayed() throws -> View<Play> { View(try peer.view(name: "listening.recently_played", input: "null")) { j in Play(json: j) } }
+    public func recentlyPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.recently_played", input: "null")) { j in Play(json: j) } }
 
     /// `listening.record_play`: its intent's id.
     @discardableResult public func recordPlay(_ input: RecordPlay) throws -> String { try peer.mutate(name: "listening.record_play", input: input.json) }
@@ -1649,13 +1649,13 @@ public struct Harken {
     @discardableResult public func createPlaylist(_ input: CreatePlaylist) throws -> String { try peer.mutate(name: "playlists.create_playlist", input: input.json) }
 
     /// `playlists.playlist`, kept, its rows UniFFI's.
-    public func playlist(_ input: PlaylistInput) throws -> View<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "playlists.playlist", input: input.json)) }
+    public func playlist(_ input: PlaylistInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "playlists.playlist", input: input.json)) }
 
     /// `playlists.playlists`, kept, its rows UniFFI's.
-    public func playlists() throws -> View<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists", input: "null")) }
+    public func playlists() throws -> LiveView<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists", input: "null")) }
 
     /// `playlists.playlists_of`, kept, its rows UniFFI's.
-    public func playlistsOf(_ input: PlaylistsOf) throws -> View<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists_of", input: input.json)) }
+    public func playlistsOf(_ input: PlaylistsOf) throws -> LiveView<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists_of", input: input.json)) }
 
     /// `playlists.remove_from_playlist`: its intent's id.
     @discardableResult public func removeFromPlaylist(_ input: RemoveFromPlaylist) throws -> String { try peer.mutate(name: "playlists.remove_from_playlist", input: input.json) }
@@ -1670,14 +1670,14 @@ public struct Harken {
     public func current() throws -> SignIn? { J.opt(J.parse(try peer.query(name: "session.current", input: "null"))) { v0 in SignIn(json: v0) } }
 
     /// `session.mine`, kept.
-    public func mine() throws -> View<SignIn> { View(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }
+    public func mine() throws -> LiveView<SignIn> { LiveView(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }
 
     /// `session.revoke`: its intent's id.
     @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
 
-    private func typed(_ v: LibraryEntryView) -> View<LibraryEntry> { View.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: LibraryEntryView) -> LiveView<LibraryEntry> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
-    private func typed(_ v: PlaylistView) -> View<Playlist> { View.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: PlaylistView) -> LiveView<Playlist> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
     /// The live table `listening`, as this device holds it.
     public func liveListening() -> [Listening] { peer.liveRows(table: "listening").map { Listening(json: J.parse($0)) } }

@@ -30,14 +30,14 @@ const LANG: Lang = Lang {
         format!("/// `{name}`, on the live space.\n    public func {m}({p}) throws {{ try peer.call(name: \"{name}\", input: {arg}) }}")
     },
     typed_view: |Hole { m, p, name, arg, r, .. }| {
-        format!("/// `{name}`, kept, its rows UniFFI's.\n    public func {m}({p}) throws -> View<{r}> {{ typed(try {r}View(peer: peer, name: \"{name}\", input: {arg})) }}")
+        format!("/// `{name}`, kept, its rows UniFFI's.\n    public func {m}({p}) throws -> LiveView<{r}> {{ typed(try {r}View(peer: peer, name: \"{name}\", input: {arg})) }}")
     },
     view: |Hole { m, p, name, arg, t, rd, .. }| {
-        format!("/// `{name}`, kept.\n    public func {m}({p}) throws -> View<{t}> {{ View(try peer.view(name: \"{name}\", input: {arg})) {{ j in {rd} }} }}")
+        format!("/// `{name}`, kept.\n    public func {m}({p}) throws -> LiveView<{t}> {{ LiveView(try peer.view(name: \"{name}\", input: {arg})) {{ j in {rd} }} }}")
     },
     query: |Hole { m, p, name, t, rd, .. }| format!("/// `{name}`.\n    public func {m}({p}) throws -> {t} {{ {rd} }}"),
     query_call: |name, arg| format!("J.parse(try peer.query(name: \"{name}\", input: {arg}))"),
-    typed: |r| format!("private func typed(_ v: {r}View) -> View<{r}> {{ View.typed(rows: v.rows, take: {{ let t = v.take(); return (t.update, t.rows) }}) }}"),
+    typed: |r| format!("private func typed(_ v: {r}View) -> LiveView<{r}> {{ LiveView.typed(rows: v.rows, take: {{ let t = v.take(); return (t.update, t.rows) }}) }}"),
     live_table: |table, row, m| {
         format!("/// The live table `{table}`, as this device holds it.\n    public func {m}() -> [{row}] {{ peer.liveRows(table: \"{table}\").map {{ {row}(json: J.parse($0)) }} }}")
     },

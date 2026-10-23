@@ -13,7 +13,7 @@
 // **The lists are spliced, not re-read.** The songs, the playlists, the
 // albums, the artists, the songs' details and the last play are the
 // kernel's maintained views (§1.10), typed by the generated stubs
-// (`View<T>`), read once — Home's three first, published, and the rest a
+// (`LiveView<T>`), read once — Home's three first, published, and the rest a
 // turn later — and after every change each is asked what it did and its
 // patches spliced into the list the screens hold; only a reset reads one
 // again. A page — an album, an artist, a playlist — is a view too, held
@@ -60,10 +60,10 @@ private final class Told: Listener, @unchecked Sendable {
 
 /// A view and the list it is spliced into; on the session's queue only.
 private final class Held<E> {
-    let open: (Harken) throws -> View<E>?
-    var view: View<E>? = nil
+    let open: (Harken) throws -> LiveView<E>?
+    var view: LiveView<E>? = nil
     var rows = [E]()
-    init(_ open: @escaping (Harken) throws -> View<E>?) { self.open = open }
+    init(_ open: @escaping (Harken) throws -> LiveView<E>?) { self.open = open }
 
     func hydrate(_ h: Harken) {
         view = (try? open(h)) ?? nil
