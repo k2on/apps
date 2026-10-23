@@ -55,7 +55,7 @@ shape is the most likely to need a fix at the first build (README.md,
 
 | Android | iOS | API | File | Built |
 |---|---|---|---|---|
-| The library's views spliced, never re-read (`Library.kt`): songs, playlists, albums first, then artists, details, last played; pages held while on the stack | Same: one queue, `View<T>.take()` spliced; a page held by its `@StateObject` | the bridge's `View<T>` | Bridge.swift, Shell.swift `Holding` | yes |
+| The library's views spliced, never re-read (`Library.kt`): songs, playlists, albums first, then artists, details, last played; pages held while on the stack | Same: one queue, `LiveView<T>.take()` spliced; a page held by its `@StateObject` | the bridge's `LiveView<T>` | Bridge.swift, Shell.swift `Holding` | yes |
 | Writes: create (and put the song on it), add, remove; each kept with its entry for the diagnostics | Same | the generated stubs | Bridge.swift | yes |
 | Playlist reorder | Not built: the domain has no function that reorders a playlist (only `create_playlist`, `add_to_playlist`, `add_all_to_playlist`, `remove_from_playlist`), and Android has none | — | — | no, no domain function |
 | The listening session through harken's one reconciler (`Listen.kt`, S3b): stepped on every change, one view (`Heard`), every press one way in | Same: the FFI's `Player` stepped on every drain, `Heard.of(view)` | `Player`, `PhoneSound` | Bridge.swift, Session.swift | yes, and run against a `Hall` (`SoundTests`) |

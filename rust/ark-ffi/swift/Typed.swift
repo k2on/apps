@@ -15,7 +15,7 @@ public struct Id: Hashable {
 /// A view's rows read as `T`, and what it did since last taken: each row its
 /// JSON read by `read` over a `ViewHandle`, or — a typed view — rows UniFFI
 /// hands over as they are (`typed`).
-public final class View<T> {
+public final class LiveView<T> {
     let rowsOf: () -> [T]
     let takeOf: () -> Update<T>
 
@@ -40,8 +40,8 @@ public final class View<T> {
 
     /// A domain's typed view object (`<T>View`): its rows, and what it did
     /// with the rows that came with it.
-    public static func typed(rows: @escaping () -> [T], take: @escaping () -> (Taken, [T])) -> View<T> {
-        View(rows: rows, take: {
+    public static func typed(rows: @escaping () -> [T], take: @escaping () -> (Taken, [T])) -> LiveView<T> {
+        LiveView(rows: rows, take: {
             let (t, came) = take()
             switch t {
             case .unchanged: return .unchanged

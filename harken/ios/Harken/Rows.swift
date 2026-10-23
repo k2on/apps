@@ -75,17 +75,17 @@ enum Phone {
     /// The playlist a list is read against when there is none: `library` marks nothing.
     static var noPlaylist: Id { Id.none }
 
-    static func library(_ h: Harken) throws -> View<LibraryEntry> { try h.library(Library(playlistId: noPlaylist)) }
+    static func library(_ h: Harken) throws -> LiveView<LibraryEntry> { try h.library(Library(playlistId: noPlaylist)) }
 
     /// A page's songs: an album's or an artist's by name, or a playlist's.
-    static func album(_ h: Harken, _ name: String) throws -> View<LibraryEntry> { try h.album(AlbumInput(playlistId: noPlaylist, name: name)) }
+    static func album(_ h: Harken, _ name: String) throws -> LiveView<LibraryEntry> { try h.album(AlbumInput(playlistId: noPlaylist, name: name)) }
 
-    static func artist(_ h: Harken, _ name: String) throws -> View<LibraryEntry> { try h.artist(Artist(playlistId: noPlaylist, name: name)) }
+    static func artist(_ h: Harken, _ name: String) throws -> LiveView<LibraryEntry> { try h.artist(Artist(playlistId: noPlaylist, name: name)) }
 
-    static func playlist(_ h: Harken, _ id: Id) throws -> View<LibraryEntry> { try h.playlist(PlaylistInput(playlistId: id)) }
+    static func playlist(_ h: Harken, _ id: Id) throws -> LiveView<LibraryEntry> { try h.playlist(PlaylistInput(playlistId: id)) }
 
     /// A page's view; none for every song, which is the library's own.
-    static func view(_ h: Harken, _ page: Page) throws -> View<LibraryEntry>? {
+    static func view(_ h: Harken, _ page: Page) throws -> LiveView<LibraryEntry>? {
         switch page {
         case let .album(name): return try album(h, name)
         case let .artist(name): return try artist(h, name)
@@ -95,7 +95,7 @@ enum Phone {
     }
 
     /// A view's rows once, and the view let go; none when it is refused.
-    static func once<E>(_ v: () throws -> View<E>) -> [E] {
+    static func once<E>(_ v: () throws -> LiveView<E>) -> [E] {
         (try? v().rows()) ?? []
     }
 
