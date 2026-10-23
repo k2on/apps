@@ -37,7 +37,16 @@ async fn main() -> Result<()> {
     if let Some(extra) = args.next() {
         anyhow::bail!("unexpected argument {extra}\n{USAGE}");
     }
-    let server = start(Config::from_env(&listen)?).await?;
+    let config = Config::from_env(&listen)?;
+    // The system's events, this server's and every device's, in the data
+    // directory: what `arkdb` reads (docs/plan-observe.md).
+    let events = config.data.join("events");
+    match ark_peer::observe::Files::new(&events) {
+        Ok(f) => drop(ark_peer::observe::install(ark_peer::observe::Sink::Files(std::sync::Mutex::new(f)))),
+        Err(e) => eprintln!("harken-server: no events kept: {}: {e}", events.display()),
+    }
+    eprintln!("harken-server: events in {}", events.display());
+    let server = start(config).await?;
     stopped().await?;
     eprintln!("harken-server: stopping");
     server.stop().await;

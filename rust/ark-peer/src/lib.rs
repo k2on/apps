@@ -65,7 +65,7 @@ mod hub;
 pub mod instance;
 mod jobs;
 pub mod link;
-mod observe;
+pub mod observe;
 pub mod local;
 pub mod signed;
 pub mod watched;
@@ -850,6 +850,15 @@ impl Peer {
     }
 
     /// The frames for its server, taken: a driver carrying them itself.
+    /// What this peer said of itself since, out of the outbox and to its
+    /// server ([`Frame::Telemetry`](ark::frames::Frame)), a page at a time.
+    pub fn ship(&mut self) {
+        let events = observe::take(&self.label(), 256);
+        if !events.is_empty() {
+            self.frames.push(ark::frames::Frame::Telemetry { events }.enc());
+        }
+    }
+
     pub fn take_frames(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut self.frames)
     }

@@ -13,6 +13,7 @@ ark-auth = { path = "../ark-auth", default-features = false }
 # What a peer does, as events and spans (docs/plan-observe.md): emitted
 # here, collected wherever a subscriber is.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 
 # The server side (`serve`, `web`): a server's, which a phone or a browser
 # never links.

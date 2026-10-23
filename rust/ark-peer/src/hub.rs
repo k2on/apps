@@ -204,6 +204,18 @@ impl Peer {
     pub fn frame(&mut self, c: ConnId, bytes: Vec<u8>, now: i64) -> Vec<Deliver> {
         let Some(conn) = self.hub.conns.get_mut(&c) else { return vec![] };
         let Ok(f) = Frame::dec(&bytes) else { return vec![] };
+        if let Frame::Telemetry { events } = f {
+            // What a device says of itself, kept with what this server says,
+            // each named by the login that sent it: a device says which of
+            // its peers, the connection whose.
+            let (actor, session) = (conn.who.actor.clone(), conn.who.session.clone());
+            let events = events.into_iter().map(|mut e| {
+                e.fields.push(("from".into(), format!("{actor} \u{b7} {session}")));
+                e
+            });
+            crate::observe::collect(events.collect());
+            return vec![];
+        }
         let (space, device) = match &f {
             Frame::Hello { space, device, .. } => {
                 conn.hello[*space as usize] = true;

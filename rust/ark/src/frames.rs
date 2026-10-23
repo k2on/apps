@@ -7,6 +7,7 @@
 //! Page    { space, from, logged: [Logged] }
 //! Snapshot{ space, snapshot }
 //! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } }
+//! Telemetry { events: [Event] }
 //! ```
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
@@ -14,6 +15,10 @@
 //! zero hashes ([`Logged::intent`]) — a push being a page of one; a chain
 //! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers one intent: sequenced at `seq`, refused, or
 //! `Held` — a function the authority does not run.
+//!
+//! `Telemetry` is no machine's: what a device says of itself
+//! (docs/plan-observe.md), sent to its server beside the frames, which a
+//! server collects and a machine never reads.
 //!
 //! **No code crosses the wire.** An entry names its function by name; an
 //! authority runs exactly the functions its program was built with, and
@@ -61,6 +66,21 @@ pub enum Frame {
         id: EntryId,
         verdict: Verdict,
     },
+    Telemetry {
+        events: Vec<Event>,
+    },
+}
+
+/// One thing a peer said of itself: when (its clock, ms), which peer, how
+/// loud (`error`, `warn`, `info`, `debug`, `trace`), what (`msg`), and its
+/// fields as text, the spans around it first.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Event {
+    pub at: i64,
+    pub peer: String,
+    pub level: String,
+    pub msg: String,
+    pub fields: Vec<(String, String)>,
 }
 
 /// An authority's answer to one intent; what its journal keeps of each it
@@ -77,6 +97,8 @@ impl Frame {
     pub fn space(&self) -> Space {
         match self {
             Frame::Hello { space, .. } | Frame::Page { space, .. } | Frame::Snapshot { space, .. } | Frame::Verdict { space, .. } => *space,
+            // About no log: the log's space, whose machine passes it by.
+            Frame::Telemetry { .. } => Space::Durable,
         }
     }
 

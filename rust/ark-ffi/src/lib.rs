@@ -342,6 +342,8 @@ impl Peer {
     /// A peer opened by its host its own way — as a login it keeps itself,
     /// its link tuned — driven from now on as [`Peer::open`]'s is.
     pub fn of(mut peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
+        // What this device does goes to its server (docs/plan-observe.md).
+        ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
         let (wake, rx) = bell();
         peer.set_waker(wake.clone());
         let state = State {

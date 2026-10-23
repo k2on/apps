@@ -2384,6 +2384,8 @@ pub fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     panic_to_console();
     arkui::theme::install(palette::HARKEN);
+    // What this device does goes to its server (docs/plan-observe.md).
+    ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
     iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)

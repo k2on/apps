@@ -170,3 +170,36 @@ fn an_answer_after_the_trace_is_over_begins_its_own() {
     assert_eq!(b.cause, None, "late, it is a trace of its own");
     assert_ne!(b.span().trace, tap.trace);
 }
+
+/// What a job's own code says is collected inside the job's span, with its
+/// peer and the trace it runs in; what is refused is collected with why.
+/// Falsified by the layer reading only the event's own fields: the job's
+/// line had no peer and no span.
+#[test]
+fn a_jobs_own_words_are_collected_in_its_trace() {
+    let kept = ark_peer::observe::memory();
+    let mut net = Net::new(2);
+    net.d(0).handle::<Fetch>(|_, f| {
+        tracing::info!(id = %f.id, "fetching");
+        Ok("body".into())
+    });
+    let tap = net.d(1).begin("tap");
+    asks(&mut net, 1, "words");
+    net.d(1).end();
+    for _ in 0..3 {
+        net.d(0).jobs(now_ms());
+        net.carry();
+    }
+    let me = net.devices[0].0.label();
+    let trace = ark::hash::hex(&tap.trace.0);
+    let all = kept.lock().unwrap().clone();
+    let said = all.iter().find(|e| e.msg == "fetching" && e.fields.iter().any(|(k, v)| k == "id" && v == "words"));
+    let said = said.expect("the job's line was collected");
+    assert_eq!(said.peer, me, "as the peer that ran it");
+    let span = said.fields.iter().find(|(k, _)| k == "span").map(|(_, v)| v.clone()).unwrap();
+    assert!(span.contains(&trace[..12]), "inside the tap's trace: {span}");
+    // A refusal, said where it was refused.
+    let _ = net.d(1).mutate("fetch.ask", &Ask { id: "words".into() });
+    let refused = kept.lock().unwrap().iter().any(|e| e.msg == "refused" && e.level == "warn");
+    assert!(refused, "the refusal was collected");
+}
