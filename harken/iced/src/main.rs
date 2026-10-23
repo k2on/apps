@@ -324,6 +324,22 @@ fn loaded_at(player: &Player, queue: &[listening::Track]) -> Option<usize> {
     }
 }
 
+/// What is playing now ([`App::now`]): a queue, where in it, and its
+/// clock, in seconds.
+pub struct Now<'a> {
+    pub queue: &'a [listening::Track],
+    pub at: usize,
+    pub playing: bool,
+    pub position: f64,
+    pub duration: f64,
+}
+
+impl<'a> Now<'a> {
+    pub fn track(&self) -> &'a listening::Track {
+        &self.queue[self.at]
+    }
+}
+
 /// Put `player` on `at` in `queue`, at this point, playing or not: the one
 /// place a queued track becomes a sound. Whether it has a file to stream.
 fn play_at(player: &mut Player, server: &str, queue: &[listening::Track], at: usize, position_ms: i64, playing: bool) -> bool {
@@ -332,8 +348,6 @@ fn play_at(player: &mut Player, server: &str, queue: &[listening::Track], at: us
         Track {
             id: track.id.0,
             title: track.title.clone(),
-            creator: track.creator.clone(),
-            album: track.album.clone(),
             ms: track.duration_ms,
         },
         at,
@@ -1241,12 +1255,9 @@ impl App {
     /// after it, each with its place in the queue — the session's, or, this
     /// device being its own session, its own.
     pub fn queue_rows(&self) -> Vec<(usize, listening::Track)> {
-        let (queue, at) = match self.session.as_ref().and_then(|s| s.session.as_ref()) {
-            Some(a) => (a.queue.clone(), a.at.max(0) as usize),
-            None if self.session.is_none() && self.player.track().is_some() => (self.queue.clone(), self.playing_at()),
-            None => return vec![],
-        };
-        queue.into_iter().enumerate().skip(at).collect()
+        self.now()
+            .map(|n| n.queue.iter().cloned().enumerate().skip(n.at).collect())
+            .unwrap_or_default()
     }
 
     /// What a key does on the queue row under the cursor: `x` takes it out,
@@ -1736,6 +1747,45 @@ impl App {
         }
     }
 
+    /// What is playing now: the one state the bar draws, the list lights,
+    /// the queue panel starts from and the tab's title and the media
+    /// session say. Part of a session, the session's — its queue, its
+    /// track, its clock counted against the server's — whichever device
+    /// sounds it, so a window watching a phone says the phone's track; its
+    /// own session, this device's player in its own queue.
+    pub fn now(&self) -> Option<Now<'_>> {
+        match &self.session {
+            Some(s) => {
+                let a = s.session.as_ref()?;
+                let at = (a.at.max(0) as usize).min(a.queue.len().checked_sub(1)?);
+                Some(Now {
+                    queue: &a.queue,
+                    at,
+                    playing: a.clock.playing(),
+                    position: listening::Remote::position_ms(a) as f64 / 1000.0,
+                    duration: a.queue[at].duration_ms as f64 / 1000.0,
+                })
+            }
+            None => Some(Now {
+                queue: &self.queue,
+                at: loaded_at(&self.player, &self.queue)?,
+                playing: self.player.is_playing(),
+                position: self.player.position(),
+                duration: self.player.duration(),
+            }),
+        }
+    }
+
+    /// The window's title, the tab's in a browser: [`App::now`]'s track
+    /// and who made it, or the app's name.
+    pub fn title(&self) -> String {
+        match self.now().map(|n| n.track()) {
+            Some(t) if t.creator.is_empty() => t.title.clone(),
+            Some(t) => format!("{} \u{2014} {}", t.title, t.creator),
+            None => "harken".into(),
+        }
+    }
+
     /// Where a queue was pressed from: the page it was on, as the address
     /// bar names it.
     fn from(&self) -> String {
@@ -2207,7 +2257,10 @@ impl App {
             }
         }
         #[cfg(target_arch = "wasm32")]
-        self.player.announce();
+        {
+            let now = self.now().map(|n| (n.track().clone(), n.playing, n.duration, n.position));
+            self.player.announce(&self.title(), now);
+        }
         Task::batch(tasks)
     }
 
@@ -2243,7 +2296,7 @@ impl App {
         if fading || self.ctx.dwelling() || self.volume_held.is_some() {
             return Some(Duration::from_millis(50));
         }
-        let sounding = self.player.is_playing() || self.session.as_ref().is_some_and(|s| s.sounding());
+        let sounding = self.now().is_some_and(|n| n.playing);
         (sounding || self.debug).then_some(Duration::from_millis(250))
     }
 
@@ -2330,7 +2383,7 @@ pub fn main() -> iced::Result {
 
     iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
-        .title("harken")
+        .title(App::title)
         .window_size((860.0, 600.0))
         .run()
 }

@@ -49,16 +49,14 @@ impl Remote {
     }
 }
 
-/// What the bar is showing: enough to draw it without going back to the list,
-/// because the list can change underneath a playing track.
+/// What the element was loaded with: which track of the queue it sounds.
+/// Not what the window says is playing — that is `App::now`, which a window
+/// watching another device takes from the session — so the bar, the list
+/// and the title never read this; the diagnostics do, by its title.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Track {
     pub id: Id,
     pub title: String,
-    pub creator: String,
-    /// Only the platform's media controller reads this — the bar has no room
-    /// for it and the table has a column. Empty for a kind that has no album.
-    pub album: String,
     /// What the library says it runs for. The element reports its own duration
     /// once it has read enough of the stream, and that one is preferred when
     /// it arrives — a transcode is not always the length the catalogue claims.
@@ -67,7 +65,8 @@ pub struct Track {
 
 #[cfg(target_arch = "wasm32")]
 mod imp {
-    use super::{Remote, Track};
+    use super::Remote;
+    use crate::listening::Track;
     use crate::rows::Id;
     use wasm_bindgen::prelude::*;
     use wasm_bindgen::JsCast;
@@ -128,10 +127,10 @@ function wire() {
   });
 }
 
-export function announce(title, artist, album, playing) {
+export function announce(heading, title, artist, album, playing) {
   // Windows draws the tab's title in its own window list, so the tab is the
   // one place this has to be right even where there is no media session.
-  document.title = title ? (artist ? title + " — " + artist : title) : "harken";
+  document.title = heading;
   if (!("mediaSession" in navigator)) return;
   wire();
   navigator.mediaSession.metadata = title
@@ -169,7 +168,7 @@ export function take_remote() {
 "#)]
     extern "C" {
         #[wasm_bindgen(js_name = announce)]
-        fn announce_js(title: &str, artist: &str, album: &str, playing: bool);
+        fn announce_js(heading: &str, title: &str, artist: &str, album: &str, playing: bool);
         #[wasm_bindgen(js_name = position)]
         fn position_js(duration: f64, at: f64);
         #[wasm_bindgen(js_name = take_remote)]
@@ -349,16 +348,17 @@ export function take_remote() {
             }
         }
 
-        /// Say what is playing: the tab's title, and the controller the
-        /// operating system draws over the lock screen or beside the clock.
-        pub fn announce(&mut self, track: Option<&Track>, playing: bool, duration: f64, at: f64) {
-            let now = track.map(|t| (t.id, playing));
+        /// Say what is playing: the tab's title, `heading`, and the
+        /// controller the operating system draws over the lock screen or
+        /// beside the clock.
+        pub fn announce(&mut self, heading: &str, track: Option<&Track>, playing: bool, duration: f64, at: f64) {
+            let now = track.map(|t| (t.id.0, playing));
             if now != self.said {
                 self.said = now;
                 self.timed = -1;
                 match track {
-                    Some(t) => announce_js(&t.title, &t.creator, &t.album, playing),
-                    None => announce_js("", "", "", false),
+                    Some(t) => announce_js(heading, &t.title, &t.creator, &t.album, playing),
+                    None => announce_js(heading, "", "", "", false),
                 }
             }
             let whole = at as i64;
@@ -477,7 +477,11 @@ impl Player {
     }
 
     /// Say what is playing, where the platform shows such things: the tab's
-    /// title, and the controller Windows draws beside the clock.
+    /// title, `heading`, and the controller Windows draws beside the clock —
+    /// what the window says is playing (`App::now`: its track, whether it
+    /// plays, its duration and where it is; `App::title`), which is not
+    /// always this element: a window watching another device says that
+    /// device's track.
     ///
     /// Called after every update rather than from each place that changes
     /// something, because the element changes it too — a stream that stalls
@@ -486,10 +490,11 @@ impl Player {
     /// element rings the window when it does (`watch` above), and while it
     /// plays the window's clock moves the controller's scrubber.
     #[cfg(target_arch = "wasm32")]
-    pub fn announce(&mut self) {
-        let playing = self.is_playing();
-        let (duration, at) = (self.duration(), self.position());
-        self.sink.announce(self.track.as_ref(), playing, duration, at);
+    pub fn announce(&mut self, heading: &str, now: Option<(crate::listening::Track, bool, f64, f64)>) {
+        match &now {
+            Some((track, playing, duration, at)) => self.sink.announce(heading, Some(track), *playing, *duration, *at),
+            None => self.sink.announce(heading, None, false, 0.0, 0.0),
+        }
     }
 
     /// What a lock-screen button asked for since the last update, if anything.
