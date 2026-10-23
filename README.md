@@ -13,16 +13,15 @@ a crate of plain Rust every peer links — and harken, the first app on it.
 - `rust/ark-peer` — the one peer over one disk: a device that dials
   (storage, the link with redial, the app kit a UI calls by name, the live
   relay) and a server that listens (the connections, the log written
-  before delivered, the sync socket, the admin listener, the web build).
+  before delivered, the sync socket, the web build).
 - `rust/ark-ffi` — `ark-peer`'s app kit through UniFFI for an app in
   another language; `ark-dev gen kotlin|swift` writes a domain's types
   and stubs for it. The phones run the Rust kernel; there is no Kotlin or
   Swift runtime.
 - `rust/ark-dev` — the demo, the simulator over real peers in both roles,
   the trace recorder and player, the fuzzer (`ark-fuzz`), the vector
-  writer, `gen`. Beside it `ark-auth` (dev sign-in and OpenID Connect),
-  `ark-explorer` (the admin page and the explorer) and `arkui` (the iced
-  components).
+  writer, `gen`. Beside it `ark-auth` (dev sign-in and OpenID Connect)
+  and `arkui` (the iced components).
 - `spec/` — the vectors the kernel is held to (the bytes, the machine, the
   frames, the views), `RUNNERS.md` (how `ark-dev` runs them) and
   `AUTHORING.md` (writing a domain).
@@ -58,7 +57,7 @@ One command holds all of it:
                       # harken-ios-typecheck: the iOS app's non-UI Swift
                       #   type-checked on Linux against the library
     nix build .#harken-server   # or harken-iced, harken-web, harken-domain,
-                                # ark-admin, ark, vectors, trace-corpus
+                                # ark, vectors, trace-corpus
     nix build .#harken-apk      # the kernel for three ABIs and the APK over it,
                                 # its JVM tests run on the real kernel
     nix build .#revelation-apk  # Revelation's APK, its JVM tests run first;

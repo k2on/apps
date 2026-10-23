@@ -146,10 +146,8 @@ pub struct Peer {
     /// Bumped whenever a list that carries covers moved: the window asks for
     /// covers when this moves, which is the *data* changing.
     pub art_gen: u64,
-    /// Bumped whenever the store moved at all — its state hash is not what
-    /// the last refresh saw. The explorer diffs what it shows against what
-    /// it last drew when this moves, and not on an update where nothing did.
-    pub store_gen: u64,
+    /// The store's state hash at the last refresh: the views settle against
+    /// what moved since, and not on an update where nothing did.
     seen: ark::hash::StateHash,
 }
 
@@ -207,7 +205,6 @@ impl Peer {
             choices: Vec::new(),
             moved: Vec::new(),
             art_gen: 1,
-            store_gen: 1,
             seen,
         };
         peer.choose();
@@ -302,7 +299,6 @@ impl Peer {
         let moved = state != self.seen;
         if moved {
             self.seen = state;
-            self.store_gen += 1;
         }
         let (c, v) = (&mut self.client, &mut self.views);
         let mut changed = Vec::new();

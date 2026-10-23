@@ -2,7 +2,7 @@
 //!
 //! It used to run on `iced::time::every(50ms)`: every tick pumped the peer,
 //! pumped the listening session, polled the address bar, announced to the
-//! media session, counted the dwell and the quiet, and faded the explorer —
+//! media session, and counted the dwell and the quiet —
 //! twenty updates a second whether anything had happened or not. Now each
 //! source says so:
 //!
@@ -15,11 +15,11 @@
 //! - **in a browser, the page**: the back button and a followed fragment
 //!   (`popstate`, `hashchange`), a lock-screen button, and the `<audio>`
 //!   element starting, pausing or ending ring the bell too ([`page`]);
-//! - **a clock** only while something moves by itself — audio playing, a
-//!   highlight fading, a submenu's dwell — which is [`crate::App::clock`];
+//! - **a clock** only while something moves by itself — audio playing and a
+//!   submenu's dwell — which is [`crate::App::clock`];
 //! - and what a person does, which iced delivers as messages anyway.
 //!
-//! With nothing playing, nothing fading and nothing arriving, the window
+//! With nothing playing, nothing dwelling and nothing arriving, the window
 //! runs no timer and `update` is not called.
 
 use arkui::wake::Bell;

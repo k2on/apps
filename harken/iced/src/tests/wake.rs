@@ -1,12 +1,11 @@
 //! The window runs no loop (`docs/plan-reactive.md`): these run the very
 //! subscription iced would run — every recipe `App::subscription` returns,
 //! streamed with no input events — and count what reaches `update`. At rest
-//! that is nothing at all; a frame on the socket is a wake; a fading
-//! highlight and a submenu's dwell run a clock, and stop it when they stop.
+//! that is nothing at all; a frame on the socket is a wake; a submenu's
+//! dwell runs a clock, and stops it when it stops.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::domain::CreatePlaylist;
 use iced::advanced::subscription::{into_recipes, EventStream};
 use iced::futures::executor::block_on;
 use iced::futures::future::{self, Either};
@@ -14,7 +13,6 @@ use iced::futures::stream::{self, StreamExt};
 
 use super::Queues;
 use super::{alone, signed_in};
-use crate::client::monotonic_ms;
 use crate::{App, Message};
 use ark_peer::Event;
 
@@ -111,39 +109,6 @@ fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
     assert_eq!(names(&heard), ["due"], "the redial, once, at {at}");
     let _ = app.update(Message::Due);
     assert_eq!(made.lock().unwrap().len(), 2, "dialled again at the deadline");
-}
-
-/// A highlight in the explorer runs the 50 ms clock while it fades and
-/// stops it when it has: lit, the window ticks; two seconds on, it does not.
-/// Falsified by `clock` ignoring `fading()`: no tick while the row is lit.
-#[test]
-fn a_fading_highlight_runs_the_clock_until_it_has_faded() {
-    let mut app = App::with_peer(alone("alice"), String::new(), None);
-    app.peer.ensure_playlist();
-    let _ = app.update(Message::Wake);
-    let _ = app.update(Message::Key(
-        iced::keyboard::Key::Character("E".into()),
-        iced::keyboard::Modifiers::empty(),
-    ));
-    let _ = app.update(Message::Explore(ark_explorer::Msg::Open("playlist".into())));
-    assert_eq!(app.clock(), None, "open, and nothing lit");
-    app.peer
-        .client
-        .mutate("create_playlist", &CreatePlaylist { name: "Lit".into() })
-        .expect("made");
-    let _ = app.update(Message::Wake);
-    assert!(app.explore.as_ref().unwrap().ui.fading(), "the new row is lit");
-    assert_eq!(app.clock(), Some(Duration::from_millis(50)));
-    let t = Instant::now();
-    let heard = heard_within(&app, Duration::from_millis(300));
-    assert!(
-        names(&heard).iter().filter(|n| **n == "tick").count() >= 3,
-        "{:?} in {:?}",
-        names(&heard),
-        t.elapsed()
-    );
-    app.observe_explorer_at(monotonic_ms() + 2_100);
-    assert_eq!(app.clock(), None, "faded: the clock stops");
 }
 
 /// A submenu's dwell runs the clock while it can still open the submenu,

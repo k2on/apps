@@ -150,17 +150,7 @@ impl App {
                 .push(layer::pinned(self.view_devices(at), origin));
         }
 
-        // The explorer docks beside the app rather than over it, so the app
-        // stays usable while it is open (`explore::Dock`).
-        match self.view_explorer() {
-            Some(explorer) => row![
-                container(layers).width(Length::Fill).height(Length::Fill),
-                rule::vertical(1),
-                self.view_dock(explorer),
-            ]
-            .into(),
-            None => layers.into(),
-        }
+        layers.into()
     }
 
     /// Music, then the lists somebody made — each read back by the domain.
@@ -696,7 +686,6 @@ impl App {
             line = format!("{line}  \u{b7}  {}", self.note);
         }
         let mode = match self.focus() {
-            _ if self.explorer_has_keys() => "explorer",
             Focus::Pane(Pane::Sidebar) => "browse",
             Focus::Pane(Pane::Tracks) => "tracks",
             // The overlay rather than the pane under it: the pane under it is
@@ -1196,10 +1185,6 @@ fn view_help() -> Element<'static, Message> {
         ("M", "mute it, or unmute it"),
         ("J", "in the picker: join this speaker to what is playing, or take it out"),
         ("D", "every number the session holds, and where your changes stand"),
-        (
-            "E",
-            "the explorer: every table this device holds, the log, a query console, every function callable",
-        ),
         ("/", "search this pane; <Enter> accepts, <Esc> drops it"),
         ("n  N", "the next match, the one before"),
         ("{  }", "the previous track, the next one"),

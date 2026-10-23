@@ -8,7 +8,7 @@
 //! is. An [`Input`] is a value a function takes (`#[derive(Input)]`), whose
 //! refinements — trims and checks, each with the words a form shows — are
 //! [`Input::check`]. A [`Describe`] type says what it is as a [`Type`]: what
-//! the schema's columns, a form's fields and the explorer read.
+//! the schema's columns and a form's fields read.
 //!
 //! **Keys are bytes that compare as the values do** ([`Key`]): a row's key,
 //! an index entry's columns and a prefix of them encode to bytes whose
@@ -64,7 +64,7 @@ impl<T: Serialize + ?Sized> Key for T {
 
 // * What a type is
 
-/// What a type is, as a schema's column, a form's field and the explorer
+/// What a type is, as a schema's column and a form's field
 /// read it. A record and a sum carry their names and their fields'.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Type {

@@ -1,7 +1,7 @@
 //! What a server is told (§1.11; the `server` feature): where it listens
 //! and keeps its log, how people sign in, where a browser reaches it, its
-//! web build, its keepalive and retention, who holds which role, and its
-//! admin page — read from the environment under an app's prefix
+//! web build, its keepalive and retention, and who holds which role —
+//! read from the environment under an app's prefix
 //! ([`Serve::from_env`]: `HARKEN_DATA`, `HARKEN_OIDC_ISSUER`, …), so that
 //! what is any app's server is configured once, here, and an app reads
 //! only what is its own beside it.
@@ -94,10 +94,6 @@ pub struct Serve {
     /// connection, so a restart with another configuration grants or
     /// revokes at once.
     pub roles: BTreeMap<String, Vec<String>>,
-    /// Where the admin page listens (`_ADMIN_BIND`; none without it).
-    pub admin_bind: Option<String>,
-    /// The admin page's static build (`_ADMIN_WEB`).
-    pub admin_web: Option<PathBuf>,
 }
 
 impl Serve {
@@ -115,8 +111,6 @@ impl Serve {
             keepalive: Keepalive::default(),
             retain: Retention::default(),
             roles: BTreeMap::new(),
-            admin_bind: None,
-            admin_web: None,
         }
     }
 
@@ -136,8 +130,6 @@ impl Serve {
     /// _RETAIN_DAYS              read and checked; kept nothing by
     /// _RETAIN_ENTRIES           entries kept above the snapshot (10000)
     /// _ROLES                    who holds which role: `library=alice,bob;admin=alice`
-    /// _ADMIN_BIND               where the admin page listens (none without it)
-    /// _ADMIN_WEB                the admin page's build
     /// ```
     pub fn from_env(prefix: &str, listen: &str) -> Result<Serve> {
         Serve::from_vars(prefix, listen, |k| std::env::var(k).ok())
@@ -202,8 +194,6 @@ impl Serve {
             keepalive,
             retain,
             roles: roles_of(&name("ROLES"), &env("ROLES").unwrap_or_default())?,
-            admin_bind: env("ADMIN_BIND"),
-            admin_web: env("ADMIN_WEB").map(PathBuf::from),
         })
     }
 

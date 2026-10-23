@@ -330,7 +330,7 @@ impl Domain {
     }
 }
 
-/// A domain described (§1.16), what the explorer and a generator read: its schema, and per
+/// A domain described (§1.16), what a generator reads: its schema, and per
 /// function its name, its kind, and the descriptions of its input, of what
 /// it answers and of its input's refinements — what a form is drawn from.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

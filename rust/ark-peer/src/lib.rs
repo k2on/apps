@@ -11,7 +11,7 @@
 //!   **listens** (`hub`: the connections, each with its identity and its
 //!   feed, routed; the journal beside the log), natively on a thread of its
 //!   own (`handle`) and, with the `server` feature, on a socket (`serve`:
-//!   the sync socket, the admin listener, the web build's routes and
+//!   the sync socket, the web build's routes and
 //!   sign-in — axum and tokio, which a phone or a browser never links).
 //!
 //! It is sans-io like the machines: a UI, a test or the hub's thread feeds

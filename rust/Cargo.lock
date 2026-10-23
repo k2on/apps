@@ -167,30 +167,9 @@ name = "ark-dev"
 version = "0.1.0"
 dependencies = [
  "ark",
- "ark-explorer",
  "ark-peer",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "ark-explorer"
-version = "0.1.0"
-dependencies = [
- "ark",
- "ark-auth",
- "ark-peer",
- "arkui",
- "axum",
- "iced",
- "js-sys",
- "serde",
- "serde_json",
- "tokio",
- "ureq",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -2159,7 +2138,6 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-dev",
- "ark-explorer",
  "ark-ffi",
  "ark-peer",
  "harken-domain",
@@ -2175,7 +2153,6 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-auth",
- "ark-explorer",
  "ark-peer",
  "arkui",
  "harken-domain",
@@ -2206,7 +2183,6 @@ dependencies = [
  "ark",
  "ark-auth",
  "ark-dev",
- "ark-explorer",
  "ark-ffi",
  "ark-peer",
  "axum",

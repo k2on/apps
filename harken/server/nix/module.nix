@@ -33,11 +33,6 @@ let
     "[::1]"
   ];
 
-  # Whether the admin page's bind answers on this machine alone: what
-  # `ark_peer::admin::is_loopback` asks of it.
-  adminLoopback = bind:
-    lib.any (p: lib.hasPrefix p bind) [ "127." "localhost:" "[::1]:" ];
-
   # What a speaker resolves a `file` against. Total rather than guarded at
   # each use, so neither the assertion's message nor the warning's has to
   # care whether `homeAssistant` is there.
@@ -47,6 +42,12 @@ let
     else cfg.publicUrl;
 in
 {
+  # The admin page went with `ark-explorer`: setting either is an error that
+  # says so, rather than one about an option nobody has heard of.
+  imports = map (o: lib.mkRemovedOptionModule [ "services" "harken" "admin" o ]
+    "the admin page and its explorer were removed; the server serves no admin listener.")
+    [ "bind" "page" ];
+
   options.services.harken = {
     enable = lib.mkEnableOption "the Harken sync server and its browser client";
 
@@ -190,36 +191,6 @@ in
         memory and its log on disk. The log is compacted when it holds twice
         as many as it has to keep.
       '';
-    };
-
-    admin = {
-      bind = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = "127.0.0.1:8788";
-        example = "10.0.0.2:8788";
-        description = ''
-          Where the admin page listens (`HARKEN_ADMIN_BIND`): the database
-          explorer over the server's own store, its log and its connections,
-          editing as the server itself — through the domain's CRUD by
-          default, and raw when its switch says so (`docs/plan-guards.md`
-          D4). On loopback, the default, it asks nothing: reach it through an
-          SSH tunnel. Bound anywhere wider it asks for a login holding the
-          `admin` role ({option}`services.harken.roles`), signing in through
-          this server — whose redirects must then allow the page's address
-          ({option}`services.harken.redirects`) when the bind names no host.
-          Null serves no admin page.
-        '';
-      };
-
-      page = lib.mkOption {
-        type = lib.types.nullOr lib.types.package;
-        default = harken.ark-admin or null;
-        defaultText = lib.literalExpression "harken.packages.\${system}.ark-admin";
-        description = ''
-          The admin page's build: the explorer compiled to wasm
-          (`HARKEN_ADMIN_WEB`). Null serves the admin API alone.
-        '';
-      };
     };
 
     web = lib.mkOption {
@@ -413,15 +384,6 @@ in
         Either set services.harken.address = "0.0.0.0" (with openFirewall, or
         a firewall rule of your own) so the LAN can reach it, or point
         mediaUrl at a proxy that can.
-      ''
-      # `docs/plan-guards.md` D4 An admin page bound wider than loopback asks
-      # for the `admin` role, and one nobody holds is a page nobody can open.
-      ++ lib.optional (cfg.admin.bind != null && !(adminLoopback cfg.admin.bind) && (cfg.roles.admin or [ ]) == [ ]) ''
-        services.harken: the admin page listens on ${cfg.admin.bind}, wider
-        than loopback, where it asks for a login holding the admin role —
-        and services.harken.roles names nobody holding it, so nobody can
-        open it. Name somebody in services.harken.roles.admin, or bind it to
-        loopback and reach it through an SSH tunnel.
       '';
 
     # Made rather than required, so the default works on a machine where
@@ -455,11 +417,7 @@ in
         HARKEN_MEDIA = "${cfg.mediaPath}";
       } // lib.optionalAttrs (cfg.web != null) {
         HARKEN_WEB = "${cfg.web}";
-      } // lib.optionalAttrs (cfg.admin.bind != null) {
-        HARKEN_ADMIN_BIND = cfg.admin.bind;
-      } // lib.optionalAttrs (cfg.admin.bind != null && cfg.admin.page != null) {
-        HARKEN_ADMIN_WEB = "${cfg.admin.page}";
-      } // lib.optionalAttrs (cfg.oidc != null) {
+      } //lib.optionalAttrs (cfg.oidc != null) {
         HARKEN_OIDC_ISSUER = cfg.oidc.issuer;
         HARKEN_OIDC_CLIENT_ID = cfg.oidc.clientId;
         HARKEN_OIDC_SCOPES = lib.concatStringsSep " " cfg.oidc.scopes;

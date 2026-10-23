@@ -1,6 +1,6 @@
 //! §1.1, §1.16 A value without a Rust type: JSON under a [`Type`].
 //!
-//! A row as the store and a replica see it, a row the explorer edits, an
+//! A row as the store and a replica see it, a row a person edits, an
 //! input a phone sends as JSON, is a [`serde_json::Value`] read under the
 //! schema's or the function's [`Type`]. [`Typed`] serializes it exactly as
 //! the Rust type it describes would be serialized, so its bytes in the

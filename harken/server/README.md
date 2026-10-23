@@ -2,8 +2,8 @@
 
 harken's server, an `ark-peer` that listens, with `ark-auth`, hosting
 `harken-domain`. The log and the listening session's volatile space on
-the hub, the sync socket at `/sync`, the sign-in routes under `/auth`, the
-browser client's validator and the admin page's listener are the shared
+the hub, the sync socket at `/sync`, the sign-in routes under `/auth` and the
+browser client's validator are the shared
 crates'; what is here is what only harken has:
 
 - **`library.rs`** — the media directory as a peer. `music/` under the root
@@ -139,8 +139,6 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_BRIDGE_TRACE=1` | a line per poll per speaker: what the house said of it and what the bridge did (below) |
 | `HARKEN_ROLES` | who holds which role: `library=alice,bob;admin=alice`; an `admin` grants more as rows (`role.grant`) |
 | `HARKEN_SCOPED=1` | every connection fed `session.feed`: the library whole, its person's sign-ins and roles only (off: the log whole, as the fleet holds it) |
-| `HARKEN_ADMIN_BIND` | where the admin page listens (none without it): loopback asks nothing, wider asks for a login holding `admin` (`docs/plan-guards.md` D4); `ark_peer::admin`, its raw writes and mutations authored by the authority as itself |
-| `HARKEN_ADMIN_WEB` | the admin page's build (`nix build .#ark-admin`); without it the admin API alone |
 
 What is in `HARKEN_DATA` (`/var/lib/harken` under the NixOS module), and
 whose it is:
@@ -215,10 +213,8 @@ afterwards: it is a line a second for every speaker standing.
   credential, the assertion that a speaker is never handed a URL on this
   machine, the warning when it is handed a LAN URL this server is not
   bound to, and `homeAssistant.trace` for the bridge's trace. `web` defaults to null: which build a server should serve is the
-  flake's to say. `admin.bind` is the admin page's listener,
-  `127.0.0.1:8788` by default and null for none, and `admin.page` its
-  build, `ark-admin` by default; a bind wider than loopback that nobody in
-  `roles.admin` can open is a warning.
+  flake's to say. `admin.bind` and `admin.page` are gone with the admin
+  page; setting either is an error saying so.
 - `nix/module-test.nix` — the module evaluated under each of those
   configurations and held to its assertions, warning and unit, without
   building a system.
@@ -242,10 +238,10 @@ over real WAV files, tags written and read by lofty, covers beside a
 record and inside its tracks fetched where the log says, a retagged file
 the same song, a rescan of nothing new reading nothing, and `/media` range
 requests and `..` (`tests/library.rs`); sign-in, signed-out and older-login work,
-restarts, `/healthz` and the admin page over its wire (`tests/server.rs`);
+restarts and `/healthz` (`tests/server.rs`);
 the web validator through this server (`tests/web.rs`); the process fleet
-— the real binaries on loopback, the network taken away and given back,
-the admin page's raw write (`tests/fleet.rs`); and versions: which module
+— the real binaries on loopback, the network taken away and given back
+(`tests/fleet.rs`); and versions: which module
 may follow which, and the fleet across a moved function
 (`tests/versions.rs`). Each was falsified once by breaking what it holds;
 what v5 does not yet do is a test ignored as a witness, saying where.

@@ -12,7 +12,7 @@
 //! no encoding a proper prefix of another's, so a prefix of a key's
 //! columns is a prefix of its bytes and the store is ordered by `memcmp`.
 //!
-//! **JSON is the human form**: what the explorer shows and edits and the
+//! **JSON is the human form**: what a person reads and edits and the
 //! vectors are written in ([`to_json`], [`from_json`]). In it hashes and
 //! ids are hex, and bytes that are a value of the format — a row, an input
 //! — are their hex (read as JSON under the schema by [`crate::dynamic`]).
