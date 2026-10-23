@@ -1,36 +1,113 @@
 #!/usr/bin/env bash
-# Type-check what of the iOS app Linux can: Rows.swift, Bridge.swift and
-# Model.swift with the generated types (Gen/Harken.swift), the Swift UniFFI
-# writes for harken's library and the bridge's typed half — against the
-# library's C headers, and a stand-in for the three things of SwiftUI's that
-# Model.swift names (ObservableObject, @Published, Color) — so that what is
-# checked is the app's use of the bridge, not SwiftUI. The views are not
-# checked: SwiftUI is not on Linux.
+# Type-check what of the iOS app Linux can: every file under Harken/ that
+# imports nothing of Apple's but Foundation and Combine — the rows, the
+# listening session, what plays, the onboarding's machine, the player's core,
+# the bridge and the model — with the generated types (Gen/Harken.swift), the
+# Swift UniFFI writes for harken's library and the bridge's typed half,
+# against the library's C headers and a stand-in for the two things of
+# Combine's that Model.swift names (ObservableObject, @Published). The files
+# that import SwiftUI, UIKit, AVFoundation, MediaPlayer, AuthenticationServices
+# or ImageIO — the screens, the AVPlayer engine, the lock screen, the sign-in
+# sheet and the covers — are left out: none of those is on Linux.
+#
+# Then the tests (HarkenTests/) that need no device are compiled against the
+# same sources with a stand-in for XCTest's assertions, and — when
+# `HARKEN_FFI_LIB` names harken's library built for this machine
+# (`libharken_ffi.so`) — linked against it and run.
 #
 #   typecheck.sh BINDINGS   # a directory of `uniffi-bindgen generate --language swift`
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HERE/../Harken"
+TESTS="$HERE/../HarkenTests"
 BINDINGS="$1"
 TYPED="${TYPED:-$HERE/../../../rust/ark-ffi/swift/Typed.swift}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
-cat > "$OUT/SwiftUI.swift" <<'SWIFT'
-// A stand-in for what Model.swift names of SwiftUI, for type-checking on Linux.
+
+# The app's files Linux can read: none of Apple's frameworks but Foundation and Combine.
+SOURCES=("$APP/Gen/Harken.swift")
+for f in "$APP"/*.swift; do
+  if ! grep -qE '^import (SwiftUI|UIKit|AVFoundation|AVKit|MediaPlayer|AuthenticationServices|ImageIO|CoreGraphics|UniformTypeIdentifiers)' "$f"; then
+    SOURCES+=("$f")
+  fi
+done
+
+cat > "$OUT/Combine.swift" <<'SWIFT'
+// A stand-in for what Model.swift names of Combine, for type-checking on Linux.
 public protocol ObservableObject: AnyObject {}
 @propertyWrapper public struct Published<Value> {
     public var wrappedValue: Value
     public init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
 }
-public struct Color {
-    public static let gray = Color(), red = Color(), blue = Color(), green = Color(), orange = Color()
+SWIFT
+cat > "$OUT/XCTest.swift" <<'SWIFT'
+// A stand-in for XCTest's assertions, for running HarkenTests on Linux: a
+// failure is counted and said, and the runner exits non-zero after.
+import Foundation
+open class XCTestCase { public init() {} }
+public var xcFailures = 0
+private func fail(_ what: String, _ message: String, _ file: StaticString, _ line: UInt) {
+    xcFailures += 1
+    print("\(file):\(line): \(what) failed\(message.isEmpty ? "" : ": " + message)")
 }
+public func XCTAssertEqual<T: Equatable>(_ a: @autoclosure () throws -> T, _ b: @autoclosure () throws -> T, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
+    do {
+        let x = try a(), y = try b()
+        if x != y { fail("XCTAssertEqual", "(\(x)) is not (\(y)) \(message())", file, line) }
+    } catch { fail("XCTAssertEqual", "threw \(error)", file, line) }
+}
+public func XCTAssertTrue(_ a: @autoclosure () throws -> Bool, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
+    if (try? a()) != true { fail("XCTAssertTrue", message(), file, line) }
+}
+public func XCTAssertFalse(_ a: @autoclosure () throws -> Bool, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
+    if (try? a()) != false { fail("XCTAssertFalse", message(), file, line) }
+}
+public func XCTAssertNil<T>(_ a: @autoclosure () throws -> T?, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
+    if let v = try? a() { fail("XCTAssertNil", "(\(v)) \(message())", file, line) }
+}
+public func XCTAssertNotNil<T>(_ a: @autoclosure () throws -> T?, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) {
+    if (try? a()) == nil { fail("XCTAssertNotNil", message(), file, line) }
+}
+public func XCTFail(_ message: String = "", file: StaticString = #filePath, line: UInt = #line) { fail("XCTFail", message, file, line) }
 SWIFT
 mkdir -p "$OUT/ffi"
 cp "$BINDINGS"/*.h "$OUT/ffi/"
 cat "$BINDINGS"/*.modulemap > "$OUT/ffi/module.modulemap"
 SWIFTC="${SWIFT_EXEC:-swiftc}"
-"$SWIFTC" -emit-module -module-name SwiftUI -parse-as-library "$OUT/SwiftUI.swift" -emit-module-path "$OUT/SwiftUI.swiftmodule"
+"$SWIFTC" -emit-library -static -emit-module -module-name Combine -parse-as-library "$OUT/Combine.swift" \
+  -emit-module-path "$OUT/Combine.swiftmodule" -o "$OUT/libCombine.a"
 "$SWIFTC" -typecheck -parse-as-library -module-name Harken -I "$OUT" -I "$OUT/ffi" \
-  "$BINDINGS"/*.swift "$TYPED" "$APP/Gen/Harken.swift" "$APP/Rows.swift" "$APP/Bridge.swift" "$APP/Model.swift" "$APP/Player.swift"
-echo "harken/ios: Rows.swift, Bridge.swift, Model.swift, Player.swift and Gen/Harken.swift type-check against harken's library"
+  "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}"
+echo "harken/ios: $(for f in "${SOURCES[@]}"; do printf '%s ' "${f#$APP/}"; done)type-check against harken's library"
+
+# The tests: one module with the sources, as `@testable import Harken` reads
+# them, and a runner calling every `func test…` of every `final class …Tests`.
+TESTFILES=("$TESTS"/*.swift)
+mkdir -p "$OUT/tests"
+for f in "${TESTFILES[@]}"; do
+  sed -e '/^@testable import Harken/d' -e '/^import XCTest/d' "$f" > "$OUT/tests/$(basename "$f")"
+done
+{
+  echo "import Foundation"
+  echo "@main enum Run { static func main() {"
+  for f in "${TESTFILES[@]}"; do
+    class=$(sed -n 's/^final class \([A-Za-z]*Tests\).*/\1/p' "$f")
+    for t in $(sed -n 's/^    func \(test[A-Za-z0-9_]*\)().*/\1/p' "$f"); do
+      echo "  print(\"$class.$t\"); $class().$t()"
+    done
+  done
+  echo "  if xcFailures > 0 { print(\"\\(xcFailures) failed\"); exit(1) }"
+  echo "  print(\"every test passed\")"
+  echo "} }"
+} > "$OUT/tests/Run.swift"
+if [ -z "${HARKEN_FFI_LIB:-}" ]; then
+  "$SWIFTC" -typecheck -parse-as-library -module-name Harken -I "$OUT" -I "$OUT/ffi" \
+    "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}" "$OUT"/tests/*.swift "$OUT/XCTest.swift"
+  echo "harken/ios: HarkenTests type-check (not run: no HARKEN_FFI_LIB)"
+else
+  "$SWIFTC" -parse-as-library -module-name Harken -I "$OUT" -I "$OUT/ffi" \
+    "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}" "$OUT"/tests/*.swift "$OUT/XCTest.swift" \
+    -L "$OUT" -lCombine -L "$(dirname "$HARKEN_FFI_LIB")" -lharken_ffi -Xlinker -rpath -Xlinker "$(dirname "$HARKEN_FFI_LIB")" -o "$OUT/tests/run"
+  "$OUT/tests/run"
+fi

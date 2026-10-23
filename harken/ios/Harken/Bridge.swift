@@ -1,310 +1,402 @@
-// The phone's one peer, and nothing SwiftUI: harken's peer — the Rust
-// kernel through the bridge (`harken/ffi`), which drives its own link and
-// keeps its own views — and the lists the screens draw, *spliced*, never
-// re-read: `library`, `playlists` and the open `playlist` are the kernel's
-// maintained views, typed by the generated stubs (`Gen/Harken.swift`); when
-// the peer says anything moved, each is asked what it did and its patches
-// are applied to the list the screen was given — read again only on a
-// reset, or when the selection moves. What the screens see goes to `Model`
-// (Model.swift) as a `Snapshot`, on the main queue, when something in it
-// moved. The twin of `harken/android/.../Library.kt`.
+// The phone's session, and nothing of Apple's but Foundation: harken's peer
+// — the Rust kernel through the bridge (`harken/ffi`), which drives its own
+// link and keeps its own views — opened over the replica for one server and
+// one login, and the account's listening session reconciled against this
+// phone's player. The twin of Android's `onboarding/ArkSession.kt`,
+// `Library.kt` and `Listen.kt` in one.
+//
+// **Everything runs on one queue** (`harken-session`), in order: every write,
+// every read, and the drain after each change the peer reports (`Listener`)
+// — never on a clock, so a library at rest runs nothing at all. A burst of
+// tells is one drain.
+//
+// **The lists are spliced, not re-read.** The songs, the playlists, the
+// albums, the artists, the songs' details and the last play are the
+// kernel's maintained views (§1.10), typed by the generated stubs
+// (`View<T>`), read once — Home's three first, published, and the rest a
+// turn later — and after every change each is asked what it did and its
+// patches spliced into the list the screens hold; only a reset reads one
+// again. A page — an album, an artist, a playlist — is a view too, held
+// while a screen shows it ([hold]) and let go when the last one leaves.
+//
+// **The listening session is the reconciler's** (`Player`, harken's one
+// reconciler, S3b): each drain steps it, which makes this phone's player
+// agree with the session and says what happened to it, and its view of what
+// plays ([Heard]) is published with the lists. A press from anywhere — a
+// button, a row, the lock screen — is [press], one way in; refused as
+// "not part of the session", the caller does it to the player itself.
+//
+// What the screens see goes to the main queue as a [Snapshot] after a drain
+// that moved something.
 import Foundation
 
-/// Where the app points: the server (`http://host:port`; the socket is
-/// derived from it), whether to work alone, and the login, if somebody
-/// signed in — kept whole, so a restart reuses it.
-struct Prefs: Equatable {
-    var server: String
-    var workAlone: Bool
-    var login: Login?
-
-    var user: String? { login?.user }
-
-    static let defaults = Prefs(server: "http://127.0.0.1:8787", workAlone: false, login: nil)
-}
-
 /// Everything a screen reads, at one moment.
-struct Snapshot: Equatable {
-    var library = [LibraryEntry]()
+struct Snapshot {
+    /// Home's lists have been read once; the rest after them.
+    var loaded = false
+    var complete = false
+    /// Every song, in the order it was added.
+    var tracks = [LibraryEntry]()
     var playlists = [Playlist]()
-    var selected: Id? = nil
-    var items = [LibraryEntry]()
+    var albums = [AlbumsEntry]()
+    var artists = [ArtistsEntry]()
+    var details = [Id: TrackDetailsEntry]()
+    /// The newest play in the log, this person's.
+    var lastPlayed: Play? = nil
+    /// The pages held, each its rows once read.
+    var pages = [Page: [LibraryEntry]]()
     var status: Status? = nil
-    /// Every change this phone made while it has been running, newest first.
-    var changes = [Authored]()
-    /// Where each of them stands, read again whenever anything moved.
-    var standings = [String: Standing]()
-    /// Which entry made a playlist, and which last touched a (playlist,
-    /// item) pair: so a row can say it is not synced yet, or why it was not saved.
-    var madeBy = [Id: String]()
-    var touchedBy = [Pair: String]()
-
-    struct Pair: Hashable {
-        let playlist: Id
-        let media: Id
-    }
-
-    /// What to write under a playlist: nothing once it is in the log.
-    func caption(forPlaylist id: Id) -> String? { madeBy[id].flatMap { standings[$0] }.flatMap(Phone.caption) }
-
-    /// What to write under an item of a playlist.
-    func caption(for track: LibraryEntry, on playlist: Id) -> String? {
-        touchedBy[Pair(playlist: playlist, media: track.id)].flatMap { standings[$0] }.flatMap(Phone.caption)
-    }
-
-    func caption(for change: Authored) -> String { standings[change.id].flatMap(Phone.caption) ?? "saved" }
+    var heard = Heard()
+    /// How many changes the peer has reported: what the diagnostics read again on.
+    var moved = 0
 }
 
-/// What the peer says when anything moved: the bridge's queue is told.
+/// What the peer says when anything moved: the session's queue is told.
 private final class Told: Listener, @unchecked Sendable {
     private let then: () -> Void
     init(_ then: @escaping () -> Void) { self.then = then }
     func changed() { then() }
 }
 
+/// A view and the list it is spliced into; on the session's queue only.
+private final class Held<E> {
+    let open: (Harken) throws -> View<E>?
+    var view: View<E>? = nil
+    var rows = [E]()
+    init(_ open: @escaping (Harken) throws -> View<E>?) { self.open = open }
+
+    func hydrate(_ h: Harken) {
+        view = (try? open(h)) ?? nil
+        rows = view?.rows() ?? []
+    }
+
+    /// What it did since last asked, spliced; true when it moved.
+    func update() -> Bool {
+        guard let v = view else { return false }
+        switch v.take() {
+        case .unchanged: return false
+        case .patched(let changes):
+            rows.splice(changes)
+            return true
+        case .reset(let all):
+            rows = all
+            return true
+        }
+    }
+}
+
 final class Bridge {
+    let server: String
+    let login: Login
     private let queue = DispatchQueue(label: "harken-session")
     private let root: URL
-    /// Told on the main queue whenever the snapshot moved, and of anything worth a line.
+    private let name: String
+    private let sound: SoundCore
+    /// Told on the main queue.
     private let publish: (Snapshot) -> Void
     private let notice: (String) -> Void
+    private let denied: (String) -> Void
+    private let failed: (String) -> Void
 
     // On `queue` only.
     private var harken: Harken? = nil
-    private var libraryView: View<LibraryEntry>? = nil
-    private var playlistsView: View<Playlist>? = nil
-    private var itemsView: View<LibraryEntry>? = nil
-    private var snap = Snapshot()
-    private var shown: Snapshot? = nil
+    private var player: Player? = nil
+    private var closed = false
+    private var draining = false
     private var deniedSaid = false
+    private var snap = Snapshot()
+    private var changes = [Authored]()
+    private let library = Held<LibraryEntry> { try Phone.library($0) }
+    private let playlists = Held<Playlist> { try $0.playlists() }
+    private let albums = Held<AlbumsEntry> { try $0.albums() }
+    private let artists = Held<ArtistsEntry> { try $0.artists() }
+    private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
+    private let played = Held<Play> { try $0.lastPlayed() }
+    private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
 
-    /// The replicas under `root`.
-    init(root: URL, publish: @escaping (Snapshot) -> Void, notice: @escaping (String) -> Void) {
+    /// The session for `login` at `server`, its replica under `root`; this
+    /// phone named `name` in the listening session, playing through `sound`.
+    init(server: String, login: Login, root: URL, name: String, sound: SoundCore,
+         publish: @escaping (Snapshot) -> Void, notice: @escaping (String) -> Void,
+         denied: @escaping (String) -> Void, failed: @escaping (String) -> Void) {
+        self.server = server
+        self.login = login
         self.root = root
+        self.name = name
+        self.sound = sound
         self.publish = publish
         self.notice = notice
+        self.denied = denied
+        self.failed = failed
+        snap.heard.me = login.session
+        queue.async { self.open() }
     }
 
-    /// Where a replica lives: one directory per server (or alone), not per
-    /// person — the log is the server's and every person reads it — so that
-    /// work done signed out is still here when somebody signs in.
-    private func directory(_ p: Prefs) -> String {
-        let place = p.workAlone ? "alone" : "server-" + String(p.server.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "_" })
-        let dir = root.appendingPathComponent("harken").appendingPathComponent(place).appendingPathComponent("replica")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.path
+    /// The replica's directory for `server` under `root`: one per server, not
+    /// per person — the log is the server's and every person reads it, and a
+    /// person signing in again after a denial finds their pending intents.
+    static func directory(_ root: URL, _ server: String) -> URL {
+        let place = "server-" + String(server.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) && $0.isASCII ? Character($0) : "_" })
+        return root.appendingPathComponent("harken").appendingPathComponent(place).appendingPathComponent("replica")
     }
 
-    private func say(_ s: String) { DispatchQueue.main.async { self.notice(s) } }
+    private func main(_ f: @escaping () -> Void) { DispatchQueue.main.async(execute: f) }
 
-    /// Open the peer the prefs describe and read the three views.
-    func start(_ prefs: Prefs) { queue.async { self.open(prefs) } }
-
-    private func open(_ prefs: Prefs) {
-        let device = Device(canPlay: false, id: "", kind: "phone", name: "iPhone", user: "")
-        let peer: Peer
+    // On `queue`: the peer opened and dialling, Home's views read and shown, then the rest.
+    private func open() {
+        let dir = Bridge.directory(root, server)
+        let h: Harken
         do {
-            peer = try harkenOpen(dir: directory(prefs), login: prefs.workAlone ? nil : prefs.login, device: device.json)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            // A phone, which can play, named as its owner named it; its id is its
+            // login's session — the server fills in an empty one — so a device is a login.
+            let device = Device(canPlay: true, id: "", kind: "phone", name: name, user: "")
+            let peer = try harkenOpen(dir: dir.path, login: login, device: device.json)
+            peer.connect(url: socketUrl(server: server))
+            h = Harken(peer: peer)
         } catch {
-            say("could not open the replica: \(why(error))")
+            closed = true
+            let w = why(error)
+            main { self.failed(w) }
             return
         }
-        if prefs.workAlone {
-            peer.alone()
-        } else {
-            peer.connect(url: socketUrl(server: prefs.server))
-        }
-        let h = Harken(peer: peer)
         harken = h
-        peer.setListener(listener: Told { [weak self] in self?.queue.async { self?.tick() } })
-        playlistsView = try? h.playlists()
-        snap.playlists = playlistsView?.rows() ?? []
-        reselect(h, snap.selected)
-        snap.status = peer.status()
-        show()
-    }
-
-    // The selection moved, or has to: the first playlist when the one held
-    // went away. The library is read against it and the playlist view is of
-    // it, so both are opened again — a read, once per selection.
-    private func reselect(_ h: Harken, _ want: Id?) {
-        let sel = want.flatMap { id in snap.playlists.contains { $0.id == id } ? id : nil } ?? snap.playlists.first?.id
-        snap.selected = sel
-        libraryView = try? h.library(Library(playlistId: sel ?? Phone.noPlaylist))
-        snap.library = (libraryView?.rows() ?? [])
-        itemsView = sel.flatMap { try? h.playlist(PlaylistInput(playlistId: $0)) }
-        snap.items = (itemsView?.rows() ?? [])
-    }
-
-    // Each view asked what it did, and its list spliced by its patches, or
-    // read again on a reset.
-    private func splice(_ h: Harken) {
-        let before = snap.selected
-        apply(playlistsView, &snap.playlists) { $0 }
-        if let b = before, !snap.playlists.contains(where: { $0.id == b }) { return reselect(h, nil) }
-        if before == nil, let first = snap.playlists.first { return reselect(h, first.id) }
-        apply(libraryView, &snap.library) { $0 }
-        apply(itemsView, &snap.items) { $0 }
-    }
-
-    private func apply<E, T>(_ v: View<E>?, _ rows: inout [T], _ of: (E) -> T) {
-        guard let view = v else { return }
-        switch view.take() {
-        case .unchanged: break
-        case .patched(let changes):
-            rows.splice(changes.map { c -> Change<T> in
-                switch c {
-                case let .insert(at, row): return .insert(at: at, row: of(row))
-                case let .remove(at): return .remove(at: at)
-                case let .update(at, row): return .update(at: at, row: of(row))
-                }
-            })
-        case .reset(let all): rows = all.map(of)
-        }
-    }
-
-    /// Whatever moved: the views, the status, where each change stands, a rejection's reason.
-    private func tick() {
-        guard let h = harken else { return }
-        splice(h)
-        let st = h.peer.status()
-        snap.status = st
-        if let d = st.denied, !deniedSaid {
-            deniedSaid = true
-            say("turned away: \(d)")
-        }
-        var now = [String: Standing]()
-        for c in snap.changes { now[c.id] = h.peer.standing(id: c.id) }
-        snap.standings = now
-        if let last = h.peer.takeRejections().last { say("not saved: \(last.why)") }
-        show()
-    }
-
-    private func show() {
-        guard shown != snap else { return }
-        shown = snap
-        let s = snap
-        DispatchQueue.main.async { self.publish(s) }
-    }
-
-    /// Something to do with the peer, on its queue; what moved spliced.
-    func onPeer(_ f: @escaping (Harken) -> Void) {
+        // What it counted is kept beside the replica.
+        let p = Player(peer: h.peer, me: login.session, dir: dir.path)
+        p.attach(sound: sound)
+        player = p
+        h.peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
+        library.hydrate(h)
+        playlists.hydrate(h)
+        albums.hydrate(h)
+        snap.tracks = library.rows
+        snap.playlists = playlists.rows
+        snap.albums = albums.rows
+        snap.loaded = true
+        drain()
+        // A later turn, so nothing that published waits on it.
         queue.async {
             guard let h = self.harken else { return }
-            f(h)
-            self.tick()
-        }
-    }
-
-    /// A read a screen needs at once, on the peer's queue.
-    func now<T>(_ fallback: T, _ f: (Harken) -> T) -> T {
-        queue.sync { harken.map(f) ?? fallback }
-    }
-
-    // -- what the screens ask -----------------------------------------------------
-
-    func select(_ id: Id) {
-        queue.async {
-            guard let h = self.harken else { return }
-            self.reselect(h, id)
+            self.artists.hydrate(h)
+            self.details.hydrate(h)
+            self.played.hydrate(h)
+            self.snap.artists = self.artists.rows
+            self.snap.details = Bridge.byMedia(self.details.rows)
+            self.snap.lastPlayed = self.played.rows.first
+            self.snap.complete = true
             self.show()
         }
     }
 
-    /// Which of the person's playlists a track is on, for the menu's ticks.
-    func playlistsOf(_ track: LibraryEntry) -> Set<Id> { now([]) { Set(Phone.playlistsOf($0, media: track.id).map { $0.id }) } }
-
-    /// The `create_playlist` input's checks on a name being typed; nil when it would pass.
-    func nameProblem(_ name: String) -> String? { now(nil) { Phone.nameProblem($0, name) } }
-
-    func createPlaylist(_ name: String) { onPeer { h in self.created(h, Phone.createPlaylist(h, name), name.trimmingCharacters(in: .whitespaces)) } }
-
-    // A playlist made: which entry made it, found by the row it added.
-    private func created(_ h: Harken, _ w: Wrote, _ name: String) {
-        let before = Set(snap.playlists.map { $0.id })
-        let entry = record(w, "make the playlist \(name)", nil)
-        splice(h)
-        if let e = entry { for pl in snap.playlists where !before.contains(pl.id) { snap.madeBy[pl.id] = e } }
+    private static func byMedia(_ rows: [TrackDetailsEntry]) -> [Id: TrackDetailsEntry] {
+        var m = [Id: TrackDetailsEntry](minimumCapacity: rows.count)
+        for r in rows { m[r.mediaId] = r }
+        return m
     }
 
-    /// Put a track on a playlist — the given one, the selected one, or for
-    /// somebody with none, "Favorites", made now.
-    func add(_ track: LibraryEntry, to playlist: Id? = nil) {
-        onPeer { h in
-            var target = playlist ?? self.snap.selected
-            if target == nil {
-                self.created(h, Phone.createPlaylist(h, Phone.defaultPlaylist), Phone.defaultPlaylist)
-                target = self.snap.playlists.last?.id
-            }
-            guard let t = target else { return self.say("no playlist to add to") }
-            let name = self.snap.playlists.first { $0.id == t }?.name ?? Phone.defaultPlaylist
-            _ = self.record(Phone.addToPlaylist(h, t, track.id), "add \(track.title) to \(name)", Snapshot.Pair(playlist: t, media: track.id))
+    private func drainSoon() {
+        queue.async {
+            if self.draining { return }
+            self.draining = true
+            self.queue.async { self.drain() }
         }
+    }
+
+    // On `queue`: the views spliced, a rejection said once, a denial said
+    // once, the reconciler stepped, and what moved shown.
+    private func drain() {
+        draining = false
+        guard !closed, let h = harken else { return }
+        snap.moved += 1
+        splice()
+        let st = h.peer.status()
+        snap.status = st
+        if let d = st.denied, !deniedSaid {
+            deniedSaid = true
+            main { self.denied(d) }
+        }
+        if let last = h.peer.takeRejections().last {
+            let w = last.why
+            main { self.notice("Not saved: \(w)") }
+        }
+        step()
+        show()
+    }
+
+    private func splice() {
+        if library.update() { snap.tracks = library.rows }
+        if playlists.update() { snap.playlists = playlists.rows }
+        if albums.update() { snap.albums = albums.rows }
+        if artists.update() { snap.artists = artists.rows }
+        if details.update() { snap.details = Bridge.byMedia(details.rows) }
+        if played.update() { snap.lastPlayed = played.rows.first }
+        for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }
+    }
+
+    private func step() {
+        guard let p = player else { return }
+        snap.heard = Heard.of(p.step())
+    }
+
+    private func show() {
+        let s = snap
+        main { self.publish(s) }
+    }
+
+    /// Something to do with the peer, on its queue; then a drain, so what it moved is shown.
+    private func onPeer(_ f: @escaping (Harken) -> Void) {
+        queue.async {
+            guard !self.closed, let h = self.harken else { return }
+            f(h)
+            self.drain()
+        }
+    }
+
+    /// A read on the peer's queue, answered on the main queue.
+    private func ask<T>(_ fallback: T, _ f: @escaping (Harken) -> T, _ done: @escaping (T) -> Void) {
+        queue.async {
+            let v = self.harken.map(f) ?? fallback
+            self.main { done(v) }
+        }
+    }
+
+    // MARK: the listening session
+
+    /// A press — a transition while this phone is part of the session —
+    /// previewed on the session's queue, so what is published next already
+    /// shows it; then `done` on the main queue with the refusal, if any.
+    /// Unlinked it is refused ([notPart]), and the caller does it to the player itself.
+    func press(_ p: Press, done: @escaping (String?) -> Void = { _ in }) {
+        queue.async {
+            guard let player = self.player else { return self.main { done(notPart) } }
+            let w = player.press(press: p.json)
+            self.step()
+            self.show()
+            self.main { done(w) }
+        }
+    }
+
+    /// The player said something happened to it: reconcile.
+    func poke() {
+        queue.async {
+            guard !self.closed, self.player != nil else { return }
+            self.step()
+            self.show()
+        }
+    }
+
+    // MARK: pages
+
+    /// A page's tracks, kept up to date while it is held; [release] it when the screen goes.
+    func hold(_ page: Page) {
+        if page == .songs { return }
+        queue.async {
+            if var p = self.pages[page] {
+                p.refs += 1
+                self.pages[page] = p
+                return
+            }
+            let held = Held<LibraryEntry> { try Phone.view($0, page) }
+            self.pages[page] = (held, 1)
+            if let h = self.harken {
+                held.hydrate(h)
+                self.snap.pages[page] = held.rows
+                self.show()
+            }
+        }
+    }
+
+    func release(_ page: Page) {
+        queue.async {
+            guard var p = self.pages[page] else { return }
+            p.refs -= 1
+            if p.refs > 0 {
+                self.pages[page] = p
+                return
+            }
+            self.pages[page] = nil
+            self.snap.pages[page] = nil
+        }
+    }
+
+    /// A page's tracks once, for playing it from somewhere that does not show it (Home's last played).
+    func read(_ page: Page, done: @escaping ([LibraryEntry]) -> Void) {
+        ask([], { h in page == .songs ? self.library.rows : Phone.once { try Phone.view(h, page)! } }, done)
+    }
+
+    /// The library's songs matching `needle`, by the domain's `search`.
+    func search(_ needle: String, done: @escaping ([LibraryEntry]) -> Void) { ask([], { Phone.search($0, needle) }, done) }
+
+    /// Which of the person's playlists `track` is on.
+    func playlistsOf(_ track: LibraryEntry, done: @escaping (Set<Id>) -> Void) {
+        ask([], { Set(Phone.playlistsOf($0, media: track.id).map { $0.id }) }, done)
+    }
+
+    /// What `create_playlist`'s own checks say of a name as it is typed; nil when it would pass.
+    func nameProblem(_ name: String, done: @escaping (String?) -> Void) { ask(nil, { Phone.nameProblem($0, name) }, done) }
+
+    // MARK: writing
+
+    private func record(_ w: Wrote, _ what: String, _ refused: String) {
+        switch w {
+        case .refused(let why): main { self.notice("\(refused): \(why)") }
+        case .entry(let id):
+            changes.insert(Authored(id: id, what: what), at: 0)
+            if changes.count > 100 { changes.removeLast(changes.count - 100) }
+        }
+    }
+
+    /// Make a playlist, and put `then` on it once it is there.
+    func createPlaylist(_ name: String, then: LibraryEntry? = nil) {
+        onPeer { h in
+            let before = Set(self.playlists.rows.map { $0.id })
+            self.record(Phone.createPlaylist(h, name), "make the playlist \(name.trimmingCharacters(in: .whitespaces))", "Couldn't make it")
+            if self.playlists.update() { self.snap.playlists = self.playlists.rows }
+            if let t = then, let made = self.playlists.rows.first(where: { !before.contains($0.id) }) {
+                self.record(Phone.addToPlaylist(h, made.id, t.id), "add \(t.title) to \(made.name)", "Couldn't add it")
+            }
+        }
+    }
+
+    func add(_ track: LibraryEntry, to playlist: Playlist) {
+        onPeer { h in self.record(Phone.addToPlaylist(h, playlist.id, track.id), "add \(track.title) to \(playlist.name)", "Couldn't add it") }
     }
 
     func remove(_ track: LibraryEntry, from playlist: Id) {
         onPeer { h in
-            let name = self.snap.playlists.first { $0.id == playlist }?.name ?? "a playlist"
-            _ = self.record(Phone.removeFromPlaylist(h, playlist, track.id), "take \(track.title) off \(name)", Snapshot.Pair(playlist: playlist, media: track.id))
+            let name = self.playlists.rows.first { $0.id == playlist }?.name ?? "a playlist"
+            self.record(Phone.removeFromPlaylist(h, playlist, track.id), "take \(track.title) off \(name)", "Couldn't take it off")
         }
     }
 
-    /// On the playlist it is not on, or off the one it is on.
-    func toggle(_ track: LibraryEntry, on playlist: Id) {
-        if playlistsOf(track).contains(playlist) { remove(track, from: playlist) } else { add(track, to: playlist) }
-    }
+    // MARK: the account
 
-    // A change this phone made, kept so its standing is read whenever anything moves.
-    private func record(_ w: Wrote, _ what: String, _ key: Snapshot.Pair?) -> String? {
-        switch w {
-        case .refused(let why):
-            say("refused: \(why)")
-            return nil
-        case .entry(let id):
-            snap.changes.insert(Authored(id: id, what: what), at: 0)
-            if snap.changes.count > 100 { snap.changes.removeLast(snap.changes.count - 100) }
-            if let k = key { snap.touchedBy[k] = id }
-            if let h = harken { snap.standings[id] = h.peer.standing(id: id) }
-            return id
-        }
-    }
+    /// Offline on purpose, or back online.
+    func setOnline(_ online: Bool) { onPeer { $0.peer.setOnline(online: online) } }
 
-    /// Sign in as `login`: everything done so far as nobody becomes theirs
-    /// and is pushed; whoever is signed in is every view's reader, so each
-    /// is read again.
-    func signIn(_ login: Login) {
-        onPeer { h in
-            h.peer.login(login: login)
-            self.deniedSaid = false
-            self.playlistsView = try? h.playlists()
-            self.snap.playlists = self.playlistsView?.rows() ?? []
-            self.reselect(h, self.snap.selected)
-        }
-    }
-
-    /// Sign out: the link stopped; what that person left pending stays theirs.
+    /// Signed out: the session revoked through the domain (pushed while
+    /// linked, pending for the next sign-in otherwise), nothing dialled after
+    /// it, what is pending kept. The model closes the session after.
     func signOut() { onPeer { $0.peer.logout() } }
 
-    /// Reopen under new prefs: the old peer let go first.
-    func reopen(_ prefs: Prefs) {
+    /// Every number the diagnostics show: the status, and every change with where it stands.
+    func diagnostics(done: @escaping (Status?, [(String, String)]) -> Void) {
         queue.async {
-            self.close()
-            // What this phone made, and where it stands, outlive the peer.
-            let kept = self.snap
-            self.snap = Snapshot()
-            self.snap.changes = kept.changes
-            self.snap.madeBy = kept.madeBy
-            self.snap.touchedBy = kept.touchedBy
-            self.open(prefs)
+            let st = self.harken?.peer.status()
+            let list = self.changes.map { c in (c.what, self.harken.map { Phone.standing($0.peer.standing(id: c.id)) } ?? "unknown") }
+            self.main { done(st, list) }
         }
     }
 
-    // On `queue`: the views and the peer let go; the kernel writes as it goes.
-    private func close() {
-        harken?.peer.setListener(listener: nil)
-        libraryView = nil
-        playlistsView = nil
-        itemsView = nil
-        harken = nil
+    /// Stop telling and let the peer go; its disk stays for the next session.
+    func close() {
+        queue.async {
+            self.closed = true
+            self.harken?.peer.setListener(listener: nil)
+            self.player?.attach(sound: nil)
+            self.player = nil
+            self.pages = [:]
+            self.harken = nil
+        }
     }
 }
