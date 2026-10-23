@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- No action bar, and the window's own ground in the theme's colour, so
+    <!-- Dark always (Theme.Material is the dark one), no action bar, and the
+         window's own ground black, so
          the first frame before the text is laid out is the page and not a
          white flash. The bars are drawn over (edge to edge, MainActivity). -->
-    <style name="Theme.Revelation" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+    <style name="Theme.Revelation" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/ground</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

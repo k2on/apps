@@ -99,6 +99,15 @@ class BibleView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
     private val labelWidths = HashMap<String, Double>()
     private var labels: List<Levels.Label> = emptyList()
 
+    /**
+     * A label's own opacity over time, so book and chapter names fade in when they are placed and
+     * fade out when they are dropped, rather than popping. Keyed by side and target; [docY] keeps a
+     * label that is fading out on the text it named while the camera moves.
+     */
+    private class Fade(var label: Levels.Label, var docY: Double, var opacity: Double, var shown: Boolean)
+    private val fades = HashMap<String, Fade>()
+    private var fadedAt = 0L
+
     private var bars = FloatArray(4 * 1024)
     private val verseNumbers = Array(200) { (it + 1).toString() }
     private var baseline = 0f
@@ -262,7 +271,7 @@ class BibleView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         if (mix.bars > 0.002) drawBars(canvas, f, mix.bars)
         if (mix.column > 0.002) drawColumn(canvas, b, f, mix.column, mix.columnInk)
         again = drawHighlight(canvas, b, f, now) || again
-        if (mix.labels > 0.002) drawLabels(canvas, b, f, mix.labels) else labels = emptyList()
+        again = drawLabels(canvas, b, f, mix.labels, now) || again
         again = drawEdges(canvas) || again
         if (again) postInvalidateOnAnimation()
 
@@ -385,27 +394,66 @@ class BibleView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         return true
     }
 
-    private fun drawLabels(canvas: Canvas, b: Bible, f: Levels.Frame, alpha: Double) {
+    /** Draws the labels, each at its faded opacity; true while any is still fading. */
+    private fun drawLabels(canvas: Canvas, b: Bible, f: Levels.Frame, alpha: Double, now: Long): Boolean {
         bookLabelPaint.textSize = sp(13f)
         chapterLabelPaint.textSize = sp(11f)
         val measure: (String) -> Double = { s ->
             // Chapter labels are numbers alone; a book's name may start with one ("1 Corinthians").
             labelWidths.getOrPut(s) { (if (s.all(Char::isDigit)) chapterLabelPaint else bookLabelPaint).measureText(s).toDouble() }
         }
-        labels = Levels.labels(
-            b, f,
-            top = topInset + 8 * density, bottom = height - bottomInset - 8 * density,
-            labelHeight = labelHeight.toDouble(), gap = labelHeight.toDouble(), margin = 14 * density,
-            measure = measure,
-        )
+        labels = if (alpha > 0.002) {
+            Levels.labels(
+                b, f,
+                top = topInset + 8 * density, bottom = height - bottomInset - 8 * density,
+                labelHeight = labelHeight.toDouble(), gap = labelHeight.toDouble(), margin = 14 * density,
+                measure = measure,
+            )
+        } else {
+            emptyList()
+        }
+
+        // The first frame shows what it places at once (nothing has moved yet); after that a
+        // frame moves each label's opacity toward its target by the time since the last, capped
+        // so that a frame after a still spell does not jump.
+        val first = fadedAt == 0L
+        val step = if (first) 1.0 else (now - fadedAt).coerceIn(0L, 32L) / LABEL_FADE_MS
+        fadedAt = now
+        for (fade in fades.values) fade.shown = false
         for (l in labels) {
+            val key = "${l.side}:${l.target.book}:${l.target.chapter}"
+            val docY = f.camera.docY(l.centreY / density)
+            val fade = fades.getOrPut(key) { Fade(l, docY, if (first) 1.0 else 0.0, true) }
+            fade.label = l
+            fade.docY = docY
+            fade.shown = true
+        }
+
+        var again = false
+        val gone = ArrayList<String>()
+        for ((key, fade) in fades) {
+            fade.opacity = if (fade.shown) min(1.0, fade.opacity + step) else max(0.0, fade.opacity - step)
+            if (!fade.shown && fade.opacity <= 0.0) {
+                gone += key
+                continue
+            }
+            if (fade.opacity < 1.0) again = true
+            val l = fade.label
+            // A label being dropped is drawn where its text now is; a placed one where it was placed.
+            val centreY = if (fade.shown) l.centreY else f.px(fade.docY)
             val paint = if (l.side == Levels.Side.LEFT) bookLabelPaint else chapterLabelPaint
             val ink = if (l.side == Levels.Side.LEFT) 0.85 else 0.6
-            paint.alpha = (alpha * l.alpha * ink * 255).roundToInt()
+            val eased = smooth(fade.opacity)
+            paint.alpha = (alpha * l.alpha * ink * eased * 255).roundToInt()
             val fm = paint.fontMetrics
-            canvas.drawText(l.text, l.left.toFloat(), (l.centreY - (fm.ascent + fm.descent) / 2).toFloat(), paint)
+            canvas.drawText(l.text, l.left.toFloat(), (centreY - (fm.ascent + fm.descent) / 2).toFloat(), paint)
         }
+        for (key in gone) fades.remove(key)
+        return again
     }
+
+    /** Ease in and out over [0, 1]. */
+    private fun smooth(x: Double) = x * x * (3 - 2 * x)
 
     private fun drawEdges(canvas: Canvas): Boolean {
         var again = false
@@ -702,6 +750,8 @@ class BibleView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         private const val NUMBER_INK = 0.45
         private const val CHAPTER_INK = 0.75
         private const val HIGHLIGHT_MS = 1600L
+        /** How long a book or chapter name takes to fade in or out. */
+        private const val LABEL_FADE_MS = 200.0
 
         /** How far a double tap or a two-finger tap zooms. */
         private const val STEP = 2.5

@@ -369,7 +369,7 @@ rubber-bands back rather than reflowing.
 What landed, against the pieces above: the text (1), the layout (2),
 the surface with the platform's scroller and edge effects (3), the
 levels down to the one-pixel line with their fades and labels (4), the
-fly-to, the header, the picker and search (5), the two themes and the
+fly-to, the header, the picker and search (5), the theme and the
 saved place (6, without the font-size setting), and the build (7):
 `revelation-apk`, `revelation-apk-deps` and `revelation-android-screens`
 beside harken's, and one F-Droid repository for both apps (`fdroid-repo`,
@@ -392,3 +392,9 @@ selection, bookmarks, a second translation. No phone has run it: the
 touch routing, the fling against `ScrollView`'s, the stretch effect,
 frame times during a pinch over reading text and the layout's time with
 the real `Paint` are the first things to look at with the first APK.
+
+Since: the app is dark always, whatever the phone's theme, on a black
+ground rather than near-black, and the light theme is gone. Book and
+chapter names fade in and out over a fifth of a second as the collision
+rule places and drops them, instead of popping; a name fading out stays
+on the text it named.

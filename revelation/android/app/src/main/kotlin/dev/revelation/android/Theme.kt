@@ -1,13 +1,10 @@
-// The two looks: white on near-black, the owner's image and the default on
-// a phone in dark mode, and its inverse for a phone in light mode. The
+// The one look: white on black, whatever the phone's own theme is. The
 // surface (BibleView) and the chrome (Compose) draw from the same palette.
 package dev.revelation.android
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -17,39 +14,27 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 
 /** The ground the text is on and the ink it is in, as ARGB, for the view's Paints and Compose's colours alike. */
-data class Palette(val ground: Int, val ink: Int, val dark: Boolean) {
+data class Palette(val ground: Int, val ink: Int) {
     companion object {
-        /** Near-black, and white: the far end's line is pure white on it. */
-        val Dark = Palette(ground = 0xFF0B0B0C.toInt(), ink = 0xFFFFFFFF.toInt(), dark = true)
-
-        /** Its inverse, a little warm, and the line is near-black. */
-        val Light = Palette(ground = 0xFFF7F6F2.toInt(), ink = 0xFF111111.toInt(), dark = false)
+        /** Black, and white: the far end's line is pure white on it. */
+        val Dark = Palette(ground = 0xFF000000.toInt(), ink = 0xFFFFFFFF.toInt())
     }
 }
 
 val LocalPalette = staticCompositionLocalOf { Palette.Dark }
 
 @Composable
-fun RevelationTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val palette = if (dark) Palette.Dark else Palette.Light
+fun RevelationTheme(content: @Composable () -> Unit) {
+    val palette = Palette.Dark
     val ground = Color(palette.ground)
     val ink = Color(palette.ink)
     val dim = ink.copy(alpha = 0.6f)
-    val raised = if (dark) Color(0xFF17171A) else Color(0xFFEDEBE5)
-    val scheme =
-        if (dark) {
-            darkColorScheme(
-                background = ground, onBackground = ink, surface = ground, onSurface = ink,
-                surfaceVariant = raised, onSurfaceVariant = dim, surfaceContainerHigh = raised,
-                primary = ink, onPrimary = ground, outline = ink.copy(alpha = 0.2f),
-            )
-        } else {
-            lightColorScheme(
-                background = ground, onBackground = ink, surface = ground, onSurface = ink,
-                surfaceVariant = raised, onSurfaceVariant = dim, surfaceContainerHigh = raised,
-                primary = ink, onPrimary = ground, outline = ink.copy(alpha = 0.2f),
-            )
-        }
+    val raised = Color(0xFF141414)
+    val scheme = darkColorScheme(
+        background = ground, onBackground = ink, surface = ground, onSurface = ink,
+        surfaceVariant = raised, onSurfaceVariant = dim, surfaceContainerHigh = raised,
+        primary = ink, onPrimary = ground, outline = ink.copy(alpha = 0.2f),
+    )
     val serif = TextStyle(fontFamily = FontFamily.Serif)
     val type = Typography(
         titleMedium = serif.copy(fontSize = 18.sp),

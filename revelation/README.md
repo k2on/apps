@@ -25,7 +25,7 @@ and the app parses it at launch.
         Gestures.kt   the gesture state machine: idle, dragging, flinging, pinching, animating
         BibleView.kt  the View: draws what Levels decides, and turns touches into camera moves
         Shell.kt      the Compose chrome: header, picker, search, About
-        Theme.kt      the two palettes, shared by the View and Compose
+        Theme.kt      the one palette, white on black, shared by the View and Compose
         MainActivity.kt
       app/src/test/kotlin/dev/revelation/android/   JUnit 4 tests and the Paparazzi screens
       debug.keystore                the key every build signs with (see below)
@@ -106,11 +106,11 @@ as trusted.
   pinch neither drags nor flings, and no animation starts while a finger
   is driving the camera.
 - **The screens.** Paparazzi draws the real `BibleView` over the real
-  text inside the real Compose shell, at a Pixel 5's size, light and
-  dark. These are the six camera states (`01_reading`, `02_small_glyphs`,
+  text inside the real Compose shell, at a Pixel 5's size, in the app's
+  one dark look. These are the six camera states (`01_reading`, `02_small_glyphs`,
   `03_greeked`, `04_chapters`, `05_books`, `06_line`) and the chrome
   (`07_picker`, `08_picker_chapters`, `09_search`, `10_search_reference`,
-  `11_about`). Each has a `-light` and a `-dark`.
+  `11_about`), each named `-dark`.
 
 ## What only a phone can show
 
@@ -144,9 +144,6 @@ one does:
 - **No accessibility yet.** TalkBack cannot read a canvas.
   `ExploreByTouchHelper` over the visible verses is the planned answer.
 - Selection, bookmarks, highlights and a second translation.
-- **Popping book labels.** Book labels placed by the collision rule appear
-  and disappear whole as the zoom changes. Chapter labels and every level
-  fade instead.
 - **The saved place.** The camera is saved to SharedPreferences, not
   DataStore. It stores the verse under the centre, the offset from its
   first line and the scale, so it survives a change of width.

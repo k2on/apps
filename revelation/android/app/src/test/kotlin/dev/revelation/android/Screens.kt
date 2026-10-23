@@ -1,5 +1,5 @@
-// The surface at each level of zoom, and the chrome's places, in light and
-// in dark, at a phone's size: what a change to the drawing is reviewed by.
+// The surface at each level of zoom, and the chrome's places, in the app's
+// one dark look, at a phone's size: what a change to the drawing is reviewed by.
 //
 // Paparazzi renders each on the JVM through layoutlib, the renderer Android
 // Studio's previews use, so nothing here needs a phone or an emulator. The
@@ -15,7 +15,7 @@
 //     05_books          Matthew at the centre, chapters a few pixels: a rule at each long book
 //     06_line           the whole Bible, the single line
 //
-// and the chrome after them (07 on). Each has a `-light` and a `-dark`.
+// and the chrome after them (07 on). Each is named `-dark`.
 package dev.revelation.android
 
 import android.view.View.MeasureSpec
@@ -40,10 +40,9 @@ class Screens {
     private fun lines(h: Double) = h / (27 * 2.75)
 
     /** The surface laid out at the phone's size with the camera at [anchor], before Compose takes it. */
-    private fun surface(dark: Boolean, anchor: BibleView.Anchor): BibleView {
+    private fun surface(anchor: BibleView.Anchor): BibleView {
         val v = BibleView(paparazzi.context)
         v.synchronousLayout = true
-        v.palette = if (dark) Palette.Dark else Palette.Light
         v.setBible(bible, anchor)
         val w = paparazzi.context.resources.displayMetrics.widthPixels
         val h = paparazzi.context.resources.displayMetrics.heightPixels
@@ -53,21 +52,17 @@ class Screens {
     }
 
     private fun camera(name: String, anchor: BibleView.Anchor) {
-        for (dark in listOf(false, true)) {
-            val v = surface(dark, anchor)
-            val place = v.place()
-            paparazzi.snapshot(if (dark) "$name-dark" else "$name-light") {
-                RevelationTheme(dark) { RevelationApp(v, bible, place) }
-            }
+        val v = surface(anchor)
+        val place = v.place()
+        paparazzi.snapshot("$name-dark") {
+            RevelationTheme { RevelationApp(v, bible, place) }
         }
     }
 
     private fun chrome(name: String, content: @Composable () -> Unit) {
-        for (dark in listOf(false, true)) {
-            paparazzi.snapshot(if (dark) "$name-dark" else "$name-light") {
-                RevelationTheme(dark) {
-                    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { content() }
-                }
+        paparazzi.snapshot("$name-dark") {
+            RevelationTheme {
+                Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { content() }
             }
         }
     }
@@ -89,12 +84,10 @@ class Screens {
         chrome("08_picker_chapters") { Picker(bible, psalm23, {}, {}, book = book("Psalm")) }
         chrome("09_search") { SearchPanel(bible, {}, {}, initial = "shepherd", focus = false) }
         chrome("10_search_reference") { SearchPanel(bible, {}, {}, initial = "john 3:16", focus = false) }
-        for (dark in listOf(false, true)) {
-            val v = surface(dark, BibleView.Anchor(verse("Psalm", 23), 0.0, 1.0))
-            val place = v.place()
-            paparazzi.snapshot(if (dark) "11_about-dark" else "11_about-light") {
-                RevelationTheme(dark) { RevelationApp(v, bible, place, start = Overlay.ABOUT) }
-            }
+        val v = surface(BibleView.Anchor(verse("Psalm", 23), 0.0, 1.0))
+        val place = v.place()
+        paparazzi.snapshot("11_about-dark") {
+            RevelationTheme { RevelationApp(v, bible, place, start = Overlay.ABOUT) }
         }
     }
 }
