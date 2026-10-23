@@ -3,106 +3,133 @@
 SwiftUI over harken's library (`../ffi`, `docs/plan-v5.md` §1.16): the Rust
 kernel with harken's domain linked in, as `HarkenFFI.xcframework` — the
 same code the server, the desktop, the browser and the Android app run. The
-kernel keeps the replica, dials the server and keeps the views; the app's
-code is its screens and its model. It calls the domain by name through the
-Swift `ark-dev gen swift` writes from the registered domain — a struct per
-record and row, an enum per sum, a stub per function (`Harken/Gen/
-Harken.swift`, never edited: `ARK_WRITE_GEN=1 cargo test -p harken-ffi
---test gen` writes it, and the same test fails when it is not what the
-domain generates) — over UniFFI's Swift and the bridge's typed half
-(`rust/ark-ffi/swift/Typed.swift`).
+kernel keeps the replica, dials the server, keeps the views and, through
+harken's one reconciler (`harken/player`, the FFI's `Player`), decides what
+this phone's player does; the app's code is its screens, its model, and the
+player itself. It calls the domain by name through the Swift `ark-dev gen
+swift` writes (`Harken/Gen/Harken.swift`, never edited: `ARK_WRITE_GEN=1
+cargo test -p harken-ffi --test gen` writes it) over UniFFI's Swift and the
+bridge's typed half (`rust/ark-ffi/swift/Typed.swift`).
 
-**Never built for iOS, never run.** The library for iOS is
-`nix build .#harken-ios-xcframework` — `harken/ffi` compiled for
-`aarch64-apple-ios` and `aarch64-apple-ios-sim`, bound into an xcframework
-by `xcodebuild`, with the Swift UniFFI writes for it — a derivation that
-evaluates everywhere and builds only on a macOS builder with Xcode
-(`meta.platforms`; it asks for the builder's Xcode outside the store). It
-has not been built: this was written in a Linux container with no Mac, no
-Xcode and no SwiftUI. What *was* checked here: the Rust targets install
-(`rustup target add aarch64-apple-ios aarch64-apple-ios-sim`), UniFFI
-writes the Swift for the library built for Linux (`checks.ffi`), and the
-generated `Harken.swift` is held to the domain; and `Rows.swift`,
-`Bridge.swift`, `Model.swift` and the generated Swift **type-check** on
-Linux against UniFFI's Swift and the library's headers, with a stand-in for
-SwiftUI (`tools/typecheck.sh`, `checks.harken-ios-typecheck`: nixpkgs'
-Swift 5.8, which predates the `nonisolated(unsafe)` UniFFI writes twice for
-Swift 6, so the check's copy has it taken out — Xcode's Swift reads it as
-written). That check found two things a Mac would have: the app's own
-`Track` beside the domain's (the rows are `LibraryEntry` now), and
-`URLSession` living in `FoundationNetworking` off Apple's platforms. The
-views were written against iOS 17's SwiftUI and read, not compiled. Expect
-the first build in Xcode to want small fixes.
+The Android app is the spec: `PARITY.md` lists every screen, sheet, control,
+gesture, animation and background behaviour it has, the iOS counterpart and
+its API, the motion mapping, every Liquid Glass and iOS 26 API used, and
+what is not built and why.
 
-## Generating the project
+**Never built in Xcode, never run on a device.** It was written in a Linux
+container with no Mac. What *was* checked: the non-UI half type-checks and
+its tests run (below); every file parses.
+
+## Building
 
 ```
-nix build .#harken-ios-xcframework -o ../ffi/ios   # on a Mac
-brew install xcodegen                               # once
+nix build .#harken-ios-xcframework -o result-ios     # on a Mac with Xcode
+rm -rf ../ffi/ios && cp -RL result-ios ../ffi/ios     # HarkenFFI.xcframework, swift/
+brew install xcodegen                                  # once
 cd harken/ios
 xcodegen generate
-open Harken.xcodeproj
+xcodebuild archive -scheme Harken -configuration Release -destination 'generic/platform=iOS'
 ```
 
-`project.yml` is the project: one target, iOS 17, over
-`../ffi/ios/HarkenFFI.xcframework` and the Swift beside it
-(`../ffi/ios/swift`). `Harken.xcodeproj` and `Harken/Info.plist` are
-outputs; regenerate rather than edit.
+`project.yml` is the project: the app (iOS 26.0, Swift 5 language mode —
+why not 6 is said at its top — `UIBackgroundModes: audio`, the `harken`
+URL scheme, `ITSAppUsesNonExemptEncryption: false`, the icon in
+`Harken/Assets.xcassets`, version `1.0 (1)` which CI overrides, automatic
+signing, bundle id `dev.arkdb.harken` which CI overrides) over
+`../ffi/ios/HarkenFFI.xcframework` and `../ffi/ios/swift`, and the
+`HarkenTests` unit tests, in the one scheme `Harken`. `Harken.xcodeproj`
+and `Harken/Info.plist` are outputs; regenerate rather than edit. The icon
+is `tools/icon.py`'s (standard-library Python: a gold waveform on a dark
+ground, 1024 × 1024, opaque).
 
 ## How the pieces meet
 
-- **`Bridge`** holds the one peer, `harkenOpen` over a replica directory,
-  and a serial queue of its own for the lists the screens draw. The peer
-  drives itself (its link, its redial and its views are the kernel's) and
-  tells the bridge when anything moved (`Listener`); the bridge then asks
-  `library`, `playlists` and the open `playlist` — the kernel's maintained
-  views, typed (`View<T>`) — what they did, and splices their patches into
-  the lists the screens were given, reading one again only on a reset or
-  when the selection moves. What the screens see goes to the main queue as
-  a `Snapshot` when something in it moved.
-- **`Model`** is SwiftUI's half: the prefs in `UserDefaults` (the server,
-  work alone, the login whole so a restart reuses it), the snapshot, the
-  last notice, and the sign-in (dev auth: the code read off the server's
-  redirect, exchanged through the kernel).
-- **`Phone`** (Rows.swift) reads harken's views as the domain's own rows
-  (`LibraryEntry`, `Playlist`: UniFFI's records, read typed with no JSON;
-  the generated Swift gives them only their JSON, as an extension) and makes each write one of the domain's
-  functions through the generated stubs, returning the entry's id so that
-  its standing can be asked later.
+Foundation only — type-checked and tested on Linux:
 
-The replica is `Application Support/harken/<server-…|alone>/replica`, the
-kernel's own files — one directory per server (or alone), not per person,
-because the log is the server's.
+- **`Bridge`** — the session for one server and login: the peer opened over
+  the replica (`Application Support/harken/server-…/replica`, one directory
+  per server), dialled, and drained on one queue whenever it says anything
+  moved (`Listener`): the library's views spliced (songs, playlists, albums
+  first, then artists, details, the last play; a page's while it is on its
+  stack), the reconciler stepped, a rejection or a denial said once, and a
+  `Snapshot` sent to the main queue. Every write is a domain function.
+- **`Model`** — the main actor's: the onboarding's machine run, the session
+  it opens, what plays (`PlayerState`, derived from the reconciler's one
+  view), and every button: a press of the account's session while this
+  phone is part of it, or, alone, done to the player itself.
+- **`Onboarding`** — the server step (`Address`, `Health`, `Probe`) and the
+  sign-in, with no button: it goes by itself, once a launch.
+- **`Session`**, **`Playing`**, **`Rows`** — the session read, every press as
+  harken_player's JSON, the queue edits, the picker, volumes and the
+  throttle; what plays and Home's last played; the rows, pages, places.
+- **`SoundCore`** — the reconciler's `PhoneSound` over an `Engine`.
 
-## What it does
+Apple's — written, not compiled here: **`AVEngine`** (AVPlayer, the
+audio session, interruptions, route changes), **`NowPlaying`** (lock
+screen, Control Center, headset), **`Covers`** (disk and memory caches,
+ImageIO), and the screens: `Shell` (tabs, accessory, sheets, zoom),
+`HomeView`, `SearchView`, `LibraryView`, `Pages`, `PlayerViews`, `Sheets`,
+`SettingsView`, `OnboardingViews`, `Components`, `Theme`, `HarkenApp`.
 
-- **It works with nobody signed in.** The first launch opens the peer
-  signed out: everything is authored as nobody, applied, written down, and
-  nothing is dialled. Signing in (Settings; dev auth, a name) makes all of
-  it that person's and syncs it; the login is kept and the app opens as
-  them on every launch. Signing out keeps what that person left pending for
-  when they sign in again. A server that signs people in through a
-  provider's page is not supported: the sign-in says so.
-- **Work alone.** No server: the peer is its own authority over a local
-  history in a replica of its own. Songs only arrive from a server's
-  scanner, so the library stays empty; playlists work.
-- **Library** — everything in the library, read against the selected
-  playlist so each row knows whether it is on it; the row's button puts a
-  track on that playlist or takes it off, a long press lists every
-  playlist ticked by `playlists_of`. With no playlist at all, adding makes
-  "Favorites" first.
-- **Playlists** — the person's playlists in the order they were made; `+`
-  names a new one (`create_playlist`), the name's problems said as it is
-  typed by the function's own input checks (`check`). A name the person
-  already has is kept and numbered by the log.
-- **Playlist** — its contents in playlist order; swipe to remove
-  (`remove_from_playlist`).
-- **Where every change stands.** Each change this phone makes is kept with
-  its entry id, and the peer's `standing` says where it is: *not synced yet* while
-  pending, nothing once confirmed, *not saved:* and the server's own
-  sentence when it was rejected.
-- **Settings** — the account, the server's address (`http://host:port`;
-  the socket, `ws://host:port/sync`, is derived from it), work alone, and
-  the status: the link in a word, linked, the cursor, not synced, joining,
-  connections, the disk's last refusal, a denial; and every change with
-  its standing.
+## Checks
+
+`checks.harken-ios-typecheck` (`tools/typecheck.sh`): every file under
+`Harken/` whose imports are Foundation and Combine only, with the
+generated types, against UniFFI's Swift for the library and its headers
+and a stand-in for Combine's `ObservableObject`/`@Published` — nixpkgs'
+Swift 5.8, which predates `nonisolated(unsafe)`, so the check's copy of
+UniFFI's Swift has it taken out. Then HarkenTests type-check with them
+against a stand-in for XCTest's assertions; and, handed the library built
+for this machine, they are linked and run:
+
+```
+cargo build -p harken-ffi --lib          # rust/
+HARKEN_FFI_LIB=$PWD/rust/target/debug/libharken_ffi.so \
+  bash harken/ios/tools/typecheck.sh <uniffi swift bindings>
+```
+
+On a Mac the same tests are Xcode's: `xcodebuild test -scheme Harken
+-destination 'platform=iOS Simulator,name=iPhone 17'`.
+
+## First build
+
+The first compile is the user's CI on a macOS runner (Xcode 26.3). What is
+most likely to want a fix, most likely first:
+
+1. **`\.tabViewBottomAccessoryPlacement`** (PlayerViews.swift `MiniPlayer`):
+   the environment key's name and its type (`TabViewBottomAccessoryPlacement?`,
+   `.inline`/`.expanded`). If it does not compile, delete the property and
+   `compact`: the bar then draws its full face always.
+2. **The zoom on a `fullScreenCover`** (Shell.swift):
+   `navigationTransition(.zoom(sourceID:in:))` on the cover's content with
+   the accessory as `matchedTransitionSource`. If the accessory cannot be a
+   source, drop `matchedTransitionSource` there: the player then rises as a
+   plain full-screen cover.
+3. **`web.authenticate(using:callbackURLScheme:)`** (HarkenApp.swift): if the
+   SDK has only the iOS 17.4 form, it is
+   `authenticate(using: url, callback: .customScheme("harken"), preferredBrowserSession: nil, additionalHeaderFields: [:])`.
+4. **Isolation in Swift 5 mode**: `AVEngine` and `NowPlaying` assume the main
+   thread (`MainActor.assumeIsolated` in the remote commands); `Model`'s
+   closures handed to `Bridge` are formed on the main actor and called on
+   the main queue. A warning is expected; an error means a
+   `@MainActor`/`nonisolated` to add where it points.
+5. **Linking the static library**: Security and SystemConfiguration are
+   linked; if the archive reports undefined symbols from Rust's standard
+   library, add what `rustc --print native-static-libs` names (`-lc++`,
+   `-liconv`, `-lresolv`) to `OTHER_LDFLAGS` in `project.yml`.
+6. **The test target**: `HarkenTests` reaches the bindings (`Hall`, `Player`)
+   through `@testable import Harken`; if the test host does not load, set
+   `TEST_HOST`/`BUNDLE_LOADER` in `project.yml` (XcodeGen normally does).
+7. Small things a compiler finds at once: a ternary's colour type
+   (`Color.gold : .secondary`), `Slider(value:in:onEditingChanged:)`, a
+   `ForEach` over `enumerated()`, `UIDevice.current.name` (it is "iPhone"
+   without an entitlement, which is the name other devices' pickers show).
+
+## Not verified
+
+Everything that needs Xcode, a simulator, a device or a real server: the
+screens and their Liquid Glass, the motion, the AVPlayer engine and the
+audio session in the background, interruptions and route changes, the lock
+screen and Control Center, the sign-in sheet and the `harken://auth`
+redirect, the covers, the app icon in App Store Connect, the xcframework
+link, and the archive.

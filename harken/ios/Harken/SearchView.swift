@@ -28,6 +28,12 @@ struct SearchView: View {
         .navigationTitle("Search")
         .searchable(text: needle, prompt: "Songs, albums, artists")
         .onSubmit(of: .search) { model.searched(model.needle) }
+        // The covers of an answer that just arrived decoded before its rows ask.
+        .onChange(of: model.results) { _, r in
+            guard let r = r else { return }
+            Covers.shared.warm(r.songs.prefix(searchSongs).map { RowCover.url(model, model.album(of: $0)?.art ?? "") }, side: Space.thumb)
+            Covers.shared.warm(r.albums.map { RowCover.url(model, $0.art) }, side: 128)
+        }
     }
 
     @ViewBuilder private var recent: some View {
