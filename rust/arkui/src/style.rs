@@ -100,6 +100,27 @@ pub fn action(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// A button that reads as a label until it is pointed at: the account at
+/// the end of a top bar. Not [`action`]: it is not something somebody is
+/// being asked to press, and an accent there would compete with the one on
+/// the row that is playing.
+pub fn quiet(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = of(theme);
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => Some(Background::Color(palette.background.strong.color)),
+        button::Status::Active | button::Status::Disabled => None,
+    };
+    button::Style {
+        background,
+        text_color: palette.background.base.text,
+        border: Border {
+            radius: ENTRY_RADIUS.into(),
+            ..Border::default()
+        },
+        ..button::Style::default()
+    }
+}
+
 /// The scrollbars. **A scrollbar is not a thing to accent.**
 ///
 /// iced's default draws a hovered scroller in `primary.strong`, so the bar
