@@ -697,8 +697,20 @@
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           # The library for each iOS target and for the host, which UniFFI
           # reads the Swift from.
+          # The iOS targets compile and link with the builder's Xcode: its
+          # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
+          # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
+          # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
+          # fails under them: both are taken back for these two targets, and
+          # the host build keeps nix's toolchain.
           iosBuild = ''
-            export PATH=/usr/bin:$PATH DEVELOPER_DIR=''${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}
+            export PATH=/usr/bin:$PATH
+            export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+            unset SDKROOT
+            ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
+              export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
+              export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
+            '') iosTargets}
             ${lib.concatMapStrings (t: "cargoWithProfile build --locked -p harken-ffi --lib --target ${t}\n") iosTargets}
             cargoWithProfile build --locked -p harken-ffi --lib
           '';
