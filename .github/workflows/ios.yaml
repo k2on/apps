@@ -1,8 +1,11 @@
 # harken for iOS, to TestFlight, on every push to main that touches what the
 # app is built from. Its own workflow: nothing here depends on build.yaml.
 #
-# The Rust kernel with harken's domain linked in is built by nix as
-# HarkenFFI.xcframework (`.#harken-ios-xcframework`), the Xcode project is
+# The Rust kernel with harken's domain linked in is built here with rustup
+# and cargo for a phone and the simulator, bound into HarkenFFI.xcframework
+# with the Swift UniFFI writes for it (the same output as the flake's
+# `.#harken-ios-xcframework`, built natively because a nix build user cannot
+# use the system xcrun the iOS SDK is found through), the Xcode project is
 # generated from harken/ios/project.yml by XcodeGen, and the archive is
 # signed and uploaded by xcodebuild itself: automatic signing with an App
 # Store Connect API key (Xcode makes or reuses the distribution certificate
@@ -17,8 +20,6 @@
 #   APPLE_TEAM_ID       the ten-character Team ID
 # Repository variable (the Variables tab), optional:
 #   IOS_BUNDLE_ID       the app's bundle ID; dev.arkdb.harken when unset
-#   CACHIX_NAME         a Cachix cache, as in build.yaml, if you use one
-#   (and the secret CACHIX_AUTH_TOKEN with it)
 name: ios
 
 on:
@@ -62,26 +63,40 @@ jobs:
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
 
-      # The xcframework derivation asks for the builder's Xcode outside the
-      # store (`__noChroot`), which a relaxed sandbox allows.
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          extra-conf: |
-            sandbox = relaxed
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
-      - if: vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          workspaces: rust
 
+      # harken's library for each iOS target and for this Mac, which UniFFI
+      # reads the Swift from; then the two iOS builds bound as one
+      # xcframework with UniFFI's headers, and the Swift beside it with the
+      # bridge's typed half.
       - name: Build the kernel for iOS
+        working-directory: rust
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         run: |
-          nix build .#harken-ios-xcframework --print-build-logs -o result-ios
-          rm -rf harken/ffi/ios
-          mkdir -p harken/ffi/ios
-          cp -RL result-ios/. harken/ffi/ios/
-          chmod -R u+w harken/ffi/ios
+          for t in aarch64-apple-ios aarch64-apple-ios-sim; do
+            cargo build --locked --release -p harken-ffi --lib --target "$t"
+          done
+          cargo build --locked --release -p harken-ffi --lib
+          cargo run --locked --release -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/release/libharken_ffi.dylib \
+            --language swift --no-format --out-dir "$RUNNER_TEMP/bindings"
+          mkdir -p "$RUNNER_TEMP/headers"
+          cp "$RUNNER_TEMP"/bindings/*.h "$RUNNER_TEMP/headers/"
+          cat "$RUNNER_TEMP"/bindings/*.modulemap > "$RUNNER_TEMP/headers/module.modulemap"
+          out=../harken/ffi/ios
+          rm -rf "$out" && mkdir -p "$out/swift"
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libharken_ffi.a -headers "$RUNNER_TEMP/headers" \
+            -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers "$RUNNER_TEMP/headers" \
+            -output "$out/HarkenFFI.xcframework"
+          cp "$RUNNER_TEMP"/bindings/*.swift ark-ffi/swift/Typed.swift "$out/swift/"
 
       - name: Generate the Xcode project
         working-directory: harken/ios
