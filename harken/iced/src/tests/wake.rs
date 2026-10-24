@@ -94,9 +94,6 @@ fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
     assert_eq!(names(&heard), ["wake"], "the open, once");
     let _ = app.update(Message::Wake);
     assert!(app.peer.client.linked);
-    // Linked, the default playlist waits a second of quiet: the one timer.
-    assert!(app.quiet.is_some() && app.deadline() == app.quiet);
-    app.quiet = None;
     assert_eq!((app.clock(), app.deadline()), (None, None));
     assert!(heard_within(&app, Duration::from_millis(500)).is_empty(), "linked and idle");
 

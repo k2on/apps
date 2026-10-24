@@ -165,9 +165,11 @@ pub fn function(e: &Logged) -> String {
 }
 
 /// Whether an entry is a sign-in: the hub's own raw write of a `sign_in`
-/// row (`docs/plan-v5.md` S1), which every login now is.
+/// row (`docs/plan-v5.md` S1), which every login now is, or the welcome a
+/// person's first one runs (`playlists.welcome`).
 pub fn is_sign_in(e: &Logged) -> bool {
-    e.entry.func.is_empty() && e.facts.iter().all(|c| c.table() == "sign_in")
+    let welcome = e.entry.func == "playlists.welcome";
+    welcome || e.entry.func.is_empty() && e.facts.iter().all(|c| c.table() == "sign_in")
 }
 
 /// Whether an entry is the scanner's own bookkeeping of a look: asking for

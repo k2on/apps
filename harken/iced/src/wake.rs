@@ -10,7 +10,7 @@
 //!   or brings a frame — the log, an ack, the listening session's frames —
 //!   through [`crate::client::Replica::set_waker`] ([`waker`]);
 //! - **a deadline** the replica or the window asked for — the redial after a
-//!   close, the second of quiet before a default playlist — is one timer,
+//!   close — is one timer,
 //!   `arkui::wake::at`, keyed by the deadline;
 //! - **in a browser, the page**: the back button and a followed fragment
 //!   (`popstate`, `hashchange`), a lock-screen button, and the `<audio>`

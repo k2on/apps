@@ -261,11 +261,10 @@ impl Peer {
     /// Make sure there is a playlist to read the library against: make
     /// "Favorites" if this replica has none.
     ///
-    /// **When** is the window's question, not this one's (`App::default_playlist`):
-    /// signed in, not before the log has been heard, because a later playlist
-    /// of the same name comes back renamed — "Favorites (1)" — and every
-    /// device making its own on its first run would leave a person one per
-    /// device. A refusal is not worth a status line: it only means there is
+    /// **Only alone** (`App::alone`). On a server a person's Favorites is the
+    /// server's to make, at their first sign-in (`playlists.welcome`): a
+    /// device making its own before it had heard the log would leave them a
+    /// "Favorites (1)" per device. A refusal is not worth a status line: it only means there is
     /// no playlist yet.
     pub fn ensure_playlist(&mut self) {
         let made = CreatePlaylist { name: "Favorites".into() };

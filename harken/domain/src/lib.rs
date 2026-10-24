@@ -50,7 +50,7 @@ pub fn domain() -> Domain {
         browse::library, browse::search, browse::albums, browse::artists, browse::track_details, browse::album,
         browse::artist, browse::composers, browse::works, browse::work, browse::recordings, browse::credits,
         browse::recording,
-        playlists::create_playlist, playlists::add_to_playlist, playlists::add_all_to_playlist,
+        playlists::create_playlist, playlists::welcome, playlists::add_to_playlist, playlists::add_all_to_playlist,
         playlists::remove_from_playlist, playlists::playlists, playlists::playlists_of, playlists::playlist,
         plays::record_play, plays::last_played, plays::recently_played,
         listening::start, listening::play, listening::pause, listening::seek, listening::skip, listening::jump,

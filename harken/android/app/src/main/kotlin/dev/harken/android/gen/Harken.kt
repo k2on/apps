@@ -832,6 +832,15 @@ data class Transfer(val to: String) {
     }
 }
 
+/** The record `Welcome`. */
+data class Welcome(val user: String, val name: String) {
+    fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "}"
+
+    companion object {
+        fun of(j: Any?): Welcome = (j as JSONObject).let { o -> Welcome(J.text(o.opt("user")), J.text(o.opt("name"))) }
+    }
+}
+
 /** The record `Work`. */
 data class Work(val id: String, val composer: String, val title: String, val catalogue: String, val opus: String, val keySig: String, val form: String, val period: String, val composed: Long, val art: String, val addedMs: Long, val userId: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"composer\":" + J.q(composer) + "," + "\"title\":" + J.q(title) + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"opus\":" + J.q(opus) + "," + "\"key_sig\":" + J.q(keySig) + "," + "\"form\":" + J.q(form) + "," + "\"period\":" + J.q(period) + "," + "\"composed\":" + composed.toString() + "," + "\"art\":" + J.q(art) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
@@ -1067,6 +1076,9 @@ class Harken(val peer: Peer) {
 
     /** `playlists.remove_from_playlist`: its intent's id. */
     fun removeFromPlaylist(input: RemoveFromPlaylist): String = peer.mutate("playlists.remove_from_playlist", input.json())
+
+    /** `playlists.welcome`: its intent's id. */
+    fun welcome(input: Welcome): String = peer.mutate("playlists.welcome", input.json())
 
     /** `role.grant`: its intent's id. */
     fun grant(input: Grant): String = peer.mutate("role.grant", input.json())

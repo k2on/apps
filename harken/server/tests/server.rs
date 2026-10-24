@@ -8,13 +8,17 @@ mod common;
 use ark::format::Encode;
 use ark::store::Change;
 use common::*;
+use harken_server::domain::playlists::favorites_of;
 use harken_server::domain::CreatePlaylist;
 use harken_server::domain::Playlist;
 use harken_server::{start, Config, SignIn};
 
+/// The playlists people made, by name and owner: the Favorites a first
+/// sign-in makes apart.
 fn playlists(server: &harken_server::Server) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = hub_rows::<Playlist>(server, "playlist")
         .into_iter()
+        .filter(|p| p.id != favorites_of(&p.user_id))
         .map(|p| (p.name, p.user_id))
         .collect();
     out.sort();
@@ -55,7 +59,7 @@ fn a_login_from_the_routes_is_who_the_socket_says_you_are() {
     let mine: Vec<Playlist> = phone.query("playlists.playlists", &()).unwrap();
     assert_eq!(
         mine.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-        ["Road trip"]
+        ["Favorites", "Road trip"]
     );
 
     // A token nobody issued is turned away, and keeps what it authored.
@@ -214,8 +218,8 @@ fn the_health_says_the_head_and_who_is_connected() {
         .unwrap();
     let lines: Vec<&str> = h.lines().collect();
     assert_eq!(lines[0], "ok", "{h}");
-    // Two sign-ins and the playlist.
-    assert!(lines.contains(&"head 3"), "{h}");
+    // Two sign-ins, the first one's welcome, and the playlist.
+    assert!(lines.contains(&"head 4"), "{h}");
     assert!(lines.contains(&"horizon 0"), "{h}");
     assert!(lines.contains(&"room alice peers 2"), "{h}");
     assert!(
@@ -287,4 +291,38 @@ fn a_clients_raw_write_is_refused() {
         "held, not refused"
     );
     rt.block_on(server.stop());
+}
+
+/// A person's first sign-in gives them Favorites, made by the server: one,
+/// theirs, however many devices sign in after it and before any of them
+/// has heard the log; the server's own scanner gets none. Falsified by
+/// `start` not naming `playlists.welcome` (`Auth::welcome`): nobody has a
+/// playlist.
+#[test]
+fn a_first_sign_in_makes_favorites_once() {
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |_| {});
+    login(&server, "alice");
+    login(&server, "alice");
+    login(&server, "bob");
+    let mut phone = signed_in(&server, "alice");
+    pump_until(&mut [&mut phone], 10, |ps| ps[0].cursor() == head(&server));
+    let mut made: Vec<(String, String, bool)> = hub_rows::<Playlist>(&server, "playlist")
+        .into_iter()
+        .map(|p| (p.name, p.user_id.clone(), p.id == favorites_of(&p.user_id)))
+        .collect();
+    made.sort();
+    assert_eq!(
+        made,
+        [
+            ("Favorites".to_string(), "alice".to_string(), true),
+            ("Favorites".to_string(), "bob".to_string(), true)
+        ]
+    );
+    let mine: Vec<Playlist> = phone.query("playlists.playlists", &()).unwrap();
+    assert_eq!(
+        mine.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        ["Favorites"]
+    );
 }

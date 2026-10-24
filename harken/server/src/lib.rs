@@ -355,7 +355,9 @@ pub async fn start(config: Config) -> Result<Server> {
     let mut auth = Auth::open::<crate::domain::Harken>(mode, &public_url, &config.data)
         .context("the session key")?
         .allow_redirect(PHONE_SCHEME)
-        .with_roles(roles);
+        .with_roles(roles)
+        // A person's Favorites, made once, here, at their first sign-in.
+        .welcome("playlists.welcome");
     for prefix in &config.redirects {
         auth = auth.allow_redirect(prefix);
     }

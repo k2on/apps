@@ -56,24 +56,48 @@ pub fn playlist_name(names: &[String], name: &str) -> String {
 /// The same entry twice is one playlist: its id is the key.
 #[mutator("playlists.create_playlist")]
 pub fn create_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: CreatePlaylist) -> Result<(), Refusal> {
-    let id = ctx.new_id();
+    make(ctx, db, ctx.new_id(), ctx.user(), &input.name)
+}
+
+/// What everybody starts with: "Favorites".
+pub const FAVORITES: &str = "Favorites";
+
+/// A person's first sign-in (`ark_auth::server::Auth::welcome`): their
+/// Favorites, made by the server so that no device has to guess whether
+/// another already has. Its id is the person's, so two first sign-ins at
+/// once make one. Only the server's authority runs it.
+#[mutator("playlists.welcome")]
+pub fn welcome(ctx: &Ctx, db: &mut Db<Harken>, input: ark_auth::Welcome) -> Result<(), Refusal> {
+    if ctx.user() != "authority" {
+        return Err(Refusal::new("only the server welcomes"));
+    }
+    make(ctx, db, favorites_of(&input.user), &input.user, FAVORITES)
+}
+
+/// The id of `user`'s Favorites.
+pub fn favorites_of(user: &str) -> Id<Playlist> {
+    let h = ark::hash::sha256(&[b"harken favorites ", user.as_bytes()]);
+    Id::new(h[..16].try_into().unwrap())
+}
+
+/// Playlist `id`, `user`'s, called `name` or numbered after it.
+fn make(ctx: &Ctx, db: &mut Db<Harken>, id: Id<Playlist>, user: &str, name: &str) -> Result<(), Refusal> {
     if db.playlist.has(id) {
         return Ok(());
     }
-    let user = ctx.user().to_string();
     let last = db.playlist.by(Playlist::POS).whole().last();
     let siblings = db
         .playlist
         .by(Playlist::USER_ID_NAME)
-        .between((user.clone(), input.name.clone()), (user.clone(), format!("{} )", input.name)))
+        .between((user.to_string(), name.to_string()), (user.to_string(), format!("{name} )")))
         .all();
     let names: Vec<String> = siblings.into_iter().map(|s| s.name).collect();
     db.playlist.insert(Playlist {
         id,
-        name: playlist_name(&names, &input.name),
+        name: playlist_name(&names, name),
         pos: last.map_or(0, |p| p.pos) + 1,
         created_ms: ctx.now,
-        user_id: user,
+        user_id: user.to_string(),
     })
 }
 

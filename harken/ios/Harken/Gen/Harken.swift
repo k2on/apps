@@ -1381,6 +1381,21 @@ public struct Transfer: Equatable {
     public var json: String { J.obj(["\"to\":" + J.q(to)]) }
 }
 
+/// The record `Welcome`.
+public struct Welcome: Equatable {
+    public var user: String
+    public var name: String
+
+    public init(user: String, name: String) { self.user = user; self.name = name; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(user: J.text(o["user"]), name: J.text(o["name"]))
+    }
+
+    public var json: String { J.obj(["\"user\":" + J.q(user), "\"name\":" + J.q(name)]) }
+}
+
 /// The record `Work`.
 public struct Work: Equatable {
     public var id: String
@@ -1659,6 +1674,9 @@ public struct Harken {
 
     /// `playlists.remove_from_playlist`: its intent's id.
     @discardableResult public func removeFromPlaylist(_ input: RemoveFromPlaylist) throws -> String { try peer.mutate(name: "playlists.remove_from_playlist", input: input.json) }
+
+    /// `playlists.welcome`: its intent's id.
+    @discardableResult public func welcome(_ input: Welcome) throws -> String { try peer.mutate(name: "playlists.welcome", input: input.json) }
 
     /// `role.grant`: its intent's id.
     @discardableResult public func grant(_ input: Grant) throws -> String { try peer.mutate(name: "role.grant", input: input.json) }

@@ -55,8 +55,11 @@ Four decisions that each show on screen:
 - **A taken name is numbered, not refused.** Creating "Favorites" when that
   person has one keeps the new playlist under its own id as "Favorites
   (1)", then "(2)", decided in `create_playlist` in log order, so work done
-  offline or on another device is never dropped. A client makes its default
-  "Favorites" only when that person has no playlist.
+  offline or on another device is never dropped. Nobody's client makes a
+  default: the server makes a person's "Favorites" at their first sign-in
+  (`playlists.welcome`, run by `ark_auth::server::Auth::welcome`), under an
+  id that is theirs, so it is one however many devices sign in at once. A
+  window alone, with no server, makes its own.
 - **An app works before anyone signs in.** A peer with no account authors
   as nobody, keeps its work pending and on disk, and connects to nothing;
   signing in makes all of it the signer's and syncs it. An older login of

@@ -202,8 +202,7 @@ pub enum Message {
     /// button, or the `<audio>` element starting, pausing or ending. What it
     /// was is whatever the update after it finds; see [`App::react`].
     Wake,
-    /// A deadline this window armed came due: the redial after a close, or
-    /// the second of quiet [`App::default_playlist`] waits for.
+    /// A deadline this window armed came due: the redial after a close.
     Due,
     /// A clock, running only while something on screen moves by itself: 50
     /// ms while a submenu's dwell counts,
@@ -560,11 +559,6 @@ pub struct App {
     pub connect: String,
     /// Offline on purpose.
     pub offline: bool,
-    /// When the link will have been quiet for [`App::QUIET_MS`] since it
-    /// opened, as a monotonic millisecond — a deadline, while this window
-    /// waits to know whether the person signed in already has a playlist; see
-    /// `default_playlist`. `None` when not waiting.
-    pub quiet: Option<u64>,
     /// What wakes this window: the peer's socket rings it, and in a browser
     /// the page's own events do (`wake.rs`).
     pub bell: arkui::wake::Bell,
@@ -615,7 +609,6 @@ impl App {
             sign_in_tried: false,
             connect: String::new(),
             offline: false,
-            quiet: None,
             bell,
             peer,
             edits: Vec::new(),
@@ -648,6 +641,8 @@ impl App {
             ),
         };
         let mut peer = Peer::open(client);
+        // Alone nobody signs in, so no server welcomes anybody: the replica
+        // is the whole truth, and its Favorites is made here.
         peer.ensure_playlist();
         let mut app = App::with_peer(peer, String::new(), None);
         app.logins = Some(auth::logins());
@@ -772,12 +767,9 @@ impl App {
             // any refusal is — `auth::open` gave the replica the login's.
             let mut peer = Peer::open(client);
             peer.client.connect(&ark_auth::socket_url(&server));
-            // Signed out, the replica is the whole truth there is: its own
-            // default playlist is made now. Signed in, not until the log has
-            // been heard (`default_playlist`).
-            if login.is_none() {
-                peer.ensure_playlist();
-            }
+            // No Favorites made here: the server makes a person's at their
+            // first sign-in (`playlists.welcome`), and a device that made its
+            // own before hearing the log would leave them two.
             let mut app = App::with_peer(peer, server, login);
             app.logins = Some(auth::logins());
             app.user = user;
@@ -894,32 +886,6 @@ impl App {
         // else's picker, and a reloaded tab the same one.
         self.listening.open(&login.session);
         self.login = Some(login);
-    }
-
-    /// How long the link has to have been quiet before this window believes
-    /// it has heard the whole log: a second. The server sends the backlog the
-    /// moment `Hello` lands, so a second of nothing after the socket opened is
-    /// a second of nothing left to send. A deadline, moved by every frame —
-    /// it was twenty ticks of a clock that no longer runs.
-    pub const QUIET_MS: u64 = 1_000;
-
-    /// Make the default "Favorites" — but only once it is known that this
-    /// person has no playlist at all.
-    ///
-    /// **Not before the first sync.** A device that has not heard the log
-    /// yet sees no playlists because nothing has arrived, not because there
-    /// are none — and the domain renames a later playlist of the same name
-    /// ("Favorites (1)", in the server's order), so every device making its
-    /// own on first run would leave the person a numbered Favorites per
-    /// device. So a signed-in window waits until the link has opened and then
-    /// been quiet for [`App::QUIET_MS`]; signed out (or alone, the demo)
-    /// the replica is the whole truth and it is made at once. A window that
-    /// never reaches its server makes none, and "New playlist…" is still
-    /// there.
-    fn default_playlist(&mut self) {
-        if self.login.is_some() && self.peer.playlists().is_empty() {
-            self.peer.ensure_playlist();
-        }
     }
 
     /// Author a change, and remember what it was. A refusal here is the
@@ -2199,7 +2165,6 @@ impl App {
     /// has anything to do.
     fn react(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
-        self.due_at(client::monotonic_ms());
         tasks.push(self.pump());
         // A lock-screen button leaves a note and rings; it goes where every
         // transport button goes.
@@ -2256,22 +2221,10 @@ impl App {
         Task::batch(tasks)
     }
 
-    /// The quiet deadline, at `now`: a second of nothing since the link
-    /// opened, and the default playlist is decided.
-    pub fn due_at(&mut self, now: u64) {
-        if self.quiet.is_some_and(|at| now >= at) {
-            self.quiet = None;
-            self.default_playlist();
-        }
-    }
-
     /// The one timer this window may need for something that has not
-    /// happened: the earlier of the peer's redial and the quiet deadline.
+    /// happened: the peer's redial.
     pub fn deadline(&self) -> Option<u64> {
-        match (self.peer.client.deadline(), self.quiet) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        self.peer.client.deadline()
     }
 
     /// How often the window needs a clock, if at all: only while something on
@@ -2296,11 +2249,6 @@ impl App {
     fn pump(&mut self) -> Task<Message> {
         let pumped = self.peer.client.pump();
         let mut turned_away = Task::none();
-        // The link opened, or something arrived while waiting: the quiet
-        // starts again.
-        if pumped.opened || (pumped.moved && self.quiet.is_some()) {
-            self.quiet = Some(client::monotonic_ms() + Self::QUIET_MS);
-        }
         if let Some(reason) = pumped.denied {
             // Turned away from the other end — an expired token, a revoked
             // session. The replica and the pending work stay; signing in again

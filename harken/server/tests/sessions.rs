@@ -196,7 +196,8 @@ fn a_scoped_server_holds_nobody_else_s_sign_ins() {
     );
     pump_until(&mut [&mut alice, &mut bob], 10, |ps| {
         ps[1].pending() == 0
-            && ps[0].rows::<Playlist>("playlist").len() == 1
+            // Bob's, and the Favorites each first sign-in made.
+            && ps[0].rows::<Playlist>("playlist").len() == 3
             && ps[0].client.current().is_some()
     });
     assert_eq!(hub_rows::<SignIn>(&server, "sign_in").len(), 2);

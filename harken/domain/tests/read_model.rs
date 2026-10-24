@@ -880,3 +880,23 @@ fn the_whole_library_onto_a_playlist() {
     assert_eq!(each(&on_it, |r| r.playlist_pos), [Some(1), Some(2), Some(3)]);
     assert_eq!(c.mutate("alice", "add_all_to_playlist", &all), Ok(0));
 }
+
+/// A first sign-in's welcome makes the person's Favorites, theirs, once
+/// however often it runs; and nobody but the server's authority runs it.
+/// Falsified by dropping the authority's check: mallory made alice a
+/// playlist.
+#[test]
+fn the_welcome_is_the_servers_and_makes_one_favorites() {
+    let mut c = Lib::new();
+    let alice = ark_auth::Welcome {
+        user: "alice".into(),
+        name: "Alice".into(),
+    };
+    assert!(c.mutate("mallory", "welcome", &alice).is_err(), "only the server welcomes");
+    assert!(names(&c, "alice").is_empty());
+    c.mutate("authority", "welcome", &alice).unwrap();
+    c.mutate("authority", "welcome", &alice).unwrap();
+    assert_eq!(names(&c, "alice"), ["Favorites"]);
+    let mine: Vec<Playlist> = c.query("alice", "playlists", &()).unwrap();
+    assert_eq!((mine[0].id, mine[0].user_id.as_str()), (playlists::favorites_of("alice"), "alice"));
+}

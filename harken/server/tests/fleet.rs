@@ -34,6 +34,7 @@ use std::time::{Duration, Instant};
 use ark::format::Encode;
 use ark::frames::Frame;
 use ark::log::Logged;
+use harken_server::domain::playlists::favorites_of;
 use harken_server::domain::{AddAllToPlaylist, AddToPlaylist, CreatePlaylist, RemoveFromPlaylist};
 use harken_server::domain::{Media, Playlist, PlaylistItem};
 use serde_json::{json, Value};
@@ -786,8 +787,9 @@ fn work_done_signed_out_is_the_signers_everywhere() {
 }
 
 /// **7. The same playlist name, made on two black-holed devices.** Both
-/// of alice's devices make "Favorites" with no network. Given it back, one
-/// is "Favorites (1)" on every peer — and which one is decided by the log:
+/// of alice's devices make "Road trip" with no network. Given it back, one
+/// is "Road trip (1)" on every peer, after the Favorites her first sign-in
+/// made — and which one is decided by the log:
 /// the earlier entry keeps the name.
 ///
 /// Falsified by asserting the later entry keeps the name: it fails on
@@ -800,9 +802,13 @@ fn the_same_name_twice_is_numbered_in_log_order() {
     f.converged(&mut [&mut a, &mut b]);
     a.proxy.blackhole();
     b.proxy.blackhole();
-    let ia = a.author("create_playlist", named("Favorites"));
-    let ib = b.author("create_playlist", named("Favorites"));
-    assert_eq!(playlists(&mut a).len(), 1, "each sees only its own");
+    let ia = a.author("create_playlist", named("Road trip"));
+    let ib = b.author("create_playlist", named("Road trip"));
+    assert_eq!(
+        playlists(&mut a).len(),
+        2,
+        "each sees only its own, and Favorites"
+    );
     b.proxy.pass();
     a.proxy.pass();
     let done = f.converged(&mut [&mut a, &mut b]);
@@ -826,8 +832,9 @@ fn the_same_name_twice_is_numbered_in_log_order() {
         assert_eq!(
             lists,
             vec![
-                ("Favorites".to_string(), first),
-                ("Favorites (1)".to_string(), second)
+                ("Favorites".to_string(), favorites_of("alice").0),
+                ("Road trip".to_string(), first),
+                ("Road trip (1)".to_string(), second)
             ],
             "{}",
             p.name
@@ -1111,7 +1118,9 @@ fn a_replayed_push_or_hello_changes_nothing() {
         .collect();
     assert_eq!(
         names,
-        ["After the replay", "Once"].map(String::from).into(),
+        ["After the replay", "Favorites", "Once"]
+            .map(String::from)
+            .into(),
         "and what came after it is the next entry"
     );
 
