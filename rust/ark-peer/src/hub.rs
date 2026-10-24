@@ -125,9 +125,12 @@ impl Peer {
         last.into_iter().for_each(|l| j.pass(l.origin, &l.actor, l.last));
         j.verdicts.extend(refused.into_iter().map(|r| (r.entry, Verdict::Refused { why: r.why })));
         log.local = log.local.max(journal(&mut log).last_of(&origin));
+        // The live authority draws an origin at every open, as a device's
+        // live machine does: under the session's, the one the log authors
+        // from, its first `local` and the log's had one id.
         let live = config.live.as_ref().map(|l| Instance {
             fold: Fold::keep(l.keep),
-            ..machine(&l.module, auth(), &me, None, Space::Volatile)
+            ..machine(&l.module, auth(), &me, Some((l.origin)()), Space::Volatile)
         });
         let mut p = Peer::with(config, log, live, local);
         (p.hub.serving, p.hub.next) = (true, 1);

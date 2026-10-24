@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::schema::Space;
 use arkdb::demo::demo as domain;
-use arkdb::demo::{arrival, room, Point};
+use arkdb::demo::{arrival, room, CreatePlaylist, Point};
 use ark_peer::{dev, Config, Memory, Module, Peer};
 
 fn hub() -> Peer {
@@ -76,4 +76,27 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
     carry(&mut hub, &mut d, c);
     let after = hub.machine(Space::Volatile).unwrap().log().head();
     assert_ne!(before, after, "the reloaded page's call never reached the server's live space");
+}
+
+/// The server's two spaces never name one entry alike: its live authority
+/// draws an origin of its own. Falsified by the live authority authoring
+/// under the session's origin, as the log does: the first `room.on_join`
+/// and the log's first entry had one id, and `arkdb trace` hung a join an
+/// hour later from the log's first entry.
+#[test]
+fn the_servers_spaces_name_their_entries_apart() {
+    let mut hub = hub();
+    // The log's first entry is the server's own, as harken's library is.
+    hub.author(Space::Durable, "demo.create_playlist", CreatePlaylist { name: "mix".into() }.to_bytes(), 0).unwrap();
+    let mut d = device();
+    let c = hub.accept(d.me().clone());
+    d.connected();
+    carry(&mut hub, &mut d, c);
+    let ids = |s: Space| {
+        let log = hub.machine(s).unwrap().log();
+        (1..=log.head().0).filter_map(|n| log.at(n)).map(|l| l.entry.id).collect::<Vec<_>>()
+    };
+    let (durable, live) = (ids(Space::Durable), ids(Space::Volatile));
+    assert!(!durable.is_empty() && !live.is_empty(), "both spaces logged something");
+    assert!(live.iter().all(|id| !durable.contains(id)), "an id in both spaces: {durable:?} {live:?}");
 }

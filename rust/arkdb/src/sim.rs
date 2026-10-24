@@ -102,6 +102,15 @@ pub struct Net {
     pub views: BTreeMap<(i64, usize), Watched>,
 }
 
+/// A live origin drawn at every open, seeded: `session`'s, counted.
+fn counted(session: &str) -> ark_peer::Draw {
+    let (session, opens) = (session.to_string(), Arc::new(AtomicU64::new(0)));
+    Arc::new(move || {
+        let n = opens.fetch_add(1, Ordering::Relaxed);
+        ark::log::Origin::named(format!("{session} live {n}"))
+    })
+}
+
 /// A view a client keeps: its space, its view's name and input, who
 /// reads it, and the list its patches made.
 pub type Watched = (Space, String, Vec<u8>, Ctx, Vec<Vec<u8>>);
@@ -113,7 +122,10 @@ impl Net {
     }
 
     /// A hub and a client per login, each linked.
-    pub fn of(hub: Config, clients: Vec<(Who, Config)>, seed: u64) -> Net {
+    pub fn of(mut hub: Config, clients: Vec<(Who, Config)>, seed: u64) -> Net {
+        if let Some(live) = &mut hub.live {
+            live.origin = counted("authority");
+        }
         let mut net = Net {
             hub: Peer::serve(hub.clone(), Box::new(Memory::default()), 0),
             hub_config: hub,
@@ -147,11 +159,7 @@ impl Net {
         let _ = ark_peer::local::preset(&mut disk, |r| r.origin = origin);
         // And its live machine's, drawn at every open: the session's, counted.
         if let Some(live) = &mut config.live {
-            let (session, opens) = (who.session.clone(), Arc::new(AtomicU64::new(0)));
-            live.origin = Arc::new(move || {
-                let n = opens.fetch_add(1, Ordering::Relaxed);
-                ark::log::Origin::named(format!("{session} live {n}"))
-            });
+            live.origin = counted(&who.session);
         }
         self.clients.insert(i, Peer::open(config, who, Box::new(disk), true));
         self.heal(i);
