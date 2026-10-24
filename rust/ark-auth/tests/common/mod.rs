@@ -35,9 +35,13 @@ pub fn domain() -> Domain {
         .scope("feed", ark_auth::feed(Scope::<App>::new().on::<Note>(all)))
 }
 
-/// The hub: a store every sign-in is written to.
+/// The hub: a store every sign-in is written to, and what its authority was
+/// asked to author.
 #[derive(Clone)]
-pub struct Memory(pub Arc<Mutex<Store>>);
+pub struct Memory(pub Arc<Mutex<Store>>, pub Authored);
+
+/// Each function the authority was asked to author, with its input.
+pub type Authored = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
 impl Default for Memory {
     fn default() -> Memory {
@@ -47,7 +51,10 @@ impl Default for Memory {
 
 impl Memory {
     pub fn new() -> Memory {
-        Memory(Arc::new(Mutex::new(Store::new(domain().schema.clone(), ark::schema::Space::Durable))))
+        Memory(
+            Arc::new(Mutex::new(Store::new(domain().schema.clone(), ark::schema::Space::Durable))),
+            Arc::default(),
+        )
     }
 
     pub fn sign_ins(&self) -> Vec<SignIn> {
@@ -63,6 +70,11 @@ impl Hub for Memory {
 
     fn write(&self, c: Change) -> Result<(), String> {
         self.0.lock().unwrap().apply(&c).map_err(|r| r.0)
+    }
+
+    fn author(&self, func: &str, input: Vec<u8>) -> Result<(), String> {
+        self.1.lock().unwrap().push((func.into(), input));
+        Ok(())
     }
 }
 

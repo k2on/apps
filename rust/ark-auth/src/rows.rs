@@ -65,6 +65,15 @@ pub struct Revoke {
     pub id: String,
 }
 
+/// Who signed in for the first time, as [`server::Auth::welcome`] hands it
+/// to the function an app names: authored by the server's authority, once a
+/// person's first sign-in row is written.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Welcome {
+    pub user: String,
+    pub name: String,
+}
+
 /// A role and who it is granted to, or taken from.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct Grant {

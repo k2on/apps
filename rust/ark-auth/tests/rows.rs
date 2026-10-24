@@ -14,7 +14,7 @@ use ark::peer::Who;
 use ark::row::Row;
 use ark::store::Change;
 use ark_auth::server::{dev_account, Auth, Mode};
-use ark_auth::{Account, Grant, Revoke, Role, SignIn};
+use ark_auth::{Account, Grant, Revoke, Role, SignIn, Welcome};
 use common::{domain, on, App, Memory};
 
 /// Author `name` as `ctx` over the hub's store: the refusal's text.
@@ -350,4 +350,28 @@ fn the_key_is_kept() {
     std::fs::write(&path, "not hex").unwrap();
     assert!(ark_auth::server::key_file(&path).is_err());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A person's first sign-in runs the app's welcome, once, as them; later
+/// sign-ins — another device, the same one again — and a server's own peer
+/// do not. Falsified by `issue` welcoming every sign-in: alice's phone is
+/// welcomed again.
+#[test]
+fn a_first_sign_in_is_welcomed_once() {
+    let (a, hub) = served(dev_auth().welcome("app.welcome"));
+    let welcomed = || hub.1.lock().unwrap().clone();
+    a.own(&dev_account("scanner"), "the scanner").unwrap();
+    assert!(welcomed().is_empty(), "a server's own peer is nobody to welcome");
+    a.issue(&alice(), "a laptop").unwrap();
+    let w = Welcome {
+        user: alice().id,
+        name: alice().name,
+    };
+    assert_eq!(welcomed(), vec![("app.welcome".to_string(), w.to_bytes())]);
+    a.issue(&alice(), "a phone").unwrap();
+    a.issue(&alice(), "a laptop").unwrap();
+    assert_eq!(welcomed().len(), 1, "welcomed on the first sign-in only");
+    let (b, quiet) = served(dev_auth());
+    b.issue(&alice(), "a laptop").unwrap();
+    assert!(quiet.1.lock().unwrap().is_empty(), "no welcome named, none run");
 }

@@ -129,6 +129,12 @@ impl ark_auth::server::Hub for Handle {
     fn write(&self, c: ark::store::Change) -> std::result::Result<(), String> {
         Handle::write(self, vec![c]).ok_or("the hub is gone")?.map(|_| ())
     }
+
+    fn author(&self, func: &str, input: Vec<u8>) -> std::result::Result<(), String> {
+        Handle::author(self, ark::schema::Space::Durable, func.into(), input)
+            .ok_or("the hub is gone")?
+            .map(|_| ())
+    }
 }
 
 /// `router` served on `listener` until told to stop.

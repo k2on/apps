@@ -72,6 +72,9 @@ pub trait Hub: Send + Sync {
     /// One change written as an entry the authority authors: a raw write,
     /// which no client's intent can name.
     fn write(&self, c: Change) -> Result<(), String>;
+    /// The domain's function `func` run on `input`, as an entry the
+    /// authority authors.
+    fn author(&self, func: &str, input: Vec<u8>) -> Result<(), String>;
 }
 
 /// The hub's watch over who is signed in: given what an entry changed — or
@@ -153,6 +156,8 @@ pub struct Auth {
     /// `docs/plan-auth.md` The roles the configuration grants, by account
     /// id ([`Auth::with_roles`]), merged at every judging.
     roles: BTreeMap<String, BTreeSet<String>>,
+    /// The function a person's first sign-in runs ([`Auth::welcome`]).
+    welcome: Option<String>,
 }
 
 impl Auth {
@@ -170,6 +175,7 @@ impl Auth {
             hub: OnceLock::new(),
             reads: reads::<S>(),
             roles: BTreeMap::new(),
+            welcome: None,
         }
     }
 
@@ -202,6 +208,18 @@ impl Auth {
         let mut all: BTreeSet<String> = roles.iter().cloned().collect();
         all.extend(self.roles.get(account).into_iter().flatten().cloned());
         all.into_iter().collect()
+    }
+
+    /// Run the domain's `func` when a person signs in for the first time:
+    /// once their first sign-in row is written, the authority authors it on
+    /// a [`crate::Welcome`] — what an app gives everybody, made in one
+    /// place rather than by whichever device is first to look. Two first
+    /// sign-ins at once both run it, so it makes what it makes once
+    /// whatever the count. A peer the server runs itself ([`Auth::own`]) is
+    /// not welcomed.
+    pub fn welcome(mut self, func: &str) -> Self {
+        self.welcome = Some(func.to_string());
+        self
     }
 
     /// Let a login code go back to anything starting with `prefix` — an
@@ -338,6 +356,30 @@ impl Auth {
     /// Sign `account` in on `device`, with no code and no browser: the
     /// session row written, and the login.
     pub fn issue(&self, account: &Account, device: &str) -> Result<Login, String> {
+        let first = match &self.welcome {
+            Some(_) => {
+                let (user, of) = (account.id.clone(), self.reads.of);
+                self.ask(move |store| of(store, &user).is_empty()).unwrap_or(false)
+            }
+            None => false,
+        };
+        let login = self.write_sign_in(account, device)?;
+        if let (true, Some(func)) = (first, &self.welcome) {
+            let hub = self.hub.get().ok_or("no hub writes sessions here")?;
+            let input = crate::Welcome {
+                user: account.id.clone(),
+                name: account.name.clone(),
+            };
+            // A welcome refused is not a sign-in refused: the person is in.
+            if let Err(e) = hub.author(func, input.to_bytes()) {
+                eprintln!("ark-auth: {func} for {}: {e}", account.id);
+            }
+        }
+        Ok(login)
+    }
+
+    /// The session row written, and the login; nobody welcomed.
+    fn write_sign_in(&self, account: &Account, device: &str) -> Result<Login, String> {
         let hub = self.hub.get().ok_or("no hub writes sessions here")?;
         let issued_ms = now_ms();
         let row = SignIn {
@@ -369,7 +411,7 @@ impl Auth {
         let earlier = self.ask(move |store| of(store, &user)).unwrap_or_default();
         match earlier.into_iter().rfind(|s| s.device == device && live(s, now + day)) {
             Some(s) => Ok(self.login(account, s)),
-            None => self.issue(account, device),
+            None => self.write_sign_in(account, device),
         }
     }
 
