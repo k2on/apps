@@ -19,7 +19,7 @@
 #   ASC_KEY_P8          the .p8 file's whole contents, BEGIN/END lines included
 #   APPLE_TEAM_ID       the ten-character Team ID
 # Repository variable (the Variables tab), optional:
-#   IOS_BUNDLE_ID       the app's bundle ID; dev.arkdb.harken when unset
+#   IOS_BUNDLE_ID       the app's bundle ID; us.koon.harken when unset
 name: ios
 
 on:
@@ -49,7 +49,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     env:
-      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'dev.arkdb.harken' }}
+      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'us.koon.harken' }}
     steps:
       - uses: actions/checkout@v4
 
