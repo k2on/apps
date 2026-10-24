@@ -35,7 +35,7 @@ xcodebuild archive -scheme Harken -configuration Release -destination 'generic/p
 why not 6 is said at its top — `UIBackgroundModes: audio`, the `harken`
 URL scheme, `ITSAppUsesNonExemptEncryption: false`, the icon in
 `Harken/Assets.xcassets`, version `1.0 (1)` which CI overrides, automatic
-signing, bundle id `dev.arkdb.harken` which CI overrides) over
+signing, bundle id `us.koon.harken`) over
 `../ffi/ios/HarkenFFI.xcframework` and `../ffi/ios/swift`, and the
 `HarkenTests` unit tests, in the one scheme `Harken`. `Harken.xcodeproj`
 and `Harken/Info.plist` are outputs; regenerate rather than edit. The icon

@@ -52,7 +52,7 @@ targets:
         UIBackgroundModes: [audio]
         # Where the server's sign-in sends its code back to: harken://auth?code=…
         CFBundleURLTypes:
-          - CFBundleURLName: dev.arkdb.harken.auth
+          - CFBundleURLName: us.koon.harken.auth
             CFBundleURLSchemes: [harken]
         # Only the system's TLS and ring's, which are exempt: no export question on upload.
         ITSAppUsesNonExemptEncryption: false
@@ -64,7 +64,7 @@ targets:
           NSAllowsLocalNetworking: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.arkdb.harken
+        PRODUCT_BUNDLE_IDENTIFIER: us.koon.harken
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -78,7 +78,7 @@ targets:
       - target: Harken
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.arkdb.harken.tests
+        PRODUCT_BUNDLE_IDENTIFIER: us.koon.harken.tests
         GENERATE_INFOPLIST_FILE: true
 schemes:
   Harken:
