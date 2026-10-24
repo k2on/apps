@@ -3239,13 +3239,21 @@ pub mod ha {
         /// The span `k`'s speaker answers under at `now`: what woke it, while
         /// that trace lasts.
         fn cause(&self, k: &(String, String), now: i64) -> Option<ark::log::Span> {
-            self.woke.get(k).copied().filter(|w| now - w.began < ark_peer::TRACE_MS)
+            self.woke
+                .get(k)
+                .copied()
+                .filter(|w| now - w.began < ark_peer::TRACE_MS)
         }
 
         /// The span what the house is told for `entity` is said inside: the
         /// newest a speaker of it was woken by.
         fn span_of(&self, entity: &str) -> tracing::Span {
-            let woke = self.woke.iter().filter(|(k, _)| k.1 == entity).map(|(k, s)| (k, *s)).max_by_key(|(_, s)| s.began);
+            let woke = self
+                .woke
+                .iter()
+                .filter(|(k, _)| k.1 == entity)
+                .map(|(k, s)| (k, *s))
+                .max_by_key(|(_, s)| s.began);
             match woke {
                 Some((k, s)) => tracing::info_span!(
                     target: "ark",
@@ -3269,7 +3277,12 @@ pub mod ha {
             };
             let now = now_ms();
             let cause = self.cause(&k, now);
-            let input = Input::Mutate { func, input, now, cause };
+            let input = Input::Mutate {
+                func,
+                input,
+                now,
+                cause,
+            };
             let seen = input.clone();
             let Some(peer) = self.machines.get_mut(&k) else {
                 return;

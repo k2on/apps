@@ -177,7 +177,9 @@ impl Instance {
                         Change::Remove { .. } => -1,
                         Change::Edit { .. } => 0,
                     };
-                    self.rows = self.rows.saturating_add_signed(cs.iter().map(|t| &t.change).filter(|c| c.table() != LOG).map(n).sum());
+                    self.rows = self
+                        .rows
+                        .saturating_add_signed(cs.iter().map(|t| &t.change).filter(|c| c.table() != LOG).map(n).sum());
                 }
                 _ => {}
             }

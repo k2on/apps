@@ -154,12 +154,7 @@ fn a_device_reopens_as_its_replica_row() {
     let config = Config::of(Arc::new(arkdb::demo::demo()));
     let mut d = Peer::open_as(config.clone(), Box::new(Memory::default()), None);
     d.alone();
-    let _ = d.author(
-        Space::Durable,
-        CREATE,
-        arkdb::demo::CreatePlaylist { name: "Road".into() }.to_bytes(),
-        1,
-    );
+    let _ = d.author(Space::Durable, CREATE, arkdb::demo::CreatePlaylist { name: "Road".into() }.to_bytes(), 1);
     let (origin, me, local) = (d.log.origin, d.log.me.clone(), d.log.local);
     let mut d = d.reopen();
     assert!(d.is_alone(), "alone still");

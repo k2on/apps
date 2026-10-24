@@ -65,8 +65,8 @@ mod hub;
 pub mod instance;
 mod jobs;
 pub mod link;
-pub mod observe;
 pub mod local;
+pub mod observe;
 pub mod signed;
 pub mod watched;
 
@@ -658,7 +658,13 @@ impl Peer {
     pub fn authored(&self, id: &EntryId) -> Option<Entry> {
         let pending = self.log.pending.iter().map(|p| &p.entry).find(|e| e.id == *id).cloned();
         let head = self.log.log().head().0;
-        pending.or_else(|| (head.saturating_sub(8)..=head).rev().filter_map(|s| self.log.log().at(s)).map(|l| l.entry).find(|e| e.id == *id))
+        pending.or_else(|| {
+            (head.saturating_sub(8)..=head)
+                .rev()
+                .filter_map(|s| self.log.log().at(s))
+                .map(|l| l.entry)
+                .find(|e| e.id == *id)
+        })
     }
 
     /// The span opened ([`Peer::begin`], [`Peer::under`]), if one is.

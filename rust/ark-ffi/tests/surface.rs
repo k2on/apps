@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use arkdb::demo::{arrival, demo, live, room, Playlist};
 use ark_ffi::{Listener, Login, Patch, Peer, Refusal, Standing, ViewUpdate};
 use ark_peer::{dev, Config, Handle, Live, Memory, Module};
+use arkdb::demo::{arrival, demo, live, room, Playlist};
 
 fn config() -> Config {
     Config::of(Arc::new(demo()))
@@ -309,7 +309,14 @@ fn a_tap_begun_through_the_bridge_is_the_servers_cause() {
     alice.end();
     until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
     let cause = hub
-        .with(move |p| p.log.log().entries().into_iter().find(|l| ark::hash::hex(&l.entry.id.0) == made).and_then(|l| l.entry.cause))
+        .with(move |p| {
+            p.log
+                .log()
+                .entries()
+                .into_iter()
+                .find(|l| ark::hash::hex(&l.entry.id.0) == made)
+                .and_then(|l| l.entry.cause)
+        })
         .flatten()
         .expect("the server's entry has a cause");
     assert_eq!(format!("{}/{}", ark::hash::hex(&cause.trace.0), ark::hash::hex(&cause.id)), span);
@@ -329,7 +336,14 @@ fn an_apps_mutate_is_the_root_of_its_trace() {
     let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
     until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
     let entry = hub
-        .with(move |p| p.log.log().entries().into_iter().find(|l| ark::hash::hex(&l.entry.id.0) == made).map(|l| l.entry))
+        .with(move |p| {
+            p.log
+                .log()
+                .entries()
+                .into_iter()
+                .find(|l| ark::hash::hex(&l.entry.id.0) == made)
+                .map(|l| l.entry)
+        })
         .flatten()
         .unwrap();
     let cause = entry.cause.expect("a root span");

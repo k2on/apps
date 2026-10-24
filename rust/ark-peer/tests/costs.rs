@@ -22,9 +22,9 @@ use ark::log::{EntryId, Origin};
 use ark::row::{Id, Type};
 use ark::schema::{Schema, Space, Table};
 use ark::store::Store;
-use arkdb::demo::{demo as domain, AddToPlaylist};
 use ark_peer::link::wait;
 use ark_peer::{dev, now_ms, Config, Disk, Memory, Module, Peer, Server};
+use arkdb::demo::{demo as domain, AddToPlaylist};
 
 mod support;
 

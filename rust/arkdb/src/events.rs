@@ -79,11 +79,20 @@ pub fn read(from: &str) -> Result<Vec<Event>, String> {
         p if Path::new(p).is_dir() => {
             let mut all = vec![];
             for f in files(Path::new(p)) {
-                all.extend(std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?.lines().map(String::from));
+                all.extend(
+                    std::fs::read_to_string(&f)
+                        .map_err(|e| format!("{}: {e}", f.display()))?
+                        .lines()
+                        .map(String::from),
+                );
             }
             all
         }
-        p => std::fs::read_to_string(p).map_err(|e| format!("{p}: {e}"))?.lines().map(String::from).collect(),
+        p => std::fs::read_to_string(p)
+            .map_err(|e| format!("{p}: {e}"))?
+            .lines()
+            .map(String::from)
+            .collect(),
     };
     Ok(lines.iter().filter_map(|l| parse(l)).collect())
 }
@@ -97,7 +106,11 @@ fn field<'a>(e: &'a Event, k: &str) -> Option<&'a str> {
 /// An id as it prints: its first 8 digits.
 fn short(v: &str) -> &str {
     let hexy = v.len() >= 16 && v.bytes().all(|b| b.is_ascii_hexdigit());
-    if hexy { &v[..8] } else { v }
+    if hexy {
+        &v[..8]
+    } else {
+        v
+    }
 }
 
 fn clock(ms: i64) -> String {
@@ -123,7 +136,9 @@ pub fn line(e: &Event) -> String {
             false => format!("{k}={}", short(v)),
         })
         .collect();
-    format!("{} {:5} {} {} {}", clock(e.at), e.level, who(e), e.msg, fields.join(" ")).trim_end().to_string()
+    format!("{} {:5} {} {} {}", clock(e.at), e.level, who(e), e.msg, fields.join(" "))
+        .trim_end()
+        .to_string()
 }
 
 fn matches(e: &Event, args: &[String]) -> bool {
@@ -174,7 +189,10 @@ fn tail(args: &[String]) -> Result<(), String> {
 fn peer(args: &[String]) -> Result<(), String> {
     let w = words(args);
     let p = w.first().ok_or("arkdb peer P: which peer (a prefix of its label or its login)")?;
-    for e in read(&source(args))?.iter().filter(|e| who(e).contains(p.as_str()) || e.peer.contains(p.as_str())) {
+    for e in read(&source(args))?
+        .iter()
+        .filter(|e| who(e).contains(p.as_str()) || e.peer.contains(p.as_str()))
+    {
         println!("{}", line(e));
     }
     Ok(())
@@ -199,7 +217,9 @@ struct Node {
 fn trace_of(all: &[Event], id: &str) -> Option<String> {
     let mut count: BTreeMap<String, usize> = BTreeMap::new();
     for e in all {
-        let named = ["trace", "span", "parent", "entry"].iter().any(|k| field(e, k).is_some_and(|v| v.starts_with(id)));
+        let named = ["trace", "span", "parent", "entry"]
+            .iter()
+            .any(|k| field(e, k).is_some_and(|v| v.starts_with(id)));
         if let (true, Some(t)) = (named, field(e, "trace").filter(|t| !t.is_empty())) {
             *count.entry(t.to_string()).or_default() += 1;
         }
@@ -235,7 +255,11 @@ pub fn render_trace(all: &[Event], id: &str) -> Result<String, String> {
                 let kind = field(e, "kind").unwrap_or_default();
                 if n.what.is_empty() || (kind == "push" && field(e, "dir") == Some("out")) {
                     (n.at, n.what) = (e.at, field(e, "func").unwrap_or_default().to_string());
-                    n.by = format!("{} \u{b7} {}", field(e, "actor").unwrap_or_default(), field(e, "session").unwrap_or_default());
+                    n.by = format!(
+                        "{} \u{b7} {}",
+                        field(e, "actor").unwrap_or_default(),
+                        field(e, "session").unwrap_or_default()
+                    );
                     n.parent = field(e, "parent").filter(|p| !p.is_empty()).map(String::from);
                 }
                 n.seen.insert(who(e));

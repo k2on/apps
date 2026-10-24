@@ -6,8 +6,8 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::prelude::*;
 use ark::schema::Space;
-use arkdb::demo::{add_to_playlist, create_playlist, rename_playlist, AddToPlaylist, CreatePlaylist, Demo, Item, Playlist, RenamePlaylist};
 use ark_peer::{Config, Memory, Peer, Update};
+use arkdb::demo::{add_to_playlist, create_playlist, rename_playlist, AddToPlaylist, CreatePlaylist, Demo, Item, Playlist, RenamePlaylist};
 
 /// The items of the playlist of this name of the reader's: refused when
 /// there is none, which is read as the view is made.

@@ -90,7 +90,14 @@ impl Net {
     /// The server's logged entries naming `func`, in order.
     fn logged(&self, func: &str) -> Vec<Entry> {
         let f = self.hub.binding(func).unwrap_or_else(|| func.to_string());
-        self.hub.log.log().entries().into_iter().map(|l| l.entry).filter(|e| e.func == f).collect()
+        self.hub
+            .log
+            .log()
+            .entries()
+            .into_iter()
+            .map(|l| l.entry)
+            .filter(|e| e.func == f)
+            .collect()
     }
 }
 
@@ -148,7 +155,10 @@ fn a_job_runs_in_the_trace_of_what_made_it_due() {
     assert_eq!(claim.cause, Some(a.span()), "the claim is a child of the ask");
     assert_eq!(*seen.lock().unwrap(), Some(claim.span()), "the handler ran under the claim");
     assert_eq!(finish.cause, Some(claim.span()), "the finish is the claim's child");
-    assert!([a.span(), claim.span(), finish.span()].iter().all(|s| s.trace == tap.trace), "one trace, from the tap");
+    assert!(
+        [a.span(), claim.span(), finish.span()].iter().all(|s| s.trace == tap.trace),
+        "one trace, from the tap"
+    );
 }
 
 /// A trace is what one hand caused, for [`ark_peer::TRACE_MS`]: an answer
@@ -193,7 +203,9 @@ fn a_jobs_own_words_are_collected_in_its_trace() {
     let me = net.devices[0].0.label();
     let trace = ark::hash::hex(&tap.trace.0);
     let all = kept.lock().unwrap().clone();
-    let said = all.iter().find(|e| e.msg == "fetching" && e.fields.iter().any(|(k, v)| k == "id" && v == "words"));
+    let said = all
+        .iter()
+        .find(|e| e.msg == "fetching" && e.fields.iter().any(|(k, v)| k == "id" && v == "words"));
     let said = said.expect("the job's line was collected");
     assert_eq!(said.peer, me, "as the peer that ran it");
     let at = said.fields.iter().find(|(k, _)| k == "trace").map(|(_, v)| v.clone()).unwrap();

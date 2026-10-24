@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
+use ark_peer::{dev, Config, ConnId, Memory, Peer};
 use arkdb::demo::{demo, CreatePlaylist};
 use arkdb::events::{line, render_trace};
-use ark_peer::{dev, Config, ConnId, Memory, Peer};
 
 fn config() -> Config {
     Config::of(Arc::new(demo()))

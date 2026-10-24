@@ -27,8 +27,8 @@ use ark::hash::hex;
 use ark::log::Logged;
 use ark::peer::Who;
 use ark::store::{Change, Store};
-use arkdb::sim::{Net, Op};
 use ark_peer::{Config, Files, Peer};
+use arkdb::sim::{Net, Op};
 use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
 

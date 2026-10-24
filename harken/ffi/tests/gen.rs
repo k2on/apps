@@ -2,8 +2,8 @@
 //! generator writes from the domain now (`arkdb gen`): regenerating moves
 //! nothing. `ARK_WRITE_GEN=1` writes them instead.
 
-use arkdb::gen::{kotlin, swift, walk};
 use ark::domain::Catalog;
+use arkdb::gen::{kotlin, swift, walk};
 
 const KOTLIN: &str = "../android/app/src/main/kotlin/dev/harken/android/gen/Harken.kt";
 const SWIFT: &str = "../ios/Harken/Gen/Harken.swift";

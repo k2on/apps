@@ -258,7 +258,12 @@ impl Files {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
         let n = numbered(&dir).last().map_or(0, |(n, _)| n + 1);
-        Ok(Files { dir, n, file: None, bytes: 0 })
+        Ok(Files {
+            dir,
+            n,
+            file: None,
+            bytes: 0,
+        })
     }
 
     fn write(&mut self, e: &Event) {

@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::schema::Space;
+use ark_peer::{dev, Config, Memory, Module, Peer};
 use arkdb::demo::demo as domain;
 use arkdb::demo::{arrival, room, CreatePlaylist, Point};
-use ark_peer::{dev, Config, Memory, Module, Peer};
 
 fn hub() -> Peer {
     let mut c = Config::new(Module::of(&domain()));
@@ -87,7 +87,13 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
 fn the_servers_spaces_name_their_entries_apart() {
     let mut hub = hub();
     // The log's first entry is the server's own, as harken's library is.
-    hub.author(Space::Durable, "demo.create_playlist", CreatePlaylist { name: "mix".into() }.to_bytes(), 0).unwrap();
+    hub.author(
+        Space::Durable,
+        "demo.create_playlist",
+        CreatePlaylist { name: "mix".into() }.to_bytes(),
+        0,
+    )
+    .unwrap();
     let mut d = device();
     let c = hub.accept(d.me().clone());
     d.connected();

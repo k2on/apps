@@ -42,7 +42,9 @@ async fn main() -> Result<()> {
     // directory: what `arkdb` reads (docs/plan-observe.md).
     let events = config.data.join("events");
     match ark_peer::observe::Files::new(&events) {
-        Ok(f) => drop(ark_peer::observe::install(ark_peer::observe::Sink::Files(std::sync::Mutex::new(f)))),
+        Ok(f) => drop(ark_peer::observe::install(ark_peer::observe::Sink::Files(
+            std::sync::Mutex::new(f),
+        ))),
         Err(e) => eprintln!("harken-server: no events kept: {}: {e}", events.display()),
     }
     eprintln!("harken-server: events in {}", events.display());

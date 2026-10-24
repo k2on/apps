@@ -10,10 +10,10 @@ use ark::hash::{hex, EntryHash, StateHash};
 use ark::log::EntryId;
 use ark::peer::{Input, Output};
 use ark::schema::Space;
+use ark_peer::Act;
 use arkdb::fuzz::session;
 use arkdb::trace::{record, replay};
 use arkdb::vectors::{fleet, fleet_script, on_disk, op_json, sessions, vector};
-use ark_peer::Act;
 use serde_json::{json, Value};
 
 /// Every name written to `d`, and only those, on disk.

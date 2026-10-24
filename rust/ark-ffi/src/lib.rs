@@ -522,7 +522,11 @@ impl Peer {
     /// it authors under now: `name`, and `detail` as the app writes it.
     pub fn event(&self, name: String, detail: String) {
         let s = self.shared.lock();
-        let span = s.peer.cause(ark::schema::Space::Durable, ark_peer::now_ms()).map(|s| ark::hash::hex(&s.id)).unwrap_or_default();
+        let span = s
+            .peer
+            .cause(ark::schema::Space::Durable, ark_peer::now_ms())
+            .map(|s| ark::hash::hex(&s.id))
+            .unwrap_or_default();
         tracing::info!(target: "ark", peer = %s.peer.label(), span = %span, name = %name, detail = %detail, "app");
     }
 

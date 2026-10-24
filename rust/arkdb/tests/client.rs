@@ -14,10 +14,10 @@ use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
 use ark::row::Id;
 use ark::schema::Space;
+use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
 use arkdb::demo::{arrival, live, room};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
 use arkdb::sim::{who, Net, Op};
-use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
 
 fn demo() -> Config {
     Config::of(Arc::new(arkdb::demo::demo()))
