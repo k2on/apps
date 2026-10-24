@@ -24,7 +24,7 @@ use harken_server::Server;
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
-use lofty::tag::{Accessor, ItemKey, Tag, TagType};
+use lofty::tag::{Accessor, ItemKey, Tag, TagExt, TagType};
 use sha2::{Digest, Sha256};
 
 /// `(title, file)` for every song the server's log holds.
@@ -221,6 +221,50 @@ fn the_tags_are_what_a_song_is() {
     assert!(
         harken_server::library::read(&junk).is_none(),
         "not audio lofty can read"
+    );
+}
+
+/// A classical file's standard tags are read: the composer is who it is
+/// by and the artist tag who played it, the work and its catalogue number,
+/// the movement numbered as the title, and the disc. Falsified by reading
+/// the artist tag as the artist whatever the composer: it said L'Astrée.
+#[test]
+fn a_classical_files_tags_name_its_work() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("rv68.wav");
+    wav(&path, 1_500);
+    let mut tag = Tag::new(TagType::Id3v2);
+    tag.set_title("Sonata in F major, RV 68: II. Andante".into());
+    tag.set_artist("L'Astrée".into());
+    tag.set_album("Sonate da Camera".into());
+    tag.set_track(2);
+    tag.set_disk(1);
+    tag.insert_text(ItemKey::Composer, "Antonio Vivaldi".into());
+    tag.insert_text(ItemKey::Movement, "Andante".into());
+    tag.insert_text(ItemKey::MovementNumber, "2".into());
+    // The work is `TXXX:WORK`, which lofty's generic tag cannot write
+    // (it names the frame `WORK`), so it goes in as the user text it is.
+    let mut id3 = lofty::id3::v2::Id3v2Tag::from(tag);
+    id3.insert_user_text("WORK".into(), "Sonata in F major, RV 68".into());
+    id3.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let track = harken_server::library::read(&path).expect("a tagged file is read");
+    assert_eq!(track.artist, "Antonio Vivaldi", "who it is by");
+    assert_eq!(track.performer, "L'Astrée", "who played it");
+    assert_eq!(track.title, "II. Andante", "the movement, numbered");
+    assert_eq!(
+        (track.work.as_str(), track.catalogue.as_str()),
+        ("Sonata in F major, RV 68", "RV 68")
+    );
+    assert_eq!((track.movement_no, track.number, track.disc), (2, 2, 1));
+    assert_eq!(
+        harken_server::library::catalogue("Tafelmusik I: Quartet in G major, TWV 43:G2"),
+        "TWV 43:G2"
+    );
+    assert_eq!(
+        harken_server::library::catalogue("Spring, Summer"),
+        "",
+        "no index, no number"
     );
 }
 

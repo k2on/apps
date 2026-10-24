@@ -701,11 +701,11 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         duration_ms: track.duration_ms,
         file: rel.clone(),
         track: track.number,
-        // Neither is in a standard tag: a part is a division of a work and a
-        // catalogue number is a scholarly index, and no file carries either.
-        // Left empty rather than guessed out of the folder names.
+        // A part, a division of a work, is in no standard tag; left empty
+        // rather than guessed out of the folder names. The catalogue number
+        // is the work title's own (`catalogue`).
         part: String::new(),
-        catalogue: String::new(),
+        catalogue: track.catalogue,
         performer: track.performer,
         bpm: track.bpm,
         // The covers found for it, or empty: the procedure reads empty as
@@ -714,12 +714,11 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         // album already has.
         album_art,
         artist_art,
-        // No disc, no work, no movement number — none of which a plain tag
-        // carries. 0 and empty are "nobody said": the track becomes a
+        // 0 and empty are "nobody said": a file naming no work becomes a
         // recording of its own, which is what a pop track is.
-        disc: 0,
-        work_title: String::new(),
-        movement_no: 0,
+        disc: track.disc,
+        work_title: track.work,
+        movement_no: track.movement_no,
     }
     .to_bytes();
     if !would_change(peer, ADD_SONG, &call) {
@@ -766,19 +765,32 @@ pub fn relative(root: &Path, path: &Path) -> Option<String> {
 /// What a file's tags say, as `add_song` takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Track {
+    /// The movement's name where the file names one ("I. Allegro"), the
+    /// title tag otherwise.
     pub title: String,
+    /// Who made it: the composer where the file names one, which on a
+    /// classical recording is who the music is by; the artist tag otherwise.
     pub artist: String,
     pub album: String,
     pub duration_ms: i64,
     /// The tag's own numbering, 0 when the file has none.
     pub number: i64,
-    /// `ALBUMARTIST` where there is one. On a classical recording the artist
-    /// tag is usually the composer and this is the performer, which is
-    /// exactly the pair the schema keeps apart.
+    /// Who played it: `ALBUMARTIST` where there is one, and where there is
+    /// not and a composer is named, the artist tag — which on a classical
+    /// file is then the performer. The pair the schema keeps apart.
     pub performer: String,
     /// `TBPM`. Rare, and the reason the column is worth storing rather than
     /// deriving: when a file states its tempo, that is a fact.
     pub bpm: i64,
+    /// The disc, 0 when the file has none.
+    pub disc: i64,
+    /// The work it is a movement of (`WORK`, `©wrk`), empty for none.
+    pub work: String,
+    /// The work's catalogue number, read off the end of its title
+    /// ("Sonata in F major, RV 68"): no tag carries one.
+    pub catalogue: String,
+    /// Where it sits in its work (`MVIN`, `©mvi`), 0 when nobody said.
+    pub movement_no: i64,
 }
 
 /// What the tags say, with the file name as the fallback for a title; `None`
@@ -795,6 +807,14 @@ pub fn read(path: &Path) -> Option<Track> {
 
 /// [`read`], and the picture the tags carry ([`covers::embedded`]), from
 /// the one reading.
+///
+/// **A classical file says so in standard tags**, and they are read: the
+/// composer (`TCOM`, `©wrt`), the work (`TXXX:WORK`, `©wrk`), the movement
+/// (`MVNM` and `MVIN`, `©mvn` and `©mvi`) and the disc. Named, the composer
+/// is the artist and whoever the artist tag named played it; the movement's
+/// name, numbered, is the title, so a work's page reads "I. Allegro" under
+/// "Sonata in F major, RV 68" while the title tag can say both for players
+/// that know no works.
 pub fn read_with_picture(path: &Path) -> Option<(Track, Option<Vec<u8>>)> {
     use lofty::file::{AudioFile, TaggedFileExt};
     use lofty::probe::Probe;
@@ -805,7 +825,29 @@ pub fn read_with_picture(path: &Path) -> Option<(Track, Option<Vec<u8>>)> {
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
     let text =
         |v: Option<std::borrow::Cow<'_, str>>| v.map(|s| s.trim().to_string()).unwrap_or_default();
-    let title = text(tag.and_then(|t| t.title()));
+    let item = |key: ItemKey| {
+        tag.and_then(|t| t.get_string(key))
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    // A tag that is there but unparseable is the same as no tag: a number
+    // nobody can read is not a number. `3/12` is 3.
+    let number = |key: ItemKey| {
+        let v = item(key);
+        v.split('/')
+            .next()
+            .and_then(|n| n.trim().parse::<i64>().ok())
+            .unwrap_or(0)
+            .clamp(0, 999)
+    };
+    let movement_no = number(ItemKey::MovementNumber);
+    let movement = item(ItemKey::Movement);
+    let title = match (movement.is_empty(), movement_no) {
+        (false, 0) => movement,
+        (false, n) => format!("{}. {movement}", roman(n)),
+        (true, _) => text(tag.and_then(|t| t.title())),
+    };
     let title = if title.is_empty() {
         path.file_stem()?.to_str()?.trim().to_string()
     } else {
@@ -814,15 +856,20 @@ pub fn read_with_picture(path: &Path) -> Option<(Track, Option<Vec<u8>>)> {
     if title.is_empty() {
         return None;
     }
-    // A tag that is there but unparseable is the same as no tag: a number
-    // nobody can read is not a number.
-    let bpm = tag
-        .and_then(|t| t.get_string(ItemKey::Bpm))
-        .and_then(|v| v.trim().parse::<i64>().ok())
-        .unwrap_or(0);
+    let (composer, artist) = (item(ItemKey::Composer), text(tag.and_then(|t| t.artist())));
+    let performer = match item(ItemKey::AlbumArtist) {
+        p if !p.is_empty() => p,
+        _ if !composer.is_empty() && artist != composer => artist.clone(),
+        _ => String::new(),
+    };
+    let work = item(ItemKey::Work);
     let track = Track {
         title,
-        artist: text(tag.and_then(|t| t.artist())),
+        artist: if composer.is_empty() {
+            artist
+        } else {
+            composer
+        },
         album: text(tag.and_then(|t| t.album())),
         duration_ms,
         // The tag's own reading of it, which is where `3/12` becomes 3.
@@ -830,14 +877,42 @@ pub fn read_with_picture(path: &Path) -> Option<(Track, Option<Vec<u8>>)> {
             .and_then(|t| t.track())
             .map_or(0, i64::from)
             .clamp(0, 999),
-        performer: tag
-            .and_then(|t| t.get_string(ItemKey::AlbumArtist))
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-        bpm: bpm.max(0),
+        performer,
+        bpm: number(ItemKey::Bpm),
+        disc: tag
+            .and_then(|t| t.disk())
+            .map_or(0, i64::from)
+            .clamp(0, 999),
+        catalogue: catalogue(&work),
+        work,
+        movement_no,
     };
     Some((track, covers::embedded(&tagged)))
+}
+
+/// The catalogue number a work's title ends with — "RV 68" of "Sonata in F
+/// major, RV 68", "TWV 55:e1", "Op. 23", "BWV 988" — or empty: the last
+/// comma's part, when it starts with an index scholars keep.
+pub fn catalogue(work: &str) -> String {
+    const INDEXES: &[&str] = &[
+        "RV ", "BWV ", "HWV ", "TWV ", "K. ", "KV ", "Op. ", "D. ", "Hob. ", "WoO ", "L. ", "S. ",
+    ];
+    match work.rsplit_once(", ") {
+        Some((_, last)) if INDEXES.iter().any(|i| last.starts_with(i)) => last.trim().to_string(),
+        _ => String::new(),
+    }
+}
+
+/// `n` as a movement is numbered: I, II, … XX, and plainly past that.
+fn roman(n: i64) -> String {
+    const R: [&str; 20] = [
+        "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV",
+        "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+    ];
+    match usize::try_from(n - 1).ok().and_then(|i| R.get(i)) {
+        Some(r) => r.to_string(),
+        None => n.to_string(),
+    }
 }
 
 #[cfg(test)]
