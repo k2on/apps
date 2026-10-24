@@ -329,6 +329,32 @@ pub fn who(login: &Login) -> String {
     }
 }
 
+/// Tell the page this window is the one it shows, and the splash can go
+/// (`web/index.html`). Not before: a page that is about to go to sign in,
+/// or is still finding out whether it has a server, shows the mark rather
+/// than a player it is about to leave. Once a load; nothing on the desktop.
+pub fn reveal() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static SAID: AtomicBool = AtomicBool::new(false);
+        if SAID.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        use wasm_bindgen::prelude::*;
+        #[wasm_bindgen(inline_js = r#"
+export function revealed() {
+  window.harkenRevealed = true;
+  window.dispatchEvent(new Event("harken:reveal"));
+}
+"#)]
+        extern "C" {
+            fn revealed();
+        }
+        revealed();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

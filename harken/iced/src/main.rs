@@ -555,6 +555,11 @@ pub struct App {
     /// This load has already gone to sign in, or come back from doing so,
     /// and does not go again by itself (`App::sign_in_unasked`).
     pub sign_in_tried: bool,
+    /// The page stays on its splash ([`auth::reveal`]): this window is
+    /// finding out whether it has a server, trading a sign-in's code, or
+    /// going to sign in. What it would draw meanwhile is a player it is
+    /// about to leave.
+    pub held: bool,
     /// What the connect entry holds, while this window is alone.
     pub connect: String,
     /// Offline on purpose.
@@ -607,6 +612,7 @@ impl App {
             login,
             logins: None,
             sign_in_tried: false,
+            held: false,
             connect: String::new(),
             offline: false,
             bell,
@@ -695,6 +701,9 @@ impl App {
     fn boot() -> (App, Task<Message>) {
         let (mut app, task) = App::open();
         app.arrive();
+        if !app.held {
+            auth::reveal();
+        }
         (app, task)
     }
 
@@ -735,6 +744,7 @@ impl App {
                     let mut app = App::with_peer(Peer::open(App::alone_in_memory()), String::new(), None);
                     app.user = user;
                     app.note = format!("looking for a server at {origin}\u{2026}");
+                    app.held = true;
                     let probe = auth::answers(format!("{origin}/healthz"));
                     let task = Task::perform(probe, move |ok| Message::Started(auth::decide(None, None, Some(origin.clone()), |_| ok)));
                     (app, task)
@@ -801,7 +811,7 @@ impl App {
     pub fn arrive_signing_in(&mut self, arrival: auth::Arrival) -> Task<Message> {
         match arrival {
             auth::Arrival::Exchange(code) => {
-                self.sign_in_tried = true;
+                (self.sign_in_tried, self.held) = (true, true);
                 self.note = "signing in\u{2026}".into();
                 let server = self.server.clone();
                 #[cfg(target_arch = "wasm32")]
@@ -845,7 +855,7 @@ impl App {
             // The page goes away and comes back with a code; `boot` finishes.
             // The mark says it went, so the load it comes back as does not
             // go again if it comes back with nothing.
-            self.sign_in_tried = true;
+            (self.sign_in_tried, self.held) = (true, true);
             auth::leaving();
             ark_auth::web::go_sign_in(&self.server, self.user.as_deref());
             Task::none()
@@ -1802,6 +1812,9 @@ impl App {
     /// each call site has to remember is already broken.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        if !self.held {
+            auth::reveal();
+        }
         let reacted = self.react();
         self.router.sync(&self.peer.source.place());
         Task::batch([task, reacted, self.want_covers_if_moved()])
@@ -1844,11 +1857,14 @@ impl App {
             }
             Message::Connect => return self.connect(),
             Message::SignedIn(outcome) => match outcome {
-                Ok(login) => self.signed_in(login),
+                Ok(login) => {
+                    self.held = false;
+                    self.signed_in(login);
+                }
                 // Said once, and not tried again until a reload: going
                 // straight back would be a loop the person cannot stop.
                 Err(e) => {
-                    self.sign_in_tried = true;
+                    (self.sign_in_tried, self.held) = (true, false);
                     self.note = format!("could not sign in: {e} \u{2014} reload to try again");
                 }
             },

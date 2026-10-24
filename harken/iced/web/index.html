@@ -241,19 +241,28 @@
 
       // The canvas is appended by the wasm module, so it may not exist yet on
       // the first try. One observer, disconnected as soon as it has one.
-      const canvas = document.querySelector("canvas");
-      if (canvas) {
-        ready(canvas);
-      } else {
+      const painted = new Promise((found) => {
+        const canvas = document.querySelector("canvas");
+        if (canvas) return found(canvas);
         const watch = new MutationObserver(() => {
           const late = document.querySelector("canvas");
           if (late) {
-            ready(late);
             watch.disconnect();
+            found(late);
           }
         });
         watch.observe(document.body, { childList: true });
-      }
+      });
+      // **And the app has said it is staying** (`auth::reveal`). A page that
+      // is still asking whether it has a server, or is about to go to sign
+      // in, keeps the mark: the player under it would be on screen for the
+      // moment before the page leaves, settle animation and all. It may have
+      // said so already, inside `init()`.
+      const staying = new Promise((go) => {
+        if (window.harkenRevealed) return go();
+        addEventListener("harken:reveal", () => go(), { once: true });
+      });
+      Promise.all([painted, staying]).then(([canvas]) => ready(canvas));
     </script>
   </body>
 </html>

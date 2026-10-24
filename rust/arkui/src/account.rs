@@ -16,7 +16,7 @@
 //!
 //! The app says what each entry does: the messages are its own, and nothing
 //! here knows what a server, a session or a login is.
-use iced::widget::{button as pressable, row, text};
+use iced::widget::{button as pressable, container, row, text};
 use iced::{Alignment, Element, Length, Padding, Point, Size};
 
 use crate::fit;
@@ -146,7 +146,9 @@ pub fn button<'a, M: Clone + 'a>(account: &Account<M>, press: M) -> Element<'a, 
     ]
     .spacing(6)
     .align_y(Alignment::Center);
-    pressable(face)
+    // A button lays its content at its top; the row is centred in the
+    // button's height by a container as tall as it is.
+    pressable(container(face).center_y(Length::Fill))
         .height(Length::Fixed(HEIGHT))
         .padding(Padding::from([0.0, panel::ENTRY_PAD_X]))
         .style(style::quiet)
