@@ -479,14 +479,17 @@ pub struct Edit {
 // where the keyboard lands and where a panel goes. iced lays out after `view`,
 // so these are declared rather than measured.
 pub const SIDEBAR_WIDTH: f32 = 200.0;
+/// The chrome's padding: above the top bar, and at the right-hand end of it
+/// and of the play bar.
 pub const PAGE_PADDING: f32 = 16.0;
-/// The gap either side of the rule between the sidebar and the page.
-pub const PANE_GAP: f32 = 16.0;
-/// The index pages' cards.
+/// The index pages' cards, and every page's shelf of them.
 pub const SHELF: Shelf = Shelf::DEFAULT;
+/// The page's gutter either side: the shelf's padding, so a list, a header
+/// and a row of cards all start at one line.
+pub const GUTTER: f32 = SHELF.padding;
 /// How tall the play bar is — declared because the device picker sits on it
 /// and is placed before anything is laid out.
-pub const BAR_HEIGHT: f32 = 48.0;
+pub const BAR_HEIGHT: f32 = 64.0;
 /// What the device picker draws a row at: a name, and beside it the row's
 /// join button, its mute and its volume slider.
 pub const DEVICES_WIDTH: f32 = 336.0;
@@ -984,13 +987,11 @@ impl App {
         self.focus() == Focus::Pane(pane)
     }
 
-    /// How wide the page beside the sidebar is: the window less its padding
-    /// either side, the sidebar, and the rule with a gap either side of it —
-    /// every width `view` lays out before the page. Leaving the chrome out
-    /// counted 65px that are not there, so at the widths where the last card
-    /// needed them iced squeezed it to fit.
+    /// How wide the page beside the sidebar is: the window less the sidebar,
+    /// which is every width `view` lays out before the page — the page runs
+    /// to the window's edge, and each page keeps its own gutter inside it.
     pub fn pane_width(&self) -> f32 {
-        self.window.width - PAGE_PADDING * 2.0 - SIDEBAR_WIDTH - PANE_GAP * 2.0 - 1.0
+        self.window.width - SIDEBAR_WIDTH
     }
 
     /// How many cards fit across an index page — the same division the view
@@ -1000,9 +1001,9 @@ impl App {
     }
 
     /// How many columns a composer's works are listed in — the view's
-    /// division, from the room it leaves beside the scrollbar.
+    /// division, from the room its gutters leave, the shelf's.
     pub fn listing_columns(&self) -> usize {
-        arkui::hero::columns(self.pane_width() - arkui::SCROLLBAR - 6.0)
+        arkui::hero::columns(SHELF.room(self.pane_width()))
     }
 
     /// What shape a pane is, which is all `vim` needs to know about it: the
@@ -1378,7 +1379,7 @@ impl App {
     pub fn queue_origin(window: Size, rows: usize) -> Point {
         arkui::panel::hang_above(
             window.width - PAGE_PADDING,
-            window.height - PAGE_PADDING - BAR_HEIGHT,
+            window.height - BAR_HEIGHT,
             QUEUE_WIDTH,
             Self::queue_height(rows),
         )
@@ -1597,10 +1598,10 @@ impl App {
     }
 
     /// Where the ⋯ column ends: the list's right-hand edge, less the page's
-    /// padding and the scrollbar — so a menu opened from it ends where the
+    /// gutter and the scrollbar — so a menu opened from it ends where the
     /// button is.
     pub fn dots_right(window: Size) -> f32 {
-        window.width - PAGE_PADDING - arkui::SCROLLBAR
+        window.width - GUTTER - arkui::SCROLLBAR
     }
 
     /// Where the device picker goes: hanging off the speaker at the right-hand
@@ -1609,7 +1610,7 @@ impl App {
     pub fn devices_origin(window: Size, rows: usize) -> Point {
         arkui::panel::hang_above(
             window.width - PAGE_PADDING,
-            window.height - PAGE_PADDING - BAR_HEIGHT,
+            window.height - BAR_HEIGHT,
             DEVICES_WIDTH,
             Self::devices_height(rows),
         )
@@ -2490,7 +2491,6 @@ pub fn main() -> iced::Result {
     ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
     iced::application(App::boot, App::update, App::view)
-        .font(arkui::hero::SERIF_BYTES)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((860.0, 600.0))

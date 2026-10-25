@@ -196,6 +196,40 @@ pub fn page(theme: &Theme) -> container::Style {
     }
 }
 
+/// How far a [`surface`] steps from the page toward the text colour.
+pub const SURFACE_STEP: f32 = 0.04;
+
+/// The ground of a pane beside the page — a sidebar, a play bar: the page's
+/// own colour a step toward its text, so it reads as a lighter shelf on a
+/// dark theme and a greyer one on a light theme. In place of a rule between
+/// the two: a line is one more thing to read, and a change of ground says
+/// "another place" without being looked at.
+pub fn surface(theme: &Theme) -> container::Style {
+    let palette = of(theme);
+    container::Style {
+        background: Some(Background::Color(surface_color(theme))),
+        text_color: Some(palette.background.base.text),
+        ..container::Style::default()
+    }
+}
+
+/// The colour a [`surface`] is painted: opaque, so what is laid over it — a
+/// row's wash, a lit entry — composes the same as it does on the page.
+pub fn surface_color(theme: &Theme) -> Color {
+    let palette = of(theme);
+    mix(palette.background.base.color, palette.background.base.text, SURFACE_STEP)
+}
+
+/// `from` moved `by` of the way to `to`.
+fn mix(from: Color, to: Color, by: f32) -> Color {
+    Color {
+        r: from.r + (to.r - from.r) * by,
+        g: from.g + (to.g - from.g) * by,
+        b: from.b + (to.b - from.b) * by,
+        a: 1.0,
+    }
+}
+
 /// What a row of a list or a table is painted.
 ///
 /// Three states, and they are deliberately not three shades of one idea: the
@@ -279,5 +313,23 @@ pub fn on_row(theme: &Theme, on_cursor: bool, accent: bool, dim: bool) -> Color 
         palette.background.base.text.scale_alpha(0.6)
     } else {
         palette.background.base.text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A surface is a step off the page on either side — toward the text, so
+    /// lighter on dark and darker on light — and only a step.
+    #[test]
+    fn a_surface_is_a_step_off_the_page() {
+        for (theme, lighter) in [(Theme::Dark, true), (Theme::Light, false)] {
+            let page = of(&theme).background.base.color;
+            let surface = surface_color(&theme);
+            let step = surface.r - page.r;
+            assert_eq!(step > 0.0, lighter, "{theme:?}: {page:?} to {surface:?}");
+            assert!(step.abs() > 0.01 && step.abs() < 0.05, "{theme:?}: a step of {step}");
+        }
     }
 }
