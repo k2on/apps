@@ -96,3 +96,22 @@ fn the_providers_own_host_is_the_providers() {
     assert_eq!(host("https://u@id.example:8443/a.png"), issuer);
     assert_eq!(host("http://id.example:8443/a.png"), None);
 }
+
+/// A host the server is told to trust with pictures is trusted as the
+/// provider's is — whole, port and all — and only it: telling it one host
+/// trusts no other private one. Falsified by trusting a host by suffix, or
+/// by `hosts` replacing the provider's own.
+#[test]
+fn a_picture_host_is_trusted_as_the_providers_is() {
+    use crate::server::picture_trusted;
+    let hosts = ["photos.example".to_string()];
+    let issuer = Some("id.example:8443");
+    assert!(picture_trusted("https://photos.example/avatar/ann", issuer, &hosts));
+    assert!(picture_trusted("https://id.example:8443/a.png", issuer, &hosts), "the provider's still");
+    assert!(!picture_trusted("https://photos.example.evil/a.png", issuer, &hosts));
+    assert!(!picture_trusted("https://evil.photos.example/a.png", issuer, &hosts));
+    assert!(!picture_trusted("https://photos.example:8443/a.png", issuer, &hosts), "another port");
+    assert!(!picture_trusted("http://photos.example/a.png", issuer, &hosts));
+    assert!(!picture_trusted("https://photos.example/a.png", issuer, &[]), "none told");
+    assert!(!picture_trusted("https://photos.example/a.png", None, &[]));
+}

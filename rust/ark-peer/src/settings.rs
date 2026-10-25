@@ -81,6 +81,9 @@ pub struct Serve {
     /// Where else a login may send its code, besides loopback, an app's
     /// own scheme and `public_url`.
     pub redirects: Vec<String>,
+    /// Hosts trusted with people's pictures as the provider's own is, on
+    /// a private network too (`ark_auth::server::Auth::trust_picture_host`).
+    pub picture_hosts: Vec<String>,
     /// A built browser client to serve at `/`.
     pub web: Option<PathBuf>,
     /// The file whose change is a rebuild off the store; unset, every file is.
@@ -106,6 +109,7 @@ impl Serve {
             public_url: None,
             sign_in: SignIn::Dev,
             redirects: vec![],
+            picture_hosts: vec![],
             web: None,
             web_module: None,
             keepalive: Keepalive::default(),
@@ -124,6 +128,7 @@ impl Serve {
     /// _OIDC_ISSUER, _OIDC_CLIENT_ID, _OIDC_CLIENT_SECRET_FILE
     ///                           all three, or none; _OIDC_SCOPES
     /// _REDIRECTS                comma-separated prefixes
+    /// _PICTURE_HOSTS            hosts trusted with pictures, comma-separated
     /// _WEB, _WEB_MODULE         the browser client
     /// _KEEPALIVE_MS             the sync socket's ping interval (20000)
     /// _KEEPALIVE_MISSED         pings unanswered before it closes (3, and only 3)
@@ -189,6 +194,7 @@ impl Serve {
             public_url: env("PUBLIC_URL"),
             sign_in,
             redirects: list("REDIRECTS"),
+            picture_hosts: list("PICTURE_HOSTS"),
             web: env("WEB").map(PathBuf::from),
             web_module: env("WEB_MODULE"),
             keepalive,

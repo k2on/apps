@@ -157,6 +157,18 @@ in
       '';
     };
 
+    pictureHosts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "photos.example.com" ];
+      description = ''
+        Hosts (`host` or `host:port`) the server may fetch people's pictures
+        from on a private network, as it may from the provider's own host.
+        Anywhere else, a picture is fetched from public addresses alone. For
+        a provider whose `picture` claim points at a server beside it.
+      '';
+    };
+
     roles = lib.mkOption {
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
       default = { };
@@ -418,6 +430,7 @@ in
         HARKEN_DATA = "%S/harken";
         HARKEN_PUBLIC_URL = cfg.publicUrl;
         HARKEN_REDIRECTS = lib.concatStringsSep "," cfg.redirects;
+        HARKEN_PICTURE_HOSTS = lib.concatStringsSep "," cfg.pictureHosts;
         HARKEN_RETAIN_DAYS = toString cfg.retainDays;
         HARKEN_RETAIN_ENTRIES = toString cfg.retainEntries;
       } // lib.optionalAttrs (cfg.roles != { }) {

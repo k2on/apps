@@ -361,6 +361,11 @@ pub async fn start(config: Config) -> Result<Server> {
     for prefix in &config.redirects {
         auth = auth.allow_redirect(prefix);
     }
+    // A provider may point pictures at a server beside it on the private
+    // network (ark's photos, say): trusted as the provider is.
+    for host in &config.picture_hosts {
+        auth = auth.trust_picture_host(host);
+    }
     let auth = Arc::new(auth);
 
     let mut hub = hub_config(&hosted, config.retain.entries);
@@ -509,6 +514,10 @@ mod tests {
                     "/run/credentials/harken/oidc-secret",
                 ),
                 ("HARKEN_REDIRECTS", " https://a/ ,, https://b/"),
+                (
+                    "HARKEN_PICTURE_HOSTS",
+                    "photos.example, photos.example:8443",
+                ),
                 ("HARKEN_PUBLIC_URL", "https://harken.example.com"),
             ]),
         )
@@ -523,6 +532,7 @@ mod tests {
             }
         );
         assert_eq!(c.redirects, ["https://a/", "https://b/"]);
+        assert_eq!(c.picture_hosts, ["photos.example", "photos.example:8443"]);
         assert_eq!(c.keepalive, Keepalive::default());
         assert_eq!(c.public_url(), "https://harken.example.com");
     }

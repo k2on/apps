@@ -160,6 +160,9 @@ pub struct Auth {
     welcome: Option<String>,
     /// Pictures fetched for `/auth/picture`, by URL ([`Auth::picture`]).
     pictures: Mutex<HashMap<String, (Picture, i64)>>,
+    /// Hosts trusted with pictures as the provider's own is
+    /// ([`Auth::trust_picture_host`]).
+    picture_hosts: Vec<String>,
 }
 
 impl Auth {
@@ -179,6 +182,7 @@ impl Auth {
             roles: BTreeMap::new(),
             welcome: None,
             pictures: Mutex::new(HashMap::new()),
+            picture_hosts: Vec::new(),
         }
     }
 
@@ -229,6 +233,15 @@ impl Auth {
     /// app's URL scheme, `harken://`, or a web client served elsewhere.
     pub fn allow_redirect(mut self, prefix: &str) -> Self {
         self.redirects.push(prefix.to_string());
+        self
+    }
+
+    /// Trust `host` (`photos.example`, or `photos.example:8443`) with
+    /// people's pictures as the provider's own host is ([`Auth::picture`]):
+    /// a picture there is fetched though it is on a private network — a
+    /// server beside this one that the provider points pictures at.
+    pub fn trust_picture_host(mut self, host: &str) -> Self {
+        self.picture_hosts.push(host.to_string());
         self
     }
 
@@ -464,9 +477,10 @@ impl Auth {
     /// it: so it is fetched only over `https`, as a picture's type and size,
     /// and from a public address ([`public`], asked of every address a name
     /// resolves to, the redirects' too) — never the server's own network
-    /// handed back to whoever asks. The one host allowed to be on it is the
+    /// handed back to whoever asks. The hosts allowed to be on it are the
     /// provider's own, which a server signing people in through it already
-    /// trusts: a provider on the same network serving its own pictures.
+    /// trusts — a provider on the same network serving its own pictures —
+    /// and those it was told to trust as much ([`Auth::trust_picture_host`]).
     /// Blocking.
     pub fn picture(&self, user: &str) -> Result<Option<Picture>, String> {
         let (u, of) = (user.to_string(), self.reads.of);
@@ -482,7 +496,7 @@ impl Auth {
             Mode::Oidc(p) => host(p.issuer()).map(str::to_string),
             Mode::Dev => None,
         };
-        let p = fetch_picture(&url, issuer.is_some() && issuer.as_deref() == host(&url))?;
+        let p = fetch_picture(&url, picture_trusted(&url, issuer.as_deref(), &self.picture_hosts))?;
         let mut kept = self.pictures.lock().unwrap_or_else(|e| e.into_inner());
         kept.retain(|_, (_, at)| now - *at < PICTURE_TTL_MS);
         if kept.len() >= PICTURES_KEPT {
@@ -498,6 +512,15 @@ pub(crate) fn host(url: &str) -> Option<&str> {
     let rest = url.strip_prefix("https://")?;
     let host = rest.split(['/', '?', '#']).next()?;
     Some(host.rsplit_once('@').map_or(host, |(_, h)| h))
+}
+
+/// Whether `url` is on a host trusted with pictures: the provider's
+/// (`issuer`, its host) or one of `hosts`, matched whole, port and all.
+pub(crate) fn picture_trusted(url: &str, issuer: Option<&str>, hosts: &[String]) -> bool {
+    match host(url) {
+        Some(h) => issuer == Some(h) || hosts.iter().any(|t| t == h),
+        None => false,
+    }
 }
 
 /// `url`'s picture, as [`Auth::picture`] fetches one: from anywhere when
