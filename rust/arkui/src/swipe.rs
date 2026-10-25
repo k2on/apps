@@ -199,8 +199,12 @@ use State::{Idle, Pulling, Settling};
 /// from: a circle sliding in and growing as the pull does, filled with the
 /// accent once letting go would go. The page is not moved.
 pub fn view<'a, M: 'a>(page: Element<'a, M>, swipe: &Swipe, now: Instant) -> Element<'a, M> {
+    // The page is always the stack's first child, arrow or not: a widget's
+    // state is kept by where it sits in the tree, so wrapping it only while
+    // there is an arrow would make it a new page — scrolled to the top — the
+    // moment a pull began.
     let Some((by, progress, armed)) = swipe.arrow() else {
-        return page;
+        return stack![page, iced::widget::Space::new()].into();
     };
     let off = swipe.offset(now);
     let side = 24.0 + 20.0 * progress;
