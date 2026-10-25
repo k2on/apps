@@ -311,7 +311,9 @@ impl App {
                     .collect(),
                 "Nobody yet.",
             ),
-            Source::Album(name) => {
+            // The keymap and the numbers are drawn where the table is, so
+            // they keep the page they have always been drawn on.
+            Source::Album(name) if self.help || self.debug => {
                 let album = p.albums().iter().find(|a| a.name == *name);
                 let creator = album.map(|a| a.creator.clone()).unwrap_or_default();
                 let open = (!creator.is_empty()).then(|| Source::Artist(creator.clone()));
@@ -320,6 +322,7 @@ impl App {
                     self.view_list(),
                 )
             }
+            Source::Album(name) => self.view_album(name),
             Source::Artist(name) => {
                 let artist = p.artists().iter().find(|a| a.name == *name);
                 let art_path = artist.map(|a| a.art.as_str()).unwrap_or_default();
@@ -407,6 +410,183 @@ impl App {
             }
             _ => self.view_list(),
         }
+    }
+
+    /// An album's page, laid out as a catalogue lays one out: the cover
+    /// beside its title and who played it, then its tracks under the works
+    /// they are movements of — each work's composer over its title, its
+    /// length at its right — and at the foot when it came out, how long it
+    /// runs and who put it out. One scrollable, so the cover scrolls away
+    /// with the page. A record of no works (a pop record) is the same page
+    /// with no work headings, and its track numbers instead.
+    fn view_album(&self, name: &str) -> Element<'_, Message> {
+        let p = &self.peer;
+        let album = p.albums().iter().find(|a| a.name == name);
+        let creator = album.map(|a| a.creator.clone()).unwrap_or_default();
+        let rows = p.rows();
+        let details: Vec<_> = rows.iter().map(|i| p.detail_of(i.id)).collect();
+        let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
+        let year = album.map_or(0, |a| a.released);
+
+        // Who played it, in the accent: whoever is credited on the most of
+        // it, which on a record by one orchestra is the orchestra. Nobody
+        // credited, and it is whoever made it.
+        let performer = most(details.iter().map(|d| d.performer.as_str()));
+        let mut words = column![text(name.to_string()).size(26).font(hero::SERIF).wrapping(text::Wrapping::Word)]
+            .spacing(4)
+            .width(Length::Fill);
+        let by = performer.map_or(creator.clone(), str::to_string);
+        if !by.is_empty() {
+            words = words.push(text(by).size(16).style(style::accent).wrapping(text::Wrapping::Word));
+        }
+        let small = [
+            performer.is_some().then(|| creator.to_uppercase()).filter(|c| !c.is_empty()),
+            (year > 0).then(|| year.to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("  \u{b7}  ");
+        if !small.is_empty() {
+            let line = text(small).size(11).style(style::faint(0.5));
+            words = words.push(match creator.is_empty() {
+                true => Element::from(line),
+                false => mouse_area(line).on_press(Message::Select(Source::Artist(creator.clone()))).into(),
+            });
+        }
+        if let Some(first) = rows.first() {
+            let play = row![icon::tinted(glyphs::PLAY, 12.0, |p| p.primary.base.text), text("Play").size(13),]
+                .spacing(6)
+                .align_y(Alignment::Center);
+            words = words.push(
+                container(button(play).style(style::action).padding([5, 14]).on_press(Message::PlayItem(first.id)))
+                    .padding(Padding { top: 14.0, ..Padding::ZERO }),
+            );
+        }
+        let side = if self.pane_width() < 560.0 { 140.0 } else { 220.0 };
+        let art_path = album.map(|a| a.art.as_str()).unwrap_or_default();
+        let header = container(
+            row![self.picture(name, art_path, side, 8.0), words]
+                .spacing(28)
+                .align_y(Alignment::Center),
+        )
+        .padding(Padding {
+            top: PAGE_PADDING,
+            bottom: 18.0,
+            ..Padding::ZERO
+        });
+
+        let (playing_id, sounding) = self.highlighted().map_or((None, false), |(id, sounding)| (Some(id), sounding));
+        let focused = self.has_keys(Pane::Tracks);
+        let cursor = focused.then_some(self.at(Pane::Tracks));
+        let track = |at: usize| -> Element<'_, Message> {
+            let (item, d) = (&rows[at], &details[at]);
+            let on_cursor = cursor == Some(at);
+            let here = playing_id == Some(item.id);
+            let mut line = Row::new().spacing(0).align_y(Alignment::Center).push(match here {
+                true => Element::from(
+                    button(playing(!sounding, on_cursor))
+                        .style(button::text)
+                        .padding([0, 8])
+                        .on_press(Message::PlayPause),
+                ),
+                false => table::gutter(),
+            });
+            // A movement's number is in its title; a song's is its place.
+            if d.work.is_empty() {
+                let n = match d.track > 0 {
+                    true => d.track.to_string(),
+                    false => String::new(),
+                };
+                line = line.push(table::cell(n, TRACK, on_cursor, false, true));
+            }
+            // Under the title, who played it — or, on a record of several
+            // people's songs, whose this one is.
+            let under = match d.performer.is_empty() {
+                false => credit(&d.performer, &d.licence),
+                true if item.creator != creator => item.creator.clone(),
+                true => String::new(),
+            };
+            let mut body = column![Line::new(item.title.clone(), 13.0, Cut::Middle, move |t| style::on_row(
+                t, on_cursor, here, false
+            ))]
+            .spacing(1);
+            if !under.is_empty() {
+                body = body.push(Line::new(under, 11.0, Cut::End, move |t| {
+                    style::on_row(t, on_cursor, false, true).scale_alpha(0.8)
+                }));
+            }
+            let line = line
+                .push(container(body).width(Length::Fill).padding([3, 0]))
+                .push(table::cell(clock(item.duration_ms as f64 / 1000.0), TIME, on_cursor, false, true))
+                .push(
+                    button(icon::more(on_cursor))
+                        .style(button::text)
+                        .padding([0, 6])
+                        .on_press(Message::RowMenu(item.id, crate::Anchor::Dots)),
+                );
+            mouse_area(table::row(line, on_cursor, focused, at % 2 == 1))
+                .on_enter(Message::HoverAt(at))
+                .on_press(Message::PlayItem(item.id))
+                .on_right_press(Message::RowMenu(item.id, crate::Anchor::Pointer))
+                .into()
+        };
+        // The tracks in runs of one work, each run under its heading.
+        let mut list = column![].spacing(0).width(Length::Fill);
+        let mut at = 0;
+        while at < rows.len() {
+            let of = |d: &crate::rows::TrackDetail| (d.composer.clone(), d.work.clone());
+            let run = of(&details[at]);
+            let end = (at..rows.len()).find(|&j| of(&details[j]) != run).unwrap_or(rows.len());
+            if !run.1.is_empty() {
+                let ms: i64 = rows[at..end].iter().map(|i| i.duration_ms).sum();
+                list = list.push(work_heading(&run.0, &run.1, ms, at == 0));
+            }
+            for j in at..end {
+                list = list.push(track(j));
+            }
+            at = end;
+        }
+        if rows.is_empty() {
+            list = list.push(text("Nothing on it yet.").size(13).style(style::faint(0.5)));
+        }
+
+        // The small print: when, how much, and whose label.
+        let n = rows.len() as i64;
+        let mut foot = column![].spacing(3);
+        if year > 0 {
+            foot = foot.push(text(year.to_string()).size(12).style(style::faint(0.5)));
+        }
+        let mut length = format!("{n} {}", plural(n, "track"));
+        if ms > 0 {
+            length.push_str(&format!(", {}", spell(ms)));
+        }
+        foot = foot.push(text(length).size(12).style(style::faint(0.5)));
+        if let Some(label) = album.map(|a| a.label.clone()).filter(|l| !l.is_empty()) {
+            foot = foot.push(
+                column![
+                    text("RECORD LABEL").size(10).style(style::faint(0.5)),
+                    text(label).size(13).style(style::accent)
+                ]
+                .spacing(2)
+                .padding(Padding { top: 14.0, ..Padding::ZERO }),
+            );
+        }
+        let foot = container(foot).padding(Padding {
+            top: 24.0,
+            left: SECTION_INDENT,
+            ..Padding::ZERO
+        });
+
+        let page = scrollable(container(column![header, list, foot].width(Length::Fill)).padding(Padding {
+            right: SCROLLBAR + 6.0,
+            bottom: PAGE_PADDING,
+            ..Padding::ZERO
+        }))
+        .id(TRACKS)
+        .style(style::bars)
+        .height(Length::Fill);
+        column![page, self.view_status()].spacing(10).width(Length::Fill).into()
     }
 
     /// A composer's page: the banner (or the header, for somebody with no
@@ -1243,6 +1423,54 @@ fn initials(name: &str) -> String {
 }
 
 /// A page about something: its header, and what is on it.
+/// A work's heading on an album: its composer in small capitals over its
+/// title, and how long the run of it under the heading lasts, in the column
+/// the tracks' lengths are in.
+fn work_heading<'a>(composer: &str, work: &str, ms: i64, first: bool) -> Element<'a, Message> {
+    let words = column![
+        text(composer.to_uppercase()).size(10).style(style::faint(0.5)),
+        text(work.to_string()).size(15).font(hero::SERIF).wrapping(text::Wrapping::Word),
+    ]
+    .spacing(2)
+    .width(Length::Fill);
+    let line = row![
+        container(text("")).width(TRANSPORT),
+        words,
+        table::cell(clock(ms as f64 / 1000.0), TIME, false, false, true),
+        // Where a track's menu button is, so the lengths line up.
+        container(text("")).width(Length::Fixed(icon::SIZE + 12.0)),
+    ]
+    .align_y(Alignment::End);
+    container(line)
+        .width(Length::Fill)
+        .padding(Padding {
+            top: if first { 4.0 } else { 26.0 },
+            right: table::ROW_PADDING[1],
+            bottom: 6.0,
+            left: table::ROW_PADDING[1],
+        })
+        .into()
+}
+
+/// The value most of `values` are, empties aside; the first of the most
+/// common, so a tie goes to whoever came first.
+fn most<'a>(values: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let mut counts: Vec<(&str, usize)> = vec![];
+    for v in values.filter(|v| !v.is_empty()) {
+        match counts.iter_mut().find(|(c, _)| *c == v) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((v, 1)),
+        }
+    }
+    counts
+        .iter()
+        .fold(None, |best: Option<(&str, usize)>, &(v, n)| match best {
+            Some((_, b)) if b >= n => best,
+            _ => Some((v, n)),
+        })
+        .map(|(v, _)| v)
+}
+
 fn with_header<'a>(header: Element<'a, Message>, body: Element<'a, Message>) -> Element<'a, Message> {
     column![header, body].spacing(0).width(Length::Fill).into()
 }
@@ -1281,4 +1509,20 @@ fn view_help() -> Element<'static, Message> {
         .padding(12)
         .height(Length::Fill)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whoever is credited on most of a record is who played it, a tie
+    /// going to whoever came first and nobody to nobody. Falsified by
+    /// counting the empties: the record with one credit had none.
+    #[test]
+    fn who_played_a_record_is_whoever_played_most_of_it() {
+        assert_eq!(most(["", "", "Pinnock"].into_iter()), Some("Pinnock"));
+        assert_eq!(most(["Hogwood", "Pinnock", "Pinnock"].into_iter()), Some("Pinnock"));
+        assert_eq!(most(["Hogwood", "Pinnock"].into_iter()), Some("Hogwood"));
+        assert_eq!(most(["", ""].into_iter()), None);
+    }
 }

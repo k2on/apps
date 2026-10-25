@@ -50,7 +50,9 @@ pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refus
         .map(|(a, creators)| AlbumsEntry {
             art: a.art.clone(),
             creator: creators[0].clone(),
+            label: a.label.clone(),
             name: a.name.clone(),
+            released: a.released,
             tracks: creators.len() as i64,
         }))
 }
@@ -83,12 +85,14 @@ pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetails
         TrackDetailsEntry {
             album: song.album_name.clone().unwrap_or_default(),
             bpm: song.bpm,
-            catalogue: work.map(|w| w.catalogue).unwrap_or_default(),
+            catalogue: work.as_ref().map(|w| w.catalogue.clone()).unwrap_or_default(),
+            composer: work.as_ref().map(|w| w.composer.clone()).unwrap_or_default(),
             licence: recording.map(|r| r.licence).unwrap_or_default(),
             media_id: song.media_id,
             part: movement.map(|m| m.part).unwrap_or_default(),
             performer: performers(&credits_of(db, &song.recording_id), &song.recording_id),
             track: song.track,
+            work: work.map(|w| w.title).unwrap_or_default(),
         }
     }))
 }

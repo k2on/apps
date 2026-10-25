@@ -189,7 +189,11 @@ pub struct LibraryEntry {
 pub struct AlbumsEntry {
     pub art: String,
     pub creator: String,
+    /// Who put it out, empty where nobody said.
+    pub label: String,
     pub name: String,
+    /// The year it came out; 0 is "nobody said".
+    pub released: i64,
     pub tracks: i64,
 }
 
@@ -208,11 +212,15 @@ pub struct TrackDetailsEntry {
     pub album: String,
     pub bpm: i64,
     pub catalogue: String,
+    /// Whoever the work it is a movement of is by; empty for none.
+    pub composer: String,
     pub licence: String,
     pub media_id: Id<Media>,
     pub part: String,
     pub performer: String,
     pub track: i64,
+    /// The title of the work it is a movement of; empty for none.
+    pub work: String,
 }
 
 /// Somebody some work is by, as the composers index lists them.

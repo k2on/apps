@@ -541,6 +541,11 @@ fn a_pop_track_has_a_recording_and_no_work() {
     let details: Vec<TrackDetailsEntry> = c.list("track_details", &());
     assert_eq!(details[0].performer, "The Quiet Hours", "the artist is a credit on a recording");
     assert_eq!(details[0].catalogue, "", "no work, so no catalogue number");
+    assert_eq!(
+        (details[0].work.as_str(), details[0].composer.as_str()),
+        ("", ""),
+        "no work, so nobody composed it"
+    );
     assert_eq!(details[0].album, "Northerly");
     assert_eq!(details[0].track, 7);
     let rec = c.rows::<Recording>("recording");
@@ -623,6 +628,14 @@ fn an_entry_without_a_work_title_still_names_one() {
     assert_eq!(
         each(&c.list::<TrackDetailsEntry>("track_details", &()), |d| d.catalogue.clone()),
         ["BWV 988"]
+    );
+    assert_eq!(
+        each(&c.list::<TrackDetailsEntry>("track_details", &()), |d| (
+            d.work.clone(),
+            d.composer.clone()
+        )),
+        [("Goldberg Variations".to_string(), "Johann Sebastian Bach".to_string())],
+        "a track names the work it is a movement of, and who wrote it"
     );
     assert_eq!(
         c.rows::<Movement>("movement")[0].no,

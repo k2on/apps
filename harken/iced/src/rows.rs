@@ -90,6 +90,9 @@ pub struct Album {
     pub tracks: i64,
     /// `media.file`'s spelling; empty is the derived square.
     pub art: String,
+    pub label: String,
+    /// The year it came out; 0 is "nobody said".
+    pub released: i64,
 }
 
 impl From<AlbumsEntry> for Album {
@@ -99,6 +102,8 @@ impl From<AlbumsEntry> for Album {
             creator: e.creator,
             tracks: e.tracks,
             art: e.art,
+            label: e.label,
+            released: e.released,
         }
     }
 }
@@ -253,6 +258,9 @@ pub struct TrackDetail {
     pub performer: String,
     pub licence: String,
     pub bpm: i64,
+    /// The work it is a movement of, and who wrote it; empty for none.
+    pub work: String,
+    pub composer: String,
 }
 
 impl From<TrackDetailsEntry> for TrackDetail {
@@ -266,6 +274,8 @@ impl From<TrackDetailsEntry> for TrackDetail {
             performer: e.performer,
             licence: e.licence,
             bpm: e.bpm,
+            work: e.work,
+            composer: e.composer,
         }
     }
 }
@@ -289,7 +299,9 @@ mod tests {
         let good = AlbumsEntry {
             art: String::new(),
             creator: "Handel".into(),
+            label: String::new(),
             name: "Water Music".into(),
+            released: 0,
             tracks: 3,
         };
         assert_eq!(Album::from_bytes(&good.to_bytes()).name, "Water Music");
