@@ -20,3 +20,9 @@ pub fn reveal<M: Send + 'static>(id: &'static str, grid: Grid, at: usize) -> Tas
         },
     )
 }
+
+/// Scroll the scrollable `id` to `y` of the way down, 0 to 1: where a
+/// [`crate::vim::Page`] says its cursor sits.
+pub fn reveal_to<M: Send + 'static>(id: &'static str, y: f32) -> Task<M> {
+    snap_to(id, RelativeOffset { x: Some(0.0), y: Some(y) })
+}

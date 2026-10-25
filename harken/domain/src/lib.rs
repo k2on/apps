@@ -48,7 +48,7 @@ pub fn domain() -> Domain {
         library::add_song, library::describe_work, library::describe_recording, library::describe_person,
         library::credit_recording, library::remove_media, library::look,
         browse::library, browse::search, browse::albums, browse::artists, browse::track_details, browse::album,
-        browse::artist, browse::composers, browse::works, browse::work, browse::recordings, browse::credits,
+        browse::artist, browse::composers, browse::works, browse::work, browse::recordings, browse::credits, browse::album_credits,
         browse::recording,
         playlists::create_playlist, playlists::welcome, playlists::add_to_playlist, playlists::add_all_to_playlist,
         playlists::remove_from_playlist, playlists::playlists, playlists::playlists_of, playlists::playlist,

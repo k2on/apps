@@ -37,6 +37,7 @@ pub mod picker;
 pub mod route;
 pub mod scroll;
 pub mod style;
+pub mod swipe;
 pub mod table;
 pub mod theme;
 pub mod url;

@@ -159,6 +159,12 @@ pub struct Credits {
     pub recording_id: String,
 }
 
+/// One album, by name, for who is on it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct AlbumCredits {
+    pub name: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct RecordingInput {
     pub playlist_id: Id<Playlist>,
@@ -224,6 +230,8 @@ pub struct TrackDetailsEntry {
     pub track: i64,
     /// The title of the work it is a movement of; empty for none.
     pub work: String,
+    /// That work's key, the page it opens; empty for none.
+    pub work_id: String,
 }
 
 /// Somebody some work is by, as the composers index lists them.

@@ -66,6 +66,15 @@ data class Album(val name: String, val label: String, val released: Long, val ar
     }
 }
 
+/** The record `AlbumCredits`. */
+data class AlbumCredits(val name: String) {
+    fun json(): String = "{" + "\"name\":" + J.q(name) + "}"
+
+    companion object {
+        fun of(j: Any?): AlbumCredits = (j as JSONObject).let { o -> AlbumCredits(J.text(o.opt("name"))) }
+    }
+}
+
 /** The record `AlbumInput`. */
 data class AlbumInput(val playlistId: Id, val name: String) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"name\":" + J.q(name) + "}"
@@ -815,11 +824,11 @@ data class Track(val album: String, val creator: String, val durationMs: Long, v
 }
 
 /** The record `TrackDetailsEntry`. */
-data class TrackDetailsEntry(val album: String, val bpm: Long, val catalogue: String, val composer: String, val licence: String, val mediaId: Id, val part: String, val performer: String, val track: Long, val work: String) {
-    fun json(): String = "{" + "\"album\":" + J.q(album) + "," + "\"bpm\":" + bpm.toString() + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"composer\":" + J.q(composer) + "," + "\"licence\":" + J.q(licence) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"part\":" + J.q(part) + "," + "\"performer\":" + J.q(performer) + "," + "\"track\":" + track.toString() + "," + "\"work\":" + J.q(work) + "}"
+data class TrackDetailsEntry(val album: String, val bpm: Long, val catalogue: String, val composer: String, val licence: String, val mediaId: Id, val part: String, val performer: String, val track: Long, val work: String, val workId: String) {
+    fun json(): String = "{" + "\"album\":" + J.q(album) + "," + "\"bpm\":" + bpm.toString() + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"composer\":" + J.q(composer) + "," + "\"licence\":" + J.q(licence) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"part\":" + J.q(part) + "," + "\"performer\":" + J.q(performer) + "," + "\"track\":" + track.toString() + "," + "\"work\":" + J.q(work) + "," + "\"work_id\":" + J.q(workId) + "}"
 
     companion object {
-        fun of(j: Any?): TrackDetailsEntry = (j as JSONObject).let { o -> TrackDetailsEntry(J.text(o.opt("album")), J.int(o.opt("bpm")), J.text(o.opt("catalogue")), J.text(o.opt("composer")), J.text(o.opt("licence")), Id(J.text(o.opt("media_id"))), J.text(o.opt("part")), J.text(o.opt("performer")), J.int(o.opt("track")), J.text(o.opt("work"))) }
+        fun of(j: Any?): TrackDetailsEntry = (j as JSONObject).let { o -> TrackDetailsEntry(J.text(o.opt("album")), J.int(o.opt("bpm")), J.text(o.opt("catalogue")), J.text(o.opt("composer")), J.text(o.opt("licence")), Id(J.text(o.opt("media_id"))), J.text(o.opt("part")), J.text(o.opt("performer")), J.int(o.opt("track")), J.text(o.opt("work")), J.text(o.opt("work_id"))) }
     }
 }
 
@@ -884,6 +893,9 @@ class Harken(val peer: Peer) {
 
     /** `library.album`, kept, its rows UniFFI's. */
     fun album(input: AlbumInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.album", input.json()))
+
+    /** `library.album_credits`, kept. */
+    fun albumCredits(input: AlbumCredits): View<CreditsEntry> = View(peer.view("library.album_credits", input.json())) { j -> CreditsEntry.of(j) }
 
     /** `library.albums`, kept. */
     fun albums(): View<AlbumsEntry> = View(peer.view("library.albums", "null")) { j -> AlbumsEntry.of(j) }

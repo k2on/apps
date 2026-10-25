@@ -916,3 +916,32 @@ fn the_welcome_is_the_servers_and_makes_one_favorites() {
     let mine: Vec<Playlist> = c.query("alice", "playlists", &()).unwrap();
     assert_eq!((mine[0].id, mine[0].user_id.as_str()), (playlists::favorites_of("alice"), "alice"));
 }
+
+/// A recording with no picture of its own is drawn with the cover of the
+/// album it was recorded on. Falsified by answering `recording.art` alone:
+/// the take's art was empty.
+#[test]
+fn a_recording_wears_its_albums_cover() {
+    let mut c = Lib::new();
+    c.add(AddSong {
+        file: "music/a.mp3".into(),
+        track: 1,
+        catalogue: "BWV 988".into(),
+        performer: "Kimiko Ishizaka".into(),
+        album_art: "covers/goldberg.jpg".into(),
+        ..song("Aria", "Johann Sebastian Bach", "Goldberg Variations")
+    });
+    let works: Vec<WorkSummary> = c.list(
+        "works",
+        &Works {
+            composer: "Johann Sebastian Bach".into(),
+        },
+    );
+    let takes: Vec<RecordingsEntry> = c.list(
+        "recordings",
+        &Recordings {
+            work_id: works[0].id.clone(),
+        },
+    );
+    assert_eq!(each(&takes, |r| r.art.clone()), ["covers/goldberg.jpg"]);
+}
