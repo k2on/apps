@@ -109,6 +109,17 @@ pub enum Anchor {
     Dots,
 }
 
+/// How many works a composer's page lists before its "See All".
+pub const KNOWN_WORKS: usize = 6;
+
+/// Works best known first: the most recorded, then the most tracks, the
+/// catalogue's order between equals.
+pub fn known(works: &[rows::Work]) -> Vec<&rows::Work> {
+    let mut ranked: Vec<&rows::Work> = works.iter().collect();
+    ranked.sort_by_key(|w| (std::cmp::Reverse(w.recordings), std::cmp::Reverse(w.tracks)));
+    ranked
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Go offline on purpose, or come back.
@@ -117,6 +128,13 @@ pub enum Message {
     Select(Source),
     /// Start this one, and make what is on screen the queue it plays through.
     PlayItem(Id),
+    /// Start one performance (its key) from its first movement, the queue
+    /// its movements.
+    PlayRecording(String),
+    /// Start a work (its key): its most complete performance.
+    PlayWork(String),
+    /// A composer's page: every work, or only the best known.
+    AllWorks(bool),
     PlayPause,
     Skip(i32),
     /// Dragging the bar's progress, in seconds: where this device's
@@ -504,6 +522,9 @@ pub struct App {
     pub help: bool,
     /// `D` — every number the session holds.
     pub debug: bool,
+    /// A composer's page lists every work, not only the best known: its
+    /// "See All" was pressed. Gone with the page.
+    pub all_works: bool,
     /// A row's menu, and the playlist picker that is its submenu — or the one
     /// `a` opens alone. arkui holds the rules; the playlists are the values.
     pub ctx: Context<Message, Id>,
@@ -605,6 +626,7 @@ impl App {
             search: String::new(),
             help: false,
             debug: false,
+            all_works: false,
             ctx: Context::new(),
             menu_about: None,
             picker_about: None,
@@ -1003,7 +1025,7 @@ impl App {
                 Source::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
                 Source::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
                 Source::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
-                Source::Works(_) => p.works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
+                Source::Artist(_) if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
                 Source::Work(..) => p.recordings().iter().map(|r| r.performers.clone()).collect(),
                 _ => p.rows().iter().map(|i| format!("{} {}", i.title, i.creator)).collect(),
             },
@@ -1704,6 +1726,17 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// The works a composer's page lists, in the order it lists them: every
+    /// one by catalogue when there are few or "See All" was pressed, and
+    /// otherwise the best known ([`known`]) up to [`KNOWN_WORKS`].
+    pub fn listed_works(&self) -> Vec<&rows::Work> {
+        let works = self.peer.works();
+        match self.all_works || works.len() <= KNOWN_WORKS {
+            true => works.iter().collect(),
+            false => known(works).into_iter().take(KNOWN_WORKS).collect(),
+        }
+    }
+
     /// What the cursor opens on this page, if the page has things to open:
     /// `None` is a page where `<Enter>` plays.
     pub fn card_under_cursor(&self, at: usize) -> Option<Source> {
@@ -1711,8 +1744,8 @@ impl App {
         match &p.source {
             Source::Albums => p.albums().get(at).map(|a| Source::Album(a.name.clone())),
             Source::Artists => p.artists().get(at).map(|a| Source::Artist(a.name.clone())),
-            Source::Composers => p.composers().get(at).map(|c| Source::Works(c.name.clone())),
-            Source::Works(_) => p.works().get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
+            Source::Composers => p.composers().get(at).map(|c| Source::Artist(c.name.clone())),
+            Source::Artist(_) if !p.works().is_empty() => self.listed_works().get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
             Source::Work(..) => p.recordings().get(at).map(|r| Source::Recording(r.id.clone(), r.performers.clone())),
             _ => None,
         }
@@ -1836,6 +1869,32 @@ impl App {
         self.peer.source.place().fragment()
     }
 
+    /// Start `rows` at `at` (the first when it is not among them), the queue
+    /// `rows` themselves, taken now: skipping follows the list you pressed
+    /// play in. The rows are copied rather than referred to — a device handed
+    /// the session may not have that album yet.
+    fn play_rows(&mut self, rows: &[rows::Item], at: Option<Id>, from: String) -> Task<Message> {
+        if rows.is_empty() {
+            return Task::none();
+        }
+        self.queue = rows
+            .iter()
+            .map(|i| listening::Track {
+                id: key(i.id),
+                title: i.title.clone(),
+                creator: i.creator.clone(),
+                album: self.peer.detail_of(i.id).album,
+                duration_ms: i.duration_ms,
+                // The path as the log carries it: each device joins it to
+                // *its* server.
+                file: i.file.clone(),
+            })
+            .collect();
+        let at = self.queue.iter().position(|t| Some(t.id.0) == at).unwrap_or(0);
+        self.queued_from = from;
+        self.press(Press::Start(at))
+    }
+
     /// Do it here: this device is its own session, unlinked.
     fn obey(&mut self, press: Press) {
         match press {
@@ -1876,7 +1935,7 @@ impl App {
         // had to say, and its submenu goes with it.
         if matches!(
             message,
-            Message::PlayItem(_) | Message::Select(_) | Message::ToggleLink | Message::SignOut
+            Message::PlayItem(_) | Message::PlayRecording(_) | Message::PlayWork(_) | Message::Select(_) | Message::ToggleLink | Message::SignOut
         ) {
             self.ctx.close_menu();
         }
@@ -2098,29 +2157,27 @@ impl App {
                 }
             }
             Message::Skip(delta) => return self.press(Press::Skip(delta)),
-            // The queue is what is on screen, taken now: skipping follows the
-            // list you pressed play in. The rows are copied rather than
-            // referred to — a device handed the session may not have that
-            // album yet.
+            // The queue is what is on screen.
             Message::PlayItem(id) => {
-                self.queue = self
-                    .peer
-                    .rows()
-                    .iter()
-                    .map(|i| listening::Track {
-                        id: key(i.id),
-                        title: i.title.clone(),
-                        creator: i.creator.clone(),
-                        album: self.peer.detail_of(i.id).album,
-                        duration_ms: i.duration_ms,
-                        // The path as the log carries it: each device joins it
-                        // to *its* server.
-                        file: i.file.clone(),
-                    })
-                    .collect();
-                let at = self.queue.iter().position(|t| t.id.0 == id).unwrap_or(0);
-                self.queued_from = self.from();
-                return self.press(Press::Start(at));
+                let rows = self.peer.rows().to_vec();
+                return self.play_rows(&rows, Some(id), self.from());
+            }
+            // The performance's movements, read when it is pressed: the page
+            // it is pressed on lists performances, not tracks.
+            Message::PlayRecording(take) => {
+                let rows = self.peer.recording_rows(&take);
+                let from = arkui::route::Route::fragment(&Place::Recording(take));
+                return self.play_rows(&rows, None, from);
+            }
+            Message::PlayWork(work) => {
+                let Some(take) = self.peer.recordings_of(&work).into_iter().next() else {
+                    return Task::none();
+                };
+                return self.update(Message::PlayRecording(take.id));
+            }
+            Message::AllWorks(all) => {
+                self.all_works = all;
+                self.cursors[Pane::Tracks as usize] = 0;
             }
             Message::OpenQueue if self.queue_panel.is_some() => self.queue_panel = None,
             Message::OpenQueue => {
@@ -2190,6 +2247,7 @@ impl App {
                 let at = self.peer.choices.iter().position(|c| c.source == source);
                 self.peer.source = source;
                 self.peer.search = None;
+                self.all_works = false;
                 self.peer.open_page();
                 if let Some(at) = at {
                     self.cursors[Pane::Sidebar as usize] = at;

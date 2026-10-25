@@ -28,8 +28,12 @@ pub enum Mark {
     By(usize),
     /// A header's Play button.
     Play,
-    /// A work's most complete recording, set apart.
+    /// What a page sets apart — a work's most complete recording, a
+    /// composer's most recorded work — and its Play.
     Featured,
+    FeaturedPlay,
+    /// A composer's "See All" under their best known works.
+    SeeAll,
     /// The composer, and the work, of the heading over the run that starts
     /// at row `n`.
     Composer(usize),
@@ -110,19 +114,16 @@ pub fn runs(details: &[TrackDetail], headings: bool) -> Vec<(usize, usize)> {
 }
 
 impl App {
-    /// The page a person's name opens: their works, if they wrote any;
-    /// otherwise what they made or played. `None` for nobody this library
-    /// has.
+    /// The page a person's name opens, whatever they did: one page a
+    /// person has. `None` for nobody this library has.
     pub fn person(&self, name: &str) -> Option<Source> {
         let p = &self.peer;
         if name.is_empty() {
             return None;
         }
-        if p.composers().iter().any(|c| c.name == name) {
-            return Some(Source::Works(name.to_string()));
-        }
         let played = || p.details.values().any(|d| names(&d.performer).contains(&name));
-        (p.artists().iter().any(|a| a.name == name) || played()).then(|| Source::Artist(name.to_string()))
+        let known = p.composers().iter().any(|c| c.name == name) || p.artists().iter().any(|a| a.name == name);
+        (known || played()).then(|| Source::Artist(name.to_string()))
     }
 
     /// Who is under a track, as the page draws them: whoever played it, or
@@ -288,13 +289,27 @@ impl App {
                 let people = self.people(&self.composers_here());
                 self.faces(&mut l, &people);
             }
+            // One person's page: a composer's works, or anybody else's songs.
             Source::Artist(name) if detailed => {
-                let banner = p.artists().iter().any(|a| a.name == *name && !a.banner.is_empty());
-                if !banner {
+                if self.banner_of(name).is_none() {
                     self.play(&mut l);
                 }
-                self.tracks(&mut l, name, true);
+                let works = !p.works().is_empty();
+                if let Some(best) = self.best_known() {
+                    let open = Message::Select(Source::Work(best.id.clone(), best.title.clone()));
+                    self.featured(&mut l, open, Message::PlayWork(best.id.clone()));
+                }
+                if works {
+                    l.page.sections.push(Section::run(0, grid.cells, grid.columns));
+                    if self.listed_works().len() < p.works().len() {
+                        let id = l.mark(Mark::SeeAll, Message::AllWorks(true));
+                        l.block(vec![id], 1);
+                    }
+                }
                 self.shelf(&mut l, p.albums_by(name).into_iter(), self.columns());
+                if !works {
+                    self.tracks(&mut l, name, true);
+                }
             }
             Source::Recording(_, who) if detailed => {
                 let composer = p.works().first().map(|w| w.composer.clone()).unwrap_or_default();
@@ -311,20 +326,12 @@ impl App {
                 self.play(&mut l);
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
             }
-            Source::Works(name) => {
-                l.page.sections.push(Section::run(0, grid.cells, grid.columns));
-                self.shelf(&mut l, p.albums_by(name).into_iter(), self.columns());
-                return l;
-            }
             Source::Work(..) => {
                 let composer = p.works().first().map(|w| w.composer.clone()).unwrap_or_default();
                 l.line(Mark::Over, self.person(&composer));
-                if let Some(first) = p.recordings().first().filter(|_| p.recordings().len() > 1) {
-                    let id = l.mark(
-                        Mark::Featured,
-                        Message::Select(Source::Recording(first.id.clone(), first.performers.clone())),
-                    );
-                    l.block(vec![id], 1);
+                if let Some(first) = p.recordings().first() {
+                    let open = Message::Select(Source::Recording(first.id.clone(), first.performers.clone()));
+                    self.featured(&mut l, open, Message::PlayRecording(first.id.clone()));
                 }
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
                 return l;
@@ -337,12 +344,36 @@ impl App {
     }
 
     /// Who an album's header names in the accent: whoever is credited on
-    /// the most of it, or whoever made it.
+    /// the most of it (`albums`), or whoever made it.
     pub fn album_by(&self, name: &str) -> String {
+        let album = self.peer.albums().iter().find(|a| a.name == name);
+        match album.filter(|a| !a.performer.is_empty()) {
+            Some(a) => a.performer.clone(),
+            None => album.map(|a| a.creator.clone()).unwrap_or_default(),
+        }
+    }
+
+    /// What a page sets apart, side by side: opening it, and its Play.
+    fn featured(&self, l: &mut Layout, open: Message, play: Message) {
+        let ids = vec![l.mark(Mark::Featured, open), l.mark(Mark::FeaturedPlay, play)];
+        l.block(ids, 2);
+    }
+
+    /// A composer's most recorded work, when one is: a tie is no answer to
+    /// "which is best known".
+    pub fn best_known(&self) -> Option<&crate::rows::Work> {
+        match crate::known(self.peer.works())[..] {
+            [best, next, ..] if best.recordings > next.recordings => Some(best),
+            _ => None,
+        }
+    }
+
+    /// A person's wide picture, whichever list has it.
+    pub fn banner_of(&self, name: &str) -> Option<&str> {
         let p = &self.peer;
-        let creator = p.albums().iter().find(|a| a.name == name).map(|a| a.creator.clone()).unwrap_or_default();
-        let details: Vec<_> = p.rows().iter().map(|i| p.detail_of(i.id)).collect();
-        crate::view::most(details.iter().map(|d| d.performer.as_str())).map_or(creator, str::to_string)
+        let artist = p.artists().iter().find(|a| a.name == name).map(|a| a.banner.as_str());
+        let composer = p.composers().iter().find(|c| c.name == name).map(|c| c.banner.as_str());
+        artist.filter(|b| !b.is_empty()).or(composer.filter(|b| !b.is_empty()))
     }
 
     /// The page's main list as a grid: what the cursor walked before there
@@ -353,12 +384,13 @@ impl App {
             crate::places::Source::Albums => crate::SHELF.grid(p.albums().len(), self.pane_width()),
             Source::Artists => crate::SHELF.grid(p.artists().len(), self.pane_width()),
             Source::Composers => crate::SHELF.grid(p.composers().len(), self.pane_width()),
-            Source::Works(_) => vim::Grid {
-                cells: p.works().len(),
+            Source::Artist(_) if !p.works().is_empty() => vim::Grid {
+                cells: self.listed_works().len(),
                 columns: self.listing_columns(),
             },
+            // A work of one performance has only that one, set apart.
             Source::Work(..) => vim::Grid {
-                cells: p.recordings().len(),
+                cells: if p.recordings().len() > 1 { p.recordings().len() } else { 0 },
                 columns: self.listing_columns(),
             },
             _ => vim::Grid::column(p.rows().len()),

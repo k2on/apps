@@ -179,14 +179,29 @@ exactly what the app draws):
 - **Search** — one field, answered as you type: songs from `search`,
   albums and artists from the held lists whose names hold the needle;
   the last few searches when nothing is typed, on the phone only.
-- **Library** — Playlists, Albums, Artists, Songs; a new playlist from
+- **Library** — Playlists, Albums, Artists, Composers (where there are
+  works), Songs; a new playlist from
   the `+`, checked as it is typed by `create_playlist`'s own validator,
   whose sentence is shown under the field.
-- **An album** in the order the work goes, in sections where it has
-  parts and with each track's number on the release; **an artist** with
-  their albums and then their songs; **a playlist** in the order it was
-  made. Each opens with its cover, what it is, the numbers true of the
-  whole of it, and Play and Shuffle.
+- **The catalogue's pages**, laid out as the desktop's are
+  (`harken/iced/src/view.rs`), its serif — Source Serif 4 Display,
+  `res/font`, its licence `app/src/main/LICENSE.source-serif.md` — for
+  names, titles and headings. **An album**: its cover beside its title and
+  who played the most of it (`albums`' `performer`), its tracks under the
+  works they are movements of (composer over title, the run's length), its
+  parts, and at its foot the year, its length and its label. **A person** —
+  one page, whether they made songs or wrote works: their banner, or their
+  portrait; "Composer" or "Artist" and their years; their most recorded
+  work set apart with a Play when it is strictly the most recorded; their
+  best known six works and "See All"; their records; and their songs only
+  where they wrote no works. **A work**: its composer, the way back to
+  them, its title, catalogue, form and period; its fullest performance set
+  apart with a Play ("Most Complete", or "The Recording" when it is the
+  only one), and every performance with its cover, who played it, its
+  year, tracks and length. **A performance**: its movements, its small
+  print, the records it is on and everybody on it. A Play on a work or a
+  performance reads its movements (`recording`) when it is pressed.
+  **A playlist** in the order it was made.
 - **A song's menu** — play next and add to queue (the session's
   `enqueue`, the track playing playing on; and a car's or a watch's
   added, removed and moved items are `enqueue`, `remove` and `move`),
@@ -280,7 +295,7 @@ the Car App Library.
 Paparazzi (1.3.5) renders every screen and state on the JVM through
 layoutlib — the onboarding's three steps and their errors, Home (full,
 offline, empty, loading), Search (recent, nothing yet, typing, results,
-none), each Library tab, an album, an artist, a playlist (and an empty
+none), each Library tab, an album, an artist (a composer, one under a banner, one of songs), a work, a performance, a playlist (and an empty
 and a missing one), the mini player, the full player, the player held at
 each quarter of the way up, the queue, a song's
 menu, adding to a playlist, naming one (and a name refused), Settings and

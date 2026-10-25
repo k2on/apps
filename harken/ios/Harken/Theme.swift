@@ -1,7 +1,8 @@
 // harken's look on the phone, and how everything moves: the desktop's
 // palette (`harken/iced/src/palette.rs`) — the system's neutral greys, which
 // on iOS are the system's own colours, and the gold, one for a dark page
-// and one for a white one — the derived square a cover is until it arrives,
+// and one for a white one — the catalogue's serif, the derived square a
+// cover is until it arrives,
 // and the springs, which are Android's `Springs.kt` said in SwiftUI's terms
 // (PARITY.md, "Motion"). Liquid Glass brings its own materials: what is here
 // is only what the glass is tinted with.
@@ -17,6 +18,16 @@ extension Color {
     /// The gold: `controlAccentColor`'s slot. A dark page takes a bright leaf
     /// gold; a white one cannot, because text drawn on it has to be legible.
     static let gold = Color(light: 0x9A741A, dark: 0xE9BB45)
+}
+
+extension Font {
+    /// The catalogue's voice, the desktop's (`arkui::hero::SERIF`): Source
+    /// Serif 4 Display, semibold, for a page's title and its sections' —
+    /// everything else stays in the system's sans. Embedded (Fonts/, listed
+    /// under `UIAppFonts`), and growing with Dynamic Type as `style` does.
+    static func serif(_ size: CGFloat, relativeTo style: Font.TextStyle = .body) -> Font {
+        .custom("SourceSerif4Display-Semibold", size: size, relativeTo: style)
+    }
 }
 
 extension UIColor {
@@ -41,6 +52,8 @@ enum Space {
     static let thumb: CGFloat = 48
     /// A page's header cover.
     static let header: CGFloat = 200
+    /// A record's cover beside its title, as a catalogue's page opens.
+    static let record: CGFloat = 132
     /// Corners: a cover, a card.
     static let corner: CGFloat = 8
 }

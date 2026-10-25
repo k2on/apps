@@ -431,9 +431,18 @@ impl Peer {
         Peer::rows_of(self.client.answer(browse::works, Works { composer: composer.into() }))
     }
 
-    #[cfg(test)]
+    /// A work's performances, read once: the most complete first.
     pub fn recordings_of(&self, work: &str) -> Vec<Recording> {
         Peer::rows_of(self.client.answer(browse::recordings, Recordings { work_id: work.into() }))
+    }
+
+    /// One performance's tracks, read once, in the order the work goes.
+    pub fn recording_rows(&self, id: &str) -> Vec<Item> {
+        let input = RecordingInput {
+            playlist_id: key(self.playlist),
+            id: id.into(),
+        };
+        Peer::rows_of(self.client.answer(browse::recording, input))
     }
 
     #[cfg(test)]
@@ -501,7 +510,6 @@ impl Peer {
                 None,
             ),
             Source::Albums | Source::Artists | Source::Composers => (None, None, None),
-            Source::Works(composer) => (None, Some(("works", Works { composer: composer.clone() }.to_bytes())), None),
             // Both halves: the work itself, for the header, and its
             // performances. This page may have been reached without opening a
             // composer at all — a link somebody sent — so the row is read by
@@ -524,6 +532,8 @@ impl Peer {
                 None,
                 None,
             ),
+            // Their tracks and the works they are by: a composer's page is
+            // their works, anybody else's their songs.
             Source::Artist(name) => (
                 Some((
                     "artist",
@@ -533,7 +543,7 @@ impl Peer {
                     }
                     .to_bytes(),
                 )),
-                None,
+                Some(("works", Works { composer: name.clone() }.to_bytes())),
                 None,
             ),
             // The one list ordered by the *work* rather than the release, and
@@ -602,14 +612,14 @@ impl Peer {
                 true => Source::Album(name.clone()),
                 false => Source::Library,
             },
-            Place::Artist(name) => match self.artists().iter().any(|a| a.name == *name) {
-                true => Source::Artist(name.clone()),
-                false => Source::Library,
-            },
-            Place::Composer(name) => match self.composers().iter().any(|c| c.name == *name) {
-                true => Source::Works(name.clone()),
-                false => Source::Library,
-            },
+            // A person, whichever list they are on; an old `#composer/…` link
+            // is their page too.
+            Place::Artist(name) | Place::Composer(name) => {
+                match self.artists().iter().any(|a| a.name == *name) || self.composers().iter().any(|c| c.name == *name) {
+                    true => Source::Artist(name.clone()),
+                    false => Source::Library,
+                }
+            }
             // By *querying*, not against a list this peer holds: a link
             // arriving cold has no page yet, and the key is enough to ask with.
             Place::Work(id) => match self.work_named(id) {

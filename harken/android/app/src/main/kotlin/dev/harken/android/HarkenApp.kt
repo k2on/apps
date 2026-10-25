@@ -229,6 +229,7 @@ fun HarkenApp(
     val playlists by library.playlists.collectAsStateWithLifecycle()
     val albums by library.albums.collectAsStateWithLifecycle()
     val artists by library.artists.collectAsStateWithLifecycle()
+    val composers by library.composers.collectAsStateWithLifecycle()
     val details by library.details.collectAsStateWithLifecycle()
     val loaded by library.loaded.collectAsStateWithLifecycle()
     val complete by library.complete.collectAsStateWithLifecycle()
@@ -282,6 +283,20 @@ fun HarkenApp(
 
             override fun shuffle(queue: List<Track>, from: Page?) {
                 playback.play(queue, queue.indices.random(), albumOf, shuffled = true, from = from?.place(playlists) ?: "")
+            }
+
+            // The performance's movements, read when it is pressed: the page it is pressed on lists
+            // performances, not tracks. Played from the performance's own page.
+            override fun playRecording(id: String) {
+                scope.launch {
+                    val page = Page.ForRecording(id)
+                    val rows = library.read(page)
+                    if (rows.isNotEmpty()) play(rows, 0, page)
+                }
+            }
+
+            override fun playWork(id: String) {
+                scope.launch { library.recordingsOf(id).firstOrNull()?.let { playRecording(it.id) } }
             }
 
             override fun more(track: Track, from: Page?) {
@@ -440,7 +455,7 @@ fun HarkenApp(
                                         )
                                     }
                                     Route.Library ->
-                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete), albumOf, playing, act)
+                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers), albumOf, playing, act)
                                     Route.Album -> {
                                         val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
                                         if (page != null) {
@@ -452,17 +467,25 @@ fun HarkenApp(
                                         val page = Page.parse("artist/" + back.arguments?.getString("arg")) as? Page.ForArtist
                                         if (page != null) {
                                             val rows by held(library, page, back)
-                                            Ready(rows) { read ->
-                                                val tracks = read.orEmpty()
-                                                val theirs = tracks.mapNotNull { details[it.id]?.album?.takeIf(String::isNotEmpty) }.distinct()
+                                            // The works they wrote, if any: a composer's page is their artist page.
+                                            val works by heldBy(library, worksKey(page.name), back) { it.works(page.name) }
+                                            // "See All", the destination's: kept while it is on the stack, as its scroll is.
+                                            var all by rememberSaveable { mutableStateOf(false) }
+                                            Ready(if (works == null) null else rows) { read ->
                                                 ArtistPage(
                                                     page.name,
                                                     artists.firstOrNull { it.name == page.name },
-                                                    tracks,
-                                                    theirs.mapNotNull { n -> albums.firstOrNull { it.name == n } },
+                                                    read.orEmpty(),
+                                                    // Theirs: the records whose first track is theirs.
+                                                    albums.filter { it.creator == page.name },
                                                     albumOf,
                                                     playing,
                                                     act,
+                                                    details,
+                                                    composers.firstOrNull { it.name == page.name },
+                                                    works.orEmpty(),
+                                                    all,
+                                                    { all = it },
                                                 )
                                             }
                                         }
@@ -472,6 +495,47 @@ fun HarkenApp(
                                         if (page != null) {
                                             val rows by held(library, page, back)
                                             Ready(rows) { r -> PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, r.orEmpty(), albumOf, playing, act) }
+                                        }
+                                    }
+                                    Route.Work -> {
+                                        val page = Page.parse("work/" + back.arguments?.getString("arg")) as? Page.ForWork
+                                        if (page != null) {
+                                            val work by heldBy(library, workKey(page.id), back) { it.work(page.id) }
+                                            val takes by heldBy(library, recordingsKey(page.id), back) { it.recordings(page.id) }
+                                            Ready(if (work == null) null else takes) { r -> WorkPage(page.id, work?.firstOrNull(), r.orEmpty(), act) }
+                                        }
+                                    }
+                                    Route.Recording -> {
+                                        val page = Page.parse("recording/" + back.arguments?.getString("arg")) as? Page.ForRecording
+                                        if (page != null) {
+                                            // The work's own row and every performance of it, so the header can find this one.
+                                            val of = Catalogue.workOf(page.id) ?: ""
+                                            val rows by held(library, page, back)
+                                            val work by heldBy(library, workKey(of), back) { it.work(of) }
+                                            val takes by heldBy(library, recordingsKey(of), back) { it.recordings(of) }
+                                            val credits by heldBy(library, creditsKey(page.id), back) { it.credits(page.id) }
+                                            Ready(if (work == null || takes == null || credits == null) null else rows) { read ->
+                                                val tracks = read.orEmpty()
+                                                val w = work?.firstOrNull()
+                                                // Everybody on it, as faces, each opening their page where they have one.
+                                                val people =
+                                                    Catalogue.people(w?.composer.orEmpty(), credits.orEmpty()).map { (name, role) ->
+                                                        val c = composers.firstOrNull { it.name == name }
+                                                        val a = artists.firstOrNull { it.name == name }
+                                                        OnRecording(name, role, a?.art ?: c?.art ?: "", if (c != null || a != null) Page.ForArtist(name) else null)
+                                                    }
+                                                RecordingPage(
+                                                    page.id,
+                                                    w,
+                                                    takes?.firstOrNull { it.id == page.id },
+                                                    tracks,
+                                                    details,
+                                                    Catalogue.albumsOf(tracks, { details[it.id] }, albumsByName),
+                                                    people,
+                                                    playing,
+                                                    act,
+                                                )
+                                            }
                                         }
                                     }
                                     Route.Settings -> {
@@ -635,6 +699,8 @@ enum class Route(val pattern: String, val tab: Tab?) {
     Album("album/{arg}", null),
     Artist("artist/{arg}", null),
     Playlist("playlist/{arg}", null),
+    Work("work/{arg}", null),
+    Recording("recording/{arg}", null),
     Settings("settings", null),
     Diagnostics("diagnostics", null);
 
@@ -668,15 +734,20 @@ private fun <V : ViewModel> kept(entry: NavBackStackEntry, key: String, make: ()
  * clamps it to the top. Null until the page's view has first been read. Let go when the entry is
  * popped.
  */
-private class Holding(val library: Library, val page: Page) : ViewModel() {
-    val rows = library.hold(page)
+private class Holding<T>(val library: Library, val key: Any, hold: (Library) -> StateFlow<List<T>?>) : ViewModel() {
+    val rows = hold(library)
 
-    override fun onCleared() = library.release(page)
+    override fun onCleared() = library.release(key)
 }
 
 @Composable
-private fun held(library: Library, page: Page, entry: NavBackStackEntry): androidx.compose.runtime.State<List<Track>?> {
-    val holding = remember(entry, page) { kept(entry, "held:" + page.route) { Holding(library, page) } }
+private fun held(library: Library, page: Page, entry: NavBackStackEntry): androidx.compose.runtime.State<List<Track>?> = heldBy(library, page, entry) { it.hold(page) }
+
+/** A catalogue's list — a composer's works, a work's performances — held as a page's tracks are, by its key. */
+@Composable
+private fun <T> heldBy(library: Library, key: Any, entry: NavBackStackEntry, hold: (Library) -> StateFlow<List<T>?>): androidx.compose.runtime.State<List<T>?> {
+    val name = if (key is Page) key.route else key.toString()
+    val holding = remember(entry, key) { kept(entry, "held:$name") { Holding(library, key, hold) } }
     return holding.rows.collectAsStateWithLifecycle()
 }
 

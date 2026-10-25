@@ -84,3 +84,22 @@ fn ctrl_o_and_ctrl_i_go_back_and_forward() {
     let _ = app.update(Message::Key(Key::Character("i".into()), Modifiers::CTRL));
     assert_eq!(app.peer.source, Source::Albums);
 }
+
+/// A work's performance set apart, and its Play, are cells: `<Enter>` on
+/// the Play queues the performance, as its click does. Falsified by
+/// marking only `Featured`: the Play had no cell.
+#[test]
+fn a_featured_play_is_a_key_away() {
+    let mut app = super::demo_app();
+    let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
+    let _ = app.update(Message::Select(Source::Work(id, "Goldberg Variations".into())));
+    app.pane = Pane::Tracks;
+    let l = app.layout();
+    assert!(l.cell(Mark::Featured).is_some(), "the performance set apart");
+    let play = l.cell(Mark::FeaturedPlay).expect("…and its Play");
+    let _ = app.update(Message::HoverAt(play));
+    app.keyed = None;
+    let _ = app.update(Message::HoverAt(play));
+    let _ = app.update(Message::Key(Key::Named(iced::keyboard::key::Named::Enter), Modifiers::empty()));
+    assert!(!app.queue.is_empty(), "<Enter> on the Play queues it");
+}

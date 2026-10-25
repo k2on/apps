@@ -65,6 +65,20 @@ pub fn performers(credits: &[Credit], recording_id: &str) -> String {
     joined(&billed.into_iter().map(|c| c.person_name).collect::<Vec<_>>())
 }
 
+/// The value most of `values` are, empties aside, or empty: the first of
+/// the most common, so a tie goes to whichever came first.
+pub fn most<'a>(values: impl Iterator<Item = &'a str>) -> String {
+    let mut counts: Vec<(&str, usize)> = vec![];
+    for v in values.filter(|v| !v.is_empty()) {
+        match counts.iter_mut().find(|(c, _)| *c == v) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((v, 1)),
+        }
+    }
+    let top = counts.iter().map(|(_, n)| *n).max().unwrap_or(0);
+    counts.iter().find(|(_, n)| *n == top).map_or(String::new(), |(v, _)| v.to_string())
+}
+
 /// A recording's credits.
 pub fn credits_of(db: &Db<Harken>, recording_id: &str) -> Vec<Credit> {
     db.credit.by(Credit::KEY).from(recording_id).all()
@@ -426,4 +440,20 @@ pub fn remove_media(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveMedia) -> Resul
     }
     db.song.delete(input.id)?;
     db.media.delete(input.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whoever is credited on most of a record is who played it, a tie
+    /// going to whoever came first and nobody to nobody. Falsified by
+    /// counting the empties: the record with one credit had none.
+    #[test]
+    fn who_played_a_record_is_whoever_played_most_of_it() {
+        assert_eq!(most(["", "", "Pinnock"].into_iter()), "Pinnock");
+        assert_eq!(most(["Hogwood", "Pinnock", "Pinnock"].into_iter()), "Pinnock");
+        assert_eq!(most(["Hogwood", "Pinnock"].into_iter()), "Hogwood");
+        assert_eq!(most(["", ""].into_iter()), "");
+    }
 }

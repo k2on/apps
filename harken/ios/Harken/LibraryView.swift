@@ -1,6 +1,7 @@
 // Library: everything, four ways — the person's playlists, the albums, the
-// artists, and every song in the order it arrived — each opening the page it
-// stands for, zooming out of its cover (Android's `LibraryScreen.kt`). The
+// people (the composers some work here is by, then everyone else who made
+// something), and every song in the order it arrived — each opening the page
+// it stands for, zooming out of its cover (Android's `LibraryScreen.kt`). The
 // four are a segmented control in the glass of the navigation bar's bottom;
 // the playlists list is where a new one is made, and the domain's own checks
 // decide whether a name will do.
@@ -112,7 +113,7 @@ private struct AlbumsGrid: View {
                                     .zoomSource(r, zoom)
                                     .padding(.bottom, Space.s - 2)
                                 Text(a.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                Text(a.creator).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text(a.playedBy).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
                         .buttonStyle(.plain)
@@ -126,30 +127,65 @@ private struct AlbumsGrid: View {
 
 private struct ArtistsList: View {
     @EnvironmentObject private var model: Model
+
+    var body: some View {
+        let composers = model.composers
+        let named = Set(composers.map { $0.name })
+        let others = model.artists.filter { !named.contains($0.name) }
+        if composers.isEmpty && others.isEmpty {
+            ContentUnavailableView("No artists yet", systemImage: "music.microphone", description: Text("Whoever made what the server finds appears here."))
+        } else {
+            List {
+                // A composer once, under the composers; their page is the one page a person has.
+                if !composers.isEmpty {
+                    Section("Composers") {
+                        ForEach(composers) { c in
+                            let life = Catalogue.life(born: c.born, died: c.died)
+                            PersonRow(name: c.name, art: c.art, under: life.isEmpty ? Spell.count(Int(c.works), "work") : life, to: .page(.artist(c.name)))
+                        }
+                    }
+                }
+                if composers.isEmpty {
+                    artists(others)
+                } else if !others.isEmpty {
+                    Section("Artists") { artists(others) }
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private func artists(_ list: [ArtistsEntry]) -> some View {
+        ForEach(list) { a in
+            PersonRow(name: a.name, art: a.art, under: Spell.count(Int(a.tracks), "song"), to: .page(.artist(a.name)))
+        }
+    }
+}
+
+/// Somebody in the Library's list: their face, their name, a line under, and
+/// the page they open, zooming out of the face.
+private struct PersonRow: View {
+    let name: String
+    let art: String
+    let under: String
+    let to: Route
+    @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
     @Environment(\.zoom) private var zoom
 
     var body: some View {
-        if model.artists.isEmpty {
-            ContentUnavailableView("No artists yet", systemImage: "music.microphone", description: Text("Whoever made what the server finds appears here."))
-        } else {
-            List(model.artists) { a in
-                let r = Route.page(.artist(a.name))
-                Button { open(r) } label: {
-                    HStack(spacing: Space.l) {
-                        CoverView(seed: a.name, url: RowCover.url(model, a.art), side: 56, round: true).frame(width: 56, height: 56).zoomSource(r, zoom)
-                        VStack(alignment: .leading) {
-                            Text(a.name).font(.headline).lineLimit(1)
-                            Text(Spell.count(Int(a.tracks), "song")).font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
-                    }
+        Button { open(to) } label: {
+            HStack(spacing: Space.l) {
+                CoverView(seed: name, url: RowCover.url(model, art), side: 56, round: true).frame(width: 56, height: 56).zoomSource(to, zoom)
+                VStack(alignment: .leading) {
+                    Text(name).font(.headline).lineLimit(1)
+                    Text(under).font(.subheadline).foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
             }
-            .listStyle(.plain)
         }
+        .foregroundStyle(.primary)
     }
 }
 

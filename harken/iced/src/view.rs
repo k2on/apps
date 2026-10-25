@@ -292,10 +292,14 @@ impl App {
             Source::Albums => self.view_cards(
                 p.albums()
                     .iter()
-                    // When it came out, as a catalogue's shelf says; the year
-                    // unknown, whoever made it.
+                    // Who played it and when it came out, as a catalogue's
+                    // shelf says; nobody credited, whoever made it.
                     .map(|a| {
-                        let under = if a.released > 0 { a.released.to_string() } else { a.creator.clone() };
+                        let who = if a.performer.is_empty() { &a.creator } else { &a.performer };
+                        let under = match a.released > 0 {
+                            true => format!("{who}  \u{b7}  {}", a.released),
+                            false => who.clone(),
+                        };
                         self.card(&a.name, under, a.tracks, Source::Album(a.name.clone()), false, &a.art)
                     })
                     .collect(),
@@ -313,7 +317,7 @@ impl App {
                 p.composers()
                     .iter()
                     .map(|c| {
-                        let mut card = self.card(&c.name, span(c.born, c.died), c.works, Source::Works(c.name.clone()), true, &c.art);
+                        let mut card = self.card(&c.name, span(c.born, c.died), c.works, Source::Artist(c.name.clone()), true, &c.art);
                         if c.born == 0 && c.died == 0 {
                             card.under = format!("{} {}", c.works, plural(c.works, "work"));
                         }
@@ -334,7 +338,6 @@ impl App {
             // their works as a list in columns — the catalogue number under
             // each, the one name a work has that survives translation — then
             // their records.
-            Source::Works(name) => self.view_composer(name),
             // One work and every performance of it: the rows are the same
             // music, and what tells them apart is who played it.
             Source::Work(id, title) => self.view_work(id, title),
@@ -449,26 +452,68 @@ impl App {
             words = words.push(text(small).size(11).style(style::faint(0.5)));
         }
         if l.cell(Mark::Play).is_some() {
-            let on = self.on(l, Mark::Play);
-            let play = row![icon::tinted(glyphs::PLAY, 12.0, |p| p.primary.base.text), text("Play").size(13),]
-                .spacing(6)
-                .align_y(Alignment::Center);
-            // Under the cursor, ringed: the button is already the accent.
-            let ring = container(button(play).style(style::action).padding([5, 14]).on_press(Message::Swallow))
-                .padding(2)
-                .style(move |t| container::Style {
-                    border: iced::border::rounded(8.0)
-                        .width(if on { 2.0 } else { 0.0 })
-                        .color(arkui::theme::of(t).background.base.text),
-                    ..container::Style::default()
-                });
-            words = words.push(container(self.opens(l, Mark::Play, ring)).padding(Padding { top: 12.0, ..Padding::ZERO }));
+            words = words.push(container(self.play_button(l, Mark::Play)).padding(Padding { top: 12.0, ..Padding::ZERO }));
         }
         let _ = name;
         container(row![art, words].spacing(28).align_y(Alignment::Center))
             .padding(Padding {
                 top: PAGE_PADDING,
                 bottom: 18.0,
+                ..Padding::ZERO
+            })
+            .into()
+    }
+
+    /// A Play, in the accent, that does what `mark`'s cell does — ringed
+    /// under the cursor, as the button is already the accent.
+    fn play_button<'a>(&self, l: &Layout, mark: Mark) -> Element<'a, Message> {
+        let on = self.on(l, mark);
+        let play = row![icon::tinted(glyphs::PLAY, 12.0, |p| p.primary.base.text), text("Play").size(13),]
+            .spacing(6)
+            .align_y(Alignment::Center);
+        let ring = container(button(play).style(style::action).padding([5, 14]).on_press(Message::Swallow))
+            .padding(2)
+            .style(move |t| container::Style {
+                border: iced::border::rounded(8.0)
+                    .width(if on { 2.0 } else { 0.0 })
+                    .color(arkui::theme::of(t).background.base.text),
+                ..container::Style::default()
+            });
+        self.opens(l, mark, ring)
+    }
+
+    /// One thing set apart at the head of a section, the one to start with
+    /// (`Mark::Featured`): its cover beside `label` in small capitals, its
+    /// title, its facts, and a Play (`Mark::FeaturedPlay`). The cover and
+    /// the title open it.
+    fn view_featured<'a>(&'a self, l: &Layout, label: &str, seed: &str, art_path: &str, title: String, facts: String) -> Element<'a, Message> {
+        let on = self.on(l, Mark::Featured);
+        let mut words = column![
+            text(label.to_uppercase()).size(10).style(style::faint(0.5)),
+            text(title).size(15).wrapping(text::Wrapping::Word).style(move |t| text::Style {
+                color: Some(style::entry_text(t, on)),
+            }),
+        ]
+        .spacing(3);
+        if !facts.is_empty() {
+            words = words.push(text(facts).size(12).style(style::faint(0.55)));
+        }
+        let opened = self.opens(
+            l,
+            Mark::Featured,
+            row![self.picture(seed, art_path, 120.0, 6.0), words]
+                .spacing(20)
+                .align_y(Alignment::Center),
+        );
+        let play = container(self.play_button(l, Mark::FeaturedPlay)).padding(Padding {
+            top: 10.0,
+            left: 140.0,
+            ..Padding::ZERO
+        });
+        container(column![opened, play])
+            .padding(Padding {
+                top: 22.0,
+                bottom: 4.0,
                 ..Padding::ZERO
             })
             .into()
@@ -735,14 +780,18 @@ impl App {
         }
     }
 
-    /// An artist's page: their banner (or, for somebody with no wide
-    /// picture, their portrait beside their name), their songs as an album
-    /// lists them, and the records they made.
+    /// Somebody's page, whatever they did: their banner (or, for somebody
+    /// with no wide picture, their portrait beside their name), what they
+    /// are and their years on it; then, for a composer, their most recorded
+    /// work set apart, their best known works and a "See All"; their
+    /// records; and, for somebody no work is by, their songs as an album
+    /// lists them.
     fn view_artist(&self, name: &str) -> Element<'_, Message> {
         let p = &self.peer;
         let l = self.layout();
         let artist = p.artists().iter().find(|a| a.name == name);
         let composer = p.composers().iter().find(|c| c.name == name);
+        let works = p.works().len() as i64;
         let albums = p.albums_by(name);
         let tracks = p.rows().len() as i64;
         let counts = format!(
@@ -757,40 +806,67 @@ impl App {
             Some(s) => s,
             None => composer.map(|c| span(c.born, c.died)).unwrap_or_default(),
         };
-        let kind = if composer.is_some() { "Composer" } else { "Artist" };
-        let mut body = column![].width(Length::Fill);
-        let top = match artist.filter(|a| !a.banner.is_empty()) {
-            Some(a) => {
-                let kind = match life.is_empty() {
-                    true => format!("{kind}  \u{b7}  {counts}"),
-                    false => format!("{kind}  \u{b7}  {life}"),
-                };
-                body = body.push(hero::heading("Songs"));
-                Some(hero::banner(
-                    self.banners.handle(&self.art_url(&a.banner)),
-                    &kind,
-                    name,
-                    self.pane_width(),
-                ))
-            }
+        let kind = if works > 0 { "Composer" } else { "Artist" };
+        let kind = match life.is_empty() {
+            true => format!("{kind}  \u{b7}  {counts}"),
+            false => format!("{kind}  \u{b7}  {life}"),
+        };
+        let mut page = column![].width(Length::Fill);
+        let top = match self.banner_of(name) {
+            Some(b) => Some(hero::banner(self.banners.handle(&self.art_url(b)), &kind, name, self.pane_width())),
             None => {
-                let art_path = artist.map(|a| a.art.as_str()).unwrap_or_default();
+                let art = artist.map(|a| a.art.as_str()).filter(|a| !a.is_empty());
+                let art_path = art.or(composer.map(|c| c.art.as_str())).unwrap_or_default();
                 let side = self.cover_side();
-                let mut small = kind.to_uppercase();
-                if !life.is_empty() {
-                    small.push_str(&format!("  \u{b7}  {life}"));
-                }
-                small.push_str(&format!("  \u{b7}  {counts}"));
-                body = body.push(self.view_cover(&l, name, self.picture(name, art_path, side, side / 2.0), None, name, "", small));
+                let picture = self.picture(name, art_path, side, side / 2.0);
+                page = page.push(self.view_cover(&l, name, picture, None, name, "", kind.to_uppercase()));
                 None
             }
         };
-        body = body.push(self.view_tracks(&l, name, true));
-        if !albums.is_empty() {
-            body = body.push(hero::heading("Albums"));
-            body = body.push(self.view_shelf(&l, albums.into_iter(), self.columns()));
+        if let Some(best) = self.best_known() {
+            let facts = [
+                best.catalogue.clone(),
+                format!("{} {}", best.recordings, plural(best.recordings, "recording")),
+            ]
+            .into_iter()
+            .filter(|f| !f.is_empty())
+            .collect::<Vec<_>>()
+            .join("  \u{b7}  ");
+            page = page.push(self.view_featured(&l, "Most Recorded", &best.id, &best.art, best.title.clone(), facts));
         }
-        self.scrolled(top, body, true)
+        // Each work under who it is by, its catalogue number under it, and
+        // how many performances of it there are at its right.
+        if works > 0 {
+            let by = initials(name);
+            let listed = self.listed_works();
+            let short = listed.len() < works as usize;
+            let entries: Vec<hero::Entry<Message>> = listed
+                .iter()
+                .map(|w| hero::Entry {
+                    over: by.clone(),
+                    title: w.title.clone(),
+                    under: w.catalogue.clone(),
+                    count: w.recordings.to_string(),
+                    open: Message::Select(Source::Work(w.id.clone(), w.title.clone())),
+                })
+                .collect();
+            page = page.push(hero::heading(if short { "Well-Known Works" } else { "Works" }));
+            page = page.push(hero::listing(&entries, self.listing_columns(), self.page_cursor(), Message::HoverAt));
+            if short {
+                let label = format!("See All {works} Works");
+                page = page.push(self.opens(&l, Mark::SeeAll, hero::more(&label, self.on(&l, Mark::SeeAll))));
+            }
+        }
+        if !albums.is_empty() {
+            page = page.push(hero::heading("Albums"));
+            page = page.push(self.view_shelf(&l, albums.into_iter(), self.columns()));
+        }
+        // Somebody no work is by: their songs, which are the page's list.
+        if works == 0 {
+            page = page.push(hero::heading("Songs"));
+            page = page.push(self.view_tracks(&l, name, true));
+        }
+        self.scrolled(top, page, works == 0)
     }
 
     /// Records as a shelf of cards, `columns` across, each a cell of the
@@ -818,73 +894,21 @@ impl App {
         shelf.into()
     }
 
-    /// A composer's page: the banner (or the header, for somebody with no
-    /// wide picture), their works, and the records their works are on.
-    fn view_composer(&self, name: &str) -> Element<'_, Message> {
-        let p = &self.peer;
-        let l = self.layout();
-        let composer = p.composers().iter().find(|c| c.name == name);
-        let life = composer.map(|c| span(c.born, c.died)).unwrap_or_default();
-        let works = p.works().len() as i64;
-        let tracks: i64 = p.works().iter().map(|w| w.tracks).sum();
-        let mut page = column![].width(Length::Fill);
-        let top = match composer.filter(|c| !c.banner.is_empty()) {
-            Some(c) => {
-                let kind = match life.is_empty() {
-                    true => "Composer".to_string(),
-                    false => format!("Composer  \u{b7}  {life}"),
-                };
-                Some(hero::banner(
-                    self.banners.handle(&self.art_url(&c.banner)),
-                    &kind,
-                    name,
-                    self.pane_width(),
-                ))
-            }
-            None => {
-                let facts = format!("{works} {}  \u{b7}  {tracks} {}", plural(works, "work"), plural(tracks, "track"));
-                let art_path = composer.map(|c| c.art.as_str()).unwrap_or_default();
-                page = page.push(self.view_header(name, &life, None, facts, art_path, true));
-                None
-            }
-        };
-        let by = initials(name);
-        let entries: Vec<hero::Entry<Message>> = p
-            .works()
-            .iter()
-            .map(|w| hero::Entry {
-                over: by.clone(),
-                title: w.title.clone(),
-                under: w.catalogue.clone(),
-                count: w.tracks.to_string(),
-                open: Message::Select(Source::Work(w.id.clone(), w.title.clone())),
-            })
-            .collect();
-        page = page.push(hero::heading("Works"));
-        page = match entries.is_empty() {
-            true => page.push(text("Nothing by them yet.").size(13).style(style::faint(0.5))),
-            false => page.push(hero::listing(&entries, self.listing_columns(), self.page_cursor(), Message::HoverAt)),
-        };
-        let albums = p.albums_by(name);
-        if !albums.is_empty() {
-            page = page.push(hero::heading("Albums"));
-            page = page.push(self.view_shelf(&l, albums.into_iter(), self.columns()));
-        }
-        self.scrolled(top, page, false)
-    }
-
     /// A work's page, as a catalogue sets one: its composer over its title,
     /// what it is under, a hairline; then the fullest performance of it set
-    /// apart, and every performance in columns — cover, who played it, when
-    /// — the same music told apart by who played it.
+    /// apart with a Play, and every performance in columns — cover, who
+    /// played it, when, how long — the same music told apart by who played
+    /// it.
     fn view_work(&self, id: &str, title: &str) -> Element<'_, Message> {
         let p = &self.peer;
         let l = self.layout();
         let work = p.works().iter().find(|w| w.id == id);
         let composer = work.map(|w| w.composer.clone()).unwrap_or_default();
         let mut head = column![].spacing(4).width(Length::Fill);
+        // Whose it is, in small capitals, the way back to them.
         if !composer.is_empty() {
-            head = head.push(self.name(&l, Mark::Over, composer.clone(), 13.0, |t| style::faint(0.9)(t)));
+            let crumb = format!("{}  \u{203A}", composer.to_uppercase());
+            head = head.push(self.name(&l, Mark::Over, crumb, 12.0, |t| style::faint(0.6)(t)));
         }
         head = head.push(text(title.to_string()).size(28).font(hero::SERIF).wrapping(text::Wrapping::Word));
         let facts = work
@@ -927,6 +951,9 @@ impl App {
                 f.push(r.recorded.to_string());
             }
             f.push(format!("{} {}", r.tracks, plural(r.tracks, "track")));
+            if r.duration_ms > 0 {
+                f.push(spell(r.duration_ms));
+            }
             if !r.licence.is_empty() {
                 f.push(r.licence.clone());
             }
@@ -934,35 +961,13 @@ impl App {
         };
         let open = |r: &crate::rows::Recording| Message::Select(Source::Recording(r.id.clone(), r.performers.clone()));
 
-        // The fullest performance, set apart: the one to start with.
-        if l.cell(Mark::Featured).is_some() {
-            let first = &takes[0];
-            let on = self.on(&l, Mark::Featured);
-            let words = column![
-                text("MOST COMPLETE").size(10).style(style::faint(0.5)),
-                text(who(first)).size(15).wrapping(text::Wrapping::Word).style(move |t| text::Style {
-                    color: Some(style::entry_text(t, on)),
-                }),
-                text(facts(first)).size(12).style(style::faint(0.55)),
-            ]
-            .spacing(3)
-            .width(Length::Fill);
-            page = page.push(
-                self.opens(
-                    &l,
-                    Mark::Featured,
-                    container(
-                        row![self.picture(&first.id, &first.art, 120.0, 6.0), words]
-                            .spacing(20)
-                            .align_y(Alignment::Center),
-                    )
-                    .padding(Padding {
-                        top: 22.0,
-                        bottom: 4.0,
-                        ..Padding::ZERO
-                    }),
-                ),
-            );
+        // The fullest performance, set apart with a Play: the one to start
+        // with. The only one is set apart alone.
+        let first = &takes[0];
+        let label = if takes.len() > 1 { "Most Complete" } else { "The Recording" };
+        page = page.push(self.view_featured(&l, label, &first.id, &first.art, who(first), facts(first)));
+        if takes.len() == 1 {
+            return self.scrolled(None, page, false);
         }
 
         page = page.push(hero::heading("Recordings"));
@@ -1779,25 +1784,6 @@ fn work_heading<'a>(composer: Element<'a, Message>, work: Element<'a, Message>, 
         .into()
 }
 
-/// The value most of `values` are, empties aside; the first of the most
-/// common, so a tie goes to whoever came first.
-pub fn most<'a>(values: impl Iterator<Item = &'a str>) -> Option<&'a str> {
-    let mut counts: Vec<(&str, usize)> = vec![];
-    for v in values.filter(|v| !v.is_empty()) {
-        match counts.iter_mut().find(|(c, _)| *c == v) {
-            Some((_, n)) => *n += 1,
-            None => counts.push((v, 1)),
-        }
-    }
-    counts
-        .iter()
-        .fold(None, |best: Option<(&str, usize)>, &(v, n)| match best {
-            Some((_, b)) if b >= n => best,
-            _ => Some((v, n)),
-        })
-        .map(|(v, _)| v)
-}
-
 fn with_header<'a>(header: Element<'a, Message>, body: Element<'a, Message>) -> Element<'a, Message> {
     column![header, body].spacing(0).width(Length::Fill).into()
 }
@@ -1836,20 +1822,4 @@ fn view_help() -> Element<'static, Message> {
         .padding(12)
         .height(Length::Fill)
         .into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Whoever is credited on most of a record is who played it, a tie
-    /// going to whoever came first and nobody to nobody. Falsified by
-    /// counting the empties: the record with one credit had none.
-    #[test]
-    fn who_played_a_record_is_whoever_played_most_of_it() {
-        assert_eq!(most(["", "", "Pinnock"].into_iter()), Some("Pinnock"));
-        assert_eq!(most(["Hogwood", "Pinnock", "Pinnock"].into_iter()), Some("Pinnock"));
-        assert_eq!(most(["Hogwood", "Pinnock"].into_iter()), Some("Hogwood"));
-        assert_eq!(most(["", ""].into_iter()), None);
-    }
 }

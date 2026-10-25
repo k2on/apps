@@ -37,6 +37,8 @@ package dev.harken.android
 import dev.harken.android.gen.AddSong
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.CreatePlaylist
+import dev.harken.android.gen.Recordings
+import dev.harken.android.gen.Works
 import dev.arkdb.ffi.Id
 import android.view.MotionEvent
 import android.view.View
@@ -114,7 +116,14 @@ object Fixture {
     var first: Id? = null
         private set
 
-    private fun song(title: String, artist: String, album: String, ms: Long, track: Long, file: String, part: String = "", performer: String = ""): AddSong =
+    /** Water Music, recorded eight times, and its fullest performance: a work's page and a recording's that scroll. */
+    var work: String = ""
+        private set
+
+    var recording: String = ""
+        private set
+
+    private fun song(title: String, artist: String, album: String, ms: Long, track: Long, file: String, part: String = "", performer: String = "", workTitle: String = ""): AddSong =
         AddSong(
             title = title,
             artist = artist,
@@ -129,7 +138,7 @@ object Fixture {
             albumArt = "",
             artistArt = "",
             disc = 1,
-            workTitle = "",
+            workTitle = workTitle,
             movementNo = 0,
             artistBanner = "",
         )
@@ -141,11 +150,15 @@ object Fixture {
             peer.addSong(song(t.title, t.creator, d.album, t.durationMs, d.track, t.file, d.part, d.performer))
         }
         for ((i, e) in extra.withIndex()) peer.addSong(song(e.first, e.second, e.third, 120_000L + i, (i % 2 + 1).toLong(), "music/extra/$i.mp3"))
+        // Six more performances of Water Music's first suite, each its own record.
+        for (o in 1..6) for (t in 31L..33L) peer.addSong(song("Movement $t", "George Frideric Handel", "Water Music $o", 150_000L, t, "music/water/$o/$t.mp3", "Suite No. 1 in F major", "Orchestra $o", "Water Music"))
         for (n in playlists) peer.createPlaylist(CreatePlaylist(n))
         val list = Phone.once({ peer.playlists() }) { it }.first { it.name == playlists[0] }
         val songs = Phone.once({ Phone.library(peer, null) }, Track::of)
         for (t in songs.take(30)) Phone.addToPlaylist(peer, list.id, t.id)
         first = list.id
+        work = Phone.once({ peer.works(Works("George Frideric Handel")) }) { it }.first { it.title == "Water Music" }.id
+        recording = Phone.once({ peer.recordings(Recordings(work)) }) { it }.first().id
         return peer
     }
 }
@@ -371,6 +384,8 @@ class RestorationTests(private val case: Case) {
             Route.Album -> navs.getValue(tab).navigate(Page.ForAlbum("Water Music").route)
             Route.Artist -> navs.getValue(tab).navigate(Page.ForArtist(Fixture.ARTIST).route)
             Route.Playlist -> navs.getValue(tab).navigate(Page.ForPlaylist(Fixture.first!!).route)
+            Route.Work -> navs.getValue(tab).navigate(Page.ForWork(Fixture.work).route)
+            Route.Recording -> navs.getValue(tab).navigate(Page.ForRecording(Fixture.recording).route)
             Route.Settings -> navs.getValue(tab).navigate(Route.Settings.pattern)
             Route.Diagnostics -> navs.getValue(tab).navigate(Route.Diagnostics.pattern)
         }

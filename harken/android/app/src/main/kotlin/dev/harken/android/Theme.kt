@@ -1,6 +1,6 @@
 // harken's look on the phone: the desktop's palette (`harken/iced/src/palette.rs`)
 // — AppKit's neutral greys and the gold — as a Material 3 colour scheme in
-// light and dark, and one type scale. The spacings are `ark-ui`'s (`Space`),
+// light and dark, one type scale, and the catalogue's serif. The spacings are `ark-ui`'s (`Space`),
 // which is drawn in these colours.
 //
 // **The only file in this app that writes a colour down.** Every screen asks
@@ -26,6 +26,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import dev.harken.android.ui.ArkTheme
@@ -146,6 +149,12 @@ object Palette {
 
     /** The scrim under the full player's cover, and over a card's caption. */
     val Shade = Color(0x99000000)
+
+    /** Where a banner's shade has not begun. */
+    val Clear = Color(0x00000000)
+
+    /** What is written on a banner's shade, whichever the theme: a picture is not light or dark. */
+    val OnShade = Color(0xFFFFFFFF)
 }
 
 /** One type scale for every screen: the platform's sans, in a few sizes and two weights. */
@@ -162,6 +171,22 @@ val HarkenType: Typography =
             labelLarge = labelLarge.copy(fontWeight = FontWeight.SemiBold),
         )
     }
+
+/**
+ * The catalogue's voice, the desktop's (`rust/arkui/src/hero.rs`): Source Serif 4 Display,
+ * semibold, for a person's name on their banner, a work's or a record's title on its page, and a
+ * section's heading under them. Everything else stays in the sans. Bundled (`res/font`, its
+ * licence beside the sources as `LICENSE.source-serif.md`), as the desktop embeds it.
+ */
+val Serif: FontFamily = FontFamily(Font(R.font.source_serif_display_semibold, FontWeight.SemiBold))
+
+/** The serif's sizes: a name on a banner, a title at a page's head, a section's heading, a work's heading. */
+object SerifType {
+    val banner = TextStyle(fontFamily = Serif, fontWeight = FontWeight.SemiBold, fontSize = 34.sp, lineHeight = 38.sp)
+    val title = TextStyle(fontFamily = Serif, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, lineHeight = 33.sp)
+    val heading = TextStyle(fontFamily = Serif, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp)
+    val work = TextStyle(fontFamily = Serif, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, lineHeight = 22.sp)
+}
 
 /**
  * The theme: the scheme for the side asked (the system's by default), the type, and what `ark-ui`

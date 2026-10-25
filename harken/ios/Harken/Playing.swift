@@ -190,6 +190,7 @@ struct LastPlayed: Equatable {
         switch from {
         case let .album(n)?: return "From \(n)"
         case let .artist(n)?: return "From \(n)"
+        case .some(.recording), .some(.work): return "From a recording"
         case let .playlist(id)?: return playlists.first { $0.id == id }.map { "From \($0.name)" } ?? "From a playlist"
         default: return "From your library"
         }

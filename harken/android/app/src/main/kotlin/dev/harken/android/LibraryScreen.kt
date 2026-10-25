@@ -1,6 +1,6 @@
-// Library: everything, four ways — the person's playlists, the albums, the
-// artists, and every song in the order it arrived — each opening the page
-// it stands for. The playlists tab is where a new one is made; the
+// Library: everything, five ways — the person's playlists, the albums, the
+// artists, the composers (where there are works), and every song in the
+// order it arrived — each opening the page it stands for. The playlists tab is where a new one is made; the
 // module's own checks decide whether a name will do, and say why not.
 package dev.harken.android
 
@@ -57,6 +57,7 @@ enum class LibraryTab(val title: String) {
     Playlists("Playlists"),
     Albums("Albums"),
     Artists("Artists"),
+    Composers("Composers"),
     Songs("Songs"),
 }
 
@@ -71,6 +72,8 @@ data class LibraryData(
     val offline: String?,
     /** Whether the artists have been read: they are read after Home's lists, milliseconds later. */
     val complete: Boolean = true,
+    /** Everyone some work is by: none in a library of pop, which has no Composers then. */
+    val composers: List<Composer> = emptyList(),
 )
 
 @Composable
@@ -82,7 +85,8 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             Modifier.fillMaxWidth().horizontalScroll(rememberDestinationScrollState("chips")).padding(horizontal = Space.page),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            for (t in LibraryTab.entries) {
+            // A library of pop has no works, so no Composers — unless it is the list already shown.
+            for (t in LibraryTab.entries.filter { it != LibraryTab.Composers || data.composers.isNotEmpty() || it == tab }) {
                 FilterChip(
                     selected = t == tab,
                     onClick = { onTab(t) },
@@ -103,6 +107,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             LibraryTab.Albums -> Albums(data.albums, act)
             // Before the artists arrive, nothing — not "no artists": they are milliseconds away.
             LibraryTab.Artists -> if (data.complete) Artists(data.artists, act)
+            LibraryTab.Composers -> if (data.complete) Composers(data.composers, act)
             LibraryTab.Songs -> Songs(data.tracks, albumOf, playing, act)
         }
     }
@@ -158,7 +163,8 @@ private fun Albums(albums: List<Album>, act: Do) {
                 Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(a.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(a.creator, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Who played it, as a catalogue lists a record: whose it is when nobody is credited.
+                Text(a.by, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(Space.s)) }
@@ -178,6 +184,26 @@ private fun Artists(artists: List<Artist>, act: Do) {
             val hero = rememberHero(Space.corner, round = true)
             ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
                 Cover(a.name, a.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Composers(composers: List<Composer>, act: Do) {
+    if (composers.isEmpty()) {
+        Empty(Glyphs.Artist, "No composers yet", "Whoever a work the server finds is by appears here.")
+        return
+    }
+    val list = rememberDestinationListState("composers")
+    ScrollsToTop(list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
+        items(composers, key = { it.name }) { c ->
+            val hero = rememberHero(Space.corner, round = true)
+            // When they lived; nobody's years known, and it is how many works of theirs there are.
+            val under = Catalogue.span(c.born, c.died).ifEmpty { Media.count(c.works.toInt(), "work") }
+            ListRow(onClick = hero.lifting { act.open(Page.ForArtist(c.name)) }, title = c.name, under = under) {
+                Cover(c.name, c.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
             }
         }
     }

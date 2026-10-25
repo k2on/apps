@@ -3,7 +3,7 @@
 
 use ark::prelude::*;
 
-use crate::library::{credited, credits_of, has, library_entry, movement_of, performers, playlist_pos, summary, work_tracks};
+use crate::library::{credited, credits_of, has, library_entry, most, movement_of, performers, playlist_pos, summary, work_tracks};
 use crate::schema::*;
 use crate::types::*;
 
@@ -32,28 +32,33 @@ pub fn search(_: &Ctx, _: &Db<Harken>, input: Search) -> Result<Plan<LibraryEntr
 }
 
 /// Every album some song is on, by name, with whoever made its first track
-/// (in the song table's order) and how many tracks it has.
+/// (in the song table's order), who played most of it, and how many tracks
+/// it has.
 #[view("library.albums")]
 pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refusal> {
     Ok(scan::<Harken, Album>()
         .map_with(|db, a| {
-            let creators: Vec<String> = db
+            let tracks: Vec<(String, String)> = db
                 .song
                 .scan()
                 .into_iter()
                 .filter(|s| s.album_name.as_ref() == Some(&a.name))
-                .map(|s| db.media.get(s.media_id).map(|m| m.creator).unwrap_or_default())
+                .map(|s| {
+                    let creator = db.media.get(s.media_id).map(|m| m.creator).unwrap_or_default();
+                    (creator, performers(&credits_of(db, &s.recording_id), &s.recording_id))
+                })
                 .collect();
-            (a.clone(), creators)
+            (a.clone(), tracks)
         })
-        .filter(|(_, creators)| !creators.is_empty())
-        .map(|(a, creators)| AlbumsEntry {
+        .filter(|(_, tracks)| !tracks.is_empty())
+        .map(|(a, tracks)| AlbumsEntry {
             art: a.art.clone(),
-            creator: creators[0].clone(),
+            creator: tracks[0].0.clone(),
             label: a.label.clone(),
             name: a.name.clone(),
+            performer: most(tracks.iter().map(|(_, p)| p.as_str())),
             released: a.released,
-            tracks: creators.len() as i64,
+            tracks: tracks.len() as i64,
         }))
 }
 
@@ -162,15 +167,19 @@ pub fn work(_: &Ctx, _: &Db<Harken>, input: WorkInput) -> Result<Plan<WorkSummar
     Ok(scan::<Harken, Work>().filter(move |w| w.id == input.id).map_with(summary))
 }
 
-/// Every performance of one work: the most complete first, then the
-/// oldest, then the key.
+/// Every performance of one work, with how long its tracks run: the most
+/// complete first, then the oldest, then the key.
 #[view("library.recordings")]
 pub fn recordings(_: &Ctx, _: &Db<Harken>, input: Recordings) -> Result<Plan<RecordingsEntry>, Refusal> {
     Ok(scan::<Harken, Recording>()
         .filter(move |r| r.work_id.as_ref() == Some(&input.work_id))
-        .map_with(|db, r| (r.clone(), db.song.scan().iter().filter(|s| s.recording_id == r.id).count() as i64))
-        .sort(|(r, tracks)| (-tracks, r.recorded))
-        .map_with(|db, (r, tracks)| RecordingsEntry {
+        .map_with(|db, r| {
+            let songs: Vec<Song> = db.song.scan().into_iter().filter(|s| s.recording_id == r.id).collect();
+            let ms = songs.iter().filter_map(|s| db.media.get(s.media_id)).map(|m| m.duration_ms).sum::<i64>();
+            (r.clone(), songs.len() as i64, ms)
+        })
+        .sort(|(r, tracks, _)| (-tracks, r.recorded))
+        .map_with(|db, (r, tracks, ms)| RecordingsEntry {
             // Its own picture, or else the cover of the album it was
             // recorded on — the picture it is known by.
             art: match r.art.is_empty() {
@@ -185,6 +194,7 @@ pub fn recordings(_: &Ctx, _: &Db<Harken>, input: Recordings) -> Result<Plan<Rec
                     .find(|art| !art.is_empty())
                     .unwrap_or_default(),
             },
+            duration_ms: *ms,
             id: r.id.clone(),
             label: r.label.clone(),
             licence: r.licence.clone(),

@@ -47,6 +47,9 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        # The catalogue's serif (Harken/Fonts, from rust/arkui/fonts, under the
+        # SIL Open Font License beside it): a page's title and its sections'.
+        UIAppFonts: [SourceSerif4Display-Semibold.otf]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # The player plays on with the screen locked and the app in the background.
         UIBackgroundModes: [audio]

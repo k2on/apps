@@ -85,11 +85,11 @@ data class AlbumInput(val playlistId: Id, val name: String) {
 }
 
 /** The record `AlbumsEntry`. */
-data class AlbumsEntry(val art: String, val creator: String, val label: String, val name: String, val released: Long, val tracks: Long) {
-    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"creator\":" + J.q(creator) + "," + "\"label\":" + J.q(label) + "," + "\"name\":" + J.q(name) + "," + "\"released\":" + released.toString() + "," + "\"tracks\":" + tracks.toString() + "}"
+data class AlbumsEntry(val art: String, val creator: String, val label: String, val name: String, val performer: String, val released: Long, val tracks: Long) {
+    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"creator\":" + J.q(creator) + "," + "\"label\":" + J.q(label) + "," + "\"name\":" + J.q(name) + "," + "\"performer\":" + J.q(performer) + "," + "\"released\":" + released.toString() + "," + "\"tracks\":" + tracks.toString() + "}"
 
     companion object {
-        fun of(j: Any?): AlbumsEntry = (j as JSONObject).let { o -> AlbumsEntry(J.text(o.opt("art")), J.text(o.opt("creator")), J.text(o.opt("label")), J.text(o.opt("name")), J.int(o.opt("released")), J.int(o.opt("tracks"))) }
+        fun of(j: Any?): AlbumsEntry = (j as JSONObject).let { o -> AlbumsEntry(J.text(o.opt("art")), J.text(o.opt("creator")), J.text(o.opt("label")), J.text(o.opt("name")), J.text(o.opt("performer")), J.int(o.opt("released")), J.int(o.opt("tracks"))) }
     }
 }
 
@@ -630,11 +630,11 @@ data class Recordings(val workId: String) {
 }
 
 /** The record `RecordingsEntry`. */
-data class RecordingsEntry(val art: String, val id: String, val label: String, val licence: String, val performers: String, val recorded: Long, val tracks: Long) {
-    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"id\":" + J.q(id) + "," + "\"label\":" + J.q(label) + "," + "\"licence\":" + J.q(licence) + "," + "\"performers\":" + J.q(performers) + "," + "\"recorded\":" + recorded.toString() + "," + "\"tracks\":" + tracks.toString() + "}"
+data class RecordingsEntry(val art: String, val durationMs: Long, val id: String, val label: String, val licence: String, val performers: String, val recorded: Long, val tracks: Long) {
+    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"id\":" + J.q(id) + "," + "\"label\":" + J.q(label) + "," + "\"licence\":" + J.q(licence) + "," + "\"performers\":" + J.q(performers) + "," + "\"recorded\":" + recorded.toString() + "," + "\"tracks\":" + tracks.toString() + "}"
 
     companion object {
-        fun of(j: Any?): RecordingsEntry = (j as JSONObject).let { o -> RecordingsEntry(J.text(o.opt("art")), J.text(o.opt("id")), J.text(o.opt("label")), J.text(o.opt("licence")), J.text(o.opt("performers")), J.int(o.opt("recorded")), J.int(o.opt("tracks"))) }
+        fun of(j: Any?): RecordingsEntry = (j as JSONObject).let { o -> RecordingsEntry(J.text(o.opt("art")), J.int(o.opt("duration_ms")), J.text(o.opt("id")), J.text(o.opt("label")), J.text(o.opt("licence")), J.text(o.opt("performers")), J.int(o.opt("recorded")), J.int(o.opt("tracks"))) }
     }
 }
 
