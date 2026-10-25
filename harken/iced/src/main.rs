@@ -2014,7 +2014,10 @@ impl App {
             Message::Resized(size) => {
                 self.window = size;
             }
-            Message::Wheel(delta) => self.swipe.feed(delta, iced::time::Instant::now()),
+            Message::Wheel(delta) => {
+                self.swipe.allow(self.router.can_go(-1), self.router.can_go(1));
+                self.swipe.feed(delta, iced::time::Instant::now());
+            }
             Message::HoverAt(at) => {
                 // Not while a context window is up. A backdrop stops a click
                 // and a wheel, but a hover is published by the row itself and
@@ -2435,7 +2438,9 @@ impl App {
                     let (x, y) = match delta {
                         iced::mouse::ScrollDelta::Pixels { x, y } | iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
                     };
-                    (x.abs() > y.abs()).then_some(Message::Wheel(delta))
+                    // One that moved nowhere is the fingers lifting, where
+                    // the system says so (`arkui::swipe`).
+                    (x.abs() > y.abs() || (x == 0.0 && y == 0.0)).then_some(Message::Wheel(delta))
                 }
                 _ => None,
             }),
