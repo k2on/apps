@@ -41,23 +41,22 @@ fn the_awkward_characters_in_a_filename_are_escaped() {
 /// fit is drawn — against *this* window's pane, which is what the keyboard's
 /// grid is built from too.
 ///
-/// The page is 265px narrower than the window: 16 of padding either side,
-/// the 200px sidebar, and the 1px rule with 16 either side of it — measured
-/// off a screenshot, where the first card starts at x = 265 (16 of the
-/// shelf's own padding past the page's edge at 249). A literal, because
-/// written as `pane_width()` the test agreed with the bug it was for: the
-/// pane once left out all of it but the sidebar, and a seventh card at
+/// The page is 200px narrower than the window: the sidebar, and nothing
+/// else — the page runs to the window's edge, and the first card starts at
+/// x = 224, the shelf's own 24 of padding past the page's edge. A literal,
+/// because written as `pane_width()` the test agreed with the bug it was
+/// for: the pane once left out chrome that was there, and a seventh card at
 /// 1280px was squeezed to fit.
 ///
-/// Falsified by `pane_width` returning the window less the sidebar alone: it
-/// fails at 522px, where 2 cards need 280px in 215.
+/// Falsified by `pane_width` forgetting the sidebar: it fails at 414px,
+/// where 2 cards need 356px in 156.
 #[test]
 fn the_cards_fit_the_page_beside_the_sidebar() {
     let mut app = App::with_peer(super::alone("me"), String::new(), None);
     for width in 320..=4000 {
         app.window = Size::new(width as f32, 600.0);
         let n = app.columns() as f32;
-        let room = width as f32 - 265.0 - 32.0 - arkui::SCROLLBAR;
+        let room = width as f32 - 200.0 - 48.0 - arkui::SCROLLBAR;
         let needed = n * SHELF.card + (n - 1.0) * SHELF.gap;
         assert!(n == 1.0 || needed <= room, "at {width}px {n} cards need {needed}px in {room}px");
         assert!((n + 1.0) * SHELF.card + n * SHELF.gap > room, "at {width}px another card fits");
@@ -79,7 +78,7 @@ fn a_right_click_opens_on_the_pointer_and_the_dots_open_on_the_dots() {
     let dots = Anchor::RightEdge(App::dots_right(window));
     assert_eq!(at(220.0, dots), at(1240.0, dots), "one button, one place");
     assert_eq!(at(220.0, dots).y, 300.0, "…and how far down is still the row's");
-    assert_eq!(at(220.0, dots).x + wide, 1280.0 - 16.0 - 10.0, "the menu ends where the dots do");
+    assert_eq!(at(220.0, dots).x + wide, 1280.0 - 24.0 - 10.0, "the menu ends where the dots do");
 }
 
 /// The device picker hangs off the speaker button — the right-hand end of
@@ -89,14 +88,14 @@ fn a_right_click_opens_on_the_pointer_and_the_dots_open_on_the_dots() {
 /// **Said twice, the second time as literals**, because against the
 /// constants both sides move together. 508 and 423 are this panel at 860×600
 /// with three rows, by hand: 860 − 16 − 336, and
-/// 600 − 16 − 48 − (8 + 24 + 27 × 3). Falsified by leaving `BAR_HEIGHT` out
+/// 600 − 64 − (8 + 24 + 27 × 3). Falsified by leaving `BAR_HEIGHT` out
 /// of `devices_origin`: the literals fail.
 #[test]
 fn the_device_picker_hangs_off_the_speaker_button() {
     let window = Size::new(860.0, 600.0);
     let at = App::devices_origin(window, 3);
     assert_eq!(at.x + DEVICES_WIDTH, window.width - PAGE_PADDING);
-    assert_eq!(at.y + App::devices_height(3), window.height - PAGE_PADDING - BAR_HEIGHT);
+    assert_eq!(at.y + App::devices_height(3), window.height - BAR_HEIGHT);
     assert_eq!((at.x, at.y), (508.0, 423.0));
 }
 

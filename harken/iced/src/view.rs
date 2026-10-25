@@ -10,7 +10,7 @@ use arkui::fit::Cut;
 use arkui::format::{clock, plural, span, spell};
 use arkui::line::Line;
 use arkui::{account, art, cards, fit, glyphs, hero, icon, layer, menu, panel, picker, style, table, SCROLLBAR};
-use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row};
+use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row, Space};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::listening::{self, Clock, Output};
@@ -18,7 +18,7 @@ use crate::nav::{Layout, Mark};
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
 use crate::{
-    credit, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, PAGE_PADDING, PANE_GAP, QUEUE, QUEUE_ROWS, QUEUE_WIDTH, SHELF, SIDEBAR, SIDEBAR_WIDTH,
+    credit, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, QUEUE_ROWS, QUEUE_WIDTH, SHELF, SIDEBAR, SIDEBAR_WIDTH,
     TRACKS,
 };
 
@@ -52,6 +52,18 @@ fn devices<'a>(here: bool) -> iced::widget::Svg<'a> {
 
 /// How wide the bar's volume slider is, and a picker row's.
 const VOLUME_WIDTH: f32 = 84.0;
+/// A work's recordings, each cover beside who played it, and the one set
+/// apart over them: a catalogue's proportions, about 1:1.6.
+const RECORDING_ART: f32 = 96.0;
+const FEATURED_ART: f32 = 160.0;
+/// The play bar's cover, and the width it and the words beside it take.
+const BAR_ART: f32 = 44.0;
+const NOW_WIDTH: f32 = 280.0;
+/// A clock beside the seek bar: room for `1:23:45` at 11px.
+const CLOCK_WIDTH: f32 = 40.0;
+/// Between the bar's groups: the transport, what plays, the seek bar, and
+/// each control after it.
+const BAR_SPACING: f32 = 16.0;
 
 /// The mute button: the speaker, or the speaker struck through. Dimmed
 /// beside the transport, which it should not compete with for the eye; on a
@@ -78,28 +90,28 @@ fn volume_slider<'a>(level: Level, at: f32) -> Element<'a, Message> {
 
 impl App {
     pub fn view(&self) -> Element<'_, Message> {
-        let base = container(
-            column![
-                // The sidebar and the page share the height left once the bar
-                // has taken its own, so the bar stays at the bottom.
-                row![
-                    self.view_sidebar(),
-                    rule::vertical(1),
-                    // A swipe's arrow over the page, not the sidebar.
-                    arkui::swipe::view(
-                        column![self.view_top(), self.view_page()].spacing(10).into(),
-                        &self.swipe,
-                        iced::time::Instant::now(),
-                    )
-                ]
-                .spacing(PANE_GAP)
-                .height(Length::Fill),
-                rule::horizontal(1),
-                self.view_bar(),
+        // The top bar on the page's own padding, clear of the account's
+        // anchors (`ACCOUNT_BOTTOM`, `account_right`); the page under it
+        // edge to edge, so a banner reaches both sides of it.
+        let top = container(self.view_top()).padding(Padding {
+            top: PAGE_PADDING,
+            right: PAGE_PADDING,
+            bottom: 0.0,
+            left: GUTTER,
+        });
+        let base = container(column![
+            // The sidebar and the page share the height left once the bar
+            // has taken its own, so the bar stays at the bottom. No rule
+            // between any of them: the sidebar and the bar are a surface,
+            // a step off the page's ground, and that is the edge.
+            row![
+                self.view_sidebar(),
+                // A swipe's arrow over the page, not the sidebar.
+                arkui::swipe::view(column![top, self.view_page()].spacing(10).into(), &self.swipe, iced::time::Instant::now(),)
             ]
-            .spacing(12),
-        )
-        .padding(PAGE_PADDING)
+            .height(Length::Fill),
+            self.view_bar(),
+        ])
         .width(Length::Fill)
         .height(Length::Fill)
         // The window's own ground is the one thing a style closure cannot
@@ -163,11 +175,11 @@ impl App {
     fn view_sidebar(&self) -> Element<'_, Message> {
         let cursor = self.at(Pane::Sidebar);
         let focused = self.has_keys(Pane::Sidebar);
-        let mut side = column![].spacing(0).padding(Padding {
-            top: 0.0,
+        let mut side = column![].spacing(1).padding(Padding {
+            top: PAGE_PADDING,
             right: 10.0,
-            bottom: 0.0,
-            left: 0.0,
+            bottom: PAGE_PADDING,
+            left: 10.0,
         });
         let mut under: Option<&str> = None;
         for (i, choice) in self.peer.choices.iter().enumerate() {
@@ -210,8 +222,8 @@ impl App {
                         .align_y(Alignment::Center),
                     )
                     .width(Length::Fill)
-                    .padding([4, 10])
-                    .style(move |theme| style::row(theme, on_cursor, focused, false)),
+                    .padding([5, 10])
+                    .style(move |theme| style::entry(theme, on_cursor, focused)),
                 )
                 .on_press(Message::Select(choice.source.clone())),
             );
@@ -219,6 +231,7 @@ impl App {
         container(scrollable(side).id(SIDEBAR).style(style::bars))
             .width(Length::Fixed(SIDEBAR_WIDTH))
             .height(Length::Fill)
+            .style(style::surface)
             .into()
     }
 
@@ -249,7 +262,7 @@ impl App {
     /// across, the same division the keyboard walks.
     fn view_cards(&self, cards: Vec<cards::Card<Message>>, empty: &'static str) -> Element<'_, Message> {
         let cursor = self.has_keys(Pane::Tracks).then_some(self.at(Pane::Tracks));
-        cards::view(SHELF, &cards, self.columns(), cursor, empty, Message::HoverAt, TRACKS)
+        cards::view(SHELF, &cards, self.pane_width(), cursor, empty, Message::HoverAt, TRACKS)
     }
 
     /// The header every page that is *about* something opens with.
@@ -329,7 +342,7 @@ impl App {
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
             Source::Album(name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
-                with_header(self.view_record(name, "", None, None, ""), self.view_list())
+                padded(with_header(self.view_record(name, "", None, None, ""), self.view_list()))
             }
             Source::Album(name) => self.view_album(name),
             Source::Playlist(_, name) => self.view_playlist(name),
@@ -343,18 +356,22 @@ impl App {
             Source::Work(id, title) => self.view_work(id, title),
             // One performance, in the order the work goes.
             Source::Recording(id, who) => self.view_recording(id, who),
-            _ => self.view_list(),
+            _ => padded(self.view_list()),
         }
     }
 
     /// A page as one scrollable, so its top scrolls away with it: `top`
-    /// edge to edge (a banner runs under the scrollbar), the rest clear of
-    /// it — and, on a page of tracks, the status line under it all.
+    /// edge to edge (a banner runs the whole width of the page and under
+    /// the scrollbar), the rest on the page's gutter and clear of the
+    /// scrollbar — the room `SHELF.room` counts — with the gutter again
+    /// under its last line, so a shelf is never cut off at the foot; and, on
+    /// a page of tracks, the status line under it all.
     fn scrolled<'a>(&'a self, top: Option<Element<'a, Message>>, body: iced::widget::Column<'a, Message>, status: bool) -> Element<'a, Message> {
         let body = container(body.width(Length::Fill)).padding(Padding {
-            right: SCROLLBAR + 6.0,
-            bottom: PAGE_PADDING,
-            ..Padding::ZERO
+            top: 0.0,
+            right: GUTTER + SCROLLBAR,
+            bottom: GUTTER * 2.0,
+            left: GUTTER,
         });
         let page = match top {
             Some(top) => column![top, body],
@@ -362,7 +379,10 @@ impl App {
         };
         let page = scrollable(page.width(Length::Fill)).id(TRACKS).style(style::bars).height(Length::Fill);
         match status {
-            true => column![page, self.view_status()].spacing(10).width(Length::Fill).into(),
+            true => column![page, container(self.view_status()).padding([0.0, GUTTER])]
+                .spacing(10)
+                .width(Length::Fill)
+                .into(),
             false => page.into(),
         }
     }
@@ -493,7 +513,7 @@ impl App {
         // on dark.
         let mut words = column![
             text(label.to_uppercase()).size(10).style(style::faint(0.5)),
-            text(title).size(15).wrapping(text::Wrapping::Word).style(move |t| text::Style {
+            text(title).size(17).wrapping(text::Wrapping::Word).style(move |t| text::Style {
                 color: Some(match on {
                     true => arkui::theme::of(t).primary.base.color,
                     false => style::entry_text(t, false),
@@ -507,7 +527,7 @@ impl App {
         let opened = self.opens(l, Mark::Featured, words);
         // The cover, and beside it the words over the Play, as one card.
         let card = row![
-            self.picture(seed, art_path, 120.0, 6.0),
+            self.picture(seed, art_path, FEATURED_ART, 8.0),
             column![opened, self.play_button(l, Mark::FeaturedPlay)].spacing(12),
         ]
         .spacing(20)
@@ -742,7 +762,7 @@ impl App {
             small.push_str(&format!("  \u{b7}  {}", spell(ms)));
         }
         let header = self.view_cover(&l, name, self.mosaic(name, self.cover_side()), None, name, "", small);
-        with_header(header, self.view_list())
+        padded(with_header(header, self.view_list()))
     }
 
     /// A list's cover: the first four different records on it, two by two —
@@ -861,7 +881,7 @@ impl App {
         }
         if !albums.is_empty() {
             page = page.push(hero::heading("Albums"));
-            page = page.push(self.view_shelf(&l, albums.into_iter(), self.columns()));
+            page = page.push(self.view_shelf(&l, albums.into_iter()));
         }
         // Somebody no work is by: their songs, which are the page's list.
         if works == 0 {
@@ -871,9 +891,10 @@ impl App {
         self.scrolled(top, page, works == 0)
     }
 
-    /// Records as a shelf of cards, `columns` across, each a cell of the
-    /// page's.
-    fn view_shelf<'a>(&'a self, l: &Layout, albums: impl Iterator<Item = &'a crate::rows::Album>, columns: usize) -> Element<'a, Message> {
+    /// Records as a shelf of cards, as many across as the index pages draw
+    /// and as big, each a cell of the page's.
+    fn view_shelf<'a>(&'a self, l: &Layout, albums: impl Iterator<Item = &'a crate::rows::Album>) -> Element<'a, Message> {
+        let (columns, side) = (self.columns(), SHELF.side(self.pane_width()));
         let cursor = self.page_cursor();
         let cards: Vec<(cards::Card<Message>, Option<usize>)> = albums
             .enumerate()
@@ -889,7 +910,7 @@ impl App {
         for chunk in cards.chunks(columns.max(1)) {
             let line = chunk.iter().map(|(c, cell)| {
                 let hover = cell.map_or(Message::Swallow, Message::HoverAt);
-                cards::view_card(SHELF, c, cell.is_some() && *cell == cursor, hover)
+                cards::view_card(side, c, cell.is_some() && *cell == cursor, hover)
             });
             shelf = shelf.push(Row::with_children(line).spacing(SHELF.gap).align_y(Alignment::Start));
         }
@@ -985,7 +1006,12 @@ impl App {
                     count: String::new(),
                     open: open(r),
                 };
-                hero::entry(Some(self.picture(&r.id, &r.art, 64.0, 4.0)), &e, Some(at) == cursor, Message::HoverAt(at))
+                hero::entry(
+                    Some(self.picture(&r.id, &r.art, RECORDING_ART, 6.0)),
+                    &e,
+                    Some(at) == cursor,
+                    Message::HoverAt(at),
+                )
             })
             .collect();
         page = page.push(hero::grid(entries, self.listing_columns()));
@@ -1598,6 +1624,11 @@ impl App {
 
     /// The now-playing bar, honest about silence: a build with no audio
     /// device says so rather than drawing a transport that does nothing.
+    ///
+    /// Left to right: the transport; the cover beside the title over who
+    /// made it; the seek bar between its clocks; and at the right-hand end
+    /// the volume, the queue and where it plays. On a surface, as the
+    /// sidebar is, rather than under a rule.
     fn view_bar(&self) -> Element<'_, Message> {
         let Some(bar) = self.now() else {
             let idle = text(match Player::AUDIBLE {
@@ -1606,18 +1637,16 @@ impl App {
             })
             .size(12)
             .style(style::dim);
-            let mut line = row![idle, container(text("")).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
+            let mut line = row![idle, Space::new().width(Length::Fill)]
+                .spacing(BAR_SPACING)
+                .align_y(Alignment::Center);
             if let Some(volume) = self.view_volume() {
                 line = line.push(volume);
             }
             if let Some(output) = self.view_output() {
                 line = line.push(output);
             }
-            return container(line)
-                .padding([8, 4])
-                .height(Length::Fixed(BAR_HEIGHT))
-                .align_y(Alignment::Center)
-                .into();
+            return bar_surface(line.into());
         };
         let duration = bar.duration.max(0.1);
         // A scrubber being dragged draws where it is being dragged to.
@@ -1627,34 +1656,59 @@ impl App {
         // control is a use, and `AUDIBLE` only decides whether *this* device
         // can be the one playing.
         let workable = Player::AUDIBLE || self.session.is_some();
+        // Play/pause the size of the pair either side and a half again: the
+        // one of the three anybody reaches for.
+        let toggle = icon::tinted(if bar.playing { glyphs::PAUSE } else { glyphs::PLAY }, 22.0, |p| p.background.base.text);
         let transport = row![
             button(icon::plain(glyphs::PREVIOUS, true))
                 .style(button::text)
+                .padding(6)
                 .on_press(Message::Skip(-1)),
-            button(icon::plain(if bar.playing { glyphs::PAUSE } else { glyphs::PLAY }, false))
+            button(toggle)
                 .style(button::text)
+                .padding(6)
                 .on_press_maybe(workable.then_some(Message::PlayPause)),
-            button(icon::plain(glyphs::NEXT, true)).style(button::text).on_press(Message::Skip(1)),
+            button(icon::plain(glyphs::NEXT, true))
+                .style(button::text)
+                .padding(6)
+                .on_press(Message::Skip(1)),
         ]
-        .spacing(4)
+        .spacing(2)
         .align_y(Alignment::Center);
-        let mut line = row![
-            transport,
+        // The cover its album has everywhere else, the derived square until
+        // it arrives — and the words beside it cut, never run on under the
+        // seek bar.
+        let art = self.peer.albums().iter().find(|a| a.name == track.album).map_or("", |a| a.art.as_str());
+        let playing = row![
+            self.picture(&track.album, art, BAR_ART, 4.0),
             column![
-                text(track.title.as_str()).size(14),
-                text(track.creator.as_str()).size(12).style(style::dim)
+                Line::new(track.title.as_str(), 13.0, Cut::End, |t| arkui::theme::of(t).background.base.text),
+                Line::new(track.creator.as_str(), 12.0, Cut::End, |t| style::dim(t).color.unwrap_or_default()),
             ]
-            .spacing(2)
-            .width(Length::Fixed(260.0)),
-            text(clock(position)).size(11).style(style::dim),
+            .spacing(3)
+            .width(Length::Fill),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .width(Length::Fixed(NOW_WIDTH));
+        // Each clock as wide as the longest it can say, so the bar between
+        // them does not shift as the seconds go by.
+        let seek = row![
+            text(clock(position))
+                .size(11)
+                .style(style::dim)
+                .width(Length::Fixed(CLOCK_WIDTH))
+                .align_x(Alignment::End),
             slider(0.0..=duration as f32, position as f32, Message::Seek)
                 .on_release(Message::SeekDone)
                 .style(style::seek)
                 .width(Length::Fill),
-            text(clock(duration)).size(11).style(style::dim),
+            text(clock(duration)).size(11).style(style::dim).width(Length::Fixed(CLOCK_WIDTH)),
         ]
-        .spacing(12)
-        .align_y(Alignment::Center);
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+        let mut line = row![transport, playing, seek].spacing(BAR_SPACING).align_y(Alignment::Center);
         if let Some(volume) = self.view_volume() {
             line = line.push(volume);
         }
@@ -1662,13 +1716,7 @@ impl App {
         if let Some(output) = self.view_output() {
             line = line.push(output);
         }
-        // A declared height: the device picker is placed on top of this bar
-        // before iced has laid any of it out.
-        container(line)
-            .padding([6, 4])
-            .height(Length::Fixed(BAR_HEIGHT))
-            .align_y(Alignment::Center)
-            .into()
+        bar_surface(line.into())
     }
 
     /// Where the sound is, and everywhere it could be: a row per device of
@@ -1783,6 +1831,25 @@ fn work_heading<'a>(composer: Element<'a, Message>, work: Element<'a, Message>, 
             bottom: 6.0,
             left: table::ROW_PADDING[1],
         })
+        .into()
+}
+
+/// A page on the gutter either side — one that is not a [`App::scrolled`]
+/// page or a shelf, which keep their own.
+fn padded(page: Element<'_, Message>) -> Element<'_, Message> {
+    container(page).padding([0.0, GUTTER]).into()
+}
+
+/// The bar's ground: a surface, [`BAR_HEIGHT`] tall because the device
+/// picker is placed on top of it before iced has laid any of it out, with
+/// its contents centred down it and on the chrome's padding either end.
+fn bar_surface(line: Element<'_, Message>) -> Element<'_, Message> {
+    container(line)
+        .padding([0.0, PAGE_PADDING])
+        .width(Length::Fill)
+        .height(Length::Fixed(BAR_HEIGHT))
+        .align_y(Alignment::Center)
+        .style(style::surface)
         .into()
 }
 
