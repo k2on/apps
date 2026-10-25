@@ -42,6 +42,7 @@ import dev.harken.android.onboarding.PermissionStep
 import dev.harken.android.onboarding.ServerStep
 import dev.harken.android.onboarding.SignInStep
 import dev.harken.android.onboarding.Step
+import dev.harken.android.ui.BelowStatusBar
 import dev.harken.android.ui.Space
 import dev.harken.android.gen.Active
 import dev.harken.android.gen.Clock
@@ -91,7 +92,8 @@ class Screens {
     private val last = LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum("The Four Seasons"))
 
     @Composable
-    private fun tab(t: Tab, state: PlayerState = player, page: @Composable () -> Unit) = Chrome(t, state, Still, onTab = {}, position = at) { page() }
+    // Below the status bar, or under it for a page that says so, as the app's navigation draws each destination.
+    private fun tab(t: Tab, state: PlayerState = player, page: @Composable () -> Unit) = Chrome(t, state, Still, onTab = {}, position = at) { BelowStatusBar { page() } }
 
     // The onboarding ---------------------------------------------------------
 

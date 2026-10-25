@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.material3.BasicAlertDialog
@@ -28,6 +30,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -46,7 +49,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
@@ -91,7 +97,9 @@ enum class Tab(val route: String, val title: String) {
 /**
  * The frame every tab is drawn in: the page, then the player's bar and the tab bar at its foot, and
  * the player over all of it. The app and the screenshots both draw it, so what is reviewed is what
- * ships.
+ * ships. The page runs up to the top of the screen: the status bar's inset is each destination's
+ * own (`ark-ui`'s `BelowStatusBar`), so that it moves with the page and a page under a banner can
+ * run under the bar.
  */
 @Composable
 fun Chrome(
@@ -115,6 +123,7 @@ fun Chrome(
         Scaffold(
             snackbarHost = { if (snackbar != null) SnackbarHost(snackbar) },
             containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = ScaffoldDefaults.contentWindowInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
             bottomBar = {
                 Column {
                     // Where the player's bar stands; the player draws it, over everything.
@@ -131,6 +140,32 @@ fun Chrome(
         PlayerCard(sheet, player, controls, position, tabs, scrubbing)
     }
 }
+
+/**
+ * The status bar's icons: light over a picture the pages have under the bar (`PageMotion.pictured`)
+ * — until the player has come up over it — and otherwise the theme's, dark on a light ground. Its
+ * own scope, so the bar changing recomposes nothing else.
+ */
+@Composable
+private fun StatusBarIcons(motion: PageMotion, sheet: PlayerSheet) {
+    val view = LocalView.current
+    val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val covered by remember(sheet) { derivedStateOf { sheet.p >= 0.9f } }
+    val pictured = motion.pictured && !covered
+    val window = remember(view) { view.context.activity()?.window }
+    DisposableEffect(window, light, pictured) {
+        val bars = window?.let { WindowCompat.getInsetsController(it, view) }
+        bars?.isAppearanceLightStatusBars = light && !pictured
+        onDispose { bars?.isAppearanceLightStatusBars = light }
+    }
+}
+
+private tailrec fun Context.activity(): android.app.Activity? =
+    when (this) {
+        is android.app.Activity -> this
+        is android.content.ContextWrapper -> baseContext.activity()
+        else -> null
+    }
 
 // The three tabs, sliding away under the player as it comes up.
 @Composable
@@ -388,6 +423,7 @@ fun HarkenApp(
             // first; and stood down while the player is up, whatever the order. At the root of Search
             // or of the Library, back goes Home; at Home's, it is the system's.
             PageBack(motion, blocked = { sheet.p > 0f }, toFirst = if (tab != Tab.Home) ({ tab = Tab.Home }) else null)
+            StatusBarIcons(motion, sheet)
             Box(Modifier.fillMaxSize()) {
                 Chrome(tab, player, controls, onTab = { select(it) }, snackbar, playback.position, playback.scrubbing, sheet) {
                     // Said for every move, so the NavHost's own cross-fade is nowhere: a page grows
