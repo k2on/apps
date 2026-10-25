@@ -75,7 +75,7 @@ struct SearchView: View {
         if !r.albums.isEmpty {
             Section("Albums") {
                 CoverShelf(items: r.albums) { a in
-                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.creator, side: 128, opens: .page(.album(a.name))) {
+                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: 128, opens: .page(.album(a.name))) {
                         model.searched(model.needle)
                         open(.page(.album(a.name)))
                     }
@@ -86,9 +86,10 @@ struct SearchView: View {
         if !r.artists.isEmpty {
             Section("Artists") {
                 CoverShelf(items: r.artists) { a in
-                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: Spell.count(Int(a.tracks), "song"), side: 112, round: true, opens: .page(.artist(a.name))) {
+                    let to = Route.page(.artist(a.name))
+                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: Spell.count(Int(a.tracks), "song"), side: 112, round: true, opens: to) {
                         model.searched(model.needle)
-                        open(.page(.artist(a.name)))
+                        open(to)
                     }
                 }
                 .listRowInsets(EdgeInsets())

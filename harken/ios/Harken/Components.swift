@@ -104,8 +104,9 @@ struct TrackRow<Leading: View>: View {
 }
 
 /// What a song's menu can do: play it next, put it on the queue or on a
-/// playlist, go to its album or its artist, take it off the playlist it was
-/// opened from (Android's `TrackMenu`).
+/// playlist, go to its album, its artist or the composer of the work it is
+/// a movement of, take it off the playlist it was opened from (Android's
+/// `TrackMenu`).
 struct TrackActions: View {
     let track: LibraryEntry
     let from: Page?
@@ -122,6 +123,9 @@ struct TrackActions: View {
         }
         if !track.creator.isEmpty, from != .artist(track.creator) {
             Button { open(.page(.artist(track.creator))) } label: { Label("Go to Artist", systemImage: "music.microphone") }
+        }
+        if let c = model.detail(track)?.composer, !c.isEmpty, c != track.creator, from != .artist(c) {
+            Button { open(.page(.artist(c))) } label: { Label("Go to Composer", systemImage: "music.quarternote.3") }
         }
         if case let .playlist(id)? = from {
             Button(role: .destructive) { model.remove(track, from: id) } label: { Label("Remove from This Playlist", systemImage: "minus.circle") }

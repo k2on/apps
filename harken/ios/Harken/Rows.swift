@@ -38,10 +38,24 @@ extension AlbumsEntry: Identifiable, Hashable {
     }
 }
 
+extension AlbumsEntry {
+    /// Who played it, as a card and a page say it: whoever is credited on
+    /// the most of it (`albums`' `performer`), whose it is when nobody is.
+    var playedBy: String { performer.isEmpty ? creator : performer }
+}
+
 extension ArtistsEntry: Identifiable, Hashable {
     public var id: String { name }
     public func hash(into h: inout Hasher) { h.combine(name) }
 }
+
+extension ComposersEntry: Identifiable {
+    public var id: String { name }
+}
+
+extension WorkSummary: Identifiable {}
+
+extension RecordingsEntry: Identifiable {}
 
 extension Play {
     /// The track's id, when the play names one this library could have.
@@ -84,14 +98,26 @@ enum Phone {
 
     static func playlist(_ h: Harken, _ id: Id) throws -> LiveView<LibraryEntry> { try h.playlist(PlaylistInput(playlistId: id)) }
 
-    /// A page's view; none for every song, which is the library's own.
+    /// One performance's tracks, in the order the work goes.
+    static func recording(_ h: Harken, _ id: String) throws -> LiveView<LibraryEntry> { try h.recording(RecordingInput(playlistId: noPlaylist, id: id)) }
+
+    /// A page's view; none for every song, which is the library's own, and
+    /// for a work's, which lists performances rather than tracks
+    /// ([Page.listings]).
     static func view(_ h: Harken, _ page: Page) throws -> LiveView<LibraryEntry>? {
         switch page {
         case let .album(name): return try album(h, name)
         case let .artist(name): return try artist(h, name)
         case let .playlist(id): return try playlist(h, id)
-        case .songs: return nil
+        case let .recording(id): return try recording(h, id)
+        case .work, .songs: return nil
         }
+    }
+
+    /// A page's tracks once, and the view let go; none for a page of none, or when it is refused.
+    static func rows(_ h: Harken, _ page: Page) -> [LibraryEntry] {
+        guard let v = try? view(h, page) else { return [] }
+        return v.rows()
     }
 
     /// A view's rows once, and the view let go; none when it is refused.
@@ -164,8 +190,38 @@ enum Page: Hashable {
     case album(String)
     case artist(String)
     case playlist(Id)
+    /// One work and every performance of it, by the work's key
+    /// (`johann-sebastian-bach/bwv-988`).
+    case work(String)
+    /// One performance, in the order the work goes, by its key: the work's,
+    /// `@`, and who played it.
+    case recording(String)
     /// Every song, in the order they were added.
     case songs
+
+    /// Whether the page is a list of tracks, which is a view of its own
+    /// ([Phone.view]): not a work's, which lists performances.
+    var listsTracks: Bool {
+        if case .work = self { return false }
+        return true
+    }
+
+    /// The catalogue's views the page reads beside its tracks, as the
+    /// desktop's `Peer::open_page` opens them: a person's works (none, for
+    /// somebody who wrote nothing here); a work's row and its performances;
+    /// a performance's credits, and its work's row and performances — the
+    /// work's key is everything before the `@` — so its header can say what
+    /// it is a performance of and who played it.
+    var listings: [Listing] {
+        switch self {
+        case let .artist(name): return [.works(name)]
+        case let .work(id): return [.work(id), .recordings(id)]
+        case let .recording(id):
+            guard let work = Catalogue.workKey(id) else { return [.credits(id)] }
+            return [.credits(id), .work(work), .recordings(work)]
+        default: return []
+        }
+    }
 
     /// Where a track was played from, as the listening session and the plays
     /// carry it — the desktop's address-bar spelling (`#album/Water%20Music`),
@@ -178,6 +234,8 @@ enum Page: Hashable {
         case let .playlist(id):
             guard let p = playlists.first(where: { $0.id == id }) else { return "" }
             return "#playlist/" + Places.encode(p.name)
+        case let .work(id): return "#work/" + Places.encode(id)
+        case let .recording(id): return "#recording/" + Places.encode(id)
         case .songs: return "#library"
         }
     }
@@ -193,10 +251,24 @@ enum Page: Hashable {
         case "album": return name.isEmpty ? nil : .album(name)
         case "artist": return name.isEmpty ? nil : .artist(name)
         case "playlist": return playlists.first(where: { $0.name == name }).map { .playlist($0.id) }
+        // A composer's page is their artist page: a person has one.
+        case "composer": return name.isEmpty ? nil : .artist(name)
+        case "work": return name.isEmpty ? nil : .work(name)
+        case "recording": return name.isEmpty ? nil : .recording(name)
         case "library": return .songs
         default: return nil
         }
     }
+}
+
+/// A catalogue's view a page holds beside its tracks, by what it is read
+/// by: a composer's works by the composer's name, a work's row and its
+/// performances by the work's key, who is on a performance by its key.
+enum Listing: Hashable {
+    case works(String)
+    case work(String)
+    case recordings(String)
+    case credits(String)
 }
 
 /// A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved.

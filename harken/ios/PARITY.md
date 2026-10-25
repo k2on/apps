@@ -24,8 +24,12 @@ shape is the most likely to need a fix at the first build (README.md,
 | Last played: the session's track, else the log's newest play; pressing it resumes the session (and opens the player) or plays the list it came from | Same rule (`LastPlayed.of`, held by `NowPlayingTests`) | — | Playing.swift, Model.swift | yes |
 | Search (`SearchScreen.kt`): field, as-you-type after 150 ms, songs (50) / albums / artists, recent searches (8, this phone's), clear, offline banner, nothing found | The system search field in the Search tab, the same three groups and recent searches | `.searchable(text:prompt:)`, `.onSubmit(of: .search)`, `ContentUnavailableView.search(text:)` | SearchView.swift | yes |
 | Library (`LibraryScreen.kt`): Playlists / Albums / Artists / Songs chips, New playlist, album grid (adaptive 150 dp), artists list, songs list | A segmented control under the title (glass in iOS 26), the same four lists, a `+` in the bar | `Picker(...).pickerStyle(.segmented)`, `LazyVGrid(.adaptive(minimum: 150))`, `safeAreaInset(edge: .top)` | LibraryView.swift | yes |
-| Album page: header (cover, kind, title, artist link, facts), Play / Shuffle, sections by part, track numbers, performer under the title | Same; Play `.glassProminent`, Shuffle `.glass` in one `GlassEffectContainer` | `.buttonStyle(.glassProminent)` †, `.buttonStyle(.glass)` †, `GlassEffectContainer(spacing:)` † | Pages.swift, Components.swift | yes |
-| Artist page: header, their albums shelf, their songs | Same | — | Pages.swift | yes |
+| Album page: header (cover, kind, title, artist link, facts), Play / Shuffle, sections by part, track numbers, performer under the title | **Ahead of Android, at the desktop's** (`view_album`): the cover beside the title in the serif, who played most of it (`albums`' `performer`) in the gold and whose it is under it, each opening their page; Play `.glassProminent`, Shuffle `.glass` in one `GlassEffectContainer`; the tracks in runs of one work, each under its composer in small capitals and its title in the serif with the run's length, movements unnumbered; at the foot the year, how much, and the label | `.buttonStyle(.glassProminent)` †, `.buttonStyle(.glass)` †, `GlassEffectContainer(spacing:)` †, `Font.custom(_:size:relativeTo:)` | Pages.swift, Hero.swift, Catalogue.swift | yes |
+| Artist page: header, their albums shelf, their songs | **Ahead of Android, at the desktop's**: one page a person has, laid out as a catalogue's composer page — their banner across the page under the navigation bar (its back button glass over the picture), or their portrait beside their name; "Composer" when the `works` view has any of theirs, else "Artist", and when they lived or else how much of them there is; their most recorded work set apart with a Play when it leads the next; "Well-Known Works" (six, the most recorded then the most tracks) and "See All N Works" by catalogue; their albums; their songs only when they wrote nothing here | `.ignoresSafeArea(.container, edges: .top)`, `.toolbarBackgroundVisibility(.hidden, for: .navigationBar)` ‡ | Pages.swift, Hero.swift, Catalogue.swift | yes |
+| — (Android has no work page) | A work's page, as the desktop's `view_work`: its composer in small capitals, the way back to them; its title in the serif; catalogue, form, period; its fullest performance set apart ("Most Complete", or "The Recording" for the only one) with a Play; every performance — cover, who played it or "Performer not named", "1992 · 3 tracks · 40 min" — opening its page | the `work` and `recordings` views | Pages.swift | yes |
+| — (Android has no performance page) | A performance's page, as the desktop's `view_recording`: laid out as its album's, then the records it is on and everybody on it, the composer first, each opening their page | the `recording`, `credits`, `work` and `recordings` views | Pages.swift | yes |
+| — | A Play pressed on a page of works or performances reads the performance's tracks (`recording`) — for a work, its first `recordings` row's — and plays them through the one play path, from `#recording/…` | `Bridge.read`, `Bridge.fullest` | Model.swift, Bridge.swift | yes |
+| — | The Library's Artists list has the composers first (`composers`), each once; a song's menu goes to its work's composer | — | LibraryView.swift, Components.swift | yes |
 | Playlist page: header, its songs, "gone" and "nothing on it yet" | Same, and a swipe on a row takes it off | `.swipeActions` | Pages.swift | yes |
 | Settings (`SettingsScreen.kt`): account, server and whether connected, Sign out (+ the sentence), About, version tapped 7 times for Diagnostics (remembered) | Same, as a `Form`; "4 more taps" said on glass; and a Work offline switch | `Form`, `LabeledContent` | SettingsView.swift | yes |
 | Diagnostics: the peer's numbers, the listening session's numbers, every change with its standing | Same (the desktop's `D`), read again whenever the peer reports a change | `.task(id:)` | SettingsView.swift | yes |
@@ -121,6 +125,8 @@ As this was written against them (the iOS 26 SDK's SwiftUI), and where:
 
 | API | Signature as used | Where |
 |---|---|---|
+| `View.toolbarBackgroundVisibility(_:for:)` (iOS 18) ‡ | `.toolbarBackgroundVisibility(.hidden, for: .navigationBar)` over a banner | Pages.swift |
+| `Font.custom(_:size:relativeTo:)` | Source Serif 4 Display, `UIAppFonts` in project.yml, the file and its SIL Open Font License in Harken/Fonts | Theme.swift |
 | `View.glassEffect(_:in:)` † | `func glassEffect(_ glass: Glass = .regular, in shape: some Shape = DefaultGlassEffectShape()) -> some View` | Components.swift (`Offline`), HomeView.swift (last played), LibraryView.swift (New playlist tile), SettingsView.swift (avatar, the taps note), OnboardingViews.swift (mark, field) |
 | `Glass.regular`, `.tint(_:)`, `.interactive()` † | `static var regular: Glass`, `func tint(_ color: Color?) -> Glass`, `func interactive(_ isEnabled: Bool = true) -> Glass` | HomeView.swift, SettingsView.swift, OnboardingViews.swift |
 | `GlassEffectContainer` † | `init(spacing: CGFloat? = nil, @ViewBuilder content: () -> Content)` | Components.swift (Play/Shuffle), PlayerViews.swift (transport, chips) |
@@ -152,6 +158,12 @@ harken's library (`tools/typecheck.sh`, `checks.harken-ios-typecheck`, Swift
 library built for the host, the player's two over a `Hall` — the real
 reconciler driving `SoundCore` — each new test falsified once. Every file
 parses (`swiftc -parse`).
+
+The catalogue's pages (Catalogue.swift, Hero.swift, the work, performance
+and person pages, the bridge's held listings, CatalogueTests) were written
+in a container with no Swift toolchain at all: neither type-checked nor
+parsed there. Catalogue.swift, Rows.swift, Bridge.swift and Model.swift
+are in `tools/typecheck.sh`'s set and are checked by the next run of it.
 
 Not checked: the screens (SwiftUI), the engine (AVFoundation), the lock
 screen (MediaPlayer), the sign-in sheet (AuthenticationServices), the

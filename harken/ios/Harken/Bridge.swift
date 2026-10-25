@@ -16,8 +16,11 @@
 // (`LiveView<T>`), read once — Home's three first, published, and the rest a
 // turn later — and after every change each is asked what it did and its
 // patches spliced into the list the screens hold; only a reset reads one
-// again. A page — an album, an artist, a playlist — is a view too, held
-// while a screen shows it ([hold]) and let go when the last one leaves.
+// again. A page — an album, an artist, a playlist, a performance — is a view
+// too, held while a screen shows it ([hold]) and let go when the last one
+// leaves; and so are the catalogue's views a page reads beside its tracks
+// (`Page.listings`: a person's works, a work and its performances, who is
+// on one), each held by its key for as long as some page holds it.
 //
 // **The listening session is the reconciler's** (`Player`, harken's one
 // reconciler, S3b): each drain steps it, which makes this phone's player
@@ -40,11 +43,20 @@ struct Snapshot {
     var playlists = [Playlist]()
     var albums = [AlbumsEntry]()
     var artists = [ArtistsEntry]()
+    /// Everyone some work here is by.
+    var composers = [ComposersEntry]()
     var details = [Id: TrackDetailsEntry]()
     /// The newest play in the log, this person's.
     var lastPlayed: Play? = nil
     /// The pages held, each its rows once read.
     var pages = [Page: [LibraryEntry]]()
+    /// The listings held, once read: a person's works by their name, a
+    /// work's row by its key, its performances by its key, who is on a
+    /// performance by its key.
+    var works = [String: [WorkSummary]]()
+    var work = [String: WorkSummary]()
+    var recordings = [String: [RecordingsEntry]]()
+    var credits = [String: [CreditsEntry]]()
     var status: Status? = nil
     var heard = Heard()
     /// How many changes the peer has reported: what the diagnostics read again on.
@@ -85,6 +97,51 @@ private final class Held<E> {
     }
 }
 
+/// Views opened by a key while some page holds them, each held as many
+/// times as pages hold it, spliced like the rest and let go with the last;
+/// on the session's queue only.
+private final class Holds<E> {
+    private let open: (Harken, String) throws -> LiveView<E>
+    private var held = [String: (view: Held<E>, refs: Int)]()
+    init(_ open: @escaping (Harken, String) throws -> LiveView<E>) { self.open = open }
+
+    /// Held once more; its rows when it was opened just now, none when it was already held.
+    func hold(_ key: String, _ h: Harken?) -> [E]? {
+        if var e = held[key] {
+            e.refs += 1
+            held[key] = e
+            return nil
+        }
+        let open = self.open
+        let v = Held<E> { try open($0, key) }
+        held[key] = (v, 1)
+        guard let h = h else { return nil }
+        v.hydrate(h)
+        return v.rows
+    }
+
+    /// Held once less; true when nothing holds it now and it is let go.
+    func release(_ key: String) -> Bool {
+        guard var e = held[key] else { return false }
+        e.refs -= 1
+        if e.refs > 0 {
+            held[key] = e
+            return false
+        }
+        held[key] = nil
+        return true
+    }
+
+    /// Every held view that moved, and its rows now.
+    func update() -> [(String, [E])] {
+        var moved = [(String, [E])]()
+        for (k, e) in held where e.view.update() { moved.append((k, e.view.rows)) }
+        return moved
+    }
+
+    func clear() { held = [:] }
+}
+
 final class Bridge {
     let server: String
     let login: Login
@@ -110,9 +167,14 @@ final class Bridge {
     private let playlists = Held<Playlist> { try $0.playlists() }
     private let albums = Held<AlbumsEntry> { try $0.albums() }
     private let artists = Held<ArtistsEntry> { try $0.artists() }
+    private let composers = Held<ComposersEntry> { try $0.composers() }
     private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
     private let played = Held<Play> { try $0.lastPlayed() }
     private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
+    private let works = Holds<WorkSummary> { h, composer in try h.works(Works(composer: composer)) }
+    private let work = Holds<WorkSummary> { h, id in try h.work(WorkInput(id: id)) }
+    private let recordings = Holds<RecordingsEntry> { h, work in try h.recordings(Recordings(workId: work)) }
+    private let credits = Holds<CreditsEntry> { h, take in try h.credits(Credits(recordingId: take)) }
 
     /// The session for `login` at `server`, its replica under `root`; this
     /// phone named `name` in the listening session, playing through `sound`.
@@ -178,9 +240,11 @@ final class Bridge {
         queue.async {
             guard let h = self.harken else { return }
             self.artists.hydrate(h)
+            self.composers.hydrate(h)
             self.details.hydrate(h)
             self.played.hydrate(h)
             self.snap.artists = self.artists.rows
+            self.snap.composers = self.composers.rows
             self.snap.details = Bridge.byMedia(self.details.rows)
             self.snap.lastPlayed = self.played.rows.first
             self.snap.complete = true
@@ -228,9 +292,14 @@ final class Bridge {
         if playlists.update() { snap.playlists = playlists.rows }
         if albums.update() { snap.albums = albums.rows }
         if artists.update() { snap.artists = artists.rows }
+        if composers.update() { snap.composers = composers.rows }
         if details.update() { snap.details = Bridge.byMedia(details.rows) }
         if played.update() { snap.lastPlayed = played.rows.first }
         for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }
+        for (k, rows) in works.update() { snap.works[k] = rows }
+        for (k, rows) in work.update() { snap.work[k] = rows.first }
+        for (k, rows) in recordings.update() { snap.recordings[k] = rows }
+        for (k, rows) in credits.update() { snap.credits[k] = rows }
     }
 
     private func step() {
@@ -287,27 +356,56 @@ final class Bridge {
 
     // MARK: pages
 
-    /// A page's tracks, kept up to date while it is held; [release] it when the screen goes.
+    /// A page's tracks and its listings, kept up to date while it is held;
+    /// [release] it when the screen goes.
     func hold(_ page: Page) {
         if page == .songs { return }
         queue.async {
-            if var p = self.pages[page] {
-                p.refs += 1
-                self.pages[page] = p
-                return
-            }
-            let held = Held<LibraryEntry> { try Phone.view($0, page) }
-            self.pages[page] = (held, 1)
-            if let h = self.harken {
-                held.hydrate(h)
-                self.snap.pages[page] = held.rows
-                self.show()
-            }
+            var read = false
+            if page.listsTracks { read = self.holdTracks(page) }
+            for l in page.listings where self.hold(l) { read = true }
+            if read { self.show() }
         }
+    }
+
+    // On `queue`: a page's tracks held once more; true when they were read just now.
+    private func holdTracks(_ page: Page) -> Bool {
+        if var p = pages[page] {
+            p.refs += 1
+            pages[page] = p
+            return false
+        }
+        let held = Held<LibraryEntry> { try Phone.view($0, page) }
+        pages[page] = (held, 1)
+        guard let h = harken else { return false }
+        held.hydrate(h)
+        snap.pages[page] = held.rows
+        return true
+    }
+
+    // On `queue`: a listing held once more; true when it was read just now.
+    private func hold(_ l: Listing) -> Bool {
+        let h = harken
+        switch l {
+        case let .works(k):
+            guard let rows = works.hold(k, h) else { return false }
+            snap.works[k] = rows
+        case let .work(k):
+            guard let rows = work.hold(k, h) else { return false }
+            snap.work[k] = rows.first
+        case let .recordings(k):
+            guard let rows = recordings.hold(k, h) else { return false }
+            snap.recordings[k] = rows
+        case let .credits(k):
+            guard let rows = credits.hold(k, h) else { return false }
+            snap.credits[k] = rows
+        }
+        return true
     }
 
     func release(_ page: Page) {
         queue.async {
+            for l in page.listings { self.release(l) }
             guard var p = self.pages[page] else { return }
             p.refs -= 1
             if p.refs > 0 {
@@ -319,9 +417,29 @@ final class Bridge {
         }
     }
 
-    /// A page's tracks once, for playing it from somewhere that does not show it (Home's last played).
+    // On `queue`: a listing held once less, and gone from the snapshot with the last.
+    private func release(_ l: Listing) {
+        switch l {
+        case let .works(k): if works.release(k) { snap.works[k] = nil }
+        case let .work(k): if work.release(k) { snap.work[k] = nil }
+        case let .recordings(k): if recordings.release(k) { snap.recordings[k] = nil }
+        case let .credits(k): if credits.release(k) { snap.credits[k] = nil }
+        }
+    }
+
+    /// A page's tracks once, for playing it from somewhere that does not show
+    /// it (Home's last played; a performance's Play on a page of performances).
     func read(_ page: Page, done: @escaping ([LibraryEntry]) -> Void) {
-        ask([], { h in page == .songs ? self.library.rows : Phone.once { try Phone.view(h, page)! } }, done)
+        ask([], { h in page == .songs ? self.library.rows : Phone.rows(h, page) }, done)
+    }
+
+    /// A work's fullest performance — the first of its `recordings` — and its
+    /// tracks once, in the order the work goes; none for a work nobody recorded.
+    func fullest(_ work: String, done: @escaping ((String, [LibraryEntry])?) -> Void) {
+        ask(nil, { h -> (String, [LibraryEntry])? in
+            guard let take = Phone.once({ try h.recordings(Recordings(workId: work)) }).first else { return nil }
+            return (take.id, Phone.rows(h, .recording(take.id)))
+        }, done)
     }
 
     /// The library's songs matching `needle`, by the domain's `search`.
@@ -396,6 +514,10 @@ final class Bridge {
             self.player?.attach(sound: nil)
             self.player = nil
             self.pages = [:]
+            self.works.clear()
+            self.work.clear()
+            self.recordings.clear()
+            self.credits.clear()
             self.harken = nil
         }
     }
