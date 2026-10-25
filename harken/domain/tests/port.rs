@@ -335,62 +335,62 @@ const PINS: [(u64, &str, &str); 12] = [
     (
         1,
         "c798d85243d21c6d47dc0686383483fd5980b446a53401fad1d88deb87e5a3a4",
-        "a5a4f5f3781d80cd79f22501cc43e75a5d1c324547542e2b77723a0fcd28b68c",
+        "b139ebdace975fc58002559354f5a0c861026ba338d82367bec6a7e30de0e820",
     ),
     (
         2,
         "3f440c0644bfc0143cf20cb6334e40b01a92857ec7987050d64e06a6fea13a67",
-        "ec43524af0f2d70b2425f6068003a39748378fe1e64152644e14b6de628642b2",
+        "5d303feec44d223c7b90ffb90934f50a1acacf39e22f1f8ef1b2d677553a4707",
     ),
     (
         3,
         "1858c760f2c3541a476d6017593b80294052112b4ce4e776066089879ec11c45",
-        "a57c0d925836ac1ab5aee30b6dfdf1ce512d6de7d9bc4d4dd1bbbfbf459b5d70",
+        "d97b7bfa1ae682ba4e38770efedb8054e4a3d5fe42e6071a89c6e6363f2fd701",
     ),
     (
         4,
         "0c4e3dda3d9369d4a7d243f31611f80f1ef047851409d7be5fc92ac579c88d8d",
-        "34c888471d432c7724d328def5da8d210c8615727def902b856c5fe4142856d0",
+        "372ecdfbb108f42a0d2918c26c56a2d4e765a9ff5e459fb71300f0eac1836203",
     ),
     (
         5,
         "3b528061ae6e4415bb5b72d40141129f7ba754df5cf06776a6daa4689772a2ff",
-        "06a5f16da39ea830c08fa75b8beba7a756cd0dce95c32f0de284b2591e506b33",
+        "d2c018020d48ae54a2cbe7699165af2aa18224a259c636f5360451881748e3a6",
     ),
     (
         6,
         "47e6c012f03c902133221a002f337d66154b2878b407bd0b92d192d6bf6a83c9",
-        "6bccd532351ca69dfc5beb5aa4f14673ede4a9dae046f7ea214a514788aeb031",
+        "ec977ace7dd69683a548c26fcfd33ce31bf4039a0c0da8349666e582632bbb40",
     ),
     (
         7,
         "fa2b6809dba400d396c0dcdd19f0560c59c8abc792d88cbfbc59460d76adf7a2",
-        "e3430c88af58315b65fc491ec4e7b1b525faf6ca9277493dbd4102403e3a2364",
+        "ead52b9c1e895c359e95ff4180e1755be2a055b40792a43fd7aeecc92406ec8d",
     ),
     (
         8,
         "95bae4fa8476cb7a95f563266b4ff97161127f70328e2f45254bac8d15f0e066",
-        "9c80abfac243f1da976abd1848fbd4e3b6ed3ca4e46c8bdbb0982638fc76f142",
+        "79e265a4cb3fe5575c729b69a3fe5979777652bafc64c572c7d1689bd7a1e1c8",
     ),
     (
         9,
         "e0050a56bed067704ecaca1920d2e4001551df9f30fd51d6c0a5440b1f9f6b9b",
-        "259f73b8723f5bcd3e955a7ac151e6214e2496bc6b58061c919fef7340c7eb30",
+        "113b70045aa3c9dc4e7a4868192abfa1d4d4da210ab092a32aeb236209cf3323",
     ),
     (
         10,
         "09aab3c327eb3015614b7a71c855121761ab6d61582cc9c9596737767531fec1",
-        "0761e82520854616cfca45a8d7a6f1025a5b7bdaa280dd5b3fbfc4d18320b71c",
+        "80773c58b803daf84b82bbd9812ee1ce29fe927c09b53571b6cb21d72184571a",
     ),
     (
         11,
         "3cec7b2fb0e627e0f936c12424ffd048d59fddc56facfd0d1df738d870bfb0c8",
-        "bde7012270094f3923a2957476c3485ca05e60b69e2d876d8da67e875ce01dcb",
+        "c25f300ce43d7de53d0c175509c3d961c99dd1adfc6c27ffbc75a8f8ee745c43",
     ),
     (
         12,
         "a1515e5eb189ed8530bea9b670a4b3a631037d4d98b55f059ca8bd8303bd6b55",
-        "969926a25cb0703001f44bec6d4aa79f7e1d7ad8e4aed7c3e9e50a3b9130983f",
+        "6367a8b2221cc3eec381085aba6b7228859a112bea206c9f63c528d60b83c908",
     ),
 ];
 
@@ -432,7 +432,7 @@ fn run(seed: u64) -> (String, String, usize, usize) {
         .filter(|f| f.kind == ark::domain::Kind::View)
         .map(|f| f.name.as_str())
         .collect();
-    assert_eq!(views.len(), 19);
+    assert_eq!(views.len(), 20);
     let (mut refused, mut moved) = (0, 0);
     let mut a = Store::new(native.schema.clone(), ark::schema::Space::Durable);
     let mut r = Rng(seed);
@@ -499,6 +499,7 @@ fn view_input(a: &Store, v: &str) -> Vec<u8> {
             name: "Bach".into(),
         }
         .to_bytes(),
+        "library.album_credits" => AlbumCredits { name: "Air".into() }.to_bytes(),
         "library.works" => Works { composer: "Bach".into() }.to_bytes(),
         "library.work" | "library.recordings" => {
             let w = a.rows("work").next().map(|b| Work::from_bytes(b).unwrap().id).unwrap_or_default();

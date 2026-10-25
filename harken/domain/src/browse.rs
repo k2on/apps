@@ -99,6 +99,7 @@ pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetails
             part: movement.map(|m| m.part).unwrap_or_default(),
             performer: performers(&credits_of(db, &song.recording_id), &song.recording_id),
             track: song.track,
+            work_id: work.as_ref().map(|w| w.id.clone()).unwrap_or_default(),
             work: work.map(|w| w.title).unwrap_or_default(),
         }
     }))
@@ -179,7 +180,20 @@ pub fn recordings(_: &Ctx, _: &Db<Harken>, input: Recordings) -> Result<Plan<Rec
         })
         .sort(|(r, tracks, _)| (-tracks, r.recorded))
         .map_with(|db, (r, tracks, ms)| RecordingsEntry {
-            art: r.art.clone(),
+            // Its own picture, or else the cover of the album it was
+            // recorded on — the picture it is known by.
+            art: match r.art.is_empty() {
+                false => r.art.clone(),
+                true => db
+                    .song
+                    .scan()
+                    .into_iter()
+                    .filter(|s| s.recording_id == r.id)
+                    .filter_map(|s| s.album_name.and_then(|n| db.album.get(&n)))
+                    .map(|a| a.art)
+                    .find(|art| !art.is_empty())
+                    .unwrap_or_default(),
+            },
             duration_ms: *ms,
             id: r.id.clone(),
             label: r.label.clone(),
@@ -219,4 +233,44 @@ pub fn recording(_: &Ctx, _: &Db<Harken>, input: RecordingInput) -> Result<Plan<
             (s.movement_id.is_none(), no, title)
         })
         .map_with(move |db, s| library_entry(&db.media.get(s.media_id).expect("a song's media"), playlist_pos(db, on, s.media_id))))
+}
+
+/// Who plays on one album: everybody credited on a recording any of its
+/// songs are of, the composers left out (an album's composers are its works'),
+/// each once — their roles together — in billing order.
+#[view("library.album_credits")]
+pub fn album_credits(_: &Ctx, _: &Db<Harken>, input: AlbumCredits) -> Result<Plan<CreditsEntry>, Refusal> {
+    let name = input.name;
+    Ok(scan::<Harken, Credit>()
+        .filter(|c| c.role != "composer")
+        .filter_with(move |db, c| {
+            let on = db
+                .song
+                .scan()
+                .into_iter()
+                .any(|s| s.recording_id == c.recording_id && s.album_name.as_ref() == Some(&name));
+            on && credited(&credits_of(db, &c.recording_id)).contains(c)
+        })
+        .group(
+            |c| c.person_name.clone(),
+            |_, name, credits| {
+                let (mut roles, mut instrument, mut pos) = (Vec::<String>::new(), String::new(), i64::MAX);
+                for c in credits {
+                    if !c.role.is_empty() && !roles.contains(&c.role) {
+                        roles.push(c.role.clone());
+                    }
+                    if instrument.is_empty() {
+                        instrument.clone_from(&c.instrument);
+                    }
+                    pos = pos.min(c.pos);
+                }
+                CreditsEntry {
+                    instrument,
+                    name: name.clone(),
+                    pos,
+                    role: roles.join(", "),
+                }
+            },
+        )
+        .sort(|c| (c.pos, c.name.clone())))
 }

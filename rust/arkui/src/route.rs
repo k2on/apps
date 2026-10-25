@@ -91,13 +91,24 @@ pub trait AddressBar {
     /// Put `fragment` in the bar, as a new history entry or in place of the
     /// current one.
     fn write(&mut self, fragment: &str, nav: Nav);
+    /// Go `by` entries through the history — back for `-1`, forward for `1`
+    /// — as the browser's buttons do. The bar moves; [`Router::poll`] reads
+    /// where to, as it does for the buttons themselves. Past either end, it
+    /// stays.
+    fn go(&mut self, by: isize);
 }
 
-/// The browser's address bar. On the desktop there is none, so it reads
-/// nothing and writes nowhere — the type is shared so that the one place an app
-/// records a change is written once and reads the same in both builds.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Browser;
+/// The browser's address bar. On the desktop there is none, so this keeps
+/// one in memory — the entries written and which is current — so that back
+/// and forward (`^O`, `^I`, a swipe) mean the same in both builds, and the
+/// one place an app records a change is written once.
+#[derive(Debug, Default, Clone)]
+pub struct Browser {
+    #[cfg(not(target_arch = "wasm32"))]
+    entries: Vec<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    at: usize,
+}
 
 #[cfg(target_arch = "wasm32")]
 impl AddressBar for Browser {
@@ -116,15 +127,36 @@ impl AddressBar for Browser {
             Nav::Replace => history.replace_state_with_url(&null, "", Some(fragment)),
         };
     }
+
+    fn go(&mut self, by: isize) {
+        if let Some(history) = web_sys::window().and_then(|w| w.history().ok()) {
+            let _ = history.go_with_delta(by as i32);
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AddressBar for Browser {
     fn read(&self) -> Option<String> {
-        None
+        self.entries.get(self.at).cloned()
     }
 
-    fn write(&mut self, _fragment: &str, _nav: Nav) {}
+    fn write(&mut self, fragment: &str, nav: Nav) {
+        // A new place drops whatever was forward of here, as a browser does.
+        match (nav, self.entries.is_empty()) {
+            (Nav::Replace, false) => self.entries.truncate(self.at),
+            _ => self.entries.truncate(self.at + 1),
+        }
+        self.entries.push(fragment.to_string());
+        self.at = self.entries.len() - 1;
+    }
+
+    fn go(&mut self, by: isize) {
+        let to = self.at as isize + by;
+        if to >= 0 && (to as usize) < self.entries.len() {
+            self.at = to as usize;
+        }
+    }
 }
 
 /// Keeps the address bar and what an app is showing in agreement.
@@ -142,7 +174,7 @@ pub struct Router<R, B = Browser> {
 
 impl<R: Route> Default for Router<R, Browser> {
     fn default() -> Self {
-        Router::with_bar(Browser)
+        Router::with_bar(Browser::default())
     }
 }
 
@@ -159,6 +191,12 @@ impl<R: Route, B: AddressBar> Router<R, B> {
             routed: None,
             nav: Nav::Push,
         }
+    }
+
+    /// Back (`-1`) or forward (`1`) through the history; the app arrives
+    /// there by its next [`Router::poll`].
+    pub fn go(&mut self, by: isize) {
+        self.bar.go(by);
     }
 
     /// Make the next [`Router::sync`] rewrite the current entry rather than add
@@ -306,6 +344,7 @@ mod tests {
             }
             self.history.push(fragment.to_string());
         }
+        fn go(&mut self, _by: isize) {}
     }
 
     /// Places visited are history entries; a scrub is one; and the back
@@ -354,5 +393,30 @@ mod tests {
         assert_eq!(router.poll(true), None, "reported once");
         router.sync(&Place::Playlist("C".into()));
         assert_eq!(router.bar().history.len(), 2, "arriving where the back button went is not a new entry");
+    }
+
+    /// The desktop's bar in memory goes back and forward as a browser's
+    /// does, and a new place drops what was forward. Falsified by not
+    /// truncating in `write`: the last `go(1)` still found the album.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_desktop_bar_goes_back_and_forward() {
+        let mut router: Router<Place> = Router::new();
+        router.sync(&Place::Library);
+        router.sync(&Place::Albums);
+        router.sync(&Place::Album("Messiah".into()));
+        router.go(-1);
+        assert_eq!(router.poll(true), Some(Place::Albums));
+        router.go(-1);
+        assert_eq!(router.poll(true), Some(Place::Library));
+        router.go(-1);
+        assert_eq!(router.poll(true), None, "nothing before the first");
+        router.go(1);
+        assert_eq!(router.poll(true), Some(Place::Albums));
+        router.sync(&Place::Work("bwv-988".into()));
+        router.go(1);
+        assert_eq!(router.poll(true), None, "a new place dropped what was forward");
+        router.go(-1);
+        assert_eq!(router.poll(true), Some(Place::Albums));
     }
 }

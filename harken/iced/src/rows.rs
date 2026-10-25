@@ -271,6 +271,7 @@ pub struct TrackDetail {
     /// The work it is a movement of, and who wrote it; empty for none.
     pub work: String,
     pub composer: String,
+    pub work_id: String,
 }
 
 impl From<TrackDetailsEntry> for TrackDetail {
@@ -286,6 +287,7 @@ impl From<TrackDetailsEntry> for TrackDetail {
             bpm: e.bpm,
             work: e.work,
             composer: e.composer,
+            work_id: e.work_id,
         }
     }
 }

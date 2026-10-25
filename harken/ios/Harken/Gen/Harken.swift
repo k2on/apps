@@ -111,6 +111,20 @@ public struct Album: Equatable {
     public var json: String { J.obj(["\"name\":" + J.q(name), "\"label\":" + J.q(label), "\"released\":" + String(released), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId)]) }
 }
 
+/// The record `AlbumCredits`.
+public struct AlbumCredits: Equatable {
+    public var name: String
+
+    public init(name: String) { self.name = name; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(name: J.text(o["name"]))
+    }
+
+    public var json: String { J.obj(["\"name\":" + J.q(name)]) }
+}
+
 /// The record `AlbumInput`.
 public struct AlbumInput: Equatable {
     public var playlistId: Id
@@ -1369,15 +1383,16 @@ public struct TrackDetailsEntry: Equatable {
     public var performer: String
     public var track: Int64
     public var work: String
+    public var workId: String
 
-    public init(album: String, bpm: Int64, catalogue: String, composer: String, licence: String, mediaId: Id, part: String, performer: String, track: Int64, work: String) { self.album = album; self.bpm = bpm; self.catalogue = catalogue; self.composer = composer; self.licence = licence; self.mediaId = mediaId; self.part = part; self.performer = performer; self.track = track; self.work = work; }
+    public init(album: String, bpm: Int64, catalogue: String, composer: String, licence: String, mediaId: Id, part: String, performer: String, track: Int64, work: String, workId: String) { self.album = album; self.bpm = bpm; self.catalogue = catalogue; self.composer = composer; self.licence = licence; self.mediaId = mediaId; self.part = part; self.performer = performer; self.track = track; self.work = work; self.workId = workId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(album: J.text(o["album"]), bpm: J.int(o["bpm"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), licence: J.text(o["licence"]), mediaId: Id(J.text(o["media_id"])), part: J.text(o["part"]), performer: J.text(o["performer"]), track: J.int(o["track"]), work: J.text(o["work"]))
+        self.init(album: J.text(o["album"]), bpm: J.int(o["bpm"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), licence: J.text(o["licence"]), mediaId: Id(J.text(o["media_id"])), part: J.text(o["part"]), performer: J.text(o["performer"]), track: J.int(o["track"]), work: J.text(o["work"]), workId: J.text(o["work_id"]))
     }
 
-    public var json: String { J.obj(["\"album\":" + J.q(album), "\"bpm\":" + String(bpm), "\"catalogue\":" + J.q(catalogue), "\"composer\":" + J.q(composer), "\"licence\":" + J.q(licence), "\"media_id\":" + J.q(mediaId.hex), "\"part\":" + J.q(part), "\"performer\":" + J.q(performer), "\"track\":" + String(track), "\"work\":" + J.q(work)]) }
+    public var json: String { J.obj(["\"album\":" + J.q(album), "\"bpm\":" + String(bpm), "\"catalogue\":" + J.q(catalogue), "\"composer\":" + J.q(composer), "\"licence\":" + J.q(licence), "\"media_id\":" + J.q(mediaId.hex), "\"part\":" + J.q(part), "\"performer\":" + J.q(performer), "\"track\":" + String(track), "\"work\":" + J.q(work), "\"work_id\":" + J.q(workId)]) }
 }
 
 /// The record `Transfer`.
@@ -1495,6 +1510,9 @@ public struct Harken {
 
     /// `library.album`, kept, its rows UniFFI's.
     public func album(_ input: AlbumInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.album", input: input.json)) }
+
+    /// `library.album_credits`, kept.
+    public func albumCredits(_ input: AlbumCredits) throws -> LiveView<CreditsEntry> { LiveView(try peer.view(name: "library.album_credits", input: input.json)) { j in CreditsEntry(json: j) } }
 
     /// `library.albums`, kept.
     public func albums() throws -> LiveView<AlbumsEntry> { LiveView(try peer.view(name: "library.albums", input: "null")) { j in AlbumsEntry(json: j) } }

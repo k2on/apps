@@ -219,21 +219,30 @@ pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, o
 }
 
 /// The line under a section that opens the rest of it — "See All 40
-/// Works" — in the accent, its chevron where an entry's is.
-pub fn more<'a, M: Clone + 'a>(label: &str, open: M) -> Element<'a, M> {
+/// Works" — in the accent, its chevron where an entry's is; `lit` under
+/// the cursor, filled as the cursor's row is. Opening it is the caller's.
+pub fn more<'a, M: 'a>(label: &str, lit: bool) -> Element<'a, M> {
     let line = row![
-        text(label.to_string()).size(14).style(style::accent),
+        text(label.to_string()).size(14).style(move |t| match lit {
+            true => text::Style {
+                color: Some(theme::of(t).primary.base.text),
+            },
+            false => style::accent(t),
+        }),
         Space::new().width(Length::Fill),
         text("\u{203A}").size(18).style(style::faint(0.45)),
     ]
     .align_y(Alignment::Center);
-    mouse_area(container(line).padding(Padding {
-        top: 12.0,
-        right: 4.0,
+    container(container(line).padding([4, 6]).style(move |t| match lit {
+        true => style::row(t, true, true, false),
+        false => container::Style::default(),
+    }))
+    .padding(Padding {
+        top: 8.0,
+        right: 0.0,
         bottom: 4.0,
         left: 0.0,
-    }))
-    .on_press(open)
+    })
     .into()
 }
 

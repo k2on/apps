@@ -30,6 +30,7 @@ mod auth;
 mod client;
 mod domain;
 mod listening;
+mod nav;
 mod palette;
 mod peer;
 mod places;
@@ -183,6 +184,8 @@ pub enum Message {
     /// A key nothing on screen wanted.
     Key(iced::keyboard::Key, iced::keyboard::Modifiers),
     Resized(Size),
+    /// The wheel moved mostly sideways: perhaps a swipe back or forward.
+    Wheel(iced::mouse::ScrollDelta),
     /// The queue: open it, or close it — `q`, and the button on the bar.
     OpenQueue,
     CloseQueue,
@@ -538,8 +541,17 @@ pub struct App {
     pub window: Size,
     /// The address bar, reconciled after every update.
     pub router: Router<Place>,
+    /// A sideways trackpad gesture under way: back and forward, as a
+    /// browser has them ([`arkui::swipe`]).
+    pub swipe: arkui::swipe::Swipe,
     /// Where the pointer is.
     pub cursor: Point,
+    /// Where the pointer was when a key last moved the cursor, until it
+    /// moves: a list the keyboard scrolls slides rows under a pointer that
+    /// is standing still, and a row arriving under it is not somebody
+    /// pointing at it — taken as a hover, it pulled the cursor back under
+    /// the pointer at every step.
+    pub keyed: Option<Point>,
     pub player: Player,
     /// What `Skip` moves through: the list as it stood when play was pressed,
     /// as the tracks a hand-off carries — this device's own while it is its
@@ -622,6 +634,8 @@ impl App {
             queue_panel: None,
             window: Size::new(860.0, 600.0),
             router: Router::new(),
+            swipe: Default::default(),
+            keyed: None,
             cursor: Point::ORIGIN,
             player: Player::new(),
             queue: Vec::new(),
@@ -991,28 +1005,13 @@ impl App {
         arkui::hero::columns(self.pane_width() - arkui::SCROLLBAR - 6.0)
     }
 
-    /// What shape a pane is, which is all `vim` needs to know about it.
-    pub fn shape(&self, pane: Pane) -> vim::Grid {
-        let p = &self.peer;
+    /// What shape a pane is, which is all `vim` needs to know about it: the
+    /// sidebar a column, and the page everything on it a click opens
+    /// ([`nav`]) — its main list first, as it always was.
+    pub fn shape(&self, pane: Pane) -> vim::Page {
         match pane {
-            Pane::Sidebar => vim::Grid::column(p.choices.len()),
-            // The only pane ever more than one column: an index page is rows
-            // of cards. A work's recordings are rows, so a column: `h` there
-            // hands the cursor back to the sidebar.
-            Pane::Tracks => match &p.source {
-                Source::Albums => SHELF.grid(p.albums().len(), self.pane_width()),
-                Source::Artists => SHELF.grid(p.artists().len(), self.pane_width()),
-                Source::Composers => SHELF.grid(p.composers().len(), self.pane_width()),
-                Source::Artist(_) if !p.works().is_empty() => vim::Grid {
-                    cells: self.listed_works().len(),
-                    columns: self.listing_columns(),
-                },
-                Source::Work(..) => vim::Grid {
-                    cells: p.recordings().len(),
-                    columns: self.listing_columns(),
-                },
-                _ => vim::Grid::column(p.rows().len()),
-            },
+            Pane::Sidebar => vim::Page::single(vim::Grid::column(self.peer.choices.len())),
+            Pane::Tracks => self.layout().page,
         }
     }
 
@@ -1092,6 +1091,12 @@ impl App {
             vim::Action::Cycle => {
                 self.pane = self.pane.next();
                 self.reveal()
+            }
+            // Back and forward, the way the browser's buttons go: the bar
+            // moves, and the next update arrives where it went.
+            vim::Action::Jump(by) => {
+                self.router.go(by);
+                Task::none()
             }
             vim::Action::Toggle => self.update(Message::PlayPause),
             vim::Action::Search(query) => {
@@ -1224,7 +1229,7 @@ impl App {
             Pane::Sidebar => SIDEBAR,
             Pane::Tracks => TRACKS,
         };
-        arkui::scroll::reveal(id, self.shape(self.pane), self.at(self.pane))
+        arkui::scroll::reveal_to(id, self.shape(self.pane).progress(self.at(self.pane)))
     }
 
     /// Jump to the next label matching the last search, from `from`
@@ -1659,6 +1664,10 @@ impl App {
                 self.reveal()
             }
             Pane::Tracks => {
+                // A name, a button, a record on a shelf: what its click does.
+                if let Some(m) = self.layout().message(at).cloned() {
+                    return self.update(m);
+                }
                 if let Some(source) = self.card_under_cursor(at) {
                     return self.update(Message::Select(source));
                 }
@@ -1864,7 +1873,7 @@ impl App {
     /// `rows` themselves, taken now: skipping follows the list you pressed
     /// play in. The rows are copied rather than referred to — a device handed
     /// the session may not have that album yet.
-    fn play(&mut self, rows: &[rows::Item], at: Option<Id>, from: String) -> Task<Message> {
+    fn play_rows(&mut self, rows: &[rows::Item], at: Option<Id>, from: String) -> Task<Message> {
         if rows.is_empty() {
             return Task::none();
         }
@@ -1985,6 +1994,7 @@ impl App {
                 }
             }
             Message::Key(key, mods) => {
+                self.keyed = Some(self.cursor);
                 // `None` is still typing: a count, a `g`, a search — drawn in
                 // the status line so nothing swallowed is a mystery.
                 let action = self.keys.press(&key, mods);
@@ -2004,12 +2014,17 @@ impl App {
             Message::Resized(size) => {
                 self.window = size;
             }
+            Message::Wheel(delta) => self.swipe.feed(delta, iced::time::Instant::now()),
             Message::HoverAt(at) => {
                 // Not while a context window is up. A backdrop stops a click
                 // and a wheel, but a hover is published by the row itself and
                 // falls through every layer — so the cursor the menu is about
                 // would creep away under it.
                 if !matches!(self.focus(), Focus::Pane(_)) {
+                    return Task::none();
+                }
+                // Nor while the keys are driving and the pointer has not moved.
+                if self.keyed.is_some() {
                     return Task::none();
                 }
                 // Takes the keyboard as well as the highlight: the cursor is
@@ -2019,7 +2034,12 @@ impl App {
             }
             Message::Cover(done) => self.covers.loaded(done),
             Message::Banner(done) => self.banners.loaded(done),
-            Message::Hover(at) => self.cursor = at,
+            Message::Hover(at) => {
+                if self.keyed.is_some_and(|k| k != at) {
+                    self.keyed = None;
+                }
+                self.cursor = at;
+            }
             Message::MenuAt(at) => self.ctx.land(at),
             Message::MenuActivate => {
                 if let Some(m) = self.ctx.chosen() {
@@ -2140,14 +2160,14 @@ impl App {
             // The queue is what is on screen.
             Message::PlayItem(id) => {
                 let rows = self.peer.rows().to_vec();
-                return self.play(&rows, Some(id), self.from());
+                return self.play_rows(&rows, Some(id), self.from());
             }
             // The performance's movements, read when it is pressed: the page
             // it is pressed on lists performances, not tracks.
             Message::PlayRecording(take) => {
                 let rows = self.peer.recording_rows(&take);
                 let from = arkui::route::Route::fragment(&Place::Recording(take));
-                return self.play(&rows, None, from);
+                return self.play_rows(&rows, None, from);
             }
             Message::PlayWork(work) => {
                 let Some(take) = self.peer.recordings_of(&work).into_iter().next() else {
@@ -2254,6 +2274,11 @@ impl App {
             // is shown rather than entered. The clock runs only while it can.
             Message::Tick => {
                 self.release_volume(false);
+                // A swipe let go far enough: the bar moves, and the next
+                // update arrives where it went.
+                if let Some(by) = self.swipe.tick(iced::time::Instant::now()) {
+                    self.router.go(by);
+                }
                 if let Some(m) = self.ctx.tick() {
                     return self.update(m);
                 }
@@ -2345,6 +2370,11 @@ impl App {
     pub fn clock(&self) -> Option<Duration> {
         // A volume the throttle holds is sent by the clock, the last value
         // of a drag that stopped moving without being let go.
+        // A swipe under way draws a frame at a time: the page follows the
+        // fingers, and springs back.
+        if self.swipe.active() {
+            return Some(Duration::from_millis(16));
+        }
         if self.ctx.dwelling() || self.volume_held.is_some() {
             return Some(Duration::from_millis(50));
         }
@@ -2398,6 +2428,17 @@ impl App {
             // Only the presses no widget took: a focused text box consumes its
             // own, so typing a playlist's name cannot walk the cursor.
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),
+            // The wheel, when it moves mostly sideways — whichever widget
+            // took it, since a list scrolls down and a swipe is sideways.
+            iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                    let (x, y) = match delta {
+                        iced::mouse::ScrollDelta::Pixels { x, y } | iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
+                    };
+                    (x.abs() > y.abs()).then_some(Message::Wheel(delta))
+                }
+                _ => None,
+            }),
         ];
         // One timer for the next deadline, keyed by it: the same deadline on
         // every call is the timer already running. Two milliseconds late

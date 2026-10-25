@@ -65,6 +65,9 @@ pub enum Action {
     Cycle,
     /// `<Esc>` — drop whatever was half-typed.
     Cancel,
+    /// `^O` and `^I`, vim's jump list: where you were before, and back again
+    /// — `-1` and `1`, which a browser calls back and forward.
+    Jump(isize),
     /// Keys an application binds for itself: `a`, `m`, `?`. Held apart from the
     /// motions so that adding one cannot change the grammar.
     Key(char),
@@ -151,12 +154,15 @@ impl Keys {
             };
         }
 
-        // `^D` and `^U`, which are the only chorded keys in the grammar.
+        // `^D` and `^U`, and `^O` and `^I`: the only chorded keys in the
+        // grammar.
         if mods.control() {
             if let Key::Character(c) = key {
                 return match c.as_str() {
                     "d" => Some(Action::Move(Motion::Down(PAGE))),
                     "u" => Some(Action::Move(Motion::Up(PAGE))),
+                    "o" => Some(Action::Jump(-1)),
+                    "i" => Some(Action::Jump(1)),
                     _ => None,
                 };
             }
@@ -356,6 +362,123 @@ impl Grid {
             return 0.0;
         }
         ((at / columns) as f32 / (rows - 1) as f32).clamp(0.0, 1.0)
+    }
+}
+
+/// One block of a [`Page`]: the cells it draws, as the page numbers them,
+/// in reading order, `columns` to a row.
+///
+/// A cell may be named twice: a row of a track and the performer under it,
+/// where a track with no performer to open names itself again — `l` there
+/// goes nowhere, as it would off the end of a row.
+#[derive(Debug, Clone, Default)]
+pub struct Section {
+    pub ids: Vec<usize>,
+    pub columns: usize,
+}
+
+impl Section {
+    /// `cells` numbered from `base`, `columns` across.
+    pub fn run(base: usize, cells: usize, columns: usize) -> Section {
+        Section {
+            ids: (base..base + cells).collect(),
+            columns,
+        }
+    }
+
+    fn grid(&self) -> Grid {
+        Grid {
+            cells: self.ids.len(),
+            columns: self.columns.max(1),
+        }
+    }
+
+    fn rows(&self) -> usize {
+        self.ids.len().div_ceil(self.columns.max(1))
+    }
+}
+
+/// Everything on a page a cursor can be on, as the blocks it is drawn in
+/// from the top: a header's links, a list, the links between its runs, a
+/// shelf of records under it.
+///
+/// **The numbering is not the drawing order.** The page's main list keeps
+/// the numbers it always had, `0..main` — a track is still its row, and
+/// `7G` is still the seventh — and everything else is numbered after it,
+/// wherever it is drawn. `j` and `k` go by the drawing: refused at the foot
+/// of one block they carry on into the head of the next, keeping the column
+/// where it has one; `gg`, `G` and `{count}G` go along the main list. `h`
+/// and `l` stay in their block, so a refusal still reads as "the pane that
+/// way".
+#[derive(Debug, Clone, Default)]
+pub struct Page {
+    pub sections: Vec<Section>,
+    /// How many cells the main list has: the ones numbered `0..main`.
+    pub main: usize,
+}
+
+impl Page {
+    /// A page that is one grid, all of it the main list.
+    pub fn single(grid: Grid) -> Page {
+        Page {
+            sections: vec![Section::run(0, grid.cells, grid.columns)],
+            main: grid.cells,
+        }
+    }
+
+    /// Every cell, once.
+    pub fn cells(&self) -> usize {
+        let mut ids: Vec<usize> = self.sections.iter().flat_map(|s| s.ids.iter().copied()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids.len()
+    }
+
+    /// Where `at` is drawn: its block, and its place in it.
+    fn find(&self, at: usize) -> Option<(usize, usize)> {
+        self.sections
+            .iter()
+            .enumerate()
+            .find_map(|(s, sec)| sec.ids.iter().position(|&i| i == at).map(|p| (s, p)))
+    }
+
+    /// Where `motion` lands from `from`, or `None` when nothing is that way.
+    pub fn step(&self, from: usize, motion: Motion) -> Option<usize> {
+        if let Motion::First | Motion::Last | Motion::To(_) = motion {
+            return Grid::column(self.main).step(0, motion);
+        }
+        let (s, p) = self.find(from)?;
+        let sec = &self.sections[s];
+        let column = p % sec.columns.max(1);
+        if let Some(to) = sec.grid().step(p, motion) {
+            // A cell named twice is one cell: stepping onto its other name
+            // is going nowhere.
+            return (sec.ids[to] != from).then_some(sec.ids[to]);
+        }
+        let land = |n: &Section, row_start: usize| n.ids[(row_start + column.min(n.columns.max(1) - 1)).min(n.ids.len() - 1)];
+        match motion {
+            Motion::Down(_) => self.sections[s + 1..].iter().find(|n| !n.ids.is_empty()).map(|n| land(n, 0)),
+            Motion::Up(_) => self.sections[..s].iter().rev().find(|n| !n.ids.is_empty()).map(|n| {
+                let columns = n.columns.max(1);
+                land(n, (n.ids.len() - 1) / columns * columns)
+            }),
+            _ => None,
+        }
+    }
+
+    /// How far down the page cell `at` sits, 0 to 1, by rows drawn: every
+    /// block's rows counted in order.
+    pub fn progress(&self, at: usize) -> f32 {
+        let total: usize = self.sections.iter().map(Section::rows).sum();
+        let Some((s, p)) = self.find(at) else {
+            return 0.0;
+        };
+        let before: usize = self.sections[..s].iter().map(Section::rows).sum();
+        let row = before + p / self.sections[s].columns.max(1);
+        match total {
+            0 | 1 => 0.0,
+            t => (row as f32 / (t - 1) as f32).clamp(0.0, 1.0),
+        }
     }
 }
 
@@ -594,5 +717,53 @@ mod tests {
         assert_eq!(find(&labels, "bach", 3, 1), Some(1), "past the last it wraps to the first");
         assert_eq!(find(&labels, "bach", 1, -1), Some(3), "…and back past the first to the last");
         assert_eq!(find(&labels, "mozart", 0, 1), None);
+    }
+
+    /// A page of a header link, a list of three with a link beside the
+    /// middle one, and a shelf of two: `j` and `k` cross from block to block,
+    /// `l` reaches the link beside a row and nowhere beside the others, and
+    /// `gg`/`G` stay on the list. Falsified by refusing at a block's edge
+    /// (the first assertion), or by letting a cell named twice be stepped onto
+    /// (`l` on row 0 answered 0).
+    #[test]
+    fn a_page_crosses_its_blocks_and_keeps_its_list_numbered() {
+        // 3          (the header link)
+        // 0 0        (a row whose performer opens nothing)
+        // 1 4        (a row and its performer's link)
+        // 2 2
+        // 5 6        (a shelf)
+        let page = Page {
+            sections: vec![
+                Section { ids: vec![3], columns: 1 },
+                Section {
+                    ids: vec![0, 0, 1, 4, 2, 2],
+                    columns: 2,
+                },
+                Section::run(5, 2, 2),
+            ],
+            main: 3,
+        };
+        assert_eq!(page.step(3, Motion::Down(1)), Some(0), "header into the list");
+        assert_eq!(page.step(0, Motion::Up(1)), Some(3), "and back");
+        assert_eq!(page.step(0, Motion::Right(1)), None, "nothing beside the first row");
+        assert_eq!(page.step(1, Motion::Right(1)), Some(4), "the second row's link");
+        assert_eq!(page.step(4, Motion::Down(1)), Some(2), "down the link column lands on the row");
+        assert_eq!(page.step(2, Motion::Down(1)), Some(5), "out of the list onto the shelf");
+        assert_eq!(page.step(4, Motion::Left(1)), Some(1));
+        assert_eq!(page.step(6, Motion::Up(1)), Some(2), "the shelf's right-hand card up to the last row");
+        assert_eq!(page.step(5, Motion::Last), Some(2), "G is the list's last");
+        assert_eq!(page.step(6, Motion::First), Some(0));
+        assert_eq!(page.step(3, Motion::To(2)), Some(1), "2G is the second row");
+        assert_eq!(page.cells(), 7);
+        assert_eq!(page.progress(3), 0.0);
+        assert_eq!(page.progress(5), 1.0);
+    }
+
+    #[test]
+    fn ctrl_o_and_ctrl_i_jump_back_and_forward() {
+        let mut keys = Keys::new();
+        let ctrl = Modifiers::CTRL;
+        assert_eq!(keys.press(&Key::Character("o".into()), ctrl), Some(Action::Jump(-1)));
+        assert_eq!(keys.press(&Key::Character("i".into()), ctrl), Some(Action::Jump(1)));
     }
 }

@@ -17,6 +17,8 @@ mod context;
 #[cfg(feature = "demo")]
 mod demo;
 #[cfg(feature = "demo")]
+mod keys;
+#[cfg(feature = "demo")]
 mod views;
 
 use crate::domain::AddSong;
