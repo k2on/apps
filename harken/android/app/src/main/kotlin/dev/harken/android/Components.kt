@@ -1,26 +1,35 @@
 // The pieces harken's screens are made of that are harken's: a track's row
-// and its number, a page's header with Play and Shuffle, and the banner a
-// server that cannot be reached puts over everything. The rest — headings,
+// and its number, a page's header with Play and Shuffle, the banner a
+// server that cannot be reached puts over everything, and a catalogue's
+// pieces (below). The rest — headings,
 // shelves, cards, rows that open something, a row's menu button, what an
 // empty list says — is `ark-ui`'s (`dev.arkdb.ui`). Drawn from plain values
 // and the theme, so a screen is a function of its data and can be rendered
 // without a phone (the screenshots).
 package dev.harken.android
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -30,14 +39,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.harken.android.ui.ArkGlyphs
+import dev.harken.android.ui.Chevron
+import dev.harken.android.ui.Cover
 import dev.harken.android.ui.Glyph
 import dev.harken.android.ui.LocalPageFrame
 import dev.harken.android.ui.MoreButton
@@ -47,6 +62,7 @@ import dev.harken.android.ui.RowOrigin
 import dev.harken.android.ui.Space
 import dev.harken.android.ui.Tapped
 import dev.harken.android.ui.quiet
+import dev.harken.android.ui.rememberHero
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {
@@ -55,6 +71,12 @@ interface Do {
     fun play(queue: List<Track>, at: Int, from: Page?) {}
 
     fun shuffle(queue: List<Track>, from: Page?) {}
+
+    /** Start one performance (its key) from its first movement, the queue its movements: read when pressed. */
+    fun playRecording(id: String) {}
+
+    /** Start a work (its key): its most complete performance. */
+    fun playWork(id: String) {}
 
     /** The row's menu, about `track`, on a list that came from `from`. */
     fun more(track: Track, from: Page?) {}
@@ -211,5 +233,218 @@ fun Offline(host: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+// A catalogue's pieces ---------------------------------------------------------------------------
+//
+// What the pages about a composer, a work, a performance and a record are made of, as the
+// desktop's are (`rust/arkui/src/hero.rs`, `harken/iced/src/view.rs`): a banner with the name on
+// it, a header with the cover beside the words, a section's heading in the serif, the one thing
+// set apart with a Play, a listing's entry over its hairline, a work's heading over its
+// movements, and a record's small print.
+
+/** The tallest a banner is drawn, the desktop's: its whole shape on a page about 1250 wide. */
+val BANNER_TALLEST = 486.dp
+
+/** A banner's shape, width over height: a painting cut for one (2400×933). */
+const val BANNER_ASPECT = 2400f / 933f
+
+/**
+ * How tall a banner `width` wide is drawn on a phone. Its own shape would be a strip there (about
+ * 150 dp), so a phone crops it to a taller frame, as a catalogue's phone app does, the name on its
+ * lower edge; never past [BANNER_TALLEST].
+ */
+fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).coerceIn(200.dp, BANNER_TALLEST)
+
+/**
+ * Somebody's banner, edge to edge: their wide picture cropped to fill, `kind` in small capitals and
+ * `name` in the serif on its lower edge over a shade that keeps them legible, and back over its top.
+ * Until the picture arrives the derived square is drawn instead, so the name is already where it
+ * will be. A page grows out of a portrait into it.
+ */
+@Composable
+fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val w = maxWidth
+        Box(Modifier.fillMaxWidth().height(bannerHeight(w)).then(LocalPageFrame.current?.art?.modifier ?: Modifier)) {
+            Cover(seed, art, w, Modifier.fillMaxSize(), corner = 0.dp)
+            // Clear at the top, darkest at the foot, where the name is.
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Palette.Clear, 0.45f to Palette.Clear, 1f to Palette.Shade)))
+            Column(Modifier.align(Alignment.BottomStart).padding(start = Space.page, end = Space.page, bottom = Space.xl)) {
+                Text(kind.uppercase(), style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
+                Spacer(Modifier.height(Space.xs))
+                Text(name, style = SerifType.banner, color = Palette.OnShade)
+            }
+            Box(Modifier.padding(Space.xs).size(48.dp).clip(CircleShape).background(Palette.Shade).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
+                Icon(ArkGlyphs.Back, contentDescription = "Back", tint = Palette.OnShade, modifier = Modifier.size(24.dp))
+            }
+        }
+    }
+}
+
+/** A section's heading, in the serif, with what opens the rest of it at its end. */
+@Composable
+fun SerifHeading(title: String, modifier: Modifier = Modifier) {
+    Text(title, style = SerifType.heading, modifier = modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.xl, bottom = Space.s))
+}
+
+/** A Play, small and in the accent's tone: what a header and a featured performance start with. */
+@Composable
+fun PlayPill(onPlay: () -> Unit, enabled: Boolean = true) {
+    FilledTonalButton(onClick = onPlay, enabled = enabled, contentPadding = PaddingValues(horizontal = Space.l), modifier = Modifier.height(36.dp)) {
+        Glyph(Glyphs.Play, null, size = 14.dp)
+        Spacer(Modifier.width(Space.s))
+        Text("Play")
+    }
+}
+
+/**
+ * The header a record's page opens with, as a catalogue sets one: the cover beside a line of small
+ * capitals (`over`, whose it is), the title in the serif, who played it in the accent, a small line
+ * under (`small`), and Play and Shuffle. A line that goes somewhere opens it.
+ */
+@Composable
+fun CoverHeader(
+    seed: String,
+    art: String,
+    title: String,
+    over: String? = null,
+    onOver: (() -> Unit)? = null,
+    by: String? = null,
+    small: String? = null,
+    onSmall: (() -> Unit)? = null,
+    round: Boolean = false,
+    canPlay: Boolean = false,
+    onPlay: (() -> Unit)? = null,
+    onShuffle: (() -> Unit)? = null,
+) {
+    Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.s, bottom = Space.l), verticalAlignment = Alignment.CenterVertically) {
+        val side = 132.dp
+        // Where the art a page grew from lands.
+        Box(LocalPageFrame.current?.art?.modifier ?: Modifier) { Cover(seed, art, side, Modifier.size(side), round = round, corner = 6.dp) }
+        Spacer(Modifier.width(Space.l))
+        Column(Modifier.weight(1f)) {
+            if (!over.isNullOrEmpty()) {
+                Text(over.uppercase(), style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.clickable(onClick = onOver) else Modifier)
+                Spacer(Modifier.height(Space.xs))
+            }
+            Text(title, style = SerifType.title.copy(fontSize = SerifType.title.fontSize * 0.86f, lineHeight = SerifType.title.lineHeight * 0.86f))
+            if (!by.isNullOrEmpty()) Text(by, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.xs))
+            if (!small.isNullOrEmpty()) {
+                Text(small, style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(top = Space.xs).then(if (onSmall != null) Modifier.clickable(onClick = onSmall) else Modifier))
+            }
+            if (onPlay != null) {
+                Spacer(Modifier.height(Space.m))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+                    PlayPill(onPlay, enabled = canPlay)
+                    if (onShuffle != null) {
+                        IconButton(onClick = onShuffle, enabled = canPlay) { Glyph(Glyphs.Shuffle, "Shuffle", size = 20.dp) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One thing set apart at the head of a section, the one to start with: its cover beside `label`
+ * in small capitals, its title, its facts, and a Play. The cover and the title open it, the page
+ * growing out of the cover.
+ */
+@Composable
+fun Featured(label: String, seed: String, art: String, title: String, facts: String, onPlay: () -> Unit, onOpen: () -> Unit) {
+    val hero = rememberHero(6.dp)
+    val open = hero.lifting(onOpen)
+    Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.l, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+        Cover(seed, art, 112.dp, Modifier.size(112.dp).then(hero.modifier).clickable(onClick = open), corner = 6.dp)
+        Spacer(Modifier.width(Space.l))
+        Column(Modifier.weight(1f)) {
+            Text(label.uppercase(), style = quiet(MaterialTheme.typography.labelSmall))
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = open))
+            if (facts.isNotEmpty()) Text(facts, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(Space.s))
+            PlayPill(onPlay)
+        }
+    }
+}
+
+/**
+ * One entry of a catalogue's listing over its hairline: a picture at its left when it has one,
+ * a line of small capitals over its title (who it is by), a line under, a count at its right, and
+ * the chevron. The whole entry opens it.
+ */
+@Composable
+fun Entry(title: String, over: String, under: String, count: String, onOpen: () -> Unit, picture: (@Composable (Modifier) -> Unit)? = null) {
+    val hero = if (picture != null) rememberHero(4.dp) else null
+    Column(Modifier.fillMaxWidth().clickable(onClick = hero?.lifting(onOpen) ?: onOpen).padding(start = Space.page)) {
+        Row(Modifier.fillMaxWidth().padding(end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
+            if (picture != null && hero != null) {
+                picture(hero.modifier)
+                Spacer(Modifier.width(Space.m))
+            }
+            Column(Modifier.weight(1f)) {
+                if (over.isNotEmpty()) Text(over.uppercase(), style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
+                Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (under.isNotEmpty()) Text(under, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (count.isNotEmpty()) Text(count, style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(horizontal = Space.s))
+            Chevron()
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+/** The line under a section that opens the rest of it — "See All 40 Works" — in the accent. */
+@Composable
+fun MoreLine(label: String, onOpen: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = Space.page, end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+        Chevron()
+    }
+}
+
+/**
+ * A work's heading on a record: its composer in small capitals over its title in the serif, and
+ * how long the run of it under the heading lasts, where the tracks' lengths are.
+ */
+@Composable
+fun WorkHeading(composer: String, work: String, ms: Long, first: Boolean) {
+    Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs + 48.dp + Space.s, top = if (first) Space.s else Space.xl, bottom = Space.xs), verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f)) {
+            if (composer.isNotEmpty()) Text(composer.uppercase(), style = quiet(MaterialTheme.typography.labelSmall))
+            Text(work, style = SerifType.work)
+        }
+        if (ms > 0) Text(Media.clock(ms), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(start = Space.s))
+    }
+}
+
+/** A record's small print: when, how much, and whose label. */
+@Composable
+fun Foot(tracks: List<Track>, year: Long, label: String) {
+    Column(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.xl)) {
+        if (year > 0) Text(year.toString(), style = quiet(MaterialTheme.typography.bodySmall))
+        val ms = tracks.sumOf { it.durationMs }
+        Text(Media.count(tracks.size, "track") + if (ms > 0) ", " + Media.spell(ms) else "", style = quiet(MaterialTheme.typography.bodySmall))
+        if (label.isNotEmpty()) {
+            Spacer(Modifier.height(Space.l))
+            Text("RECORD LABEL", style = quiet(MaterialTheme.typography.labelSmall))
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+/** A person on a recording, as a face: their portrait, their name, what they did. Opens their page where they have one. */
+@Composable
+fun Face(name: String, art: String, role: String, onOpen: (() -> Unit)?) {
+    val hero = if (onOpen != null) rememberHero(Space.corner, round = true) else null
+    Column(
+        Modifier.width(104.dp).then(if (onOpen != null && hero != null) Modifier.clickable(onClick = hero.lifting(onOpen)) else Modifier),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Cover(name, art, 88.dp, Modifier.size(88.dp).then(hero?.modifier ?: Modifier), round = true)
+        Spacer(Modifier.height(Space.s))
+        Text(name, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (role.isNotEmpty()) Text(role, style = quiet(MaterialTheme.typography.bodySmall), textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

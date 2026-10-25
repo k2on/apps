@@ -200,7 +200,7 @@ class Screens {
         }
     }
 
-    private val data = LibraryData(true, Demo.playlists, Demo.albums, Demo.artists, Demo.tracks, null)
+    private val data = LibraryData(true, Demo.playlists, Demo.albums, Demo.artists, Demo.tracks, null, composers = Demo.composers)
 
     @Test
     fun b3_library() {
@@ -228,8 +228,36 @@ class Screens {
     fun c2_artist() {
         val name = "George Frideric Handel"
         val tracks = Demo.artist(name)
-        val albums = tracks.mapNotNull { Demo.details[it.id]?.album }.distinct().mapNotNull { a -> Demo.albums.firstOrNull { it.name == a } }
-        shot("handel") { tab(Tab.Library) { ArtistPage(name, Demo.artists.first { it.name == name }, tracks, albums, Demo::albumOf, hornpipe.id.hex, Idle) } }
+        val albums = Demo.albums.filter { it.creator == name }
+        val works = Demo.works(name)
+        val handel = Demo.composers.first { it.name == name }
+        val artist = Demo.artists.first { it.name == name }
+        shot("handel") { tab(Tab.Library) { ArtistPage(name, artist, tracks, albums, Demo::albumOf, hornpipe.id.hex, Idle, Demo.details, handel, works) } }
+        shot("handel-banner") {
+            tab(Tab.Library) { ArtistPage(name, artist.copy(banner = "banners/handel.jpg", born = 1685, died = 1759), tracks, albums, Demo::albumOf, null, Idle, Demo.details, handel, works) }
+        }
+        // Somebody who wrote no works: their songs, under their records.
+        val bach = "Johann Sebastian Bach"
+        shot("songs") { tab(Tab.Library) { ArtistPage(bach, Demo.artists.first { it.name == bach }, Demo.album("Goldberg Variations, BWV 988"), emptyList(), Demo::albumOf, null, Idle, Demo.details) } }
+    }
+
+    @Test
+    fun c4_work() {
+        val work = Demo.works("George Frideric Handel").first { it.title == "Water Music" }
+        shot("water-music-work") { tab(Tab.Library) { WorkPage(work.id, work, Demo.recordings("Water Music"), Idle) } }
+        val messiah = Demo.works("George Frideric Handel").first { it.title == "Messiah" }
+        shot("one-recording") { tab(Tab.Library) { WorkPage(messiah.id, messiah, Demo.recordings("Messiah"), Idle) } }
+    }
+
+    @Test
+    fun c5_recording() {
+        val work = Demo.works("George Frideric Handel").first { it.title == "Water Music" }
+        val take = Demo.recordings("Water Music").first()
+        val tracks = Demo.album("Water Music").filter { Demo.details[it.id]?.performer == take.performers }
+        val people = listOf(OnRecording("George Frideric Handel", "Composer", "", Page.ForArtist("George Frideric Handel")), OnRecording(take.performers, "performer", "", null))
+        shot("marine-band") {
+            tab(Tab.Library) { RecordingPage(take.id, work, take, tracks, Demo.details, Demo.albums.filter { it.name == "Water Music" }, people, hornpipe.id.hex, Idle) }
+        }
     }
 
     @Test
