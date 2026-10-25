@@ -12,12 +12,17 @@
 //! [`Swipe::active`], and on each frame asks [`Swipe::tick`] whether the
 //! fingers have let go — and where to.
 //!
-//! **Letting go is the wheel falling quiet.** A wheel event carries no
-//! touch phase here, only a distance; so a gesture ends when no event has
-//! come for [`LET_GO`]. A trackpad that coasts after the fingers lift keeps
-//! the gesture going until it stops, which reads as the fingers letting go
-//! a moment late. Whatever is still arriving after a gesture ends is its
+//! **Letting go is the fingers lifting.** A wheel event here carries only a
+//! distance, no touch phase — but where the system says when the fingers
+//! lift (Wayland, macOS), that arrives as a wheel event that moved nowhere,
+//! and that is the gesture's end. Fingers held still are still down. Where
+//! no such event has ever come (X11, a browser), a gesture ends when no event
+//! has come for [`LET_GO`] instead. A trackpad that coasts after the fingers
+//! lift keeps sending; whatever still arrives after a gesture ends is its
 //! coast, and is spent until the wheel has been quiet for [`QUIET`].
+//!
+//! The arrow shows, and a gesture goes, only the ways there is somewhere to
+//! go ([`Swipe::allow`]).
 use iced::mouse::ScrollDelta;
 use iced::time::{Duration, Instant};
 use iced::widget::{container, stack};
@@ -29,8 +34,9 @@ use crate::{glyphs, icon, theme};
 /// letting go would move.
 pub const FAR: f32 = 160.0;
 
-/// How long the wheel is still before the fingers count as lifted.
-pub const LET_GO: Duration = Duration::from_millis(90);
+/// How long the wheel is still before the fingers count as lifted, where
+/// the system never says.
+pub const LET_GO: Duration = Duration::from_millis(150);
 
 /// How long the wheel is still before what arrives is a new gesture rather
 /// than the last one coasting.
@@ -64,6 +70,13 @@ pub struct Swipe {
     last: Option<Instant>,
     /// How far it has gone down, to tell a sideways pull from a scroll.
     y: f32,
+    /// The fingers lifted since the last event.
+    lifted: bool,
+    /// The system has said when fingers lift, so only that ends a gesture.
+    told: bool,
+    /// Whether there is somewhere back, and somewhere forward.
+    back: bool,
+    forward: bool,
 }
 
 /// Pulled `x`, drawn: as far as the fingers at first, and ever less for
@@ -79,6 +92,14 @@ impl Swipe {
             ScrollDelta::Pixels { x, y } => (x, y),
             ScrollDelta::Lines { x, y } => (x * LINE, y * LINE),
         };
+        // Moved nowhere: the fingers lifted. It is not motion, so it neither
+        // starts a gesture nor keeps a coast going.
+        if dx == 0.0 && dy == 0.0 {
+            self.told = true;
+            self.lifted = matches!(self.state, Pulling { .. });
+            return;
+        }
+        self.lifted = false;
         let quiet = self.last.is_none_or(|t| now.duration_since(t) > QUIET);
         self.last = Some(now);
         match self.state {
@@ -98,10 +119,15 @@ impl Swipe {
     /// just let go far enough sideways — fingers to the right are back, as a
     /// browser has it.
     pub fn tick(&mut self, now: Instant) -> Option<isize> {
+        let let_go = match self.told {
+            true => self.lifted,
+            false => self.last.is_some_and(|t| now.duration_since(t) > LET_GO),
+        };
         match self.state {
-            Pulling { x } if self.last.is_some_and(|t| now.duration_since(t) > LET_GO) => {
+            Pulling { x } if let_go => {
+                self.lifted = false;
                 self.state = Settling { x, at: now };
-                (self.armed_at(x)).then_some(if x > 0.0 { -1 } else { 1 })
+                (self.armed_at(x)).then_some(Self::way(x))
             }
             Settling { at, .. } if now.duration_since(at) > BACK && self.last.is_some_and(|t| now.duration_since(t) > QUIET) => {
                 self.state = Idle;
@@ -111,8 +137,31 @@ impl Swipe {
         }
     }
 
+    /// Say which ways there is somewhere to go: an arrow is drawn, and a
+    /// gesture goes, only those ways.
+    pub fn allow(&mut self, back: bool, forward: bool) {
+        self.back = back;
+        self.forward = forward;
+    }
+
+    /// Fingers to the right are back, as a browser has it.
+    fn way(x: f32) -> isize {
+        if x > 0.0 {
+            -1
+        } else {
+            1
+        }
+    }
+
+    fn open(&self, x: f32) -> bool {
+        match Self::way(x) {
+            -1 => self.back,
+            _ => self.forward,
+        }
+    }
+
     fn armed_at(&self, x: f32) -> bool {
-        x.abs() >= FAR && x.abs() >= 2.0 * self.y
+        x.abs() >= FAR && x.abs() >= 2.0 * self.y && self.open(x)
     }
 
     /// Whether a gesture is under way, and so frames are wanted.
@@ -124,7 +173,7 @@ impl Swipe {
     pub fn offset(&self, now: Instant) -> f32 {
         match self.state {
             Idle => 0.0,
-            Pulling { x } if x.abs() < 2.0 * self.y => 0.0,
+            Pulling { x } if x.abs() < 2.0 * self.y || !self.open(x) => 0.0,
             Pulling { x } => band(x),
             Settling { x, at } => {
                 let t = (now.duration_since(at).as_secs_f32() / BACK.as_secs_f32()).min(1.0);
@@ -138,10 +187,7 @@ impl Swipe {
     /// and whether letting go now would go: `None` while there is no pull.
     pub fn arrow(&self) -> Option<(isize, f32, bool)> {
         match self.state {
-            Pulling { x } if x.abs() >= 2.0 * self.y && x != 0.0 => {
-                let by = if x > 0.0 { -1 } else { 1 };
-                Some((by, (x.abs() / FAR).min(1.0), self.armed_at(x)))
-            }
+            Pulling { x } if x.abs() >= 2.0 * self.y && x != 0.0 && self.open(x) => Some((Self::way(x), (x.abs() / FAR).min(1.0), self.armed_at(x))),
             _ => None,
         }
     }
@@ -212,6 +258,7 @@ mod tests {
         let t = Instant::now();
         let ms = |n: u64| t + Duration::from_millis(n);
         let mut s = Swipe::default();
+        s.allow(true, true);
         s.feed(px(100.0, 0.0), ms(0));
         s.feed(px(100.0, 0.0), ms(16));
         assert_eq!(s.tick(ms(32)), None, "still down: nothing yet");
@@ -223,6 +270,7 @@ mod tests {
         assert_eq!(s.offset(ms(600)), 0.0, "and the page is back");
 
         let mut short = Swipe::default();
+        short.allow(true, true);
         short.feed(px(-80.0, 0.0), ms(2000));
         assert_eq!(short.arrow(), Some((1, 0.5, false)), "forward, half way, not armed");
         assert_eq!(short.tick(ms(2200)), None, "let go short: nowhere");
@@ -231,6 +279,41 @@ mod tests {
         down.feed(px(200.0, 150.0), ms(5000));
         assert_eq!(down.arrow(), None);
         assert_eq!(down.tick(ms(5200)), None, "mostly down is a scroll");
+    }
+
+    /// Where the system says when the fingers lift, only that lets go:
+    /// fingers held still past [`LET_GO`] are still down. Falsified by letting
+    /// go on the wheel falling quiet alone.
+    #[test]
+    fn a_pull_goes_only_when_the_fingers_lift() {
+        let t = Instant::now();
+        let ms = |n: u64| t + Duration::from_millis(n);
+        let mut s = Swipe::default();
+        s.allow(true, true);
+        s.feed(px(0.0, 0.0), ms(0));
+        s.feed(px(200.0, 0.0), ms(100));
+        assert_eq!(s.tick(ms(600)), None, "held still, still down");
+        assert!(s.arrow().is_some());
+        s.feed(px(0.0, 0.0), ms(700));
+        assert_eq!(s.tick(ms(716)), Some(-1), "lifted: back");
+    }
+
+    /// No arrow, and nowhere to go, the way there is nothing: at the first
+    /// page there is no back. Falsified by drawing the arrow either way.
+    #[test]
+    fn there_is_no_arrow_where_there_is_nowhere_to_go() {
+        let t = Instant::now();
+        let ms = |n: u64| t + Duration::from_millis(n);
+        let mut s = Swipe::default();
+        s.allow(false, true);
+        s.feed(px(200.0, 0.0), ms(0));
+        assert_eq!(s.arrow(), None, "nothing back");
+        assert_eq!(s.offset(ms(10)), 0.0);
+        assert_eq!(s.tick(ms(400)), None, "and it goes nowhere");
+        let mut f = Swipe::default();
+        f.allow(false, true);
+        f.feed(px(-200.0, 0.0), ms(1000));
+        assert_eq!(f.arrow().map(|a| a.0), Some(1), "forward is there");
     }
 
     /// The band gives a pixel for a pixel at first and never more than its

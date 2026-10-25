@@ -96,6 +96,10 @@ pub trait AddressBar {
     /// where to, as it does for the buttons themselves. Past either end, it
     /// stays.
     fn go(&mut self, by: isize);
+    /// Whether there is an entry `by` away to go to.
+    fn can_go(&self, _by: isize) -> bool {
+        true
+    }
 }
 
 /// The browser's address bar. On the desktop there is none, so this keeps
@@ -110,6 +114,20 @@ pub struct Browser {
     at: usize,
 }
 
+// Which entry of this app's own the browser is on: each is written with its
+// index as its state, counting from the one the app opened on (no state, 0),
+// and the furthest written is kept, so back stops at the first and forward at
+// the last. A reload forgets the furthest, and so whatever was forward of it.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static FURTHEST: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn entry(history: &web_sys::History) -> i32 {
+    history.state().ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as i32
+}
+
 #[cfg(target_arch = "wasm32")]
 impl AddressBar for Browser {
     fn read(&self) -> Option<String> {
@@ -121,10 +139,14 @@ impl AddressBar for Browser {
         let Some(history) = web_sys::window().and_then(|w| w.history().ok()) else {
             return;
         };
-        let null = wasm_bindgen::JsValue::NULL;
+        let at = entry(&history);
         let _ = match nav {
-            Nav::Push => history.push_state_with_url(&null, "", Some(fragment)),
-            Nav::Replace => history.replace_state_with_url(&null, "", Some(fragment)),
+            Nav::Push => {
+                // A new place drops whatever was forward of here.
+                FURTHEST.with(|f| f.set(at + 1));
+                history.push_state_with_url(&(at + 1).into(), "", Some(fragment))
+            }
+            Nav::Replace => history.replace_state_with_url(&at.into(), "", Some(fragment)),
         };
     }
 
@@ -132,6 +154,15 @@ impl AddressBar for Browser {
         if let Some(history) = web_sys::window().and_then(|w| w.history().ok()) {
             let _ = history.go_with_delta(by as i32);
         }
+    }
+
+    fn can_go(&self, by: isize) -> bool {
+        let Some(history) = web_sys::window().and_then(|w| w.history().ok()) else {
+            return false;
+        };
+        let at = entry(&history);
+        let to = at + by as i32;
+        to >= 0 && to <= FURTHEST.with(|f| f.get()).max(at)
     }
 }
 
@@ -156,6 +187,11 @@ impl AddressBar for Browser {
         if to >= 0 && (to as usize) < self.entries.len() {
             self.at = to as usize;
         }
+    }
+
+    fn can_go(&self, by: isize) -> bool {
+        let to = self.at as isize + by;
+        to >= 0 && (to as usize) < self.entries.len()
     }
 }
 
@@ -197,6 +233,12 @@ impl<R: Route, B: AddressBar> Router<R, B> {
     /// there by its next [`Router::poll`].
     pub fn go(&mut self, by: isize) {
         self.bar.go(by);
+    }
+
+    /// Whether there is anywhere `by` entries away: back (`-1`) at the first
+    /// place, forward (`1`) at the last, there is not.
+    pub fn can_go(&self, by: isize) -> bool {
+        self.bar.can_go(by)
     }
 
     /// Make the next [`Router::sync`] rewrite the current entry rather than add
