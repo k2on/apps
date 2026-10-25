@@ -135,6 +135,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                             is Page.ForAlbum -> "From ${f.name}"
                             is Page.ForArtist -> "From ${f.name}"
                             is Page.ForPlaylist -> data.playlists.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From a playlist"
+                            is Page.ForRecording -> "From a recording"
                             else -> "From your library"
                         }
                     item { LastCard(last, last.on ?: from, onResume = { act.resume(last) }) }
