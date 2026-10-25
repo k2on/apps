@@ -15,6 +15,12 @@ pub struct Account {
     /// May be empty.
     #[serde(default)]
     pub email: String,
+    /// Their picture, as the provider's `picture` claim has it: a URL of
+    /// the provider's, which a client loads through [`crate::picture_url`].
+    /// Empty when the provider has none, and for dev auth; absent from a
+    /// login written before it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub picture: String,
     /// `docs/plan-auth.md` The roles this person holds, as the server says
     /// at sign-in: what it was configured with for the account
     /// (`server::Auth::with_roles`) and, signed in through dev auth, what

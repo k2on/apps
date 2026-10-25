@@ -200,6 +200,7 @@ fn a_login_is_remembered_across_runs() {
             id: "alice".into(),
             name: "Alice".into(),
             email: String::new(),
+            picture: String::new(),
             roles: vec!["library".into()],
         },
         expires_ms: 42,

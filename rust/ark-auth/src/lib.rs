@@ -66,7 +66,7 @@ pub mod web;
 
 pub use login::{Account, Login};
 pub use rows::{feed, register, AuthTables, Grant, Revoke, Role, SignIn, Welcome, ADMIN};
-pub use util::{login_url, percent_decode, percent_encode, query_value, socket_url, with_code};
+pub use util::{login_url, percent_decode, percent_encode, picture_url, query_value, socket_url, with_code};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

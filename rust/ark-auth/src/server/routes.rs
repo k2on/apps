@@ -1,5 +1,5 @@
-//! Sign-in's routes (the `server` feature): `/auth/login`, its callback
-//! and the code's exchange, as an axum `Router`.
+//! Sign-in's routes (the `server` feature): `/auth/login`, its callback,
+//! the code's exchange and a person's picture, as an axum `Router`.
 
 use std::sync::Arc;
 
@@ -23,6 +23,7 @@ pub fn router(auth: Arc<Auth>) -> Router {
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/exchange", post(exchange))
+        .route("/auth/picture", get(picture))
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .with_state(auth)
 }
@@ -141,6 +142,33 @@ async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> 
     match auth.redeem(&body.code) {
         Some(login) => Json(login).into_response(),
         None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PictureQuery {
+    user: String,
+}
+
+/// A person's picture, fetched from their provider ([`Auth::picture`]):
+/// what a page cannot load from a provider that does not answer it with
+/// CORS. Asked by anybody, as `/media` is — a picture is what a person
+/// shows to whoever they are signed in beside — and kept a day by whoever
+/// asked: the address has a version in it (`crate::picture_url`).
+async fn picture(State(auth): State<Arc<Auth>>, Query(q): Query<PictureQuery>) -> Response {
+    match tokio::task::spawn_blocking(move || auth.picture(&q.user)).await {
+        Ok(Ok(Some(p))) => (
+            [
+                (header::CONTENT_TYPE, p.kind),
+                (header::CACHE_CONTROL, "public, max-age=86400".into()),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+            ],
+            p.bytes,
+        )
+            .into_response(),
+        Ok(Ok(None)) => (StatusCode::NOT_FOUND, "no picture").into_response(),
+        Ok(Err(e)) => (StatusCode::BAD_GATEWAY, e).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
     }
 }
 

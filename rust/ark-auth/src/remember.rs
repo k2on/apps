@@ -25,6 +25,10 @@ pub struct Remember {
     pub session: String,
     pub token: String,
     pub expires_ms: i64,
+    /// Defaulted, as `SignIn::picture` is: a login remembered before it
+    /// still opens.
+    #[serde(default)]
+    pub picture: String,
 }
 
 /// The logins a device remembers.
@@ -43,6 +47,7 @@ pub fn recall(db: &Db<Remembered>, server: &str) -> Option<Login> {
             id: r.user,
             name: r.name,
             email: r.email,
+            picture: r.picture,
             roles: r.roles,
         },
         expires_ms: r.expires_ms,
@@ -59,6 +64,7 @@ pub fn remember(db: &mut Db<Remembered>, server: &str, l: &Login) -> Result<(), 
         session: l.session.clone(),
         token: l.token.clone(),
         expires_ms: l.expires_ms,
+        picture: l.user.picture.clone(),
     })
 }
 
