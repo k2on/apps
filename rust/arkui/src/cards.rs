@@ -183,7 +183,7 @@ pub fn header<'a, M: Clone + 'a>(
             picture,
             column![
                 Line::new(kind, 10.0, Cut::End, faint),
-                text(name).size(28).font(crate::hero::SERIF).wrapping(text::Wrapping::Word),
+                text(name).size(28).font(crate::hero::BOLD).wrapping(text::Wrapping::Word),
                 match open_under {
                     Some(open) => Element::from(mouse_area(under_line(under)).on_press(open)),
                     None => under_line(under).into(),

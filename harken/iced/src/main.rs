@@ -2490,7 +2490,6 @@ pub fn main() -> iced::Result {
     ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
     iced::application(App::boot, App::update, App::view)
-        .font(arkui::hero::SERIF_BYTES)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((860.0, 600.0))

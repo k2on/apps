@@ -426,7 +426,7 @@ impl App {
 
     /// The header a record's page opens with, as a catalogue sets one: the
     /// cover beside a line of small capitals (`over`, whose it is), the title
-    /// in the serif, who played it in the accent — each name a link — a
+    /// in bold, who played it in the accent — each name a link — a
     /// small line under (`small`), and a Play button for the first track.
     #[allow(clippy::too_many_arguments)]
     fn view_cover<'a>(
@@ -443,7 +443,7 @@ impl App {
         if let Some(line) = over.filter(|o| !o.is_empty()) {
             words = words.push(self.name(l, Mark::Over, line.to_uppercase(), 11.0, |t| style::faint(0.6)(t)));
         }
-        words = words.push(text(title.to_string()).size(26).font(hero::SERIF).wrapping(text::Wrapping::Word));
+        words = words.push(text(title.to_string()).size(26).font(hero::BOLD).wrapping(text::Wrapping::Word));
         let by: Vec<String> = crate::nav::names(by).into_iter().map(str::to_string).collect();
         if !by.is_empty() {
             words = words.push(self.names(l, &by, Mark::By, 16.0, style::accent));
@@ -607,7 +607,7 @@ impl App {
                 let work = self.opens(
                     l,
                     Mark::Work(start),
-                    container(text(d.work.clone()).size(15).font(hero::SERIF).wrapping(text::Wrapping::Word).style({
+                    container(text(d.work.clone()).size(15).font(hero::BOLD).wrapping(text::Wrapping::Word).style({
                         let on = self.on(l, Mark::Work(start));
                         move |t| text::Style {
                             color: Some(match on {
@@ -912,7 +912,7 @@ impl App {
             let crumb = format!("{}  \u{203A}", composer.to_uppercase());
             head = head.push(self.name(&l, Mark::Over, crumb, 12.0, |t| style::faint(0.6)(t)));
         }
-        head = head.push(text(title.to_string()).size(28).font(hero::SERIF).wrapping(text::Wrapping::Word));
+        head = head.push(text(title.to_string()).size(28).font(hero::BOLD).wrapping(text::Wrapping::Word));
         let facts = work
             .map(|w| {
                 // The catalogue number once: not again under a title that
