@@ -119,8 +119,11 @@ struct ArtistPage: View {
         let lived = Catalogue.life(born: artist?.born ?? 0, died: artist?.died ?? 0)
         let life = lived.isEmpty ? Catalogue.life(born: composer?.born ?? 0, died: composer?.died ?? 0) : lived
         let kicker = Spell.facts([works.isEmpty ? "Artist" : "Composer", life.isEmpty ? counts : life])
-        let banner = [artist?.banner, composer?.banner].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
         let portrait = [artist?.art, composer?.art].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
+        // Their wide picture across the page, or else their portrait cropped
+        // to it: only somebody with no picture at all has the round header.
+        let wide = [artist?.banner, composer?.banner].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
+        let banner = wide.isEmpty ? portrait : wide
         // Songs only for somebody who wrote nothing here: a composer's are
         // their works', and those are the works' pages.
         let songs = works.isEmpty && !tracks.isEmpty
