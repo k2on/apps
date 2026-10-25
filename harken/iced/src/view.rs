@@ -1213,8 +1213,19 @@ impl App {
     /// The engine showing through: how much of the log is applied, what this
     /// peer has done that nobody has confirmed, the last thing worth saying —
     /// and which grid has the keys, with anything half-typed.
+    ///
+    /// **All of it only under `D`** (and `?`). Otherwise only what somebody needs to
+    /// see as they type: the last thing worth saying, and what is half-typed
+    /// — a count, a `g`, a search — and nothing at all when there is neither.
     fn view_status(&self) -> Element<'_, Message> {
         let p = &self.peer;
+        let typing = !self.keys.pending().is_empty() || matches!(self.keys.mode(), arkui::vim::Mode::Search(_));
+        // The keymap keeps it whole too: which pane has the cursor is what
+        // somebody reading it is trying to work out.
+        let whole = self.debug || self.help;
+        if !whole && self.note.is_empty() && !typing {
+            return iced::widget::Space::new().height(Length::Fixed(0.0)).into();
+        }
         let mut line = format!(
             "{} songs \u{b7} cursor {} \u{b7} {} pending",
             p.items().len(),
@@ -1245,6 +1256,9 @@ impl App {
         if !self.note.is_empty() {
             line = format!("{line}  \u{b7}  {}", self.note);
         }
+        if !whole {
+            line = self.note.clone();
+        }
         let mode = match self.focus() {
             Focus::Pane(Pane::Sidebar) => "browse",
             Focus::Pane(Pane::Tracks) => "tracks",
@@ -1268,7 +1282,7 @@ impl App {
                 },
             ]
             .align_y(Alignment::Center),
-            text(mode).size(12).style(style::dim),
+            text(if whole { mode } else { "" }).size(12).style(style::dim),
         ]
         .spacing(12)
         .into()
