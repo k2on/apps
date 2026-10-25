@@ -419,7 +419,7 @@ fun HarkenApp(
                             destinations(Route.entries.filter { it.on(t) }, motion, Route::pattern) { r, back ->
                                 when (r) {
                                     Route.Home ->
-                                        HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching), albumOf, act)
+                                        HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching, Who(library.name, library.picture)), albumOf, act)
                                     Route.Search -> {
                                         var needle by rememberSaveable { mutableStateOf("") }
                                         var recent by remember { mutableStateOf(device.searches) }
@@ -542,7 +542,7 @@ fun HarkenApp(
                                         var taps by remember { mutableIntStateOf(0) }
                                         var unlocked by remember { mutableStateOf(device.diagnostics) }
                                         SettingsScreen(
-                                            SettingsData(library.name, library.user, library.email, library.server, status.linked, version(context), unlocked),
+                                            SettingsData(library.name, library.user, library.email, library.server, status.linked, version(context), unlocked, library.picture),
                                             onBack = act::back,
                                             onSignOut = library::signOut,
                                             onVersion = {

@@ -131,7 +131,7 @@ class ServerTests {
         assertNull(r.login)
         assertEquals(emptySet<String>(), r.asked)
         val login =
-            testLogin("ana", "s1", listOf("library"), "Ana", "ana@example.com").copy(token = "tok", expiresMs = 1234)
+            testLogin("ana", "s1", listOf("library"), "Ana", "ana@example.com").copy(token = "tok", expiresMs = 1234, picture = "https://pictures.example.invalid/ana.png")
         r.server = "https://music.example.com"
         r.login = login
         // A second store over the same shelf reads it back whole.
