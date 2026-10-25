@@ -48,8 +48,8 @@ object Catalogue {
     /** The set-apart work's line: its catalogue number and how many performances of it there are. */
     fun recordedFacts(w: WorkSummary): String = facts(w.catalogue, Media.count(w.recordings.toInt(), "recording"))
 
-    /** What a work is, at its page's head: catalogue number, form, period. */
-    fun workFacts(w: WorkSummary): String = facts(w.catalogue, w.form, w.period)
+    /** What a work is, at its page's head: catalogue number (unless its title ends with it), form, period. */
+    fun workFacts(w: WorkSummary): String = facts(w.catalogue.takeUnless { it.isNotEmpty() && w.title.contains(it) }, w.form, w.period)
 
     /** When a person lived, as a catalogue heads them: `1685–1750`, `1685–`, `–1750`, or nothing. */
     fun span(born: Long, died: Long): String =

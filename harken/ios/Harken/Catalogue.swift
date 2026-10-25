@@ -51,9 +51,11 @@ enum Catalogue {
         Spell.facts([w.catalogue, Spell.count(Int(w.recordings), "recording")])
     }
 
-    /// What a work is, under its title: its catalogue number, its form, its period.
+    /// What a work is, under its title: its catalogue number (unless the
+    /// title already ends with it), its form, its period.
     static func facts(_ w: WorkSummary) -> String {
-        Spell.facts([w.catalogue, w.form, w.period])
+        let catalogue = !w.catalogue.isEmpty && w.title.contains(w.catalogue) ? "" : w.catalogue
+        return Spell.facts([catalogue, w.form, w.period])
     }
 
     /// How a catalogue writes who a work is by over its title: every name
