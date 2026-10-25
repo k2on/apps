@@ -116,6 +116,7 @@ impl Hall {
             email: String::new(),
             roles: vec![],
             expires_ms: 0,
+            picture: String::new(),
         };
         let p = Peer::open(config(said(&device)?), &dir, Some(login))?;
         p.by_hand();

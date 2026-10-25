@@ -58,6 +58,20 @@ class CatalogueTests {
         assertEquals("1 recording", Catalogue.recordedFacts(work("X", 1, 1)))
     }
 
+    /**
+     * A face without a picture says the first and last words' initials, as the desktop's does
+     * (`arkui::account::Who::initials`). Falsified by taking the second word's: `JS`.
+     */
+    @Test
+    fun aFaceSaysWhoByItsInitials() {
+        assertEquals("A", Who.initials("Ada"))
+        assertEquals("JB", Who.initials("Johann Sebastian Bach"))
+        assertEquals("AL", Who.initials("  ada   lovelace "))
+        assertEquals("U", Who.initials("user-0123"))
+        assertEquals("", Who.initials(""))
+        assertEquals("\u00c9", Who.initials("\u00e9mile (\u2014)"))
+    }
+
     @Test
     fun aCatalogueWritesWhoAndWhen() {
         assertEquals("J. S. Bach", Catalogue.initials("Johann Sebastian Bach"))

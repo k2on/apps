@@ -48,6 +48,7 @@ async fn token(State(fake): State<Arc<Mutex<Fake>>>, Form(form): Form<HashMap<St
     let claims = serde_json::json!({
         "iss": f.issuer, "sub": "42", "aud": "harken", "iat": now, "exp": now + 600,
         "nonce": f.nonce, "name": "Ann", "email": "ann@example.org",
+        "picture": "https://pictures.example.invalid/ann.png",
     });
     Json(serde_json::json!({ "access_token": "at", "token_type": "Bearer", "id_token": jwt(claims, &f.key) }))
 }
@@ -120,7 +121,7 @@ fn callback(server: &str, state: &str) -> Result<String, (u16, String)> {
 /// and the scopes; the callback trades the code (with the verifier the
 /// challenge was made from, and the secret) for an ID token whose nonce is
 /// this login's, and the person is who its `sub` says, with its name and
-/// email, and its session the row the callback wrote. Falsified by sending the token endpoint a verifier of its own
+/// email and picture, and its session the row the callback wrote. Falsified by sending the token endpoint a verifier of its own
 /// (`PkceCodeVerifier::new("x"…)` in `exchange`): the challenge did not
 /// hash from what the provider was sent.
 #[test]
@@ -139,8 +140,10 @@ fn a_login_through_the_provider_is_its_subject() {
     let login = ark_auth::client::exchange(&server, code).unwrap();
     assert_eq!((login.user.id.as_str(), login.user.name.as_str()), ("42", "Ann"));
     assert_eq!(login.user.email, "ann@example.org");
+    assert_eq!(login.user.picture, "https://pictures.example.invalid/ann.png");
     let row = fake.lock().unwrap().rows.sign_ins().pop().expect("the callback wrote the session");
     assert_eq!((row.id, row.user, row.email), (login.session, "42".into(), "ann@example.org".into()));
+    assert_eq!(row.picture, login.user.picture);
     let sent = fake.lock().unwrap().asked.pop().unwrap();
     assert_eq!((sent["grant_type"].as_str(), sent["code"].as_str()), ("authorization_code", "the-code"));
     assert_eq!(B64.encode(Sha256::digest(sent["code_verifier"].as_bytes())), q["code_challenge"]);
@@ -167,4 +170,25 @@ fn an_id_token_that_does_not_answer_this_login_is_refused() {
     assert!(why.to_lowercase().contains("signature"), "{why}");
     let (status, _) = callback(&server, "never-started").unwrap_err();
     assert_eq!(status, 400);
+}
+
+/// `/auth/picture` hands on the picture a person's sign-in holds, and
+/// nobody else's: a person with none is a 404, and one whose provider's
+/// host cannot be reached is the provider's failure, not the server's own.
+/// (Its fetch is refused anything but a public address, so a test cannot
+/// serve it one: `public` is unit-tested.)
+#[test]
+fn a_picture_is_the_sign_ins_and_nobody_elses() {
+    let (_rt, fake, server) = serve();
+    let get = |user: &str| match ureq::get(&format!("{server}/auth/picture?user={user}&v=1")).call() {
+        Ok(r) => r.status(),
+        Err(ureq::Error::Status(s, _)) => s,
+        Err(e) => panic!("{e}"),
+    };
+    assert_eq!(get("42"), 404, "nobody has signed in yet");
+    let q = start(&server);
+    fake.lock().unwrap().nonce = q["nonce"].clone();
+    callback(&server, &q["state"]).expect("signed in");
+    assert_eq!(get("42"), 502, "the provider's host is not there");
+    assert_eq!(get("43"), 404);
 }

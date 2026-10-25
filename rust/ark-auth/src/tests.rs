@@ -41,3 +41,58 @@ fn a_secret_file_loses_its_newline_and_an_empty_one_is_refused() {
     assert!(read_secret(dir.join("missing")).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A picture's address names the person and the picture: none, nothing to
+/// load; another picture, another address, so a cache keyed by it lets the
+/// old one go. Falsified by leaving `v` out: the two addresses are one.
+#[test]
+fn a_picture_is_loaded_through_the_server_by_version() {
+    assert_eq!(picture_url("https://h.example", "u", ""), None);
+    let a = picture_url("https://h.example/", "google|42", "https://p.example/a.png").unwrap();
+    assert!(a.starts_with("https://h.example/auth/picture?user=google%7C42&v="), "{a}");
+    let query = a.split('?').nth(1).unwrap();
+    assert_eq!(query_value(query, "user").as_deref(), Some("google|42"));
+    let b = picture_url("https://h.example", "google|42", "https://p.example/b.png").unwrap();
+    assert_ne!(a, b);
+}
+
+/// What the server fetches a picture from: the internet at large, never
+/// this machine or a network only it can reach. Falsified by dropping
+/// `is_private` from `public`: `10.0.0.5` is fetched.
+#[test]
+fn a_picture_is_fetched_from_a_public_address_alone() {
+    use crate::server::public;
+    for ok in ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"] {
+        assert!(public(ok.parse().unwrap()), "{ok}");
+    }
+    for no in [
+        "127.0.0.1",
+        "10.0.0.5",
+        "172.16.0.1",
+        "192.168.1.1",
+        "169.254.169.254",
+        "100.64.0.1",
+        "0.0.0.0",
+        "::1",
+        "fd00::1",
+        "fe80::1",
+        "::ffff:127.0.0.1",
+    ] {
+        assert!(!public(no.parse().unwrap()), "{no}");
+    }
+}
+
+/// The one host a picture may come from on a private network is the
+/// provider's own, matched whole, port and all. Falsified by matching on a
+/// prefix: `id.example.evil` passes as `id.example`.
+#[test]
+fn the_providers_own_host_is_the_providers() {
+    use crate::server::host;
+    let issuer = host("https://id.example:8443/application/o/harken/");
+    assert_eq!(issuer, Some("id.example:8443"));
+    assert_eq!(host("https://id.example:8443/media/a.png"), issuer);
+    assert_ne!(host("https://id.example.evil:8443/a.png"), issuer);
+    assert_ne!(host("https://id.example/a.png"), issuer);
+    assert_eq!(host("https://u@id.example:8443/a.png"), issuer);
+    assert_eq!(host("http://id.example:8443/a.png"), None);
+}

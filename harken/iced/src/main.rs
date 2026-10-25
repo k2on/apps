@@ -50,7 +50,7 @@ use std::time::Duration;
 
 use ark::log::EntryId;
 use ark_auth::Login;
-use arkui::account::{Account, Link, Who};
+use arkui::account::{Account, Who};
 use arkui::cards::Shelf;
 use arkui::context::{Context, Layer};
 use arkui::glyphs;
@@ -122,8 +122,6 @@ pub fn known(works: &[rows::Work]) -> Vec<&rows::Work> {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// Go offline on purpose, or come back.
-    ToggleLink,
     /// Show a playlist, an album, an artist, a page — or everything.
     Select(Source),
     /// Start this one, and make what is on screen the queue it plays through.
@@ -153,8 +151,8 @@ pub enum Message {
     /// The sign-in came back, one way or the other.
     SignedIn(Result<Login, String>),
     SignOut,
-    /// The account button at the top right: its menu, whose entries send
-    /// `ToggleLink` and `SignOut`.
+    /// The account button at the top right: its menu, whose entry sends
+    /// `SignOut`.
     AccountMenu,
     /// Where the pointer is, in the window: tracked on the root so a menu's
     /// `pin` shares its origin.
@@ -603,8 +601,6 @@ pub struct App {
     pub held: bool,
     /// What the connect entry holds, while this window is alone.
     pub connect: String,
-    /// Offline on purpose.
-    pub offline: bool,
     /// What wakes this window: the peer's socket rings it, and in a browser
     /// the page's own events do (`wake.rs`).
     pub bell: arkui::wake::Bell,
@@ -659,7 +655,6 @@ impl App {
             sign_in_tried: false,
             held: false,
             connect: String::new(),
-            offline: false,
             bell,
             peer,
             edits: Vec::new(),
@@ -934,7 +929,6 @@ impl App {
                 if n == 1 { "" } else { "s" }
             ),
         };
-        self.offline = false;
         self.peer.refresh();
         // A device is a login, so a new login is a new device — which is what
         // makes signing out and back in honestly a different row in somebody
@@ -1582,14 +1576,34 @@ impl App {
             name: login.user.name.clone(),
             id: login.user.id.clone(),
         };
-        let link = match self.offline {
-            true => Link::Offline,
-            false => Link::Online,
-        };
         Some(match login.token.is_empty() {
             true => Account::turned_away(&who, Message::SignOut),
-            false => Account::signed_in(&who, link, Message::ToggleLink, Message::SignOut),
+            false => Account::signed_in(&who, Message::SignOut),
         })
+    }
+
+    /// Where the signed-in person's picture is loaded from: the server's
+    /// `/auth/picture`, which fetches it from their provider — a page
+    /// cannot, from a provider that does not answer it with CORS, so the
+    /// desktop goes the same way and the two are one path. None while
+    /// nobody is signed in, or their provider has no picture of them.
+    pub fn account_picture_url(&self) -> Option<String> {
+        let login = self.login.as_ref()?;
+        ark_auth::picture_url(&self.server, &login.user.id, &login.user.picture)
+    }
+
+    /// The picture the account button draws, once it has arrived.
+    pub fn account_picture(&self) -> Option<&iced::widget::image::Handle> {
+        self.covers.handle(&self.account_picture_url()?)
+    }
+
+    /// Ask for the signed-in person's picture: once a login, the cache
+    /// knowing it from then on.
+    fn want_picture(&mut self) -> Task<Message> {
+        match self.account_picture_url().and_then(|url| self.covers.want(url)) {
+            Some(t) => t.map(Message::Cover),
+            None => Task::none(),
+        }
     }
 
     /// Where the account button ends: the page's right-hand edge.
@@ -1919,7 +1933,7 @@ impl App {
         }
         let reacted = self.react();
         self.router.sync(&self.peer.source.place());
-        Task::batch([task, reacted, self.want_covers_if_moved()])
+        Task::batch([task, reacted, self.want_covers_if_moved(), self.want_picture()])
     }
 
     /// Ask for covers when the lists have been rebuilt since the last ask.
@@ -1936,7 +1950,7 @@ impl App {
         // had to say, and its submenu goes with it.
         if matches!(
             message,
-            Message::PlayItem(_) | Message::PlayRecording(_) | Message::PlayWork(_) | Message::Select(_) | Message::ToggleLink | Message::SignOut
+            Message::PlayItem(_) | Message::PlayRecording(_) | Message::PlayWork(_) | Message::Select(_) | Message::SignOut
         ) {
             self.ctx.close_menu();
         }
@@ -2259,19 +2273,6 @@ impl App {
                 // Always: landing on row seventeen of a record you just opened
                 // is a cursor that remembers the wrong list.
                 self.cursors[Pane::Tracks as usize] = 0;
-            }
-            Message::ToggleLink => {
-                self.offline = !self.offline;
-                match self.offline {
-                    true => {
-                        self.peer.client.disconnect();
-                        self.note = "gone offline — changes pile up here".into();
-                    }
-                    false => {
-                        self.peer.client.reconnect();
-                        self.note = format!("reaching {}", self.server);
-                    }
-                }
             }
             // A submenu opens by being pointed at, after a beat: arkui counts
             // the rest and answers the entry's message, and the picker it opens

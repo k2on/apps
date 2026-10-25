@@ -87,6 +87,17 @@ fn http() -> ureq::Agent {
 
 type Client = CoreClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointMaybeSet, EndpointMaybeSet>;
 
+/// The `picture` claim, in the default language — and only an `https` one:
+/// it is fetched by the server ([`crate::server::Auth::picture`]) and by
+/// phones, and a picture is never worth a request in the clear.
+fn picture(p: Option<&openidconnect::LocalizedClaim<openidconnect::EndUserPictureUrl>>) -> String {
+    let url = p.and_then(|p| p.get(None)).map(|u| u.to_string()).unwrap_or_default();
+    match url.starts_with("https://") {
+        true => url,
+        false => String::new(),
+    }
+}
+
 /// An error and every cause under it, on one line.
 fn said(e: &dyn std::error::Error) -> String {
     let mut out = e.to_string();
@@ -173,11 +184,12 @@ impl Provider {
             id: claims.subject().to_string(),
             name: name(claims.name(), claims.preferred_username()),
             email: claims.email().map_or(String::new(), |e| e.to_string()),
+            picture: picture(claims.picture()),
             roles: vec![],
         };
         // A provider that keeps the ID token small says the rest at
         // userinfo, which must name the same subject.
-        if account.name.is_empty() || account.email.is_empty() {
+        if account.name.is_empty() || account.email.is_empty() || account.picture.is_empty() {
             let asked = client.user_info(tokens.access_token().clone(), Some(claims.subject().clone()));
             let info: Option<CoreUserInfoClaims> = asked.ok().and_then(|r| r.request(&http).ok());
             if let Some(info) = info {
@@ -186,6 +198,9 @@ impl Provider {
                 }
                 if account.email.is_empty() {
                     account.email = info.email().map_or(String::new(), |e| e.to_string());
+                }
+                if account.picture.is_empty() {
+                    account.picture = picture(info.picture());
                 }
             }
         }

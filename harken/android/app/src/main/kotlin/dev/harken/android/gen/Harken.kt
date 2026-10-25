@@ -779,11 +779,11 @@ data class SetVolume(val device: String, val level: Long) {
 }
 
 /** The record `SignIn`. */
-data class SignIn(val id: String, val user: String, val name: String, val email: String, val device: String, val issuedMs: Long, val expiresMs: Long, val revoked: Boolean, val roles: List<String>) {
-    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "," + "\"email\":" + J.q(email) + "," + "\"device\":" + J.q(device) + "," + "\"issued_ms\":" + issuedMs.toString() + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"revoked\":" + revoked.toString() + "," + "\"roles\":" + J.wlist(roles) { v0 -> J.q(v0) } + "}"
+data class SignIn(val id: String, val user: String, val name: String, val email: String, val device: String, val issuedMs: Long, val expiresMs: Long, val revoked: Boolean, val roles: List<String>, val picture: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "," + "\"email\":" + J.q(email) + "," + "\"device\":" + J.q(device) + "," + "\"issued_ms\":" + issuedMs.toString() + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"revoked\":" + revoked.toString() + "," + "\"roles\":" + J.wlist(roles) { v0 -> J.q(v0) } + "," + "\"picture\":" + J.q(picture) + "}"
 
     companion object {
-        fun of(j: Any?): SignIn = (j as JSONObject).let { o -> SignIn(J.text(o.opt("id")), J.text(o.opt("user")), J.text(o.opt("name")), J.text(o.opt("email")), J.text(o.opt("device")), J.int(o.opt("issued_ms")), J.int(o.opt("expires_ms")), J.bool(o.opt("revoked")), J.list(o.opt("roles")) { v0 -> J.text(v0) }) }
+        fun of(j: Any?): SignIn = (j as JSONObject).let { o -> SignIn(J.text(o.opt("id")), J.text(o.opt("user")), J.text(o.opt("name")), J.text(o.opt("email")), J.text(o.opt("device")), J.int(o.opt("issued_ms")), J.int(o.opt("expires_ms")), J.bool(o.opt("revoked")), J.list(o.opt("roles")) { v0 -> J.text(v0) }, J.text(o.opt("picture"))) }
     }
 }
 

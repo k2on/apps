@@ -21,6 +21,7 @@ fn librarian(dir: &tempfile::TempDir) -> Arc<Peer> {
         email: String::new(),
         roles: vec![harken_domain::LIBRARY.into()],
         expires_ms: 0,
+        picture: String::new(),
     };
     let device = r#"{"can_play":true,"id":"","kind":"phone","name":"Pixel","user":""}"#;
     let p = harken_open(dir.path().to_str().unwrap().into(), Some(login), device.into()).unwrap();

@@ -1221,7 +1221,7 @@ impl App {
 
     /// The top of the page, on every page: joining a server while this
     /// window is alone on the left, and at the right-hand end the account —
-    /// who, and the menu that goes offline and signs out (`App::account`).
+    /// their picture, and the menu that signs out (`App::account`).
     /// Exactly [`arkui::account::HEIGHT`] tall, because the menu hangs off
     /// its bottom before anything is laid out.
     fn view_top(&self) -> Element<'_, Message> {
@@ -1243,7 +1243,7 @@ impl App {
         };
         let mut bar = row![container(left).width(Length::Fill)].align_y(Alignment::Center);
         if let Some(account) = self.account() {
-            bar = bar.push(account::button(&account, Message::AccountMenu));
+            bar = bar.push(account::button(&account, self.account_picture(), Message::AccountMenu));
         }
         container(bar).height(Length::Fixed(account::HEIGHT)).width(Length::Fill).into()
     }
