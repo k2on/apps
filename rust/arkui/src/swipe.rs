@@ -1,8 +1,9 @@
 //! Two fingers sideways across a trackpad, as back and forward — the way a
-//! browser has it: the page follows the fingers, tighter the further it is
-//! pulled; an arrow at the edge it is pulled from says which way it would
-//! go, and lights once the pull is far enough; and the page goes only when
-//! the fingers let go past that point. Short of it, it springs back.
+//! browser has it: an arrow slides in from the edge the fingers pull from,
+//! saying which way it would go, ever slower the further they pull, and
+//! lights once the pull is far enough; and the page goes only when the
+//! fingers let go past that point. Short of it, nothing happens. The page
+//! itself stays where it is.
 //!
 //! A browser does this by itself — but only over a page that lets the wheel
 //! through, and a canvas app takes every wheel event, so the gesture never
@@ -38,8 +39,8 @@ pub const QUIET: Duration = Duration::from_millis(300);
 /// How long the page takes to spring back.
 pub const BACK: Duration = Duration::from_millis(220);
 
-/// The furthest the page is drawn moved, however far it is pulled: the
-/// rubber band's length.
+/// The furthest the pull is drawn, however far the fingers go: the rubber
+/// band's length, which the arrow slides in by half of.
 pub const STRETCH: f32 = 180.0;
 
 /// A line of a wheel that turns in lines, in pixels, as a browser counts it.
@@ -119,7 +120,7 @@ impl Swipe {
         self.state != Idle
     }
 
-    /// How far the page is drawn moved now: right is positive.
+    /// How far the pull is drawn now, banded: right is positive.
     pub fn offset(&self, now: Instant) -> f32 {
         match self.state {
             Idle => 0.0,
@@ -148,23 +149,14 @@ impl Swipe {
 
 use State::{Idle, Pulling, Settling};
 
-/// `page` drawn moved by the swipe, squeezed from the side it is pulled
-/// from rather than slid off the window, with the arrow at that edge: a
-/// circle growing in as the pull does, filled with the accent once letting
-/// go would go.
+/// `page` with the swipe's arrow over it, at the edge the fingers pull
+/// from: a circle sliding in and growing as the pull does, filled with the
+/// accent once letting go would go. The page is not moved.
 pub fn view<'a, M: 'a>(page: Element<'a, M>, swipe: &Swipe, now: Instant) -> Element<'a, M> {
-    let off = swipe.offset(now);
-    if off == 0.0 && swipe.arrow().is_none() {
-        return page;
-    }
-    let moved = container(page).width(Length::Fill).height(Length::Fill).padding(Padding {
-        left: off.max(0.0),
-        right: (-off).max(0.0),
-        ..Padding::ZERO
-    });
     let Some((by, progress, armed)) = swipe.arrow() else {
-        return moved.into();
+        return page;
     };
+    let off = swipe.offset(now);
     let side = 24.0 + 20.0 * progress;
     let glyph = if by < 0 { glyphs::BACK } else { glyphs::CHEVRON };
     let mark = icon::tinted(glyph, side * 0.5, move |p| match armed {
@@ -187,8 +179,8 @@ pub fn view<'a, M: 'a>(page: Element<'a, M>, swipe: &Swipe, now: Instant) -> Ele
                 ..container::Style::default()
             }
         });
-    // In the gap the pull opens, halfway across it.
-    let inset = (off.abs() - side).max(0.0) / 2.0;
+    // In from the edge as the band stretches: half of it.
+    let inset = (off.abs() / 2.0 - side / 2.0).max(4.0);
     let place = container(disc)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -199,7 +191,7 @@ pub fn view<'a, M: 'a>(page: Element<'a, M>, swipe: &Swipe, now: Instant) -> Ele
             right: if by > 0 { inset } else { 0.0 },
             ..Padding::ZERO
         });
-    stack![moved, place].into()
+    stack![page, place].into()
 }
 
 #[cfg(test)]
