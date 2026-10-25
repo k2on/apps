@@ -68,6 +68,8 @@ pub fn artists(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ArtistsEntry>, Ref
             ArtistsEntry {
                 art: p.art,
                 banner: p.banner,
+                born: p.born,
+                died: p.died,
                 name: name.clone(),
                 tracks: tracks.len() as i64,
             }

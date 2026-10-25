@@ -12,7 +12,7 @@
 //!
 //! Nothing below writes a colour down, which is the whole of what makes a dark
 //! theme restate all of it.
-use iced::widget::{button, container, scrollable, slider, text};
+use iced::widget::{button, container, rule, scrollable, slider, text};
 use iced::{Background, Border, Color, Theme};
 
 use crate::panel::ENTRY_RADIUS;
@@ -165,6 +165,18 @@ pub fn bars(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
         vertical_rail: v,
         horizontal_rail: h,
         ..scrollable::default(theme, status)
+    }
+}
+
+/// The hairline under an entry of a list, and between sections: the text
+/// colour at a fifth, so it reads as a line on either ground — iced's own
+/// rule is its palette's grey, which on harken's ground all but vanishes.
+pub fn hairline(theme: &Theme) -> rule::Style {
+    rule::Style {
+        color: of(theme).background.base.text.scale_alpha(0.2),
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
     }
 }
 

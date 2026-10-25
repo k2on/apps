@@ -20,13 +20,13 @@ use std::collections::HashMap;
 
 use crate::domain::Id as Key;
 use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
-use crate::domain::{AlbumInput, Artist as ArtistInput, Library, RecordingInput, Recordings, Search, WorkInput, Works};
+use crate::domain::{AlbumInput, Artist as ArtistInput, Credits, Library, RecordingInput, Recordings, Search, WorkInput, Works};
 use ark::format::Encode;
 use ark_peer::{Patch, Watched};
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
-use crate::rows::{Album, Artist, Composer, Id, Item, Playlist, Recording, TrackDetail, Work};
+use crate::rows::{Album, Artist, Composer, Credit, Id, Item, Playlist, Recording, TrackDetail, Work};
 
 /// One line of the sidebar: somewhere the cursor can be and something it can
 /// open.
@@ -83,6 +83,8 @@ struct Views {
     works: Option<Watched<Work>>,
     /// The page's performances (`recordings`).
     recordings: Option<Watched<Recording>>,
+    /// Who is on the page's recording (`credits`).
+    credits: Option<Watched<Credit>>,
     /// Which playlists one track is on (`playlists_of`).
     on: Option<Watched<Playlist>>,
 }
@@ -177,6 +179,7 @@ impl Peer {
             shown: None,
             works: None,
             recordings: None,
+            credits: None,
             on: None,
         };
         // What the hydrate already read is not news.
@@ -258,6 +261,11 @@ impl Peer {
         rows(&self.views.recordings)
     }
 
+    /// Who is on the recording the page is, in billing order.
+    pub fn on_recording(&self) -> &[Credit] {
+        rows(&self.views.credits)
+    }
+
     /// Make sure there is a playlist to read the library against: make
     /// "Favorites" if this replica has none.
     ///
@@ -327,6 +335,7 @@ impl Peer {
         let shown = slot(settle(c, &mut v.shown, moved));
         let works = slot(settle(c, &mut v.works, moved));
         let recordings = slot(settle(c, &mut v.recordings, moved));
+        let credits = slot(settle(c, &mut v.credits, moved));
         let on = slot(settle(c, &mut v.on, moved));
         self.moved = changed;
 
@@ -346,13 +355,13 @@ impl Peer {
         if lists || library || albums || artists || composers || repointed {
             self.choose();
         }
-        if albums || artists || composers || works {
+        if albums || artists || composers || works || recordings {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
         if recordings {
             self.label_recording();
         }
-        lists || library || albums || artists || composers || details || shown || works || recordings || on || repointed
+        lists || library || albums || artists || composers || details || shown || works || recordings || credits || on || repointed
     }
 
     /// The sidebar, from the lists it counts. Grouping is the domain's, so
@@ -551,8 +560,13 @@ impl Peer {
         let (c, v) = (&mut self.client, &mut self.views);
         want(c, &mut v.shown, shown, Item::from_bytes);
         let works = want(c, &mut v.works, works, Work::from_bytes);
-        want(c, &mut v.recordings, recordings, Recording::from_bytes);
-        if works {
+        let recordings = want(c, &mut v.recordings, recordings, Recording::from_bytes);
+        let credits = match &self.source {
+            Source::Recording(id, _) => Some(("credits", Credits { recording_id: id.clone() }.to_bytes())),
+            _ => None,
+        };
+        want(c, &mut v.credits, credits, Credit::from_bytes);
+        if works || recordings {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
         self.label_recording();

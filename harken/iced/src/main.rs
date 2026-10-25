@@ -985,7 +985,10 @@ impl App {
                     cells: p.works().len(),
                     columns: self.listing_columns(),
                 },
-                Source::Work(..) => vim::Grid::column(p.recordings().len()),
+                Source::Work(..) => vim::Grid {
+                    cells: p.recordings().len(),
+                    columns: self.listing_columns(),
+                },
                 _ => vim::Grid::column(p.rows().len()),
             },
         }
@@ -1666,6 +1669,7 @@ impl App {
             .chain(p.artists().iter().map(|a| a.art.clone()))
             .chain(p.composers().iter().map(|c| c.art.clone()))
             .chain(p.works().iter().map(|w| w.art.clone()))
+            .chain(p.recordings().iter().map(|r| r.art.clone()))
             .filter(|art| !art.is_empty())
             .map(|art| media_url(&self.server, &art))
             .collect();

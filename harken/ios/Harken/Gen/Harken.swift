@@ -164,17 +164,19 @@ public struct Artist: Equatable {
 public struct ArtistsEntry: Equatable {
     public var art: String
     public var banner: String
+    public var born: Int64
+    public var died: Int64
     public var name: String
     public var tracks: Int64
 
-    public init(art: String, banner: String, name: String, tracks: Int64) { self.art = art; self.banner = banner; self.name = name; self.tracks = tracks; }
+    public init(art: String, banner: String, born: Int64, died: Int64, name: String, tracks: Int64) { self.art = art; self.banner = banner; self.born = born; self.died = died; self.name = name; self.tracks = tracks; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), name: J.text(o["name"]), tracks: J.int(o["tracks"]))
+        self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), born: J.int(o["born"]), died: J.int(o["died"]), name: J.text(o["name"]), tracks: J.int(o["tracks"]))
     }
 
-    public var json: String { J.obj(["\"art\":" + J.q(art), "\"banner\":" + J.q(banner), "\"name\":" + J.q(name), "\"tracks\":" + String(tracks)]) }
+    public var json: String { J.obj(["\"art\":" + J.q(art), "\"banner\":" + J.q(banner), "\"born\":" + String(born), "\"died\":" + String(died), "\"name\":" + J.q(name), "\"tracks\":" + String(tracks)]) }
 }
 
 /// The record `At`.

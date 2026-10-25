@@ -33,13 +33,19 @@ pub const SERIF: Font = Font {
 pub const ASPECT: f32 = 2400.0 / 933.0;
 
 /// How tall a banner `width` wide is drawn: its shape, within reason — a
-/// phone-width page would make a strip, a wide monitor a wall.
+/// phone-width page would make a strip, and past [`TALLEST`] a wide monitor
+/// would make a wall, so it is cropped from there.
 pub fn height(width: f32) -> f32 {
-    (width / ASPECT).clamp(200.0, 380.0)
+    (width / ASPECT).clamp(200.0, TALLEST)
 }
 
-/// The banner: `picture` across `width`, `kind` in small capitals and `name`
-/// in the serif on its lower edge. Until the picture arrives the ground is
+/// The tallest a banner is drawn: its whole shape up to a page about 1250
+/// wide.
+pub const TALLEST: f32 = 486.0;
+
+/// The banner: `picture` edge to edge across `width`, square-cornered as a
+/// catalogue's is, `kind` in small capitals and `name` in the serif on its
+/// lower edge. Until the picture arrives the ground is
 /// drawn instead, so the name is already where it will be.
 pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str, width: f32) -> Element<'a, M> {
     let h = height(width);
@@ -48,14 +54,12 @@ pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str
             .content_fit(ContentFit::Cover)
             .width(Length::Fill)
             .height(Length::Fixed(h))
-            .border_radius(8.0)
             .into(),
         None => container(Space::new())
             .width(Length::Fill)
             .height(Length::Fixed(h))
             .style(|t| container::Style {
                 background: Some(Background::Color(theme::of(t).background.strong.color)),
-                border: iced::border::rounded(8.0),
                 ..container::Style::default()
             })
             .into(),
@@ -63,11 +67,7 @@ pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str
     // Clear at the top, darkest at the foot, where the name is. A picture,
     // not a gradient fill: iced draws a layer's pictures over its fills, so a
     // fill laid on a picture is under it.
-    let shade = image(shade())
-        .content_fit(ContentFit::Fill)
-        .width(Length::Fill)
-        .height(Length::Fixed(h))
-        .border_radius(8.0);
+    let shade = image(shade()).content_fit(ContentFit::Fill).width(Length::Fill).height(Length::Fixed(h));
     let white = |a: f32| {
         move |_: &iced::Theme| text::Style {
             color: Some(Color::from_rgba(1.0, 1.0, 1.0, a)),
@@ -75,8 +75,8 @@ pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str
     };
     let words = container(
         column![
-            text(kind.to_uppercase()).size(11).style(white(0.85)),
-            text(name.to_string()).size(34).font(SERIF).style(white(1.0)),
+            text(kind.to_uppercase()).size(12).style(white(0.85)),
+            text(name.to_string()).size(40).font(SERIF).style(white(1.0)),
         ]
         .spacing(2),
     )
@@ -84,9 +84,9 @@ pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str
     .height(Length::Fixed(h))
     .padding(Padding {
         top: 0.0,
-        right: 24.0,
-        bottom: 20.0,
-        left: 24.0,
+        right: 32.0,
+        bottom: 28.0,
+        left: 32.0,
     })
     .align_y(Alignment::End);
     stack![ground, shade, words].width(Length::Fill).into()
@@ -148,16 +148,25 @@ pub fn columns(room: f32) -> usize {
 /// catalogue's list of works. The cursor's entry has its title in the accent,
 /// as a card's does.
 pub fn listing<'a, M: Clone + 'a>(entries: &[Entry<M>], columns: usize, cursor: Option<usize>, on_hover: impl Fn(usize) -> M) -> Element<'a, M> {
+    let drawn = entries.iter().enumerate().map(|(at, e)| entry(None, e, Some(at) == cursor, on_hover(at)));
+    grid(drawn.collect(), columns)
+}
+
+/// Entries already drawn, `columns` across and read across: a [`listing`]'s
+/// layout, for entries that carry a picture ([`entry`]).
+pub fn grid<'a, M: 'a>(entries: Vec<Element<'a, M>>, columns: usize) -> Element<'a, M> {
     let columns = columns.max(1);
     let mut page = column![].spacing(0);
-    for (r, chunk) in entries.chunks(columns).enumerate() {
+    let mut entries = entries.into_iter().peekable();
+    while entries.peek().is_some() {
+        let chunk: Vec<_> = entries.by_ref().take(columns).collect();
+        let n = chunk.len();
         let mut line = row![].spacing(24).align_y(Alignment::Start);
-        for (c, e) in chunk.iter().enumerate() {
-            let at = r * columns + c;
-            line = line.push(entry(e, Some(at) == cursor, on_hover(at)));
+        for e in chunk {
+            line = line.push(e);
         }
         // A short last row keeps its columns where the full ones have them.
-        for _ in chunk.len()..columns {
+        for _ in n..columns {
             line = line.push(Space::new().width(Length::Fill));
         }
         page = page.push(line);
@@ -165,22 +174,28 @@ pub fn listing<'a, M: Clone + 'a>(entries: &[Entry<M>], columns: usize, cursor: 
     page.width(Length::Fill).into()
 }
 
-fn entry<'a, M: Clone + 'a>(e: &Entry<M>, on_cursor: bool, hover: M) -> Element<'a, M> {
+/// One entry over its hairline, with `picture` (a cover, a face) at its
+/// left when it has one.
+pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, on_cursor: bool, hover: M) -> Element<'a, M> {
     let title = text(e.title.clone()).size(14).style(move |t| text::Style {
         color: Some(match on_cursor {
             true => theme::of(t).primary.base.color,
             false => theme::of(t).background.base.text,
         }),
     });
-    let words = column![
-        text(e.over.to_uppercase()).size(10).style(style::faint(0.5)),
-        title,
-        text(e.under.clone()).size(11).style(style::faint(0.5)),
-    ]
-    .spacing(2)
-    .width(Length::Fill);
+    let mut words = column![].spacing(2).width(Length::Fill);
+    if !e.over.is_empty() {
+        words = words.push(text(e.over.to_uppercase()).size(10).style(style::faint(0.5)));
+    }
+    // The line under is drawn even empty, so a row of entries lines up.
+    words = words.push(title).push(text(e.under.clone()).size(11).style(style::faint(0.5)));
+    let body = row![].spacing(12).align_y(Alignment::Center);
+    let body = match picture {
+        Some(p) => body.push(p),
+        None => body,
+    };
     let body = row![
-        words,
+        body.push(words).width(Length::Fill),
         text(e.count.clone()).size(12).style(style::faint(0.45)),
         text("\u{203A}").size(18).style(style::faint(0.45)),
     ]
@@ -194,7 +209,7 @@ fn entry<'a, M: Clone + 'a>(e: &Entry<M>, on_cursor: bool, hover: M) -> Element<
                 bottom: 10.0,
                 left: 0.0
             }),
-            rule::horizontal(1)
+            rule::horizontal(1).style(style::hairline)
         ]
         .width(Length::Fill),
     )
@@ -220,6 +235,6 @@ mod tests {
     fn a_banner_keeps_its_shape_within_reason() {
         assert_eq!(height(ASPECT * 300.0), 300.0);
         assert_eq!(height(100.0), 200.0);
-        assert_eq!(height(5000.0), 380.0);
+        assert_eq!(height(5000.0), TALLEST);
     }
 }

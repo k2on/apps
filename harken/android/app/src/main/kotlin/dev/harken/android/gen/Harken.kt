@@ -94,11 +94,11 @@ data class Artist(val playlistId: Id, val name: String) {
 }
 
 /** The record `ArtistsEntry`. */
-data class ArtistsEntry(val art: String, val banner: String, val name: String, val tracks: Long) {
-    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"banner\":" + J.q(banner) + "," + "\"name\":" + J.q(name) + "," + "\"tracks\":" + tracks.toString() + "}"
+data class ArtistsEntry(val art: String, val banner: String, val born: Long, val died: Long, val name: String, val tracks: Long) {
+    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"banner\":" + J.q(banner) + "," + "\"born\":" + born.toString() + "," + "\"died\":" + died.toString() + "," + "\"name\":" + J.q(name) + "," + "\"tracks\":" + tracks.toString() + "}"
 
     companion object {
-        fun of(j: Any?): ArtistsEntry = (j as JSONObject).let { o -> ArtistsEntry(J.text(o.opt("art")), J.text(o.opt("banner")), J.text(o.opt("name")), J.int(o.opt("tracks"))) }
+        fun of(j: Any?): ArtistsEntry = (j as JSONObject).let { o -> ArtistsEntry(J.text(o.opt("art")), J.text(o.opt("banner")), J.int(o.opt("born")), J.int(o.opt("died")), J.text(o.opt("name")), J.int(o.opt("tracks"))) }
     }
 }
 

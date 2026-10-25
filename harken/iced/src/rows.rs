@@ -7,7 +7,7 @@
 //! the record — a module this build was not made with — read as empty rather
 //! than as a panic in the middle of a frame.
 
-use crate::domain::{AlbumsEntry, ArtistsEntry, ComposersEntry, LibraryEntry, RecordingsEntry, TrackDetailsEntry, WorkSummary};
+use crate::domain::{AlbumsEntry, ArtistsEntry, ComposersEntry, CreditsEntry, LibraryEntry, RecordingsEntry, TrackDetailsEntry, WorkSummary};
 use ark::format::Encode;
 
 /// A row's id: its sixteen bytes, whatever table it names.
@@ -121,6 +121,8 @@ pub struct Artist {
     pub tracks: i64,
     pub art: String,
     pub banner: String,
+    pub born: i64,
+    pub died: i64,
 }
 
 impl From<ArtistsEntry> for Artist {
@@ -130,6 +132,8 @@ impl From<ArtistsEntry> for Artist {
             tracks: e.tracks,
             art: e.art,
             banner: e.banner,
+            born: e.born,
+            died: e.died,
         }
     }
 }
@@ -283,6 +287,30 @@ impl From<TrackDetailsEntry> for TrackDetail {
 impl TrackDetail {
     pub fn from_bytes(b: &[u8]) -> TrackDetail {
         TrackDetailsEntry::from_bytes(b).map_or_else(|_| TrackDetail::default(), TrackDetail::from)
+    }
+}
+
+/// Somebody on one recording, in what role (`credits`), billing order.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Credit {
+    pub name: String,
+    pub role: String,
+    pub instrument: String,
+}
+
+impl From<CreditsEntry> for Credit {
+    fn from(e: CreditsEntry) -> Credit {
+        Credit {
+            name: e.name,
+            role: e.role,
+            instrument: e.instrument,
+        }
+    }
+}
+
+impl Credit {
+    pub fn from_bytes(b: &[u8]) -> Credit {
+        CreditsEntry::from_bytes(b).map_or_else(|_| Credit::default(), Credit::from)
     }
 }
 

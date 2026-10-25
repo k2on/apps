@@ -842,6 +842,9 @@ fn describing_fills_in_and_never_erases() {
     let composers: Vec<ComposersEntry> = c.list("composers", &());
     assert_eq!(each(&composers, |p| p.sort_name.clone()), ["Beethoven, Ludwig van"]);
     assert_eq!(each(&composers, |p| p.born), [1770]);
+    let artists: Vec<ArtistsEntry> = c.list("artists", &());
+    let beethoven = artists.iter().find(|a| a.name == "Ludwig van Beethoven").map(|a| (a.born, a.died));
+    assert_eq!(beethoven, Some((1770, 0)), "an artist's years are their person's");
     person(&mut c, "Clara Schumann", "", 1819).unwrap();
     assert_eq!(
         each(&c.list::<ComposersEntry>("composers", &()), |p| p.name.clone()),

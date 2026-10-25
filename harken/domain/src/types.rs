@@ -202,6 +202,9 @@ pub struct AlbumsEntry {
 pub struct ArtistsEntry {
     pub art: String,
     pub banner: String,
+    /// The years they lived, where `person` has them: 0 for unknown.
+    pub born: i64,
+    pub died: i64,
     pub name: String,
     pub tracks: i64,
 }
