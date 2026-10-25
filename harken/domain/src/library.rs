@@ -441,3 +441,19 @@ pub fn remove_media(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveMedia) -> Resul
     db.song.delete(input.id)?;
     db.media.delete(input.id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whoever is credited on most of a record is who played it, a tie
+    /// going to whoever came first and nobody to nobody. Falsified by
+    /// counting the empties: the record with one credit had none.
+    #[test]
+    fn who_played_a_record_is_whoever_played_most_of_it() {
+        assert_eq!(most(["", "", "Pinnock"].into_iter()), "Pinnock");
+        assert_eq!(most(["Hogwood", "Pinnock", "Pinnock"].into_iter()), "Pinnock");
+        assert_eq!(most(["Hogwood", "Pinnock"].into_iter()), "Hogwood");
+        assert_eq!(most(["", ""].into_iter()), "");
+    }
+}

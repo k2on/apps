@@ -430,9 +430,18 @@ impl Peer {
         Peer::rows_of(self.client.answer(browse::works, Works { composer: composer.into() }))
     }
 
-    #[cfg(test)]
+    /// A work's performances, read once: the most complete first.
     pub fn recordings_of(&self, work: &str) -> Vec<Recording> {
         Peer::rows_of(self.client.answer(browse::recordings, Recordings { work_id: work.into() }))
+    }
+
+    /// One performance's tracks, read once, in the order the work goes.
+    pub fn recording_rows(&self, id: &str) -> Vec<Item> {
+        let input = RecordingInput {
+            playlist_id: key(self.playlist),
+            id: id.into(),
+        };
+        Peer::rows_of(self.client.answer(browse::recording, input))
     }
 
     #[cfg(test)]

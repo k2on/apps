@@ -343,3 +343,54 @@ fn the_catalogue_is_the_key() {
         assert!(seen.insert(w.catalogue), "two works both claim {}: {}", w.catalogue, w.title);
     }
 }
+
+/// A performance's Play, on a work's page where no track is listed, queues
+/// its movements from the first and says it came from the performance; a
+/// work's Play is its most complete performance's. Falsified by queueing
+/// `rows()`, as a track's Play does: the work's page has none, and nothing
+/// was queued.
+#[test]
+fn a_featured_play_queues_the_performance() {
+    let mut app = super::demo_app();
+    let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
+    let _ = app.update(crate::Message::Select(Source::Work(id.clone(), "Goldberg Variations".into())));
+    assert!(app.peer.rows().is_empty(), "a work's page lists performances");
+    let take = app.peer.recordings()[0].clone();
+    let titles = |q: &[crate::listening::Track]| q.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+    let movements: Vec<String> = app.peer.recording_rows(&take.id).into_iter().map(|i| i.title).collect();
+
+    let _ = app.update(crate::Message::PlayRecording(take.id.clone()));
+    assert_eq!(titles(&app.queue), movements);
+    assert_eq!(app.queue.len() as i64, take.tracks);
+    assert_eq!(app.queued_from, arkui::route::Route::fragment(&Place::Recording(take.id.clone())));
+
+    app.queue.clear();
+    let _ = app.update(crate::Message::PlayWork(id));
+    assert_eq!(titles(&app.queue), movements, "the most complete performance");
+}
+
+/// A composer's page lists their best known works first and the rest
+/// behind "See All", by catalogue; a page opened again lists the best known
+/// again. Falsified by ranking on tracks alone: the work of two short
+/// performances came after the one long one.
+#[test]
+fn the_best_known_works_are_the_most_recorded() {
+    let work = |title: &str, recordings: i64, tracks: i64| crate::rows::Work {
+        title: title.into(),
+        recordings,
+        tracks,
+        ..Default::default()
+    };
+    let works = [work("Air", 1, 9), work("Bourrée", 2, 2), work("Chaconne", 1, 9), work("Gigue", 2, 4)];
+    let ranked: Vec<&str> = crate::known(&works).iter().map(|w| w.title.as_str()).collect();
+    assert_eq!(ranked, ["Gigue", "Bourrée", "Air", "Chaconne"]);
+
+    let mut app = super::demo_app();
+    let _ = app.update(crate::Message::Select(Source::Works("Johann Sebastian Bach".into())));
+    let all = app.peer.works().len();
+    assert_eq!(app.listed_works().len(), all.min(crate::KNOWN_WORKS));
+    let _ = app.update(crate::Message::AllWorks(true));
+    assert_eq!(app.listed_works().len(), all);
+    let _ = app.update(crate::Message::Select(Source::Works("Johann Sebastian Bach".into())));
+    assert!(!app.all_works, "gone with the page");
+}

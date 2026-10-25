@@ -218,6 +218,25 @@ pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, o
     .into()
 }
 
+/// The line under a section that opens the rest of it — "See All 40
+/// Works" — in the accent, its chevron where an entry's is.
+pub fn more<'a, M: Clone + 'a>(label: &str, open: M) -> Element<'a, M> {
+    let line = row![
+        text(label.to_string()).size(14).style(style::accent),
+        Space::new().width(Length::Fill),
+        text("\u{203A}").size(18).style(style::faint(0.45)),
+    ]
+    .align_y(Alignment::Center);
+    mouse_area(container(line).padding(Padding {
+        top: 12.0,
+        right: 4.0,
+        bottom: 4.0,
+        left: 0.0,
+    }))
+    .on_press(open)
+    .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
