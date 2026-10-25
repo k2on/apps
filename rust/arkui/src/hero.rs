@@ -1,6 +1,6 @@
 //! A page about somebody, the way a record shop's catalogue opens one: their
 //! picture across the whole page, their name set on it, and the page under it
-//! in sections, each under a serif heading.
+//! in sections, each under a heading.
 //!
 //! **The picture is a backdrop, not a portrait.** It is drawn wide and
 //! cropped to fill ([`ContentFit::Cover`]), at the shape a painting of
@@ -9,23 +9,20 @@
 //! or a white wig. Somebody with no wide picture has no banner: a portrait
 //! stretched across a page is a close-up of a nose.
 //!
-//! **The serif is the catalogue's voice.** Names and section headings are set
-//! in Source Serif; everything else stays in the interface's sans. It is
-//! embedded ([`SERIF_BYTES`], loaded by the app), because a browser build has
-//! no system fonts to ask.
-use iced::font::{Family, Weight};
+//! **One face, two weights.** Names and section headings are the interface's
+//! own sans at [`BOLD`] and a size up; a second family beside it was one more
+//! voice on a page that only needs the one.
+use iced::font::Weight;
 use iced::widget::{column, container, image, mouse_area, row, rule, stack, text, Space};
 use iced::{Alignment, Background, Color, ContentFit, Element, Font, Length, Padding};
 
 use crate::{style, theme};
 
-/// Source Serif 4 Display, semibold: the file an app loads at start.
-pub const SERIF_BYTES: &[u8] = include_bytes!("../fonts/SourceSerif4Display-Semibold.otf");
-
-/// The headings' face, once [`SERIF_BYTES`] is loaded.
-pub const SERIF: Font = Font {
-    family: Family::Name("Source Serif 4 Display"),
-    weight: Weight::Semibold,
+/// A name or a heading: the interface's face, bold. Where only a regular
+/// face is installed (a browser has only the one iced embeds) it is drawn
+/// regular, and its size alone sets it apart.
+pub const BOLD: Font = Font {
+    weight: Weight::Bold,
     ..Font::DEFAULT
 };
 
@@ -44,7 +41,7 @@ pub fn height(width: f32) -> f32 {
 pub const TALLEST: f32 = 486.0;
 
 /// The banner: `picture` edge to edge across `width`, square-cornered as a
-/// catalogue's is, `kind` in small capitals and `name` in the serif on its
+/// catalogue's is, `kind` in small capitals and `name` in bold on its
 /// lower edge. Until the picture arrives the ground is
 /// drawn instead, so the name is already where it will be.
 pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str, width: f32) -> Element<'a, M> {
@@ -76,7 +73,7 @@ pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str
     let words = container(
         column![
             text(kind.to_uppercase()).size(12).style(white(0.85)),
-            text(name.to_string()).size(40).font(SERIF).style(white(1.0)),
+            text(name.to_string()).size(40).font(BOLD).style(white(1.0)),
         ]
         .spacing(2),
     )
@@ -111,9 +108,9 @@ fn shade() -> image::Handle {
         .clone()
 }
 
-/// A section's heading, in the serif.
+/// A section's heading, in bold.
 pub fn heading<'a, M: 'a>(title: &str) -> Element<'a, M> {
-    container(text(title.to_string()).size(20).font(SERIF))
+    container(text(title.to_string()).size(20).font(BOLD))
         .padding(Padding {
             top: 28.0,
             right: 0.0,
