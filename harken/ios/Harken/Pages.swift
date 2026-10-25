@@ -165,7 +165,7 @@ struct ArtistPage: View {
                          facts: Catalogue.featuredFacts(best), opens: .page(.work(best.id))) { model.playWork(best.id) }
             }
             if !works.isEmpty {
-                SerifHeading(title: Catalogue.heading(works, all: all))
+                SectionHeading(title: Catalogue.heading(works, all: all))
                 // Each under who it is by, its catalogue number under it, and
                 // how many performances of it there are at its right.
                 ForEach(listed) { w in
@@ -178,11 +178,11 @@ struct ArtistPage: View {
                 }
             }
             if !albums.isEmpty {
-                SerifHeading(title: "Albums")
+                SectionHeading(title: "Albums")
                 AlbumShelf(albums: albums)
             }
             if songs {
-                SerifHeading(title: "Songs")
+                SectionHeading(title: "Songs")
                 CatalogueTracks(tracks: tracks, page: page, creator: name)
             }
         }
@@ -219,7 +219,7 @@ struct WorkPage: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text(work?.title ?? "").font(.serif(30, relativeTo: .largeTitle)).fixedSize(horizontal: false, vertical: true)
+                Text(work?.title ?? "").font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
                 if !facts.isEmpty { Text(facts).font(.subheadline).foregroundStyle(.secondary) }
             }
             .padding(.horizontal, Space.page)
@@ -236,7 +236,7 @@ struct WorkPage: View {
                 }
             }
             if takes.count > 1 {
-                SerifHeading(title: "Recordings")
+                SectionHeading(title: "Recordings")
                 ForEach(Array(takes.enumerated()), id: \.element.id) { i, r in
                     EntryRow(title: Catalogue.who(r), under: Catalogue.facts(r), onOpen: { open(.page(.recording(r.id))) }) {
                         // The first is set apart above and zooms from there.
@@ -295,11 +295,11 @@ struct RecordingPage: View {
             CatalogueTracks(tracks: tracks, page: page, creator: "", headings: false)
             RecordFoot(year: year, tracks: tracks, label: take?.label ?? "")
             if !albums.isEmpty {
-                SerifHeading(title: albums.count == 1 ? "From the Album" : "From the Albums")
+                SectionHeading(title: albums.count == 1 ? "From the Album" : "From the Albums")
                 AlbumShelf(albums: albums)
             }
             if !people.isEmpty {
-                SerifHeading(title: "On This Recording")
+                SectionHeading(title: "On This Recording")
                 CoverShelf(items: people) { p in Face(billed: p) }
                     .padding(.top, Space.xs)
             }

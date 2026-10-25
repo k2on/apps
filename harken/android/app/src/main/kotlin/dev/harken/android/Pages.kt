@@ -223,14 +223,14 @@ fun ArtistPage(
             }
         }
         if (works.isNotEmpty()) {
-            item { SerifHeading(if (short) "Well-Known Works" else "Works") }
+            item { SectionHeading(if (short) "Well-Known Works" else "Works") }
             // Each work under who it is by, its catalogue number under it, and how many performances
             // of it there are at its right.
             items(listed, key = { "work:" + it.id }) { w -> Entry(w.title, by, w.catalogue, w.recordings.toString(), onOpen = { act.open(Page.ForWork(w.id)) }) }
             if (short) item { MoreLine("See All ${works.size} Works") { onAll(true) } }
         }
         if (albums.isNotEmpty()) {
-            item { SerifHeading("Albums") }
+            item { SectionHeading("Albums") }
             item {
                 Shelf("albums", albums, key = { it.name }) { a ->
                     CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "track"), 136.dp, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
@@ -239,7 +239,7 @@ fun ArtistPage(
         }
         // Somebody's songs, where they wrote no works: a composer's are their works' performances.
         if (works.isEmpty() && tracks.isNotEmpty()) {
-            item { SerifHeading("Songs") }
+            item { SectionHeading("Songs") }
             underWorks(
                 tracks,
                 details,
@@ -280,7 +280,7 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
                         modifier = Modifier.clickable { act.open(Page.ForArtist(composer)) }.padding(vertical = Space.xs),
                     )
                 }
-                Text(work?.title.orEmpty(), style = SerifType.title)
+                Text(work?.title.orEmpty(), style = MaterialTheme.typography.headlineMedium)
                 val facts = work?.let(Catalogue::workFacts).orEmpty()
                 if (facts.isNotEmpty()) Text(facts, style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(top = Space.xs))
             }
@@ -303,7 +303,7 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
             )
         }
         if (recordings.size > 1) {
-            item { SerifHeading("Recordings") }
+            item { SectionHeading("Recordings") }
             items(recordings, key = { "take:" + it.id }) { r ->
                 Entry(Catalogue.who(r), "", Catalogue.takeFacts(r), "", onOpen = { act.open(Page.ForRecording(r.id)) }) { m ->
                     Cover(r.id, r.art, 64.dp, Modifier.size(64.dp).then(m), corner = 4.dp)
@@ -369,7 +369,7 @@ fun RecordingPage(
         }
         item { Foot(tracks, year, take?.label ?: "") }
         if (on.isNotEmpty()) {
-            item { SerifHeading(if (on.size == 1) "From the Album" else "From the Albums") }
+            item { SectionHeading(if (on.size == 1) "From the Album" else "From the Albums") }
             items(on, key = { "album:" + it.name }) { a ->
                 Entry(a.name, "", a.by, "", onOpen = { act.open(Page.ForAlbum(a.name)) }) { m ->
                     Cover(a.name, a.art, 64.dp, Modifier.size(64.dp).then(m), corner = 4.dp)
@@ -377,7 +377,7 @@ fun RecordingPage(
             }
         }
         if (people.isNotEmpty()) {
-            item { SerifHeading("On This Recording") }
+            item { SectionHeading("On This Recording") }
             item {
                 Shelf("people", people, key = { it.name }) { p ->
                     Face(p.name, p.art, p.role, p.page?.let { to -> { act.open(to) } })

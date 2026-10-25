@@ -184,9 +184,8 @@ exactly what the app draws):
   the `+`, checked as it is typed by `create_playlist`'s own validator,
   whose sentence is shown under the field.
 - **The catalogue's pages**, laid out as the desktop's are
-  (`harken/iced/src/view.rs`), its serif — Source Serif 4 Display,
-  `res/font`, its licence `app/src/main/LICENSE.source-serif.md` — for
-  names, titles and headings. **An album**: its cover beside its title and
+  (`harken/iced/src/view.rs`), in the app's own type: names, titles and
+  headings bold in the sans. **An album**: its cover beside its title and
   who played the most of it (`albums`' `performer`), its tracks under the
   works they are movements of (composer over title, the run's length), its
   parts, and at its foot the year, its length and its label. **A person** —

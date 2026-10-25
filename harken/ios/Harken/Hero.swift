@@ -3,18 +3,18 @@
 // `work_heading` and `view_foot` in `harken/iced/src/view.rs`): a person's
 // banner, run up to the top of the screen, under the status bar and the
 // navigation bar, so its back button is Liquid Glass over the picture; a
-// record's header, its cover beside its title in the serif; the one thing
-// a section sets apart, with a Play; a section's serif heading; an entry
-// over its hairline, and the "See All" under a list of them; a work's
-// heading over its movements; and a record's small print. The pages
-// (Pages.swift) put them together.
+// record's header, its cover beside its title; the one thing a section
+// sets apart, with a Play; a section's heading; an entry over its
+// hairline, and the "See All" under a list of them; a work's heading over
+// its movements; and a record's small print. The pages (Pages.swift) put
+// them together.
 import SwiftUI
 import UIKit
 
 /// A person's banner: their wide picture across the page, cropped to fill,
 /// run up to the top of the screen under the status bar and that much
 /// taller, so what shows below the bar is the shape `shape(width:)` says;
-/// `kind` in small capitals and their name in the serif on its lower edge,
+/// `kind` in small capitals and their name in bold on its lower edge,
 /// over a shade that keeps both legible on a white collar or a white wig,
 /// and a lighter one at its top under the bar and the back button. Until
 /// the picture arrives the ground is drawn, so the name is already where it
@@ -67,7 +67,7 @@ struct Banner: View {
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(kind.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.white.opacity(0.85))
-                    Text(name).font(.serif(38, relativeTo: .largeTitle)).foregroundStyle(Color.white)
+                    Text(name).font(.largeTitle.bold()).foregroundStyle(Color.white)
                         .lineLimit(3).minimumScaleFactor(0.6)
                 }
                 .padding(.horizontal, Space.page + 4)
@@ -125,7 +125,7 @@ struct PlayShuffle: View {
 
 /// The header a record's page opens with, as a catalogue sets one: the
 /// cover beside a line of small capitals (`over`, whose it is), the title in
-/// the serif, who played it in the gold, a small line under (`small`) —
+/// bold, who played it in the gold, a small line under (`small`) —
 /// each line that names somebody opening their page — and Play and Shuffle
 /// under it all.
 struct RecordHeader<Cover: View>: View {
@@ -147,7 +147,7 @@ struct RecordHeader<Cover: View>: View {
                 cover().frame(width: Space.record, height: Space.record)
                 VStack(alignment: .leading, spacing: Space.xs) {
                     if !over.isEmpty { Linked(words: over.uppercased(), font: .caption.weight(.semibold), color: .secondary, action: onOver) }
-                    Text(title).font(.serif(24, relativeTo: .title2)).fixedSize(horizontal: false, vertical: true)
+                    Text(title).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
                     if !by.isEmpty { Linked(words: by, font: .headline, color: .gold, action: onBy) }
                     if !small.isEmpty { Linked(words: small, font: .caption, color: .secondary, action: onSmall) }
                 }
@@ -205,12 +205,12 @@ struct Featured: View {
     }
 }
 
-/// A section's heading, in the serif.
-struct SerifHeading: View {
+/// A section's heading, bold.
+struct SectionHeading: View {
     let title: String
 
     var body: some View {
-        Text(title).font(.serif(22, relativeTo: .title2))
+        Text(title).font(.title2.weight(.semibold))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Space.page)
             .padding(.top, Space.xl + 4)
@@ -276,7 +276,7 @@ struct MoreRow: View {
 }
 
 /// A work's heading over its movements: its composer in small capitals over
-/// its title in the serif, and how long the run of it lasts, in the column
+/// its title, and how long the run of it lasts, in the column
 /// the tracks' lengths are in.
 struct WorkHeading: View {
     let composer: String
@@ -288,7 +288,7 @@ struct WorkHeading: View {
         HStack(alignment: .lastTextBaseline, spacing: Space.m) {
             VStack(alignment: .leading, spacing: 2) {
                 if !composer.isEmpty { Text(composer.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
-                Text(work).font(.serif(17, relativeTo: .headline)).fixedSize(horizontal: false, vertical: true)
+                Text(work).font(.headline).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
             Text(Spell.clock(ms)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
