@@ -288,6 +288,55 @@ struct Offline: View {
     }
 }
 
+/// Who is signed in, round, `side` across: their provider's picture once it
+/// has arrived — fetched and kept as a cover is (`Covers`) — over their
+/// initials on the name's own colour, as the desktop's account button draws
+/// them (`arkui::account::face`) and Android's `Avatar` does.
+struct Avatar: View {
+    let name: String
+    let picture: String
+    var side: CGFloat = 32
+    @Environment(\.colorScheme) private var scheme
+    @State private var image: UIImage? = nil
+
+    var body: some View {
+        let set = scheme == .dark ? Squares.dark : Squares.light
+        let rgb = set[Art.pick(set.count, name)]
+        ZStack {
+            Circle().fill(Color(uiColor: UIColor(rgb: rgb)))
+            Text(Avatar.initials(name))
+                .font(.system(size: side * 0.4, weight: .semibold))
+                .foregroundStyle(Avatar.ink(on: rgb))
+            if let i = image ?? (picture.isEmpty ? nil : Covers.shared.cached(picture, side: side)) {
+                Image(uiImage: i).renderingMode(.original).resizable().scaledToFill()
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(Circle())
+        .task(id: picture) {
+            image = nil
+            if picture.isEmpty { return }
+            image = await Covers.shared.load(picture, side: side)
+        }
+    }
+
+    /// The first letters of the name's first and last words, upper case:
+    /// `Ada Lovelace` is `AL`, `Ada` is `A` — the desktop's `Who::initials`.
+    static func initials(_ name: String) -> String {
+        func first(_ w: Substring) -> Character? { w.first { $0.isLetter || $0.isNumber } }
+        let words = name.split(whereSeparator: { $0.isWhitespace }).filter { first($0) != nil }
+        guard let a = words.first.flatMap(first) else { return "" }
+        guard words.count > 1, let z = words.last.flatMap(first) else { return String(a).uppercased() }
+        return (String(a) + String(z)).uppercased()
+    }
+
+    /// Black or white, whichever reads on `rgb`: the desktop's rule, on the same colours.
+    static func ink(on rgb: UInt32) -> Color {
+        let r = Double((rgb >> 16) & 0xff) / 255, g = Double((rgb >> 8) & 0xff) / 255, b = Double(rgb & 0xff) / 255
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 ? .black : .white
+    }
+}
+
 /// What the app shows is not on this phone yet and is on its way from
 /// `host`: said quietly, and only after a beat, so an answer that lands at
 /// once never shows it.
@@ -312,7 +361,9 @@ struct Fetching: View {
 }
 
 /// The account at the top right of every tab, as the browser has it: who,
-/// whether the link is up, going offline or online, Settings, signing out.
+/// as their picture, whether the link is up, Settings, signing out. Nobody
+/// goes offline by hand: the phone does by itself when the server cannot be
+/// reached, and says so.
 struct AccountMenu: View {
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
@@ -324,20 +375,22 @@ struct AccountMenu: View {
                     Text(linkWords)
                 }
             }
-            Button { model.toggleOnline() } label: {
-                model.offline ? Label("Go Online", systemImage: "icloud") : Label("Go Offline", systemImage: "icloud.slash")
-            }
             Button { open(.settings) } label: { Label("Settings", systemImage: "gearshape") }
             Divider()
             Button(role: .destructive) { model.signOut() } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }
         } label: {
-            Image(systemName: model.offline ? "person.crop.circle.badge.xmark" : "person.crop.circle")
-                .accessibilityLabel("Account")
+            Group {
+                if let l = model.login {
+                    Avatar(name: Logins.name(l), picture: l.picture, side: 32)
+                } else {
+                    Image(systemName: "person.crop.circle")
+                }
+            }
+            .accessibilityLabel("Account")
         }
     }
 
     private var linkWords: String {
-        if model.offline { return "Offline — changes wait on this phone" }
         guard let st = model.snapshot.status else { return "Opening…" }
         if st.linked { return "Connected to \(Probe.display(model.server))" }
         return "Can't reach \(Probe.display(model.server)) right now"

@@ -489,9 +489,6 @@ final class Bridge {
 
     // MARK: the account
 
-    /// Offline on purpose, or back online.
-    func setOnline(_ online: Bool) { onPeer { $0.peer.setOnline(online: online) } }
-
     /// Signed out: the session revoked through the domain (pushed while
     /// linked, pending for the next sign-in otherwise), nothing dialled after
     /// it, what is pending kept. The model closes the session after.

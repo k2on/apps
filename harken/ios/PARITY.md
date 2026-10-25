@@ -31,7 +31,7 @@ shape is the most likely to need a fix at the first build (README.md,
 | — | A Play pressed on a page of works or performances reads the performance's tracks (`recording`) — for a work, its first `recordings` row's — and plays them through the one play path, from `#recording/…` | `Bridge.read`, `Bridge.fullest` | Model.swift, Bridge.swift | yes |
 | — | The Library's Artists list has the composers first (`composers`), each once; a song's menu goes to its work's composer | — | LibraryView.swift, Components.swift | yes |
 | Playlist page: header, its songs, "gone" and "nothing on it yet" | Same, and a swipe on a row takes it off | `.swipeActions` | Pages.swift | yes |
-| Settings (`SettingsScreen.kt`): account, server and whether connected, Sign out (+ the sentence), About, version tapped 7 times for Diagnostics (remembered) | Same, as a `Form`; "4 more taps" said on glass; and a Work offline switch | `Form`, `LabeledContent` | SettingsView.swift | yes |
+| Settings (`SettingsScreen.kt`): account, server and whether connected, Sign out (+ the sentence), About, version tapped 7 times for Diagnostics (remembered) | Same, as a `Form`, the account's face its picture; "4 more taps" said on glass | `Form`, `LabeledContent` | SettingsView.swift | yes |
 | Diagnostics: the peer's numbers, the listening session's numbers, every change with its standing | Same (the desktop's `D`), read again whenever the peer reports a change | `.task(id:)` | SettingsView.swift | yes |
 | A song's menu (`TrackMenu`, a bottom sheet): Play next, Add to queue, Add to playlist, Go to album, Go to artist, Remove from this playlist | The row's `…` is a `Menu`, and the row's long press a context menu, with the same six | `Menu`, `.contextMenu` (glass menus in iOS 26) | Components.swift | yes |
 | Add to playlist sheet: New playlist, every playlist ticked where the song is, tap toggles | A sheet with the same list | `.sheet(item:)`, `.presentationDetents` | Sheets.swift | yes |
@@ -39,7 +39,7 @@ shape is the most likely to need a fix at the first build (README.md,
 | Queue sheet: now playing, up next (100), tap to play from there | Same, and swipe to remove and drag to reorder — each the session's `remove` / `move` | `List`, `.onDelete`, `.onMove`, `EditButton` | PlayerViews.swift | yes (more than Android: its sheet has no remove/reorder; Media3's controller does) |
 | Device picker (`DevicesSheet`): rows by name, ticked where the sound is, the group first ("Kitchen + 1"), slider and mute per row, join `+` / leave `−`, cursor on the output | Same rows (`DevicePicker`, held by `PressTests`) | `List`, `Slider` | Sheets.swift, Session.swift | yes |
 | Snackbar for a refusal or rejection, said once | An alert, said once | `.alert(_:isPresented:)` | Shell.swift | yes |
-| Account: sign out in Settings | And the account menu at the top right of every tab, as the browser has it: who, the link, Go offline / Go online, Settings, Sign out | `ToolbarItem(placement: .topBarTrailing)`, `Menu` (glass by default in iOS 26 toolbars) | Components.swift `AccountMenu` | yes |
+| Account: sign out in Settings | And the account menu at the top right of every tab, as the browser has it: the person's picture (their initials until it arrives), who, the link, Settings, Sign out | `ToolbarItem(placement: .topBarTrailing)`, `Menu`, `sharedBackgroundVisibility(.hidden)` † | Components.swift `AccountMenu` | yes |
 
 ## The player
 

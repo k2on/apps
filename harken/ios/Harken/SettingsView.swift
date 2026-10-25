@@ -17,10 +17,7 @@ struct SettingsView: View {
             Section("Account") {
                 HStack(spacing: Space.l) {
                     let name = model.login.map(Logins.name) ?? ""
-                    Text(name.prefix(1).uppercased())
-                        .font(.title2.bold())
-                        .frame(width: 48, height: 48)
-                        .glassEffect(.regular.tint(.gold), in: Circle())
+                    Avatar(name: name, picture: model.login?.picture ?? "", side: 48)
                     VStack(alignment: .leading) {
                         Text(name).font(.headline)
                         Text(model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "").foregroundStyle(.secondary)
@@ -29,9 +26,8 @@ struct SettingsView: View {
             }
             Section("Server") {
                 LabeledContent(Probe.display(model.server)) {
-                    Text(model.offline ? "Offline" : (model.snapshot.status?.linked == true ? "Connected" : "Can't reach it right now"))
+                    Text(model.snapshot.status?.linked == true ? "Connected" : "Can't reach it right now")
                 }
-                Toggle("Work offline", isOn: Binding(get: { model.offline }, set: { _ in model.toggleOnline() }))
             }
             Section {
                 Button(role: .destructive) { model.signOut() } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }

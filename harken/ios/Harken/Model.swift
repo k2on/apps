@@ -38,8 +38,6 @@ final class Model: ObservableObject {
     @Published var browse: URL? = nil
     /// The full player is up.
     @Published var fullPlayer = false
-    /// Offline on purpose, from the account menu.
-    @Published private(set) var offline = false
     /// What the search last found, and the last few searches.
     @Published var needle = ""
     @Published private(set) var results: Results? = nil
@@ -188,7 +186,6 @@ final class Model: ObservableObject {
         sound.poke = {}
         snapshot = Snapshot()
         results = nil
-        offline = false
         redraw()
     }
 
@@ -271,7 +268,7 @@ final class Model: ObservableObject {
 
     /// The server's host while it cannot be reached; none while it can.
     var unreachable: String? {
-        guard let st = snapshot.status, !offline else { return nil }
+        guard let st = snapshot.status else { return nil }
         return st.link == "waiting to dial" || st.link == "offline" ? Probe.display(server) : nil
     }
 
@@ -496,12 +493,6 @@ final class Model: ObservableObject {
     }
 
     // MARK: the account
-
-    /// Offline on purpose, or back online: the account menu's.
-    func toggleOnline() {
-        offline.toggle()
-        bridge?.setOnline(!offline)
-    }
 
     /// Sign out: the session revoked, the link stopped, the login forgotten; what is pending stays.
     func signOut() {
