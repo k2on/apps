@@ -68,7 +68,7 @@ struct HomeView: View {
         if !s.albums.isEmpty {
             Heading(title: "Albums", action: "See All") { showTab(.library, .albums) }
             CoverShelf(items: s.albums) { a in
-                CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.creator, side: Space.shelf, opens: .page(.album(a.name))) {
+                CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: Space.shelf, opens: .page(.album(a.name))) {
                     open(.page(.album(a.name)))
                 }
             }

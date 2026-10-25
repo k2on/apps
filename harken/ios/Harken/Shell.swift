@@ -125,6 +125,8 @@ struct Destination: View {
         case .page(.album(let n)): AlbumPage(model: model, name: n)
         case .page(.artist(let n)): ArtistPage(model: model, name: n)
         case .page(.playlist(let id)): PlaylistPage(model: model, id: id)
+        case .page(.work(let id)): WorkPage(model: model, id: id)
+        case .page(.recording(let id)): RecordingPage(model: model, id: id)
         case .page(.songs): SongsList().navigationTitle("Songs")
         case .settings: SettingsView()
         case .diagnostics: DiagnosticsView()
