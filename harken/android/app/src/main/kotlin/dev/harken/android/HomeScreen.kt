@@ -92,6 +92,8 @@ data class HomeData(
     val offline: String?,
     /** The server's host while the library has never arrived from it; null once it has. */
     val fetching: String? = null,
+    /** Who is signed in: the face at the top that opens Settings. */
+    val who: Who = Who(""),
 )
 
 /** How many of the newest songs Home's shelf shows. */
@@ -110,7 +112,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
-            TabTitle("Home") { IconButton(onClick = act::settings) { Glyph(Glyphs.Settings, "Settings") } }
+            TabTitle("Home") { IconButton(onClick = act::settings) { Avatar(data.who, 32.dp, "Settings") } }
         }
         if (data.offline != null) item { Offline(data.offline) }
         when {

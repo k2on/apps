@@ -2,9 +2,12 @@
 // signing out, and what this is. Nothing a person sees here is a cursor, a
 // hash or a count of pending intents: those are the diagnostics, behind
 // the version — tapped seven times, the way Android's own build number
-// unlocks its developer options — and remembered once found.
+// unlocks its developer options — and remembered once found. And who is
+// signed in as a face, their picture round, which Home's bar opens this by.
 package dev.harken.android
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,12 +29,30 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.arkdb.ffi.Status
+import dev.harken.android.ui.Art
 import dev.harken.android.ui.Glyph
+import dev.harken.android.ui.LocalArkTheme
+import dev.harken.android.ui.LocalCoverLoader
 import dev.harken.android.ui.PageBar
 import dev.harken.android.ui.Space
 import dev.harken.android.ui.quiet
@@ -46,7 +67,55 @@ data class SettingsData(
     val linked: Boolean,
     val version: String,
     val diagnostics: Boolean,
+    /** Their provider's picture of them, or empty. */
+    val picture: String = "",
 )
+
+/** Who is signed in, as their face draws them: what to call them, and their provider's picture or none. */
+@Immutable
+data class Who(val name: String, val picture: String = "") {
+    companion object {
+        /**
+         * What a face says without a picture: the first letters of the name's first and last words
+         * (`Ada Lovelace` is `AL`, `Ada` is `A`), upper case — the desktop's `Who::initials`.
+         */
+        fun initials(name: String): String {
+            fun first(w: String): Char? = w.firstOrNull { it.isLetterOrDigit() }
+            val words = name.split(Regex("\\s+")).filter { first(it) != null }
+            val letters = when (words.size) {
+                0 -> emptyList()
+                1 -> listOfNotNull(first(words[0]))
+                else -> listOfNotNull(first(words.first()), first(words.last()))
+            }
+            return letters.joinToString("") { it.uppercase() }
+        }
+
+        /** Black or white, whichever reads on `fill`: the desktop's rule, on the same colours. */
+        fun inkOn(fill: Color): Color = if (0.2126f * fill.red + 0.7152f * fill.green + 0.0722f * fill.blue > 0.55f) Color.Black else Color.White
+    }
+}
+
+/**
+ * Who is signed in, round, `side` across: their provider's picture once it has arrived — fetched
+ * from the provider and kept as a cover is, by the app's cover loader — over their initials on
+ * the name's own colour, as the desktop's account button draws them (`arkui::account::face`). It
+ * says `description` and nothing else to a screen reader.
+ */
+@Composable
+fun Avatar(who: Who, side: Dp, description: String? = null, modifier: Modifier = Modifier) {
+    val tint = Art.pick(LocalArkTheme.current.art, who.name).first
+    val said = Modifier.clearAndSetSemantics { if (description != null) contentDescription = description }
+    Box(modifier.then(said).size(side).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) {
+        Text(Who.initials(who.name), color = Who.inkOn(tint), fontSize = (side.value * 0.4f).sp, fontWeight = FontWeight.SemiBold)
+        val covers = LocalCoverLoader.current
+        val url = remember(covers, who.picture) { covers?.urlOf(who.picture) }
+        if (covers != null && url != null) {
+            var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(covers.cached(url)) }
+            if (bitmap == null) LaunchedEffect(url) { bitmap = covers.load(url, side) }
+            bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+        }
+    }
+}
 
 @Composable
 fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit, onVersion: () -> Unit, onDiagnostics: () -> Unit) {
@@ -55,15 +124,7 @@ fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("settings")).padding(horizontal = Space.page)) {
             Group("Account") {
                 Row(Modifier.padding(Space.l), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape, modifier = Modifier.size(48.dp)) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                data.name.take(1).uppercase(),
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                    }
+                    Avatar(Who(data.name, data.picture), 48.dp)
                     Spacer(Modifier.width(Space.l))
                     Column {
                         Text(data.name, style = MaterialTheme.typography.titleMedium)

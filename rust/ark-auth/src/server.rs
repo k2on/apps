@@ -1,6 +1,6 @@
-//! The routes — `/auth/login`, `/auth/callback`, `/auth/exchange`, the
-//! `server` feature's — and the hub's side of who is signed in (S1,
-//! `crate::rows`).
+//! The routes — `/auth/login`, `/auth/callback`, `/auth/exchange` and a
+//! person's picture at `/auth/picture`, the `server` feature's — and the
+//! hub's side of who is signed in (S1, `crate::rows`).
 //!
 //! A sign-in is a [`SignIn`] row the hub writes as its authority
 //! ([`Auth::issue`]), and its token is the row's id with this server's HMAC
@@ -158,6 +158,8 @@ pub struct Auth {
     roles: BTreeMap<String, BTreeSet<String>>,
     /// The function a person's first sign-in runs ([`Auth::welcome`]).
     welcome: Option<String>,
+    /// Pictures fetched for `/auth/picture`, by URL ([`Auth::picture`]).
+    pictures: Mutex<HashMap<String, (Picture, i64)>>,
 }
 
 impl Auth {
@@ -176,6 +178,7 @@ impl Auth {
             reads: reads::<S>(),
             roles: BTreeMap::new(),
             welcome: None,
+            pictures: Mutex::new(HashMap::new()),
         }
     }
 
@@ -392,6 +395,7 @@ impl Auth {
             expires_ms: issued_ms + self.ttl_ms,
             revoked: false,
             roles: account.roles.clone(),
+            picture: account.picture.clone(),
         };
         let c = Change::Add {
             table: SignIn::TABLE.into(),
@@ -431,6 +435,134 @@ impl Auth {
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         let issued = codes.remove(code)?;
         (now_ms() - issued.issued_ms < CODE_TTL_MS).then_some(issued.login)
+    }
+}
+
+/// A picture as `/auth/picture` hands it on: its type, and its bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picture {
+    pub kind: String,
+    pub bytes: Vec<u8>,
+}
+
+/// The most of a picture the server fetches, and how long, and how many,
+/// it keeps one it fetched: a person's picture is asked for at every load
+/// of every client, and the provider asked once an hour.
+const PICTURE_MAX: usize = 2 << 20;
+const PICTURE_TTL_MS: i64 = 60 * 60 * 1000;
+const PICTURES_KEPT: usize = 256;
+
+/// The kinds of picture handed on. Not SVG: a picture served from this
+/// server's origin is the origin's, and an SVG can carry script.
+const PICTURE_KINDS: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"];
+
+impl Auth {
+    /// `user`'s picture: the URL their newest sign-in holds, fetched (or
+    /// kept from an hour since). `None` when no sign-in of theirs has one.
+    ///
+    /// The URL is the provider's say, and a provider may let a person set
+    /// it: so it is fetched only over `https`, as a picture's type and size,
+    /// and from a public address ([`public`], asked of every address a name
+    /// resolves to, the redirects' too) — never the server's own network
+    /// handed back to whoever asks. The one host allowed to be on it is the
+    /// provider's own, which a server signing people in through it already
+    /// trusts: a provider on the same network serving its own pictures.
+    /// Blocking.
+    pub fn picture(&self, user: &str) -> Result<Option<Picture>, String> {
+        let (u, of) = (user.to_string(), self.reads.of);
+        let rows = self.ask(move |store| of(store, &u)).unwrap_or_default();
+        let newest = rows.into_iter().filter(|s| !s.picture.is_empty()).max_by_key(|s| s.issued_ms);
+        let Some(url) = newest.map(|s| s.picture) else { return Ok(None) };
+        let now = now_ms();
+        let kept = self.pictures.lock().unwrap_or_else(|e| e.into_inner()).get(&url).cloned();
+        if let Some((p, _)) = kept.filter(|(_, at)| now - at < PICTURE_TTL_MS) {
+            return Ok(Some(p));
+        }
+        let issuer = match &self.mode {
+            Mode::Oidc(p) => host(p.issuer()).map(str::to_string),
+            Mode::Dev => None,
+        };
+        let p = fetch_picture(&url, issuer.is_some() && issuer.as_deref() == host(&url))?;
+        let mut kept = self.pictures.lock().unwrap_or_else(|e| e.into_inner());
+        kept.retain(|_, (_, at)| now - *at < PICTURE_TTL_MS);
+        if kept.len() >= PICTURES_KEPT {
+            kept.clear();
+        }
+        kept.insert(url, (p.clone(), now));
+        Ok(Some(p))
+    }
+}
+
+/// The host of an `https` URL, port and all.
+pub(crate) fn host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://")?;
+    let host = rest.split(['/', '?', '#']).next()?;
+    Some(host.rsplit_once('@').map_or(host, |(_, h)| h))
+}
+
+/// `url`'s picture, as [`Auth::picture`] fetches one: from anywhere when
+/// it is `trusted` (the provider's own host), and then where it is and no
+/// further; otherwise from public addresses alone.
+fn fetch_picture(url: &str, trusted: bool) -> Result<Picture, String> {
+    use std::io::Read;
+    if !url.starts_with("https://") {
+        return Err("a picture is fetched over https".into());
+    }
+    let agent = ureq::AgentBuilder::new()
+        .https_only(true)
+        .redirects(if trusted { 0 } else { 3 })
+        .timeout(std::time::Duration::from_secs(10))
+        .resolver(move |netloc: &str| {
+            use std::net::ToSocketAddrs;
+            let all: Vec<_> = netloc.to_socket_addrs()?.filter(|a| trusted || public(a.ip())).collect();
+            match all.is_empty() {
+                true => Err(std::io::Error::other(format!("{netloc} is not a public address"))),
+                false => Ok(all),
+            }
+        })
+        .build();
+    let r = agent.get(url).call().map_err(|e| format!("the picture: {e}"))?;
+    let kind = r.content_type().to_ascii_lowercase();
+    if !PICTURE_KINDS.contains(&kind.as_str()) {
+        return Err(format!("the picture is {kind}, not a picture"));
+    }
+    let mut bytes = Vec::new();
+    r.into_reader()
+        .take(PICTURE_MAX as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("the picture: {e}"))?;
+    match bytes.len() > PICTURE_MAX {
+        true => Err("the picture is too big".into()),
+        false => Ok(Picture { kind, bytes }),
+    }
+}
+
+/// Whether `ip` is on the internet at large: not this machine, not a
+/// private, shared, link-local or reserved network — where a fetch for
+/// somebody else would reach what only the server can.
+pub fn public(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v) => {
+            let [a, b, ..] = v.octets();
+            !(v.is_private()
+                || v.is_loopback()
+                || v.is_link_local()
+                || v.is_unspecified()
+                || v.is_broadcast()
+                || v.is_documentation()
+                || v.is_multicast()
+                || a == 0
+                || a >= 240
+                || (a == 100 && (64..128).contains(&b)))
+        }
+        IpAddr::V6(v) => match v.to_ipv4_mapped() {
+            Some(v4) => public(IpAddr::V4(v4)),
+            None => {
+                let s = v.segments()[0];
+                !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (s & 0xfe00) == 0xfc00 || (s & 0xffc0) == 0xfe80)
+            }
+        },
     }
 }
 
@@ -474,6 +606,7 @@ pub fn dev_account(name: &str) -> Account {
         id: id.trim().into(),
         name: id.trim().into(),
         email: String::new(),
+        picture: String::new(),
         roles: roles.into_iter().collect(),
     }
 }

@@ -209,6 +209,9 @@ class Library(private val session: ArkSession) {
 
     val email: String = session.login.email
 
+    /** Their provider's picture of them, or empty. */
+    val picture: String = session.login.picture
+
     /** The server, as the onboarding found it. */
     val server: String = session.server
 

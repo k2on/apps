@@ -175,11 +175,26 @@ final class OnboardingTests: XCTestCase {
         let r = Remembered(shelf)
         r.login = Fx.login
         XCTAssertEqual(r.login, Fx.login)
+        var pictured = Fx.login
+        pictured.picture = "https://pictures.example.invalid/ana.png"
+        r.login = pictured
+        XCTAssertEqual(r.login?.picture, pictured.picture)
         shelf.put("ark.login", "{not json")
         XCTAssertNil(r.login)
         XCTAssertEqual(Model.code(URL(string: "harken://auth?code=abc")!), "abc")
         XCTAssertNil(Model.code(URL(string: "harken://auth?code=")!))
         XCTAssertNil(Model.code(URL(string: "other://auth?code=abc")!))
+    }
+
+    /// A face without a picture says the first and last words' initials, as
+    /// the desktop's and Android's do. Falsified by taking the second word's: `JS`.
+    func testAFaceSaysWhoByItsInitials() {
+        XCTAssertEqual(Avatar.initials("Ada"), "A")
+        XCTAssertEqual(Avatar.initials("Johann Sebastian Bach"), "JB")
+        XCTAssertEqual(Avatar.initials("  ada   lovelace "), "AL")
+        XCTAssertEqual(Avatar.initials("user-0123"), "U")
+        XCTAssertEqual(Avatar.initials(""), "")
+        XCTAssertEqual(Avatar.initials("\u{e9}mile (\u{2014})"), "\u{c9}")
     }
 }
 

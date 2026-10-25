@@ -1290,15 +1290,16 @@ public struct SignIn: Equatable {
     public var expiresMs: Int64
     public var revoked: Bool
     public var roles: [String]
+    public var picture: String
 
-    public init(id: String, user: String, name: String, email: String, device: String, issuedMs: Int64, expiresMs: Int64, revoked: Bool, roles: [String]) { self.id = id; self.user = user; self.name = name; self.email = email; self.device = device; self.issuedMs = issuedMs; self.expiresMs = expiresMs; self.revoked = revoked; self.roles = roles; }
+    public init(id: String, user: String, name: String, email: String, device: String, issuedMs: Int64, expiresMs: Int64, revoked: Bool, roles: [String], picture: String) { self.id = id; self.user = user; self.name = name; self.email = email; self.device = device; self.issuedMs = issuedMs; self.expiresMs = expiresMs; self.revoked = revoked; self.roles = roles; self.picture = picture; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: J.text(o["id"]), user: J.text(o["user"]), name: J.text(o["name"]), email: J.text(o["email"]), device: J.text(o["device"]), issuedMs: J.int(o["issued_ms"]), expiresMs: J.int(o["expires_ms"]), revoked: J.bool(o["revoked"]), roles: J.list(o["roles"]) { v0 in J.text(v0) })
+        self.init(id: J.text(o["id"]), user: J.text(o["user"]), name: J.text(o["name"]), email: J.text(o["email"]), device: J.text(o["device"]), issuedMs: J.int(o["issued_ms"]), expiresMs: J.int(o["expires_ms"]), revoked: J.bool(o["revoked"]), roles: J.list(o["roles"]) { v0 in J.text(v0) }, picture: J.text(o["picture"]))
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id), "\"user\":" + J.q(user), "\"name\":" + J.q(name), "\"email\":" + J.q(email), "\"device\":" + J.q(device), "\"issued_ms\":" + String(issuedMs), "\"expires_ms\":" + String(expiresMs), "\"revoked\":" + String(revoked), "\"roles\":" + J.wlist(roles) { v0 in J.q(v0) }]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id), "\"user\":" + J.q(user), "\"name\":" + J.q(name), "\"email\":" + J.q(email), "\"device\":" + J.q(device), "\"issued_ms\":" + String(issuedMs), "\"expires_ms\":" + String(expiresMs), "\"revoked\":" + String(revoked), "\"roles\":" + J.wlist(roles) { v0 in J.q(v0) }, "\"picture\":" + J.q(picture)]) }
 }
 
 /// The record `Skip`.

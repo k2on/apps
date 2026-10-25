@@ -67,7 +67,9 @@ struct Shell: View {
         NavigationStack(path: path(t)) {
             root()
                 .toolbar {
+                    // The face is its own glass, as a person's picture is in the system's apps.
                     ToolbarItem(placement: .topBarTrailing) { AccountMenu() }
+                        .sharedBackgroundVisibility(.hidden)
                 }
                 .navigationDestination(for: Route.self) { r in
                     Destination(route: r).zoomed(r, zoom)

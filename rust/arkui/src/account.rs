@@ -1,5 +1,10 @@
-//! The account: a button at the right-hand end of a window's top bar saying
+//! The account: a picture at the right-hand end of a window's top bar of
 //! who is signed in, and the menu it opens.
+//!
+//! **The button is only a face.** A circle: the person's picture once it has
+//! arrived, their initials on their own colour until then or when they have
+//! none ([`face`]), and a figure when nobody is (alone). Their name is the
+//! menu's to say.
 //!
 //! **The menu is an ordinary [`Menu`].** It goes into the app's
 //! [`crate::context::Context`] like a row's menu does, so the keyboard,
@@ -16,21 +21,16 @@
 //!
 //! The app says what each entry does: the messages are its own, and nothing
 //! here knows what a server, a session or a login is.
-use iced::widget::{button as pressable, container, row, text};
-use iced::{Alignment, Element, Length, Padding, Point, Size};
+use iced::widget::{container, image, mouse_area, text};
+use iced::{mouse, Border, Color, ContentFit, Element, Length, Point, Size, Theme};
 
-use crate::fit;
 use crate::menu::{self, Anchor, Entry, Menu};
-use crate::{glyphs, icon, panel, style};
+use crate::{art, glyphs, icon, panel};
 
-/// How tall the account button is. Declared, because the menu is placed
-/// before iced lays the button out: a bar holding it is given this height,
-/// and the menu hangs from its bottom.
+/// How tall the account button is — and as wide: a circle. Declared,
+/// because the menu is placed before iced lays the button out: a bar
+/// holding it is given this height, and the menu hangs from its bottom.
 pub const HEIGHT: f32 = 28.0;
-
-/// The most of a name the button shows. A name is a label on a button, not
-/// a heading: past this it is cut, and the menu's header says it whole.
-pub const BUTTON_CHARS: usize = 20;
 
 /// Who is signed in, as the app knows them: the name they gave, and the id
 /// the server knows them by — either may be empty.
@@ -49,53 +49,48 @@ impl Who {
         }
     }
 
-    /// …short enough for the button. A name loses its end (`Johann Sebasti…`),
-    /// an id its middle, whose ends are what tell two ids apart
-    /// ([`fit::Cut`]).
-    pub fn short(&self) -> String {
-        match self.name.is_empty() {
-            true => fit::middle(&self.id, BUTTON_CHARS),
-            false => fit::tail(&self.name, BUTTON_CHARS),
-        }
+    /// What the face says without a picture: the first letters of the
+    /// name's first and last words (`Ada Lovelace` is `AL`, `Ada` is `A`),
+    /// or the id's first letter or digit. Upper case.
+    pub fn initials(&self) -> String {
+        let first = |w: &str| w.chars().find(|c| c.is_alphanumeric());
+        let words: Vec<&str> = self.name.split_whitespace().filter(|w| first(w).is_some()).collect();
+        let letters: Vec<char> = match words.as_slice() {
+            [] => first(&self.id).into_iter().collect(),
+            [one] => first(one).into_iter().collect(),
+            [a, .., z] => first(a).into_iter().chain(first(z)).collect(),
+        };
+        letters.into_iter().flat_map(char::to_uppercase).collect()
     }
 }
 
-/// Whether the window is talking to its server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Link {
-    Online,
-    Offline,
-}
-
-/// What the account button says and what its menu offers.
+/// What the account button draws and what its menu offers.
 #[derive(Debug, Clone)]
 pub struct Account<M> {
-    /// On the button.
-    pub label: String,
+    /// Who the face is: initials and the colour they are drawn on, picked
+    /// by [`art::pair`] from the name, as a phone picks it. `None` alone.
+    pub who: Option<Who>,
     /// Across the top of the menu.
     pub header: String,
     pub entries: Vec<Entry<M>>,
 }
 
 impl<M> Account<M> {
-    /// Somebody signed in: going offline or back online, and signing out.
-    pub fn signed_in(who: &Who, link: Link, toggle: M, sign_out: M) -> Self {
-        let (glyph, go) = match link {
-            Link::Online => (glyphs::OFFLINE, "Go offline"),
-            Link::Offline => (glyphs::ONLINE, "Go online"),
-        };
+    /// Somebody signed in: signing out. Whether the window is talking to
+    /// its server is the window's own business — it goes offline by
+    /// itself when it cannot, and says so — and not a thing to ask for.
+    pub fn signed_in(who: &Who, sign_out: M) -> Self {
         Account {
-            label: who.short(),
+            who: Some(who.clone()),
             header: format!("Signed in as {}", who.full()),
-            entries: vec![Entry::run(glyph, go, toggle), Entry::run(glyphs::SIGN_OUT, "Sign out", sign_out)],
+            entries: vec![Entry::run(glyphs::SIGN_OUT, "Sign out", sign_out)],
         }
     }
 
-    /// A login the server turned away: there is no link to go on or off, and
-    /// the login is still here to clear.
+    /// A login the server turned away: the login is still here to clear.
     pub fn turned_away(who: &Who, sign_out: M) -> Self {
         Account {
-            label: who.short(),
+            who: Some(who.clone()),
             header: format!("{} \u{2014} signed out by the server", who.full()),
             entries: vec![Entry::run(glyphs::SIGN_OUT, "Sign out", sign_out)],
         }
@@ -106,7 +101,7 @@ impl<M> Account<M> {
     /// nothing.
     pub fn alone(header: impl Into<String>) -> Self {
         Account {
-            label: "Alone".into(),
+            who: None,
             header: header.into(),
             entries: Vec::new(),
         }
@@ -135,24 +130,62 @@ pub fn origin(right: f32, bottom: f32, window: Size, width: f32, rows: usize) ->
     Point::new(menu::right_aligned(right, width), y)
 }
 
-/// The button: who, and a chevron saying it opens downwards. `press` opens
-/// the menu; with the menu up its backdrop is over the button, so a second
+/// The face, `side` across: `picture` when there is one, cropped to the
+/// circle; else `who`'s initials on their colour, in black or white,
+/// whichever reads on it; else (nobody) a figure on the bar's own grey.
+pub fn face<'a, M: 'a>(who: Option<&Who>, picture: Option<&image::Handle>, side: f32) -> Element<'a, M> {
+    if let Some(p) = picture {
+        return image(p.clone())
+            .width(Length::Fixed(side))
+            .height(Length::Fixed(side))
+            .content_fit(ContentFit::Cover)
+            .border_radius(side / 2.0)
+            .into();
+    }
+    let round = Border {
+        radius: (side / 2.0).into(),
+        ..Border::default()
+    };
+    let inside: Element<'a, M> = match who {
+        Some(w) => text(w.initials()).size((side * 0.4).round()).into(),
+        None => icon::line(glyphs::ARTIST, false).into(),
+    };
+    let seed = who.map(|w| w.full().to_string());
+    container(inside)
+        .width(Length::Fixed(side))
+        .height(Length::Fixed(side))
+        .center(Length::Fixed(side))
+        .style(move |theme: &Theme| {
+            let fill = match &seed {
+                Some(seed) => art::pair(theme, seed)[0],
+                None => theme.extended_palette().background.strong.color,
+            };
+            container::Style {
+                background: Some(fill.into()),
+                text_color: Some(ink_on(fill)),
+                border: round,
+                ..container::Style::default()
+            }
+        })
+        .into()
+}
+
+/// Black or white, whichever is further from `fill`'s lightness.
+fn ink_on(fill: Color) -> Color {
+    let lightness = 0.2126 * fill.r + 0.7152 * fill.g + 0.0722 * fill.b;
+    match lightness > 0.55 {
+        true => Color::BLACK,
+        false => Color::WHITE,
+    }
+}
+
+/// The button: the face ([`face`]), [`HEIGHT`] across. `press` opens the
+/// menu; with the menu up its backdrop is over the button, so a second
 /// click closes it as a click anywhere else does.
-pub fn button<'a, M: Clone + 'a>(account: &Account<M>, press: M) -> Element<'a, M> {
-    let face = row![
-        icon::line(glyphs::ARTIST, false),
-        text(account.label.clone()).size(13).wrapping(text::Wrapping::None),
-        icon::line(glyphs::DOWN, false),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
-    // A button lays its content at its top; the row is centred in the
-    // button's height by a container as tall as it is.
-    pressable(container(face).center_y(Length::Fill))
-        .height(Length::Fixed(HEIGHT))
-        .padding(Padding::from([0.0, panel::ENTRY_PAD_X]))
-        .style(style::quiet)
+pub fn button<'a, M: Clone + 'a>(account: &Account<M>, picture: Option<&image::Handle>, press: M) -> Element<'a, M> {
+    mouse_area(face(account.who.as_ref(), picture, HEIGHT))
         .on_press(press)
+        .interaction(mouse::Interaction::Pointer)
         .into()
 }
 
@@ -165,7 +198,6 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq)]
     enum Msg {
-        Toggle,
         SignOut,
     }
 
@@ -180,22 +212,21 @@ mod tests {
         }
     }
 
-    /// What the menu offers in each state, and what each entry sends.
+    /// What the menu offers in each state, and what each entry sends —
+    /// signed in or turned away, signing out and nothing else: no going
+    /// offline or online, which a window does by itself.
     ///
-    /// Falsified by swapping the two arms of `link` in `signed_in`: online
-    /// offers `Go online`, and the first assertion names it.
+    /// Falsified by putting a `Go offline` entry back in `signed_in`: the
+    /// first assertion names it.
     #[test]
     fn the_menu_offers_what_the_account_can_do() {
-        let on = Account::signed_in(&ada(), Link::Online, Msg::Toggle, Msg::SignOut);
-        assert_eq!(labels(&on), ["Go offline", "Sign out"]);
+        let on = Account::signed_in(&ada(), Msg::SignOut);
+        assert_eq!(labels(&on), ["Sign out"]);
         assert_eq!(on.header, "Signed in as Ada");
-        assert_eq!(on.label, "Ada");
+        assert_eq!(on.who.as_ref(), Some(&ada()));
         let messages: Vec<&Msg> = on.entries.iter().map(|e| e.message()).collect();
-        assert_eq!(messages, [&Msg::Toggle, &Msg::SignOut]);
+        assert_eq!(messages, [&Msg::SignOut]);
         assert!(on.entries.iter().all(|e| !e.opens_submenu()));
-
-        let off = Account::signed_in(&ada(), Link::Offline, Msg::Toggle, Msg::SignOut);
-        assert_eq!(labels(&off), ["Go online", "Sign out"]);
 
         let away = Account::turned_away(&ada(), Msg::SignOut);
         assert_eq!(labels(&away), ["Sign out"]);
@@ -203,31 +234,30 @@ mod tests {
 
         let alone: Account<Msg> = Account::alone("Alone, on this device");
         assert!(alone.entries.is_empty(), "nothing to sign out of");
+        assert!(alone.who.is_none(), "nobody's face");
         assert_eq!(alone.header, "Alone, on this device");
     }
 
-    /// The button says the name, else the id, cut when long — a name at its
-    /// end, an id in its middle — and the header says it whole.
+    /// The face without a picture says the name's first and last initials,
+    /// else the id's first letter; the header says the name whole.
     ///
-    /// Falsified by making `short` cut an id with `tail`: the id's last
-    /// characters, which tell it from its neighbours, are gone.
+    /// Falsified by taking the second letter from the second word rather
+    /// than the last: `Johann Sebastian Bach` is `JS`.
     #[test]
-    fn the_button_says_who_briefly_and_the_header_whole() {
-        let id = Who {
-            name: String::new(),
-            id: "user-0123456789abcdef-xyz".into(),
+    fn the_face_says_who_by_initials_and_the_header_whole() {
+        let who = |name: &str, id: &str| Who {
+            name: name.into(),
+            id: id.into(),
         };
-        assert_eq!(id.full(), "user-0123456789abcdef-xyz");
-        assert_eq!(id.short().chars().count(), BUTTON_CHARS);
-        assert!(id.short().ends_with("-xyz"), "{}", id.short());
-        let long = Who {
-            name: "Johann Sebastian Bach of Eisenach".into(),
-            id: "u".into(),
-        };
-        assert_eq!(long.short(), "Johann Sebastian Ba\u{2026}");
-        let a = Account::signed_in(&long, Link::Online, Msg::Toggle, Msg::SignOut);
+        assert_eq!(ada().initials(), "A");
+        assert_eq!(who("Johann Sebastian Bach", "u").initials(), "JB");
+        assert_eq!(who("  ada   lovelace ", "u").initials(), "AL");
+        assert_eq!(who("", "user-0123").initials(), "U");
+        assert_eq!(who("", "").initials(), "");
+        assert_eq!(who("\u{e9}mile (\u{2014})", "u").initials(), "\u{c9}");
+        let long = who("Johann Sebastian Bach of Eisenach", "u");
+        let a = Account::signed_in(&long, Msg::SignOut);
         assert_eq!(a.header, "Signed in as Johann Sebastian Bach of Eisenach");
-        assert_eq!(ada().short(), "Ada", "what fits is left alone");
     }
 
     /// Hung off the button: its right edge on the button's, its top on the
@@ -245,7 +275,7 @@ mod tests {
         let bottom = 16.0 + HEIGHT;
         for (w, h) in [(860.0, 600.0), (1600.0, 1000.0), (420.0, 300.0), (240.0, 120.0)] {
             let window = Size::new(w, h);
-            let a = Account::signed_in(&ada(), Link::Online, Msg::Toggle, Msg::SignOut);
+            let a = Account::signed_in(&ada(), Msg::SignOut);
             let m = a.menu(right(w), bottom, window);
             let height = Menu::<Msg>::height(m.entries.len());
             assert!(
@@ -265,7 +295,7 @@ mod tests {
                 assert_eq!(m.origin.y, bottom, "{w}×{h}: it does not open down from the button");
             }
         }
-        let m = Account::signed_in(&ada(), Link::Online, Msg::Toggle, Msg::SignOut).menu(844.0, bottom, Size::new(860.0, 600.0));
+        let m = Account::signed_in(&ada(), Msg::SignOut).menu(844.0, bottom, Size::new(860.0, 600.0));
         assert_eq!((m.origin.x, m.origin.y, m.width), (646.0, 44.0, 198.0));
     }
 
@@ -273,13 +303,13 @@ mod tests {
     /// it, `<Enter>` answers the entry's message, `<Esc>` closes it — and a
     /// menu with nothing in it (alone) walks nowhere without falling over.
     ///
-    /// Falsified by `Context::chosen` answering the first entry whatever the
-    /// cursor: `<Enter>` after `j` answers `Toggle`.
+    /// Falsified by a `Context::chosen` that answers nothing: `<Enter>` on
+    /// `Sign out` signs nobody out.
     #[test]
     fn the_menu_is_driven_like_every_other() {
         let window = Size::new(860.0, 600.0);
         let mut ctx: Context<Msg, u32> = Context::new();
-        ctx.open_menu(Account::signed_in(&ada(), Link::Online, Msg::Toggle, Msg::SignOut).menu(844.0, 44.0, window));
+        ctx.open_menu(Account::signed_in(&ada(), Msg::SignOut).menu(844.0, 44.0, window));
         assert_eq!(ctx.focus(), Some(Layer::Menu));
         assert_eq!(ctx.travel(Motion::Down(1)), None);
         assert_eq!(ctx.chosen(), Some(Msg::SignOut));

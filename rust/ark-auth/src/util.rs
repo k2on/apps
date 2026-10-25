@@ -17,6 +17,25 @@ pub fn login_url(server: &str, redirect: &str, user: Option<&str>) -> String {
     format!("{}/auth/login?redirect={}{user}", server.trim_end_matches('/'), percent_encode(redirect))
 }
 
+/// Where a client loads `user`'s picture from: the server's
+/// `/auth/picture`, which fetches the provider's URL for it
+/// (`server::Auth::picture`) — a page cannot read a picture from a host that
+/// does not answer it with CORS, and most providers' do not. `picture` is
+/// the URL the login holds: none, and there is nothing to load; another,
+/// and so is the address (`v`), so a cache keyed by it lets the old one go.
+pub fn picture_url(server: &str, user: &str, picture: &str) -> Option<String> {
+    if picture.is_empty() || server.is_empty() {
+        return None;
+    }
+    // FNV-1a: a version, not a secret.
+    let v = picture.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+    Some(format!(
+        "{}/auth/picture?user={}&v={v:08x}",
+        server.trim_end_matches('/'),
+        percent_encode(user)
+    ))
+}
+
 /// The socket beside the login: `/sync`, with the scheme to match.
 ///
 /// A client is told one address and derives the other, so a server moved

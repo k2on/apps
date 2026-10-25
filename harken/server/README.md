@@ -127,7 +127,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 |---|---|
 | `HARKEN_DATA` | the log (sign-ins among its rows), the kept listening sessions, the session key, the scanner's replica, its prints and the covers it took out of files (default: `$TMPDIR/harken-server`; below) |
 | `HARKEN_DEV_AUTH=1` | anyone is whoever they say — a laptop only, said loudly at start |
-| `HARKEN_OIDC_ISSUER`, `HARKEN_OIDC_CLIENT_ID`, `HARKEN_OIDC_CLIENT_SECRET_FILE` | all three or none; the secret is a file (a systemd credential); `HARKEN_OIDC_SCOPES` |
+| `HARKEN_OIDC_ISSUER`, `HARKEN_OIDC_CLIENT_ID`, `HARKEN_OIDC_CLIENT_SECRET_FILE` | all three or none; the secret is a file (a systemd credential); `HARKEN_OIDC_SCOPES` (default `openid profile email`: `profile` is what carries a person's name and `picture`, which every client draws as their face, the browser and the desktop through `/auth/picture`) |
 | `HARKEN_PUBLIC_URL` | where a browser reaches this server (default `http://ADDR`) |
 | `HARKEN_REDIRECTS` | comma-separated prefixes a login may return to, besides loopback, `harken://` and the public URL |
 | `HARKEN_MEDIA` | the media root: `music/` is scanned, all of it served at `/media`, **unauthenticated** |

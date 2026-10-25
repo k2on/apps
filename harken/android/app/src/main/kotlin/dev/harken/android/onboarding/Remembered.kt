@@ -75,6 +75,7 @@ public object Logins {
                     .put("id", l.user)
                     .put("name", l.name)
                     .put("email", l.email)
+                    .put("picture", l.picture)
                     .put("roles", JSONArray(l.roles)))
             .put("expires_ms", l.expiresMs)
             .toString()
@@ -91,6 +92,7 @@ public object Logins {
             email = u.optString("email"),
             roles = List(roles?.length() ?: 0) { roles!!.getString(it) },
             expiresMs = o.optLong("expires_ms"),
+            picture = u.optString("picture"),
         )
     }
 }

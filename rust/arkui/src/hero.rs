@@ -18,13 +18,25 @@ use iced::{Alignment, Background, Color, ContentFit, Element, Font, Length, Padd
 
 use crate::{style, theme};
 
-/// A name or a heading: the interface's face, bold. Where only a regular
-/// face is installed (a browser has only the one iced embeds) it is drawn
-/// regular, and its size alone sets it apart.
+/// A name or a heading: the interface's face, bold.
+///
+/// On the desktop that is the system's sans-serif, bold. In a browser there
+/// are no system fonts and iced draws everything in the Fira Sans it embeds,
+/// which is Regular alone — so [`FIRA_SANS_BOLD`] is loaded beside it, and
+/// this names the family outright: a generic sans-serif there matches no
+/// family at all.
 pub const BOLD: Font = Font {
+    #[cfg(target_arch = "wasm32")]
+    family: iced::font::Family::Name("Fira Sans"),
     weight: Weight::Bold,
     ..Font::DEFAULT
 };
+
+/// Fira Sans Bold 4.203 (SIL OFL 1.1, `fonts/LICENSE.fira-sans.txt`), from
+/// google/fonts — the same release as the Regular iced embeds. An app hands
+/// it to `iced::application(...).font(...)` so [`BOLD`] has a face to draw
+/// with in a browser; on the desktop it is a fallback.
+pub const FIRA_SANS_BOLD: &[u8] = include_bytes!("../fonts/FiraSans-Bold.ttf");
 
 /// A banner's shape: width over height.
 pub const ASPECT: f32 = 2400.0 / 933.0;
@@ -246,6 +258,23 @@ pub fn more<'a, M: 'a>(label: &str, lit: bool) -> Element<'a, M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The embedded face is a bold one: its `OS/2` table says weight 700,
+    /// the weight [`BOLD`] asks for. Falsified by embedding iced's
+    /// `FiraSans-Regular.ttf` in its place: that says 400.
+    #[test]
+    fn the_embedded_face_is_bold() {
+        let f = FIRA_SANS_BOLD;
+        let u16_at = |at: usize| u16::from_be_bytes([f[at], f[at + 1]]) as usize;
+        let u32_at = |at: usize| u32::from_be_bytes([f[at], f[at + 1], f[at + 2], f[at + 3]]) as usize;
+        let os2 = (0..u16_at(4))
+            .map(|i| 12 + 16 * i)
+            .find(|&at| &f[at..at + 4] == b"OS/2")
+            .map(|at| u32_at(at + 8))
+            .expect("an OS/2 table");
+        assert_eq!(u16_at(os2 + 4), 700);
+        assert_eq!(BOLD.weight, Weight::Bold);
+    }
 
     /// A listing is never so narrow a title has no room, nor wider than three.
     #[test]

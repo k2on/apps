@@ -410,7 +410,7 @@ final class Remembered {
 enum Logins {
     static func json(_ l: Login) -> String {
         J.obj(["\"token\":" + J.q(l.token), "\"session\":" + J.q(l.session),
-               "\"user\":" + J.obj(["\"id\":" + J.q(l.user), "\"name\":" + J.q(l.name), "\"email\":" + J.q(l.email), "\"roles\":" + J.wlist(l.roles, J.q)]),
+               "\"user\":" + J.obj(["\"id\":" + J.q(l.user), "\"name\":" + J.q(l.name), "\"email\":" + J.q(l.email), "\"picture\":" + J.q(l.picture), "\"roles\":" + J.wlist(l.roles, J.q)]),
                "\"expires_ms\":" + String(l.expiresMs)])
     }
 
@@ -418,7 +418,8 @@ enum Logins {
         guard let o = J.parse(s) as? [String: Any], let u = o["user"] as? [String: Any],
               let token = o["token"] as? String, let session = o["session"] as? String, let id = u["id"] as? String else { return nil }
         return Login(token: token, session: session, user: id, name: u["name"] as? String ?? "", email: u["email"] as? String ?? "",
-                     roles: u["roles"] as? [String] ?? [], expiresMs: o["expires_ms"].map { J.int($0) } ?? 0)
+                     roles: u["roles"] as? [String] ?? [], expiresMs: o["expires_ms"].map { J.int($0) } ?? 0,
+                     picture: u["picture"] as? String ?? "")
     }
 
     /// What to call whoever is signed in.

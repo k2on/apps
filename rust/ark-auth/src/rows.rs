@@ -48,6 +48,11 @@ pub struct SignIn {
     /// The roles it was opened with: a dev name's (`alice:library`), a
     /// server's own peer's.
     pub roles: Vec<String>,
+    /// The person's picture as the provider said it at this sign-in
+    /// ([`crate::Account::picture`]). Defaulted: a row written before it
+    /// was added has none, and without a default it cannot be read at all.
+    #[serde(default)]
+    pub picture: String,
 }
 
 /// A role granted to a person.

@@ -50,9 +50,14 @@ fn config() -> Config {
 /// The token the writer's sign-in was given, and what the fixture holds:
 /// the hub's head and state hash, and `N` playlists, `p0`… — enough that
 /// the device's local instance folds into its `local.kv` too.
+///
+/// The state hash is over the rows as this schema has them, so a column
+/// appended moves it though nothing on the disk did: `sign_in.picture`,
+/// defaulted, took it from `9781dcf4…`, the hash the fixture was written
+/// with.
 const TOKEN: &str = "c3d0755a76b5a48571c12ae1b690ebed.e0d2394e21051a98976bd9d4d1f10569192f49f49b56c0d235ed92ed3273d0a1";
 const HEAD: i64 = 72;
-const STATE: &str = "9781dcf488c5df53e9f7a28cfdf17fa345565dcd57c04ae8b40c27f8ef3d67d9";
+const STATE: &str = "710d712e81d1469987f08d80d37c0a1f0c386b03bd2e60f166bd62d86be01624";
 const N: usize = 70;
 
 fn fixture() -> PathBuf {
