@@ -316,6 +316,48 @@ fn where_the_player_went_by_itself_is_said() {
     );
 }
 
+/// A speaker paused and resumed by hand is where it is: the `play` it said
+/// lands in the session as a clock it did not move, so when that clock
+/// comes back the speaker — a second on already, played while the house
+/// noticed and the session heard — is followed, not sought back to where
+/// it paused.
+///
+/// Falsified by reading the clock the speaker's own `play` made as the
+/// session moving: a Sonos resumed by its button jumped back a second
+/// (`seek 4200`).
+#[test]
+fn a_resume_by_hand_is_followed_not_sought_back() {
+    let mut rig = Rig::new();
+    rig.started(1, 0);
+    let paused = session(1, 0, Clock::Paused { at_ms: 4_200 }, ME, false);
+    rig.sound.playing = false;
+    rig.sound.place = Some(Place::Believed(4_200));
+    assert!(rig.look(&paused, NOW).is_empty());
+
+    rig.sound.playing = true;
+    rig.sound.events.push_back(Event::Resumed);
+    assert_eq!(rig.names(&paused, NOW + 1_000), ["play"]);
+    // The play lands at 1_100, from the pause; the speaker had been playing
+    // since about 0_000, and is measured 1_300 on.
+    let resumed = session(1, 0, playing(4_200, NOW + 1_100), ME, false);
+    rig.sound.place = Some(Place::Measured { ms: 5_500, at: NOW + 1_200 });
+    let said = rig.look(&resumed, NOW + 1_200);
+    assert_eq!(rig.sound.take_did(), Vec::<String>::new(), "not sought back");
+    assert_eq!(
+        said,
+        [(
+            "report_position",
+            Report {
+                at_ms: 5_500,
+                since: NOW + 1_100
+            }
+            .to_bytes(),
+            Some(NOW + 1_200)
+        )],
+        "the session is told where it is"
+    );
+}
+
 /// A player that has come apart from a clock nobody touched by more than
 /// the bound is followed: the session is told where it is
 /// (`report_position`, against the clock it was measured against, as of

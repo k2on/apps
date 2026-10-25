@@ -265,7 +265,12 @@ impl Reconciler {
             return;
         }
         m.role = Role::Output;
-        if matches!(m.waiting, Waiting::On { clock } if clock != a.clock) {
+        // What it said has landed: the clock now is the one its own word made
+        // — a `play` from the pause, a `stalled` where it stopped — and not the
+        // session moving. Read as a move, a speaker resumed by hand was sought
+        // back to its pause, a second behind where it had played on to.
+        let landed = matches!(m.waiting, Waiting::On { clock } if clock != a.clock);
+        if landed {
             m.waiting = Waiting::Nothing;
         }
         let at = (a.at.max(0) as usize).min(a.queue.len().saturating_sub(1));
@@ -361,7 +366,7 @@ impl Reconciler {
         // told — as the player's own `seek` past [`DRIFT_MS`], else
         // `report_position` — once, until the session moves.
         let against = Against::Clock { here, clock: a.clock };
-        let moved = m.against != against && !placed;
+        let moved = m.against != against && !placed && !landed;
         m.against = against;
         match (heard.place, a.clock) {
             (p, _) if moved => {
