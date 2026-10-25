@@ -76,6 +76,10 @@ pub struct Login {
     pub email: String,
     pub roles: Vec<String>,
     pub expires_ms: i64,
+    /// The provider's picture of them (`ark_auth::Account::picture`), or
+    /// empty. Last and defaulted, so a login made before it still builds.
+    #[uniffi(default = "")]
+    pub picture: String,
 }
 
 impl From<ark_auth::Login> for Login {
@@ -88,6 +92,7 @@ impl From<ark_auth::Login> for Login {
             email: l.user.email,
             roles: l.user.roles,
             expires_ms: l.expires_ms,
+            picture: l.user.picture,
         }
     }
 }
@@ -607,6 +612,7 @@ impl Peer {
             email: s.email,
             roles: s.roles,
             expires_ms: s.expires_ms,
+            picture: s.picture,
         })
     }
 

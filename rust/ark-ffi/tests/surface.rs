@@ -37,6 +37,7 @@ fn login(token: &str) -> Login {
         email: String::new(),
         roles: w.roles,
         expires_ms: 0,
+        picture: String::new(),
     }
 }
 
