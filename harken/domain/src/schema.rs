@@ -47,6 +47,9 @@ pub struct Person {
     pub added_ms: i64,
     pub user_id: String,
     /// A wide picture to open their page with, where `art` is the square.
+    /// Defaulted: a row written before it was added has none, and without
+    /// a default it cannot be read at all.
+    #[serde(default)]
     pub banner: String,
 }
 

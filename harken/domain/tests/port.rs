@@ -327,70 +327,70 @@ fn step(r: &mut Rng, s: &Store) -> Step {
 
 /// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
 /// a build could write values as JSON).
-const SCHEMA: &str = "f579a0f02908d79ff9f539492b8dfba149ec495c0c53df2081d739396e96ec91";
+const SCHEMA: &str = "049fd9d324ef1af3b6a69ed20ef8728cd566763ea336df68983e40e2bebdd37e";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
 /// value format writes them (postcard, N4).
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,
-        "792f39404784e17cb09a07a796d7faecc01a7f5793234e60fe2569900959dcc0",
-        "724614585e730f429eaa5d6d0410521ba0d154df715adacee524b66bd1f708d6",
+        "c798d85243d21c6d47dc0686383483fd5980b446a53401fad1d88deb87e5a3a4",
+        "6ceae137e687fab182fbb032ac07811e2a5f19967fe9b941cfb25dbea8578024",
     ),
     (
         2,
-        "2d7c012aab7b4448c0ba269635c0d57fbe01296ec1614c7eeb99b95f3bb39fa4",
-        "58f584f469b1240f86d93744c271498840b60e22cd9fd069eaae6a1943cef152",
+        "3f440c0644bfc0143cf20cb6334e40b01a92857ec7987050d64e06a6fea13a67",
+        "3e981672863a3757e19823f45a8d2b69197bf9b10bb16fe5dcd2ac12501b27a3",
     ),
     (
         3,
-        "b3f7884253a24b211010ef098607a017455326d8b835c7a8072c8b8be6c5e618",
-        "35fde5827085be58544925acc0d7ab03c5eb7f716ef333d8113f92c4b13feb83",
+        "1858c760f2c3541a476d6017593b80294052112b4ce4e776066089879ec11c45",
+        "865965469a7e32b3262ad61d9ae7bf9133252f761fb35b03d5799278099bd64e",
     ),
     (
         4,
-        "a78209f2f3e5a64687f4b85b3aa041bb046900c06ff726a563110baf76b0c6d7",
-        "7851024ffd56c7c00e80d83e9b6fc99aa5bd0ca627bfde29bde14cb4db8d4fe8",
+        "0c4e3dda3d9369d4a7d243f31611f80f1ef047851409d7be5fc92ac579c88d8d",
+        "1f0f710c4894de381cc535aed32f380559ba06739f1db235f9a42675d5a4e0a8",
     ),
     (
         5,
-        "62aee24a7dbd53e7b9b93b903f2bb24f77365bc05bd3db3f7702027c2a06c70b",
-        "dc7b4b402b928304e6268c6dd0b5dc56cec46df21736583686d74b10f0f56ea5",
+        "3b528061ae6e4415bb5b72d40141129f7ba754df5cf06776a6daa4689772a2ff",
+        "7dc596c6aa69b073868931fcae5f4ad9cc04408bbc8e53ff2c2cff321d6e47c2",
     ),
     (
         6,
-        "b7fffd9dd11b37ec6ee1f32a6bae57790e020190b6a3889891ad4b7c6c87d46e",
-        "78618923a5fad1390452df0909527e58fcc62f3c805cd57c680968a1db04096d",
+        "47e6c012f03c902133221a002f337d66154b2878b407bd0b92d192d6bf6a83c9",
+        "481e420243ea6bea4e48e4a2df91befffa3560f0d31730587469322653c2e121",
     ),
     (
         7,
-        "8a86eaf2a4a0765f9d088f219cbfabcb397f7641d7050369ad4b856aa520c8b3",
-        "be3bdd96f9561a552f1157e1a5706f6c25819a5861553647e60a68d97c10397d",
+        "fa2b6809dba400d396c0dcdd19f0560c59c8abc792d88cbfbc59460d76adf7a2",
+        "5c330c88bfb1a606015c5da4ee0d67859254e9dc4556ef20811940cc0a176ea9",
     ),
     (
         8,
-        "f85f575c01ed6913a2dd40237a6fff1f68a7302266b97b697d1732da17387aed",
-        "d293c8ef3a16471707134fb556ddb91200a5572d7ed21ebcf64af24b75418d43",
+        "95bae4fa8476cb7a95f563266b4ff97161127f70328e2f45254bac8d15f0e066",
+        "1c1f8b17ec1ef893790bb5521df2fc4ac2f11607c0ff64846388a05f27c4c002",
     ),
     (
         9,
-        "c7b9e67d9e6f488325f1a110cc8554e7eae8f5e7b44202783bfeb2d85b8f1fc4",
-        "1e1e840065c4340fde9e280fdc6000d3a55065b08d3b04dd227ecdd696b22f6b",
+        "e0050a56bed067704ecaca1920d2e4001551df9f30fd51d6c0a5440b1f9f6b9b",
+        "92e48f60ffc2c9a7c14f8192fd01ac31d86a3bd2cbcf6a8f827d2fd2b5670851",
     ),
     (
         10,
-        "ef5966089b9e202877e526954fc133b3ab7e1ab012ca7c88154a84c662c70adf",
-        "0899c7fa967b548cb74195f836e789ec4354f7e4370daf748e6fdae5c771dc43",
+        "09aab3c327eb3015614b7a71c855121761ab6d61582cc9c9596737767531fec1",
+        "1c6fc921dda33a71e7f646b8025e0d4479bb32381efb72ac32d75250b0256fc7",
     ),
     (
         11,
-        "8eeefef8467a9cbd96b5a02b7be212f096024cf03a6f8a44e42c9d8e8d99a797",
-        "6fd9df11d80795292bb66920ccaaa07bedcf2a15f6fbdb92bf30cd2fe1f01e44",
+        "3cec7b2fb0e627e0f936c12424ffd048d59fddc56facfd0d1df738d870bfb0c8",
+        "c9ef7eddbcefaf27f1dbc854fc7b4f7a9eba10b7e405a03783d97a235e1c4979",
     ),
     (
         12,
-        "5675a444a83facedd90993bd3eef1a9a53fc001a58cf0fc8f011e0e63498b02f",
-        "34ba320a37c930e0de787337f57c16f28ee0b24cd783a287dd1d71b4a66d3be8",
+        "a1515e5eb189ed8530bea9b670a4b3a631037d4d98b55f059ca8bd8303bd6b55",
+        "0d8430e7d91ece997cf8fa4482f44b680a9c3fb3918e1052354a4fa0a629da55",
     ),
 ];
 
@@ -399,6 +399,27 @@ const PINS: [(u64, &str, &str); 12] = [
 #[test]
 fn the_schema_hash_is_pinned() {
     assert_eq!(domain().schema_hash().hex(), SCHEMA);
+}
+
+/// The schema reads every row the one a server last stood on wrote
+/// (`tests/schema.json`, `ark::schema::compat`). A column appended with
+/// neither an `Option` type nor a default is a log that does not open: the
+/// server opens what it can read of it and carries on from there, and what
+/// it could not read is gone. `ARK_WRITE_GEN=1` writes this schema there,
+/// once it is the one the server runs.
+///
+/// Falsified by taking `#[serde(default)]` off `person.banner`: "banner is
+/// appended with neither an Option type nor a default".
+#[test]
+fn the_schema_reads_what_the_last_one_wrote() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/schema.json");
+    let now = domain().schema.clone();
+    if std::env::var_os("ARK_WRITE_GEN").is_some() {
+        std::fs::write(path, serde_json::to_string_pretty(&*now).unwrap() + "\n").unwrap();
+    }
+    let was = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}; ARK_WRITE_GEN=1 writes it"));
+    let was: ark::schema::Schema = serde_json::from_str(&was).unwrap();
+    assert_eq!(ark::schema::compat(&was, &now), Ok(()));
 }
 
 /// One seed's script run: the state it ends at, and its transcript's hash;

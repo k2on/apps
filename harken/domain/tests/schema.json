@@ -1,0 +1,1079 @@
+{
+  "tables": [
+    {
+      "name": "media",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "kind",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "title",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "creator",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "duration_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "file",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "pos",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            5
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            6
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "album",
+      "columns": [
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "label",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "released",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "art",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "person",
+      "columns": [
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "sort_name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "born",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "died",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "art",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "work",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "composer",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "title",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "catalogue",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "opus",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "key_sig",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "form",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "period",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "composed",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "art",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 1,
+          "table": "person"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "movement",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "work_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "no",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "title",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "part",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 1,
+          "table": "work"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "recording",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "work_id",
+          "ty": {
+            "Option": "Text"
+          },
+          "default": null
+        },
+        {
+          "name": "recorded",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "venue",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "label",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "licence",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "art",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 1,
+          "table": "work"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "credit",
+      "columns": [
+        {
+          "name": "recording_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "person_name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "role",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "instrument",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "pos",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 3,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 0,
+          "table": "recording"
+        },
+        {
+          "column": 1,
+          "table": "person"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "song",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "album_name",
+          "ty": {
+            "Option": "Text"
+          },
+          "default": null
+        },
+        {
+          "name": "disc",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "track",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "recording_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "movement_id",
+          "ty": {
+            "Option": "Text"
+          },
+          "default": null
+        },
+        {
+          "name": "bpm",
+          "ty": "Int",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        },
+        {
+          "column": 1,
+          "table": "album"
+        },
+        {
+          "column": 4,
+          "table": "recording"
+        },
+        {
+          "column": 5,
+          "table": "movement"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "playlist",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "playlist"
+          },
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "pos",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "created_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            4,
+            1
+          ],
+          "unique": true
+        },
+        {
+          "columns": [
+            2
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            4,
+            2
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "playlist_item",
+      "columns": [
+        {
+          "name": "playlist_id",
+          "ty": {
+            "Id": "playlist"
+          },
+          "default": null
+        },
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "pos",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [
+        {
+          "columns": [
+            0,
+            2
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 0,
+          "table": "playlist"
+        },
+        {
+          "column": 1,
+          "table": "media"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "play",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "play"
+          },
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "track",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "title",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "creator",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "album",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "duration_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "file",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "played_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "from",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            1,
+            8
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "listening",
+      "columns": [
+        {
+          "name": "user",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "session",
+          "ty": {
+            "Sum": [
+              "Session",
+              [
+                [
+                  "Active",
+                  [
+                    [
+                      "active",
+                      {
+                        "Record": [
+                          "Active",
+                          [
+                            [
+                              "at",
+                              "Int"
+                            ],
+                            [
+                              "clock",
+                              {
+                                "Sum": [
+                                  "Clock",
+                                  [
+                                    [
+                                      "Paused",
+                                      [
+                                        [
+                                          "at_ms",
+                                          "Int"
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "Playing",
+                                      [
+                                        [
+                                          "at_ms",
+                                          "Int"
+                                        ],
+                                        [
+                                          "since",
+                                          "Int"
+                                        ]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              }
+                            ],
+                            [
+                              "from",
+                              "Text"
+                            ],
+                            [
+                              "output",
+                              {
+                                "Sum": [
+                                  "Output",
+                                  [
+                                    [
+                                      "Away",
+                                      [
+                                        [
+                                          "id",
+                                          "Text"
+                                        ],
+                                        [
+                                          "name",
+                                          "Text"
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "Device",
+                                      [
+                                        [
+                                          "id",
+                                          "Text"
+                                        ],
+                                        [
+                                          "moving",
+                                          "Bool"
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "Nowhere",
+                                      []
+                                    ]
+                                  ]
+                                ]
+                              }
+                            ],
+                            [
+                              "queue",
+                              {
+                                "List": {
+                                  "Record": [
+                                    "Track",
+                                    [
+                                      [
+                                        "album",
+                                        "Text"
+                                      ],
+                                      [
+                                        "creator",
+                                        "Text"
+                                      ],
+                                      [
+                                        "duration_ms",
+                                        "Int"
+                                      ],
+                                      [
+                                        "file",
+                                        "Text"
+                                      ],
+                                      [
+                                        "id",
+                                        {
+                                          "Id": "media"
+                                        }
+                                      ],
+                                      [
+                                        "title",
+                                        "Text"
+                                      ]
+                                    ]
+                                  ]
+                                }
+                              }
+                            ]
+                          ]
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                [
+                  "Idle",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "volatile"
+    },
+    {
+      "name": "listening_device",
+      "columns": [
+        {
+          "name": "user",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "device",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "present",
+          "ty": {
+            "Record": [
+              "Present",
+              [
+                [
+                  "can_play",
+                  "Bool"
+                ],
+                [
+                  "can_volume",
+                  "Bool"
+                ],
+                [
+                  "family",
+                  {
+                    "Option": "Text"
+                  }
+                ],
+                [
+                  "follows",
+                  {
+                    "Option": "Text"
+                  }
+                ],
+                [
+                  "id",
+                  "Text"
+                ],
+                [
+                  "kind",
+                  "Text"
+                ],
+                [
+                  "muted",
+                  "Bool"
+                ],
+                [
+                  "name",
+                  "Text"
+                ],
+                [
+                  "user",
+                  "Text"
+                ],
+                [
+                  "volume",
+                  "Int"
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [],
+      "space": "volatile"
+    },
+    {
+      "name": "listening_scrub",
+      "columns": [
+        {
+          "name": "user",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "device",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "at_ms",
+          "ty": "Int",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [],
+      "space": "volatile"
+    },
+    {
+      "name": "sign_in",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "user",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "email",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "device",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "issued_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "expires_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "revoked",
+          "ty": "Bool",
+          "default": null
+        },
+        {
+          "name": "roles",
+          "ty": {
+            "List": "Text"
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            1
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "role",
+      "columns": [
+        {
+          "name": "user",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "role",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "look",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "look"
+          },
+          "default": null
+        },
+        {
+          "name": "paths",
+          "ty": {
+            "List": "Text"
+          },
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "JobLooked",
+              [
+                [
+                  "Pending",
+                  [
+                    [
+                      "due_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Claimed",
+                  [
+                    [
+                      "by",
+                      "Text"
+                    ],
+                    [
+                      "at_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Done",
+                  [
+                    [
+                      "value",
+                      {
+                        "Record": [
+                          "Looked",
+                          [
+                            [
+                              "read",
+                              "Int"
+                            ],
+                            [
+                              "authored",
+                              "Int"
+                            ]
+                          ]
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                [
+                  "Failed",
+                  [
+                    [
+                      "why",
+                      "Text"
+                    ],
+                    [
+                      "retry_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Cancelled",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    }
+  ]
+}
