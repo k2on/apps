@@ -2495,5 +2495,6 @@ pub fn main() -> iced::Result {
         .subscription(App::subscription)
         .title(App::title)
         .window_size((860.0, 600.0))
+        .font(arkui::hero::FIRA_SANS_BOLD)
         .run()
 }
