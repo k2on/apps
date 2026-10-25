@@ -31,6 +31,12 @@ enum Catalogue {
         return Array(ranked(works).prefix(known))
     }
 
+    /// The heading over a person's works: "Well-Known Works" only while the
+    /// list is cut short, "Works" when it is every one.
+    static func heading(_ works: [WorkSummary], all: Bool) -> String {
+        listed(works, all: all).count < works.count ? "Well-Known Works" : "Works"
+    }
+
     /// The work a composer's page sets apart with a Play: the most recorded,
     /// when it is recorded more often than any other — a tie is no answer to
     /// "which is best known", and one work is no answer either.

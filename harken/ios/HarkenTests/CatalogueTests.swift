@@ -45,6 +45,9 @@ final class CatalogueTests: XCTestCase {
         XCTAssertEqual(Catalogue.listed(works, all: true).map { $0.title }, works.map { $0.title })
         let few = Array(works.prefix(4))
         XCTAssertEqual(Catalogue.listed(few, all: false).map { $0.title }, few.map { $0.title }, "few are listed by catalogue")
+        XCTAssertEqual(Catalogue.heading(works, all: false), "Well-Known Works")
+        XCTAssertEqual(Catalogue.heading(works, all: true), "Works")
+        XCTAssertEqual(Catalogue.heading(Array(works.prefix(6)), all: false), "Works", "six are every one")
     }
 
     /// The most recorded is set apart only when it is recorded more than

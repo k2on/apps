@@ -147,7 +147,7 @@ struct ArtistPage: View {
                          facts: Catalogue.featuredFacts(best), opens: .page(.work(best.id))) { model.playWork(best.id) }
             }
             if !works.isEmpty {
-                SerifHeading(title: short ? "Well-Known Works" : "Works")
+                SerifHeading(title: Catalogue.heading(works, all: all))
                 // Each under who it is by, its catalogue number under it, and
                 // how many performances of it there are at its right.
                 ForEach(listed) { w in
