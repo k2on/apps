@@ -149,6 +149,7 @@ class MotionTests {
                     disc = 1,
                     workTitle = "",
                     movementNo = 0,
+                    artistBanner = "",
                 ),
             )
         }
