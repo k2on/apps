@@ -48,6 +48,19 @@
       import init from "./pkg/harken-iced.js?v=dev";
       await init({ module_or_path: new URL("pkg/harken-iced_bg.wasm?v=dev", document.baseURI) });
 
+      // Two fingers sideways are the browser's own back and forward, which
+      // knows when the fingers lift: a sideways wheel is kept from the canvas,
+      // whose handler would cancel it, and so never reaches the app's own
+      // swipe (`arkui::swipe`, for the desktop). Nothing in the app scrolls
+      // sideways. On the window, capturing, so it is asked before the canvas.
+      addEventListener(
+        "wheel",
+        (e) => {
+          if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) e.stopImmediatePropagation();
+        },
+        { capture: true, passive: true },
+      );
+
       // The keyboard reaches the app only while its canvas has the focus, and
       // a loaded page focuses <body>; so the canvas is focused on arrival and
       // whenever the window comes back.
