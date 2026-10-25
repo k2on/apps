@@ -220,7 +220,8 @@ struct WorkPage: View {
                     model.playRecording(first.id)
                 }
             }
-            if takes.count > 1 {
+            // Every performance, under the one set apart — the only one too.
+            if !takes.isEmpty {
                 SerifHeading(title: "Recordings")
                 ForEach(Array(takes.enumerated()), id: \.element.id) { i, r in
                     EntryRow(title: Catalogue.who(r), under: Catalogue.facts(r), onOpen: { open(.page(.recording(r.id))) }) {

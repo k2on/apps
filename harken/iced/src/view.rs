@@ -488,29 +488,31 @@ impl App {
     /// the title open it.
     fn view_featured<'a>(&'a self, l: &Layout, label: &str, seed: &str, art_path: &str, title: String, facts: String) -> Element<'a, Message> {
         let on = self.on(l, Mark::Featured);
+        // Under the cursor the title takes the accent itself: nothing is
+        // filled behind it, so the colour paired with a fill would be dark
+        // on dark.
         let mut words = column![
             text(label.to_uppercase()).size(10).style(style::faint(0.5)),
             text(title).size(15).wrapping(text::Wrapping::Word).style(move |t| text::Style {
-                color: Some(style::entry_text(t, on)),
+                color: Some(match on {
+                    true => arkui::theme::of(t).primary.base.color,
+                    false => style::entry_text(t, false),
+                }),
             }),
         ]
         .spacing(3);
         if !facts.is_empty() {
             words = words.push(text(facts).size(12).style(style::faint(0.55)));
         }
-        let opened = self.opens(
-            l,
-            Mark::Featured,
-            row![self.picture(seed, art_path, 120.0, 6.0), words]
-                .spacing(20)
-                .align_y(Alignment::Center),
-        );
-        let play = container(self.play_button(l, Mark::FeaturedPlay)).padding(Padding {
-            top: 10.0,
-            left: 140.0,
-            ..Padding::ZERO
-        });
-        container(column![opened, play])
+        let opened = self.opens(l, Mark::Featured, words);
+        // The cover, and beside it the words over the Play, as one card.
+        let card = row![
+            self.picture(seed, art_path, 120.0, 6.0),
+            column![opened, self.play_button(l, Mark::FeaturedPlay)].spacing(12),
+        ]
+        .spacing(20)
+        .align_y(Alignment::Center);
+        container(card)
             .padding(Padding {
                 top: 22.0,
                 bottom: 4.0,
@@ -913,9 +915,11 @@ impl App {
         head = head.push(text(title.to_string()).size(28).font(hero::SERIF).wrapping(text::Wrapping::Word));
         let facts = work
             .map(|w| {
+                // The catalogue number once: not again under a title that
+                // already ends with it ("Sonata in A minor, RV 86").
                 [&w.catalogue, &w.form, &w.period]
                     .into_iter()
-                    .filter(|f| !f.is_empty())
+                    .filter(|f| !f.is_empty() && !title.contains(f.as_str()))
                     .cloned()
                     .collect::<Vec<_>>()
             })
@@ -962,13 +966,11 @@ impl App {
         let open = |r: &crate::rows::Recording| Message::Select(Source::Recording(r.id.clone(), r.performers.clone()));
 
         // The fullest performance, set apart with a Play: the one to start
-        // with. The only one is set apart alone.
+        // with. Every performance is listed under it all the same, the only
+        // one too — who played it, when, how many tracks and how long.
         let first = &takes[0];
         let label = if takes.len() > 1 { "Most Complete" } else { "The Recording" };
         page = page.push(self.view_featured(&l, label, &first.id, &first.art, who(first), facts(first)));
-        if takes.len() == 1 {
-            return self.scrolled(None, page, false);
-        }
 
         page = page.push(hero::heading("Recordings"));
         let cursor = self.page_cursor();

@@ -287,7 +287,8 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
                 onOpen = { act.open(Page.ForRecording(first.id)) },
             )
         }
-        if (recordings.size > 1) {
+        // Every performance, under the one set apart — the only one too.
+        if (recordings.isNotEmpty()) {
             item { SerifHeading("Recordings") }
             items(recordings, key = { "take:" + it.id }) { r ->
                 Entry(Catalogue.who(r), "", Catalogue.takeFacts(r), "", onOpen = { act.open(Page.ForRecording(r.id)) }) { m ->

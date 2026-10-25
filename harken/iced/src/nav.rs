@@ -388,9 +388,9 @@ impl App {
                 cells: self.listed_works().len(),
                 columns: self.listing_columns(),
             },
-            // A work of one performance has only that one, set apart.
+            // Every performance, under the one set apart.
             Source::Work(..) => vim::Grid {
-                cells: if p.recordings().len() > 1 { p.recordings().len() } else { 0 },
+                cells: p.recordings().len(),
                 columns: self.listing_columns(),
             },
             _ => vim::Grid::column(p.rows().len()),
