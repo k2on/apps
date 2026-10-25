@@ -92,13 +92,39 @@ object Demo {
         }
 
     val details: Map<Id, TrackDetail> =
-        rows.mapIndexed { i, r -> id(i) to TrackDetail(id(i), r.album, r.part, r.track, r.performer, r.licence) }.toMap()
+        // A track in a part is a movement of the work its album names, as `add_song` keys it.
+        rows.mapIndexed { i, r ->
+            val work = if (r.part.isNotEmpty()) r.album else ""
+            id(i) to TrackDetail(id(i), r.album, r.part, r.track, r.performer, r.licence, if (work.isEmpty()) "" else r.composer, work)
+        }.toMap()
 
     val albums: List<Album> =
-        rows.groupBy { it.album }.map { (name, rs) -> Album(name, rs.first().composer, "", rs.size.toLong()) }.sortedBy { it.name }
+        rows.groupBy { it.album }
+            .map { (name, rs) ->
+                // Who is credited on the most of it, as `albums` says.
+                val performer = rs.filter { it.performer.isNotEmpty() }.groupingBy { it.performer }.eachCount().maxByOrNull { it.value }?.key ?: ""
+                Album(name, rs.first().composer, "", rs.size.toLong(), performer = performer, label = if (name == "Messiah") "Westminster" else "", released = if (name == "Messiah") 1959 else 0)
+            }
+            .sortedBy { it.name }
 
     val artists: List<Artist> =
         rows.groupBy { it.composer }.map { (name, rs) -> Artist(name, "", rs.size.toLong()) }.sortedBy { it.name }
+
+    /** Everyone a work is by. */
+    val composers: List<Composer> =
+        rows.filter { it.part.isNotEmpty() }.groupBy { it.composer }.map { (name, rs) -> Composer(name, "", "", 0, 0, rs.map { it.album }.distinct().size.toLong(), rs.size.toLong()) }.sortedBy { it.name }
+
+    /** A composer's works as `works` lists them, and as many performances of each as the seed has. */
+    fun works(composer: String): List<dev.harken.android.gen.WorkSummary> =
+        rows.filter { it.composer == composer && it.part.isNotEmpty() }.groupBy { it.album }.map { (album, rs) ->
+            dev.harken.android.gen.WorkSummary("", "", composer, "", composer.lowercase().replace(' ', '-') + "/" + album.lowercase().replace(' ', '-'), "", rs.map { it.performer }.distinct().size.toLong(), album, rs.size.toLong())
+        }
+
+    /** A work's performances, the most complete first, as `recordings` answers. */
+    fun recordings(work: String): List<dev.harken.android.gen.RecordingsEntry> =
+        rows.filter { it.part.isNotEmpty() && it.album == work }.groupBy { it.performer }.map { (who, rs) ->
+            dev.harken.android.gen.RecordingsEntry("", rs.sumOf { it.ms }, "w@" + who.lowercase().replace(' ', '-'), "", rs.first().licence, who, if (who.isEmpty()) 0 else 1959, rs.size.toLong())
+        }.sortedByDescending { it.tracks }
 
     val playlists: List<Playlist> =
         listOf("Favorites", "Sunday morning", "Baroque for working").mapIndexed { i, n ->

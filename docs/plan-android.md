@@ -1718,3 +1718,59 @@ Not Disturb refusing a write, and a car's head unit leaving the player's
 volume alone are all unseen; the media session's own wiring of the volume
 provider was read from Media3's bytecode, not run (Media3's test utilities
 are not in the recorded graph).
+
+### The catalogue's pages
+
+The desktop's pages about a person, a work, a performance and a record
+(`harken/iced/src/view.rs`) on the phone, laid out for its width: the
+serif (Source Serif 4 Display semibold, `res/font`, its licence at
+`app/src/main/LICENSE.source-serif.md`) for names, titles and section
+headings, everything else in the sans, the palette unchanged.
+
+- **A person** has one page (`Page.ForArtist`), whatever they did. Their
+  banner edge to edge with back over it — the artist's entry's, else the
+  composer's; taller than the desktop's shape on a phone, `bannerHeight`
+  — or their round portrait beside their name. "Composer" when the `works`
+  view for them has rows, else "Artist", then their years, else how much
+  of them there is. Their most recorded work set apart (`Featured`, with a
+  Play) only when it is recorded strictly more than the next; "Well-Known
+  Works" while the list is cut to six (recordings, then tracks, the
+  catalogue's order between equals: `Catalogue.known`), "Works" otherwise,
+  and "See All N Works" listing every one by catalogue; their records
+  (`albums` whose creator they are); and their songs only where they
+  wrote no works. An old `#composer/…` place opens it; the Library's
+  Composers list (shown where there are composers) opens it.
+- **A work**: its composer in small capitals (back to their page), its
+  title, catalogue · form · period, a hairline; its first performance set
+  apart as "Most Complete", or alone as "The Recording"; then every
+  performance with its cover, who played it ("Performer not named" where
+  nobody is credited) and year · tracks · length (`recordings`'
+  `duration_ms`).
+- **A performance**: its cover beside the composer, the work and its
+  catalogue number, who played it and the year; its movements in the order
+  the work goes; its small print; the records it is on; everybody on it
+  (the composer, then `credits` in billing order) as faces.
+- **An album**: its cover beside its title, who played the most of it
+  (`albums`' `performer`, else its creator) and whose it is with the year;
+  its tracks under the works they are movements of, a work in parts with
+  its parts' headings as before; its year, length and label at its foot.
+  The Albums grid says who played each record.
+
+A Play on a work or a performance reads the `recording` view when it is
+pressed (a work's first row of `recordings` first) and starts it through
+the same path every list plays by, from `#recording/<key>`. The ranking and
+the lines are `Catalogue.kt`, plain Kotlin over the views' fields; the
+lists are held as a page's tracks are (`Library.works`, `work`,
+`recordings`, `credits`, by key), so a page come back to has its rows on
+its first frame. The pages move as every page does: a work or a record
+grows out of the cover tapped, a page from a text row rises.
+
+**Held to**: `CatalogueTests` (the ranking, the cut, the tie, the lines,
+the runs, the routes, and the kernel's own composers, works and
+performances for a seeded library, a work's Play reading its fullest
+performance in movement order); `RestorationTests` over the new routes and
+the Composers list (the fixture records Water Music eight times);
+`MotionTests` (a composer's page opened from a row's menu; the pull test
+on a record long enough to scroll); and the screenshots `c2_artist`
+(a composer, a composer under a banner, an artist of songs), `c4_work`
+and `c5_recording`.

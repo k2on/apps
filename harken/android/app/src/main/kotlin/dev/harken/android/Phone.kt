@@ -16,6 +16,7 @@ import dev.harken.android.gen.AlbumInput
 import dev.harken.android.gen.AlbumsEntry
 import dev.harken.android.gen.Artist as ArtistInput
 import dev.harken.android.gen.ArtistsEntry
+import dev.harken.android.gen.ComposersEntry
 import dev.harken.android.gen.CreatePlaylist
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Library as LibraryInput
@@ -24,6 +25,7 @@ import dev.harken.android.gen.Play
 import uniffi.harken_domain.Playlist
 import dev.harken.android.gen.PlaylistInput
 import dev.harken.android.gen.PlaylistsOf
+import dev.harken.android.gen.RecordingInput
 import dev.harken.android.gen.RemoveFromPlaylist
 import dev.harken.android.gen.Search
 import dev.harken.android.gen.TrackDetailsEntry
@@ -48,10 +50,26 @@ data class Track(
     }
 }
 
-/** A row of `albums`: every album some song is on, with whoever made its first track. */
-data class Album(val name: String, val creator: String, val art: String, val tracks: Long) {
+/**
+ * A row of `albums`: every album some song is on, with whoever made its first track, who played the
+ * most of it (`performer`, empty where nobody is credited), whose label put it out, and the year it
+ * came out (0 for nobody said).
+ */
+data class Album(
+    val name: String,
+    val creator: String,
+    val art: String,
+    val tracks: Long,
+    val performer: String = "",
+    val label: String = "",
+    val released: Long = 0,
+) {
+    /** Who played it, as a catalogue lists a record: whose it is when nobody is credited. */
+    val by: String
+        get() = performer.ifEmpty { creator }
+
     companion object {
-        fun of(e: AlbumsEntry): Album = Album(e.name, e.creator, e.art, e.tracks)
+        fun of(e: AlbumsEntry): Album = Album(e.name, e.creator, e.art, e.tracks, e.performer, e.label, e.released)
 
         /**
          * The album `track` is on, by its details: the album's own row, found by its name — or,
@@ -65,10 +83,28 @@ data class Album(val name: String, val creator: String, val art: String, val tra
     }
 }
 
-/** A row of `artists`: everyone who made something in the library. */
-data class Artist(val name: String, val art: String, val tracks: Long) {
+/**
+ * A row of `artists`: everyone who made something in the library, their portrait, their banner (a
+ * wide picture, empty for none) and their years (0 for unknown).
+ */
+data class Artist(val name: String, val art: String, val tracks: Long, val banner: String = "", val born: Long = 0, val died: Long = 0) {
     companion object {
-        fun of(e: ArtistsEntry): Artist = Artist(e.name, e.art, e.tracks)
+        fun of(e: ArtistsEntry): Artist = Artist(e.name, e.art, e.tracks, e.banner, e.born, e.died)
+    }
+}
+
+/** A row of `composers`: everyone some work is by, with how many works and tracks of theirs there are. */
+data class Composer(
+    val name: String,
+    val art: String,
+    val banner: String,
+    val born: Long,
+    val died: Long,
+    val works: Long,
+    val tracks: Long,
+) {
+    companion object {
+        fun of(e: ComposersEntry): Composer = Composer(e.name, e.art, e.banner, e.born, e.died, e.works, e.tracks)
     }
 }
 
@@ -80,9 +116,12 @@ data class TrackDetail(
     val track: Long,
     val performer: String,
     val licence: String,
+    /** The work it is a movement of, and whose, as an album's headings name them; empty for a song. */
+    val composer: String = "",
+    val work: String = "",
 ) {
     companion object {
-        fun of(e: TrackDetailsEntry): TrackDetail = TrackDetail(e.mediaId, e.album, e.part, e.track, e.performer, e.licence)
+        fun of(e: TrackDetailsEntry): TrackDetail = TrackDetail(e.mediaId, e.album, e.part, e.track, e.performer, e.licence, e.composer, e.work)
     }
 }
 
@@ -133,6 +172,9 @@ object Phone {
     fun artist(h: Harken, name: String): View<LibraryEntry> = h.artist(ArtistInput(NO_PLAYLIST, name))
 
     fun playlist(h: Harken, id: Id): View<LibraryEntry> = h.playlist(PlaylistInput(id))
+
+    /** One performance's tracks, in the order the work goes (`recording`). */
+    fun recording(h: Harken, id: String): View<LibraryEntry> = h.recording(RecordingInput(NO_PLAYLIST, id))
 
     /** A view's rows once, and the view let go. */
     fun <E, T> once(v: () -> View<E>, of: (E) -> T): List<T> =

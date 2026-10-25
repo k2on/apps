@@ -376,7 +376,8 @@ class MotionTests {
                 {
                     val w = view.width.toFloat()
                     val h = view.height.toFloat()
-                    click(view, "Brandenburg Concertos")
+                    // A record longer than the screen, so there is somewhere to scroll.
+                    click(view, "Goldberg Variations, BWV 988")
                     frames(600)
                     // Scrolled down a way: a drag down scrolls the list back before it pulls anything.
                     drag(view, Offset(w / 2, h * 0.7f), Offset(w / 2, h * 0.4f), 10)
@@ -388,7 +389,7 @@ class MotionTests {
                     frames(700)
                     gone = !has(view, "ALBUM")
                     // A little way, and let go: it springs back.
-                    if (gone) click(view, "Brandenburg Concertos")
+                    if (gone) click(view, "Goldberg Variations, BWV 988")
                     frames(600)
                     drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.35f), 4) { smallPull = maxOf(smallPull, motion.previewDrawn) }
                     frames(600)
@@ -701,7 +702,7 @@ class MotionTests {
         var left: Pair<Int, Int>? = null
         var opened = false
         var back: Pair<Pair<Int, Int>?, Pair<Int, Int>?>? = null
-        // A part's heading: the album page draws them, and the composer's page, with the same songs, does not.
+        // A part's heading: the album page draws them, and the composer's page, which lists works, does not.
         val album = { n: SemanticsNode -> texts(n).any { it.startsWith("Suite No.") } }
         app(
             { view, _, b ->
@@ -717,7 +718,8 @@ class MotionTests {
                     frames(300)
                     menu!!.goTo(Page.ForArtist("George Frideric Handel"))
                     frames(700)
-                    opened = has(view, "ARTIST")
+                    // Handel's one page: a composer's, its kicker his counts beside what he is.
+                    opened = all(root(view)).any { n -> texts(n).any { it.startsWith("COMPOSER") } }
                     back = backTo(view, b, album)
                 }
             },
