@@ -23,10 +23,22 @@
 // move is a scale, an offset and a clip as it is drawn, so a page moving costs
 // a frame of drawing and no measuring. Nothing about it is in the lists.
 //
+// The window is edge to edge, and the status bar's inset is each
+// destination's own, not the frame's around them all: a destination is laid
+// out below the bar inside its own frame, so the strip over it is its own
+// ground and moves, shrinks and dims with it. One whose first thing is a
+// picture says so (`UnderStatusBar`) and is laid out from the top of the
+// screen, its picture under the bar; once the picture has scrolled up past
+// the bar, the bar is over its ground again, as every other page's is.
+// Where the bar's icons go light is worked out as the pages are drawn: from
+// whatever is drawn at the bar — a page at rest, the page under one moving
+// until the moving one covers the bar, the page under a back preview — so
+// they are never light over a light page or dark over a picture.
+//
 // Nothing here knows what a page is about: the app says which routes are its
 // tabs, puts a `Hero` on the art that opens a page and a `Spot` where the
-// header's art lands, and says when something over the pages (a player)
-// takes the back gesture instead.
+// header's art lands, a page under the bar says so, and the app says when
+// something over the pages (a player) takes the back gesture instead.
 package dev.harken.android.ui
 
 import androidx.activity.BackEventCompat
@@ -44,11 +56,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -82,6 +98,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.node.LayoutAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
@@ -91,6 +108,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.util.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavBackStackEntry
@@ -182,6 +200,20 @@ public class PageMotion(private val tabs: Set<String> = emptySet()) {
 
     /** What the last row whose menu opened was, and where: set by the row, read by its menu. */
     public var tapped: Tapped? = null
+
+    /**
+     * Whether what is drawn at the status bar is a picture (a banner), so its icons go light: worked
+     * out as the pages are drawn ([PageFrame]), and read by whatever sets the bar's icons.
+     */
+    public var pictured: Boolean by mutableStateOf(false)
+        private set
+
+    /** What the page under a moving one has at the bar, as it was drawn this frame. */
+    internal var underPictured = false
+
+    internal fun atBar(p: Boolean) {
+        if (pictured != p) pictured = p
+    }
 
     public fun from(origin: Origin?) {
         pending = origin
@@ -323,6 +355,86 @@ public val LocalPageFrame: ProvidableCompositionLocal<PageFrame?> = staticCompos
     null
 }
 
+/**
+ * The status bar over one destination: whether the destination is laid out under it (said by
+ * [UnderStatusBar]) or below it, as every destination is unless it says otherwise, and, under it,
+ * whether its picture is still what the bar is over.
+ */
+@Stable
+public class StatusBarTop {
+    internal var under by mutableStateOf(false)
+
+    /** Read as the destination is drawn: whether its picture is still under the bar. */
+    internal var pictured: () -> Boolean = { false }
+
+    /** The bar's height, and the inset the destination was last laid out below: 0 under the bar. */
+    internal var bar = 0
+    internal var applied = 0
+
+    /** Whether the bar is over the destination's picture now. */
+    internal fun isPictured(): Boolean = under && pictured()
+}
+
+/** The status bar over the destination being drawn. */
+public val LocalStatusBarTop: ProvidableCompositionLocal<StatusBarTop?> = staticCompositionLocalOf {
+    null
+}
+
+/**
+ * `content` laid out below the status bar, or, once it says [UnderStatusBar], from the top of the
+ * screen; and then, once its picture has gone up past the bar, the bar over its ground. Every
+ * destination is drawn in one ([Moving]); a screen drawn without the navigation (a screenshot's)
+ * is put in one to be drawn as the app draws it.
+ */
+@Composable
+public fun BelowStatusBar(
+    top: StatusBarTop = remember { StatusBarTop() },
+    content: @Composable () -> Unit
+) {
+    val bars = WindowInsets.statusBars
+    val ground = MaterialTheme.colorScheme.background
+    // Read as it is laid out, not composed: a page saying it goes under the bar, on its first
+    // frame, is laid out under it on that frame.
+    Box(
+        Modifier.fillMaxSize()
+            .layout { m, c ->
+                top.bar = bars.getTop(this)
+                val inset = if (top.under) 0 else minOf(top.bar, c.maxHeight)
+                top.applied = inset
+                val p = m.measure(c.offset(vertical = -inset))
+                layout(p.width, p.height + inset) { p.place(0, inset) }
+            }
+            .drawWithContent {
+                drawContent()
+                if (top.under && !top.pictured())
+                    drawRect(ground, size = Size(size.width, top.bar.toFloat()))
+            }) {
+            CompositionLocalProvider(LocalStatusBarTop provides top) { content() }
+        }
+}
+
+/**
+ * Said by a destination whose first thing is a picture: it is laid out from the top of the screen,
+ * the picture under the status bar, for as long as this is composed. `pictured` says, as the page
+ * is drawn, whether the picture is still under the bar; once it is not, the bar is over the page's
+ * ground. Say it from the page, not from the picture's item in a lazy list, which goes as it
+ * scrolls away.
+ */
+@Composable
+public fun UnderStatusBar(pictured: () -> Boolean) {
+    val top = LocalStatusBarTop.current ?: return
+    SideEffect {
+        top.under = true
+        top.pictured = pictured
+    }
+    DisposableEffect(top) {
+        onDispose {
+            top.under = false
+            top.pictured = { false }
+        }
+    }
+}
+
 /** Something laid out, kept by where it was placed and nothing else: no callback, no allocation. */
 public class Spot {
     public var coords: LayoutCoordinates? = null
@@ -441,6 +553,9 @@ internal constructor(
     internal val outer = Spot()
     internal val inner = Spot()
 
+    /** The status bar over this destination. */
+    internal val statusBar = StatusBarTop()
+
     /** The header's art: what lands on the tapped art. */
     public val art: Spot = Spot()
 
@@ -467,6 +582,8 @@ internal constructor(
         }
         // What lands on the origin: the header's own art where the page has laid it out, or,
         // scrolled past it, the top of the page; for a container, the top of the page in its shape.
+        // The page's top is below its status-bar strip, unless the page is laid out under the bar.
+        val y = statusBar.applied.toFloat()
         val hero =
             if (origin!!.art)
                 inner.coords
@@ -476,8 +593,8 @@ internal constructor(
                             ?.takeIf { it.isAttached }
                             ?.let { i.localBoundingBoxOf(it, clipBounds = false) }
                     }
-                    ?.takeIf { it.width > 0f } ?: Rect(0f, 0f, w, w)
-            else Rect(0f, 0f, w, w * from.height / from.width.coerceAtLeast(1f))
+                    ?.takeIf { it.width > 0f } ?: Rect(0f, y, w, y + w)
+            else Rect(0f, y, w, y + w * from.height / from.width.coerceAtLeast(1f))
         val s0 = from.width / hero.width
         val s = lerp(s0, 1f, e)
         // The clip opens from the art to the page; its corner goes from the art's to none, said in
@@ -546,6 +663,7 @@ internal constructor(
             // A tab left at once is not drawn for the frame it is still there: what arrives is.
             if (motion.move == Move.Cut && leaving) return
             val m = placing(size, shown, placed)
+            atBar(m, shown, size.width)
             if (m == null) drawContent()
             else {
                 motion.movingFrames++
@@ -566,6 +684,24 @@ internal constructor(
             }
         }
 
+    // What the status bar is over. Drawn in order, the page under a moving one first: it says what
+    // it has at the bar, and the moving one, once it covers the bar, says what it has instead. At
+    // rest, and under nothing, a destination is what the bar is over.
+    private fun atBar(m: Placing?, shown: Float, width: Float) {
+        val pictured = statusBar.isPictured()
+        if (m != null) {
+            val r = m.onScreen
+            val covers =
+                m.alpha >= 0.5f &&
+                    r.top <= statusBar.bar / 2f &&
+                    r.left <= width / 2f &&
+                    r.right >= width / 2f
+            motion.atBar(if (covers) pictured else motion.underPictured)
+        } else if (motion.top != id && motion.move != Move.Cut && shown < 1f)
+            motion.underPictured = pictured
+        else motion.atBar(pictured)
+    }
+
     /** How much darker this destination is drawn: only while another page moves over it. */
     private fun dim(shown: Float): Float {
         if (motion.move == Move.Cut || motion.top == id || shown >= 1f) return 0f
@@ -576,7 +712,9 @@ internal constructor(
 /**
  * One destination of the NavHost, drawn in the navigation's motion. A page (anything that is not a
  * tab) grows, shrinks and is pulled down to go back; a tab only dims under a page. Both are opaque,
- * so that whatever moves over them hides them.
+ * so that whatever moves over them hides them, and both are laid out below the status bar inside
+ * the frame ([BelowStatusBar]), the strip over them their own ground, unless they say they go under
+ * it.
  */
 @Composable
 public fun AnimatedVisibilityScope.Moving(
@@ -638,7 +776,7 @@ public fun AnimatedVisibilityScope.Moving(
                     LocalPageFrame provides (if (page) frame else null),
                     real?.let { LocalOnBackPressedDispatcherOwner provides it },
                 )
-            CompositionLocalProvider(*locals.toTypedArray()) { content() }
+            CompositionLocalProvider(*locals.toTypedArray()) { BelowStatusBar(frame.statusBar, content) }
         }
 }
 

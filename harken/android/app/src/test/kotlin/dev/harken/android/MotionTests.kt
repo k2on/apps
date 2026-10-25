@@ -16,6 +16,7 @@ package dev.harken.android
 import dev.harken.android.gen.AddSong
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.CreatePlaylist
+import android.content.res.Configuration
 import android.view.MotionEvent
 import android.view.View
 import androidx.activity.BackEventCompat
@@ -36,13 +37,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -52,6 +58,7 @@ import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
 import dev.harken.android.onboarding.ArkSession
+import dev.harken.android.ui.BelowStatusBar
 import dev.harken.android.ui.Origin
 import dev.harken.android.ui.PageMotion
 import dev.harken.android.ui.Springs
@@ -66,6 +73,8 @@ import org.junit.Rule
 import org.junit.Test
 
 private const val FPS = 60
+
+private const val HANDEL = "George Frideric Handel"
 
 class MotionTests {
     private val shots = Shots()
@@ -83,6 +92,9 @@ class MotionTests {
         var keep: String? = null
         var series: String? = null
         var meta: () -> Float = { 0f }
+
+        /** Handed the next frame drawn, as the renderer's image. */
+        var grab: ((Any) -> Unit)? = null
         val written = mutableListOf<Pair<String, Float>>()
         private var n = 0
 
@@ -90,6 +102,10 @@ class MotionTests {
             Proxy.newProxyInstance(SnapshotHandler::class.java.classLoader, arrayOf(SnapshotHandler.FrameHandler::class.java)) { _, method, args ->
                 if (method.name == "handle") {
                     val image = args!![0]
+                    grab?.let { g ->
+                        grab = null
+                        g(image)
+                    }
                     keep?.let { name ->
                         keep = null
                         write(image, name)
@@ -127,8 +143,8 @@ class MotionTests {
         override fun close() {}
     }
 
-    /** The demo's songs, authored through `add_song` as the server's scanner would. */
-    private fun demo(): Harken {
+    /** The demo's songs, authored through `add_song` as the server's scanner would; `banner`, Handel's. */
+    private fun demo(banner: Boolean = false): Harken {
         val peer = alone()
         for (t in Demo.tracks) {
             val d = Demo.details.getValue(t.id)
@@ -149,7 +165,7 @@ class MotionTests {
                     disc = 1,
                     workTitle = "",
                     movementNo = 0,
-                    artistBanner = "",
+                    artistBanner = if (banner && t.creator == HANDEL) "banners/handel.jpg" else "",
                 ),
             )
         }
@@ -237,8 +253,16 @@ class MotionTests {
      * of its own, as a phone's does — so a page's rows arrive a moment after the page — rather than
      * at once on the frame clock's.
      */
-    private fun app(test: (ComposeView, PageMotion, OnBackPressedDispatcher) -> suspend () -> Unit, ms: Long, start: LibraryTab? = null, threaded: Boolean = false) {
-        val peer = demo()
+    private fun app(
+        test: (ComposeView, PageMotion, OnBackPressedDispatcher) -> suspend () -> Unit,
+        ms: Long,
+        start: LibraryTab? = null,
+        threaded: Boolean = false,
+        /** A status bar this many pixels tall over the window, as a phone's; and Handel with a banner. */
+        bar: Int = 0,
+        dark: Boolean = false,
+    ) {
+        val peer = demo(banner = bar > 0)
         val login = testLogin("library", roles = listOf("library"))
         val session = if (threaded) ArkSession.over(peer, "https://music.example.com", login) else ArkSession.inline(peer, "https://music.example.com", login)
         val motion = PageMotion(Tab.routes)
@@ -246,11 +270,22 @@ class MotionTests {
         var done = false
         try {
             val view = ComposeView(paparazzi.context)
+            // The window's insets, whatever layoutlib says they are: the bar's.
+            val insets = WindowInsetsCompat.Builder().setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, bar, 0, 0)).build()
+            if (bar > 0) ViewCompat.setOnApplyWindowInsetsListener(view) { _, _ -> insets }
             val script = test(view, motion, back)
             view.setContent {
-                Host(back) { HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false) }, start = start, motion = motion, onMenu = { menu = it }) }
+                val config = LocalConfiguration.current
+                val night = remember(config, dark) { Configuration(config).apply { uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or (if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO) } }
+                CompositionLocalProvider(LocalConfiguration provides night) {
+                    Host(back) { HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false) }, start = start, motion = motion, onMenu = { menu = it }) }
+                }
                 LaunchedEffect(Unit) {
                     frames(800)
+                    if (bar > 0) {
+                        ViewCompat.dispatchApplyWindowInsets(view, insets)
+                        frames(100)
+                    }
                     script()
                     done = true
                 }
@@ -810,6 +845,149 @@ class MotionTests {
 
     private fun near(a: androidx.compose.ui.geometry.Rect, b: androidx.compose.ui.geometry.Rect) =
         abs(a.left - b.left) <= 1f && abs(a.top - b.top) <= 1f && abs(a.right - b.right) <= 1f && abs(a.bottom - b.bottom) <= 1f
+
+    // The status bar ---------------------------------------------------------
+
+    /** The colour drawn at `x`, `y` on the next frame. */
+    private suspend fun pixel(x: Int, y: Int): Int {
+        var seen = 0
+        shots.grab = { image -> seen = image.javaClass.getMethod("getRGB", Int::class.java, Int::class.java).invoke(image, x, y) as Int }
+        frame()
+        frame()
+        return seen
+    }
+
+    /** Where the back button nearest the top of the screen is. */
+    private fun backAt(view: ComposeView): androidx.compose.ui.geometry.Rect? =
+        described(view, "Back").map { it.boundsInRoot }.filter { it.width > 0f }.minByOrNull { it.top }
+
+    /**
+     * A person's banner runs up to the top of the screen, under the status bar, its back below the
+     * bar; every other page — a tab's root, an album — starts below it. What the bar's icons are
+     * over follows what is drawn there: the banner while it is under the bar, not the page under a
+     * back preview of it, and not an album. (Handel's page is too short to scroll his banner up past
+     * the bar: the next test scrolls one.)
+     */
+    private fun underTheBar(dark: Boolean) {
+        val bar = 66
+        val ground = (if (dark) Palette.DarkScheme else Palette.LightScheme).background.toArgb()
+        val seen = linkedMapOf<String, Any?>()
+        app(
+            { view, motion, b ->
+                {
+                    val x = view.width / 2
+                    val y = bar / 2
+                    seen["library"] = pixel(x, y)
+                    seen["library pictured"] = motion.pictured
+                    click(view, "Water Music")
+                    frames(700)
+                    seen["album"] = pixel(x, y)
+                    seen["album back"] = backAt(view)?.top
+                    seen["album pictured"] = motion.pictured
+                    more(view).config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(300)
+                    shots.meta = { motion.drawnAt }
+                    shots.series = "banner-open"
+                    menu!!.goTo(Page.ForArtist(HANDEL))
+                    frames(700)
+                    shots.series = null
+                    seen["banner"] = pixel(x, y)
+                    seen["banner back"] = backAt(view)?.top
+                    seen["banner pictured"] = motion.pictured
+                    shots.keep = if (dark) "banner-top-dark" else "banner-top-light"
+                    frame()
+                    // The back preview: the album is what the bar is over, around the card.
+                    b.dispatchOnBackStarted(start)
+                    b.dispatchOnBackProgressed(at(0.6f))
+                    frames(300)
+                    seen["preview pictured"] = motion.pictured
+                    shots.keep = if (dark) "banner-back-dark" else "banner-back-light"
+                    frame()
+                    b.dispatchOnBackCancelled()
+                    frames(600)
+                    seen["cancelled pictured"] = motion.pictured
+                    b.onBackPressed()
+                    frames(700)
+                    seen["back on the album pictured"] = motion.pictured
+                    seen["back on the album"] = pixel(x, y)
+                }
+            },
+            8_000L,
+            start = LibraryTab.Albums,
+            threaded = true,
+            bar = bar,
+            dark = dark,
+        )
+        shots.pick("banner-open", listOf(0.25f, 0.5f, 0.75f), if (dark) "banner-open-dark" else "banner-open-light")
+        val d = paparazzi.context.resources.displayMetrics.density
+        println("under the bar (${if (dark) "dark" else "light"}): " + seen.entries.joinToString { (k, v) -> "$k=" + if (v is Int) "#%08x".format(v) else "$v" })
+        assertEquals("the Library's root is below the bar: its ground under it", ground, seen["library"])
+        assertEquals("and so is an album's", ground, seen["album"])
+        assertTrue("its back below the bar: ${seen["album back"]}", (seen["album back"] as Float) >= bar)
+        assertTrue("the banner is under the bar: ${seen["banner"]}", seen["banner"] != ground)
+        assertEquals("its back just below the bar", bar + 4 * d, seen["banner back"] as Float, 1f)
+        assertEquals("and back on the album, its ground", ground, seen["back on the album"])
+        assertEquals("the bar's icons over a picture only while the banner is under it", false, seen["library pictured"])
+        assertEquals(false, seen["album pictured"])
+        assertEquals(true, seen["banner pictured"])
+        assertEquals("under the back preview, the album is at the bar", false, seen["preview pictured"])
+        assertEquals(true, seen["cancelled pictured"])
+        assertEquals(false, seen["back on the album pictured"])
+    }
+
+    @Test fun aBannerRunsUnderTheStatusBarAndNothingElseDoes() = underTheBar(dark = false)
+
+    @Test fun aBannerRunsUnderTheStatusBarInTheDark() = underTheBar(dark = true)
+
+    /** A banner scrolled up past the status bar leaves the bar over the page's ground; back down, over the picture. */
+    @Test
+    fun aBannerScrolledUpPastTheBarLeavesItOverTheGround() {
+        val bar = 66
+        val bach = "Johann Sebastian Bach"
+        val ground = Palette.LightScheme.background.toArgb()
+        val seen = linkedMapOf<String, Int>()
+        var done = false
+        val view = ComposeView(paparazzi.context)
+        val insets = WindowInsetsCompat.Builder().setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, bar, 0, 0)).build()
+        ViewCompat.setOnApplyWindowInsetsListener(view) { _, _ -> insets }
+        view.setContent {
+            Host(playerBack) {
+                HarkenTheme(dark = false) {
+                    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+                        Chrome(Tab.Library, PlayerState(), Still, onTab = {}) {
+                            BelowStatusBar {
+                                // Somebody who wrote no works, with a banner: their songs, a long page.
+                                ArtistPage(bach, Demo.artists.first { it.name == bach }.copy(banner = "banners/bach.jpg"), Demo.album("Goldberg Variations, BWV 988"), emptyList(), Demo::albumOf, null, Idle, Demo.details)
+                            }
+                        }
+                    }
+                }
+            }
+            LaunchedEffect(Unit) {
+                frames(300)
+                ViewCompat.dispatchApplyWindowInsets(view, insets)
+                frames(200)
+                val x = view.width / 2
+                seen["under"] = pixel(x, bar / 2)
+                val list = listWith(view) { n -> "Songs" in texts(n) }!!
+                list.scrollToItem(6)
+                frames(200)
+                seen["past"] = pixel(x, bar / 2)
+                shots.keep = "banner-scrolled-light"
+                frame()
+                list.scrollToItem(0)
+                frames(200)
+                seen["back"] = pixel(x, bar / 2)
+                done = true
+            }
+        }
+        paparazzi.gif(view, "strip", 0L, 2_500L, FPS)
+        println("scrolled: " + seen.entries.joinToString { (k, v) -> "$k=#%08x".format(v) })
+        assertTrue("the script ran to its end", done)
+        assertTrue("under the bar, the picture", seen["under"] != ground)
+        assertEquals("scrolled up past it, the page's ground", ground, seen["past"])
+        assertTrue("and back down, the picture", seen["back"] != ground)
+    }
 
     // The player -------------------------------------------------------------
 

@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -240,12 +243,15 @@ fun Offline(host: String) {
 //
 // What the pages about a composer, a work, a performance and a record are made of, as the
 // desktop's are (`rust/arkui/src/hero.rs`, `harken/iced/src/view.rs`): a banner with the name on
-// it, a header with the cover beside the words, a section's heading in the serif, the one thing
+// it, a header with the cover beside the words, a section's heading, the one thing
 // set apart with a Play, a listing's entry over its hairline, a work's heading over its
 // movements, and a record's small print.
 
 /** The tallest a banner is drawn, the desktop's: its whole shape on a page about 1250 wide. */
 val BANNER_TALLEST = 486.dp
+
+/** How far below the status bar the shade at a banner's top runs: past its back. */
+val BANNER_TOP_SHADE = 72.dp
 
 /** A banner's shape, width over height: a painting cut for one (2400×933). */
 const val BANNER_ASPECT = 2400f / 933f
@@ -258,35 +264,41 @@ const val BANNER_ASPECT = 2400f / 933f
 fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).coerceIn(200.dp, BANNER_TALLEST)
 
 /**
- * Somebody's banner, edge to edge: their wide picture cropped to fill, `kind` in small capitals and
- * `name` in the serif on its lower edge over a shade that keeps them legible, and back over its top.
- * Until the picture arrives the derived square is drawn instead, so the name is already where it
- * will be. A page grows out of a portrait into it.
+ * Somebody's banner, edge to edge and up to the top of the screen: their wide picture cropped to
+ * fill, run up under the status bar (its page says [dev.harken.android.ui.UnderStatusBar]) and that
+ * much taller, so what shows below the bar is the shape [bannerHeight] says; `kind` in small
+ * capitals and `name` in bold on its lower edge over a shade that keeps them legible, a lighter
+ * one under the bar's icons, and back over its top, below the bar. Until the picture arrives the
+ * derived square is drawn instead, so the name is already where it will be. A page grows out of a
+ * portrait into it, the part under the bar included.
  */
 @Composable
 fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> Unit) {
+    val bar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val w = maxWidth
-        Box(Modifier.fillMaxWidth().height(bannerHeight(w)).then(LocalPageFrame.current?.art?.modifier ?: Modifier)) {
+        Box(Modifier.fillMaxWidth().height(bar + bannerHeight(w)).then(LocalPageFrame.current?.art?.modifier ?: Modifier)) {
             Cover(seed, art, w, Modifier.fillMaxSize(), corner = 0.dp)
             // Clear at the top, darkest at the foot, where the name is.
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Palette.Clear, 0.45f to Palette.Clear, 1f to Palette.Shade)))
+            // And a little shade at the very top, under the bar's icons and back.
+            Box(Modifier.fillMaxWidth().height(bar + BANNER_TOP_SHADE).background(Brush.verticalGradient(0f to Palette.Shade.copy(alpha = 0.35f), 1f to Palette.Clear)))
             Column(Modifier.align(Alignment.BottomStart).padding(start = Space.page, end = Space.page, bottom = Space.xl)) {
                 Text(kind.uppercase(), style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
                 Spacer(Modifier.height(Space.xs))
-                Text(name, style = SerifType.banner, color = Palette.OnShade)
+                Text(name, style = MaterialTheme.typography.headlineLarge, color = Palette.OnShade)
             }
-            Box(Modifier.padding(Space.xs).size(48.dp).clip(CircleShape).background(Palette.Shade).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
+            Box(Modifier.padding(top = bar).padding(Space.xs).size(48.dp).clip(CircleShape).background(Palette.Shade).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
                 Icon(ArkGlyphs.Back, contentDescription = "Back", tint = Palette.OnShade, modifier = Modifier.size(24.dp))
             }
         }
     }
 }
 
-/** A section's heading, in the serif, with what opens the rest of it at its end. */
+/** A section's heading, bold, with what opens the rest of it at its end. */
 @Composable
-fun SerifHeading(title: String, modifier: Modifier = Modifier) {
-    Text(title, style = SerifType.heading, modifier = modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.xl, bottom = Space.s))
+fun SectionHeading(title: String, modifier: Modifier = Modifier) {
+    Text(title, style = MaterialTheme.typography.headlineSmall, modifier = modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.xl, bottom = Space.s))
 }
 
 /** A Play, small and in the accent's tone: what a header and a featured performance start with. */
@@ -301,7 +313,7 @@ fun PlayPill(onPlay: () -> Unit, enabled: Boolean = true) {
 
 /**
  * The header a record's page opens with, as a catalogue sets one: the cover beside a line of small
- * capitals (`over`, whose it is), the title in the serif, who played it in the accent, a small line
+ * capitals (`over`, whose it is), the title in bold, who played it in the accent, a small line
  * under (`small`), and Play and Shuffle. A line that goes somewhere opens it.
  */
 @Composable
@@ -329,7 +341,7 @@ fun CoverHeader(
                 Text(over.uppercase(), style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.clickable(onClick = onOver) else Modifier)
                 Spacer(Modifier.height(Space.xs))
             }
-            Text(title, style = SerifType.title.copy(fontSize = SerifType.title.fontSize * 0.86f, lineHeight = SerifType.title.lineHeight * 0.86f))
+            Text(title, style = MaterialTheme.typography.headlineSmall)
             if (!by.isNullOrEmpty()) Text(by, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.xs))
             if (!small.isNullOrEmpty()) {
                 Text(small, style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(top = Space.xs).then(if (onSmall != null) Modifier.clickable(onClick = onSmall) else Modifier))
@@ -405,7 +417,7 @@ fun MoreLine(label: String, onOpen: () -> Unit) {
 }
 
 /**
- * A work's heading on a record: its composer in small capitals over its title in the serif, and
+ * A work's heading on a record: its composer in small capitals over its title, and
  * how long the run of it under the heading lasts, where the tracks' lengths are.
  */
 @Composable
@@ -413,7 +425,7 @@ fun WorkHeading(composer: String, work: String, ms: Long, first: Boolean) {
     Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs + 48.dp + Space.s, top = if (first) Space.s else Space.xl, bottom = Space.xs), verticalAlignment = Alignment.Bottom) {
         Column(Modifier.weight(1f)) {
             if (composer.isNotEmpty()) Text(composer.uppercase(), style = quiet(MaterialTheme.typography.labelSmall))
-            Text(work, style = SerifType.work)
+            Text(work, style = MaterialTheme.typography.titleMedium)
         }
         if (ms > 0) Text(Media.clock(ms), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(start = Space.s))
     }
