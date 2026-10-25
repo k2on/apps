@@ -3384,7 +3384,9 @@ pub struct Art {
 /// **Public domain, the same rule the recordings follow**, and chosen to be
 /// *of the work* rather than decorative: a painting of the occasion a suite was
 /// written for, the autograph of the piece, a first title page. A composer gets
-/// the portrait everyone knows him by.
+/// the portrait everyone knows him by, and Vivaldi the Venice he worked in,
+/// across the top of his page (`banner`): the one composer with one, so the
+/// demo shows a page with a banner and pages without.
 ///
 /// **Most albums deliberately have none.** Commons has no usable image of the
 /// Goldberg title page or the Brandenburg dedication under a name a search
@@ -3394,6 +3396,12 @@ pub struct Art {
 /// back to that, which is also the only way to see in the demo that the
 /// fallback is there.
 pub const ART: &[Art] = &[
+    // Canaletto, The Grand Canal with S. Maria della Salute, c. 1730
+    Art {
+        subject: "banner",
+        name: "Antonio Vivaldi",
+        file: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/31/Canaletto_-_The_Grand_Canal_with_S._Maria_della_Salute_towards_the_Riva_degli_Schiavoni_RCIN_400520.jpg/1920px-Canaletto_-_The_Grand_Canal_with_S._Maria_della_Salute_towards_the_Riva_degli_Schiavoni_RCIN_400520.jpg",
+    },
     // the anonymous oil in Bologna, c. 1723
     Art {
         subject: "artist",
@@ -4380,6 +4388,7 @@ pub fn seeded_disk(copies: usize) -> Memory {
                 born: c.born,
                 died: c.died,
                 art: art_of("artist", c.name),
+                banner: art_of("banner", c.name),
             };
             seed.mutate(c.name, "describe_person", &person);
         }
@@ -4437,6 +4446,7 @@ pub fn seeded_disk(copies: usize) -> Memory {
                 disc: 1,
                 work_title: work_title.clone(),
                 movement_no: s.track,
+                artist_banner: String::new(),
             };
             seed.mutate(s.title, "add_song", &song);
             // The same helpers `add_song` used, so the key cannot be a second

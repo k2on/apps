@@ -9,7 +9,7 @@
 use arkui::fit::Cut;
 use arkui::format::{clock, plural, span, spell};
 use arkui::line::Line;
-use arkui::{account, art, cards, fit, glyphs, icon, layer, menu, panel, picker, style, table};
+use arkui::{account, art, cards, fit, glyphs, hero, icon, layer, menu, panel, picker, style, table, SCROLLBAR};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row};
 use iced::{Alignment, Element, Length, Padding};
 
@@ -321,39 +321,40 @@ impl App {
                 )
             }
             Source::Artist(name) => {
-                let art_path = p.artists().iter().find(|a| a.name == *name).map(|a| a.art.as_str()).unwrap_or_default();
-                with_header(
-                    self.view_record(name, "", None, Some(p.albums_by(name).len()), art_path),
-                    self.view_list(),
-                )
+                let artist = p.artists().iter().find(|a| a.name == *name);
+                let art_path = artist.map(|a| a.art.as_str()).unwrap_or_default();
+                let albums = p.albums_by(name).len();
+                let top = match artist.filter(|a| !a.banner.is_empty()) {
+                    // A wide picture opens the page as a banner, the counts on
+                    // it where a composer's years are.
+                    Some(a) => {
+                        let tracks = a.tracks;
+                        let kind = format!(
+                            "Artist  \u{b7}  {albums} {}  \u{b7}  {tracks} {}",
+                            plural(albums as i64, "album"),
+                            plural(tracks, "track")
+                        );
+                        container(hero::banner(
+                            self.banners.handle(&self.art_url(&a.banner)),
+                            &kind,
+                            name,
+                            self.pane_width(),
+                        ))
+                        .padding(Padding {
+                            bottom: 12.0,
+                            ..Padding::ZERO
+                        })
+                        .into()
+                    }
+                    None => self.view_record(name, "", None, Some(albums), art_path),
+                };
+                with_header(top, self.view_list())
             }
-            // One composer's works, as cards: the catalogue number under each,
-            // the one name a work has that survives translation.
-            Source::Works(name) => {
-                let composer = p.composers().iter().find(|c| c.name == *name);
-                let works = p.works().len() as i64;
-                let tracks: i64 = p.works().iter().map(|w| w.tracks).sum();
-                let facts = format!("{works} {}  \u{b7}  {tracks} {}", plural(works, "work"), plural(tracks, "track"));
-                let life = composer.map(|c| span(c.born, c.died)).unwrap_or_default();
-                let cards = p
-                    .works()
-                    .iter()
-                    .map(|w| {
-                        self.card(
-                            &w.title,
-                            w.catalogue.clone(),
-                            w.tracks,
-                            Source::Work(w.id.clone(), w.title.clone()),
-                            false,
-                            &w.art,
-                        )
-                    })
-                    .collect();
-                with_header(
-                    self.view_header(name, &life, None, facts, composer.map(|c| c.art.as_str()).unwrap_or_default(), true),
-                    self.view_cards(cards, "Nothing by them yet."),
-                )
-            }
+            // One composer's page, as a catalogue opens one: their banner, then
+            // their works as a list in columns — the catalogue number under
+            // each, the one name a work has that survives translation — then
+            // their records.
+            Source::Works(name) => self.view_composer(name),
             // One work and every performance of it: the rows are the same
             // music, and what tells them apart is who played it.
             Source::Work(id, title) => {
@@ -406,6 +407,72 @@ impl App {
             }
             _ => self.view_list(),
         }
+    }
+
+    /// A composer's page: the banner (or the header, for somebody with no
+    /// wide picture), their works, and the records their works are on — all
+    /// one scrollable, so the banner scrolls away with the page.
+    fn view_composer(&self, name: &str) -> Element<'_, Message> {
+        let p = &self.peer;
+        let composer = p.composers().iter().find(|c| c.name == name);
+        let life = composer.map(|c| span(c.born, c.died)).unwrap_or_default();
+        let works = p.works().len() as i64;
+        let tracks: i64 = p.works().iter().map(|w| w.tracks).sum();
+        let top: Element<'_, Message> = match composer.filter(|c| !c.banner.is_empty()) {
+            Some(c) => {
+                let kind = match life.is_empty() {
+                    true => "Composer".to_string(),
+                    false => format!("Composer  \u{b7}  {life}"),
+                };
+                hero::banner(self.banners.handle(&self.art_url(&c.banner)), &kind, name, self.pane_width())
+            }
+            None => {
+                let facts = format!("{works} {}  \u{b7}  {tracks} {}", plural(works, "work"), plural(tracks, "track"));
+                let art_path = composer.map(|c| c.art.as_str()).unwrap_or_default();
+                self.view_header(name, &life, None, facts, art_path, true)
+            }
+        };
+        let by = initials(name);
+        let entries: Vec<hero::Entry<Message>> = p
+            .works()
+            .iter()
+            .map(|w| hero::Entry {
+                over: by.clone(),
+                title: w.title.clone(),
+                under: w.catalogue.clone(),
+                count: w.tracks.to_string(),
+                open: Message::Select(Source::Work(w.id.clone(), w.title.clone())),
+            })
+            .collect();
+        let cursor = self.has_keys(Pane::Tracks).then_some(self.at(Pane::Tracks));
+        let mut page = column![top, hero::heading("Works")].width(Length::Fill);
+        page = match entries.is_empty() {
+            true => page.push(text("Nothing by them yet.").size(13).style(style::faint(0.5))),
+            false => page.push(hero::listing(&entries, self.listing_columns(), cursor, Message::HoverAt)),
+        };
+        let albums: Vec<cards::Card<Message>> = p
+            .albums_by(name)
+            .into_iter()
+            .map(|a| self.card(&a.name, String::new(), a.tracks, Source::Album(a.name.clone()), false, &a.art))
+            .collect();
+        if !albums.is_empty() {
+            page = page.push(hero::heading("Albums"));
+            let mut shelf = column![].spacing(SHELF.gap);
+            for chunk in albums.chunks(self.columns()) {
+                let line = chunk.iter().map(|c| cards::view_card(SHELF, c, false, Message::Swallow));
+                shelf = shelf.push(Row::with_children(line).spacing(SHELF.gap).align_y(Alignment::Start));
+            }
+            page = page.push(shelf);
+        }
+        scrollable(container(page).padding(Padding {
+            right: SCROLLBAR + 6.0,
+            bottom: PAGE_PADDING,
+            ..Padding::ZERO
+        }))
+        .id(TRACKS)
+        .style(style::bars)
+        .height(Length::Fill)
+        .into()
     }
 
     /// The recordings of one work, as rows rather than cards: every one has
@@ -1156,6 +1223,23 @@ impl App {
         }
         panel::panel(column![panel::title("Playing on".into()), rows].spacing(0), DEVICES_WIDTH).into()
     }
+}
+
+/// How a catalogue writes who a work is by over its title: every name but
+/// the last as an initial, a particle kept — `A. Vivaldi`, `J. S. Bach`,
+/// `L. van Beethoven`.
+fn initials(name: &str) -> String {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let Some((last, first)) = words.split_last() else { return String::new() };
+    let mut out: Vec<String> = first
+        .iter()
+        .map(|w| match w.chars().next() {
+            Some(c) if c.is_uppercase() => format!("{c}."),
+            _ => w.to_string(),
+        })
+        .collect();
+    out.push(last.to_string());
+    out.join(" ")
 }
 
 /// A page about something: its header, and what is on it.

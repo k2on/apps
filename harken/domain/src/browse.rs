@@ -61,10 +61,14 @@ pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refus
 pub fn artists(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ArtistsEntry>, Refusal> {
     Ok(scan::<Harken, Media>().group(
         |m| m.creator.clone(),
-        |db, name, tracks| ArtistsEntry {
-            art: db.person.get(name).map(|p| p.art).unwrap_or_default(),
-            name: name.clone(),
-            tracks: tracks.len() as i64,
+        |db, name, tracks| {
+            let p = db.person.get(name).unwrap_or_default();
+            ArtistsEntry {
+                art: p.art,
+                banner: p.banner,
+                name: name.clone(),
+                tracks: tracks.len() as i64,
+            }
         },
     ))
 }
@@ -126,6 +130,7 @@ pub fn composers(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ComposersEntry>,
         .filter(|(_, works)| !works.is_empty())
         .map(|(p, works)| ComposersEntry {
             art: p.art.clone(),
+            banner: p.banner.clone(),
             born: p.born,
             died: p.died,
             name: p.name.clone(),

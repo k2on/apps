@@ -38,6 +38,10 @@ use iced::Task;
 /// smaller is left exactly as it is.
 pub const BOUND: u32 = 384;
 
+/// The bound for a picture drawn across a page: a banner's width at twice
+/// the pixels of a wide window.
+pub const WIDE: u32 = 2400;
+
 /// Where one picture has got to.
 enum State {
     /// Asked for, not answered yet. Held so a second frame does not ask again.
@@ -81,6 +85,12 @@ impl Images {
             Some(State::Ready(handle)) => Some(handle),
             _ => None,
         }
+    }
+
+    /// A cache called `name` whose pictures are kept at most `bound` on their
+    /// longest side.
+    pub fn bounded(name: impl Into<String>, bound: u32) -> Self {
+        Images { bound, ..Images::new(name) }
     }
 
     /// Start fetching this one, unless it is already known — or empty, which is

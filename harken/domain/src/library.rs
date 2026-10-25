@@ -170,16 +170,24 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
     }
     if !input.artist.is_empty() {
         let person = db.person.get(&input.artist);
-        let stale = person.as_ref().is_none_or(|p| !input.artist_art.is_empty() && p.art != input.artist_art);
+        let given = |new: &String, was: &String| !new.is_empty() && new != was;
+        let stale = person
+            .as_ref()
+            .is_none_or(|p| given(&input.artist_art, &p.art) || given(&input.artist_banner, &p.banner));
+        let or = |new: &String, was: Option<&String>| match new.is_empty() {
+            true => was.cloned().unwrap_or_default(),
+            false => new.clone(),
+        };
         if stale {
             db.person.put(Person {
                 name: input.artist.clone(),
                 sort_name: person.as_ref().map_or(String::new(), |p| p.sort_name.clone()),
                 born: person.as_ref().map_or(0, |p| p.born),
                 died: person.as_ref().map_or(0, |p| p.died),
-                art: input.artist_art.clone(),
+                art: or(&input.artist_art, person.as_ref().map(|p| &p.art)),
                 added_ms: person.as_ref().map_or(now, |p| p.added_ms),
                 user_id: person.as_ref().map_or(user.clone(), |p| p.user_id.clone()),
+                banner: or(&input.artist_banner, person.as_ref().map(|p| &p.banner)),
             })?;
         }
     }
@@ -347,6 +355,7 @@ pub fn describe_person(ctx: &Ctx, db: &mut Db<Harken>, input: DescribePerson) ->
         born: int(input.born, p.as_ref().map(|p| p.born)),
         died: int(input.died, p.as_ref().map(|p| p.died)),
         art: text(&input.art, p.as_ref().map(|p| &p.art)),
+        banner: text(&input.banner, p.as_ref().map(|p| &p.banner)),
         added_ms: p.as_ref().map_or(ctx.now, |p| p.added_ms),
         user_id: p.as_ref().map_or(ctx.user().to_string(), |p| p.user_id.clone()),
     })

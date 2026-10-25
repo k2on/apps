@@ -88,6 +88,7 @@ fn step(r: &mut Rng, s: &Store) -> Step {
                 disc: n(r, 120) - 2,
                 work_title: r.pick(&["", "Goldberg Variations", "Suite"]).into(),
                 movement_no: n(r, 3),
+                artist_banner: String::new(),
             }
             .to_bytes(),
         ),
@@ -326,70 +327,70 @@ fn step(r: &mut Rng, s: &Store) -> Step {
 
 /// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
 /// a build could write values as JSON).
-const SCHEMA: &str = "748e53c5ffac28aa4f032b7b8496da2052231f57e47a5289dd8ba7bd8dade7dd";
+const SCHEMA: &str = "f579a0f02908d79ff9f539492b8dfba149ec495c0c53df2081d739396e96ec91";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
 /// value format writes them (postcard, N4).
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,
-        "b8db5481d025690ef3240fa4ffe20acfe4c91a43d448a1bd774e6d9c30fe6041",
-        "cd6056003a23bd7c36f28dd1c0789e06df572c43436c5ab284ae36065cdeef19",
+        "792f39404784e17cb09a07a796d7faecc01a7f5793234e60fe2569900959dcc0",
+        "724614585e730f429eaa5d6d0410521ba0d154df715adacee524b66bd1f708d6",
     ),
     (
         2,
-        "5d04ba61b069ff408f2a80fe4a195d373732a678386179e56e6ce430d562d859",
-        "80fecada08e8c6da8233d8db3b1f1eb3a393567641f1443e1cf580a41a79642e",
+        "2d7c012aab7b4448c0ba269635c0d57fbe01296ec1614c7eeb99b95f3bb39fa4",
+        "58f584f469b1240f86d93744c271498840b60e22cd9fd069eaae6a1943cef152",
     ),
     (
         3,
-        "d36fa93b102932483bdd57d1f7c642f1f9b1458784d1f502fca172ae1727770b",
-        "3c290b3ad5e3aa0d6e2ab90b384fcc35e65ca82e304d89219aeb575d05da8ac9",
+        "b3f7884253a24b211010ef098607a017455326d8b835c7a8072c8b8be6c5e618",
+        "35fde5827085be58544925acc0d7ab03c5eb7f716ef333d8113f92c4b13feb83",
     ),
     (
         4,
-        "93030d16cc32086826fd0c7bd08e3f707f04a3c57c4ade7e2bd783813aba4351",
-        "d1ed728c3e0cb8a86b50a82c2db6d640c2f805d09301caef24c5389e5b07260e",
+        "a78209f2f3e5a64687f4b85b3aa041bb046900c06ff726a563110baf76b0c6d7",
+        "7851024ffd56c7c00e80d83e9b6fc99aa5bd0ca627bfde29bde14cb4db8d4fe8",
     ),
     (
         5,
-        "5c53715f73f2c3744296839633c32187bfbee001f0abcb94d015eb0f5109cdc0",
-        "eab09f5a198fb9757fa01ecdc0f9620490aab919eded399dad3091992054ca1d",
+        "62aee24a7dbd53e7b9b93b903f2bb24f77365bc05bd3db3f7702027c2a06c70b",
+        "dc7b4b402b928304e6268c6dd0b5dc56cec46df21736583686d74b10f0f56ea5",
     ),
     (
         6,
-        "3dc080acbffe1ffa9507511f885389180d9c5fa781c7c0659df95d7a9236cdbe",
-        "ff4c98e3d23b749f355ace9236a44e3acbdc8ad75232050a16f0a1a181ee0c07",
+        "b7fffd9dd11b37ec6ee1f32a6bae57790e020190b6a3889891ad4b7c6c87d46e",
+        "78618923a5fad1390452df0909527e58fcc62f3c805cd57c680968a1db04096d",
     ),
     (
         7,
-        "ca207f22558cd21442fc08b94ab0f4ca55fd6466b12488a3e1fa119b89d9e8ec",
-        "7bddcaeed1a50b72c9f73c1c38e10ecdd758edb69fdad799edc6e1e2c2e3c13d",
+        "8a86eaf2a4a0765f9d088f219cbfabcb397f7641d7050369ad4b856aa520c8b3",
+        "be3bdd96f9561a552f1157e1a5706f6c25819a5861553647e60a68d97c10397d",
     ),
     (
         8,
-        "68b0531b863ecd24349c2e4c95f165e56f3665b156bfa069171923de045ee501",
-        "106f7a0513e128cb142298015bb1d704965065642df81fa4eae6332415d810c4",
+        "f85f575c01ed6913a2dd40237a6fff1f68a7302266b97b697d1732da17387aed",
+        "d293c8ef3a16471707134fb556ddb91200a5572d7ed21ebcf64af24b75418d43",
     ),
     (
         9,
-        "f97d3f3be9193c114bbc38a8c585d3c2701f65175a1f9b0414742ef50341b8b9",
-        "d79154b4be42b1d1e83427fd317b168544dfbc12aa91be00fb0348d6e681fe21",
+        "c7b9e67d9e6f488325f1a110cc8554e7eae8f5e7b44202783bfeb2d85b8f1fc4",
+        "1e1e840065c4340fde9e280fdc6000d3a55065b08d3b04dd227ecdd696b22f6b",
     ),
     (
         10,
-        "eb5d676854e3c6884d9f519fe2ecc887cc1f33fbe4ad57494dc28ee468f50403",
-        "36254f4dd26e566321122c31b409853c9f0e849e5452d05b921c1c87e92a5ea4",
+        "ef5966089b9e202877e526954fc133b3ab7e1ab012ca7c88154a84c662c70adf",
+        "0899c7fa967b548cb74195f836e789ec4354f7e4370daf748e6fdae5c771dc43",
     ),
     (
         11,
-        "3702ccd0524af1f41f5eae7b387d277ba80bb330f27bb33aa97d68da2947c885",
-        "9b57cc2da737b8d1ee4b020217c1bc910b7db060a38fcb042efe2a31766fc153",
+        "8eeefef8467a9cbd96b5a02b7be212f096024cf03a6f8a44e42c9d8e8d99a797",
+        "6fd9df11d80795292bb66920ccaaa07bedcf2a15f6fbdb92bf30cd2fe1f01e44",
     ),
     (
         12,
-        "71c894f8d45ded711a3fe8a60e152d64b4daf352b21da10cf49965a6941b5211",
-        "998c1291d10a94949ebc1e85f372ef1d0bf14f2d491bb3db569b8abd6c3330a0",
+        "5675a444a83facedd90993bd3eef1a9a53fc001a58cf0fc8f011e0e63498b02f",
+        "34ba320a37c930e0de787337f57c16f28ee0b24cd783a287dd1d71b4a66d3be8",
     ),
 ];
 

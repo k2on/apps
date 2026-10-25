@@ -160,6 +160,8 @@ pub enum Message {
     HoverAt(usize),
     /// A cover arrived, or did not.
     Cover(images::Loaded),
+    /// A banner fetched, for the banners' own cache.
+    Banner(images::Loaded),
     /// A key nothing on screen wanted.
     Key(iced::keyboard::Key, iced::keyboard::Modifiers),
     Resized(Size),
@@ -540,6 +542,9 @@ pub struct App {
     pub volume_sent: u64,
     /// Covers, fetched once and kept.
     pub covers: Images,
+    /// The wide pictures a person's page opens with, kept larger than a
+    /// cover: they are drawn across the page.
+    pub banners: Images,
     /// The `Peer::art_gen` covers were last asked for.
     pub art_seen: u64,
     pub server: String,
@@ -606,6 +611,7 @@ impl App {
             volume_held: None,
             volume_sent: 0,
             covers: Images::new("harken/covers"),
+            banners: Images::bounded("harken/banners", images::WIDE),
             art_seen: 0,
             server,
             user: None,
@@ -957,6 +963,12 @@ impl App {
         SHELF.columns(self.pane_width())
     }
 
+    /// How many columns a composer's works are listed in — the view's
+    /// division, from the room it leaves beside the scrollbar.
+    pub fn listing_columns(&self) -> usize {
+        arkui::hero::columns(self.pane_width() - arkui::SCROLLBAR - 6.0)
+    }
+
     /// What shape a pane is, which is all `vim` needs to know about it.
     pub fn shape(&self, pane: Pane) -> vim::Grid {
         let p = &self.peer;
@@ -969,7 +981,10 @@ impl App {
                 Source::Albums => SHELF.grid(p.albums().len(), self.pane_width()),
                 Source::Artists => SHELF.grid(p.artists().len(), self.pane_width()),
                 Source::Composers => SHELF.grid(p.composers().len(), self.pane_width()),
-                Source::Works(_) => SHELF.grid(p.works().len(), self.pane_width()),
+                Source::Works(_) => vim::Grid {
+                    cells: p.works().len(),
+                    columns: self.listing_columns(),
+                },
                 Source::Work(..) => vim::Grid::column(p.recordings().len()),
                 _ => vim::Grid::column(p.rows().len()),
             },
@@ -1654,11 +1669,25 @@ impl App {
             .filter(|art| !art.is_empty())
             .map(|art| media_url(&self.server, &art))
             .collect();
-        let tasks: Vec<Task<Message>> = urls
+        let banners: Vec<String> = p
+            .artists()
+            .iter()
+            .map(|a| a.banner.clone())
+            .chain(p.composers().iter().map(|c| c.banner.clone()))
+            .filter(|b| !b.is_empty())
+            .map(|b| media_url(&self.server, &b))
+            .collect();
+        let mut tasks: Vec<Task<Message>> = urls
             .into_iter()
             .filter_map(|url| self.covers.want(url))
             .map(|t| t.map(Message::Cover))
             .collect();
+        tasks.extend(
+            banners
+                .into_iter()
+                .filter_map(|url| self.banners.want(url))
+                .map(|t| t.map(Message::Banner)),
+        );
         Task::batch(tasks)
     }
 
@@ -1926,6 +1955,7 @@ impl App {
                 self.cursors[Pane::Tracks as usize] = at;
             }
             Message::Cover(done) => self.covers.loaded(done),
+            Message::Banner(done) => self.banners.loaded(done),
             Message::Hover(at) => self.cursor = at,
             Message::MenuAt(at) => self.ctx.land(at),
             Message::MenuActivate => {
@@ -2352,6 +2382,7 @@ pub fn main() -> iced::Result {
     ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
     iced::application(App::boot, App::update, App::view)
+        .font(arkui::hero::SERIF_BYTES)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((860.0, 600.0))

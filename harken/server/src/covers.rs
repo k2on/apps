@@ -27,6 +27,8 @@
 //!   invented: `artist.*` beside the album or in the directory above it, or
 //!   `folder.*` in that directory above when it is named for the artist —
 //!   Jellyfin's and Kodi's layouts, `Artist/Album/track`.
+//!   Their page's wide picture is `backdrop.*` (or `fanart.*`), looked for
+//!   where `artist.*` is: Jellyfin's name for it, and Kodi's.
 //!
 //! Files directly in `music/` are loose tracks, not a record, so that
 //! directory is nobody's album and nobody's artist.
@@ -56,6 +58,9 @@ pub const IMAGES: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
 /// The names a record's cover goes by, in the order they are preferred.
 const ALBUM: &[&str] = &["cover", "folder", "front", "album"];
+
+/// The names an artist's wide picture goes by.
+const BACKDROP: &[&str] = &["backdrop", "fanart"];
 
 /// `/media`: the media root; [`ART`] under it from `art`; and [`COVER`]
 /// under it from the media root again, its version segment dropped. The
@@ -125,6 +130,8 @@ struct Dir {
     album: Option<Image>,
     /// `artist.*` beside the record or in the directory above it.
     artist: Option<Image>,
+    /// `backdrop.*` or `fanart.*`, where `artist.*` is looked for.
+    backdrop: Option<Image>,
     /// `folder.*` in the directory above, with that directory's name, which
     /// must be the artist's for it to be theirs.
     above: Option<(String, Image)>,
@@ -148,6 +155,7 @@ pub struct Covers {
 pub struct Found {
     pub album: Option<Image>,
     pub artist: Option<Image>,
+    pub backdrop: Option<Image>,
 }
 
 impl Found {
@@ -157,7 +165,17 @@ impl Found {
             i.as_ref()
                 .map_or(String::new(), |i| format!("{}@{}", i.rel, i.print))
         };
-        format!("{}|{}", p(&self.album), p(&self.artist))
+        match &self.backdrop {
+            // As it was before there were backdrops, so a print kept then
+            // has not moved for a track that has none.
+            None => format!("{}|{}", p(&self.album), p(&self.artist)),
+            Some(_) => format!(
+                "{}|{}|{}",
+                p(&self.album),
+                p(&self.artist),
+                p(&self.backdrop)
+            ),
+        }
     }
 }
 
@@ -246,6 +264,7 @@ impl Covers {
                     false => None,
                 });
             found.artist = self.named(&record, &["artist"]);
+            found.backdrop = self.named(&record, BACKDROP);
             if let Some(above) = record
                 .parent()
                 .filter(|a| a.starts_with(&self.music) && *a != self.music)
@@ -253,6 +272,9 @@ impl Covers {
                 let above = above.to_path_buf();
                 if found.artist.is_none() {
                     found.artist = self.named(&above, &["artist"]);
+                }
+                if found.backdrop.is_none() {
+                    found.backdrop = self.named(&above, BACKDROP);
                 }
                 let name = above
                     .file_name()
@@ -277,6 +299,7 @@ impl Covers {
             artist: d
                 .artist
                 .or_else(|| d.above.filter(|(n, _)| named(n)).map(|(_, i)| i)),
+            backdrop: d.backdrop,
         }
     }
 

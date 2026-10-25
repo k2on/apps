@@ -35,6 +35,9 @@ pub struct AddSong {
     #[ark(trim)]
     pub work_title: String,
     pub movement_no: i64,
+    /// The wide picture beside the artist's (`backdrop.*`), for their page.
+    #[ark(trim)]
+    pub artist_banner: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -77,6 +80,8 @@ pub struct DescribePerson {
     pub died: i64,
     #[ark(trim)]
     pub art: String,
+    #[ark(trim)]
+    pub banner: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -192,6 +197,7 @@ pub struct AlbumsEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
 pub struct ArtistsEntry {
     pub art: String,
+    pub banner: String,
     pub name: String,
     pub tracks: i64,
 }
@@ -213,6 +219,7 @@ pub struct TrackDetailsEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
 pub struct ComposersEntry {
     pub art: String,
+    pub banner: String,
     pub born: i64,
     pub died: i64,
     pub name: String,

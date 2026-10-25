@@ -694,6 +694,7 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
             .unwrap_or_default(),
     };
     let artist_art = found.artist.map(|i| i.value()).unwrap_or_default();
+    let artist_banner = found.backdrop.map(|i| i.value()).unwrap_or_default();
     let call = AddSong {
         title: track.title,
         artist: track.artist,
@@ -719,6 +720,7 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         disc: track.disc,
         work_title: track.work,
         movement_no: track.movement_no,
+        artist_banner,
     }
     .to_bytes();
     if !would_change(peer, ADD_SONG, &call) {

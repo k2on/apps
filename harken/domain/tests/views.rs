@@ -144,6 +144,7 @@ fn seeded() -> Seeded {
         born: 1685,
         died: 1750,
         art: "bach.jpg".into(),
+        ..DescribePerson::default()
     };
     c.mutate("alice", "describe_person", &bach).unwrap();
     let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id).collect();

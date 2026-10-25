@@ -46,6 +46,8 @@ pub struct Person {
     pub art: String,
     pub added_ms: i64,
     pub user_id: String,
+    /// A wide picture to open their page with, where `art` is the square.
+    pub banner: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]

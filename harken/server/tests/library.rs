@@ -759,3 +759,44 @@ fn a_look_is_a_job_the_scanner_does() {
     assert_eq!(looked, [(0, 0), (2, 2)], "the rescan's, and the boot's");
     rt.block_on(server.stop());
 }
+
+/// An artist's page opens with the wide picture beside their own: a
+/// `backdrop.jpg` where `artist.jpg` is, in the directory named for them
+/// above their records, served where the log says.
+#[test]
+fn an_artist_takes_a_backdrop_from_beside_their_picture() {
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    let music = media.join("music");
+    picture(&music.join("Vivaldi/artist.jpg"), b"\xFF\xD8\xFF vivaldi");
+    picture(
+        &music.join("Vivaldi/backdrop.jpg"),
+        b"\xFF\xD8\xFF the red cloak",
+    );
+    put(
+        root.path(),
+        &music.join("Vivaldi/Seasons/spring.wav"),
+        "Spring",
+        "Antonio Vivaldi",
+        "The Four Seasons",
+        None,
+    );
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    settle(&server, 1);
+    let vivaldi = eventually(20, || {
+        hub_rows::<Person>(&server, "person")
+            .into_iter()
+            .find(|p| p.name == "Antonio Vivaldi" && !p.banner.is_empty())
+    })
+    .expect("Vivaldi's backdrop");
+    assert_eq!(fetch(&server, &vivaldi.art).1, b"\xFF\xD8\xFF vivaldi");
+    assert_eq!(
+        fetch(&server, &vivaldi.banner),
+        (
+            "image/jpeg".to_string(),
+            b"\xFF\xD8\xFF the red cloak".to_vec()
+        )
+    );
+    rt.block_on(server.stop());
+}
