@@ -274,7 +274,7 @@ fn the_whole_path_from_a_composer_to_a_movement() {
     peer.open_page();
     assert!(peer.composers().iter().any(|c| c.name == "Johann Sebastian Bach"));
 
-    peer.source = Source::Works("Johann Sebastian Bach".into());
+    peer.source = Source::Artist("Johann Sebastian Bach".into());
     peer.open_page();
     let goldbergs = peer
         .works()
@@ -386,11 +386,43 @@ fn the_best_known_works_are_the_most_recorded() {
     assert_eq!(ranked, ["Gigue", "Bourrée", "Air", "Chaconne"]);
 
     let mut app = super::demo_app();
-    let _ = app.update(crate::Message::Select(Source::Works("Johann Sebastian Bach".into())));
+    let _ = app.update(crate::Message::Select(Source::Artist("Johann Sebastian Bach".into())));
     let all = app.peer.works().len();
     assert_eq!(app.listed_works().len(), all.min(crate::KNOWN_WORKS));
     let _ = app.update(crate::Message::AllWorks(true));
     assert_eq!(app.listed_works().len(), all);
-    let _ = app.update(crate::Message::Select(Source::Works("Johann Sebastian Bach".into())));
+    let _ = app.update(crate::Message::Select(Source::Artist("Johann Sebastian Bach".into())));
     assert!(!app.all_works, "gone with the page");
+}
+
+/// A person has one page: a composer's card, an old `#composer/…` link and
+/// the artist's card all open it, and it lists their works where some are
+/// by them and their songs where none are. Falsified by opening `works`
+/// only for a composer's card: the artist's card opened a page of no works.
+#[test]
+fn a_composer_and_an_artist_are_one_page() {
+    let mut app = super::demo_app();
+    let bach = "Johann Sebastian Bach".to_string();
+    assert_eq!(app.peer.source_of(&Place::Composer(bach.clone())), Source::Artist(bach.clone()));
+    assert_eq!(app.peer.source_of(&Place::Artist(bach.clone())), Source::Artist(bach.clone()));
+    let _ = app.update(crate::Message::Select(Source::Composers));
+    let at = app.peer.composers().iter().position(|c| c.name == bach).unwrap();
+    assert_eq!(app.card_under_cursor(at), Some(Source::Artist(bach.clone())));
+
+    let _ = app.update(crate::Message::Select(Source::Artist(bach.clone())));
+    assert!(!app.peer.works().is_empty(), "a composer's page lists their works");
+    let first = app.listed_works()[0].clone();
+    assert_eq!(app.card_under_cursor(0), Some(Source::Work(first.id, first.title)));
+
+    let pop = app
+        .peer
+        .artists()
+        .iter()
+        .find(|a| !app.peer.composers().iter().any(|c| c.name == a.name))
+        .map(|a| a.name.clone());
+    if let Some(pop) = pop {
+        let _ = app.update(crate::Message::Select(Source::Artist(pop)));
+        assert!(app.peer.works().is_empty());
+        assert_eq!(app.card_under_cursor(0), None, "<Enter> plays a song");
+    }
 }

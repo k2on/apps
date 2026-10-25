@@ -33,9 +33,10 @@ pub enum Source {
     Composers,
     Playlist(Id, String),
     Album(String),
+    /// One person's page, whatever they did: a composer's lists their
+    /// works, and anybody else's their songs. Reached from a card on
+    /// `Artists` or on `Composers`, and from whoever a work is by.
     Artist(String),
-    /// One composer's works. Reached from a card on `Composers`.
-    Works(String),
     /// One work and the performances of it this library holds: the derived
     /// key, and the title to draw — together, because a page needs both and
     /// the key is not a name.
@@ -56,7 +57,6 @@ impl Source {
             Source::Playlist(_, name) => Place::Playlist(name.clone()),
             Source::Album(name) => Place::Album(name.clone()),
             Source::Artist(name) => Place::Artist(name.clone()),
-            Source::Works(name) => Place::Composer(name.clone()),
             // The key, not the title — and still a name in the sense the
             // route means: `#work/johann-sebastian-bach/bwv-988` is built out
             // of the composer and the catalogue number, so somebody can read
@@ -74,7 +74,7 @@ impl Source {
         match self {
             Source::Library | Source::Albums | Source::Artists | Source::Composers => Some("Music"),
             Source::Playlist(..) => Some("Playlists"),
-            Source::Album(_) | Source::Artist(_) | Source::Works(_) | Source::Work(..) | Source::Recording(..) => None,
+            Source::Album(_) | Source::Artist(_) | Source::Work(..) | Source::Recording(..) => None,
         }
     }
 
@@ -87,7 +87,7 @@ impl Source {
             Source::Library => glyphs::NOTE,
             Source::Albums | Source::Album(_) => glyphs::ALBUM,
             Source::Artists | Source::Artist(_) => glyphs::ARTIST,
-            Source::Composers | Source::Works(_) => glyphs::COMPOSER,
+            Source::Composers => glyphs::COMPOSER,
             Source::Work(..) | Source::Recording(..) => glyphs::LIBRARY,
             Source::Playlist(..) => glyphs::PLAYLIST,
         }
@@ -99,12 +99,7 @@ impl Source {
             Source::Albums => "Albums",
             Source::Artists => "Artists",
             Source::Composers => "Composers",
-            Source::Playlist(_, name)
-            | Source::Album(name)
-            | Source::Artist(name)
-            | Source::Works(name)
-            | Source::Work(_, name)
-            | Source::Recording(_, name) => name,
+            Source::Playlist(_, name) | Source::Album(name) | Source::Artist(name) | Source::Work(_, name) | Source::Recording(_, name) => name,
         }
     }
 
@@ -115,7 +110,6 @@ impl Source {
         match self {
             Source::Album(_) => "Album",
             Source::Artist(_) => "Artist",
-            Source::Works(_) => "Composer",
             Source::Work(..) => "Work",
             Source::Recording(..) => "Recording",
             _ => "",
@@ -139,8 +133,9 @@ pub enum Place {
     Playlist(String),
     Album(String),
     Artist(String),
-    /// One composer's works: `#composer/…`, because the name after the slash
-    /// is the composer's and a fragment should read as what it names.
+    /// A composer's page as a link once named it, `#composer/…`: kept so an
+    /// old link still lands on them. Their page is `#artist/…` now, the one
+    /// page a person has.
     Composer(String),
     /// A work and a recording, by the keys the domain derives. The slash
     /// inside one is why a fragment splits on the *first* separator only.

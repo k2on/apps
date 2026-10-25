@@ -1003,7 +1003,7 @@ impl App {
                 Source::Albums => SHELF.grid(p.albums().len(), self.pane_width()),
                 Source::Artists => SHELF.grid(p.artists().len(), self.pane_width()),
                 Source::Composers => SHELF.grid(p.composers().len(), self.pane_width()),
-                Source::Works(_) => vim::Grid {
+                Source::Artist(_) if !p.works().is_empty() => vim::Grid {
                     cells: self.listed_works().len(),
                     columns: self.listing_columns(),
                 },
@@ -1026,7 +1026,7 @@ impl App {
                 Source::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
                 Source::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
                 Source::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
-                Source::Works(_) => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
+                Source::Artist(_) if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
                 Source::Work(..) => p.recordings().iter().map(|r| r.performers.clone()).collect(),
                 _ => p.rows().iter().map(|i| format!("{} {}", i.title, i.creator)).collect(),
             },
@@ -1735,8 +1735,8 @@ impl App {
         match &p.source {
             Source::Albums => p.albums().get(at).map(|a| Source::Album(a.name.clone())),
             Source::Artists => p.artists().get(at).map(|a| Source::Artist(a.name.clone())),
-            Source::Composers => p.composers().get(at).map(|c| Source::Works(c.name.clone())),
-            Source::Works(_) => self.listed_works().get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
+            Source::Composers => p.composers().get(at).map(|c| Source::Artist(c.name.clone())),
+            Source::Artist(_) if !p.works().is_empty() => self.listed_works().get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
             Source::Work(..) => p.recordings().get(at).map(|r| Source::Recording(r.id.clone(), r.performers.clone())),
             _ => None,
         }
