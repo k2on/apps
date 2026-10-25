@@ -461,10 +461,13 @@ impl Auth {
     /// kept from an hour since). `None` when no sign-in of theirs has one.
     ///
     /// The URL is the provider's say, and a provider may let a person set
-    /// it: so it is fetched only over `https`, only from a public address
-    /// ([`public`], asked of every address a name resolves to, the
-    /// redirects' too), only as a picture's type and size — never the
-    /// server's own network handed back to whoever asks. Blocking.
+    /// it: so it is fetched only over `https`, as a picture's type and size,
+    /// and from a public address ([`public`], asked of every address a name
+    /// resolves to, the redirects' too) — never the server's own network
+    /// handed back to whoever asks. The one host allowed to be on it is the
+    /// provider's own, which a server signing people in through it already
+    /// trusts: a provider on the same network serving its own pictures.
+    /// Blocking.
     pub fn picture(&self, user: &str) -> Result<Option<Picture>, String> {
         let (u, of) = (user.to_string(), self.reads.of);
         let rows = self.ask(move |store| of(store, &u)).unwrap_or_default();
@@ -475,7 +478,11 @@ impl Auth {
         if let Some((p, _)) = kept.filter(|(_, at)| now - at < PICTURE_TTL_MS) {
             return Ok(Some(p));
         }
-        let p = fetch_picture(&url)?;
+        let issuer = match &self.mode {
+            Mode::Oidc(p) => host(p.issuer()).map(str::to_string),
+            Mode::Dev => None,
+        };
+        let p = fetch_picture(&url, issuer.is_some() && issuer.as_deref() == host(&url))?;
         let mut kept = self.pictures.lock().unwrap_or_else(|e| e.into_inner());
         kept.retain(|_, (_, at)| now - *at < PICTURE_TTL_MS);
         if kept.len() >= PICTURES_KEPT {
@@ -486,19 +493,28 @@ impl Auth {
     }
 }
 
-/// `url`'s picture, as [`Auth::picture`] fetches one.
-fn fetch_picture(url: &str) -> Result<Picture, String> {
+/// The host of an `https` URL, port and all.
+pub(crate) fn host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://")?;
+    let host = rest.split(['/', '?', '#']).next()?;
+    Some(host.rsplit_once('@').map_or(host, |(_, h)| h))
+}
+
+/// `url`'s picture, as [`Auth::picture`] fetches one: from anywhere when
+/// it is `trusted` (the provider's own host), and then where it is and no
+/// further; otherwise from public addresses alone.
+fn fetch_picture(url: &str, trusted: bool) -> Result<Picture, String> {
     use std::io::Read;
     if !url.starts_with("https://") {
         return Err("a picture is fetched over https".into());
     }
     let agent = ureq::AgentBuilder::new()
         .https_only(true)
-        .redirects(3)
+        .redirects(if trusted { 0 } else { 3 })
         .timeout(std::time::Duration::from_secs(10))
-        .resolver(|netloc: &str| {
+        .resolver(move |netloc: &str| {
             use std::net::ToSocketAddrs;
-            let all: Vec<_> = netloc.to_socket_addrs()?.filter(|a| public(a.ip())).collect();
+            let all: Vec<_> = netloc.to_socket_addrs()?.filter(|a| trusted || public(a.ip())).collect();
             match all.is_empty() {
                 true => Err(std::io::Error::other(format!("{netloc} is not a public address"))),
                 false => Ok(all),

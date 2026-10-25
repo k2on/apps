@@ -81,3 +81,18 @@ fn a_picture_is_fetched_from_a_public_address_alone() {
         assert!(!public(no.parse().unwrap()), "{no}");
     }
 }
+
+/// The one host a picture may come from on a private network is the
+/// provider's own, matched whole, port and all. Falsified by matching on a
+/// prefix: `id.example.evil` passes as `id.example`.
+#[test]
+fn the_providers_own_host_is_the_providers() {
+    use crate::server::host;
+    let issuer = host("https://id.example:8443/application/o/harken/");
+    assert_eq!(issuer, Some("id.example:8443"));
+    assert_eq!(host("https://id.example:8443/media/a.png"), issuer);
+    assert_ne!(host("https://id.example.evil:8443/a.png"), issuer);
+    assert_ne!(host("https://id.example/a.png"), issuer);
+    assert_eq!(host("https://u@id.example:8443/a.png"), issuer);
+    assert_eq!(host("http://id.example:8443/a.png"), None);
+}
