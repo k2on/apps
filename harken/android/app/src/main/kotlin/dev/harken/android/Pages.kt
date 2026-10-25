@@ -11,6 +11,8 @@ package dev.harken.android
 
 import uniffi.harken_domain.Playlist
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.harken.android.gen.RecordingsEntry
@@ -42,6 +45,7 @@ import dev.harken.android.ui.PageBar
 import dev.harken.android.ui.Recompositions
 import dev.harken.android.ui.Shelf
 import dev.harken.android.ui.Space
+import dev.harken.android.ui.UnderStatusBar
 import dev.harken.android.ui.quiet
 import dev.harken.android.ui.rememberDestinationListState
 
@@ -172,10 +176,21 @@ fun ArtistPage(
     val short = Catalogue.short(listed, works)
     val best = Catalogue.mostRecorded(works)
     val by = Catalogue.initials(name)
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("artist")) {
-        // Their wide picture across the page, or else their portrait cropped to it: a person's page
-        // always opens under them; only somebody with no picture at all has the round header.
-        val banner = listOf(artist?.banner, composer?.banner, artist?.art, composer?.art).firstOrNull { !it.isNullOrEmpty() }.orEmpty()
+    // Their wide picture across the page, or else their portrait cropped to it: a person's page
+    // always opens under them; only somebody with no picture at all has the round header.
+    val banner = listOf(artist?.banner, composer?.banner, artist?.art, composer?.art).firstOrNull { !it.isNullOrEmpty() }.orEmpty()
+    val list = rememberDestinationListState("artist")
+    val bar = WindowInsets.statusBars
+    val density = LocalDensity.current
+    // Under the status bar, up to the top of the screen; the bar over the picture until the banner,
+    // the first item, has gone up past it.
+    if (banner.isNotEmpty()) {
+        UnderStatusBar {
+            val first = list.layoutInfo.visibleItemsInfo.firstOrNull()
+            first != null && first.index == 0 && first.offset + first.size > bar.getTop(density)
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = list) {
         if (banner.isNotEmpty()) {
             item { Banner(name, banner, facts(kind, life.ifEmpty { counts }), name, onBack = act::back) }
             if (works.isEmpty() && tracks.isNotEmpty()) {

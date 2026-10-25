@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -247,6 +250,9 @@ fun Offline(host: String) {
 /** The tallest a banner is drawn, the desktop's: its whole shape on a page about 1250 wide. */
 val BANNER_TALLEST = 486.dp
 
+/** How far below the status bar the shade at a banner's top runs: past its back. */
+val BANNER_TOP_SHADE = 72.dp
+
 /** A banner's shape, width over height: a painting cut for one (2400×933). */
 const val BANNER_ASPECT = 2400f / 933f
 
@@ -258,25 +264,31 @@ const val BANNER_ASPECT = 2400f / 933f
 fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).coerceIn(200.dp, BANNER_TALLEST)
 
 /**
- * Somebody's banner, edge to edge: their wide picture cropped to fill, `kind` in small capitals and
- * `name` in the serif on its lower edge over a shade that keeps them legible, and back over its top.
- * Until the picture arrives the derived square is drawn instead, so the name is already where it
- * will be. A page grows out of a portrait into it.
+ * Somebody's banner, edge to edge and up to the top of the screen: their wide picture cropped to
+ * fill, run up under the status bar (its page says [dev.harken.android.ui.UnderStatusBar]) and that
+ * much taller, so what shows below the bar is the shape [bannerHeight] says; `kind` in small
+ * capitals and `name` in the serif on its lower edge over a shade that keeps them legible, a lighter
+ * one under the bar's icons, and back over its top, below the bar. Until the picture arrives the
+ * derived square is drawn instead, so the name is already where it will be. A page grows out of a
+ * portrait into it, the part under the bar included.
  */
 @Composable
 fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> Unit) {
+    val bar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val w = maxWidth
-        Box(Modifier.fillMaxWidth().height(bannerHeight(w)).then(LocalPageFrame.current?.art?.modifier ?: Modifier)) {
+        Box(Modifier.fillMaxWidth().height(bar + bannerHeight(w)).then(LocalPageFrame.current?.art?.modifier ?: Modifier)) {
             Cover(seed, art, w, Modifier.fillMaxSize(), corner = 0.dp)
             // Clear at the top, darkest at the foot, where the name is.
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Palette.Clear, 0.45f to Palette.Clear, 1f to Palette.Shade)))
+            // And a little shade at the very top, under the bar's icons and back.
+            Box(Modifier.fillMaxWidth().height(bar + BANNER_TOP_SHADE).background(Brush.verticalGradient(0f to Palette.Shade.copy(alpha = 0.35f), 1f to Palette.Clear)))
             Column(Modifier.align(Alignment.BottomStart).padding(start = Space.page, end = Space.page, bottom = Space.xl)) {
                 Text(kind.uppercase(), style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
                 Spacer(Modifier.height(Space.xs))
                 Text(name, style = SerifType.banner, color = Palette.OnShade)
             }
-            Box(Modifier.padding(Space.xs).size(48.dp).clip(CircleShape).background(Palette.Shade).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
+            Box(Modifier.padding(top = bar).padding(Space.xs).size(48.dp).clip(CircleShape).background(Palette.Shade).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
                 Icon(ArkGlyphs.Back, contentDescription = "Back", tint = Palette.OnShade, modifier = Modifier.size(24.dp))
             }
         }
