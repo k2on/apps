@@ -1,31 +1,53 @@
 // The pieces a catalogue's pages are made of, as the desktop's are
 // (`rust/arkui/src/hero.rs`, and `view_cover`, `view_featured`,
 // `work_heading` and `view_foot` in `harken/iced/src/view.rs`): a person's
-// banner, run up under the navigation bar so its back button is Liquid
-// Glass over the picture; a record's header, its cover beside its title in
-// the serif; the one thing a section sets apart, with a Play; a section's
-// serif heading; an entry over its hairline, and the "See All" under a
-// list of them; a work's heading over its movements; and a record's small
-// print. The pages (Pages.swift) put them together.
+// banner, run up to the top of the screen, under the status bar and the
+// navigation bar, so its back button is Liquid Glass over the picture; a
+// record's header, its cover beside its title in the serif; the one thing
+// a section sets apart, with a Play; a section's serif heading; an entry
+// over its hairline, and the "See All" under a list of them; a work's
+// heading over its movements; and a record's small print. The pages
+// (Pages.swift) put them together.
 import SwiftUI
 import UIKit
 
 /// A person's banner: their wide picture across the page, cropped to fill,
+/// run up to the top of the screen under the status bar and that much
+/// taller, so what shows below the bar is the shape `shape(width:)` says;
 /// `kind` in small capitals and their name in the serif on its lower edge,
-/// over a shade that keeps both legible on a white collar or a white wig.
-/// Until the picture arrives the ground is drawn, so the name is already
-/// where it will be. Somebody with no wide picture has no banner.
+/// over a shade that keeps both legible on a white collar or a white wig,
+/// and a lighter one at its top under the bar and the back button. Until
+/// the picture arrives the ground is drawn, so the name is already where it
+/// will be. Somebody with no wide picture has no banner.
 struct Banner: View {
     let url: String
     let kind: String
     let name: String
-    /// Its height on a phone, the bars it runs under included: a banner's
-    /// own shape (2400×933) across a phone would be a strip.
-    static let height: CGFloat = 380
+
+    /// How tall a banner `width` wide is below the status bar: its own shape
+    /// (2400×933) across a phone would be a strip, so a phone crops it to a
+    /// taller frame, never past the desktop's tallest (Android's
+    /// `bannerHeight`).
+    static func shape(width: CGFloat) -> CGFloat {
+        min(max(max(width / (2400 / 933), width * 0.82), 200), 486)
+    }
+
+    /// The status bar's height: the top of the window's own safe area, which
+    /// is the bar's and not the navigation bar's.
+    static var statusBar: CGFloat { phone?.safeAreaInsets.top ?? 0 }
+
+    /// Its whole height, the status bar it runs under included.
+    static var height: CGFloat { shape(width: phone?.bounds.width ?? 393) + statusBar }
+
+    /// The window the app is drawn in, as UIKit has it.
+    private static var phone: UIWindow? {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.keyWindow
+    }
 
     @State private var image: UIImage? = nil
 
     var body: some View {
+        let top = Banner.statusBar
         Color(uiColor: .secondarySystemBackground)
             .frame(maxWidth: .infinity)
             .frame(height: Banner.height)
@@ -35,6 +57,12 @@ struct Banner: View {
             .overlay {
                 LinearGradient(stops: [.init(color: Color.clear, location: 0.45), .init(color: Color.black.opacity(0.6), location: 1)],
                                startPoint: .top, endPoint: .bottom)
+            }
+            // Under the status bar's icons and the back button: a little shade.
+            .overlay(alignment: .top) {
+                LinearGradient(colors: [Color.black.opacity(0.35), Color.clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: top + 72)
+                    .allowsHitTesting(false)
             }
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 2) {

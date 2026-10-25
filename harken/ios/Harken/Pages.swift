@@ -6,10 +6,10 @@
 // shop's catalogue: an album, its cover beside its title and who played it,
 // then its tracks under the works they are movements of, then its small
 // print; a person — one page, whatever they did — under their banner,
-// which runs up under the navigation bar so its back button is glass over
-// the picture, their most recorded work set apart with a Play, their best
-// known works and a "See All", their records, and the songs of somebody
-// who wrote none; a work's fullest performance set apart and every
+// which runs up to the top of the screen, under the status bar and the
+// navigation bar, so its back button is glass over the picture, their
+// most recorded work set apart with a Play, their best known works and a
+// "See All", their records, and the songs of somebody who wrote none; a work's fullest performance set apart and every
 // performance of it; a performance, laid out as its album is, then the
 // records it is on and everybody on it. And a playlist, in the order it was
 // made. The lists are views held while the page is on its stack
@@ -17,19 +17,34 @@
 import SwiftUI
 
 /// A catalogue's page: one scrolling column — with a `hero` banner, run up
-/// under the navigation bar, whose background stands aside for it.
+/// to the top of the screen under the status bar and the navigation bar.
+/// While the banner is under the bars, the navigation bar's background
+/// stands aside for it and the bars are light over the picture; once it has
+/// scrolled up past the status bar, the bars are the page's own again.
 private struct CataloguePage<Content: View>: View {
     var hero = false
     @ViewBuilder let content: () -> Content
 
+    /// Whether the banner is still under the status bar.
+    @State private var pictured = true
+
     var body: some View {
         let under: Edge.Set = hero ? .top : []
+        // How far the column scrolls before the banner's foot passes the bar.
+        let fold = Banner.height - Banner.statusBar
+        let over = hero && pictured
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) { content() }
                 .padding(.bottom, Space.xl)
         }
         .ignoresSafeArea(.container, edges: under)
-        .toolbarBackgroundVisibility(hero ? .hidden : .automatic, for: .navigationBar)
+        .onScrollGeometryChange(for: Bool.self) { g in
+            g.contentOffset.y + g.contentInsets.top < fold
+        } action: { _, now in
+            pictured = now
+        }
+        .toolbarBackgroundVisibility(over ? .hidden : .automatic, for: .navigationBar)
+        .toolbarColorScheme(over ? .dark : nil, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
     }
 }
