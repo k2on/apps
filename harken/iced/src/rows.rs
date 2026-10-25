@@ -91,6 +91,8 @@ pub struct Album {
     /// `media.file`'s spelling; empty is the derived square.
     pub art: String,
     pub label: String,
+    /// Who played the most of it; empty where nobody is credited.
+    pub performer: String,
     /// The year it came out; 0 is "nobody said".
     pub released: i64,
 }
@@ -103,6 +105,7 @@ impl From<AlbumsEntry> for Album {
             tracks: e.tracks,
             art: e.art,
             label: e.label,
+            performer: e.performer,
             released: e.released,
         }
     }
@@ -225,6 +228,8 @@ pub struct Recording {
     pub label: String,
     pub licence: String,
     pub tracks: i64,
+    /// How long its tracks run, together.
+    pub duration_ms: i64,
     pub art: String,
 }
 
@@ -237,6 +242,7 @@ impl From<RecordingsEntry> for Recording {
             label: e.label,
             licence: e.licence,
             tracks: e.tracks,
+            duration_ms: e.duration_ms,
             art: e.art,
         }
     }
@@ -329,6 +335,7 @@ mod tests {
             creator: "Handel".into(),
             label: String::new(),
             name: "Water Music".into(),
+            performer: String::new(),
             released: 0,
             tracks: 3,
         };

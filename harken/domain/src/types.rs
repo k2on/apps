@@ -192,6 +192,9 @@ pub struct AlbumsEntry {
     /// Who put it out, empty where nobody said.
     pub label: String,
     pub name: String,
+    /// Who played the most of its tracks, as one line ("Trevor Pinnock, The
+    /// English Concert"); empty where nobody is credited.
+    pub performer: String,
     /// The year it came out; 0 is "nobody said".
     pub released: i64,
     pub tracks: i64,
@@ -257,6 +260,8 @@ pub struct WorkSummary {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
 pub struct RecordingsEntry {
     pub art: String,
+    /// How long its tracks run, together.
+    pub duration_ms: i64,
     pub id: String,
     pub label: String,
     pub licence: String,

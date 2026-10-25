@@ -34,7 +34,7 @@ extension AlbumsEntry: Identifiable, Hashable {
     /// names a new one, an album made of the name. None for a track on no album.
     static func of(_ track: LibraryEntry, details: [Id: TrackDetailsEntry], byName: [String: AlbumsEntry]) -> AlbumsEntry? {
         guard let name = details[track.id]?.album, !name.isEmpty else { return nil }
-        return byName[name] ?? AlbumsEntry(art: "", creator: track.creator, label: "", name: name, released: 0, tracks: 0)
+        return byName[name] ?? AlbumsEntry(art: "", creator: track.creator, label: "", name: name, performer: "", released: 0, tracks: 0)
     }
 }
 

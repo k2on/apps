@@ -507,6 +507,46 @@ fn one_work_holds_every_recording_of_it() {
     assert_eq!(titles(&one), ["Variatio 1", "Variatio 2", "Variatio 3"]);
 }
 
+/// A performance says how long its tracks run together, and a record who
+/// played the most of it. Falsified by summing every track of the work: the
+/// shorter performance ran as long as both; and by taking the first track's
+/// performer: the record was Glenn Gould's.
+#[test]
+fn a_recording_runs_as_long_as_its_tracks_and_a_record_is_whoever_played_most_of_it() {
+    let mut c = Lib::new();
+    let takes = [("Glenn Gould", "b", 1), ("Kimiko Ishizaka", "a", 3)];
+    for (performer, file, n) in takes {
+        for no in 1..=n {
+            c.add(AddSong {
+                duration_ms: 60_000 * no,
+                ..track(
+                    &format!("Variatio {no}"),
+                    "Johann Sebastian Bach",
+                    "Goldberg Variations",
+                    "BWV 988",
+                    performer,
+                    &format!("music/{file}{no}.mp3"),
+                    no,
+                    "Goldberg Variations",
+                    no,
+                )
+            });
+        }
+    }
+    let id = harken_domain::host::work_key("Johann Sebastian Bach", "BWV 988", "");
+    let runs: Vec<RecordingsEntry> = c.list("recordings", &Recordings { work_id: id });
+    assert_eq!(
+        each(&runs, |r| (r.performers.clone(), r.duration_ms)),
+        [("Kimiko Ishizaka".to_string(), 360_000), ("Glenn Gould".to_string(), 60_000)]
+    );
+    let albums: Vec<AlbumsEntry> = c.list("albums", &());
+    assert_eq!(each(&albums, |a| a.performer.clone()), ["Kimiko Ishizaka"]);
+    c.add(song("Northerly", "The Quiet Hours", "Northerly"));
+    let albums: Vec<AlbumsEntry> = c.list("albums", &());
+    let pop = albums.iter().find(|a| a.name == "Northerly").unwrap();
+    assert_eq!(pop.performer, "The Quiet Hours", "a pop record's is its artist's");
+}
+
 /// A pop track is a song with no work. Falsified by `credited_as` naming
 /// nobody for a track of no work: the performer column was empty.
 #[test]
