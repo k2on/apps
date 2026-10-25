@@ -242,6 +242,21 @@ final class Model: ObservableObject {
     func detail(_ t: LibraryEntry) -> TrackDetailsEntry? { snapshot.details[t.id] }
     func playlist(_ id: Id) -> Playlist? { snapshot.playlists.first { $0.id == id } }
 
+    // The catalogue: everyone some work is by, and what a held page reads beside its tracks.
+    var composers: [ComposersEntry] { snapshot.composers }
+    func composer(named n: String) -> ComposersEntry? { snapshot.composers.first { $0.name == n } }
+    /// A person's works, by catalogue, while their page is held; none until first read.
+    func works(of composer: String) -> [WorkSummary]? { snapshot.works[composer] }
+    /// A work's own row, by its key, while a page of it is held.
+    func work(_ id: String) -> WorkSummary? { snapshot.work[id] }
+    /// A work's performances, the most complete first, while a page of it is held; none until first read.
+    func recordings(of work: String) -> [RecordingsEntry]? { snapshot.recordings[work] }
+    /// Who is on a performance, in billing order, while its page is held.
+    func credits(of take: String) -> [CreditsEntry] { snapshot.credits[take] ?? [] }
+
+    /// The albums somebody made, as the albums list them.
+    func albums(by creator: String) -> [AlbumsEntry] { snapshot.albums.filter { $0.creator == creator } }
+
     /// The albums an artist's songs are on.
     func albums(of tracks: [LibraryEntry]) -> [AlbumsEntry] {
         var seen = Set<String>()
@@ -346,6 +361,21 @@ final class Model: ObservableObject {
         guard let q = Started.queue(list, at: at, shuffled: shuffled, album: albumName) else { return }
         let from = page?.place(playlists) ?? ""
         press(.start(queue: q.queue, at: q.at, positionMs: 0, from: from)) { [sound] in sound.start(q.queue, at: q.at, from: from, shuffled: shuffled) }
+    }
+
+    /// Play one performance from its first movement, its movements the
+    /// queue: read when it is pressed, as the page it is pressed on lists
+    /// performances, not tracks.
+    func playRecording(_ id: String) {
+        bridge?.read(.recording(id)) { rows in self.play(rows, at: 0, from: .recording(id)) }
+    }
+
+    /// Play a work: its most complete performance, the first of its `recordings`.
+    func playWork(_ id: String) {
+        bridge?.fullest(id) { got in
+            guard let got = got else { return }
+            self.play(got.1, at: 0, from: .recording(got.0))
+        }
     }
 
     func shuffle(_ list: [LibraryEntry], from page: Page?) {
@@ -462,7 +492,7 @@ final class Model: ObservableObject {
             if let at = list.firstIndex(where: { $0.id.hex == last.track.id }) { self.play(list, at: at, from: last.from) }
             else { self.notice = "That song isn't in your library any more." }
         }
-        if let page = last.from, page != .songs { bridge?.read(page, done: go) } else { go(tracks) }
+        if let page = last.from, page != .songs, page.listsTracks { bridge?.read(page, done: go) } else { go(tracks) }
     }
 
     // MARK: the account

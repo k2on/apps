@@ -45,6 +45,22 @@ final class RowsTests: XCTestCase {
         XCTAssertEqual(Page.of(place: "#playlist/Road%20trip", playlists: [p]), .playlist(p.id))
         XCTAssertEqual(Page.of(place: "#artist/", playlists: []), nil)
         XCTAssertEqual(Page.of(place: "", playlists: []), nil)
+        // A work's and a performance's places are their keys, `/` and `@` and all.
+        XCTAssertEqual(Page.work("johann-sebastian-bach/bwv-988").place([]), "#work/johann-sebastian-bach%2Fbwv-988")
+        XCTAssertEqual(Page.of(place: Page.recording("bach/bwv-988@kimiko").place([]), playlists: []), .recording("bach/bwv-988@kimiko"))
+        XCTAssertEqual(Page.of(place: "#composer/Antonio%20Vivaldi", playlists: []), .artist("Antonio Vivaldi"), "a composer's page is their artist page")
+    }
+
+    /// A page reads its tracks, the catalogue's views beside them, or both,
+    /// as the desktop's `open_page` opens them.
+    func testAPageHoldsWhatTheDesktopsOpens() {
+        XCTAssertEqual(Page.artist("Bach").listings, [.works("Bach")])
+        XCTAssertTrue(Page.artist("Bach").listsTracks)
+        XCTAssertEqual(Page.work("bach/bwv-988").listings, [.work("bach/bwv-988"), .recordings("bach/bwv-988")])
+        XCTAssertFalse(Page.work("bach/bwv-988").listsTracks)
+        XCTAssertEqual(Page.recording("bach/bwv-988@k").listings, [.credits("bach/bwv-988@k"), .work("bach/bwv-988"), .recordings("bach/bwv-988")])
+        XCTAssertEqual(Page.recording("loose").listings, [.credits("loose")])
+        XCTAssertEqual(Page.album("Water Music").listings, [])
     }
 
     func testRecentSearchesAreNewestFirstOnce() {
