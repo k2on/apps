@@ -26,6 +26,12 @@ fn login(who: &str) -> Login {
     }
 }
 
+fn with_picture(who: &str) -> Login {
+    let mut l = login(who);
+    l.user.picture = "https://pictures.example.invalid/alice.png".into();
+    l
+}
+
 fn labels(app: &App) -> Vec<String> {
     app.account()
         .map(|a| a.entries.iter().map(|e| e.label.clone()).collect())
@@ -37,8 +43,9 @@ fn key(app: &mut App, k: Key) {
 }
 
 /// The top bar has no "go offline" or "sign out" button any more, nor a
-/// "sign in" one: the account menu is where those are, and nothing else in
-/// the view draws them.
+/// "sign in" one: the account menu is where signing out is, and nothing
+/// offers to go offline at all — a window does that by itself when its
+/// server cannot be reached.
 ///
 /// Falsified by putting `button("sign out")` back in `view_top`: the source
 /// assertion names it.
@@ -49,26 +56,31 @@ fn the_top_bar_has_no_account_buttons() {
     for gone in ["\"go offline\"", "\"go online\"", "\"sign out\"", "\"sign in\"", "\"sign in again\""] {
         assert!(!view.contains(gone), "the view still draws {gone}");
     }
+    let main = include_str!("../main.rs");
+    assert!(!main.contains("ToggleLink"), "a message still goes offline on purpose");
     let app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
-    assert_eq!(labels(&app), ["Go offline", "Sign out"]);
+    assert_eq!(labels(&app), ["Sign out"]);
 }
 
-/// What the menu offers: signed in, the link and signing out; turned away,
-/// signing out; alone, nothing but where things are kept; nobody, no menu.
+/// What the menu offers: signed in, signing out; turned away, signing out
+/// under a header that says so; alone, nothing but where things are kept;
+/// nobody, no menu.
 ///
 /// Falsified by `App::account` building the signed-in menu for a login whose
-/// token is empty: turned away offers `Go offline`.
+/// token is empty: the header says "Signed in as".
 #[test]
 #[cfg(not(feature = "demo"))]
 fn the_menu_says_what_the_account_can_do() {
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
     let a = app.account().expect("a menu for somebody signed in");
     assert_eq!(a.header, "Signed in as Alice Liddell");
-    assert_eq!(a.label, "Alice Liddell");
+    assert_eq!(a.who.map(|w| w.initials()).as_deref(), Some("AL"));
     if let Some(l) = &mut app.login {
         l.token.clear();
     }
     assert_eq!(labels(&app), ["Sign out"]);
+    let a = app.account().unwrap();
+    assert!(a.header.contains("signed out by the server"), "{}", a.header);
 
     let nobody = App::with_peer(signed_out(), "http://127.0.0.1:9".into(), None);
     assert!(nobody.account().is_none(), "no menu, and no sign-in button, for nobody");
@@ -77,20 +89,41 @@ fn the_menu_says_what_the_account_can_do() {
     let a = here.account().expect("alone says so");
     assert!(a.entries.is_empty(), "nothing to sign out of");
     assert!(a.header.starts_with("Alone"), "{}", a.header);
+    assert!(a.who.is_none(), "nobody's face");
 }
 
-/// Choosing "Go offline" and then "Sign out" from the menu does what the
-/// buttons did: the link goes down and the note says so, then the session is
-/// revoked through the domain and the login is gone. The menu hangs off the
-/// button's bottom right, has the keys while it is up, and closes when its
-/// entry has run.
+/// The button is the person's picture, loaded through the server — one
+/// address for the desktop and the page, with the picture's version in it
+/// — and asked for once; with no picture there is nothing to ask for, and
+/// the face is their initials.
 ///
-/// Falsified by the `Sign out` entry sending `ToggleLink`: the login is still
-/// there. And by dropping `ToggleLink` from the messages that close a menu:
-/// the menu is still up after `Go offline`.
+/// Falsified by `App::account_picture_url` answering the provider's URL itself: it
+/// does not start with the server's `/auth/picture`.
 #[test]
 #[cfg(not(feature = "demo"))]
-fn the_menu_goes_offline_and_signs_out() {
+fn the_button_is_the_persons_picture_through_the_server() {
+    let app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
+    assert_eq!(app.account_picture_url(), None, "no picture, nothing to load");
+    assert!(app.account_picture().is_none());
+
+    let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(with_picture("alice")));
+    let url = app.account_picture_url().expect("a picture to load");
+    assert!(url.starts_with("http://127.0.0.1:9/auth/picture?user=alice&v="), "{url}");
+    let _ = app.update(Message::AccountMenu);
+    assert!(app.covers.want(url).is_none(), "it was not asked for");
+    assert!(app.account_picture().is_none(), "not arrived yet: the initials are drawn");
+}
+
+/// Choosing "Sign out" from the menu does what the button did: the session
+/// is revoked through the domain and the login is gone. The menu hangs off
+/// the button's bottom right, has the keys while it is up, and closes when
+/// its entry has run.
+///
+/// Falsified by dropping `SignOut` from the messages that close a menu: the
+/// menu is still up after `Sign out`.
+#[test]
+#[cfg(not(feature = "demo"))]
+fn the_menu_signs_out() {
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
     let _ = app.update(Message::AccountMenu);
     let m = app.ctx.menu.as_ref().expect("the account menu opened");
@@ -103,15 +136,7 @@ fn the_menu_goes_offline_and_signs_out() {
     assert_eq!(app.focus(), Focus::Menu);
     assert_eq!(app.menu_about, None, "it is about no row");
 
-    let _ = app.update(Message::MenuAt(0));
-    let _ = app.update(Message::MenuActivate);
-    assert!(app.offline);
-    assert!(app.note.starts_with("gone offline"), "{}", app.note);
-    assert!(app.ctx.menu.is_none(), "the menu stayed up");
-    assert_eq!(labels(&app), ["Go online", "Sign out"]);
-
-    // By key this time: the menu, `j` to `Sign out`, `<Enter>`.
-    let _ = app.update(Message::AccountMenu);
+    // By key: `j` stays on `Sign out`, the one entry; `<Enter>`.
     key(&mut app, Key::Character("j".into()));
     key(&mut app, Key::Named(Named::Enter));
     assert!(app.login.is_none(), "still signed in");
