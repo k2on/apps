@@ -85,7 +85,12 @@ impl App {
                 row![
                     self.view_sidebar(),
                     rule::vertical(1),
-                    column![self.view_top(), self.view_page()].spacing(10)
+                    // The page, not the sidebar, is what a swipe pulls.
+                    arkui::swipe::view(
+                        column![self.view_top(), self.view_page()].spacing(10).into(),
+                        &self.swipe,
+                        iced::time::Instant::now(),
+                    )
                 ]
                 .spacing(PANE_GAP)
                 .height(Length::Fill),

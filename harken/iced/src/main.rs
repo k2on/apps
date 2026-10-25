@@ -1955,11 +1955,7 @@ impl App {
             Message::Resized(size) => {
                 self.window = size;
             }
-            Message::Wheel(delta) => {
-                if let Some(by) = self.swipe.feed(delta, iced::time::Instant::now()) {
-                    self.router.go(by);
-                }
-            }
+            Message::Wheel(delta) => self.swipe.feed(delta, iced::time::Instant::now()),
             Message::HoverAt(at) => {
                 // Not while a context window is up. A backdrop stops a click
                 // and a wheel, but a hover is published by the row itself and
@@ -2220,6 +2216,11 @@ impl App {
             // is shown rather than entered. The clock runs only while it can.
             Message::Tick => {
                 self.release_volume(false);
+                // A swipe let go far enough: the bar moves, and the next
+                // update arrives where it went.
+                if let Some(by) = self.swipe.tick(iced::time::Instant::now()) {
+                    self.router.go(by);
+                }
                 if let Some(m) = self.ctx.tick() {
                     return self.update(m);
                 }
@@ -2311,6 +2312,11 @@ impl App {
     pub fn clock(&self) -> Option<Duration> {
         // A volume the throttle holds is sent by the clock, the last value
         // of a drag that stopped moving without being let go.
+        // A swipe under way draws a frame at a time: the page follows the
+        // fingers, and springs back.
+        if self.swipe.active() {
+            return Some(Duration::from_millis(16));
+        }
         if self.ctx.dwelling() || self.volume_held.is_some() {
             return Some(Duration::from_millis(50));
         }
