@@ -18,8 +18,12 @@ use crate::fit::Cut;
 use crate::line::Line;
 use crate::{art, style, vim, SCROLLBAR};
 
-/// A card grid's geometry: how big a card is, the gap between two, and the
-/// page's padding either side.
+/// A card grid's geometry: the narrowest a card is drawn, the gap between
+/// two, and the page's padding either side.
+///
+/// **A card is as wide as its row allows**, from `card` up: as many fit as
+/// would at `card`, and then they grow to fill the row, the way a record
+/// shop's shelf does — so a wider window is bigger covers, not a gutter.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shelf {
     pub card: f32,
@@ -28,11 +32,12 @@ pub struct Shelf {
 }
 
 impl Shelf {
-    /// harken's: 132px cards, 16 apart, on a page padded by 16.
+    /// harken's: cards of 168px and up, 20 apart, on a page padded by 24 —
+    /// about 190px across a 1280px window, a catalogue's shelf.
     pub const DEFAULT: Shelf = Shelf {
-        card: 132.0,
-        gap: 16.0,
-        padding: 16.0,
+        card: 168.0,
+        gap: 20.0,
+        padding: 24.0,
     };
 
     /// The width a row of cards actually gets inside a pane `pane` wide: less
@@ -49,6 +54,13 @@ impl Shelf {
     /// How many cards fit across a pane `pane` wide. At least one.
     pub fn columns(&self, pane: f32) -> usize {
         (((self.room(pane) + self.gap) / (self.card + self.gap)) as usize).max(1)
+    }
+
+    /// How wide a card is drawn in a pane `pane` wide: the row shared out
+    /// between its columns, whole pixels, and never under `card`.
+    pub fn side(&self, pane: f32) -> f32 {
+        let n = self.columns(pane) as f32;
+        ((self.room(pane) - self.gap * (n - 1.0)) / n).floor().max(self.card)
     }
 
     /// The keyboard's shape of `cells` cards in a pane `pane` wide.
@@ -79,17 +91,17 @@ pub struct Card<M> {
     pub open: M,
 }
 
-/// A page of cards, `columns` across, with the cursor on `cursor`.
+/// A page of cards across a pane `pane` wide, with the cursor on `cursor`.
 ///
-/// Laid out as rows of `columns` rather than by a wrapping widget, because the
-/// keyboard has to agree about where `l` lands: pass `shelf.columns(pane)` from
-/// the same pane width the keyboard's grid was built from. `on_hover(i)` is
+/// Laid out as rows of [`Shelf::columns`] rather than by a wrapping widget,
+/// because the keyboard has to agree about where `l` lands: pass the same
+/// pane width the keyboard's grid was built from. `on_hover(i)` is
 /// sent when the pointer reaches card `i` — one highlight, however you moved
 /// it — and `scroll` is the scrollable's id, for [`crate::scroll::reveal`].
 pub fn view<'a, M: Clone + 'a>(
     shelf: Shelf,
     cards: &[Card<M>],
-    columns: usize,
+    pane: f32,
     cursor: Option<usize>,
     empty: &'a str,
     on_hover: impl Fn(usize) -> M,
@@ -98,7 +110,8 @@ pub fn view<'a, M: Clone + 'a>(
     if cards.is_empty() {
         return empty_page(empty, shelf.padding);
     }
-    let columns = columns.max(1);
+    let columns = shelf.columns(pane);
+    let side = shelf.side(pane);
     let mut page = column![].spacing(shelf.gap);
     for (r, chunk) in cards.chunks(columns).enumerate() {
         // Top-aligned: a title that wrapped to two lines makes its card taller,
@@ -106,41 +119,44 @@ pub fn view<'a, M: Clone + 'a>(
         let mut line = row![].spacing(shelf.gap).align_y(Alignment::Start);
         for (c, card) in chunk.iter().enumerate() {
             let at = r * columns + c;
-            line = line.push(view_card(shelf, card, Some(at) == cursor, on_hover(at)));
+            line = line.push(view_card(side, card, Some(at) == cursor, on_hover(at)));
         }
         page = page.push(line);
     }
-    container(scrollable(container(page).padding(shelf.padding)).id(scroll).style(style::bars))
+    // Clear of the scrollbar on the right, which `room` has already left.
+    let padding = Padding {
+        right: shelf.padding + SCROLLBAR,
+        ..Padding::new(shelf.padding)
+    };
+    container(scrollable(container(page).padding(padding)).id(scroll).style(style::bars))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
 }
 
-/// One card: the picture, the name, and what is under it.
-pub fn view_card<'a, M: Clone + 'a>(shelf: Shelf, card: &Card<M>, on_cursor: bool, hover: M) -> Element<'a, M> {
-    let corner = if card.round { shelf.card / 2.0 } else { 6.0 };
+/// One card `side` wide ([`Shelf::side`]): the picture, the name, and what
+/// is under it.
+pub fn view_card<'a, M: Clone + 'a>(side: f32, card: &Card<M>, on_cursor: bool, hover: M) -> Element<'a, M> {
+    let corner = if card.round { side / 2.0 } else { 6.0 };
     mouse_area(
         column![
-            art::picture(&card.seed, card.picture.as_ref(), shelf.card, corner),
+            art::picture(&card.seed, card.picture.as_ref(), side, corner),
             // Bounded, and allowed to wrap. Unbounded with `Wrapping::None` the
             // layout node is as wide as the text, so a long title ran straight
             // through the card beside it.
             text(card.title.clone())
                 .size(13)
-                .width(Length::Fixed(shelf.card))
+                .width(Length::Fixed(side))
                 .style(move |theme| text::Style {
                     color: Some(match on_cursor {
                         true => crate::theme::of(theme).primary.base.color,
                         false => crate::theme::of(theme).background.base.text,
                     }),
                 }),
-            text(card.under.clone())
-                .size(11)
-                .width(Length::Fixed(shelf.card))
-                .style(style::faint(0.5)),
+            text(card.under.clone()).size(12).width(Length::Fixed(side)).style(style::faint(0.5)),
         ]
         .spacing(4)
-        .width(Length::Fixed(shelf.card)),
+        .width(Length::Fixed(side)),
     )
     .on_enter(hover)
     .on_press(card.open.clone())
@@ -255,6 +271,23 @@ mod tests {
             let one_more = (n + 1.0) * shelf.card + n * shelf.gap;
             let room = pane - shelf.padding * 2.0 - SCROLLBAR;
             assert!(one_more > room, "at {width}px there is room for {} cards and only {n} are drawn", n + 1.0);
+        }
+    }
+
+    /// The cards grow to fill their row and no further: never under `card`,
+    /// never past the room, and no more than a pixel a card short of it.
+    #[test]
+    fn the_cards_fill_their_row() {
+        let shelf = Shelf::DEFAULT;
+        for width in 320..=4000 {
+            let pane = width as f32 - SIDEBAR;
+            let (n, side) = (shelf.columns(pane) as f32, shelf.side(pane));
+            let drawn = n * side + (n - 1.0) * shelf.gap;
+            let room = shelf.room(pane);
+            assert!(side >= shelf.card, "at {width}px a card is {side}px");
+            if n > 1.0 {
+                assert!(drawn <= room && room - drawn < n, "at {width}px {n} cards draw {drawn}px in {room}px");
+            }
         }
     }
 }
