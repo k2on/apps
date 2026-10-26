@@ -182,22 +182,30 @@ fn one_release_can_carry_four_works() {
 #[test]
 fn a_compilation_carries_six_works_and_two_performers() {
     let peer = fresh();
-    assert_eq!(peer.album_rows("Concertos").len(), 16);
+    let album = peer.album_rows("Concertos");
+    assert_eq!(album.len(), 16);
+    let files: BTreeSet<_> = album.iter().map(|i| i.file.clone()).collect();
     let works = peer.works_of("Antonio Vivaldi");
-    let on_it: Vec<_> = ["RV 425", "RV 498", "RV 532", "RV 536", "RV 558", "RV 580"]
+    // A work may be recorded elsewhere too (RV 580 is on L'estro armonico):
+    // the takes are the ones whose tracks are this album's.
+    let takes: Vec<_> = ["RV 425", "RV 498", "RV 532", "RV 536", "RV 558", "RV 580"]
         .iter()
-        .map(|cat| works.iter().find(|w| w.catalogue == *cat).unwrap_or_else(|| panic!("{cat}")))
+        .map(|cat| {
+            let w = works.iter().find(|w| w.catalogue == *cat).unwrap_or_else(|| panic!("{cat}"));
+            let here: Vec<_> = peer
+                .recordings_of(&w.id)
+                .into_iter()
+                .filter(|t| peer.recording_rows(&t.id).iter().any(|i| files.contains(&i.file)))
+                .collect();
+            assert_eq!(here.len(), 1, "{cat}");
+            (*cat, here[0].clone())
+        })
         .collect();
-    assert_eq!(on_it[0].tracks, 1, "RV 425 arrived whole, in one file");
-    for w in &on_it[1..] {
-        assert_eq!(w.tracks, 3, "{}", w.catalogue);
+    assert_eq!(takes[0].1.tracks, 1, "RV 425 arrived whole, in one file");
+    for (cat, t) in &takes[1..] {
+        assert_eq!(t.tracks, 3, "{cat}");
     }
-    let mut who = BTreeSet::new();
-    for w in &on_it {
-        let takes = peer.recordings_of(&w.id);
-        assert_eq!(takes.len(), 1, "{}", w.catalogue);
-        who.insert(takes[0].performers.clone());
-    }
+    let who: BTreeSet<_> = takes.iter().map(|(_, t)| t.performers.clone()).collect();
     assert_eq!(
         who,
         ["The Milan Baroque Soloists", "The Modena Chamber Orchestra"].map(str::to_owned).into()
@@ -229,13 +237,17 @@ fn nobody_is_named_after_a_licence() {
 
 /// …and the licence is still on screen beside whoever gave it: a credit
 /// nobody draws is a condition nobody met. Falsified by dropping the licence
-/// from `credit`: the drawn string has no "CC BY".
+/// from `credit`: the drawn string has no "CC BY", nor any licence.
 #[test]
 fn the_terms_are_still_drawn_beside_whoever_gave_them() {
     let details = fresh().track_details();
     let licensed: Vec<_> = details.iter().filter(|d| !d.licence.is_empty()).collect();
     assert!(licensed.len() > 5, "{}", licensed.len());
-    assert!(credit(&licensed[0].performer, &licensed[0].licence).contains("CC BY"));
+    let cc = licensed.iter().find(|d| d.licence.contains("CC BY")).expect("a CC BY recording");
+    assert!(credit(&cc.performer, &cc.licence).contains("CC BY"));
+    for d in &licensed {
+        assert!(credit(&d.performer, &d.licence).contains(&d.licence), "{}", d.licence);
+    }
     let free = details
         .iter()
         .find(|d| d.licence.is_empty() && !d.performer.is_empty())

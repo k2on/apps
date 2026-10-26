@@ -16,12 +16,13 @@
 //! that opens and one that spends its first ten seconds cloning its own
 //! library.
 //!
-//! The recordings are public domain on Wikimedia Commons, by way of the mp3
+//! Most recordings are public domain on Wikimedia Commons, by way of the mp3
 //! transcode Commons generates for every audio file: a browser plays mp3
 //! everywhere, and Vorbis in an `.ogg` does not play in Safari at all. The
-//! URL goes in `file`, which is what that column has always been for. A few
-//! are CC BY or CC BY-SA, so those rows carry a `licence` and the credit is
-//! drawn beside the performer.
+//! rest are mp3 or FLAC on the Internet Archive. The URL goes in `file`,
+//! which is what that column has always been for. A recording that is not
+//! public domain carries a `licence` (CC BY, CC BY-SA, or the copyright it
+//! is under), and the credit is drawn beside the performer.
 
 use std::sync::OnceLock;
 

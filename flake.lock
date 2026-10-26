@@ -3,11 +3,11 @@
     "classical": {
       "flake": false,
       "locked": {
-        "lastModified": 1793015155,
-        "narHash": "sha256-MZwG2It+QMxSztyMEbY4KwZ0CccvlA/jTXRtus12GuY=",
+        "lastModified": 1793025480,
+        "narHash": "sha256-olXTLXNA0yf1JnVZSkkTQlUcF7lPXEYIC+2drlYRWC8=",
         "ref": "main",
-        "rev": "367876b195974f7593b5733d9560c16d71d7dc28",
-        "revCount": 3,
+        "rev": "a9f86e65a9b9571c09418d9b23f3eaef4d71b060",
+        "revCount": 8,
         "type": "git",
         "url": "https://github.com/k2on/classical"
       },
