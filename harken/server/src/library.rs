@@ -250,7 +250,11 @@ impl Scanner {
                             return;
                         }
                         while asked.try_recv().is_ok() {}
-                        let short = match crate::catalogue::fetch(&url, &dir) {
+                        // Each album authored as its files are in.
+                        let partly = |so_far| {
+                            let _ = back.send(Nudge::Catalogue(Box::new(so_far)));
+                        };
+                        let short = match crate::catalogue::fetch(&url, &dir, partly) {
                             Ok(fetched) => {
                                 let short = fetched.failed > 0;
                                 if back.send(Nudge::Catalogue(Box::new(fetched))).is_err() {
