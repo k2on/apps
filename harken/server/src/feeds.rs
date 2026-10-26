@@ -1,31 +1,31 @@
-//! Podcasts and sermons read off their feeds (`HARKEN_PODCASTS`,
-//! `HARKEN_SERMONS`: RSS URLs — a podcast host's, a church's, an
-//! Audiobookshelf library's): each feed's newest episodes and its pictures
-//! downloaded into the data directory and served at `/media/.feeds/`, and
-//! the show and its episodes authored by the scanner (`library.rs`) as
-//! `library.add_show` and `library.add_episode`, each only if it would
-//! change something.
+//! Podcasts and sermons read off the feeds the library follows (a
+//! `subscription` row each, added from a client): a source of the library
+//! (`sync.rs`). Each feed is read — its RSS, and its pictures downloaded
+//! into the data directory — and said as a plan: what was read
+//! (`library.feed_read`), the show (`library.add_show`) and its newest
+//! episodes (`library.add_episode`, as many as the subscription keeps),
+//! each episode's file still to come and then downloaded and served at
+//! `/media/.feeds/`. A feed that cannot be read is said so, on its
+//! subscription.
 //!
 //! The episodes are the server's, not the feed's: a client plays the copy
 //! here, so an episode the host takes down or moves still plays, a speaker
 //! fetches it from the house, and a phone offline has what it downloaded
-//! from this server. A file is named by its URL's hash, as a catalogue's
-//! is (`catalogue::name_of`), so a refresh downloads only what is new.
-//! Nothing is deleted: an episode gone from the feed stays.
+//! from this server. Nothing is deleted: an episode gone from the feed
+//! stays, until the feed is unfollowed.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::catalogue::{agent, download, name_of};
+use ark::format::Encode;
+
 use crate::domain::keys::show_key;
-use crate::domain::{AddEpisode, AddShow};
+use crate::domain::{AddEpisode, AddShow, FeedRead, Subscription};
+use crate::sync::{self, Call, Plan, Source, Want};
 
 /// Where under `/media` the downloads are served.
 pub const DIR: &str = ".feeds";
-
-/// How many of a feed's newest episodes are downloaded, unless told
-/// otherwise (`HARKEN_FEED_EPISODES`, 0 for all).
-pub const KEEP: usize = 20;
 
 /// How often every feed is read again.
 pub const EVERY: Duration = Duration::from_secs(60 * 60);
@@ -36,67 +36,137 @@ pub fn dir(data: &Path) -> PathBuf {
     data.join("feeds")
 }
 
-/// A feed the server follows: what kind of show it is, and where.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Feed {
-    /// `podcast` or `sermon`.
-    pub kind: String,
-    pub url: String,
+/// The feeds the library follows, as the scanner last read them off its
+/// replica, kept in `dir`.
+pub struct Follow {
+    pub subscriptions: Arc<Mutex<Vec<Subscription>>>,
+    pub dir: PathBuf,
 }
 
-/// The feeds a server follows, and how much of each it keeps.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Feeds {
-    pub feeds: Vec<Feed>,
-    /// The newest this many episodes of each; 0 for every one.
-    pub keep: usize,
-}
-
-impl Default for Feeds {
-    fn default() -> Feeds {
-        Feeds {
-            feeds: vec![],
-            keep: KEEP,
-        }
+impl Source for Follow {
+    fn name(&self) -> &str {
+        "feeds"
     }
-}
 
-impl Feeds {
-    /// `HARKEN_PODCASTS` and `HARKEN_SERMONS`, URLs apart by white space or
-    /// commas, and `HARKEN_FEED_EPISODES`.
-    pub fn of(
-        podcasts: Option<&str>,
-        sermons: Option<&str>,
-        keep: Option<&str>,
-    ) -> Result<Feeds, String> {
-        let mut feeds = vec![];
-        for (kind, urls) in [("podcast", podcasts), ("sermon", sermons)] {
-            for url in urls
-                .unwrap_or("")
-                .split(|c: char| c.is_whitespace() || c == ',')
-                .filter(|u| !u.is_empty())
-            {
-                if !(url.starts_with("http://") || url.starts_with("https://")) {
-                    return Err(format!("{url}: a feed is an http or https URL"));
+    /// Every feed followed, a plan each, gated on it still being followed.
+    fn read(&mut self) -> (Vec<Plan>, usize) {
+        let subscriptions = self
+            .subscriptions
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default();
+        let agent = sync::agent();
+        let mut failed = 0;
+        let plans = subscriptions
+            .iter()
+            .map(|s| match plan(&agent, s, &self.dir, &mut failed) {
+                Ok(plan) => plan,
+                Err(error) => {
+                    eprintln!("harken-server: feeds: {error}");
+                    let read = FeedRead {
+                        url: s.url.clone(),
+                        error,
+                        ..FeedRead::default()
+                    };
+                    Plan {
+                        what: s.url.clone(),
+                        calls: vec![call("library.feed_read", &s.url, &read)],
+                        gate: true,
+                        files: vec![],
+                    }
                 }
-                feeds.push(Feed {
-                    kind: kind.into(),
-                    url: url.into(),
-                });
-            }
-        }
-        let keep = match keep.map(str::trim) {
-            None | Some("") => KEEP,
-            Some(n) => n
-                .parse()
-                .map_err(|_| format!("HARKEN_FEED_EPISODES: {n} is not a number"))?,
-        };
-        Ok(Feeds { feeds, keep })
+            })
+            .collect();
+        (plans, failed)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.feeds.is_empty()
+    fn every(&self) -> Option<Duration> {
+        Some(EVERY)
     }
+}
+
+fn call(name: &'static str, what: &str, input: &impl Encode) -> Call {
+    Call {
+        name,
+        what: what.to_string(),
+        input: input.to_bytes(),
+        if_there: false,
+    }
+}
+
+/// One feed read: what it is, its show and its newest episodes as the
+/// subscription keeps them, their pictures downloaded into `dir`.
+pub fn plan(
+    agent: &ureq::Agent,
+    subscription: &Subscription,
+    dir: &Path,
+    failed: &mut usize,
+) -> Result<Plan, String> {
+    let url = &subscription.url;
+    let xml = sync::text(agent, url)?;
+    let channel = parse(&xml).map_err(|e| format!("{url}: {e}"))?;
+    if channel.title.is_empty() {
+        return Err(format!("{url}: the feed has no title"));
+    }
+    let kind = &subscription.kind;
+    let mut picture = |u: &str| sync::picture(agent, u, DIR, dir, failed).unwrap_or_default();
+    let read = FeedRead {
+        url: url.clone(),
+        title: channel.title.clone(),
+        items: channel.items.len() as i64,
+        error: String::new(),
+    };
+    let show = AddShow {
+        kind: kind.clone(),
+        title: channel.title.clone(),
+        author: channel.author.clone(),
+        description: channel.description.clone(),
+        art: picture(&channel.art),
+        feed: url.clone(),
+        link: channel.link.clone(),
+    };
+    let mut calls = vec![
+        call("library.feed_read", url, &read),
+        call("library.add_show", &channel.title, &show),
+    ];
+    let id = show_key(kind, &channel.title);
+    let take = match subscription.keep {
+        n if n <= 0 => channel.items.len(),
+        n => n as usize,
+    };
+    let mut files = vec![];
+    for item in channel.items.iter().take(take) {
+        let want = Want::of(&item.url, DIR, dir);
+        let art = match item.art == channel.art {
+            true => String::new(),
+            false => picture(&item.art),
+        };
+        let episode = AddEpisode {
+            show: id.clone(),
+            title: if item.title.is_empty() {
+                item.guid.clone()
+            } else {
+                item.title.clone()
+            },
+            duration_ms: item.duration_ms,
+            file: want.file.clone(),
+            guid: item.guid.clone(),
+            published_ms: item.published_ms,
+            description: item.description.clone(),
+            source: item.url.clone(),
+            art,
+            season: item.season,
+            number: item.number,
+        };
+        calls.push(call("library.add_episode", &episode.title, &episode));
+        files.push(want);
+    }
+    Ok(Plan {
+        what: channel.title.clone(),
+        calls,
+        gate: true,
+        files,
+    })
 }
 
 /// A feed as RSS says it, before anything is downloaded.
@@ -123,16 +193,6 @@ pub struct Item {
     pub art: String,
     pub season: i64,
     pub number: i64,
-}
-
-/// A feed read, and what of it is here: the show, and the episodes whose
-/// files were downloaded, as the scanner authors them.
-#[derive(Clone, Debug)]
-pub struct Fetched {
-    pub show: AddShow,
-    pub episodes: Vec<AddEpisode>,
-    /// How many could not be had: the next refresh tries them.
-    pub failed: usize,
 }
 
 /// Read a feed's RSS. Its items newest first, those with no audio left out.
@@ -209,105 +269,6 @@ pub fn parse(xml: &str) -> Result<Channel, String> {
         art: or(itunes_image(channel), rss_image),
         link: text(channel, "link", None),
         items,
-    })
-}
-
-/// The feed at `feed.url`, its newest `keep` episodes (0 for all) and its
-/// pictures downloaded into `dir`. Blocking, and as long as the downloads
-/// take; after each episode downloaded, what is here so far is given to
-/// `so_far`, so a show fills as it goes.
-pub fn fetch(
-    feed: &Feed,
-    keep: usize,
-    dir: &Path,
-    mut so_far: impl FnMut(Fetched),
-) -> Result<Fetched, String> {
-    let agent = agent();
-    let url = &feed.url;
-    let xml = agent
-        .get(url)
-        .call()
-        .map_err(|e| format!("{url}: {e}"))?
-        .into_string()
-        .map_err(|e| format!("{url}: {e}"))?;
-    let channel = parse(&xml).map_err(|e| format!("{url}: {e}"))?;
-    if channel.title.is_empty() {
-        return Err(format!("{url}: the feed has no title"));
-    }
-    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let mut failed = 0;
-    // A file here, by its URL: its path under the media root, or empty
-    // when it could not be had.
-    let here = |u: &str, failed: &mut usize| -> Option<String> {
-        if u.is_empty() {
-            return None;
-        }
-        let name = name_of(u);
-        let path = dir.join(&name);
-        if !path.exists() {
-            if let Err(e) = download(&agent, u, &path) {
-                *failed += 1;
-                eprintln!("harken-server: feeds: {u}: {e}");
-                return None;
-            }
-        }
-        Some(format!("{DIR}/{name}"))
-    };
-    let show = AddShow {
-        kind: feed.kind.clone(),
-        title: channel.title.clone(),
-        author: channel.author.clone(),
-        description: channel.description.clone(),
-        art: here(&channel.art, &mut failed).unwrap_or_default(),
-        feed: url.clone(),
-        link: channel.link.clone(),
-    };
-    let id = show_key(&feed.kind, &channel.title);
-    let take = if keep == 0 { channel.items.len() } else { keep };
-    let mut episodes = vec![];
-    for item in channel.items.iter().take(take) {
-        let had = dir.join(name_of(&item.url)).exists();
-        let Some(file) = here(&item.url, &mut failed) else {
-            continue;
-        };
-        let art = match item.art == channel.art {
-            true => String::new(),
-            false => here(&item.art, &mut failed).unwrap_or_default(),
-        };
-        episodes.push(AddEpisode {
-            show: id.clone(),
-            title: if item.title.is_empty() {
-                item.guid.clone()
-            } else {
-                item.title.clone()
-            },
-            duration_ms: item.duration_ms,
-            file,
-            guid: item.guid.clone(),
-            published_ms: item.published_ms,
-            description: item.description.clone(),
-            source: item.url.clone(),
-            art,
-            season: item.season,
-            number: item.number,
-        });
-        if !had {
-            eprintln!(
-                "harken-server: feeds: {}: {} downloaded",
-                channel.title,
-                episodes.last().map_or("", |e| e.title.as_str())
-            );
-            so_far(Fetched {
-                show: show.clone(),
-                episodes: episodes.clone(),
-                failed,
-            });
-        }
-    }
-    Ok(Fetched {
-        show,
-        episodes,
-        failed,
     })
 }
 
@@ -491,31 +452,5 @@ mod tests {
         );
         assert_eq!(rfc2822("25 Oct 2026 11:01:48 EST"), Some(1_792_944_108_000));
         assert_eq!(rfc2822("yesterday"), None);
-    }
-
-    #[test]
-    fn the_feeds_a_server_follows_are_its_environment() {
-        let f = Feeds::of(
-            Some("https://a/feed.xml, https://b/rss"),
-            Some("https://c/sermons.xml"),
-            None,
-        )
-        .unwrap();
-        let kinds: Vec<(&str, &str)> = f
-            .feeds
-            .iter()
-            .map(|f| (f.kind.as_str(), f.url.as_str()))
-            .collect();
-        assert_eq!(
-            kinds,
-            [
-                ("podcast", "https://a/feed.xml"),
-                ("podcast", "https://b/rss"),
-                ("sermon", "https://c/sermons.xml")
-            ]
-        );
-        assert_eq!(f.keep, KEEP);
-        assert_eq!(Feeds::of(None, None, Some("0")).unwrap().keep, 0);
-        assert!(Feeds::of(Some("feed.xml"), None, None).is_err());
     }
 }

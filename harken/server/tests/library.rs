@@ -163,7 +163,6 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
         dir,
         login,
         None,
-        Default::default(),
     )
     .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1_200));
@@ -929,12 +928,17 @@ fn host(answer: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static) -> String {
     format!("http://{addr}")
 }
 
-/// A feed followed is a show, its newest episodes downloaded into the
+/// A feed followed from a client is a show: its newest episodes in the
+/// library before their files are, each queued, then downloaded into the
 /// data directory and served at `/media/.feeds/`, where the log says they
-/// are; the oldest past what the server keeps are not.
+/// are, its download gone; one whose file cannot be had stays, its
+/// download failed and saying why, and is downloaded at a later read once
+/// it can be.
 #[test]
 fn a_feed_followed_is_downloaded_and_a_show() {
-    use harken_server::domain::{Episode, Show};
+    use harken_server::domain::{
+        Download, Episode, FetchOlder, Show, Subscribe, Subscription, LIBRARY,
+    };
     let rt = runtime();
     let root = tempfile::tempdir().unwrap();
     let (media, data) = (root.path().join("media"), root.path().join("data"));
@@ -943,7 +947,12 @@ fn a_feed_followed_is_downloaded_and_a_show() {
     wav(&audio, 1_000);
     let bytes = std::fs::read(&audio).unwrap();
     let base = std::sync::Arc::new(std::sync::OnceLock::<String>::new());
-    let (at, served_bytes) = (base.clone(), bytes.clone());
+    let served = std::sync::Arc::new(std::sync::Mutex::new(vec![
+        "/1.wav".to_string(),
+        "/2.wav".to_string(),
+        "/3.wav".to_string(),
+    ]));
+    let (at, served_bytes, files) = (base.clone(), bytes.clone(), served.clone());
     let url = host(move |path| {
         let base = at.get().cloned().unwrap_or_default();
         match path {
@@ -957,25 +966,51 @@ fn a_feed_followed_is_downloaded_and_a_show() {
                       <enclosure url="{base}/3.wav" type="audio/wav"/></item>
                     <item><title>Too Old</title><guid>1</guid><pubDate>Mon, 19 Oct 2026 10:00:00 +0000</pubDate>
                       <enclosure url="{base}/1.wav" type="audio/wav"/></item>
+                    <item><title>Gone</title><guid>0</guid><pubDate>Sun, 18 Oct 2026 10:00:00 +0000</pubDate>
+                      <enclosure url="{base}/0.wav" type="audio/wav"/></item>
                     </channel></rss>"#
                 )
                 .into_bytes(),
             ),
-            "/1.wav" | "/2.wav" | "/3.wav" => Some(served_bytes.clone()),
+            p if files.lock().unwrap().iter().any(|f| f == p) => Some(served_bytes.clone()),
             _ => None,
         }
     });
     base.set(url.clone()).unwrap();
     let server = serve(&rt, &data, |c| {
         c.media = Some(media.clone());
-        c.feeds =
-            harken_server::feeds::Feeds::of(None, Some(&format!("{url}/feed.xml")), Some("2"))
-                .unwrap();
+        c.roles.insert(LIBRARY.into(), vec!["admin".into()]);
     });
-    let found = settle(&server, 2);
+    let feed = format!("{url}/feed.xml");
+    let mut admin = signed_in(&server, "admin");
+    admin.client.set_roles([LIBRARY]);
+    admin.mutate(
+        "library.subscribe",
+        &Subscribe {
+            kind: "sermon".into(),
+            url: feed.clone(),
+        },
+    );
+    // Downloaded: in the library, and no download of it left.
+    let here = |server: &Server, admin: &mut Peer, n: usize| {
+        eventually(20, || {
+            admin.pump();
+            let downloads = hub_rows::<Download>(server, "download");
+            let songs = songs(server);
+            (songs.len() >= n && downloads.iter().all(|d| d.state == "failed")).then_some(songs)
+        })
+    };
+    let found = here(&server, &mut admin, 4).expect("every episode listed");
     let titles: Vec<&str> = found.iter().map(|(t, _)| t.as_str()).collect();
-    assert_eq!(titles.len(), 2, "{found:?}");
-    assert!(titles.contains(&"The Dream of the Kingdom") && titles.contains(&"Living Grace"));
+    assert_eq!(titles.len(), 4, "{found:?}");
+    for t in [
+        "The Dream of the Kingdom",
+        "Living Grace",
+        "Too Old",
+        "Gone",
+    ] {
+        assert!(titles.contains(&t), "{t}: {found:?}");
+    }
     assert!(found
         .iter()
         .all(|(_, f)| f.starts_with(".feeds/") && f.ends_with(".wav")));
@@ -987,11 +1022,16 @@ fn a_feed_followed_is_downloaded_and_a_show() {
             shows[0].author.as_str(),
             shows[0].feed.as_str()
         ),
-        (
-            "sermon/gospel-in-life",
-            "Tim Keller",
-            format!("{url}/feed.xml").as_str()
-        )
+        ("sermon/gospel-in-life", "Tim Keller", feed.as_str())
+    );
+    let subscription = hub_rows::<Subscription>(&server, "subscription");
+    assert_eq!(
+        subscription
+            .iter()
+            .map(|s| (s.title.as_str(), s.items, s.keep))
+            .collect::<Vec<_>>(),
+        [("Gospel in Life", 4, 20)],
+        "the read said on the subscription"
     );
     let episodes = hub_rows::<Episode>(&server, "episode");
     let grace = episodes.iter().find(|e| e.guid == "2").unwrap();
@@ -1006,10 +1046,53 @@ fn a_feed_followed_is_downloaded_and_a_show() {
             .duration_ms,
         2_824_000
     );
-    let served = ureq::get(&format!("{}/media/{file}", server.url()))
+    let response = ureq::get(&format!("{}/media/{file}", server.url()))
         .call()
         .unwrap();
     let mut got = vec![];
-    std::io::Read::read_to_end(&mut served.into_reader(), &mut got).unwrap();
+    std::io::Read::read_to_end(&mut response.into_reader(), &mut got).unwrap();
     assert_eq!(got, bytes, "the episode is served from the server's copy");
+
+    let failed = hub_rows::<Download>(&server, "download");
+    assert_eq!(failed.len(), 1, "{failed:?}");
+    let gone = media_rows_of(&server, "Gone");
+    assert_eq!(
+        (
+            failed[0].media_id,
+            failed[0].state.as_str(),
+            failed[0].source.clone()
+        ),
+        (gone, "failed", format!("{url}/0.wav"))
+    );
+    assert!(failed[0].error.contains("404"), "{}", failed[0].error);
+
+    // Its file there now, and the library read again: downloaded.
+    served.lock().unwrap().push("/0.wav".into());
+    server.scanner.as_ref().unwrap().rescan();
+    eventually(20, || {
+        admin.pump();
+        hub_rows::<Download>(&server, "download")
+            .is_empty()
+            .then_some(())
+    })
+    .expect("the failed one downloaded at the next read");
+    // Asked for more of a feed it has every one of: nothing to read.
+    admin.mutate(
+        "library.fetch_older",
+        &FetchOlder {
+            url: feed.clone(),
+            more: 0,
+        },
+    );
+    assert!(admin.refused.is_empty(), "{:?}", admin.refused);
+    rt.block_on(server.stop());
+}
+
+/// The id of the media row titled `title`.
+fn media_rows_of(server: &Server, title: &str) -> harken_server::domain::Id<Media> {
+    hub_rows::<Media>(server, "media")
+        .into_iter()
+        .find(|m| m.title == title)
+        .map(|m| m.id)
+        .unwrap()
 }

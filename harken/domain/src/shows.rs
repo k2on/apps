@@ -6,14 +6,20 @@
 //! episode as they take a song, and the music's lists leave it out.
 //!
 //! The server authors both, as the library: [`add_show`] for the show,
-//! [`add_episode`] for each episode once its file is here — downloaded
-//! from the feed, or found in the folder.
+//! [`add_episode`] for each episode — found in the folder, or read off the
+//! feed and its file still to come (`downloads.rs`).
+//!
+//! Which feeds it follows is the log's too: a [`Subscription`] each,
+//! added from a client ([`subscribe`]), and the server reads every one
+//! and says what it read ([`feed_read`]). [`fetch_older`] asks for more of
+//! a feed's older episodes than it keeps, and [`unsubscribe`] takes the
+//! feed, its show and its episodes out of the library.
 
 use ark::prelude::*;
 
 use crate::browse::Plan;
 use crate::keys;
-use crate::library::{is_library, library_entry, playlist_pos};
+use crate::library::{is_library, library_entry, playlist_pos, take_out};
 use crate::schema::*;
 use crate::types::*;
 
@@ -25,6 +31,112 @@ pub const KINDS: &[&str] = &["podcast", "sermon"];
 #[allow(clippy::ptr_arg)]
 pub fn is_kind(kind: &String) -> bool {
     KINDS.contains(&kind.as_str())
+}
+
+/// How many of a feed's newest episodes are downloaded when it is first
+/// followed.
+pub const KEEP: i64 = 20;
+
+/// Whether a feed's URL is one the server can read: http or https. A
+/// `&String`, as a refinement's check is handed the field.
+#[allow(clippy::ptr_arg)]
+pub fn is_feed(url: &String) -> bool {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
+    rest.is_some_and(|r| !r.is_empty() && !r.contains(char::is_whitespace))
+}
+
+/// Follow a feed: the server reads it and downloads its newest [`KEEP`]
+/// episodes. Said again, it is the same feed, its kind as said now and
+/// the rest as it was.
+#[mutator("library.subscribe")]
+pub fn subscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Subscribe) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    let was = db.subscription.get(&input.url);
+    let next = match was {
+        Some(s) => Subscription { kind: input.kind, ..s },
+        None => Subscription {
+            url: input.url,
+            kind: input.kind,
+            keep: KEEP,
+            added_ms: ctx.now,
+            user_id: ctx.user().to_string(),
+            ..Subscription::default()
+        },
+    };
+    db.subscription.put(next)
+}
+
+/// Follow a feed no more: it, its show and every episode of it out of the
+/// library, and off every playlist holding one.
+#[mutator("library.unsubscribe")]
+pub fn unsubscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Unsubscribe) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    if !db.subscription.has(&input.url) {
+        return Err(Refusal(format!("not following {}", input.url)));
+    }
+    db.subscription.delete(input.url.clone())?;
+    for show in db.show.scan().into_iter().filter(|s| s.feed == input.url) {
+        for e in db.episode.by(Episode::SHOW_ID).from(&show.id).all() {
+            take_out(db, e.media_id)?;
+        }
+        db.show.delete(show.id)?;
+    }
+    Ok(())
+}
+
+/// More of a followed feed's older episodes: `more` past what it keeps,
+/// or 0 for every one. One that keeps every one already writes nothing.
+#[mutator("library.fetch_older")]
+pub fn fetch_older(ctx: &Ctx, db: &mut Db<Harken>, input: FetchOlder) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    let Some(was) = db.subscription.get(&input.url) else {
+        return Err(Refusal(format!("not following {}", input.url)));
+    };
+    let keep = match (was.keep, input.more) {
+        (0, _) | (_, 0) => 0,
+        (keep, more) => keep + more,
+    };
+    db.subscription.put(Subscription { keep, ..was })
+}
+
+/// What the server read of a followed feed: its show's title and how
+/// many episodes it has, or why it could not be read — a title and a
+/// count kept from the last read that had them. A feed not followed is
+/// refused, so a read that finishes after an unsubscribe adds nothing.
+#[mutator("library.feed_read")]
+pub fn feed_read(ctx: &Ctx, db: &mut Db<Harken>, input: FeedRead) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    let Some(was) = db.subscription.get(&input.url) else {
+        return Err(Refusal(format!("not following {}", input.url)));
+    };
+    let read = input.error.is_empty();
+    db.subscription.put(Subscription {
+        title: if read { input.title } else { was.title.clone() },
+        items: if read { input.items.max(0) } else { was.items },
+        error: input.error,
+        ..was
+    })
+}
+
+/// Every followed feed, by when it was added, with its show where a read
+/// has made it and how many of its episodes are in the library.
+#[view("library.subscriptions")]
+pub fn subscriptions(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<SubscriptionsEntry>, Refusal> {
+    Ok(scan::<Harken, Subscription>().sort(|s| (s.added_ms, s.url.clone())).map_with(|db, s| {
+        let show = db.show.scan().into_iter().find(|show| show.feed == s.url);
+        let episodes = show.as_ref().map_or(0, |show| db.episode.by(Episode::SHOW_ID).from(&show.id).count());
+        SubscriptionsEntry {
+            added_ms: s.added_ms,
+            episodes: episodes as i64,
+            error: s.error.clone(),
+            items: s.items,
+            keep: s.keep,
+            kind: s.kind.clone(),
+            show_id: show.map(|show| show.id).unwrap_or_default(),
+            title: s.title.clone(),
+            url: s.url.clone(),
+        }
+    }))
 }
 
 /// Put a show in the library, or say more about it: keyed by its kind and

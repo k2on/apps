@@ -127,3 +127,209 @@ fn an_episode_removed_is_gone_from_its_show() {
     assert!(c.rows::<Episode>("episode").is_empty());
     assert_eq!(c.list::<ShowsEntry>("shows", &())[0].episodes, 0);
 }
+
+const FEED: &str = "https://feeds.transistor.fm/full-time-nix";
+
+fn subscribe(kind: &str) -> Subscribe {
+    Subscribe {
+        kind: kind.into(),
+        url: FEED.into(),
+    }
+}
+
+/// A feed is followed from a client: a subscription keeping the newest
+/// twenty, said again with its kind as said now and the rest as it was;
+/// the server's read gives it its title and how many episodes the feed
+/// has, and a failed read keeps them and says why. Falsified by
+/// `feed_read` taking the title of a failed read: it was empty.
+#[test]
+fn a_feed_is_followed_and_read() {
+    let mut c = Lib::new();
+    c.mutate("library", "subscribe", &subscribe("podcast")).unwrap();
+    let read = FeedRead {
+        url: FEED.into(),
+        title: "Full Time Nix".into(),
+        items: 51,
+        error: String::new(),
+    };
+    c.mutate("library", "feed_read", &read).unwrap();
+    assert_eq!(c.mutate("library", "feed_read", &read), Ok(0));
+    let failed = FeedRead {
+        error: "connection refused".into(),
+        ..FeedRead::default()
+    };
+    c.mutate("library", "feed_read", &FeedRead { url: FEED.into(), ..failed }).unwrap();
+    c.mutate("library", "subscribe", &subscribe("sermon")).unwrap();
+    let subs = c.list::<SubscriptionsEntry>("subscriptions", &());
+    assert_eq!(
+        each(&subs, |s| (s.kind.clone(), s.title.clone(), s.items, s.keep, s.error.clone())),
+        [(
+            "sermon".to_string(),
+            "Full Time Nix".to_string(),
+            51,
+            shows::KEEP,
+            "connection refused".to_string()
+        )]
+    );
+    assert!(c
+        .mutate(
+            "library",
+            "subscribe",
+            &Subscribe {
+                url: "feed.xml".into(),
+                ..subscribe("podcast")
+            }
+        )
+        .unwrap_err()
+        .contains("a feed is an http or https URL"));
+    let as_alice = c.ctx("alice", &[]);
+    assert_eq!(
+        c.mutate_as(&as_alice, "subscribe", &subscribe("podcast")),
+        Err("only the library writes the library".into())
+    );
+}
+
+/// Older episodes are more kept: twenty more, then every one, and every
+/// one stays every one. Falsified by adding to a keep of 0: "every one"
+/// became twenty.
+#[test]
+fn older_episodes_are_more_kept() {
+    let mut c = Lib::new();
+    c.mutate("library", "subscribe", &subscribe("podcast")).unwrap();
+    let keep = |c: &mut Lib| c.rows::<Subscription>("subscription")[0].keep;
+    let more = |n| FetchOlder { url: FEED.into(), more: n };
+    c.mutate("library", "fetch_older", &more(20)).unwrap();
+    assert_eq!(keep(&mut c), 40);
+    c.mutate("library", "fetch_older", &more(0)).unwrap();
+    assert_eq!(keep(&mut c), 0);
+    assert_eq!(c.mutate("library", "fetch_older", &more(20)), Ok(0));
+    assert!(c
+        .mutate(
+            "library",
+            "fetch_older",
+            &FetchOlder {
+                url: "https://elsewhere".into(),
+                more: 1
+            }
+        )
+        .unwrap_err()
+        .contains("not following"));
+}
+
+/// An episode is in the library before its file is: queued, then how its
+/// download goes, then on the server. Falsified by `downloaded` leaving
+/// the row: the episode was still queued.
+#[test]
+fn an_episode_is_listed_before_its_file_is_here() {
+    let mut c = Lib::new();
+    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    let id = keys::show_key("podcast", "Full Time Nix");
+    c.mutate("library", "add_episode", &episode(&id, "Nix Freaks 51", ".feeds/51.mp3", 5))
+        .unwrap();
+    let queue = QueueDownload {
+        file: ".feeds/51.mp3".into(),
+        source: "https://media/51.mp3".into(),
+    };
+    c.mutate("library", "queue_download", &queue).unwrap();
+    assert_eq!(c.mutate("library", "queue_download", &queue), Ok(0));
+    let downloads = |c: &mut Lib| {
+        each(&c.list::<DownloadsEntry>("downloads", &()), |d| {
+            (d.title.clone(), d.state.clone(), d.bytes, d.total)
+        })
+    };
+    assert_eq!(downloads(&mut c), [("Nix Freaks 51".to_string(), "queued".to_string(), 0, 0)]);
+    let going = DownloadProgress {
+        file: ".feeds/51.mp3".into(),
+        state: "downloading".into(),
+        bytes: 5,
+        total: 10,
+        error: String::new(),
+    };
+    c.mutate("library", "download_progress", &going).unwrap();
+    assert_eq!(downloads(&mut c), [("Nix Freaks 51".to_string(), "downloading".to_string(), 5, 10)]);
+    assert!(c
+        .mutate(
+            "library",
+            "download_progress",
+            &DownloadProgress {
+                state: "lost".into(),
+                ..going.clone()
+            }
+        )
+        .unwrap_err()
+        .contains("queued, downloading or failed"));
+    c.mutate(
+        "library",
+        "downloaded",
+        &Downloaded {
+            file: ".feeds/51.mp3".into(),
+        },
+    )
+    .unwrap();
+    assert!(downloads(&mut c).is_empty());
+    assert_eq!(
+        c.mutate(
+            "library",
+            "downloaded",
+            &Downloaded {
+                file: ".feeds/51.mp3".into()
+            }
+        ),
+        Ok(0)
+    );
+    assert!(c
+        .mutate("library", "download_progress", &going)
+        .unwrap_err()
+        .contains("not being downloaded"));
+    assert!(c
+        .mutate(
+            "library",
+            "queue_download",
+            &QueueDownload {
+                file: ".feeds/none.mp3".into(),
+                ..queue
+            }
+        )
+        .unwrap_err()
+        .contains("no media has the file"));
+}
+
+/// A feed unfollowed takes its show and its episodes with it, a download
+/// still to come too, and leaves another show be.
+/// Falsified by `take_out` leaving the download: the media row's delete
+/// was refused.
+#[test]
+fn a_feed_unfollowed_takes_its_show_with_it() {
+    let mut c = Lib::new();
+    c.mutate("library", "subscribe", &subscribe("podcast")).unwrap();
+    c.mutate(
+        "library",
+        "add_show",
+        &AddShow {
+            feed: FEED.into(),
+            ..show("podcast", "Full Time Nix")
+        },
+    )
+    .unwrap();
+    c.mutate("library", "add_show", &show("sermon", "Gospel in Life")).unwrap();
+    let nix = keys::show_key("podcast", "Full Time Nix");
+    let gil = keys::show_key("sermon", "Gospel in Life");
+    c.mutate("library", "add_episode", &episode(&nix, "Fifty", ".feeds/50.mp3", 1)).unwrap();
+    c.mutate("library", "add_episode", &episode(&nix, "Fifty-one", ".feeds/51.mp3", 2))
+        .unwrap();
+    c.mutate("library", "add_episode", &episode(&gil, "Grace", ".feeds/g.mp3", 3)).unwrap();
+    let queue = QueueDownload {
+        file: ".feeds/51.mp3".into(),
+        source: "https://media/51.mp3".into(),
+    };
+    c.mutate("library", "queue_download", &queue).unwrap();
+    assert_eq!(
+        each(&c.list::<SubscriptionsEntry>("subscriptions", &()), |s| (s.show_id.clone(), s.episodes)),
+        [(nix.clone(), 2)]
+    );
+    c.mutate("library", "unsubscribe", &Unsubscribe { url: FEED.into() }).unwrap();
+    assert!(c.list::<SubscriptionsEntry>("subscriptions", &()).is_empty());
+    assert_eq!(each(&c.list::<ShowsEntry>("shows", &()), |s| s.id.clone()), [gil]);
+    assert_eq!(each(&c.rows::<Media>("media"), |m| m.title.clone()), ["Grace"]);
+    assert!(c.rows::<Download>("download").is_empty());
+}

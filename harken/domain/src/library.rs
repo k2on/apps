@@ -470,12 +470,19 @@ pub fn look(ctx: &Ctx, db: &mut Db<Harken>, input: LookAt) -> Result<(), Refusal
 #[mutator("library.remove_media")]
 pub fn remove_media(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveMedia) -> Result<(), Refusal> {
     is_library(ctx)?;
-    for item in db.playlist_item.scan().into_iter().filter(|i| i.media_id == input.id) {
+    take_out(db, input.id)
+}
+
+/// A media row out of the library, and everything that names it: the
+/// playlists holding it, its song or episode, its download.
+pub fn take_out(db: &mut Db<Harken>, id: Id<Media>) -> Result<(), Refusal> {
+    for item in db.playlist_item.scan().into_iter().filter(|i| i.media_id == id) {
         db.playlist_item.remove(&item)?;
     }
-    db.song.delete(input.id)?;
-    db.episode.delete(input.id)?;
-    db.media.delete(input.id)
+    db.song.delete(id)?;
+    db.episode.delete(id)?;
+    db.download.delete(id)?;
+    db.media.delete(id)
 }
 
 #[cfg(test)]

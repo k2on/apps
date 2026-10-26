@@ -1,8 +1,10 @@
 //! harken's domain in plain Rust (`docs/plan-v5.md` §1.16): the schema
 //! ([`schema`]), the types ([`types`]), the library's keys ([`keys`]), the
 //! library ([`library`], [`browse`]), the playlists ([`playlists`]), the
-//! plays ([`plays`]) and the listening session ([`listening`], [`queue`],
-//! [`devices`], [`groups`]) — one file per part — and what a host knows of
+//! plays ([`plays`]), the shows and the feeds followed ([`shows`]), what
+//! is still to be downloaded ([`downloads`]) and the listening session
+//! ([`listening`], [`queue`], [`devices`], [`groups`]) — one file per part
+//! — and what a host knows of
 //! it beside its functions ([`host`]). Who is signed in is `ark-auth`'s
 //! two tables and functions ([`ark_auth::rows`]), and [`feed`]. [`domain`] registers every function
 //! by its name; the apps link this crate and call its types and functions
@@ -17,6 +19,7 @@ use ark::prelude::scope;
 pub mod browse;
 pub mod catalogue;
 pub mod devices;
+pub mod downloads;
 pub mod groups;
 pub mod host;
 pub mod keys;
@@ -63,7 +66,9 @@ pub fn domain() -> Domain {
         devices::scrub, devices::on_join, devices::on_leave, devices::on_restore,
         groups::join, groups::unjoin, groups::report_group, groups::set_group_volume, groups::nudge_group_volume,
         groups::set_group_mute, shows::add_show, shows::add_episode, shows::shows, shows::show,
-        shows::episode_details, feed)
+        shows::episode_details, shows::subscribe, shows::unsubscribe, shows::fetch_older, shows::feed_read,
+        shows::subscriptions, downloads::queue_download, downloads::download_progress, downloads::downloaded,
+        downloads::downloads, feed)
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
 }
@@ -89,7 +94,9 @@ pub fn feed() -> Scope<Harken> {
             .on::<PlaylistItem>(all)
             .on::<Play>(all)
             .on::<Show>(all)
-            .on::<Episode>(all),
+            .on::<Episode>(all)
+            .on::<Subscription>(all)
+            .on::<Download>(all),
     )
 }
 

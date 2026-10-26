@@ -1225,6 +1225,106 @@
         }
       ],
       "space": "durable"
+    },
+    {
+      "name": "subscription",
+      "columns": [
+        {
+          "name": "url",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "kind",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "keep",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "title",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "items",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "error",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "download",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "source",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "bytes",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "total",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "error",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "asked_ms",
+          "ty": "Int",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        }
+      ],
+      "space": "durable"
     }
   ]
 }

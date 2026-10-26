@@ -47,11 +47,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::domain::{AddEpisode, AddShow, AddSong, Look, LookAt, Looked};
+use crate::domain::{
+    AddEpisode, AddShow, AddSong, DownloadProgress, Downloaded, Harken, Look, LookAt, Looked,
+    QueueDownload, Subscription,
+};
 use anyhow::{Context, Result};
 use ark::format::Encode;
 use ark::peer::{Ctx, Who};
@@ -63,6 +66,7 @@ use notify::{RecursiveMode, Watcher};
 
 use crate::covers::{self, Covers};
 use crate::hosted::Hosted;
+use crate::sync::{Reader, Said};
 
 /// What the scanner will look at. Everything else in the directory —
 /// artwork, playlists, the stray `.DS_Store` — is not a track and is skipped
@@ -98,6 +102,11 @@ const ADD_SONG: &str = "library.add_song";
 const ADD_SHOW: &str = "library.add_show";
 const ADD_EPISODE: &str = "library.add_episode";
 
+/// The mutations a download is said with.
+const QUEUE_DOWNLOAD: &str = "library.queue_download";
+const DOWNLOAD_PROGRESS: &str = "library.download_progress";
+const DOWNLOADED: &str = "library.downloaded";
+
 /// The mutation a look is asked with.
 const LOOK: &str = "library.look";
 
@@ -119,10 +128,6 @@ enum Nudge {
     /// Look at one path the watcher saw appear, change or — for a picture
     /// — go.
     One(PathBuf),
-    /// A catalogue fetched, its files here: authored (`catalogue.rs`).
-    Catalogue(Box<crate::catalogue::Fetched>),
-    /// A feed read, its episodes here: authored (`feeds.rs`).
-    Feed(Box<crate::feeds::Fetched>),
 }
 
 /// Where the scanner keeps what is its own under the server's data: its
@@ -187,14 +192,13 @@ impl Scanner {
     /// being created at all — on a fresh install it may not exist yet, and a
     /// watch on a path that is not there watches nothing forever.
     ///
-    /// With `catalogue`, the URL of one (`catalogue.rs`): fetched, and
-    /// its files downloaded, on a thread of its own at every full look
-    /// (at boot, and whenever a rescan is asked for), and its library
-    /// authored here once they are.
-    ///
-    /// With `feeds`, the podcasts and sermons followed (`feeds.rs`): every
-    /// feed read and its newest episodes downloaded on a thread of its
-    /// own, at every full look and every hour, and authored here.
+    /// What is downloaded into the library comes from sources, each read
+    /// on a thread of its own (`sync.rs`) and authored here, its files
+    /// queued and then said as they download: with `catalogue`, the URL
+    /// of one (`catalogue.rs`), read at every full look (at boot, and
+    /// whenever a rescan is asked for); and the feeds the library follows
+    /// (`feeds.rs`), read at every full look, every hour, and whenever
+    /// somebody follows one or asks for more of it.
     ///
     /// Returns at once: the walk happens on a thread of its own, so a
     /// library of ten thousand files does not hold up anything.
@@ -205,7 +209,6 @@ impl Scanner {
         data: PathBuf,
         login: Login,
         catalogue: Option<String>,
-        feeds: crate::feeds::Feeds,
     ) -> Result<Scanner> {
         // `docs/plan-auth.md` The scanner is the library, by construction: it
         // holds the library's role whatever else its login holds, and its
@@ -239,99 +242,23 @@ impl Scanner {
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let counts = Arc::new(Counts::default());
-        // The catalogue's own thread: a sync asked is a fetch and however
-        // long its downloads take, so it is not the scanner's to wait on;
-        // what it fetched comes back as a nudge. Syncs asked while one runs
-        // are that one. One that could not have everything — the host down,
-        // or telling it to wait longer than it will — is tried again by
-        // itself: ten minutes later, and twice as long each time after, to
-        // six hours, until one has it all.
+        // The sources' threads: a read asked is however long its index,
+        // its pictures and then its files take, so it is not the scanner's
+        // to wait on; what it read and how its downloads go come back as
+        // [`Said`], authored here.
+        let (said, heard) = channel::<Said>();
         let sync = catalogue.map(|url| {
-            let (sync, asked) = channel::<()>();
-            let (dir, back) = (crate::catalogue::dir(&data), tx.clone());
-            let _ = std::thread::Builder::new()
-                .name("harken-catalogue".into())
-                .spawn(move || {
-                    const FIRST: Duration = Duration::from_secs(10 * 60);
-                    const LONGEST: Duration = Duration::from_secs(6 * 60 * 60);
-                    let mut again: Option<Duration> = None;
-                    loop {
-                        let gone = match again {
-                            None => asked.recv().is_err(),
-                            Some(after) => matches!(
-                                asked.recv_timeout(after),
-                                Err(RecvTimeoutError::Disconnected)
-                            ),
-                        };
-                        if gone {
-                            return;
-                        }
-                        while asked.try_recv().is_ok() {}
-                        // Each album authored as its files are in.
-                        let partly = |so_far| {
-                            let _ = back.send(Nudge::Catalogue(Box::new(so_far)));
-                        };
-                        let short = match crate::catalogue::fetch(&url, &dir, partly) {
-                            Ok(fetched) => {
-                                let short = fetched.failed > 0;
-                                if back.send(Nudge::Catalogue(Box::new(fetched))).is_err() {
-                                    return;
-                                }
-                                short
-                            }
-                            Err(e) => {
-                                eprintln!("harken-server: catalogue: {e}");
-                                true
-                            }
-                        };
-                        again = short.then(|| again.map_or(FIRST, |a| (a * 2).min(LONGEST)));
-                        if let Some(after) = again {
-                            eprintln!(
-                                "harken-server: catalogue: syncing again in {} minutes",
-                                after.as_secs() / 60
-                            );
-                        }
-                    }
-                });
-            sync
+            let dir = crate::catalogue::dir(&data);
+            crate::sync::start(crate::catalogue::Import { url, dir }, said.clone())
         });
-        // The feeds' own thread, as the catalogue's: a refresh asked is
-        // every feed read and however long its downloads take; what it
-        // fetched comes back as a nudge, show by show. Read at every full
-        // look, and every hour by itself.
-        let follow = (!feeds.is_empty()).then(|| {
-            let (follow, asked) = channel::<()>();
-            let (dir, back) = (crate::feeds::dir(&data), tx.clone());
-            let _ = std::thread::Builder::new()
-                .name("harken-feeds".into())
-                .spawn(move || loop {
-                    match asked.recv_timeout(crate::feeds::EVERY) {
-                        Ok(()) | Err(RecvTimeoutError::Timeout) => {}
-                        Err(RecvTimeoutError::Disconnected) => return,
-                    }
-                    while asked.try_recv().is_ok() {}
-                    for feed in &feeds.feeds {
-                        let partly = |so_far| {
-                            let _ = back.send(Nudge::Feed(Box::new(so_far)));
-                        };
-                        match crate::feeds::fetch(feed, feeds.keep, &dir, partly) {
-                            Ok(fetched) => {
-                                if fetched.failed > 0 {
-                                    eprintln!(
-                                        "harken-server: feeds: {}: {} files could not be had; tried again in an hour",
-                                        fetched.show.title, fetched.failed
-                                    );
-                                }
-                                if back.send(Nudge::Feed(Box::new(fetched))).is_err() {
-                                    return;
-                                }
-                            }
-                            Err(e) => eprintln!("harken-server: feeds: {e}"),
-                        }
-                    }
-                });
-            follow
-        });
+        let subscriptions = Arc::new(Mutex::new(Vec::new()));
+        let follow = crate::sync::start(
+            crate::feeds::Follow {
+                subscriptions: subscriptions.clone(),
+                dir: crate::feeds::dir(&data),
+            },
+            said,
+        );
         let thread = {
             let (stop, counts) = (stop.clone(), counts.clone());
             let scan = Scan {
@@ -341,10 +268,12 @@ impl Scanner {
                 prints: Prints::load(prints_dir(&data)),
                 sync,
                 follow,
+                subscriptions,
+                followed: None,
             };
             std::thread::Builder::new()
                 .name("harken-scanner".into())
-                .spawn(move || run(scan, client, hub, rx, &stop, counts))
+                .spawn(move || run(scan, client, hub, rx, heard, &stop, counts))
                 .context("starting the scanner")?
         };
         tx.send(Nudge::All)
@@ -533,10 +462,43 @@ struct Scan {
     music: PathBuf,
     art: PathBuf,
     prints: Prints,
-    /// Asks the catalogue's thread for a sync, when there is a catalogue.
-    sync: Option<Sender<()>>,
-    /// Asks the feeds' thread to read every feed, when there are feeds.
-    follow: Option<Sender<()>>,
+    /// The catalogue's reader, when there is a catalogue.
+    sync: Option<Reader>,
+    /// The followed feeds' reader.
+    follow: Reader,
+    /// The feeds followed, as the feeds' reader reads them: the replica's
+    /// `subscription` rows, kept here as they move.
+    subscriptions: Arc<Mutex<Vec<Subscription>>>,
+    /// What of them the reader was last asked to read with.
+    followed: Option<Vec<(String, String, i64)>>,
+}
+
+impl Scan {
+    /// The replica's followed feeds handed to the feeds' reader, and a
+    /// read asked of it, when they moved since it last was: a feed
+    /// followed, its kind changed, or more of it asked for. Its title and
+    /// what the last read said are the reader's own writes, and ask
+    /// nothing.
+    fn follow(&mut self, peer: &ark_peer::Peer) {
+        let now: Vec<Subscription> =
+            ark::db::read::<Harken, _>(&peer.log.store, |db| db.subscription.scan());
+        let moved: Vec<(String, String, i64)> = now
+            .iter()
+            .map(|s| (s.url.clone(), s.kind.clone(), s.keep))
+            .collect();
+        if self.followed.as_ref() == Some(&moved) {
+            return;
+        }
+        let first = self.followed.is_none();
+        self.followed = Some(moved);
+        if let Ok(mut s) = self.subscriptions.lock() {
+            *s = now;
+        }
+        // The first is the boot's, whose full look asks for a read itself.
+        if !first {
+            self.follow.read();
+        }
+    }
 }
 
 /// The scanner's peer pumped — what the link said given to it, what it
@@ -557,13 +519,26 @@ fn run(
     mut peer: ark_peer::Peer,
     hub: Handle,
     rx: Receiver<Nudge>,
+    heard: Receiver<Said>,
     stop: &AtomicBool,
     counts: Arc<Counts>,
 ) {
     catch_up(&mut peer, &hub, stop);
     let root = scan.root.clone();
-    let catalogued = counts.clone();
+    let synced = counts.clone();
+    scan.follow(&peer);
+    // The look's handler and the loop both have the scan: the handler runs
+    // inside the loop's pump, one at a time.
+    let watch = Arc::new(Mutex::new(scan));
+    let looks = watch.clone();
     peer.handle::<Look>(move |p, job| {
+        let Ok(mut scan) = looks.lock() else {
+            return Ok(Looked {
+                read: 0,
+                authored: 0,
+            });
+        };
+        let scan = &mut *scan;
         let nudges = match job.paths.is_empty() {
             true => vec![Nudge::All],
             false => job
@@ -572,17 +547,15 @@ fn run(
                 .map(|r| Nudge::One(scan.root.join(r)))
                 .collect(),
         };
-        // A full look is the catalogue's sync too: at boot, and the
-        // rescan a person asks for.
+        // A full look is every source read too: at boot, and the rescan a
+        // person asks for.
         if job.paths.is_empty() {
             if let Some(sync) = &scan.sync {
-                let _ = sync.send(());
+                sync.read();
             }
-            if let Some(follow) = &scan.follow {
-                let _ = follow.send(());
-            }
+            scan.follow.read();
         }
-        let (authored, read) = look(p, &mut scan, nudges);
+        let (authored, read) = look(p, scan, nudges);
         counts.read.fetch_add(read, Ordering::Relaxed);
         if authored > 0 {
             counts.authored.fetch_add(authored, Ordering::Relaxed);
@@ -605,34 +578,20 @@ fn run(
                 std::thread::sleep(SETTLE);
             }
             nudges.extend(rx.try_iter());
-            let (fetched, nudges): (Vec<_>, Vec<_>) = nudges
-                .into_iter()
-                .partition(|n| matches!(n, Nudge::Catalogue(_) | Nudge::Feed(_)));
-            for n in fetched {
-                match n {
-                    Nudge::Catalogue(f) => {
-                        let authored = import(&mut peer, &f);
-                        catalogued.authored.fetch_add(authored, Ordering::Relaxed);
-                        println!("harken-server: catalogue +{authored}");
-                    }
-                    Nudge::Feed(f) => {
-                        let authored = follow(&mut peer, &f);
-                        catalogued.authored.fetch_add(authored, Ordering::Relaxed);
-                        if authored > 0 {
-                            println!("harken-server: {} +{authored}", f.show.title);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if !nudges.is_empty() {
-                ask(&mut peer, &root, nudges);
-            }
+            ask(&mut peer, &root, nudges);
+        }
+        // What the sources read and how their downloads go, authored.
+        for said in heard.try_iter() {
+            let authored = hear(&mut peer, said);
+            synced.authored.fetch_add(authored, Ordering::Relaxed);
         }
         // Whatever that produced, and whatever the log has for us — the
         // looks asked among it. Not conditional on a nudge: a quiet
         // scanner still has to take the entries other peers wrote.
         pump(&mut peer);
+        if let Ok(mut scan) = watch.lock() {
+            scan.follow(&peer);
+        }
     }
     // Off the hub, with what is pending written down for the next start (the
     // client writes its pending intents as they change).
@@ -705,8 +664,6 @@ fn look(peer: &mut ark_peer::Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usiz
             Nudge::One(p) => {
                 paths.insert(p);
             }
-            // Authored where it arrives, in `run`: a look is files.
-            Nudge::Catalogue(_) | Nudge::Feed(_) => {}
         }
     }
     let mut covers = Covers::new(&scan.root, &scan.music, &scan.art, scan.prints.art());
@@ -746,53 +703,128 @@ fn known_file(store: &Store, file: &str) -> bool {
     !store.scan("media", &range).is_empty()
 }
 
-/// A catalogue's library authored: each of its mutations that would change
-/// something, its files the ones here. How many it authored.
-fn import(peer: &mut ark_peer::Peer, fetched: &crate::catalogue::Fetched) -> usize {
+/// What a source said, authored: a plan's rows and its files queued, or
+/// how one of its downloads goes. How many entries it authored.
+fn hear(peer: &mut ark_peer::Peer, said: Said) -> usize {
+    match said {
+        Said::Plan(plan, answer) => {
+            let (authored, yes) = author(peer, &plan);
+            let _ = answer.send(yes);
+            if authored > 0 {
+                println!("harken-server: {} +{authored}", plan.what);
+            }
+            authored
+        }
+        // Refused, its row is gone: not downloaded.
+        Said::Start(file, answer) => {
+            let going = progress(&file, "downloading", 0, 0, "");
+            let yes = !matches!(would(peer, DOWNLOAD_PROGRESS, &going), Would::Refuse);
+            let authored = yes && author_one(peer, DOWNLOAD_PROGRESS, &file, going);
+            let _ = answer.send(yes);
+            authored as usize
+        }
+        Said::Progress(file, bytes, total) => {
+            let going = progress(&file, "downloading", bytes as i64, total as i64, "");
+            author_one(peer, DOWNLOAD_PROGRESS, &file, going) as usize
+        }
+        Said::Failed(file, why) => {
+            let failed = progress(&file, "failed", 0, 0, &why);
+            author_one(peer, DOWNLOAD_PROGRESS, &file, failed) as usize
+        }
+        Said::Here(file) => {
+            let here = Downloaded { file: file.clone() }.to_bytes();
+            author_one(peer, DOWNLOADED, &file, here) as usize
+        }
+    }
+}
+
+fn progress(file: &str, state: &str, bytes: i64, total: i64, error: &str) -> Vec<u8> {
+    DownloadProgress {
+        file: file.to_string(),
+        state: state.to_string(),
+        bytes,
+        total,
+        error: error.to_string(),
+    }
+    .to_bytes()
+}
+
+/// An entry authored if it would change something, a refusal said: whether
+/// one was.
+fn author_one(peer: &mut ark_peer::Peer, name: &str, what: &str, input: Vec<u8>) -> bool {
+    if !would_change(peer, name, &input) {
+        return false;
+    }
+    match peer.mutate_bytes(name, input) {
+        Ok(_) => true,
+        Err(why) => {
+            eprintln!("harken-server: library: {what} ({name}) was refused: {why}");
+            false
+        }
+    }
+}
+
+/// A plan authored: each of its mutations that would change something,
+/// then each of its files queued, or said to be here when it already is.
+/// How many entries it authored, and whether its files are to be
+/// downloaded — not when it is gated and its first mutation is refused.
+fn author(peer: &mut ark_peer::Peer, plan: &crate::sync::Plan) -> (usize, bool) {
     let mut authored = 0;
-    for call in fetched
-        .catalogue
-        .calls(|url| fetched.here.get(url).cloned())
-    {
+    for (n, call) in plan.calls.iter().enumerate() {
         match would(peer, call.name, &call.input) {
             Would::Nothing => continue,
+            Would::Refuse if plan.gate && n == 0 => return (0, false),
             // A describe of a work this library has not got.
             Would::Refuse if call.if_there => continue,
             Would::Change | Would::Refuse => {}
         }
-        match peer.mutate_bytes(call.name, call.input) {
+        match peer.mutate_bytes(call.name, call.input.clone()) {
             Ok(_) => authored += 1,
             Err(why) => eprintln!(
-                "harken-server: catalogue: {} ({}) was refused: {why}",
-                call.what, call.name
+                "harken-server: {}: {} ({}) was refused: {why}",
+                plan.what, call.what, call.name
             ),
         }
     }
-    authored
+    for want in &plan.files {
+        let input = match want.here() {
+            true => (
+                DOWNLOADED,
+                Downloaded {
+                    file: want.file.clone(),
+                }
+                .to_bytes(),
+            ),
+            // Queued again only from nothing or a failure: a file queued
+            // or downloading already is as it was.
+            false if queued(peer, &want.file) => continue,
+            false => (
+                QUEUE_DOWNLOAD,
+                QueueDownload {
+                    file: want.file.clone(),
+                    source: want.url.clone(),
+                }
+                .to_bytes(),
+            ),
+        };
+        authored += author_one(peer, input.0, &want.file, input.1) as usize;
+    }
+    (authored, true)
 }
 
-/// A feed's show and episodes authored: each that would change something.
-/// How many it authored.
-fn follow(peer: &mut ark_peer::Peer, fetched: &crate::feeds::Fetched) -> usize {
-    let mut calls = vec![(
-        ADD_SHOW,
-        fetched.show.title.clone(),
-        fetched.show.to_bytes(),
-    )];
-    for e in &fetched.episodes {
-        calls.push((ADD_EPISODE, e.title.clone(), e.to_bytes()));
-    }
-    let mut authored = 0;
-    for (name, what, input) in calls {
-        if !would_change(peer, name, &input) {
-            continue;
-        }
-        match peer.mutate_bytes(name, input) {
-            Ok(_) => authored += 1,
-            Err(why) => eprintln!("harken-server: feeds: {what} ({name}) was refused: {why}"),
-        }
-    }
-    authored
+/// Whether a file is queued or downloading already, as the replica has it.
+fn queued(peer: &ark_peer::Peer, file: &str) -> bool {
+    ark::db::read::<Harken, _>(&peer.log.store, |db| {
+        let media = db
+            .media
+            .by(crate::domain::Media::FILE)
+            .from(&file.to_string())
+            .first();
+        media
+            .filter(|m| m.file == file)
+            .and_then(|m| db.download.get(m.id))
+            .is_some_and(|d| d.state != "failed")
+    })
 }
 
 /// Whether an entry would write anything over what the replica holds: the

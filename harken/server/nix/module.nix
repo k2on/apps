@@ -169,39 +169,6 @@ in
       '';
     };
 
-    podcasts = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      example = [ "https://feeds.transistor.fm/full-time-nix" ];
-      description = ''
-        RSS feeds of podcasts to follow, with
-        {option}`services.harken.mediaPath` — a podcast host's, or an
-        Audiobookshelf library's: each feed's newest episodes downloaded into
-        the state directory and served under `/media/.feeds/`, at boot, at
-        every rescan and every hour. A podcast with no feed is a folder under
-        `podcasts/` in the media path.
-      '';
-    };
-
-    sermons = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      example = [ "https://podcast.gospelinlife.com/feed.xml" ];
-      description = ''
-        RSS feeds of sermons to follow, as {option}`services.harken.podcasts`.
-        A series with no feed is a folder under `sermons/` in the media path.
-      '';
-    };
-
-    feedEpisodes = lib.mkOption {
-      type = lib.types.ints.unsigned;
-      default = 20;
-      description = ''
-        How many of each feed's newest episodes are downloaded; 0 for every
-        one.
-      '';
-    };
-
     pictureHosts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -486,10 +453,6 @@ in
         HARKEN_MEDIA = "${cfg.mediaPath}";
       } // lib.optionalAttrs (cfg.mediaPath != null && cfg.catalogue != null) {
         HARKEN_CATALOGUE = cfg.catalogue;
-      } // lib.optionalAttrs (cfg.mediaPath != null && (cfg.podcasts != [ ] || cfg.sermons != [ ])) {
-        HARKEN_PODCASTS = lib.concatStringsSep " " cfg.podcasts;
-        HARKEN_SERMONS = lib.concatStringsSep " " cfg.sermons;
-        HARKEN_FEED_EPISODES = toString cfg.feedEpisodes;
       } // lib.optionalAttrs (cfg.web != null) {
         HARKEN_WEB = "${cfg.web}";
       } //lib.optionalAttrs (cfg.oidc != null) {

@@ -3,8 +3,9 @@
 //! recordings': what it names is downloaded once and served under
 //! `/media/.catalogue/`, its library is in the log — the track, its work and
 //! its composer with their descriptions, the licence, the credit — and a
-//! track whose file cannot be had is not. A rescan, which syncs it again,
-//! downloads nothing and authors nothing.
+//! track whose file cannot be had is listed, its download failed. A
+//! rescan, which syncs it again, downloads only that one again and
+//! authors nothing else.
 
 mod common;
 
@@ -15,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use common::*;
 use harken_server::catalogue::name_of;
-use harken_server::domain::{Credit, Media, Person, Recording, Work};
+use harken_server::domain::{Credit, Download, Media, Person, Recording, Work};
 
 type Shared<T> = Arc<Mutex<T>>;
 /// What the host serves, by path.
@@ -82,8 +83,8 @@ fn row<T: ark::format::Encode + Send + 'static>(
     hub_rows::<T>(server, table).into_iter().find(|r| f(r))
 }
 
-/// Falsified by authoring a track whose file did not download: "Gavotte"
-/// was a song; by naming a download without its extension: its file had
+/// Falsified by leaving a track whose file did not download out: "Gavotte"
+/// was no song; by naming a download without its extension: its file had
 /// none; by a sync downloading what it already has: the rescan asked for
 /// `/air.mp3` again; by a 429 not waited out: "Air" was no song either;
 /// and by describes that say nothing new still writing:
@@ -135,6 +136,12 @@ fn a_catalogue_is_downloaded_once_and_is_the_library() {
         })
     })
     .expect("the catalogue imported, to its last credit");
+    // And its files downloaded: none left to do but the one that cannot be.
+    eventually(20, || {
+        let downloads = hub_rows::<Download>(&server, "download");
+        downloads.iter().all(|d| d.state == "failed").then_some(())
+    })
+    .expect("the downloads done");
     let work = row::<Work>(&server, "work", |w| w.catalogue == "BWV 1068").expect("the work");
     assert_eq!(
         (work.form.as_str(), work.key_sig.as_str(), work.composed),
@@ -144,16 +151,29 @@ fn a_catalogue_is_downloaded_once_and_is_the_library() {
 
     let air = format!(".catalogue/{}", name_of(&format!("{base}/air.mp3")));
     assert!(air.ends_with(".mp3"), "{air}: its type is its extension");
+    let gavotte = format!(".catalogue/{}", name_of(&format!("{base}/gone.mp3")));
     let songs: Vec<Media> = hub_rows(&server, "media");
-    let titles: Vec<(&str, &str)> = songs
+    let mut titles: Vec<(&str, &str)> = songs
         .iter()
         .map(|m| (m.title.as_str(), m.file.as_str()))
         .collect();
+    titles.sort();
     assert_eq!(
         titles,
-        [("Air", air.as_str())],
-        "the track whose file is here, and not the one whose file is not"
+        [("Air", air.as_str()), ("Gavotte", gavotte.as_str())],
+        "the track whose file is here, and the one whose file is not"
     );
+    let downloads = hub_rows::<Download>(&server, "download");
+    let gone = songs.iter().find(|m| m.title == "Gavotte").unwrap().id;
+    assert_eq!(
+        downloads
+            .iter()
+            .map(|d| (d.media_id, d.state.as_str()))
+            .collect::<Vec<_>>(),
+        [(gone, "failed")],
+        "Air on the server, Gavotte not, and why said"
+    );
+    assert!(downloads[0].error.contains("404"), "{}", downloads[0].error);
 
     let bach = row::<Person>(&server, "person", |p| p.name == "Johann Sebastian Bach").unwrap();
     assert_eq!(
@@ -183,12 +203,18 @@ fn a_catalogue_is_downloaded_once_and_is_the_library() {
         assert_eq!(&body, bytes, "{file}");
     }
 
-    // A rescan syncs again: the catalogue asked for, nothing downloaded, and
-    // nothing new authored.
+    // A rescan syncs again: the catalogue asked for, nothing downloaded but
+    // the one that failed tried again, and nothing new authored but how
+    // that went.
     let entries = |s: &harken_server::Server| {
         let all = s.running.hub.with(|h| h.log.log().entries()).unwrap();
+        let download = |f: &str| f == "library.queue_download" || f == "library.download_progress";
         all.iter()
-            .filter(|l| l.entry.func.starts_with("library.") && l.entry.func != "library.look")
+            .filter(|l| {
+                l.entry.func.starts_with("library.")
+                    && l.entry.func != "library.look"
+                    && !download(&l.entry.func)
+            })
             .count()
     };
     let before = entries(&server);
@@ -213,6 +239,11 @@ fn a_catalogue_is_downloaded_once_and_is_the_library() {
         asked.get("/bach.jpg"),
         Some(&1),
         "downloaded once: {asked:?}"
+    );
+    assert_eq!(
+        asked.get("/gone.mp3"),
+        Some(&2),
+        "what failed is tried again: {asked:?}"
     );
     assert_eq!(
         entries(&server),

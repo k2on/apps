@@ -38,6 +38,7 @@ pub mod domain;
 pub mod feeds;
 pub mod hosted;
 pub mod library;
+pub mod sync;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -68,8 +69,6 @@ pub struct Config {
     pub media: Option<PathBuf>,
     /// A catalogue to import (`catalogue.rs`): the URL of its JSON.
     pub catalogue: Option<String>,
-    /// The podcasts and sermons followed by their feeds (`feeds.rs`).
-    pub feeds: feeds::Feeds,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
 }
@@ -94,7 +93,6 @@ impl Config {
             serve: ark_peer::Serve::dev(listen, data),
             media: None,
             catalogue: None,
-            feeds: feeds::Feeds::default(),
             house: None,
         }
     }
@@ -108,11 +106,6 @@ impl Config {
     /// HARKEN_MEDIA                  the media root
     /// HARKEN_CATALOGUE              a catalogue's JSON URL, imported
     ///                               (with HARKEN_MEDIA)
-    /// HARKEN_PODCASTS, HARKEN_SERMONS
-    ///                               RSS feeds, apart by white space or
-    ///                               commas, downloaded (with HARKEN_MEDIA)
-    /// HARKEN_FEED_EPISODES          how many of each feed's newest
-    ///                               episodes are downloaded; 0 for all
     /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
     ///                               all three, or none; HARKEN_HA_MEDIA
     /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
@@ -130,12 +123,6 @@ impl Config {
             serve,
             media: env("HARKEN_MEDIA").map(PathBuf::from),
             catalogue: env("HARKEN_CATALOGUE"),
-            feeds: feeds::Feeds::of(
-                env("HARKEN_PODCASTS").as_deref(),
-                env("HARKEN_SERMONS").as_deref(),
-                env("HARKEN_FEED_EPISODES").as_deref(),
-            )
-            .map_err(|e| anyhow!(e))?,
             house: house(&env)?,
         })
     }
@@ -468,7 +455,6 @@ pub async fn start(config: Config) -> Result<Server> {
                 config.data.clone(),
                 login,
                 config.catalogue.clone(),
-                config.feeds.clone(),
             )?)
         }
         None => None,
@@ -479,9 +465,8 @@ pub async fn start(config: Config) -> Result<Server> {
     );
     match &config.media {
         Some(dir) => eprintln!(
-            "harken-server: media from {} (music in music/, podcasts/ and sermons/ beside it; {} feeds followed)",
-            dir.display(),
-            config.feeds.feeds.len()
+            "harken-server: media from {} (music in music/, podcasts/ and sermons/ beside it; feeds followed from the clients)",
+            dir.display()
         ),
         // Said out loud: a server with no media looks exactly like one whose
         // directory is misconfigured.

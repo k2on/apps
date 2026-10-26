@@ -273,6 +273,51 @@ pub struct Episode {
     pub number: i64,
 }
 
+/// A feed the server follows, as somebody added it from a client: a
+/// podcast's or a series of sermons'. The server reads it at every full
+/// look, every hour and whenever this row moves, downloads its newest
+/// `keep` episodes, and says here what it read (`library.feed_read`). Its
+/// show is the `show` whose `feed` is this URL, once a read has made it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct Subscription {
+    #[ark(key)]
+    pub url: String,
+    /// `podcast` or `sermon`.
+    pub kind: String,
+    /// How many of the feed's newest episodes are downloaded; 0 for every
+    /// one.
+    pub keep: i64,
+    /// The show's title as the last read had it; empty until a read.
+    pub title: String,
+    /// How many episodes the feed has, as the last read had it.
+    pub items: i64,
+    /// Why the last read failed; empty when it did not.
+    pub error: String,
+    pub added_ms: i64,
+    pub user_id: String,
+}
+
+/// A file the library has a row for and the server has not got yet: its
+/// media row's `file`, to be downloaded from `source` — an episode of a
+/// followed feed, a recording of the catalogue. Said as it goes (queued,
+/// downloading and how far, failed and why), and gone once the file is
+/// here: a media row with no download is on the server.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct Download {
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    /// Where it is downloaded from.
+    pub source: String,
+    /// `queued`, `downloading` or `failed`.
+    pub state: String,
+    /// How much of it is here, and how much there is: 0 for "not said".
+    pub bytes: i64,
+    pub total: i64,
+    /// Why it failed; empty when it did not.
+    pub error: String,
+    pub asked_ms: i64,
+}
+
 /// harken's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Harken {
@@ -295,6 +340,8 @@ pub struct Harken {
     pub look: Look,
     pub show: Show,
     pub episode: Episode,
+    pub subscription: Subscription,
+    pub download: Download,
 }
 
 ark_auth::install!(Harken);

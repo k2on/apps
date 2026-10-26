@@ -224,6 +224,78 @@ pub struct AddEpisode {
     pub number: i64,
 }
 
+/// A feed to follow, as somebody adds it: a podcast's or a series of
+/// sermons'. Said again, it is the same feed, its kind as said now.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Subscribe {
+    #[ark(check = "crate::shows::is_kind", why = "a show is a podcast or a sermon")]
+    pub kind: String,
+    #[ark(trim, check = "crate::shows::is_feed", why = "a feed is an http or https URL")]
+    #[ark(len = "0..=2000")]
+    pub url: String,
+}
+
+/// A feed no longer followed, by its URL.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Unsubscribe {
+    #[ark(trim)]
+    pub url: String,
+}
+
+/// More of a followed feed's older episodes downloaded: `more` past what
+/// is kept now, or 0 for every one.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct FetchOlder {
+    #[ark(trim)]
+    pub url: String,
+    #[ark(range = "0..=100000")]
+    pub more: i64,
+}
+
+/// What the server read of a followed feed: the show's title and how many
+/// episodes the feed has, or why it could not be read.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct FeedRead {
+    #[ark(trim)]
+    pub url: String,
+    #[ark(trim)]
+    pub title: String,
+    pub items: i64,
+    #[ark(trim)]
+    pub error: String,
+}
+
+/// A file the library has a row for, to be downloaded from `source`: its
+/// media row's `file`, which the server has not got yet.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct QueueDownload {
+    #[ark(trim, non_empty, why = "a download needs a file")]
+    pub file: String,
+    #[ark(trim, non_empty, why = "a download needs a source")]
+    pub source: String,
+}
+
+/// How a download of a file is going: `downloading` and how far, or
+/// `failed` and why.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct DownloadProgress {
+    #[ark(trim)]
+    pub file: String,
+    #[ark(check = "crate::downloads::is_state", why = "a download is queued, downloading or failed")]
+    pub state: String,
+    pub bytes: i64,
+    pub total: i64,
+    #[ark(trim)]
+    pub error: String,
+}
+
+/// A file downloaded: it is on the server now.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Downloaded {
+    #[ark(trim)]
+    pub file: String,
+}
+
 /// One show, by its key, against a playlist as the library is read.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct ShowInput {
@@ -341,6 +413,38 @@ pub struct ShowsEntry {
     /// When its newest episode went out; 0 for "nobody said".
     pub newest_ms: i64,
     pub title: String,
+}
+
+/// A followed feed, as Settings and a show's page list them.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct SubscriptionsEntry {
+    pub added_ms: i64,
+    /// How many of its episodes are here.
+    pub episodes: i64,
+    /// Why the last read failed; empty when it did not.
+    pub error: String,
+    /// How many episodes the feed has, as the server last read it.
+    pub items: i64,
+    /// The newest this many are downloaded; 0 for every one.
+    pub keep: i64,
+    pub kind: String,
+    /// Its show's key, once a read has made the show; empty until then.
+    pub show_id: String,
+    /// Its show's title; empty until the server has read it.
+    pub title: String,
+    pub url: String,
+}
+
+/// A file the server has not got yet, as a list marks its row.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct DownloadsEntry {
+    pub bytes: i64,
+    pub error: String,
+    pub media_id: Id<Media>,
+    /// `queued`, `downloading` or `failed`.
+    pub state: String,
+    pub title: String,
+    pub total: i64,
 }
 
 /// What is true of a media row as an episode.

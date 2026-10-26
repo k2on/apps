@@ -26,25 +26,42 @@ crates'; what is here is what only harken has:
   a picture added, replaced or removed offers the tracks under its
   directory again; audio outside `music/` is not a track; a removed track
   is ignored (the log is permanent, and an unplugged disk looks the same).
+- **`sync.rs`** — what is downloaded into the library, from any source
+  of it: one engine under the catalogue and the feeds. A source is read
+  on a thread of its own and says what it is as plans — the mutations
+  that put it in the library and the files its rows name — and the
+  scanner authors each plan before any of its files is here: every row,
+  and every file not here queued (`library.queue_download`), so a client
+  lists a track or an episode at once, marked as not on the server yet.
+  Then the thread downloads them one at a time, each named by its URL's
+  hash, and says how each goes (`library.download_progress`:
+  `downloading` and how far, every two seconds at most, or `failed` and
+  why) until it is here (`library.downloaded`). A read asked while files
+  download stops after the file it is on and reads again; one that could
+  not have everything is read again ten minutes later, and twice as long
+  each time after, to six hours. Politely, as Wikimedia Commons asks:
+  saying who is asking, a pause between files, and a 429 or 503 waited
+  out as long as it says.
 - **`catalogue.rs`** — a catalogue imported (`HARKEN_CATALOGUE`, the URL
   of the JSON github.com/k2on/classical publishes at
-  `https://k2on.github.io/classical/catalogue.json`). At every full look —
-  at start, and when Settings' Resync asks for one — a thread of its own
-  fetches it and downloads what it names that is not here yet into
-  `DATA/catalogue/`, each file named by its URL's hash and served at
-  `/media/.catalogue/`; the scanner then authors the mutations
-  `harken_domain::catalogue` says it is, each only if it would change
-  something, so a sync of nothing new downloads and writes nothing. A file
-  that fails to download is left out until it does.
-- **`feeds.rs`** — podcasts and sermons followed by their RSS feeds
-  (`HARKEN_PODCASTS`, `HARKEN_SERMONS`: URLs apart by white space or
-  commas — a podcast host's, a church's, an Audiobookshelf library's). At
-  every full look and every hour, a thread of its own reads each feed and
-  downloads its newest `HARKEN_FEED_EPISODES` episodes (20 unless told; 0
-  for all) and its pictures into `DATA/feeds/`, named by their URLs'
-  hashes and served at `/media/.feeds/`; the scanner authors
-  `library.add_show` and then `library.add_episode` for each episode here,
-  each only if it would change something. A client plays the server's
+  `https://k2on.github.io/classical/catalogue.json`), a source of
+  `sync.rs`: read at every full look — at start, and when Settings'
+  Resync asks for one — its pictures downloaded as it is read, its
+  recordings into `DATA/catalogue/`, served at `/media/.catalogue/`. The
+  mutations `harken_domain::catalogue` says it is are each authored only
+  if they would change something, so a sync of nothing new writes nothing
+  but the tries again of what failed.
+- **`feeds.rs`** — podcasts and sermons followed by their RSS feeds, a
+  source of `sync.rs`. Which feeds is the log's: a `subscription` row
+  each, added from a client (`library.subscribe`, Settings) by an account
+  holding the `library` role. Every feed is read at every full look, every
+  hour, and whenever a subscription moves — one followed, or more of it
+  asked for (`library.fetch_older`) — and said as a plan: what was read
+  (`library.feed_read`, the show's title and how many episodes the feed
+  has, or why it could not be read), the show, and its newest episodes as
+  many as the subscription keeps (20 at first; 0 for every one), their
+  files into `DATA/feeds/`, served at `/media/.feeds/`. A plan of a feed
+  nobody follows any more is not authored. A client plays the server's
   copy, never the host's. A podcast or a series with no feed is a folder:
   `podcasts/<show>/` or `sermons/<show>/` under the media root, the show
   its folder's name and the cover in it (as a record's), each audio file

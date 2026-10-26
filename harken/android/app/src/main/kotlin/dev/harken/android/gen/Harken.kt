@@ -251,6 +251,42 @@ data class Device(val canPlay: Boolean, val id: String, val kind: String, val na
     }
 }
 
+/** The record `Download`. */
+data class Download(val mediaId: Id, val source: String, val state: String, val bytes: Long, val total: Long, val error: String, val askedMs: Long) {
+    fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"source\":" + J.q(source) + "," + "\"state\":" + J.q(state) + "," + "\"bytes\":" + bytes.toString() + "," + "\"total\":" + total.toString() + "," + "\"error\":" + J.q(error) + "," + "\"asked_ms\":" + askedMs.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): Download = (j as JSONObject).let { o -> Download(Id(J.text(o.opt("media_id"))), J.text(o.opt("source")), J.text(o.opt("state")), J.int(o.opt("bytes")), J.int(o.opt("total")), J.text(o.opt("error")), J.int(o.opt("asked_ms"))) }
+    }
+}
+
+/** The record `DownloadProgress`. */
+data class DownloadProgress(val file: String, val state: String, val bytes: Long, val total: Long, val error: String) {
+    fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"state\":" + J.q(state) + "," + "\"bytes\":" + bytes.toString() + "," + "\"total\":" + total.toString() + "," + "\"error\":" + J.q(error) + "}"
+
+    companion object {
+        fun of(j: Any?): DownloadProgress = (j as JSONObject).let { o -> DownloadProgress(J.text(o.opt("file")), J.text(o.opt("state")), J.int(o.opt("bytes")), J.int(o.opt("total")), J.text(o.opt("error"))) }
+    }
+}
+
+/** The record `Downloaded`. */
+data class Downloaded(val file: String) {
+    fun json(): String = "{" + "\"file\":" + J.q(file) + "}"
+
+    companion object {
+        fun of(j: Any?): Downloaded = (j as JSONObject).let { o -> Downloaded(J.text(o.opt("file"))) }
+    }
+}
+
+/** The record `DownloadsEntry`. */
+data class DownloadsEntry(val bytes: Long, val error: String, val mediaId: Id, val state: String, val title: String, val total: Long) {
+    fun json(): String = "{" + "\"bytes\":" + bytes.toString() + "," + "\"error\":" + J.q(error) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"state\":" + J.q(state) + "," + "\"title\":" + J.q(title) + "," + "\"total\":" + total.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): DownloadsEntry = (j as JSONObject).let { o -> DownloadsEntry(J.int(o.opt("bytes")), J.text(o.opt("error")), Id(J.text(o.opt("media_id"))), J.text(o.opt("state")), J.text(o.opt("title")), J.int(o.opt("total"))) }
+    }
+}
+
 /** The record `Enqueue`. */
 data class Enqueue(val next: Boolean, val tracks: List<Track>) {
     fun json(): String = "{" + "\"next\":" + next.toString() + "," + "\"tracks\":" + J.wlist(tracks) { v0 -> v0.json() } + "}"
@@ -284,6 +320,24 @@ data class Equip(val canVolume: Boolean, val family: String?, val muted: Boolean
 
     companion object {
         fun of(j: Any?): Equip = (j as JSONObject).let { o -> Equip(J.bool(o.opt("can_volume")), J.opt(o.opt("family")) { v0 -> J.text(v0) }, J.bool(o.opt("muted")), J.int(o.opt("volume"))) }
+    }
+}
+
+/** The record `FeedRead`. */
+data class FeedRead(val url: String, val title: String, val items: Long, val error: String) {
+    fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"title\":" + J.q(title) + "," + "\"items\":" + items.toString() + "," + "\"error\":" + J.q(error) + "}"
+
+    companion object {
+        fun of(j: Any?): FeedRead = (j as JSONObject).let { o -> FeedRead(J.text(o.opt("url")), J.text(o.opt("title")), J.int(o.opt("items")), J.text(o.opt("error"))) }
+    }
+}
+
+/** The record `FetchOlder`. */
+data class FetchOlder(val url: String, val more: Long) {
+    fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"more\":" + more.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): FetchOlder = (j as JSONObject).let { o -> FetchOlder(J.text(o.opt("url")), J.int(o.opt("more"))) }
     }
 }
 
@@ -629,6 +683,15 @@ data class Present(val canPlay: Boolean, val canVolume: Boolean, val family: Str
     }
 }
 
+/** The record `QueueDownload`. */
+data class QueueDownload(val file: String, val source: String) {
+    fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"source\":" + J.q(source) + "}"
+
+    companion object {
+        fun of(j: Any?): QueueDownload = (j as JSONObject).let { o -> QueueDownload(J.text(o.opt("file")), J.text(o.opt("source"))) }
+    }
+}
+
 /** The record `RecordPlay`. */
 data class RecordPlay(val track: Id, val title: String, val creator: String, val album: String, val durationMs: Long, val file: String, val from: String) {
     fun json(): String = "{" + "\"track\":" + J.q(track.hex) + "," + "\"title\":" + J.q(title) + "," + "\"creator\":" + J.q(creator) + "," + "\"album\":" + J.q(album) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"from\":" + J.q(from) + "}"
@@ -877,6 +940,33 @@ data class Start(val at: Long, val from: String, val position: Long, val queue: 
     }
 }
 
+/** The record `Subscribe`. */
+data class Subscribe(val kind: String, val url: String) {
+    fun json(): String = "{" + "\"kind\":" + J.q(kind) + "," + "\"url\":" + J.q(url) + "}"
+
+    companion object {
+        fun of(j: Any?): Subscribe = (j as JSONObject).let { o -> Subscribe(J.text(o.opt("kind")), J.text(o.opt("url"))) }
+    }
+}
+
+/** The record `Subscription`. */
+data class Subscription(val url: String, val kind: String, val keep: Long, val title: String, val items: Long, val error: String, val addedMs: Long, val userId: String) {
+    fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"kind\":" + J.q(kind) + "," + "\"keep\":" + keep.toString() + "," + "\"title\":" + J.q(title) + "," + "\"items\":" + items.toString() + "," + "\"error\":" + J.q(error) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+
+    companion object {
+        fun of(j: Any?): Subscription = (j as JSONObject).let { o -> Subscription(J.text(o.opt("url")), J.text(o.opt("kind")), J.int(o.opt("keep")), J.text(o.opt("title")), J.int(o.opt("items")), J.text(o.opt("error")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
+    }
+}
+
+/** The record `SubscriptionsEntry`. */
+data class SubscriptionsEntry(val addedMs: Long, val episodes: Long, val error: String, val items: Long, val keep: Long, val kind: String, val showId: String, val title: String, val url: String) {
+    fun json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"episodes\":" + episodes.toString() + "," + "\"error\":" + J.q(error) + "," + "\"items\":" + items.toString() + "," + "\"keep\":" + keep.toString() + "," + "\"kind\":" + J.q(kind) + "," + "\"show_id\":" + J.q(showId) + "," + "\"title\":" + J.q(title) + "," + "\"url\":" + J.q(url) + "}"
+
+    companion object {
+        fun of(j: Any?): SubscriptionsEntry = (j as JSONObject).let { o -> SubscriptionsEntry(J.int(o.opt("added_ms")), J.int(o.opt("episodes")), J.text(o.opt("error")), J.int(o.opt("items")), J.int(o.opt("keep")), J.text(o.opt("kind")), J.text(o.opt("show_id")), J.text(o.opt("title")), J.text(o.opt("url"))) }
+    }
+}
+
 /** The record `Track`. */
 data class Track(val album: String, val creator: String, val durationMs: Long, val file: String, val id: Id, val title: String) {
     fun json(): String = "{" + "\"album\":" + J.q(album) + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"title\":" + J.q(title) + "}"
@@ -901,6 +991,15 @@ data class Transfer(val to: String) {
 
     companion object {
         fun of(j: Any?): Transfer = (j as JSONObject).let { o -> Transfer(J.text(o.opt("to"))) }
+    }
+}
+
+/** The record `Unsubscribe`. */
+data class Unsubscribe(val url: String) {
+    fun json(): String = "{" + "\"url\":" + J.q(url) + "}"
+
+    companion object {
+        fun of(j: Any?): Unsubscribe = (j as JSONObject).let { o -> Unsubscribe(J.text(o.opt("url"))) }
     }
 }
 
@@ -993,14 +1092,32 @@ class Harken(val peer: Peer) {
     /** `library.describe_work`: its intent's id. */
     fun describeWork(input: DescribeWork): String = peer.mutate("library.describe_work", input.json())
 
+    /** `library.download_progress`: its intent's id. */
+    fun downloadProgress(input: DownloadProgress): String = peer.mutate("library.download_progress", input.json())
+
+    /** `library.downloaded`: its intent's id. */
+    fun downloaded(input: Downloaded): String = peer.mutate("library.downloaded", input.json())
+
+    /** `library.downloads`, kept. */
+    fun downloads(): View<DownloadsEntry> = View(peer.view("library.downloads", "null")) { j -> DownloadsEntry.of(j) }
+
     /** `library.episode_details`, kept. */
     fun episodeDetails(): View<EpisodeDetailsEntry> = View(peer.view("library.episode_details", "null")) { j -> EpisodeDetailsEntry.of(j) }
+
+    /** `library.feed_read`: its intent's id. */
+    fun feedRead(input: FeedRead): String = peer.mutate("library.feed_read", input.json())
+
+    /** `library.fetch_older`: its intent's id. */
+    fun fetchOlder(input: FetchOlder): String = peer.mutate("library.fetch_older", input.json())
 
     /** `library.library`, kept, its rows UniFFI's. */
     fun library(input: Library): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.library", input.json()))
 
     /** `library.look`: its intent's id. */
     fun look(input: LookAt): String = peer.mutate("library.look", input.json())
+
+    /** `library.queue_download`: its intent's id. */
+    fun queueDownload(input: QueueDownload): String = peer.mutate("library.queue_download", input.json())
 
     /** `library.recording`, kept, its rows UniFFI's. */
     fun recording(input: RecordingInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.recording", input.json()))
@@ -1020,8 +1137,17 @@ class Harken(val peer: Peer) {
     /** `library.shows`, kept. */
     fun shows(): View<ShowsEntry> = View(peer.view("library.shows", "null")) { j -> ShowsEntry.of(j) }
 
+    /** `library.subscribe`: its intent's id. */
+    fun subscribe(input: Subscribe): String = peer.mutate("library.subscribe", input.json())
+
+    /** `library.subscriptions`, kept. */
+    fun subscriptions(): View<SubscriptionsEntry> = View(peer.view("library.subscriptions", "null")) { j -> SubscriptionsEntry.of(j) }
+
     /** `library.track_details`, kept. */
     fun trackDetails(): View<TrackDetailsEntry> = View(peer.view("library.track_details", "null")) { j -> TrackDetailsEntry.of(j) }
+
+    /** `library.unsubscribe`: its intent's id. */
+    fun unsubscribe(input: Unsubscribe): String = peer.mutate("library.unsubscribe", input.json())
 
     /** `library.work`, kept. */
     fun work(input: WorkInput): View<WorkSummary> = View(peer.view("library.work", input.json())) { j -> WorkSummary.of(j) }

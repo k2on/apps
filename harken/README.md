@@ -12,7 +12,9 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            types.rs, keys.rs, library.rs, browse.rs, playlists.rs;
            listening.rs, queue.rs, devices.rs and groups.rs, the listening
            session as volatile tables (never the log); plays.rs (the log);
-           shows.rs, the podcasts and sermons; host.rs, what an app knows
+           shows.rs, the podcasts and sermons and the feeds followed;
+           downloads.rs, what the server has a row for and not yet the
+           file; host.rs, what an app knows
            of it beside its functions
 server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
            bridge, sign-in, /media, the web build;
@@ -96,23 +98,32 @@ episode as they take a song, and the music's lists — `library`,
 `artists`, an artist's songs — leave it out; `shows` lists the shows and
 `show` one show's episodes, newest first.
 
-They come from two places, and either is the server's to download:
+They come from two places:
 
 - **A feed** — any RSS with audio enclosures: a podcast host's, a
-  church's, an Audiobookshelf library's. `HARKEN_PODCASTS` and
-  `HARKEN_SERMONS` (`services.harken.podcasts` and `.sermons`) name them;
-  the server reads each at boot, at every rescan and every hour, and
-  downloads its newest `HARKEN_FEED_EPISODES` (20 unless told; 0 for all)
-  into its data directory, served at `/media/.feeds/`. Every client plays
-  the server's copy, so an episode the host takes down still plays.
+  church's, an Audiobookshelf library's. Which feeds is the library's, in
+  its log: a `subscription` each (`library.subscribe`), followed from a
+  client's Settings by an account holding the `library` role
+  (`services.harken.roles`). The server reads each at boot, at every
+  rescan, every hour and whenever one is followed, and puts its newest
+  twenty episodes in the library; a show's page fetches older ones
+  (`library.fetch_older`, twenty more or every one), and Unfollow takes
+  the feed, its show and its episodes out (`library.unsubscribe`). Every
+  client plays the server's copy, so an episode the host takes down still
+  plays.
 - **A folder** — `podcasts/<show>/` or `sermons/<show>/` beside `music/`
   in the media directory: the show is the folder's name and the cover in
   it, each audio file an episode.
 
-    HARKEN_MEDIA=$PWD/media \
-    HARKEN_PODCASTS=https://feeds.transistor.fm/full-time-nix \
-    HARKEN_SERMONS=https://podcast.gospelinlife.com/feed.xml \
-      nix run .#harken-serve
+**What is downloaded is listed before it is here** (`domain/src/downloads.rs`,
+`server/src/sync.rs`): an episode of a feed, a recording of the
+catalogue, is in the library as soon as the server has read it, with a
+`download` beside it — queued, then downloading and how far, or failed and
+why — which goes once its file is on the server. A list draws that in
+place of its length, and a show's page says how many of its episodes are
+not on the server yet.
+
+    HARKEN_MEDIA=$PWD/media nix run .#harken-serve
 
 The desktop and the browser have **Podcasts** and **Sermons** under a
 Shows heading, each a line only when there is a show of its kind; the
@@ -461,5 +472,7 @@ documentation. A speaker's plays are not recorded, since the bridge is not
 a peer of the account.
 No running server has followed a real feed: the RSS reader has read Gospel
 in Life's and Full Time Nix's feeds as they were when it was written, and
-the downloads are held against a stand-in host on loopback
-(`server/tests/library.rs`); an Audiobookshelf feed has not been tried.
+following one from a client, its downloads and a failed one tried again
+are held against a stand-in host on loopback (`server/tests/library.rs`);
+an Audiobookshelf feed has not been tried, and no download's progress
+has been watched on a real file large enough to say it.
