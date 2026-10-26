@@ -434,7 +434,7 @@ impl App {
             .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
             .style(style::bars)
             .height(Length::Fill);
-        match status {
+        match status && self.says_status() {
             true => column![page, container(self.view_status()).padding([0.0, GUTTER])]
                 .spacing(10)
                 .width(Length::Fill)
@@ -1277,17 +1277,17 @@ impl App {
         if self.debug {
             return main.push(self.view_debug()).push(self.view_status()).into();
         }
-        main.push(head)
-            .push(rule::horizontal(1))
-            .push(
-                scrollable(rows)
-                    .id(TRACKS)
-                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-                    .style(style::bars)
-                    .height(Length::Fill),
-            )
-            .push(self.view_status())
-            .into()
+        let main = main.push(head).push(rule::horizontal(1)).push(
+            scrollable(rows)
+                .id(TRACKS)
+                .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                .style(style::bars)
+                .height(Length::Fill),
+        );
+        match self.says_status() {
+            true => main.push(self.view_status()).into(),
+            false => main.into(),
+        }
     }
 
     /// The top of the page, on every page: joining a server while this
@@ -1326,13 +1326,18 @@ impl App {
     /// **All of it only under `D`** (and `?`). Otherwise only what somebody needs to
     /// see as they type: the last thing worth saying, and what is half-typed
     /// — a count, a `g`, a search — and nothing at all when there is neither.
+    /// Whether the status line has anything to say: a note, keys half
+    /// typed, or the debug view or the keymap, which keep it whole. When it
+    /// has not, a page leaves it no room at all — not even the gap above it.
+    fn says_status(&self) -> bool {
+        let typing = !self.keys.pending().is_empty() || matches!(self.keys.mode(), arkui::vim::Mode::Search(_));
+        self.debug || self.help || !self.note.is_empty() || typing
+    }
+
     fn view_status(&self) -> Element<'_, Message> {
         let p = &self.peer;
-        let typing = !self.keys.pending().is_empty() || matches!(self.keys.mode(), arkui::vim::Mode::Search(_));
-        // The keymap keeps it whole too: which pane has the cursor is what
-        // somebody reading it is trying to work out.
         let whole = self.debug || self.help;
-        if !whole && self.note.is_empty() && !typing {
+        if !self.says_status() {
             return iced::widget::Space::new().height(Length::Fixed(0.0)).into();
         }
         let mut line = format!(
