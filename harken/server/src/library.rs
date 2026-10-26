@@ -675,8 +675,11 @@ fn import(peer: &mut ark_peer::Peer, fetched: &crate::catalogue::Fetched) -> usi
         .catalogue
         .calls(|url| fetched.here.get(url).cloned())
     {
-        if !would_change(peer, call.name, &call.input) {
-            continue;
+        match would(peer, call.name, &call.input) {
+            Would::Nothing => continue,
+            // A describe of a work this library has not got.
+            Would::Refuse if call.if_there => continue,
+            Would::Change | Would::Refuse => {}
         }
         match peer.mutate_bytes(call.name, call.input) {
             Ok(_) => authored += 1,
@@ -694,16 +697,31 @@ fn import(peer: &mut ark_peer::Peer, fetched: &crate::catalogue::Fetched) -> usi
 /// procedure does with an entry saying nothing new is write nothing, so
 /// not authoring one is the same library with one entry fewer in the log.
 fn would_change(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> bool {
+    !matches!(would(peer, name, input), Would::Nothing)
+}
+
+/// What an entry would do over what the replica holds.
+enum Would {
+    Change,
+    Nothing,
+    Refuse,
+}
+
+fn would(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> Would {
     let me = &peer.log.me;
     let ctx = Ctx {
         id: peer.log.next_id(),
         ..Ctx::new(me, ark_peer::now_ms())
     };
     let Some(f) = peer.domain().get(name).and_then(|f| f.proc.clone()) else {
-        return true;
+        return Would::Change;
     };
     let mut store = peer.log.store.clone();
-    !matches!(f.apply(&mut store, &ctx, input), Ok(changes) if changes.is_empty())
+    match f.apply(&mut store, &ctx, input) {
+        Ok(changes) if changes.is_empty() => Would::Nothing,
+        Ok(_) => Would::Change,
+        Err(_) => Would::Refuse,
+    }
 }
 
 /// Every file under `dir`. A directory that cannot be read is skipped rather

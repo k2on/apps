@@ -188,9 +188,13 @@ pub fn seeded_disk(copies: usize) -> Memory {
     let mut seed = Seeder::new();
     // People, then tracks, then what a track could not carry, copy by copy:
     // the order `Catalogue::calls` gives. The demo has every file it names:
-    // they are URLs, played from where they are.
+    // they are URLs, played from where they are. What it describes that
+    // only a library of its own would have (`Call::if_there`) is not here.
     for k in 0..copies {
         for call in copy_of(catalogue(), k).calls(|url| Some(url.to_string())) {
+            if call.if_there {
+                continue;
+            }
             seed.apply(&call.what, call.name, &call.input);
         }
     }

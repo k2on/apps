@@ -102,6 +102,9 @@ pub struct Call {
     pub name: &'static str,
     pub what: String,
     pub input: Vec<u8>,
+    /// Of a row the catalogue's own tracks do not make, which the library
+    /// may or may not have: a refusal is "not here", and says nothing.
+    pub if_there: bool,
 }
 
 impl Call {
@@ -110,6 +113,7 @@ impl Call {
             name,
             what: what.to_string(),
             input: input.to_bytes(),
+            if_there: false,
         }
     }
 }
@@ -193,11 +197,18 @@ impl Catalogue {
             }
         }
         for w in &self.works {
-            // A work the catalogue describes and none of whose tracks are
-            // here is not a work in this library: `describe_work` refuses it.
-            let Some(id) = work_ids.get(w.catalogue.as_str()) else { continue };
+            // A work none of whose tracks are here may still be one of the
+            // library's own — a file whose `WORK` tag ends in the same
+            // catalogue number is keyed the same — so it is described if
+            // it is there (`Call::if_there`). Without a number, a key by
+            // title would match nothing reliably.
+            let (id, if_there) = match work_ids.get(w.catalogue.as_str()) {
+                Some(id) => (id.clone(), false),
+                None if !w.catalogue.is_empty() => (work_key(&w.composer, &w.catalogue, &w.title), true),
+                None => continue,
+            };
             let work = DescribeWork {
-                id: id.clone(),
+                id,
                 key_sig: w.key_sig.clone(),
                 form: w.form.clone(),
                 period: w.period.clone(),
@@ -205,7 +216,10 @@ impl Catalogue {
                 description: w.description.clone(),
                 ..DescribeWork::default()
             };
-            calls.push(Call::of("library.describe_work", &w.title, &work));
+            calls.push(Call {
+                if_there,
+                ..Call::of("library.describe_work", &w.title, &work)
+            });
         }
         for (id, (performer, licence)) in &takes {
             if !licence.is_empty() {
@@ -228,5 +242,36 @@ impl Catalogue {
             }
         }
         calls
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Falsified by a numbered work with no track here going undescribed,
+    /// or keyed otherwise than a file whose `WORK` tag ends in its number:
+    /// the library's own recording would never get its description; and by
+    /// one that has tracks here being described only if there.
+    #[test]
+    fn a_work_without_its_tracks_is_described_if_the_library_has_it() {
+        let catalogue = Catalogue::parse(
+            r#"{ "works": [
+                { "composer": "Georg Philipp Telemann", "catalogue": "TWV 55:e1", "title": "Tafelmusik I: Ouverture-Suite in E minor" },
+                { "composer": "Georg Philipp Telemann", "title": "Untitled" },
+                { "composer": "Antonio Vivaldi", "catalogue": "RV 269", "title": "Spring" } ],
+              "albums": [{ "name": "Seasons", "tracks": [
+                { "title": "I. Allegro", "composer": "Antonio Vivaldi", "catalogue": "RV 269", "ms": 1, "file": "spring.mp3" } ] }] }"#,
+        )
+        .unwrap();
+        let describes: Vec<(String, bool)> = catalogue
+            .calls(|u| Some(u.to_string()))
+            .into_iter()
+            .filter(|c| c.name == "library.describe_work")
+            .map(|c| (DescribeWork::from_bytes(&c.input).unwrap().id, c.if_there))
+            .collect();
+        let tagged = crate::host::work_key("Georg Philipp Telemann", "TWV 55:e1", "Tafelmusik I: Ouverture-Suite in E minor");
+        let spring = crate::host::work_key("Antonio Vivaldi", "RV 269", "Spring");
+        assert_eq!(describes, [(tagged, true), (spring, false)]);
     }
 }
