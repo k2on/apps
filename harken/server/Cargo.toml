@@ -50,6 +50,9 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 # same ureq ark-auth talks to an identity provider with.
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 serde_json = { workspace = true }
+# A podcast's or a church's RSS (`feeds.rs`): the same reader the iced
+# client's pictures are already parsed with.
+roxmltree = "0.20"
 
 [dev-dependencies]
 # The simulator, for a log written before the server starts.

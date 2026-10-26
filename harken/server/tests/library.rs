@@ -163,6 +163,7 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
         dir,
         login,
         None,
+        Default::default(),
     )
     .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1_200));
@@ -800,4 +801,215 @@ fn an_artist_takes_a_backdrop_from_beside_their_picture() {
         )
     );
     rt.block_on(server.stop());
+}
+
+/// A folder under `podcasts/` or `sermons/` is a show, named for it and
+/// pictured by the cover in it, and each audio file in it an episode of
+/// it: a media row of its kind, which the music leaves out. A file loose in
+/// `podcasts/` is nobody's show.
+#[test]
+fn a_folder_of_episodes_is_a_show() {
+    use harken_server::domain::{Episode, Show};
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    wav(&media.join("music/Bach/air.wav"), 2_000);
+    wav(
+        &media.join("podcasts/Full Time Nix/nix-freaks-51.wav"),
+        1_000,
+    );
+    wav(
+        &media.join("podcasts/Full Time Nix/nix-freaks-50.wav"),
+        1_000,
+    );
+    std::fs::write(media.join("podcasts/Full Time Nix/cover.jpg"), b"a picture").unwrap();
+    wav(
+        &media.join("sermons/Gospel in Life/the-dream-of-the-kingdom.wav"),
+        3_000,
+    );
+    wav(&media.join("podcasts/loose.wav"), 1_000);
+
+    let server = serve(&rt, &data, |c| c.media = Some(media.clone()));
+    let found = settle(&server, 4);
+    assert_eq!(found.len(), 4, "{found:?}");
+    let mut shows = hub_rows::<Show>(&server, "show");
+    shows.sort_by(|a, b| a.id.cmp(&b.id));
+    let said: Vec<(&str, &str, &str, &str)> = shows
+        .iter()
+        .map(|s| {
+            (
+                s.id.as_str(),
+                s.kind.as_str(),
+                s.title.as_str(),
+                // A cover is spelt versioned (`.cover/<print>/…`), as a
+                // record's is.
+                s.art.split_once("/podcasts/").map_or("", |(_, a)| a),
+            )
+        })
+        .collect();
+    assert_eq!(
+        said,
+        [
+            (
+                "podcast/full-time-nix",
+                "podcast",
+                "Full Time Nix",
+                "Full Time Nix/cover.jpg"
+            ),
+            ("sermon/gospel-in-life", "sermon", "Gospel in Life", ""),
+        ]
+    );
+    let media_rows = hub_rows::<Media>(&server, "media");
+    let kind_of = |file: &str| {
+        media_rows
+            .iter()
+            .find(|m| m.file == file)
+            .map(|m| (m.kind.clone(), m.creator.clone()))
+    };
+    assert_eq!(
+        kind_of("sermons/Gospel in Life/the-dream-of-the-kingdom.wav"),
+        Some(("sermon".into(), "Gospel in Life".into()))
+    );
+    assert_eq!(
+        kind_of("music/Bach/air.wav").map(|k| k.0),
+        Some("song".into())
+    );
+    let episodes = hub_rows::<Episode>(&server, "episode");
+    assert_eq!(episodes.len(), 3);
+    assert_eq!(
+        episodes
+            .iter()
+            .filter(|e| e.show_id == "podcast/full-time-nix")
+            .count(),
+        2
+    );
+    let rescan = head(&server);
+    server.scanner.as_ref().unwrap().rescan();
+    std::thread::sleep(std::time::Duration::from_millis(1_200));
+    assert_eq!(
+        head(&server),
+        rescan,
+        "a rescan of nothing new authors nothing"
+    );
+}
+
+/// A stand-in host on loopback answering every GET with what `answer`
+/// says for its path: the body, or 404.
+fn host(answer: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static) -> String {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            let _ = reader.read_line(&mut first);
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
+            let mut stream = stream;
+            let _ = match answer(&path) {
+                Some(body) => stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .and_then(|_| stream.write_all(&body)),
+                None => stream.write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                ),
+            };
+        }
+    });
+    format!("http://{addr}")
+}
+
+/// A feed followed is a show, its newest episodes downloaded into the
+/// data directory and served at `/media/.feeds/`, where the log says they
+/// are; the oldest past what the server keeps are not.
+#[test]
+fn a_feed_followed_is_downloaded_and_a_show() {
+    use harken_server::domain::{Episode, Show};
+    let rt = runtime();
+    let root = tempfile::tempdir().unwrap();
+    let (media, data) = (root.path().join("media"), root.path().join("data"));
+    std::fs::create_dir_all(&media).unwrap();
+    let audio = root.path().join("episode.wav");
+    wav(&audio, 1_000);
+    let bytes = std::fs::read(&audio).unwrap();
+    let base = std::sync::Arc::new(std::sync::OnceLock::<String>::new());
+    let (at, served_bytes) = (base.clone(), bytes.clone());
+    let url = host(move |path| {
+        let base = at.get().cloned().unwrap_or_default();
+        match path {
+            "/feed.xml" => Some(
+                format!(
+                    r#"<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+                    <title>Gospel in Life</title><itunes:author>Tim Keller</itunes:author>
+                    <item><title>Living Grace</title><guid>2</guid><pubDate>Wed, 21 Oct 2026 10:00:00 +0000</pubDate>
+                      <itunes:duration>47:04</itunes:duration><enclosure url="{base}/2.wav" type="audio/wav"/></item>
+                    <item><title>The Dream of the Kingdom</title><guid>3</guid><pubDate>Mon, 26 Oct 2026 10:00:00 +0000</pubDate>
+                      <enclosure url="{base}/3.wav" type="audio/wav"/></item>
+                    <item><title>Too Old</title><guid>1</guid><pubDate>Mon, 19 Oct 2026 10:00:00 +0000</pubDate>
+                      <enclosure url="{base}/1.wav" type="audio/wav"/></item>
+                    </channel></rss>"#
+                )
+                .into_bytes(),
+            ),
+            "/1.wav" | "/2.wav" | "/3.wav" => Some(served_bytes.clone()),
+            _ => None,
+        }
+    });
+    base.set(url.clone()).unwrap();
+    let server = serve(&rt, &data, |c| {
+        c.media = Some(media.clone());
+        c.feeds =
+            harken_server::feeds::Feeds::of(None, Some(&format!("{url}/feed.xml")), Some("2"))
+                .unwrap();
+    });
+    let found = settle(&server, 2);
+    let titles: Vec<&str> = found.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(titles.len(), 2, "{found:?}");
+    assert!(titles.contains(&"The Dream of the Kingdom") && titles.contains(&"Living Grace"));
+    assert!(found
+        .iter()
+        .all(|(_, f)| f.starts_with(".feeds/") && f.ends_with(".wav")));
+    let shows = hub_rows::<Show>(&server, "show");
+    assert_eq!(shows.len(), 1);
+    assert_eq!(
+        (
+            shows[0].id.as_str(),
+            shows[0].author.as_str(),
+            shows[0].feed.as_str()
+        ),
+        (
+            "sermon/gospel-in-life",
+            "Tim Keller",
+            format!("{url}/feed.xml").as_str()
+        )
+    );
+    let episodes = hub_rows::<Episode>(&server, "episode");
+    let grace = episodes.iter().find(|e| e.guid == "2").unwrap();
+    assert_eq!(grace.source, format!("{url}/2.wav"));
+    let file = &found.iter().find(|(t, _)| t == "Living Grace").unwrap().1;
+    let media_rows = hub_rows::<Media>(&server, "media");
+    assert_eq!(
+        media_rows
+            .iter()
+            .find(|m| &m.file == file)
+            .unwrap()
+            .duration_ms,
+        2_824_000
+    );
+    let served = ureq::get(&format!("{}/media/{file}", server.url()))
+        .call()
+        .unwrap();
+    let mut got = vec![];
+    std::io::Read::read_to_end(&mut served.into_reader(), &mut got).unwrap();
+    assert_eq!(got, bytes, "the episode is served from the server's copy");
 }

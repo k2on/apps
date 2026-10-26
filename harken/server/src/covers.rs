@@ -65,13 +65,18 @@ const BACKDROP: &[&str] = &["backdrop", "fanart"];
 /// `/media`: the media root; [`ART`] under it from `art`; and [`COVER`]
 /// under it from the media root again, its version segment dropped. A
 /// catalogue's downloads (`crate::catalogue`) are under
-/// `crate::catalogue::DIR`, from `catalogue`. The
+/// `crate::catalogue::DIR`, from `catalogue`, and a feed's
+/// (`crate::feeds`) under `crate::feeds::DIR`, from `feeds`. The
 /// reserved prefixes are matched before the root, and nothing but [`ART`]
 /// is asked of the data directory. `ServeDir` refuses a `..` in each,
 /// decoded or not, and guesses the type from the extension — which is what
 /// a picture extracted under its hash is named with.
-pub fn routes(media: &Path, art: &Path, catalogue: &Path) -> Router {
+pub fn routes(media: &Path, art: &Path, catalogue: &Path, feeds: &Path) -> Router {
     Router::new()
+        .nest_service(
+            &format!("/media/{}", crate::feeds::DIR),
+            ServeDir::new(feeds),
+        )
         .nest_service(
             &format!("/media/{}", crate::catalogue::DIR),
             ServeDir::new(catalogue),
@@ -235,6 +240,12 @@ impl Covers {
             .iter()
             .find_map(|n| images.iter().find(|p| stem(p) == *n))
             .and_then(|p| self.image(p))
+    }
+
+    /// A show's picture, in its folder (`podcasts/<show>/`): by name, then
+    /// the only picture there, as a record's cover is.
+    pub fn show_cover(&mut self, dir: &Path) -> Option<Image> {
+        self.cover_in(dir)
     }
 
     /// A record's cover in `dir`: by name, then the only picture there that

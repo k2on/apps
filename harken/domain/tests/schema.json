@@ -145,6 +145,16 @@
           "name": "user_id",
           "ty": "Text",
           "default": null
+        },
+        {
+          "name": "banner",
+          "ty": "Text",
+          "default": ""
+        },
+        {
+          "name": "description",
+          "ty": "Text",
+          "default": ""
         }
       ],
       "key": 1,
@@ -214,6 +224,11 @@
           "name": "user_id",
           "ty": "Text",
           "default": null
+        },
+        {
+          "name": "description",
+          "ty": "Text",
+          "default": ""
         }
       ],
       "key": 1,
@@ -946,6 +961,11 @@
             "List": "Text"
           },
           "default": null
+        },
+        {
+          "name": "picture",
+          "ty": "Text",
+          "default": ""
         }
       ],
       "key": 1,
@@ -1073,6 +1093,137 @@
       "key": 1,
       "indexes": [],
       "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "show",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "kind",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "title",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "author",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "description",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "art",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "feed",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "link",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "added_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "episode",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "show_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "guid",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "published_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "description",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "source",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "art",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "season",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "number",
+          "ty": "Int",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            1
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        },
+        {
+          "column": 1,
+          "table": "show"
+        }
+      ],
       "space": "durable"
     }
   ]

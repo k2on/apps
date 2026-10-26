@@ -112,3 +112,9 @@ pub fn credited_as(work: Option<&str>, artist: &str, performer: &str) -> String 
 pub fn movement_id(work: Option<&str>, movement_no: i64, track: i64) -> Option<String> {
     work.map(|key| movement_key(key, if movement_no == 0 { track } else { movement_no }))
 }
+
+/// The key of a show: its kind and its title, so `#show/podcast/full-time-nix`
+/// reads as what it is, and a feed and a folder of one title are one show.
+pub fn show_key(kind: &str, title: &str) -> String {
+    format!("{kind}/{}", key_part(title))
+}

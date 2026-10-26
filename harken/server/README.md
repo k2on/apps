@@ -36,6 +36,21 @@ crates'; what is here is what only harken has:
   `harken_domain::catalogue` says it is, each only if it would change
   something, so a sync of nothing new downloads and writes nothing. A file
   that fails to download is left out until it does.
+- **`feeds.rs`** — podcasts and sermons followed by their RSS feeds
+  (`HARKEN_PODCASTS`, `HARKEN_SERMONS`: URLs apart by white space or
+  commas — a podcast host's, a church's, an Audiobookshelf library's). At
+  every full look and every hour, a thread of its own reads each feed and
+  downloads its newest `HARKEN_FEED_EPISODES` episodes (20 unless told; 0
+  for all) and its pictures into `DATA/feeds/`, named by their URLs'
+  hashes and served at `/media/.feeds/`; the scanner authors
+  `library.add_show` and then `library.add_episode` for each episode here,
+  each only if it would change something. A client plays the server's
+  copy, never the host's. A podcast or a series with no feed is a folder:
+  `podcasts/<show>/` or `sermons/<show>/` under the media root, the show
+  its folder's name and the cover in it (as a record's), each audio file
+  an episode, its title its tag or its file's name. A file loose in
+  `podcasts/` is nobody's show. An episode is a `media` row of its show's
+  kind beside an `episode` row, so the music's lists leave it out.
 - **`covers.rs`** — where a cover comes from, in this order, per track:
   1. a picture beside it: `cover`, `folder`, `front` or `album` (`.jpg`,
      `.jpeg`, `.png`, `.webp`, any case), else the only picture in the

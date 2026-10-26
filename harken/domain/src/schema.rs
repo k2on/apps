@@ -227,6 +227,52 @@ pub struct Look {
     pub state: Job<Looked>,
 }
 
+// The shows: a podcast or a series of sermons, and what only an episode of
+// one has. An episode is a `media` row like a song — its kind the show's —
+// so a playlist, the queue, a play and `/media` take it as they take a song.
+
+/// A podcast or a series of sermons: a feed the server follows, or a
+/// folder of episodes. Keyed by its kind and its title (`keys::show_key`).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct Show {
+    #[ark(key)]
+    pub id: String,
+    /// `podcast` or `sermon`.
+    pub kind: String,
+    pub title: String,
+    /// Who makes it: a host, a preacher, a church.
+    pub author: String,
+    pub description: String,
+    pub art: String,
+    /// The RSS feed it is read from; empty for a folder of files.
+    pub feed: String,
+    /// Its own page on the web.
+    pub link: String,
+    pub added_ms: i64,
+    pub user_id: String,
+}
+
+/// What only an episode has.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(show_id))]
+pub struct Episode {
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    #[ark(refs(Show))]
+    pub show_id: String,
+    /// The feed's id for it, where it came from one.
+    pub guid: String,
+    /// When it went out: 0 for "nobody said".
+    pub published_ms: i64,
+    pub description: String,
+    /// Where it was downloaded from; empty for a file that was always here.
+    pub source: String,
+    /// Its own picture, where it has one other than its show's.
+    pub art: String,
+    pub season: i64,
+    pub number: i64,
+}
+
 /// harken's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Harken {
@@ -247,6 +293,8 @@ pub struct Harken {
     pub sign_in: ark_auth::SignIn,
     pub role: ark_auth::Role,
     pub look: Look,
+    pub show: Show,
+    pub episode: Episode,
 }
 
 ark_auth::install!(Harken);

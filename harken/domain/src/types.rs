@@ -181,6 +181,56 @@ pub struct RecordingInput {
     pub id: String,
 }
 
+/// A show: a podcast or a series of sermons, as the server reads it off a
+/// feed or a folder. Said again with nothing new, it writes nothing.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct AddShow {
+    #[ark(check = "crate::shows::is_kind", why = "a show is a podcast or a sermon")]
+    pub kind: String,
+    #[ark(trim, non_empty, why = "a show needs a title")]
+    pub title: String,
+    #[ark(trim)]
+    pub author: String,
+    #[ark(trim)]
+    pub description: String,
+    #[ark(trim)]
+    pub art: String,
+    #[ark(trim)]
+    pub feed: String,
+    #[ark(trim)]
+    pub link: String,
+}
+
+/// One episode of a show, its file here: an upsert by `file`, as a song is.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct AddEpisode {
+    /// The show's key (`keys::show_key`).
+    pub show: String,
+    #[ark(trim, non_empty, why = "an episode needs a title")]
+    pub title: String,
+    pub duration_ms: i64,
+    #[ark(trim, non_empty, why = "an episode needs a file")]
+    pub file: String,
+    #[ark(trim)]
+    pub guid: String,
+    pub published_ms: i64,
+    #[ark(trim)]
+    pub description: String,
+    #[ark(trim)]
+    pub source: String,
+    #[ark(trim)]
+    pub art: String,
+    pub season: i64,
+    pub number: i64,
+}
+
+/// One show, by its key, against a playlist as the library is read.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ShowInput {
+    pub playlist_id: Id<Playlist>,
+    pub id: String,
+}
+
 // * What the library's queries answer
 
 /// Something playable as a list renders it, and where it sits on the
@@ -275,6 +325,35 @@ pub struct WorkSummary {
     pub recordings: i64,
     pub title: String,
     pub tracks: i64,
+}
+
+/// A podcast or a series of sermons, as the shows pages list them.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ShowsEntry {
+    pub art: String,
+    pub author: String,
+    pub description: String,
+    pub episodes: i64,
+    pub feed: String,
+    pub id: String,
+    pub kind: String,
+    pub link: String,
+    /// When its newest episode went out; 0 for "nobody said".
+    pub newest_ms: i64,
+    pub title: String,
+}
+
+/// What is true of a media row as an episode.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct EpisodeDetailsEntry {
+    pub art: String,
+    pub description: String,
+    pub media_id: Id<Media>,
+    pub number: i64,
+    pub published_ms: i64,
+    pub season: i64,
+    pub show: String,
+    pub show_id: String,
 }
 
 /// One performance, as a work's page lists them.

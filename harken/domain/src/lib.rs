@@ -26,6 +26,7 @@ pub mod playlists;
 pub mod plays;
 pub mod queue;
 pub mod schema;
+pub mod shows;
 pub mod types;
 
 #[cfg(feature = "ffi")]
@@ -61,7 +62,8 @@ pub fn domain() -> Domain {
         devices::equip, devices::set_volume, devices::nudge_volume, devices::set_mute, devices::report_volume,
         devices::scrub, devices::on_join, devices::on_leave, devices::on_restore,
         groups::join, groups::unjoin, groups::report_group, groups::set_group_volume, groups::nudge_group_volume,
-        groups::set_group_mute, feed)
+        groups::set_group_mute, shows::add_show, shows::add_episode, shows::shows, shows::show,
+        shows::episode_details, feed)
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
 }
@@ -85,7 +87,9 @@ pub fn feed() -> Scope<Harken> {
             .on::<Song>(all)
             .on::<Playlist>(all)
             .on::<PlaylistItem>(all)
-            .on::<Play>(all),
+            .on::<Play>(all)
+            .on::<Show>(all)
+            .on::<Episode>(all),
     )
 }
 

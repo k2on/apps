@@ -10,12 +10,14 @@ use crate::types::*;
 /// A plan over harken's tables.
 pub type Plan<T> = ark::plan::Plan<Harken, T>;
 
-/// The whole library in the order things were added, each with where it
-/// sits on one playlist.
+/// The music: every song in the order it was added, each with where it
+/// sits on one playlist. An episode of a show is on its show's page
+/// (`shows.rs`), not here.
 #[view("library.library")]
 pub fn library(_: &Ctx, _: &Db<Harken>, input: Library) -> Result<Plan<LibraryEntry>, Refusal> {
     let on = input.playlist_id;
     Ok(scan::<Harken, Media>()
+        .filter(|m| m.kind == "song")
         .sort(|m| m.pos)
         .map_with(move |db, m| library_entry(m, playlist_pos(db, on, m.id))))
 }
@@ -62,11 +64,11 @@ pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refus
         }))
 }
 
-/// Everyone who made something in the library, by name, with the picture
-/// `person` has for the name.
+/// Everyone who made a song in the library, by name, with the picture
+/// `person` has for the name. A show is not a person.
 #[view("library.artists")]
 pub fn artists(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ArtistsEntry>, Refusal> {
-    Ok(scan::<Harken, Media>().group(
+    Ok(scan::<Harken, Media>().filter(|m| m.kind == "song").group(
         |m| m.creator.clone(),
         |db, name, tracks| {
             let p = db.person.get(name).unwrap_or_default();
@@ -126,7 +128,7 @@ pub fn album(_: &Ctx, _: &Db<Harken>, input: AlbumInput) -> Result<Plan<LibraryE
 pub fn artist(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntry>, Refusal> {
     let (on, name) = (input.playlist_id, input.name);
     Ok(scan::<Harken, Media>()
-        .filter(move |m| m.creator == name)
+        .filter(move |m| m.kind == "song" && m.creator == name)
         .sort(|m| m.pos)
         .map_with(move |db, m| library_entry(m, playlist_pos(db, on, m.id))))
 }

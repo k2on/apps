@@ -51,7 +51,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::domain::{AddSong, Look, LookAt, Looked};
+use crate::domain::{AddEpisode, AddShow, AddSong, Look, LookAt, Looked};
 use anyhow::{Context, Result};
 use ark::format::Encode;
 use ark::peer::{Ctx, Who};
@@ -80,6 +80,12 @@ pub const AUDIO: &[&str] = &[
 /// subdirectory is not a track however much it sounds like one.
 pub const MUSIC: &str = "music";
 
+/// Where podcasts and sermons live under the media root, beside `music/`:
+/// a folder per show (`podcasts/Full Time Nix/…`), the show its name, an
+/// episode each audio file in it. A show followed by its feed is
+/// downloaded into the data directory instead (`feeds.rs`).
+pub const SHOWS: &[(&str, &str)] = &[("podcasts", "podcast"), ("sermons", "sermon")];
+
 /// The account a scanned track is authored as. A real name would be a lie —
 /// nobody added these by hand — and it shows up as the `user_id` on every
 /// scanned row, which is the truth: the library put it there.
@@ -87,6 +93,10 @@ pub const ACCOUNT: &str = "library";
 
 /// The mutation a file is offered as.
 const ADD_SONG: &str = "library.add_song";
+
+/// The mutations a show and an episode are offered as.
+const ADD_SHOW: &str = "library.add_show";
+const ADD_EPISODE: &str = "library.add_episode";
 
 /// The mutation a look is asked with.
 const LOOK: &str = "library.look";
@@ -111,6 +121,8 @@ enum Nudge {
     One(PathBuf),
     /// A catalogue fetched, its files here: authored (`catalogue.rs`).
     Catalogue(Box<crate::catalogue::Fetched>),
+    /// A feed read, its episodes here: authored (`feeds.rs`).
+    Feed(Box<crate::feeds::Fetched>),
 }
 
 /// Where the scanner keeps what is its own under the server's data: its
@@ -180,6 +192,10 @@ impl Scanner {
     /// (at boot, and whenever a rescan is asked for), and its library
     /// authored here once they are.
     ///
+    /// With `feeds`, the podcasts and sermons followed (`feeds.rs`): every
+    /// feed read and its newest episodes downloaded on a thread of its
+    /// own, at every full look and every hour, and authored here.
+    ///
     /// Returns at once: the walk happens on a thread of its own, so a
     /// library of ten thousand files does not hold up anything.
     pub fn start(
@@ -189,6 +205,7 @@ impl Scanner {
         data: PathBuf,
         login: Login,
         catalogue: Option<String>,
+        feeds: crate::feeds::Feeds,
     ) -> Result<Scanner> {
         // `docs/plan-auth.md` The scanner is the library, by construction: it
         // holds the library's role whatever else its login holds, and its
@@ -278,6 +295,43 @@ impl Scanner {
                 });
             sync
         });
+        // The feeds' own thread, as the catalogue's: a refresh asked is
+        // every feed read and however long its downloads take; what it
+        // fetched comes back as a nudge, show by show. Read at every full
+        // look, and every hour by itself.
+        let follow = (!feeds.is_empty()).then(|| {
+            let (follow, asked) = channel::<()>();
+            let (dir, back) = (crate::feeds::dir(&data), tx.clone());
+            let _ = std::thread::Builder::new()
+                .name("harken-feeds".into())
+                .spawn(move || loop {
+                    match asked.recv_timeout(crate::feeds::EVERY) {
+                        Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                    while asked.try_recv().is_ok() {}
+                    for feed in &feeds.feeds {
+                        let partly = |so_far| {
+                            let _ = back.send(Nudge::Feed(Box::new(so_far)));
+                        };
+                        match crate::feeds::fetch(feed, feeds.keep, &dir, partly) {
+                            Ok(fetched) => {
+                                if fetched.failed > 0 {
+                                    eprintln!(
+                                        "harken-server: feeds: {}: {} files could not be had; tried again in an hour",
+                                        fetched.show.title, fetched.failed
+                                    );
+                                }
+                                if back.send(Nudge::Feed(Box::new(fetched))).is_err() {
+                                    return;
+                                }
+                            }
+                            Err(e) => eprintln!("harken-server: feeds: {e}"),
+                        }
+                    }
+                });
+            follow
+        });
         let thread = {
             let (stop, counts) = (stop.clone(), counts.clone());
             let scan = Scan {
@@ -286,6 +340,7 @@ impl Scanner {
                 art: art_dir(&data),
                 prints: Prints::load(prints_dir(&data)),
                 sync,
+                follow,
             };
             std::thread::Builder::new()
                 .name("harken-scanner".into())
@@ -480,6 +535,8 @@ struct Scan {
     prints: Prints,
     /// Asks the catalogue's thread for a sync, when there is a catalogue.
     sync: Option<Sender<()>>,
+    /// Asks the feeds' thread to read every feed, when there are feeds.
+    follow: Option<Sender<()>>,
 }
 
 /// The scanner's peer pumped — what the link said given to it, what it
@@ -521,6 +578,9 @@ fn run(
             if let Some(sync) = &scan.sync {
                 let _ = sync.send(());
             }
+            if let Some(follow) = &scan.follow {
+                let _ = follow.send(());
+            }
         }
         let (authored, read) = look(p, &mut scan, nudges);
         counts.read.fetch_add(read, Ordering::Relaxed);
@@ -547,12 +607,22 @@ fn run(
             nudges.extend(rx.try_iter());
             let (fetched, nudges): (Vec<_>, Vec<_>) = nudges
                 .into_iter()
-                .partition(|n| matches!(n, Nudge::Catalogue(_)));
+                .partition(|n| matches!(n, Nudge::Catalogue(_) | Nudge::Feed(_)));
             for n in fetched {
-                if let Nudge::Catalogue(f) = n {
-                    let authored = import(&mut peer, &f);
-                    catalogued.authored.fetch_add(authored, Ordering::Relaxed);
-                    println!("harken-server: catalogue +{authored}");
+                match n {
+                    Nudge::Catalogue(f) => {
+                        let authored = import(&mut peer, &f);
+                        catalogued.authored.fetch_add(authored, Ordering::Relaxed);
+                        println!("harken-server: catalogue +{authored}");
+                    }
+                    Nudge::Feed(f) => {
+                        let authored = follow(&mut peer, &f);
+                        catalogued.authored.fetch_add(authored, Ordering::Relaxed);
+                        if authored > 0 {
+                            println!("harken-server: {} +{authored}", f.show.title);
+                        }
+                    }
+                    _ => {}
                 }
             }
             if !nudges.is_empty() {
@@ -610,7 +680,12 @@ fn look(peer: &mut ark_peer::Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usiz
     let mut paths = BTreeSet::new();
     for n in nudges {
         match n {
-            Nudge::All => walk(&scan.music, &mut paths),
+            Nudge::All => {
+                walk(&scan.music, &mut paths);
+                for (dir, _) in SHOWS {
+                    walk(&scan.root.join(dir), &mut paths);
+                }
+            }
             // A *directory* appearing is the case that matters, and it is not
             // the same as a file appearing. Dropping an album folder in
             // creates the directory and its tracks in the same breath, and a
@@ -631,7 +706,7 @@ fn look(peer: &mut ark_peer::Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usiz
                 paths.insert(p);
             }
             // Authored where it arrives, in `run`: a look is files.
-            Nudge::Catalogue(_) => {}
+            Nudge::Catalogue(_) | Nudge::Feed(_) => {}
         }
     }
     let mut covers = Covers::new(&scan.root, &scan.music, &scan.art, scan.prints.art());
@@ -691,6 +766,30 @@ fn import(peer: &mut ark_peer::Peer, fetched: &crate::catalogue::Fetched) -> usi
                 "harken-server: catalogue: {} ({}) was refused: {why}",
                 call.what, call.name
             ),
+        }
+    }
+    authored
+}
+
+/// A feed's show and episodes authored: each that would change something.
+/// How many it authored.
+fn follow(peer: &mut ark_peer::Peer, fetched: &crate::feeds::Fetched) -> usize {
+    let mut calls = vec![(
+        ADD_SHOW,
+        fetched.show.title.clone(),
+        fetched.show.to_bytes(),
+    )];
+    for e in &fetched.episodes {
+        calls.push((ADD_EPISODE, e.title.clone(), e.to_bytes()));
+    }
+    let mut authored = 0;
+    for (name, what, input) in calls {
+        if !would_change(peer, name, &input) {
+            continue;
+        }
+        match peer.mutate_bytes(name, input) {
+            Ok(_) => authored += 1,
+            Err(why) => eprintln!("harken-server: feeds: {what} ({name}) was refused: {why}"),
         }
     }
     authored
@@ -763,6 +862,25 @@ pub fn is_track(music: &Path, path: &Path) -> bool {
     ext.is_some_and(|e| AUDIO.contains(&e.as_str()))
 }
 
+/// The kind of show a path is an episode of, and the show's folder: audio
+/// under `podcasts/<show>/` or `sermons/<show>/`. A file loose in
+/// `podcasts/` is nobody's show.
+pub fn is_episode(root: &Path, path: &Path) -> Option<(&'static str, PathBuf)> {
+    let audio = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| AUDIO.contains(&e.to_ascii_lowercase().as_str()));
+    if !audio {
+        return None;
+    }
+    SHOWS.iter().find_map(|(dir, kind)| {
+        let base = root.join(dir);
+        let rest = path.strip_prefix(&base).ok()?;
+        let show = rest.components().next()?;
+        (rest.components().count() > 1).then(|| (*kind, base.join(show)))
+    })
+}
+
 /// What offering one path came to.
 enum Offered {
     /// Not a track, not readable, or unchanged since it was last offered:
@@ -776,6 +894,9 @@ enum Offered {
 
 /// Offer one path to the log.
 fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> Offered {
+    if let Some((kind, show)) = is_episode(&scan.root, path) {
+        return offer_episode(peer, scan, covers, path, kind, &show);
+    }
     if !is_track(&scan.music, path) {
         return Offered::Not;
     }
@@ -869,6 +990,97 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
             );
             Offered::Read
         }
+    }
+}
+
+/// Offer one episode of a folder's show: the show, named for its folder
+/// and pictured by the cover in it, and then the file — each authored only
+/// if it would change something. Its tags say its title (else its file's
+/// name), who made it and its number; a folder has no dates, so it says
+/// none, and the show lists its episodes as they were added.
+fn offer_episode(
+    peer: &mut ark_peer::Peer,
+    scan: &mut Scan,
+    covers: &mut Covers,
+    path: &Path,
+    kind: &str,
+    show: &Path,
+) -> Offered {
+    let Some(rel) = relative(&scan.root, path) else {
+        return Offered::Not;
+    };
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Offered::Not;
+    };
+    let art = covers.show_cover(show);
+    let print = |artist: String| Print {
+        path: rel.clone(),
+        size: meta.len() as i64,
+        mtime: covers::mtime(&meta) as i64,
+        artist,
+        covers: art
+            .as_ref()
+            .map_or(String::new(), |i| format!("{}@{}", i.rel, i.print)),
+    };
+    if let Some(was) = scan.prints.get(&rel) {
+        if was == print(was.artist.clone()) && known_file(&peer.log.store, &rel) {
+            return Offered::Not;
+        }
+    }
+    let Some(track) = read(path) else {
+        return Offered::Not;
+    };
+    let title = show
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let add_show = AddShow {
+        kind: kind.into(),
+        title: title.clone(),
+        author: track.artist.clone(),
+        art: art.as_ref().map(|i| i.value()).unwrap_or_default(),
+        ..AddShow::default()
+    }
+    .to_bytes();
+    let stem = path
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let add_episode = AddEpisode {
+        show: crate::domain::keys::show_key(kind, &title),
+        title: if track.title.trim().is_empty() {
+            stem
+        } else {
+            track.title.clone()
+        },
+        duration_ms: track.duration_ms,
+        file: rel.clone(),
+        number: track.number,
+        ..AddEpisode::default()
+    }
+    .to_bytes();
+    let mut authored = false;
+    for (name, input) in [(ADD_SHOW, add_show), (ADD_EPISODE, add_episode)] {
+        if !would_change(peer, name, &input) {
+            continue;
+        }
+        match peer.mutate_bytes(name, input) {
+            Ok(_) => authored = true,
+            Err(why) => {
+                eprintln!(
+                    "harken-server: library: {} was refused: {why}",
+                    path.display()
+                );
+                return Offered::Read;
+            }
+        }
+    }
+    scan.prints.set(print(track.artist));
+    match authored {
+        true => Offered::Authored,
+        false => Offered::Read,
     }
 }
 

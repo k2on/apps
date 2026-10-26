@@ -2194,6 +2194,7 @@ dependencies = [
  "libc",
  "lofty",
  "notify",
+ "roxmltree",
  "serde",
  "serde_json",
  "sha2",

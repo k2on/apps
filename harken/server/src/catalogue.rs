@@ -68,11 +68,7 @@ pub struct Fetched {
 /// what is here so far given to `so_far`, so a library fills as it goes
 /// rather than all at once at the end.
 pub fn fetch(url: &str, dir: &Path, mut so_far: impl FnMut(Fetched)) -> Result<Fetched, String> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(30))
-        .timeout_read(Duration::from_secs(120))
-        .user_agent(AGENT)
-        .build();
+    let agent = agent();
     let json = agent
         .get(url)
         .call()
@@ -142,6 +138,16 @@ pub fn fetch(url: &str, dir: &Path, mut so_far: impl FnMut(Fetched)) -> Result<F
     })
 }
 
+/// The client every download is made with, saying who is asking — a
+/// catalogue's and a feed's (`feeds.rs`).
+pub fn agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(30))
+        .timeout_read(Duration::from_secs(120))
+        .user_agent(AGENT)
+        .build()
+}
+
 /// A URL's file name: its hash, with the extension its path ends in, which
 /// is what `/media` takes its type from.
 pub fn name_of(url: &str) -> String {
@@ -157,7 +163,7 @@ pub fn name_of(url: &str) -> String {
 }
 
 /// One file into `path`, by way of `<path>.part`, so a file there is whole.
-fn download(agent: &ureq::Agent, url: &str, path: &Path) -> Result<(), String> {
+pub fn download(agent: &ureq::Agent, url: &str, path: &Path) -> Result<(), String> {
     let response = get(agent, url)?;
     let part = path.with_extension("part");
     let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;

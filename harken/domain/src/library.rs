@@ -474,6 +474,7 @@ pub fn remove_media(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveMedia) -> Resul
         db.playlist_item.remove(&item)?;
     }
     db.song.delete(input.id)?;
+    db.episode.delete(input.id)?;
     db.media.delete(input.id)
 }
 
