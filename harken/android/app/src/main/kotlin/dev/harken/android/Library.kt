@@ -240,6 +240,8 @@ class Library(private val session: ArkSession) {
     private val artistsFlow = MutableStateFlow<List<Artist>>(emptyList())
     private val composersFlow = MutableStateFlow<List<Composer>>(emptyList())
     private val showsFlow = MutableStateFlow<List<Show>>(emptyList())
+    private val subscriptionsFlow = MutableStateFlow<List<Subscription>>(emptyList())
+    private val downloadsFlow = MutableStateFlow<Map<Id, Download>>(emptyMap())
     private val detailsFlow = MutableStateFlow<Map<Id, TrackDetail>>(emptyMap())
     private val noticeFlow = MutableStateFlow<String?>(null)
 
@@ -254,6 +256,12 @@ class Library(private val session: ArkSession) {
 
     /** Every podcast and series of sermons, by title; read with the artists. */
     val shows: StateFlow<List<Show>> = showsFlow.asStateFlow()
+
+    /** The feeds the library follows, by when each was added; read with the artists. */
+    val subscriptions: StateFlow<List<Subscription>> = subscriptionsFlow.asStateFlow()
+
+    /** The files the server has not got yet, by their media id; read with the artists. */
+    val downloads: StateFlow<Map<Id, Download>> = downloadsFlow.asStateFlow()
 
     /**
      * An album's cover by its name, "" for none: the albums by name, made again only when the list
@@ -300,10 +308,12 @@ class Library(private val session: ArkSession) {
     private val artistsHeld = Held({ it.artists() }, Artist::of) { artistsFlow.value = it }
     private val composersHeld = Held({ it.composers() }, Composer::of) { composersFlow.value = it }
     private val showsHeld = Held({ it.shows() }, Show::of) { showsFlow.value = it }
+    private val subscriptionsHeld = Held({ it.subscriptions() }, Subscription::of) { subscriptionsFlow.value = it }
+    private val downloadsHeld = Held({ it.downloads() }, Download::of) { r -> downloadsFlow.value = r.associateBy { it.mediaId } }
     private val detailsHeld = Held({ it.trackDetails() }, TrackDetail::of) { r -> detailsFlow.value = r.associateBy { it.mediaId } }
     private val playedHeld = Held({ it.lastPlayed() }, Played::of) { lastFlow.value = it.firstOrNull() }
     private val home = listOf<Held<*, *>>(library, playlistsHeld, albumsHeld)
-    private val rest = listOf<Held<*, *>>(artistsHeld, composersHeld, showsHeld, detailsHeld, playedHeld)
+    private val rest = listOf<Held<*, *>>(artistsHeld, composersHeld, showsHeld, subscriptionsHeld, downloadsHeld, detailsHeld, playedHeld)
     private val lastFlow = MutableStateFlow<Played?>(null)
 
     /**
@@ -529,6 +539,20 @@ class Library(private val session: ArkSession) {
     fun removeFromPlaylist(track: Track, playlist: Id) = write { h ->
         val name = playlistsHeld.rows.firstOrNull { it.id == playlist }?.name ?: "a playlist"
         record(Phone.removeFromPlaylist(h, playlist, track.id), "take ${track.title} off $name", "Couldn't take it off")
+    }
+
+    /** Follow a feed, as a podcast (`podcast`) or as sermons (`sermon`); refused, the notice says why. */
+    fun follow(kind: String, url: String) = write { h ->
+        record(Phone.subscribe(h, kind, url.trim()), "follow ${url.trim()}", "Couldn't follow it")
+    }
+
+    fun unfollow(feed: Subscription) = write { h ->
+        record(Phone.unsubscribe(h, feed.url), "unfollow ${feed.title.ifEmpty { feed.url }}", "Couldn't unfollow it")
+    }
+
+    /** `more` of a followed feed's older episodes, or 0 for every one. */
+    fun fetchOlder(feed: Subscription, more: Long) = write { h ->
+        record(Phone.fetchOlder(h, feed.url, more), "fetch older episodes of ${feed.title.ifEmpty { feed.url }}", "Couldn't fetch them")
     }
 
     fun dismiss() {

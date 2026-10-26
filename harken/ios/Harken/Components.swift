@@ -88,7 +88,8 @@ struct TrackRow<Leading: View>: View {
                 Text(under).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Text(Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            // Its file not on the server yet: how its download goes, in place of its length.
+            Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
             Menu { TrackActions(track: track, from: from) } label: {
                 Image(systemName: "ellipsis").frame(width: 32, height: 44).contentShape(Rectangle())
             }

@@ -266,6 +266,8 @@ fun HarkenApp(
     val artists by library.artists.collectAsStateWithLifecycle()
     val composers by library.composers.collectAsStateWithLifecycle()
     val shows by library.shows.collectAsStateWithLifecycle()
+    val subscriptions by library.subscriptions.collectAsStateWithLifecycle()
+    val downloads by library.downloads.collectAsStateWithLifecycle()
     val details by library.details.collectAsStateWithLifecycle()
     val loaded by library.loaded.collectAsStateWithLifecycle()
     val complete by library.complete.collectAsStateWithLifecycle()
@@ -430,7 +432,7 @@ fun HarkenApp(
         }
     }
 
-    CompositionLocalProvider(LocalCoverLoader provides covers, LocalPageMotion provides motion) {
+    CompositionLocalProvider(LocalCoverLoader provides covers, LocalPageMotion provides motion, LocalDownloads provides downloads) {
         HarkenTheme {
             // Before the player, so that the player's own back gesture registers after it and is asked
             // first; and stood down while the player is up, whatever the order. At the root of Search
@@ -550,7 +552,18 @@ fun HarkenApp(
                                         val page = Page.parse("show/" + back.arguments?.getString("arg")) as? Page.ForShow
                                         if (page != null) {
                                             val rows by held(library, page, back)
-                                            Ready(rows) { r -> ShowPage(page.id, shows.firstOrNull { it.id == page.id }, r.orEmpty(), playing, act) }
+                                            Ready(rows) { r ->
+                                                ShowPage(
+                                                    page.id,
+                                                    shows.firstOrNull { it.id == page.id },
+                                                    r.orEmpty(),
+                                                    playing,
+                                                    act,
+                                                    feed = subscriptions.firstOrNull { it.showId.isNotEmpty() && it.showId == page.id },
+                                                    downloads = downloads,
+                                                    onFetchOlder = library::fetchOlder,
+                                                )
+                                            }
                                         }
                                     }
                                     Route.Work -> {
@@ -614,6 +627,9 @@ fun HarkenApp(
                                                 }
                                             },
                                             onDiagnostics = { nav().navigate(Route.Diagnostics.pattern) },
+                                            feeds = subscriptions,
+                                            onFollow = library::follow,
+                                            onUnfollow = library::unfollow,
                                         )
                                     }
                                     Route.Diagnostics -> {

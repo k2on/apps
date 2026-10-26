@@ -248,6 +248,12 @@ final class Model: ObservableObject {
     func show(_ id: String) -> ShowsEntry? { snapshot.shows.first { $0.id == id } }
     /// The show an episode is of; none for a song.
     func show(of t: LibraryEntry) -> ShowsEntry? { ShowsEntry.of(t, in: snapshot.shows) }
+    /// The feeds the library follows; the one a show is read from, when
+    /// it is followed; and a file the server has not got yet, by its
+    /// media id.
+    var subscriptions: [SubscriptionsEntry] { snapshot.subscriptions }
+    func subscription(of show: String) -> SubscriptionsEntry? { snapshot.subscriptions.first { !$0.showId.isEmpty && $0.showId == show } }
+    func download(_ media: Id) -> DownloadsEntry? { snapshot.downloads[media] }
     func composer(named n: String) -> ComposersEntry? { snapshot.composers.first { $0.name == n } }
     /// A person's works, by catalogue, while their page is held; none until first read.
     func works(of composer: String) -> [WorkSummary]? { snapshot.works[composer] }
@@ -341,6 +347,9 @@ final class Model: ObservableObject {
 
     func createPlaylist(_ name: String, then: LibraryEntry? = nil) { bridge?.createPlaylist(name, then: then) }
     func add(_ t: LibraryEntry, to p: Playlist) { bridge?.add(t, to: p) }
+    func follow(_ kind: String, _ url: String) { bridge?.follow(kind, url) }
+    func unfollow(_ feed: SubscriptionsEntry) { bridge?.unfollow(feed) }
+    func fetchOlder(_ feed: SubscriptionsEntry, _ more: Int64) { bridge?.fetchOlder(feed, more) }
     func remove(_ t: LibraryEntry, from p: Id) { bridge?.remove(t, from: p) }
 
     func toggle(_ t: LibraryEntry, on p: Playlist, now on: Set<Id>) {

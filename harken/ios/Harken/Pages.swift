@@ -356,6 +356,29 @@ struct ShowPage: View {
                 Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(6)
                     .listRowSeparator(.hidden)
             }
+            // How many of its episodes are not on the server yet, and its older
+            // ones fetched — twenty more, or every one — while the feed has
+            // more than the library keeps: the desktop's.
+            let waiting = episodes.compactMap { model.download($0.id) }
+            let feed = model.subscription(of: id)
+            if !waiting.isEmpty || feed?.hasOlder == true {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    if !waiting.isEmpty {
+                        let failed = waiting.filter { $0.state == "failed" }.count
+                        let going = waiting.first { $0.state == "downloading" }
+                        let said = ["\(waiting.count) not on the server yet", going?.said, failed > 0 ? "\(failed) could not be downloaded" : nil]
+                        Text(said.compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let f = feed, f.hasOlder {
+                        let left = f.items - f.keep
+                        HStack(spacing: Space.s) {
+                            Button("Fetch \(min(left, 20)) older") { model.fetchOlder(f, 20) }.buttonStyle(.bordered)
+                            if left > 20 { Button("Fetch all \(f.items)") { model.fetchOlder(f, 0) }.buttonStyle(.bordered) }
+                        }
+                    }
+                }
+                .listRowSeparator(.hidden)
+            }
             if show == nil {
                 ContentUnavailableView("This show is gone", systemImage: "mic", description: Text("It was taken off this server."))
                     .listRowSeparator(.hidden)

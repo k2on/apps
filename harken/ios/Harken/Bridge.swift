@@ -47,6 +47,10 @@ struct Snapshot {
     var composers = [ComposersEntry]()
     /// Every podcast and series of sermons, by title.
     var shows = [ShowsEntry]()
+    /// The feeds the library follows, by when each was added.
+    var subscriptions = [SubscriptionsEntry]()
+    /// The files the server has not got yet, by their media id.
+    var downloads = [Id: DownloadsEntry]()
     var details = [Id: TrackDetailsEntry]()
     /// The newest play in the log, this person's.
     var lastPlayed: Play? = nil
@@ -171,6 +175,8 @@ final class Bridge {
     private let artists = Held<ArtistsEntry> { try $0.artists() }
     private let composers = Held<ComposersEntry> { try $0.composers() }
     private let shows = Held<ShowsEntry> { try $0.shows() }
+    private let subscriptions = Held<SubscriptionsEntry> { try $0.subscriptions() }
+    private let downloads = Held<DownloadsEntry> { try $0.downloads() }
     private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
     private let played = Held<Play> { try $0.lastPlayed() }
     private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
@@ -245,16 +251,26 @@ final class Bridge {
             self.artists.hydrate(h)
             self.composers.hydrate(h)
             self.shows.hydrate(h)
+            self.subscriptions.hydrate(h)
+            self.downloads.hydrate(h)
             self.details.hydrate(h)
             self.played.hydrate(h)
             self.snap.artists = self.artists.rows
             self.snap.composers = self.composers.rows
             self.snap.shows = self.shows.rows
+            self.snap.subscriptions = self.subscriptions.rows
+            self.snap.downloads = Bridge.downloadsByMedia(self.downloads.rows)
             self.snap.details = Bridge.byMedia(self.details.rows)
             self.snap.lastPlayed = self.played.rows.first
             self.snap.complete = true
             self.show()
         }
+    }
+
+    private static func downloadsByMedia(_ rows: [DownloadsEntry]) -> [Id: DownloadsEntry] {
+        var m = [Id: DownloadsEntry](minimumCapacity: rows.count)
+        for r in rows { m[r.mediaId] = r }
+        return m
     }
 
     private static func byMedia(_ rows: [TrackDetailsEntry]) -> [Id: TrackDetailsEntry] {
@@ -299,6 +315,8 @@ final class Bridge {
         if artists.update() { snap.artists = artists.rows }
         if composers.update() { snap.composers = composers.rows }
         if shows.update() { snap.shows = shows.rows }
+        if subscriptions.update() { snap.subscriptions = subscriptions.rows }
+        if downloads.update() { snap.downloads = Bridge.downloadsByMedia(downloads.rows) }
         if details.update() { snap.details = Bridge.byMedia(details.rows) }
         if played.update() { snap.lastPlayed = played.rows.first }
         for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }
@@ -480,6 +498,23 @@ final class Bridge {
                 self.record(Phone.addToPlaylist(h, made.id, t.id), "add \(t.title) to \(made.name)", "Couldn't add it")
             }
         }
+    }
+
+    /// Follow a feed, as a podcast (`podcast`) or as sermons (`sermon`);
+    /// refused, the notice says why.
+    func follow(_ kind: String, _ url: String) {
+        let url = url.trimmingCharacters(in: .whitespaces)
+        onPeer { h in self.record(Phone.subscribe(h, kind, url), "follow \(url)", "Couldn't follow it") }
+    }
+
+    func unfollow(_ feed: SubscriptionsEntry) {
+        onPeer { h in self.record(Phone.unsubscribe(h, feed.url), "unfollow \(feed.title.isEmpty ? feed.url : feed.title)", "Couldn't unfollow it") }
+    }
+
+    /// `more` of a followed feed's older episodes, or 0 for every one.
+    func fetchOlder(_ feed: SubscriptionsEntry, _ more: Int64) {
+        let name = feed.title.isEmpty ? feed.url : feed.title
+        onPeer { h in self.record(Phone.fetchOlder(h, feed.url, more), "fetch older episodes of \(name)", "Couldn't fetch them") }
     }
 
     func add(_ track: LibraryEntry, to playlist: Playlist) {

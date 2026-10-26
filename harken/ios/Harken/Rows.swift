@@ -68,6 +68,34 @@ extension ShowsEntry: Identifiable, Hashable {
 
 extension RecordingsEntry: Identifiable {}
 
+/// A feed the library follows (`subscriptions`), by its URL.
+extension SubscriptionsEntry: Identifiable {
+    public var id: String { url }
+
+    /// Whether the feed has older episodes than the library keeps of it.
+    var hasOlder: Bool { keep > 0 && items > keep }
+}
+
+/// A file the server has not got yet (`downloads`): what a row says in
+/// place of its length, and said whole — the desktop's `Download`.
+extension DownloadsEntry {
+    var short: String {
+        switch state {
+        case "downloading": return total > 0 ? "\(min(max(bytes * 100 / total, 0), 99))%" : "\u{2193}"
+        case "failed": return "failed"
+        default: return "queued"
+        }
+    }
+
+    var said: String {
+        switch state {
+        case "downloading": return total > 0 ? "Downloading to the server: \(short)" : "Downloading to the server"
+        case "failed": return error.isEmpty ? "Could not download" : "Could not download: \(error)"
+        default: return "Not on the server yet"
+        }
+    }
+}
+
 extension Play {
     /// The track's id, when the play names one this library could have.
     var trackId: Id? { track.count == 32 ? Id(track) : nil }
@@ -163,6 +191,21 @@ enum Phone {
         } catch {
             return .refused(why(error))
         }
+    }
+
+    /// Follow a feed, as a podcast or as sermons (`library.subscribe`):
+    /// the library's role's.
+    static func subscribe(_ h: Harken, _ kind: String, _ url: String) -> Wrote {
+        wrote { try h.subscribe(Subscribe(kind: kind, url: url)) }
+    }
+
+    static func unsubscribe(_ h: Harken, _ url: String) -> Wrote {
+        wrote { try h.unsubscribe(Unsubscribe(url: url)) }
+    }
+
+    /// `more` of a followed feed's older episodes, or 0 for every one.
+    static func fetchOlder(_ h: Harken, _ url: String, _ more: Int64) -> Wrote {
+        wrote { try h.fetchOlder(FetchOlder(url: url, more: more)) }
     }
 
     static func createPlaylist(_ h: Harken, _ name: String) -> Wrote {

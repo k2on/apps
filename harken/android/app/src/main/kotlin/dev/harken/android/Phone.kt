@@ -18,6 +18,8 @@ import dev.harken.android.gen.Artist as ArtistInput
 import dev.harken.android.gen.ArtistsEntry
 import dev.harken.android.gen.ComposersEntry
 import dev.harken.android.gen.CreatePlaylist
+import dev.harken.android.gen.DownloadsEntry
+import dev.harken.android.gen.FetchOlder
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Library as LibraryInput
 import uniffi.harken_domain.LibraryEntry
@@ -30,6 +32,9 @@ import dev.harken.android.gen.RemoveFromPlaylist
 import dev.harken.android.gen.Search
 import dev.harken.android.gen.ShowInput
 import dev.harken.android.gen.ShowsEntry
+import dev.harken.android.gen.Subscribe
+import dev.harken.android.gen.SubscriptionsEntry
+import dev.harken.android.gen.Unsubscribe
 import dev.harken.android.gen.TrackDetailsEntry
 
 /**
@@ -127,6 +132,55 @@ data class Show(
 ) {
     companion object {
         fun of(e: ShowsEntry): Show = Show(e.id, e.kind, e.title, e.author, e.description, e.art, e.episodes, e.newestMs)
+    }
+}
+
+/**
+ * A feed the library follows (`subscriptions`): its show once the server has read it, how many of
+ * its episodes are here and how many the feed has, how many it keeps (0 for every one), and why
+ * its last read failed.
+ */
+data class Subscription(
+    val url: String,
+    val kind: String,
+    val title: String,
+    val showId: String,
+    val episodes: Long,
+    val items: Long,
+    val keep: Long,
+    val error: String,
+) {
+    /** Whether the feed has older episodes than the library keeps of it. */
+    val hasOlder: Boolean
+        get() = keep > 0 && items > keep
+
+    companion object {
+        fun of(e: SubscriptionsEntry): Subscription = Subscription(e.url, e.kind, e.title, e.showId, e.episodes, e.items, e.keep, e.error)
+    }
+}
+
+/** A file the server has not got yet (`downloads`): queued, downloading and how far, or failed and why. */
+data class Download(val mediaId: Id, val state: String, val bytes: Long, val total: Long, val error: String) {
+    /** What a row says in place of its length: the desktop's `Download::short`. */
+    val short: String
+        get() =
+            when (state) {
+                "downloading" -> if (total > 0) "${(bytes * 100 / total).coerceIn(0, 99)}%" else "\u2193"
+                "failed" -> "failed"
+                else -> "queued"
+            }
+
+    /** What it is, said whole. */
+    val said: String
+        get() =
+            when (state) {
+                "downloading" -> if (total > 0) "Downloading to the server: $short" else "Downloading to the server"
+                "failed" -> if (error.isNotEmpty()) "Could not download: $error" else "Could not download"
+                else -> "Not on the server yet"
+            }
+
+    companion object {
+        fun of(e: DownloadsEntry): Download = Download(e.mediaId, e.state, e.bytes, e.total, e.error)
     }
 }
 
@@ -240,6 +294,14 @@ object Phone {
     fun addToPlaylist(h: Harken, playlist: Id, media: Id): Wrote = wrote { h.addToPlaylist(AddToPlaylist(playlist, media)) }
 
     fun removeFromPlaylist(h: Harken, playlist: Id, media: Id): Wrote = wrote { h.removeFromPlaylist(RemoveFromPlaylist(playlist, media)) }
+
+    /** Follow a feed, as a podcast or as sermons (`library.subscribe`): the library's role's. */
+    fun subscribe(h: Harken, kind: String, url: String): Wrote = wrote { h.subscribe(Subscribe(kind, url)) }
+
+    fun unsubscribe(h: Harken, url: String): Wrote = wrote { h.unsubscribe(Unsubscribe(url)) }
+
+    /** `more` of a followed feed's older episodes, or 0 for every one. */
+    fun fetchOlder(h: Harken, url: String, more: Long): Wrote = wrote { h.fetchOlder(FetchOlder(url, more)) }
 
     /**
      * What a screen writes beside an item: nothing once it is in the log, the reason word for word

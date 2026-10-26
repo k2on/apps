@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -395,7 +397,16 @@ fun RecordingPage(
  * how long it runs.
  */
 @Composable
-fun ShowPage(id: String, show: Show?, episodes: List<Track>, playing: String?, act: Do) {
+fun ShowPage(
+    id: String,
+    show: Show?,
+    episodes: List<Track>,
+    playing: String?,
+    act: Do,
+    feed: Subscription? = null,
+    downloads: Map<Id, Download> = emptyMap(),
+    onFetchOlder: (Subscription, Long) -> Unit = { _, _ -> },
+) {
     Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
     val title = show?.title ?: "Show"
@@ -424,6 +435,33 @@ fun ShowPage(id: String, show: Show?, episodes: List<Track>, playing: String?, a
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = Space.page, vertical = Space.s),
                 )
+            }
+        }
+        // How many of its episodes are not on the server yet, and its older ones fetched — twenty
+        // more, or every one — while the feed has more than the library keeps: the desktop's.
+        val waiting = episodes.mapNotNull { downloads[it.id] }
+        if (waiting.isNotEmpty() || feed?.hasOlder == true) {
+            item {
+                Column(Modifier.padding(horizontal = Space.page, vertical = Space.s)) {
+                    if (waiting.isNotEmpty()) {
+                        val failed = waiting.count { it.state == "failed" }
+                        val going = waiting.firstOrNull { it.state == "downloading" }
+                        val said =
+                            listOfNotNull(
+                                "${waiting.size} not on the server yet",
+                                going?.said,
+                                if (failed > 0) "$failed could not be downloaded" else null,
+                            ).joinToString(" · ")
+                        Text(said, style = quiet(MaterialTheme.typography.bodySmall))
+                    }
+                    if (feed != null && feed.hasOlder) {
+                        val left = feed.items - feed.keep
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(top = Space.s)) {
+                            OutlinedButton(onClick = { onFetchOlder(feed, 20) }) { Text("Fetch ${minOf(left, 20L)} older") }
+                            if (left > 20) OutlinedButton(onClick = { onFetchOlder(feed, 0) }) { Text("Fetch all ${feed.items}") }
+                        }
+                    }
+                }
             }
         }
         if (show == null) {

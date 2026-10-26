@@ -38,6 +38,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -99,6 +100,12 @@ interface Do {
 object Idle : Do
 
 /**
+ * The files the server has not got yet, by their media id (`Library.downloads`): a row whose file
+ * is among them says how its download goes where its length goes.
+ */
+val LocalDownloads = compositionLocalOf<Map<dev.arkdb.ffi.Id, Download>> { emptyMap() }
+
+/**
  * One track, as every list draws it: what stands at its start (a cover, or its number on the
  * release), its title — in the gold while it plays — whoever made it, its length, and its menu.
  * Opening the menu says where the row is (`PageMotion.tapped`), and where its cover is when what
@@ -131,7 +138,11 @@ fun TrackRow(
             )
             Text(under, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Text(Media.clock(track.durationMs), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(horizontal = Space.s))
+        Text(
+            LocalDownloads.current[track.id]?.short ?: Media.clock(track.durationMs),
+            style = quiet(MaterialTheme.typography.bodySmall),
+            modifier = Modifier.padding(horizontal = Space.s),
+        )
         MoreButton(track.title, if (art) TrackArt else TrackPlain, onMore)
     }
 }
