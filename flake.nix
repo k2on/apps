@@ -607,6 +607,10 @@
                   # AGP would fetch its own aapt2 from Maven, an unpatched binary
                   # that cannot run here; the SDK's is patched and can.
                   "-Pandroid.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2"
+                  # Whatever the SDK lacks is an error, not a download: an
+                  # install reads Google's repository indexes, which change
+                  # under any hash recorded of them (nix/android-sdk.nix).
+                  "-Pandroid.builder.sdkDownload=false"
                 ] ++ flags ++ final.versionFlags;
                 # Read by app/build.gradle.kts; a local build falls back to 1.
                 versionFlags = [

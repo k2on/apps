@@ -37,7 +37,13 @@ let
     hash = "sha256-aT1MkTezg7p5sSN8qX2Yp8Vr06jNiPQgbXl9gEcVRT8=";
   };
   debian = fetchurl {
-    url = "https://deb.debian.org/debian/pool/main/a/android-platform-tools/android-platform-tools_35.0.2.orig.tar.xz";
+    # Debian's pool keeps only the versions its suites carry, so this URL
+    # goes when the package moves on; snapshot.debian.org keeps every file
+    # it ever published, by its SHA-1.
+    urls = [
+      "https://deb.debian.org/debian/pool/main/a/android-platform-tools/android-platform-tools_35.0.2.orig.tar.xz"
+      "https://snapshot.debian.org/file/eadd54b9b8105ca2c61e8f5a4bea4dc0834cbfd0"
+    ];
     sha256 = "ec1d317608db3328bfbddf7152c8d7f185c7c87b2175081416344434546a43da";
   };
 in
