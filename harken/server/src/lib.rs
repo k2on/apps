@@ -219,6 +219,9 @@ pub fn pretty(entity: &str) -> String {
 /// What the scanner's session says signed in.
 const SCANNER: &str = "the scanner";
 
+/// What the house's sign-in of a listener says it is.
+const HOUSE: &str = "the house's speakers";
+
 /// The hub's configuration for `hosted` (`harken_player::config::hub`),
 /// keeping `keep` entries above the log's snapshot.
 pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
@@ -431,9 +434,21 @@ pub async fn start(config: Config) -> Result<Server> {
     // Every `media_player` named becomes a device in every listening
     // session somebody is in: a connection of its own in that session,
     // which is how it is a device rather than a client.
+    // What plays on a speaker is its listener's: their plays and their
+    // place in an episode are written as them, by a sign-in of theirs the
+    // house holds. It carries no name, so they are named as their own
+    // sign-ins name them.
     let house = config.house.clone().map(|house| {
         eprintln!("harken-server: the house: {house}");
-        ha::start(house, hub.clone(), hosted.clone())
+        let auth = auth.clone();
+        let sign_in: ha::SignIn = Arc::new(move |user: &str| {
+            let account = Account {
+                id: user.into(),
+                ..Account::default()
+            };
+            auth.own(&account, HOUSE)
+        });
+        ha::start(house, hub.clone(), hosted.clone(), sign_in)
     });
 
     // The scanner signs in like everything else, as the account `library`.

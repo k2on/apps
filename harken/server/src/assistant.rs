@@ -402,6 +402,15 @@ pub enum Act {
         entity: String,
         level: i64,
     },
+    /// A mutation of the log, written as the listener `key` — a play on
+    /// the speaker `entity`, their place in an episode — by the house's
+    /// sign-in of theirs.
+    Record {
+        key: String,
+        entity: String,
+        name: &'static str,
+        input: Vec<u8>,
+    },
     /// `media_player.volume_mute`.
     Mute {
         entity: String,
@@ -950,6 +959,7 @@ struct Calls<'a> {
     key: &'a str,
     entity: &'a str,
     acts: &'a RefCell<Vec<Act>>,
+    records: &'a RefCell<Vec<Act>>,
 }
 
 impl Say for Calls<'_> {
@@ -971,10 +981,34 @@ impl Say for Calls<'_> {
         Ok(())
     }
 
-    /// A speaker's plays are not counted here (the speakers' machines have
-    /// no log).
-    fn play(&mut self, _: crate::domain::RecordPlay) -> Result<(), String> {
+    /// A play on a speaker is its listener's, as on any of their devices:
+    /// written in the log as them ([`Act::Record`]).
+    fn play(&mut self, play: crate::domain::RecordPlay) -> Result<(), String> {
+        self.record(
+            "listening.record_play",
+            ark::format::Encode::to_bytes(&play),
+        );
         Ok(())
+    }
+
+    /// And so is their place in an episode.
+    fn progress(&mut self, place: crate::domain::ReportProgress) -> Result<(), String> {
+        self.record(
+            "library.report_progress",
+            ark::format::Encode::to_bytes(&place),
+        );
+        Ok(())
+    }
+}
+
+impl Calls<'_> {
+    fn record(&mut self, name: &'static str, input: Vec<u8>) {
+        self.records.borrow_mut().push(Act::Record {
+            key: self.key.into(),
+            entity: self.entity.into(),
+            name,
+            input,
+        });
     }
 }
 
@@ -996,6 +1030,10 @@ pub struct Speakers {
     /// Sessions a speaker has already let go of while still named their
     /// output — somebody else took it — so the release is said once.
     released: HashSet<(String, String)>,
+    /// What plays on the speakers, to be written as their listeners
+    /// ([`Act::Record`]), apart from what is said in the sessions: taken
+    /// by [`Speakers::take_records`].
+    records: RefCell<Vec<Act>>,
 }
 
 impl Speakers {
@@ -1009,6 +1047,7 @@ impl Speakers {
             minds: HashMap::new(),
             sessions: HashMap::new(),
             released: HashSet::new(),
+            records: RefCell::new(vec![]),
         }
     }
 
@@ -1103,7 +1142,11 @@ impl Speakers {
         let mind = self
             .minds
             .entry((key.into(), entity.into()))
-            .or_insert_with(|| Reconciler::new(entity, None));
+            // Counting its plays, and so its listener's place in an
+            // episode, as any player does ([`Act::Record`]).
+            .or_insert_with(|| {
+                Reconciler::new(entity, Some(Box::new(ark_peer::Memory::default())))
+            });
         let acts = RefCell::new(vec![]);
         let mut hand = Hand {
             entity,
@@ -1127,9 +1170,16 @@ impl Speakers {
                 key,
                 entity,
                 acts: &acts,
+                records: &self.records,
             },
         );
         acts.into_inner()
+    }
+
+    /// The plays and places the speakers have said since last asked, each
+    /// to be written as its listener.
+    pub fn take_records(&self) -> Vec<Act> {
+        std::mem::take(&mut *self.records.borrow_mut())
     }
 
     /// Home Assistant said what a held player is doing — or `None`, it did
@@ -2988,7 +3038,7 @@ pub mod ha {
     }
 
     /// Offer the house's players to every account somebody is listening as.
-    pub fn start(config: Config, hub: Handle, hosted: Hosted) -> Assistant {
+    pub fn start(config: Config, hub: Handle, hosted: Hosted, sign_in: SignIn) -> Assistant {
         let stop = Arc::new(AtomicBool::new(false));
         let (wake, woken) = channel();
         let flag = stop.clone();
@@ -3008,6 +3058,8 @@ pub mod ha {
                     woke: HashMap::new(),
                     frames: channel(),
                     waker,
+                    sign_in,
+                    recorders: HashMap::new(),
                 };
                 run(&config, &house, &mut bridge, &mut wires, &woken, &flag);
             })
@@ -3122,7 +3174,17 @@ pub mod ha {
         /// Frames the hub sent a speaker, and the thread woken for them.
         frames: (Sender<Framed>, Receiver<Framed>),
         waker: Sender<()>,
+        /// The house's sign-in of a listener, which their plays and their
+        /// places are written in the log by.
+        sign_in: SignIn,
+        /// Each listener's peer, by their account: opened at their first
+        /// play on a speaker.
+        recorders: HashMap<String, ark_peer::Peer>,
     }
+
+    /// The house's sign-in of an account (`ark_auth`'s `own`), as the
+    /// server makes it.
+    pub type SignIn = Arc<dyn Fn(&str) -> Result<ark_auth::Login, String> + Send + Sync>;
 
     impl Wires {
         /// Whether every speaker standing in `user`'s session has heard the
@@ -3297,6 +3359,55 @@ pub mod ha {
             for k in all {
                 self.leave(&k);
             }
+            self.pump_records();
+        }
+
+        /// A mutation of the log as `user`, by the house's sign-in of
+        /// theirs: their peer opened and dialled the first time, and what
+        /// it writes pending until it is linked.
+        fn record(&mut self, user: &str, name: &str, input: Vec<u8>) {
+            if !self.recorders.contains_key(user) {
+                let login = match (self.sign_in)(user) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("harken-server: house: cannot write {user}'s plays: {e}");
+                        return;
+                    }
+                };
+                let who = ark_peer::who(&login);
+                let config = ark_peer::Config::of(self.hosted.domain.clone());
+                let mut p = ark_peer::Peer::open(
+                    config,
+                    who.clone(),
+                    Box::new(ark_peer::Memory::default()),
+                    false,
+                );
+                p.sign_in(who.clone());
+                let token = login.token.clone();
+                let dial = self
+                    .hub
+                    .dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));
+                p.set_token(Some(login.token.clone()));
+                p.connect_with("", dial);
+                self.recorders.insert(user.to_string(), p);
+            }
+            if let Some(p) = self.recorders.get_mut(user) {
+                if let Err(why) = p.mutate_bytes(name, input) {
+                    eprintln!("harken-server: house: {user}'s {name} was refused: {why}");
+                }
+                p.pump();
+            }
+        }
+
+        /// Each listener's peer pumped: what it wrote pushed, what the
+        /// server refused said.
+        fn pump_records(&mut self) {
+            for (user, p) in self.recorders.iter_mut() {
+                p.pump();
+                for (_, why) in p.take_rejections() {
+                    eprintln!("harken-server: house: {user}'s entry was refused: {why}");
+                }
+            }
         }
     }
 
@@ -3329,6 +3440,10 @@ pub mod ha {
             // the state the bridge acts on, so what it says as the speaker
             // is previewed over that and not refused for being behind.
             wires.receive();
+            for record in bridge.take_records() {
+                perform(house, wires, &mut pushing, record);
+            }
+            wires.pump_records();
             // Where to stand, and which speakers: every one beside a client;
             // where no client is, the ones making the sound, until it has
             // been silent for `idle`.
@@ -3526,6 +3641,7 @@ pub mod ha {
             | Act::Volume { entity, .. }
             | Act::Mute { entity, .. }
             | Act::Unjoin { entity }
+            | Act::Record { entity, .. }
             | Act::Call { entity, .. } => entity.clone(),
             Act::Join { leader, .. } => leader.clone(),
         };
@@ -3590,6 +3706,9 @@ pub mod ha {
                     );
                 }
             }
+            Act::Record {
+                key, name, input, ..
+            } => wires.record(&key, name, input),
             Act::Verb { entity, verb, why } => {
                 if verb == "media_pause" {
                     println!("harken-server: house: {entity}: {why}; paused");
@@ -3939,6 +4058,8 @@ pub mod ha {
             woke: HashMap::new(),
             frames: channel(),
             waker: channel().0,
+            sign_in: Arc::new(|_: &str| Err("no sign-ins here".to_string())),
+            recorders: HashMap::new(),
         };
         // Read and heard, as the thread does, until max's speakers agree.
         let settled = |w: &mut Wires| {

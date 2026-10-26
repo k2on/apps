@@ -213,10 +213,7 @@ pub trait Say {
 
     fn play(&mut self, play: harken_domain::RecordPlay) -> Result<(), String>;
 
-    /// Where an episode has got to, for its listener (`library.report_progress`).
-    /// Nothing by default: a player whose plays are not its own keeps no
-    /// place either.
-    fn progress(&mut self, _place: harken_domain::ReportProgress) -> Result<(), String> {
-        Ok(())
-    }
+    /// Where an episode has got to, for its listener (`library.report_progress`),
+    /// as a play is said: by every player, each as its listener.
+    fn progress(&mut self, place: harken_domain::ReportProgress) -> Result<(), String>;
 }

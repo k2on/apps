@@ -2363,3 +2363,53 @@ fn a_transfer_is_one_trace_from_the_tap_to_the_speaker() {
         "the house told to play, inside the tap's trace:\n{tree}"
     );
 }
+
+/// What plays on a speaker is its listener's: the play is in the log under
+/// their account, written by a sign-in of theirs the house holds, as it is
+/// from any device of theirs. Falsified by the bridge's `play` saying
+/// nothing, as it did: no play of max's was ever written.
+#[test]
+fn a_play_on_a_speaker_is_its_listeners() {
+    let rt = runtime();
+    let fake = Fake::default();
+    fake.keeps_a_queue(KITCHEN, as_given);
+    let url = fake.serve(&rt);
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.house = Some(house(url)));
+
+    let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    told(&mut browser, "the kitchen standing", |s| {
+        s.devices.len() == 2
+    });
+    call(
+        &mut browser,
+        "start",
+        input::start(&queue(&["a", "b"]), 0, 40_000, "album/Mixed"),
+    );
+    told(&mut browser, "the browser playing", |s| s.sounding());
+    call(&mut browser, "transfer", input::transfer(KITCHEN));
+    told(&mut browser, "the kitchen playing", |s| {
+        s.outputs(KITCHEN) && !s.moving_to(KITCHEN) && s.sounding()
+    });
+    let plays = eventually(20, || {
+        browser.pump();
+        let plays: Vec<harken_server::domain::Play> = hub_rows(&server, "play");
+        plays
+            .iter()
+            .any(|p| p.from == "album/Mixed" && p.title == "a")
+            .then_some(plays)
+    })
+    .expect("the kitchen's play written");
+    assert!(
+        plays.iter().all(|p| p.user_id == "max"),
+        "every play is max's: {plays:?}"
+    );
+    let sign_ins: Vec<ark_auth::SignIn> = hub_rows(&server, "sign_in");
+    assert!(
+        sign_ins
+            .iter()
+            .any(|s| s.user == "max" && s.device == "the house's speakers"),
+        "written by the house's sign-in of max's: {sign_ins:?}"
+    );
+    rt.block_on(server.stop());
+}

@@ -24,12 +24,23 @@ pub fn is_finished(position_ms: i64, duration_ms: i64) -> bool {
 }
 
 /// What to call the caller: what they said, else the name their sign-in
-/// carries, else what their row was last called.
+/// carries — or, one that carries none (the house's, for a speaker), their
+/// newest that does — else what their row was last called.
 fn name_of(ctx: &Ctx, db: &Db<Harken>, said: String, was: Option<&Progress>) -> String {
     if !said.is_empty() {
         return said;
     }
-    match db.sign_in.get(ctx.session.clone()).map(|s| s.name).filter(|n| !n.is_empty()) {
+    let own = db.sign_in.get(ctx.session.clone()).map(|s| s.name).filter(|n| !n.is_empty());
+    let user = ctx.user();
+    let theirs = || {
+        db.sign_in
+            .scan()
+            .into_iter()
+            .filter(|s| s.user == user && !s.name.is_empty())
+            .max_by_key(|s| s.issued_ms)
+            .map(|s| s.name)
+    };
+    match own.or_else(theirs) {
         Some(n) => n,
         None => was.map(|p| p.name.clone()).unwrap_or_default(),
     }
