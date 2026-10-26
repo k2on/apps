@@ -380,6 +380,11 @@ fun HarkenApp(
                 scope.launch { sheet.close() }
             }
 
+            override fun goTo(page: Page) {
+                scope.launch { sheet.close() }
+                nav().navigate(page.route)
+            }
+
             override fun toggle() = playback.toggle()
 
             override fun next() = playback.next()

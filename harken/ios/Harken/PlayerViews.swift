@@ -95,6 +95,7 @@ struct FullPlayer: View {
     let close: () -> Void
     @EnvironmentObject private var model: Model
     @Environment(\.present) private var present
+    @Environment(\.open) private var open
     @Namespace private var glass
 
     var body: some View {
@@ -125,9 +126,18 @@ struct FullPlayer: View {
                     .animation(Springs.move, value: s.playing)
             }
             Spacer(minLength: 0)
+            // The title opens its album and the name its person's page, as
+            // the desktop's bar and Android's player do; opening one closes
+            // the player (`Shell`).
             VStack(alignment: .leading, spacing: 2) {
-                Text(s.now?.title ?? "Nothing playing").font(.title2.bold()).lineLimit(2)
-                Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.gold).lineLimit(1)
+                Button { if let a = s.now?.album, !a.isEmpty { open(.page(.album(a))) } } label: {
+                    Text(s.now?.title ?? "Nothing playing").font(.title2.bold()).lineLimit(2).multilineTextAlignment(.leading)
+                }
+                .buttonStyle(.plain)
+                Button { if let a = s.now?.artist, !a.isEmpty { open(.page(.artist(a))) } } label: {
+                    Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.gold).lineLimit(1)
+                }
+                .buttonStyle(.plain)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Scrubber()

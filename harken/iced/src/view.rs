@@ -1757,9 +1757,17 @@ impl App {
         let art = self.peer.albums().iter().find(|a| a.name == track.album).map_or("", |a| a.art.as_str());
         let playing = row![
             self.picture(&track.album, art, BAR_ART, 4.0),
+            // The title opens its album and the name its person's page, as the
+            // phones' players do.
             column![
-                Line::new(track.title.as_str(), 13.0, Cut::End, |t| arkui::theme::of(t).background.base.text),
-                Line::new(track.creator.as_str(), 12.0, Cut::End, |t| style::dim(t).color.unwrap_or_default()),
+                linked(
+                    Line::new(track.title.as_str(), 13.0, Cut::End, |t| arkui::theme::of(t).background.base.text).into(),
+                    (!track.album.is_empty()).then(|| Source::Album(track.album.clone())),
+                ),
+                linked(
+                    Line::new(track.creator.as_str(), 12.0, Cut::End, |t| style::dim(t).color.unwrap_or_default()).into(),
+                    (!track.creator.is_empty()).then(|| Source::Artist(track.creator.clone())),
+                ),
             ]
             .spacing(3)
             .width(Length::Fill),
@@ -1935,6 +1943,18 @@ fn padded(page: Element<'_, Message>) -> Element<'_, Message> {
             left: GUTTER,
         })
         .into()
+}
+
+/// `body`, opening `to` when clicked, with the pointer a hand over it; just
+/// `body` when it goes nowhere.
+fn linked(body: Element<'_, Message>, to: Option<Source>) -> Element<'_, Message> {
+    match to {
+        Some(to) => mouse_area(body)
+            .on_press(Message::Select(to))
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into(),
+        None => body,
+    }
 }
 
 /// The bar's ground: a surface, [`BAR_HEIGHT`] tall because the device

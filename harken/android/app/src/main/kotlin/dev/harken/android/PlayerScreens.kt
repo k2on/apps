@@ -99,6 +99,9 @@ interface Controls {
 
     fun more() {}
 
+    /** Open a page — what plays' album or its person's — closing the player for it. */
+    fun goTo(page: Page) {}
+
     /** Open the device picker. */
     fun devices() {}
 
@@ -241,13 +244,24 @@ fun FullFace(
         if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
         else if (now != null) Cover(seedOf(now), now.art, 360.dp, Modifier.fillMaxWidth().aspectRatio(1f), corner = 12.dp)
         Spacer(Modifier.weight(0.5f))
+        // The title opens its album and the name its person's page, as the desktop's bar and the
+        // iPhone's player do.
+        val album = now?.album.orEmpty()
+        val artist = now?.artist.orEmpty()
         Text(
             now?.title ?: "Nothing playing",
             style = MaterialTheme.typography.headlineSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            modifier = if (album.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForAlbum(album)) },
         )
-        Text(now?.artist ?: "", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+        Text(
+            artist,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            modifier = if (artist.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForArtist(artist)) },
+        )
         Spacer(Modifier.height(Space.l))
         Scrubber(state, position, scrubbing, controls)
         // The session has no shuffle and no repeat: neither is drawn while the phone is part of it,
