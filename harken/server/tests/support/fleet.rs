@@ -1245,6 +1245,7 @@ pub fn song(title: &str) -> Vec<(&'static str, Value)> {
         ("work_title", json!("")),
         ("movement_no", json!(0)),
         ("artist_banner", json!("")),
+        ("released", json!(0)),
     ]
 }
 

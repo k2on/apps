@@ -22,14 +22,17 @@ type Shared<T> = Arc<Mutex<T>>;
 type Files = Shared<BTreeMap<String, Vec<u8>>>;
 /// How many times each path was asked.
 type Asked = Shared<BTreeMap<String, usize>>;
+/// How many more times a path is answered 429, to wait a second.
+type Busy = Shared<BTreeMap<String, usize>>;
 
 /// A file server on an ephemeral port: its address, the files it serves by
-/// path (404 for the rest), and how many times each path was asked.
-fn host() -> (String, Files, Asked) {
+/// path (404 for the rest), how many times each path was asked, and the
+/// paths it tells to wait first.
+fn host() -> (String, Files, Asked, Busy) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let (files, asked): (Files, Asked) = (Shared::default(), Shared::default());
-    let (served, counts) = (Arc::clone(&files), Arc::clone(&asked));
+    let (files, asked, busy): (Files, Asked, Busy) = Default::default();
+    let (served, counts, waits) = (Arc::clone(&files), Arc::clone(&asked), Arc::clone(&busy));
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
@@ -44,6 +47,14 @@ fn host() -> (String, Files, Asked) {
             }
             let path = line.split_whitespace().nth(1).unwrap_or("").to_string();
             *counts.lock().unwrap().entry(path.clone()).or_insert(0) += 1;
+            if let Some(n) = waits.lock().unwrap().get_mut(&path).filter(|n| **n > 0) {
+                *n -= 1;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                continue;
+            }
             let body = served.lock().unwrap().get(&path).cloned();
             let _ = match body {
                 Some(body) => write!(
@@ -59,7 +70,7 @@ fn host() -> (String, Files, Asked) {
             };
         }
     });
-    (base, files, asked)
+    (base, files, asked, busy)
 }
 
 /// The library's rows of a table that `f` picks out.
@@ -74,7 +85,8 @@ fn row<T: ark::format::Encode + Send + 'static>(
 /// Falsified by authoring a track whose file did not download: "Gavotte"
 /// was a song; by naming a download without its extension: its file had
 /// none; by a sync downloading what it already has: the rescan asked for
-/// `/air.mp3` again; and by describes that say nothing new still writing:
+/// `/air.mp3` again; by a 429 not waited out: "Air" was no song either;
+/// and by describes that say nothing new still writing:
 /// the rescan authored.
 #[test]
 fn a_catalogue_is_downloaded_once_and_is_the_library() {
@@ -83,7 +95,9 @@ fn a_catalogue_is_downloaded_once_and_is_the_library() {
     let (media, data) = (root.path().join("media"), root.path().join("data"));
     std::fs::create_dir_all(media.join("music")).unwrap();
 
-    let (base, files, asked) = host();
+    let (base, files, asked, busy) = host();
+    // Told to wait the first time, as Commons does: waited, and asked again.
+    busy.lock().unwrap().insert("/air.mp3".into(), 1);
     let audio = b"ID3 the air".to_vec();
     let portrait = b"\xFF\xD8\xFF\xE0 Bach".to_vec();
     let catalogue = format!(
@@ -192,8 +206,8 @@ fn a_catalogue_is_downloaded_once_and_is_the_library() {
     let asked = asked.lock().unwrap().clone();
     assert_eq!(
         asked.get("/air.mp3"),
-        Some(&1),
-        "downloaded once: {asked:?}"
+        Some(&2),
+        "told to wait, asked again, and downloaded once: {asked:?}"
     );
     assert_eq!(
         asked.get("/bach.jpg"),

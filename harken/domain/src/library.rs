@@ -171,13 +171,23 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
     })?;
     if !input.album.is_empty() {
         let album = db.album.get(&input.album);
-        let stale = album.as_ref().is_none_or(|a| !input.album_art.is_empty() && a.art != input.album_art);
+        // A picture or a year the track says and the album has not; what it
+        // does not say, the album keeps.
+        let stale = album
+            .as_ref()
+            .is_none_or(|a| (!input.album_art.is_empty() && a.art != input.album_art) || (input.released > 0 && a.released != input.released));
         if stale {
             db.album.put(Album {
                 name: input.album.clone(),
                 label: album.as_ref().map_or(String::new(), |a| a.label.clone()),
-                released: album.as_ref().map_or(0, |a| a.released),
-                art: input.album_art.clone(),
+                released: match input.released {
+                    0 => album.as_ref().map_or(0, |a| a.released),
+                    year => year,
+                },
+                art: match input.album_art.is_empty() {
+                    true => album.as_ref().map_or(String::new(), |a| a.art.clone()),
+                    false => input.album_art.clone(),
+                },
                 added_ms: now,
                 user_id: user.clone(),
             })?;

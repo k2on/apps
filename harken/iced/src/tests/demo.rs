@@ -447,3 +447,22 @@ fn the_catalogue_describes_its_people_and_works() {
     let work = app.peer.works().iter().find(|w| w.id == id).cloned().expect("the work's own row");
     assert!(work.description.contains("thirty variations"), "{}", work.description);
 }
+
+/// Falsified by `add_song` dropping the catalogue's year: the Goldberg
+/// Variations came out in nobody-said, and by a track without one wiping
+/// the year its album has.
+#[test]
+fn the_catalogue_dates_its_albums() {
+    let app = super::demo_app();
+    let year = |name: &str| app.peer.albums().iter().find(|a| a.name == name).map(|a| a.released);
+    assert_eq!(year("Goldberg Variations, BWV 988"), Some(2012));
+    assert_eq!(year("Messiah"), Some(0), "nobody said");
+    let goldberg = app
+        .peer
+        .albums()
+        .iter()
+        .find(|a| a.name == "Goldberg Variations, BWV 988")
+        .cloned()
+        .unwrap();
+    assert_eq!(goldberg.performer, "Kimiko Ishizaka", "who made it");
+}

@@ -166,6 +166,7 @@ class MotionTests {
                     workTitle = "",
                     movementNo = 0,
                     artistBanner = if (banner && t.creator == HANDEL) "banners/handel.jpg" else "",
+                    released = 0,
                 ),
             )
         }

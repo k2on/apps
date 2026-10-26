@@ -51,7 +51,7 @@ fn a_views_rows_are_the_domains_own_types() {
     assert_eq!(lists.take().update, Taken::Unchanged);
     assert_eq!(lists.rows()[0].user_id, "u");
 
-    let song = r#"{"title":"Air","artist":"Bach","album":"","duration_ms":1000,"file":"air.flac","track":1,"part":"","catalogue":"","performer":"","bpm":0,"album_art":"","artist_art":"","disc":1,"work_title":"","movement_no":0,"artist_banner":""}"#;
+    let song = r#"{"title":"Air","artist":"Bach","album":"","duration_ms":1000,"file":"air.flac","track":1,"part":"","catalogue":"","performer":"","bpm":0,"album_art":"","artist_art":"","disc":1,"work_title":"","movement_no":0,"artist_banner":"","released":0}"#;
     p.mutate("library.add_song".into(), song.into()).unwrap();
     let RowId(playlist) = lists.rows()[0].id;
     let input = format!(r#"{{"playlist_id":"{}"}}"#, ark::hash::hex(&playlist));

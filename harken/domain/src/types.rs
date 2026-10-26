@@ -38,6 +38,10 @@ pub struct AddSong {
     /// The wide picture beside the artist's (`backdrop.*`), for their page.
     #[ark(trim)]
     pub artist_banner: String,
+    /// The year its album came out, 0 for "nobody said": an album with one
+    /// keeps it when a track says none. Defaulted, as it was added after.
+    #[serde(default)]
+    pub released: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]

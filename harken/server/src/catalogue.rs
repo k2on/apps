@@ -8,7 +8,14 @@
 //! A file is named by its URL's hash, so a sync downloads only what it has
 //! not got, and one interrupted leaves a `.part` that the next starts over.
 //! A file that fails to download is left out until it does: its track is
-//! not authored, and its picture is no picture. Nothing is deleted, as the
+//! not authored, and its picture is no picture, and the sync is tried again
+//! later (`library.rs`).
+//!
+//! Politely, as Wikimedia Commons — where its recordings are — asks: saying
+//! who is asking, one file at a time with a pause between, and when told to
+//! slow down (429 or 503), waiting as long as it is told and asking again.
+//! Ark's first sync asked 248 files in a second as `ureq/2`, and all but
+//! four were 429. Nothing is deleted, as the
 //! scanner deletes nothing: a recording gone from the catalogue stays.
 
 use std::collections::BTreeMap;
@@ -27,6 +34,21 @@ pub const DIR: &str = ".catalogue";
 /// megabytes.
 const MAX: u64 = 2 << 30;
 
+/// Who is asking, as Wikimedia's User-Agent policy asks a client to say.
+const AGENT: &str = concat!(
+    "harken-server/",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/k2on/apps)"
+);
+
+/// The pause after each file downloaded.
+const PAUSE: Duration = Duration::from_millis(500);
+
+/// How many times a file told to wait is asked for, and the longest wait
+/// taken: a host that says longer is tried at the next sync.
+const TRIES: u32 = 5;
+const LONGEST: Duration = Duration::from_secs(300);
+
 pub fn dir(data: &Path) -> PathBuf {
     data.join("catalogue")
 }
@@ -36,6 +58,8 @@ pub fn dir(data: &Path) -> PathBuf {
 pub struct Fetched {
     pub catalogue: Catalogue,
     pub here: BTreeMap<String, String>,
+    /// How many of its files could not be had: the next sync tries them.
+    pub failed: usize,
 }
 
 /// The catalogue at `url`, and everything it names downloaded into `dir`.
@@ -44,6 +68,7 @@ pub fn fetch(url: &str, dir: &Path) -> Result<Fetched, String> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(30))
         .timeout_read(Duration::from_secs(120))
+        .user_agent(AGENT)
         .build();
     let json = agent
         .get(url)
@@ -59,7 +84,10 @@ pub fn fetch(url: &str, dir: &Path) -> Result<Fetched, String> {
         let path = dir.join(&name);
         if !path.exists() {
             match download(&agent, u, &path) {
-                Ok(()) => fetched += 1,
+                Ok(()) => {
+                    fetched += 1;
+                    std::thread::sleep(PAUSE);
+                }
                 Err(e) => {
                     failed += 1;
                     eprintln!("harken-server: catalogue: {u}: {e}");
@@ -73,7 +101,11 @@ pub fn fetch(url: &str, dir: &Path) -> Result<Fetched, String> {
         "harken-server: catalogue: {} files here, {fetched} downloaded now, {failed} failed",
         here.len()
     );
-    Ok(Fetched { catalogue, here })
+    Ok(Fetched {
+        catalogue,
+        here,
+        failed,
+    })
 }
 
 /// A URL's file name: its hash, with the extension its path ends in, which
@@ -92,7 +124,7 @@ pub fn name_of(url: &str) -> String {
 
 /// One file into `path`, by way of `<path>.part`, so a file there is whole.
 fn download(agent: &ureq::Agent, url: &str, path: &Path) -> Result<(), String> {
-    let response = agent.get(url).call().map_err(|e| e.to_string())?;
+    let response = get(agent, url)?;
     let part = path.with_extension("part");
     let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
     let copied = std::io::copy(&mut response.into_reader().take(MAX + 1), &mut file)
@@ -102,4 +134,31 @@ fn download(agent: &ureq::Agent, url: &str, path: &Path) -> Result<(), String> {
         return Err(format!("more than {MAX} bytes"));
     }
     std::fs::rename(&part, path).map_err(|e| e.to_string())
+}
+
+/// A response to `url`, asked again — up to [`TRIES`] times — after as long
+/// as a 429 or 503 says to wait (`Retry-After`, in seconds; 30 when it does
+/// not say), unless that is longer than [`LONGEST`].
+fn get(agent: &ureq::Agent, url: &str) -> Result<ureq::Response, String> {
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        match agent.get(url).call() {
+            Ok(response) => return Ok(response),
+            Err(ureq::Error::Status(code @ (429 | 503), response)) if tries < TRIES => {
+                let wait = response
+                    .header("retry-after")
+                    .and_then(|s| s.trim().parse().ok())
+                    .map_or(Duration::from_secs(30), Duration::from_secs);
+                if wait > LONGEST {
+                    return Err(format!(
+                        "status code {code}, and to wait {}s",
+                        wait.as_secs()
+                    ));
+                }
+                std::thread::sleep(wait);
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
 }

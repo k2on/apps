@@ -76,6 +76,7 @@ class ScrollTests {
             workTitle = "",
             movementNo = 0,
             artistBanner = "",
+            released = 0,
         )
 
     private val counts = ConcurrentHashMap<String, Int>()

@@ -89,6 +89,7 @@ fn step(r: &mut Rng, s: &Store) -> Step {
                 work_title: r.pick(&["", "Goldberg Variations", "Suite"]).into(),
                 movement_no: n(r, 3),
                 artist_banner: String::new(),
+                released: 0,
             }
             .to_bytes(),
         ),

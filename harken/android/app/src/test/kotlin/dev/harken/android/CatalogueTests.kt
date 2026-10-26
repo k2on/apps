@@ -166,6 +166,7 @@ class CatalogueTests {
             workTitle = work,
             movementNo = no,
             artistBanner = "",
+            released = 0,
         )
 
     /**

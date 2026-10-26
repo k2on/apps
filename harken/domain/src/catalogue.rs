@@ -73,6 +73,8 @@ pub struct Credit {
 pub struct Album {
     pub name: String,
     pub art: String,
+    /// The year it came out, or its recordings were made; 0 for not known.
+    pub year: i64,
     pub tracks: Vec<Track>,
 }
 
@@ -178,6 +180,7 @@ impl Catalogue {
                     work_title: work_title.clone(),
                     movement_no: t.track,
                     artist_banner: String::new(),
+                    released: album.year,
                 };
                 calls.push(Call::of("library.add_song", &t.title, &song));
                 let work_id = work_key(&t.composer, &t.catalogue, &work_title);

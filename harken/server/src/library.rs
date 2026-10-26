@@ -225,22 +225,50 @@ impl Scanner {
         // The catalogue's own thread: a sync asked is a fetch and however
         // long its downloads take, so it is not the scanner's to wait on;
         // what it fetched comes back as a nudge. Syncs asked while one runs
-        // are that one.
+        // are that one. One that could not have everything — the host down,
+        // or telling it to wait longer than it will — is tried again by
+        // itself: ten minutes later, and twice as long each time after, to
+        // six hours, until one has it all.
         let sync = catalogue.map(|url| {
             let (sync, asked) = channel::<()>();
             let (dir, back) = (crate::catalogue::dir(&data), tx.clone());
             let _ = std::thread::Builder::new()
                 .name("harken-catalogue".into())
                 .spawn(move || {
-                    while asked.recv().is_ok() {
+                    const FIRST: Duration = Duration::from_secs(10 * 60);
+                    const LONGEST: Duration = Duration::from_secs(6 * 60 * 60);
+                    let mut again: Option<Duration> = None;
+                    loop {
+                        let gone = match again {
+                            None => asked.recv().is_err(),
+                            Some(after) => matches!(
+                                asked.recv_timeout(after),
+                                Err(RecvTimeoutError::Disconnected)
+                            ),
+                        };
+                        if gone {
+                            return;
+                        }
                         while asked.try_recv().is_ok() {}
-                        match crate::catalogue::fetch(&url, &dir) {
+                        let short = match crate::catalogue::fetch(&url, &dir) {
                             Ok(fetched) => {
+                                let short = fetched.failed > 0;
                                 if back.send(Nudge::Catalogue(Box::new(fetched))).is_err() {
                                     return;
                                 }
+                                short
                             }
-                            Err(e) => eprintln!("harken-server: catalogue: {e}"),
+                            Err(e) => {
+                                eprintln!("harken-server: catalogue: {e}");
+                                true
+                            }
+                        };
+                        again = short.then(|| again.map_or(FIRST, |a| (a * 2).min(LONGEST)));
+                        if let Some(after) = again {
+                            eprintln!(
+                                "harken-server: catalogue: syncing again in {} minutes",
+                                after.as_secs() / 60
+                            );
                         }
                     }
                 });
@@ -800,6 +828,7 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         work_title: track.work,
         movement_no: track.movement_no,
         artist_banner,
+        released: track.year,
     }
     .to_bytes();
     if !would_change(peer, ADD_SONG, &call) {
@@ -872,6 +901,8 @@ pub struct Track {
     pub catalogue: String,
     /// Where it sits in its work (`MVIN`, `©mvi`), 0 when nobody said.
     pub movement_no: i64,
+    /// The year its tag says (`TDRC`, `DATE`, `©day`), 0 when it says none.
+    pub year: i64,
 }
 
 /// What the tags say, with the file name as the fallback for a title; `None`
@@ -967,6 +998,7 @@ pub fn read_with_picture(path: &Path) -> Option<(Track, Option<Vec<u8>>)> {
         catalogue: catalogue(&work),
         work,
         movement_no,
+        year: tag.and_then(|t| t.date()).map_or(0, |d| i64::from(d.year)),
     };
     Some((track, covers::embedded(&tagged)))
 }

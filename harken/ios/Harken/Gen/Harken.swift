@@ -52,15 +52,16 @@ public struct AddSong: Equatable {
     public var workTitle: String
     public var movementNo: Int64
     public var artistBanner: String
+    public var released: Int64
 
-    public init(title: String, artist: String, album: String, durationMs: Int64, file: String, track: Int64, part: String, catalogue: String, performer: String, bpm: Int64, albumArt: String, artistArt: String, disc: Int64, workTitle: String, movementNo: Int64, artistBanner: String) { self.title = title; self.artist = artist; self.album = album; self.durationMs = durationMs; self.file = file; self.track = track; self.part = part; self.catalogue = catalogue; self.performer = performer; self.bpm = bpm; self.albumArt = albumArt; self.artistArt = artistArt; self.disc = disc; self.workTitle = workTitle; self.movementNo = movementNo; self.artistBanner = artistBanner; }
+    public init(title: String, artist: String, album: String, durationMs: Int64, file: String, track: Int64, part: String, catalogue: String, performer: String, bpm: Int64, albumArt: String, artistArt: String, disc: Int64, workTitle: String, movementNo: Int64, artistBanner: String, released: Int64) { self.title = title; self.artist = artist; self.album = album; self.durationMs = durationMs; self.file = file; self.track = track; self.part = part; self.catalogue = catalogue; self.performer = performer; self.bpm = bpm; self.albumArt = albumArt; self.artistArt = artistArt; self.disc = disc; self.workTitle = workTitle; self.movementNo = movementNo; self.artistBanner = artistBanner; self.released = released; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(title: J.text(o["title"]), artist: J.text(o["artist"]), album: J.text(o["album"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), track: J.int(o["track"]), part: J.text(o["part"]), catalogue: J.text(o["catalogue"]), performer: J.text(o["performer"]), bpm: J.int(o["bpm"]), albumArt: J.text(o["album_art"]), artistArt: J.text(o["artist_art"]), disc: J.int(o["disc"]), workTitle: J.text(o["work_title"]), movementNo: J.int(o["movement_no"]), artistBanner: J.text(o["artist_banner"]))
+        self.init(title: J.text(o["title"]), artist: J.text(o["artist"]), album: J.text(o["album"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), track: J.int(o["track"]), part: J.text(o["part"]), catalogue: J.text(o["catalogue"]), performer: J.text(o["performer"]), bpm: J.int(o["bpm"]), albumArt: J.text(o["album_art"]), artistArt: J.text(o["artist_art"]), disc: J.int(o["disc"]), workTitle: J.text(o["work_title"]), movementNo: J.int(o["movement_no"]), artistBanner: J.text(o["artist_banner"]), released: J.int(o["released"]))
     }
 
-    public var json: String { J.obj(["\"title\":" + J.q(title), "\"artist\":" + J.q(artist), "\"album\":" + J.q(album), "\"duration_ms\":" + String(durationMs), "\"file\":" + J.q(file), "\"track\":" + String(track), "\"part\":" + J.q(part), "\"catalogue\":" + J.q(catalogue), "\"performer\":" + J.q(performer), "\"bpm\":" + String(bpm), "\"album_art\":" + J.q(albumArt), "\"artist_art\":" + J.q(artistArt), "\"disc\":" + String(disc), "\"work_title\":" + J.q(workTitle), "\"movement_no\":" + String(movementNo), "\"artist_banner\":" + J.q(artistBanner)]) }
+    public var json: String { J.obj(["\"title\":" + J.q(title), "\"artist\":" + J.q(artist), "\"album\":" + J.q(album), "\"duration_ms\":" + String(durationMs), "\"file\":" + J.q(file), "\"track\":" + String(track), "\"part\":" + J.q(part), "\"catalogue\":" + J.q(catalogue), "\"performer\":" + J.q(performer), "\"bpm\":" + String(bpm), "\"album_art\":" + J.q(albumArt), "\"artist_art\":" + J.q(artistArt), "\"disc\":" + String(disc), "\"work_title\":" + J.q(workTitle), "\"movement_no\":" + String(movementNo), "\"artist_banner\":" + J.q(artistBanner), "\"released\":" + String(released)]) }
 }
 
 /// The record `AddToPlaylist`.
