@@ -154,11 +154,7 @@ pub fn auto_assign(ctx: &Ctx, db: &mut Db<Money>, input: AutoAssign) -> Result<(
         }
         let amount = match input.how {
             Auto::LastMonth => assigned_in(db, &last, c.id),
-            Auto::Underfunded => {
-                let line = line(db, &c, &input.month);
-                let lacks = (c.target - line.assigned - line.carried).max(0);
-                line.assigned + lacks
-            }
+            Auto::Underfunded => assigned_in(db, &input.month, c.id).max(c.target),
             Auto::Reset => 0,
         };
         set_assigned(ctx, db, &input.month, c.id, amount)?;
@@ -271,7 +267,12 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
     }
     let rta = ready_to_assign();
     let mut income_through = 0;
-    for t in db.txn.by(Txn::CATEGORY_ID_DATE).between((Some(rta), String::new()), (Some(rta), month_end(month))).all() {
+    for t in db
+        .txn
+        .by(Txn::CATEGORY_ID_DATE)
+        .between((Some(rta), String::new()), (Some(rta), month_end(month)))
+        .all()
+    {
         income_through += t.amount;
         if month_of(&t.date) == month {
             out.income += t.amount;
@@ -289,7 +290,7 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
         out.activity += s.activity;
         out.available += s.available;
         out.overspent += (s.available < 0) as i64;
-        out.underfunded += (c.target > 0 && s.carried + s.assigned < c.target) as i64;
+        out.underfunded += (s.assigned < c.target) as i64;
     }
     out.ready_to_assign = income_through - assigned_through + overspent_before;
     out
@@ -381,7 +382,10 @@ mod tests {
         let sep = h.at("2026-09");
         assert_eq!((sep.carried, sep.available), (70, -50));
         let oct = h.at("2026-10");
-        assert_eq!((oct.carried, oct.available, oct.overspent_before, oct.overspent_last_month), (0, 50, -50, -50));
+        assert_eq!(
+            (oct.carried, oct.available, oct.overspent_before, oct.overspent_last_month),
+            (0, 50, -50, -50)
+        );
         let dec = h.at("2026-12");
         assert_eq!((dec.carried, dec.available, dec.overspent_last_month), (50, 50, 0));
         assert_eq!(h.at("2026-01"), Standing::default());

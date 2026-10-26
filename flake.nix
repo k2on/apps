@@ -76,7 +76,7 @@
       # `harken/` by path, so both trees are the source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to the domain (harken/ffi/tests/gen.rs).
       genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
@@ -262,7 +262,7 @@
           # The pages' dependencies for wasm32, once for both.
           wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
           wasmBuilds = lib.concatMapStringsSep "\n" wasmBuild [
-            "-p harken-iced" "-p harken-iced --features demo"
+            "-p harken-iced" "-p harken-iced --features demo" "-p money-iced"
           ];
           wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
             pname = "arkdb-wasm";
@@ -309,6 +309,13 @@
           harken-web = icedWeb { pname = "harken-web"; demo = true; };
           # What harken-server serves as its web directory.
           harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
+          # money's demo in a browser: a seeded household, its own authority,
+          # nothing to sign in to (money/README.md).
+          money-web = wasmPage {
+            pname = "money-web";
+            crate = "money-iced";
+            files = "../money/iced/web/index.html ../money/iced/web/favicon.svg";
+          };
 
           # The server (harken/server: the server and harken-peer), on a
           # chain of its own as the APK's host part is below — dependencies,
@@ -354,6 +361,18 @@
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               wrapProgram $out/bin/harken-iced --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath (with pkgs; [
+                wayland libxkbcommon vulkan-loader libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
+              ])}
+            '';
+          };
+
+          # money's demo window, as harken-iced's: the display and the GPU by
+          # dlopen at run time.
+          money-iced = crate {
+            pname = "money-iced";
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            postFixup = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              wrapProgram $out/bin/money-iced --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath (with pkgs; [
                 wayland libxkbcommon vulkan-loader libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
               ])}
             '';
@@ -813,6 +832,7 @@
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced;
+            inherit money-iced money-web;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;

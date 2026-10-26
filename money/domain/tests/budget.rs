@@ -76,7 +76,10 @@ fn money_moves_between_categories_and_back_to_be_assigned() {
         amount: 25_000,
     };
     b.run("move_money", &m).unwrap();
-    assert_eq!((b.line("2026-09", rent).assigned, b.line("2026-09", groceries).assigned), (75_000, 25_000));
+    assert_eq!(
+        (b.line("2026-09", rent).assigned, b.line("2026-09", groceries).assigned),
+        (75_000, 25_000)
+    );
     let back = MoveMoney { to: None, ..m };
     b.run("move_money", &back).unwrap();
     assert_eq!(b.line("2026-09", rent).assigned, 50_000);
@@ -94,7 +97,14 @@ fn money_moves_between_categories_and_back_to_be_assigned() {
 fn a_month_can_be_assigned_at_once() {
     let (mut b, _, rent, groceries) = household();
     b.assign("2026-09", rent, 150_000);
-    b.run("set_target", &SetTarget { id: groceries, target: 60_000 }).unwrap();
+    b.run(
+        "set_target",
+        &SetTarget {
+            id: groceries,
+            target: 60_000,
+        },
+    )
+    .unwrap();
     let auto = |how| AutoAssign {
         month: "2026-10".into(),
         how,
@@ -124,7 +134,10 @@ fn a_transfer_is_two_transactions_kept_together() {
     };
     b.run("add_transaction", &t).unwrap();
     let mine = b.register(Some(savings));
-    assert_eq!((mine[0].payee.as_str(), mine[0].amount, mine[0].transfer), ("Transfer : Checking", 50_000, true));
+    assert_eq!(
+        (mine[0].payee.as_str(), mine[0].amount, mine[0].transfer),
+        ("Transfer : Checking", 50_000, true)
+    );
     // Between two accounts on budget no money was spent.
     assert_eq!(b.summary("2026-09").ready_to_assign, 300_000);
     // Editing one half moves the other.
@@ -201,7 +214,10 @@ fn reconciling_agrees_with_the_bank_and_locks_what_it_agreed_to() {
         amount: -1,
         ..EditTransaction::default()
     };
-    assert_eq!(b.run("edit_transaction", &edit).unwrap_err(), "reconciled: its amount is agreed with the bank");
+    assert_eq!(
+        b.run("edit_transaction", &edit).unwrap_err(),
+        "reconciled: its amount is agreed with the bank"
+    );
 }
 
 #[test]
@@ -226,11 +242,15 @@ fn a_deleted_category_hands_on_its_money_and_its_spending() {
 #[test]
 fn everybody_in_the_household_keeps_the_same_budget() {
     let (mut b, checking, rent, _) = household();
-    b.as_("bob", "assign", &Assign {
-        month: "2026-09".into(),
-        category_id: rent,
-        amount: 10_000,
-    })
+    b.as_(
+        "bob",
+        "assign",
+        &Assign {
+            month: "2026-09".into(),
+            category_id: rent,
+            amount: 10_000,
+        },
+    )
     .unwrap();
     b.as_(
         "carol",
@@ -259,5 +279,8 @@ fn a_form_says_what_is_wrong_with_it() {
         ..AddTransaction::default()
     };
     assert!(b.run("add_transaction", &bad).unwrap_err().contains("a day, as 2026-10-26"));
-    assert!(b.run("add_group", &AddGroup { name: "  ".into() }).unwrap_err().contains("a group needs a name"));
+    assert!(b
+        .run("add_group", &AddGroup { name: "  ".into() })
+        .unwrap_err()
+        .contains("a group needs a name"));
 }

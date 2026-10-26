@@ -63,7 +63,16 @@ pub fn open(
 
 #[mutator("accounts.open_account")]
 pub fn open_account(ctx: &Ctx, db: &mut Db<Money>, input: OpenAccount) -> Result<(), Refusal> {
-    open(ctx, db, ctx.new_id(), &input.name, &input.kind, input.on_budget, input.balance, &input.date)
+    open(
+        ctx,
+        db,
+        ctx.new_id(),
+        &input.name,
+        &input.kind,
+        input.on_budget,
+        input.balance,
+        &input.date,
+    )
 }
 
 pub fn account_of(db: &Db<Money>, id: Id<Account>) -> Result<Account, Refusal> {

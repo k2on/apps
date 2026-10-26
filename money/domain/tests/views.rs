@@ -67,7 +67,14 @@ fn script(b: &mut Book) -> Vec<Step> {
             b.run("set_target", &SetTarget { id: food, target: 60_000 }).unwrap();
         }),
         Box::new(move |b| {
-            b.run("rename_group", &RenameGroup { id: bills, name: "Monthly".into() }).unwrap();
+            b.run(
+                "rename_group",
+                &RenameGroup {
+                    id: bills,
+                    name: "Monthly".into(),
+                },
+            )
+            .unwrap();
         }),
         Box::new(move |b| {
             b.run(

@@ -387,7 +387,10 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
 /// writes there. What the account it fed before already holds stays.
 #[mutator("banks.link")]
 pub fn link(_: &Ctx, db: &mut Db<Money>, input: LinkAccount) -> Result<(), Refusal> {
-    let l = db.linked.get(&input.plaid_account_id).ok_or_else(|| Refusal::new("no such bank account"))?;
+    let l = db
+        .linked
+        .get(&input.plaid_account_id)
+        .ok_or_else(|| Refusal::new("no such bank account"))?;
     crate::accounts::account_of(db, input.account_id)?;
     if db.linked.by(Linked::ACCOUNT_ID).from(Some(input.account_id)).any() {
         return Err(Refusal::new("that account is fed by a bank already"));
@@ -403,7 +406,10 @@ pub fn link(_: &Ctx, db: &mut Db<Money>, input: LinkAccount) -> Result<(), Refus
 /// are dropped from every import after.
 #[mutator("banks.ignore")]
 pub fn ignore(_: &Ctx, db: &mut Db<Money>, input: IgnoreLinked) -> Result<(), Refusal> {
-    let l = db.linked.get(&input.plaid_account_id).ok_or_else(|| Refusal::new("no such bank account"))?;
+    let l = db
+        .linked
+        .get(&input.plaid_account_id)
+        .ok_or_else(|| Refusal::new("no such bank account"))?;
     db.linked.update(Linked { ignored: input.ignored, ..l })
 }
 
@@ -435,8 +441,12 @@ mod tests {
         )
         .unwrap();
         let b = bank_txn(&t);
-        assert_eq!((b.amount, b.payee.as_str(), b.imported_payee.as_str(), b.pending), (-1234, "Blue Bottle", "SQ *BLUE BOTTLE 1234", true));
-        let card: PlaidAccount = serde_json::from_str(r#"{"account_id":"a2","name":"Card","mask":"9999","type":"credit","balances":{"current":410.5}}"#).unwrap();
+        assert_eq!(
+            (b.amount, b.payee.as_str(), b.imported_payee.as_str(), b.pending),
+            (-1234, "Blue Bottle", "SQ *BLUE BOTTLE 1234", true)
+        );
+        let card: PlaidAccount =
+            serde_json::from_str(r#"{"account_id":"a2","name":"Card","mask":"9999","type":"credit","balances":{"current":410.5}}"#).unwrap();
         assert_eq!(bank_balance(&card, 410.5), -41050);
         assert_eq!(kind_of("depository", "savings"), "savings");
         assert_eq!(kind_of("credit", "credit card"), "credit");

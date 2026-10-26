@@ -100,7 +100,9 @@ impl Book {
             now: self.now,
             ..Default::default()
         };
-        let b = domain().ask(&self.store, &ctx, &full(name), &input.to_bytes()).unwrap_or_else(|r| panic!("{name}: {r}"));
+        let b = domain()
+            .ask(&self.store, &ctx, &full(name), &input.to_bytes())
+            .unwrap_or_else(|r| panic!("{name}: {r}"));
         Vec::<T>::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 
@@ -116,7 +118,14 @@ impl Book {
     }
 
     pub fn category(&mut self, group: Id<Group>, name: &str) -> Id<Category> {
-        self.run("add_category", &AddCategory { group_id: group, name: name.into() }).unwrap();
+        self.run(
+            "add_category",
+            &AddCategory {
+                group_id: group,
+                name: name.into(),
+            },
+        )
+        .unwrap();
         self.rows::<Category>("category").into_iter().find(|c| c.name == name).unwrap().id
     }
 

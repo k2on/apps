@@ -68,7 +68,15 @@ fn budget() -> (Book, Id<Account>) {
 
 /// A row of a register as the check compares it.
 fn row(t: &TxnLine) -> (String, String, i64, Cleared, String, String, String) {
-    (t.date.clone(), t.payee.clone(), t.amount, t.cleared, t.imported_payee.clone(), t.category.clone(), t.memo.clone())
+    (
+        t.date.clone(),
+        t.payee.clone(),
+        t.amount,
+        t.cleared,
+        t.imported_payee.clone(),
+        t.category.clone(),
+        t.memo.clone(),
+    )
 }
 
 fn rows(b: &Book, account: Id<Account>) -> Vec<(String, String, i64, Cleared, String, String, String)> {
@@ -100,8 +108,24 @@ fn three_phases_of_one_bank() {
     assert_eq!(
         rows(&b, savings.id),
         [
-            (s("2026-09-19"), s("Starting Balance"), 91_350, Cleared::Cleared, s(""), s("Ready to Assign"), s("Balance before the first import")),
-            (s("2026-09-20"), s("INTEREST"), 1_000, Cleared::Cleared, s("INTEREST"), s("Needs a category"), s("")),
+            (
+                s("2026-09-19"),
+                s("Starting Balance"),
+                91_350,
+                Cleared::Cleared,
+                s(""),
+                s("Ready to Assign"),
+                s("Balance before the first import")
+            ),
+            (
+                s("2026-09-20"),
+                s("INTEREST"),
+                1_000,
+                Cleared::Cleared,
+                s("INTEREST"),
+                s("Needs a category"),
+                s("")
+            ),
         ]
     );
     assert_eq!((savings.balance, savings.bank_balance), (92_350, Some(92_350)));
@@ -109,10 +133,42 @@ fn three_phases_of_one_bank() {
 
     let plaid_checking = lines.iter().find(|a| a.name == "Plaid Checking").unwrap().id;
     let after1 = [
-        (s("2026-09-19"), s("Starting Balance"), 92_350 + 5_025 - 100_000, Cleared::Cleared, s(""), s("Ready to Assign"), s("Balance before the first import")),
-        (s("2026-09-20"), s("Coffee Shop"), -5_025, Cleared::Cleared, s("COFFEE SHOP #12"), s("Needs a category"), s("")),
-        (s("2026-09-21"), s("GAS STATION PENDING"), -2_000, Cleared::Uncleared, s("GAS STATION PENDING"), s("Needs a category"), s("")),
-        (s("2026-09-23"), s("PAYROLL"), 100_000, Cleared::Cleared, s("PAYROLL"), s("Needs a category"), s("")),
+        (
+            s("2026-09-19"),
+            s("Starting Balance"),
+            92_350 + 5_025 - 100_000,
+            Cleared::Cleared,
+            s(""),
+            s("Ready to Assign"),
+            s("Balance before the first import"),
+        ),
+        (
+            s("2026-09-20"),
+            s("Coffee Shop"),
+            -5_025,
+            Cleared::Cleared,
+            s("COFFEE SHOP #12"),
+            s("Needs a category"),
+            s(""),
+        ),
+        (
+            s("2026-09-21"),
+            s("GAS STATION PENDING"),
+            -2_000,
+            Cleared::Uncleared,
+            s("GAS STATION PENDING"),
+            s("Needs a category"),
+            s(""),
+        ),
+        (
+            s("2026-09-23"),
+            s("PAYROLL"),
+            100_000,
+            Cleared::Cleared,
+            s("PAYROLL"),
+            s("Needs a category"),
+            s(""),
+        ),
     ];
     assert_eq!(rows(&b, plaid_checking), after1);
 
@@ -122,15 +178,38 @@ fn three_phases_of_one_bank() {
         b.category(car, "Gas")
     };
     let pending = b.register(Some(plaid_checking)).into_iter().find(|t| t.amount == -2_000).unwrap();
-    b.run("categorize", &Categorize { ids: vec![pending.id], category_id: Some(gas) }).unwrap();
+    b.run(
+        "categorize",
+        &Categorize {
+            ids: vec![pending.id],
+            category_id: Some(gas),
+        },
+    )
+    .unwrap();
 
     // Phase 2: P1 posts as T2 with a new amount and date, keeping its
     // category; T1 is modified.
     b.import(&import_of("chase", "Chase", &accounts(), &phase(2))).unwrap();
     let after2 = [
         after1[0].clone(),
-        (s("2026-09-20"), s("Coffee Shop"), -5_500, Cleared::Cleared, s("COFFEE SHOP #12"), s("Needs a category"), s("")),
-        (s("2026-09-22"), s("GAS STATION PENDING"), -2_150, Cleared::Cleared, s("GAS STATION"), s("Gas"), s("")),
+        (
+            s("2026-09-20"),
+            s("Coffee Shop"),
+            -5_500,
+            Cleared::Cleared,
+            s("COFFEE SHOP #12"),
+            s("Needs a category"),
+            s(""),
+        ),
+        (
+            s("2026-09-22"),
+            s("GAS STATION PENDING"),
+            -2_150,
+            Cleared::Cleared,
+            s("GAS STATION"),
+            s("Gas"),
+            s(""),
+        ),
         after1[3].clone(),
     ];
     assert_eq!(rows(&b, plaid_checking), after2);
@@ -165,7 +244,10 @@ fn a_transaction_typed_in_first_is_matched_not_doubled() {
     let payroll: Vec<&TxnLine> = mine.iter().filter(|t| t.amount == 100_000).collect();
     assert_eq!(payroll.len(), 1, "matched, not doubled");
     let p = payroll[0];
-    assert_eq!((p.payee.as_str(), p.memo.as_str(), p.imported_payee.as_str(), p.imported), ("Employer", "manual", "PAYROLL", true));
+    assert_eq!(
+        (p.payee.as_str(), p.memo.as_str(), p.imported_payee.as_str(), p.imported),
+        ("Employer", "manual", "PAYROLL", true)
+    );
 }
 
 #[test]
@@ -204,7 +286,14 @@ fn a_payee_is_filed_where_it_was_last_time() {
     let food = b.group("Food");
     let coffee = b.category(food, "Coffee");
     let t = b.register(Some(checking)).into_iter().find(|t| t.payee == "Coffee Shop").unwrap();
-    b.run("categorize", &Categorize { ids: vec![t.id], category_id: Some(coffee) }).unwrap();
+    b.run(
+        "categorize",
+        &Categorize {
+            ids: vec![t.id],
+            category_id: Some(coffee),
+        },
+    )
+    .unwrap();
     let next: Pulled = serde_json::from_str(&format!(
         r#"{{"added":[{}],"modified":[],"removed":[],"cursor":"c9"}}"#,
         txn("T9", 4.5, "COFFEE SHOP #12", r#","merchant_name":"Coffee Shop","date":"2026-10-02""#)

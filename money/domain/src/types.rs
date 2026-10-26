@@ -391,7 +391,8 @@ pub struct Summary {
     /// What categories were overspent by in the month before: taken from
     /// this month's money.
     pub overspent_last_month: i64,
-    /// Categories overspent this month, and how many lack their target.
+    /// Categories overspent this month, and how many were assigned less
+    /// than their target in it.
     pub overspent: i64,
     pub underfunded: i64,
 }

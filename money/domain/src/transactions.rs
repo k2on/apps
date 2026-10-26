@@ -300,20 +300,18 @@ pub fn inbox(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<TxnLine>, Refusal> {
 /// for: what a payee field offers, and what it fills the category with.
 #[view("transactions.payees")]
 pub fn payees(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<PayeeLine>, Refusal> {
-    Ok(scan::<Money, Txn>()
-        .filter(|t| !t.payee.is_empty() && t.transfer_id.is_none())
-        .group(
-            |t| t.payee.clone(),
-            |_, name, txns| {
-                let txns: Vec<&Txn> = txns.collect();
-                let newest = txns.iter().filter(|t| t.category_id.is_some()).max_by_key(|t| (&t.date, t.created_ms));
-                PayeeLine {
-                    name: name.clone(),
-                    count: txns.len() as i64,
-                    category_id: newest.and_then(|t| t.category_id),
-                }
-            },
-        ))
+    Ok(scan::<Money, Txn>().filter(|t| !t.payee.is_empty() && t.transfer_id.is_none()).group(
+        |t| t.payee.clone(),
+        |_, name, txns| {
+            let txns: Vec<&Txn> = txns.collect();
+            let newest = txns.iter().filter(|t| t.category_id.is_some()).max_by_key(|t| (&t.date, t.created_ms));
+            PayeeLine {
+                name: name.clone(),
+                count: txns.len() as i64,
+                category_id: newest.and_then(|t| t.category_id),
+            }
+        },
+    ))
 }
 
 /// The category `payee`'s newest categorised transaction was for: what a new

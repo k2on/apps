@@ -50,7 +50,8 @@ pub struct Group {
 }
 
 /// Something money is for: "Groceries", "Rent". `target` is what it
-/// wants assigned each month, 0 for nothing in particular.
+/// wants set aside each month — assigned in the month, whatever it carried
+/// in — 0 for nothing in particular.
 #[allow(clippy::duplicated_attributes)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(index(group_id, pos), index(pos))]
