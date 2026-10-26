@@ -31,7 +31,25 @@ pub struct Reconciler {
     minds: Instance,
     /// None where plays are not this player's to author.
     counts: Option<Instance>,
+    /// Where it last said an episode had got to, and when, by the server's
+    /// clock: in memory, as a place said again after a restart is only
+    /// the same place.
+    placed: Option<Placed>,
 }
+
+/// Where an episode was said to be, and when.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Placed {
+    here: Here,
+    ms: i64,
+    at: i64,
+    playing: bool,
+}
+
+/// How often a place in an episode is said while it plays: often enough
+/// that another device picks it up near where it was left, seldom enough
+/// to be a handful of entries an hour.
+pub const PLACE_EVERY_MS: i64 = 30_000;
 
 impl Reconciler {
     /// The reconciler of the device `me`, counting its plays on `counts`
@@ -41,6 +59,7 @@ impl Reconciler {
             me: me.into(),
             minds: Instance::ephemeral::<Minds>(),
             counts: counts.map(Instance::open::<Counts>),
+            placed: None,
         }
     }
 
@@ -72,7 +91,7 @@ impl Reconciler {
             m.alone = if heard.playing { Alone::Playing } else { Alone::Quiet };
             if let Some((at, id)) = heard.at.and_then(|at| Some((at, *heard.queue.get(at)?))) {
                 let here = Here { at: at as i64, track: id };
-                self.count(sound, here, None, &heard.from, heard.place, heard.playing, say);
+                self.count(sound, here, None, &heard.from, heard.place, heard.playing, v.now, say);
             }
             return;
         };
@@ -390,14 +409,28 @@ impl Reconciler {
             }
             _ => {}
         }
-        self.count(sound, here, Some(track), &a.from, heard.place, heard.playing, say);
+        self.count(sound, here, Some(track), &a.from, heard.place, heard.playing, v.now, say);
     }
 
     /// A play, once it has played long enough, once per load of a track —
     /// and, short of that, a wake at the moment it will have. `track` is
     /// the one at `here`, read from the player when not given.
     #[allow(clippy::too_many_arguments)]
-    fn count(&mut self, sound: &mut dyn Sound, here: Here, track: Option<&Track>, from: &str, place: Place, playing: bool, say: &mut dyn Say) {
+    fn count(
+        &mut self,
+        sound: &mut dyn Sound,
+        here: Here,
+        track: Option<&Track>,
+        from: &str,
+        place: Place,
+        playing: bool,
+        now: i64,
+        say: &mut dyn Say,
+    ) {
+        if self.counts.is_none() {
+            return;
+        }
+        self.keep_place(sound, here, track, place, playing, now, say);
         let Some(counts) = &mut self.counts else { return };
         let me = self.me.clone();
         let was = counts
@@ -437,6 +470,48 @@ impl Reconciler {
         }
         if loaded != was {
             let _ = counts.write::<Counts, Durable, _>(|db| db.count.put(Count { device: me, loaded }));
+        }
+    }
+
+    /// Where what plays has got to, said for its listener's place in it
+    /// (`library.report_progress`, which keeps it only of an episode): when
+    /// another track is loaded, when it pauses or plays, and every
+    /// [`PLACE_EVERY_MS`] while it plays — with a wake for then.
+    #[allow(clippy::too_many_arguments)]
+    fn keep_place(&mut self, sound: &mut dyn Sound, here: Here, track: Option<&Track>, place: Place, playing: bool, now: i64, say: &mut dyn Say) {
+        let Some(ms) = place.ms() else { return };
+        let due = match self.placed {
+            Some(p) if p.here == here && p.playing == playing => match playing {
+                true => PLACE_EVERY_MS - (now - p.at),
+                false => return,
+            },
+            _ => 0,
+        };
+        if due > 0 {
+            sound.wake_in(due);
+            return;
+        }
+        let fetched;
+        let track = match track {
+            Some(t) => t,
+            None => {
+                fetched = sound.tracks();
+                match fetched.get(here.at as usize).filter(|t| t.id == here.track) {
+                    Some(t) => t,
+                    None => return,
+                }
+            }
+        };
+        let said = say.progress(harken_domain::ReportProgress {
+            media_id: track.id,
+            position_ms: ms.max(0),
+            duration_ms: track.duration_ms.max(0),
+            name: String::new(),
+        });
+        // Kept either way: a song is not asked about again until it moves.
+        self.placed = Some(Placed { here, ms, at: now, playing });
+        if playing && said.is_ok() {
+            sound.wake_in(PLACE_EVERY_MS);
         }
     }
 }

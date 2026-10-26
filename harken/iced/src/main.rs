@@ -174,6 +174,10 @@ pub enum Message {
     /// Settings' Resync: a full look asked of the server, which is its
     /// catalogue's sync too.
     Resync,
+    /// An episode from this far in: one of its chapters.
+    PlayFrom(Id, i64),
+    /// An episode said played (`true`) or not by the signed-in person.
+    MarkPlayed(Id, bool),
     /// What Settings' feed entry says, and which kind it is followed as.
     FeedUrl(String),
     FeedKind(String),
@@ -333,8 +337,8 @@ pub enum Press {
     Skip(i32),
     /// Milliseconds into the track.
     Seek(i64),
-    /// The queue as it now stands, from this track.
-    Start(usize),
+    /// The queue as it now stands, from this track, this far in.
+    Start(usize, i64),
 }
 
 /// This device's player as harken's one reconciler drives it
@@ -1608,8 +1612,13 @@ impl App {
     pub fn row_entries(&self, id: Id) -> Option<(String, Vec<Entry<Message>>)> {
         let item = self.peer.rows().iter().find(|i| i.id == id)?;
         let album = self.peer.detail_of(id).album;
+        let mine = self.peer.mine_of(id);
+        let play = match mine.filter(|l| !l.finished && l.position_ms > 0) {
+            Some(l) => format!("Resume from {}", arkui::format::clock(l.resume_ms() as f64 / 1000.0)),
+            None => "Play".into(),
+        };
         let mut entries = vec![
-            Entry::run(glyphs::PLAY, "Play", Message::PlayItem(id)),
+            Entry::run(glyphs::PLAY, play, Message::PlayItem(id)),
             Entry::submenu(glyphs::ADD_TO, "Add to playlist", Message::OpenPicker),
             // The session's queue: after the track playing, or at its end.
             Entry::run(glyphs::NEXT, "Play next", Message::PlayNext(id)),
@@ -1625,6 +1634,18 @@ impl App {
         for source in places {
             if !source.title().is_empty() {
                 entries.push(Entry::run(source.glyph(), format!("Go to {}", source.title()), Message::Select(source)));
+            }
+        }
+        // An episode: played or not, by hand, and each of its chapters.
+        if item.kind != "song" {
+            let finished = mine.is_some_and(|l| l.finished);
+            entries.push(match finished {
+                true => Entry::run(glyphs::SHOW, "Mark as unplayed", Message::MarkPlayed(id, false)),
+                false => Entry::run(glyphs::SHOW, "Mark as played", Message::MarkPlayed(id, true)),
+            });
+            for c in self.peer.chapters_of(id) {
+                let label = format!("{}  {}", arkui::format::clock(c.start_ms as f64 / 1000.0), c.title);
+                entries.push(Entry::run(glyphs::PLAY, label, Message::PlayFrom(id, c.start_ms)));
             }
         }
         Some((item.title.clone(), entries))
@@ -1882,10 +1903,10 @@ impl App {
             Press::Pause => P::Pause,
             Press::Skip(by) => P::Skip { by: by as i64 },
             Press::Seek(ms) => P::Seek { ms },
-            Press::Start(at) => P::Start {
+            Press::Start(at, position_ms) => P::Start {
                 queue: self.queue.clone(),
                 at: at as i64,
-                position_ms: 0,
+                position_ms,
                 from: self.from(),
             },
         };
@@ -1995,8 +2016,19 @@ impl App {
     /// play in. The rows are copied rather than referred to — a device handed
     /// the session may not have that album yet.
     fn play_rows(&mut self, rows: &[rows::Item], at: Option<Id>, from: String) -> Task<Message> {
-        if rows.is_empty() {
+        let Some(at) = self.load_queue(rows, at) else {
             return Task::none();
+        };
+        // An episode begun picks up where its listener left it.
+        let position = self.queue.get(at).and_then(|t| self.peer.mine_of(t.id.0)).map_or(0, |l| l.resume_ms());
+        self.queued_from = from;
+        self.press(Press::Start(at, position))
+    }
+
+    /// `rows` as the queue, and where `at` is in it: none for no rows.
+    fn load_queue(&mut self, rows: &[rows::Item], at: Option<Id>) -> Option<usize> {
+        if rows.is_empty() {
+            return None;
         }
         self.queue = rows
             .iter()
@@ -2011,9 +2043,7 @@ impl App {
                 file: i.file.clone(),
             })
             .collect();
-        let at = self.queue.iter().position(|t| Some(t.id.0) == at).unwrap_or(0);
-        self.queued_from = from;
-        self.press(Press::Start(at))
+        Some(self.queue.iter().position(|t| Some(t.id.0) == at).unwrap_or(0))
     }
 
     /// Do it here: this device is its own session, unlinked.
@@ -2024,7 +2054,7 @@ impl App {
             Press::Pause => self.player.pause(),
             Press::Skip(by) => self.skip(by),
             Press::Seek(ms) => self.player.seek(ms as f64 / 1000.0),
-            Press::Start(at) => self.start_at(at, 0, true),
+            Press::Start(at, position_ms) => self.start_at(at, position_ms, true),
         }
     }
 
@@ -2325,6 +2355,24 @@ impl App {
             Message::PlayItem(id) => {
                 let rows = self.peer.rows().to_vec();
                 return self.play_rows(&rows, Some(id), self.from());
+            }
+            // An episode from one of its chapters: the page's list, from it.
+            Message::PlayFrom(id, ms) => {
+                let rows = self.peer.rows().to_vec();
+                let Some(at) = self.load_queue(&rows, Some(id)) else {
+                    return Task::none();
+                };
+                self.queued_from = self.from();
+                return self.press(Press::Start(at, ms));
+            }
+            Message::MarkPlayed(id, finished) => {
+                let input = crate::domain::MarkPlayed {
+                    media_id: key(id),
+                    finished,
+                    name: String::new(),
+                };
+                let what = if finished { "mark it played" } else { "mark it unplayed" };
+                let _ = self.author(what.into(), "mark_played", &input);
             }
             // The performance's movements, read when it is pressed: the page
             // it is pressed on lists performances, not tracks.

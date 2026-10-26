@@ -333,3 +333,137 @@ fn a_feed_unfollowed_takes_its_show_with_it() {
     assert_eq!(each(&c.rows::<Media>("media"), |m| m.title.clone()), ["Grace"]);
     assert!(c.rows::<Download>("download").is_empty());
 }
+
+/// An episode in the library, its media id.
+fn one_episode(c: &mut Lib) -> Id<Media> {
+    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    let id = keys::show_key("podcast", "Full Time Nix");
+    c.mutate("library", "add_episode", &episode(&id, "Nix Freaks 51", ".feeds/51.mp3", 5))
+        .unwrap();
+    c.rows::<Media>("media")[0].id
+}
+
+fn report(media_id: Id<Media>, position_ms: i64, name: &str) -> ReportProgress {
+    ReportProgress {
+        media_id,
+        position_ms,
+        duration_ms: 0,
+        name: name.into(),
+    }
+}
+
+/// Each person has their own place in an episode, and every member sees
+/// everybody's: the show's progress lists both, and one's own lists only
+/// theirs. Near its end it is played; a song keeps no place. Falsified by
+/// keying progress by the episode alone: Bob's place moved Alice's.
+#[test]
+fn each_person_keeps_their_own_place_and_everybody_sees_it() {
+    let mut c = Lib::new();
+    let ep = one_episode(&mut c);
+    c.add(song("Glue", "Bicep", ""));
+    let glue = c.rows::<Media>("media").into_iter().find(|m| m.title == "Glue").unwrap().id;
+    let alice = c.ctx("alice", &[]);
+    c.mutate_as(&alice, "report_progress", &report(ep, 600_000, "Alice")).unwrap();
+    let bob = c.ctx("bob", &[]);
+    c.mutate_as(&bob, "report_progress", &report(ep, 1_790_000, "Bob")).unwrap();
+    let alice = c.ctx("alice", &[]);
+    assert_eq!(
+        c.mutate_as(&alice, "report_progress", &report(ep, 600_000, "Alice")),
+        Ok(0),
+        "where it was: nothing"
+    );
+    assert_eq!(
+        c.mutate_as(&alice, "report_progress", &report(glue, 10_000, "Alice")),
+        Ok(0),
+        "a song keeps no place"
+    );
+    let nobody = c.ctx("", &[]);
+    assert!(c.mutate_as(&nobody, "report_progress", &report(ep, 1, "")).is_err());
+
+    let id = keys::show_key("podcast", "Full Time Nix");
+    let all: Vec<ProgressEntry> = c.query("carol", "show_progress", &ShowInput { playlist_id: NONE, id }).unwrap();
+    let mut seen = each(&all, |p| (p.name.clone(), p.position_ms, p.duration_ms, p.finished));
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            ("Alice".to_string(), 600_000, 1_800_000, false),
+            ("Bob".to_string(), 1_790_000, 1_800_000, true)
+        ]
+    );
+    let mine: Vec<ProgressEntry> = c.query("alice", "my_progress", &()).unwrap();
+    assert_eq!(each(&mine, |p| p.user_id.clone()), ["alice"]);
+}
+
+/// Marked played, it is at its end; unplayed, it has no place at all; a
+/// song is neither. Falsified by `mark_played` keeping the position of an
+/// unplayed one: it resumed where it was.
+#[test]
+fn an_episode_is_marked_played_or_not() {
+    let mut c = Lib::new();
+    let ep = one_episode(&mut c);
+    let alice = c.ctx("alice", &[]);
+    c.mutate_as(&alice, "report_progress", &report(ep, 60_000, "Alice")).unwrap();
+    let alice = c.ctx("alice", &[]);
+    c.mutate_as(
+        &alice,
+        "mark_played",
+        &MarkPlayed {
+            media_id: ep,
+            finished: true,
+            name: String::new(),
+        },
+    )
+    .unwrap();
+    let rows = c.rows::<Progress>("progress");
+    assert_eq!(
+        each(&rows, |p| (p.position_ms, p.finished, p.name.clone())),
+        [(1_800_000, true, "Alice".to_string())]
+    );
+    let alice = c.ctx("alice", &[]);
+    c.mutate_as(
+        &alice,
+        "mark_played",
+        &MarkPlayed {
+            media_id: ep,
+            finished: false,
+            name: String::new(),
+        },
+    )
+    .unwrap();
+    assert!(c.rows::<Progress>("progress").is_empty());
+}
+
+/// An episode's chapters are its feed's, in order, replaced when the feed
+/// says others, and gone with the episode. Falsified by `set_chapters`
+/// adding without taking away: the old second chapter stayed.
+#[test]
+fn an_episodes_chapters_are_its_feeds() {
+    let mut c = Lib::new();
+    let ep = one_episode(&mut c);
+    let at = |start_ms: i64, title: &str| ChapterAt {
+        start_ms,
+        title: title.into(),
+        ..ChapterAt::default()
+    };
+    let set = |chapters: Vec<ChapterAt>| SetChapters {
+        file: ".feeds/51.mp3".into(),
+        chapters,
+    };
+    c.mutate("library", "set_chapters", &set(vec![at(90_000, "News"), at(0, "Intro")]))
+        .unwrap();
+    assert_eq!(c.mutate("library", "set_chapters", &set(vec![at(0, "Intro"), at(90_000, "News")])), Ok(0));
+    let read = |c: &Lib| {
+        each(&c.list::<ChaptersEntry>("chapters", &EpisodeInput { media_id: ep }), |c| {
+            (c.start_ms, c.title.clone())
+        })
+    };
+    assert_eq!(read(&c), [(0, "Intro".to_string()), (90_000, "News".to_string())]);
+    c.mutate("library", "set_chapters", &set(vec![at(0, "Intro"), at(120_000, "Interview")]))
+        .unwrap();
+    assert_eq!(read(&c), [(0, "Intro".to_string()), (120_000, "Interview".to_string())]);
+    let alice = c.ctx("alice", &[]);
+    c.mutate_as(&alice, "report_progress", &report(ep, 1, "Alice")).unwrap();
+    c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
+    assert!(c.rows::<Chapter>("chapter").is_empty() && c.rows::<Progress>("progress").is_empty());
+}

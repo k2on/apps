@@ -245,6 +245,56 @@ pub fn show(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<LibraryEnt
         .map_with(move |db, e| library_entry(&db.media.get(e.media_id).expect("an episode's media"), playlist_pos(db, on, e.media_id))))
 }
 
+/// An episode's chapters, by its file: what its feed says now, in place
+/// of what it said before. Said again the same, it writes nothing.
+#[mutator("library.set_chapters")]
+pub fn set_chapters(ctx: &Ctx, db: &mut Db<Harken>, input: SetChapters) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    let Some(media) = db.media.by(Media::FILE).from(&input.file).first().filter(|m| m.file == input.file) else {
+        return Err(Refusal(format!("no media has the file {}", input.file)));
+    };
+    if !db.episode.has(media.id) {
+        return Err(Refusal::new("only an episode has chapters"));
+    }
+    let mut next: Vec<Chapter> = input
+        .chapters
+        .into_iter()
+        .map(|c| Chapter {
+            media_id: media.id,
+            start_ms: c.start_ms.max(0),
+            title: c.title.trim().to_string(),
+            url: c.url.trim().to_string(),
+            image: c.image.trim().to_string(),
+        })
+        .collect();
+    next.sort_by_key(|c| c.start_ms);
+    next.dedup_by_key(|c| c.start_ms);
+    for was in db.chapter.scan().into_iter().filter(|c| c.media_id == media.id) {
+        if !next.contains(&was) {
+            db.chapter.remove(&was)?;
+        }
+    }
+    for c in next {
+        db.chapter.put(c)?;
+    }
+    Ok(())
+}
+
+/// An episode's chapters, in the order they come.
+#[view("library.chapters")]
+pub fn chapters(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<ChaptersEntry>, Refusal> {
+    let id = input.media_id;
+    Ok(scan::<Harken, Chapter>()
+        .filter(move |c| c.media_id == id)
+        .sort(|c| c.start_ms)
+        .map(|c| ChaptersEntry {
+            image: c.image.clone(),
+            start_ms: c.start_ms,
+            title: c.title.clone(),
+            url: c.url.clone(),
+        }))
+}
+
 /// Every episode, with the columns only an episode has.
 #[view("library.episode_details")]
 pub fn episode_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<EpisodeDetailsEntry>, Refusal> {

@@ -1325,6 +1325,105 @@
         }
       ],
       "space": "durable"
+    },
+    {
+      "name": "progress",
+      "columns": [
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "position_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "duration_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "finished",
+          "ty": "Bool",
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "updated_ms",
+          "ty": "Int",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [
+        {
+          "columns": [
+            1
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 1,
+          "table": "media"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "chapter",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "start_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "title",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "url",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "image",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        }
+      ],
+      "space": "durable"
     }
   ]
 }

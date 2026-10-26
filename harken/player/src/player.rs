@@ -70,6 +70,19 @@ impl Say for Calls<'_> {
         out
     }
 
+    /// Of an episode only: a song keeps no place, and an entry that writes
+    /// nothing is still one every peer is sent.
+    fn progress(&mut self, place: harken_domain::ReportProgress) -> Result<(), String> {
+        let id = place.media_id;
+        if !ark::db::read::<harken_domain::Harken, _>(&self.peer.log.store, |db| db.episode.has(id)) {
+            return Err("not an episode".into());
+        }
+        self.peer.mutate("library.report_progress", &place).map(|_| ()).map_err(|why| {
+            self.stats.last_refusal = Some(format!("report_progress: {why}"));
+            why
+        })
+    }
+
     fn play(&mut self, play: harken_domain::RecordPlay) -> Result<(), String> {
         match self.peer.mutate("listening.record_play", &play) {
             Ok(_) => {

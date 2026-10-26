@@ -513,6 +513,26 @@ impl App {
         feeds.into()
     }
 
+    /// How far everybody has got in an episode, the signed-in person first
+    /// as "you": `you 40%  ·  Ada played`.
+    pub(crate) fn listened(&self, media: crate::rows::Id) -> String {
+        let me = self.peer.client.me().actor.clone();
+        let mut all = self.peer.listened_to(media);
+        all.sort_by_key(|l| l.user_id != me);
+        let said: Vec<String> = all
+            .iter()
+            .map(|l| {
+                let who = match l.user_id == me {
+                    true => "you".to_string(),
+                    false if l.name.is_empty() => l.user_id.clone(),
+                    false => l.name.clone(),
+                };
+                format!("{who} {}", l.short())
+            })
+            .collect();
+        said.join("  \u{b7}  ")
+    }
+
     /// What a row says in its length's column: its length, or — its file
     /// not on the server yet — how its download is going.
     pub(crate) fn length_of(&self, item: &crate::rows::Item) -> String {
@@ -1346,6 +1366,9 @@ impl App {
         // An album is the one place a track number means anything, and where
         // the performer replaces the album column that every row would repeat.
         let album_page = matches!(p.source, Source::Album(_));
+        // A show's page has no albums: its column says how far everybody
+        // has listened instead.
+        let show_page = matches!(p.source, Source::Show(..));
         let mut part = String::new();
 
         let rows = p.rows().iter().enumerate().fold(column![].spacing(0), |mut col, (i, item)| {
@@ -1384,9 +1407,10 @@ impl App {
                 // their middle, which is where they are alike.
                 .push(table::cell_cut(item.creator.clone(), ARTIST, Cut::End, on_cursor, false, true))
                 .push(table::cell_cut(
-                    match album_page {
-                        true => detail.performer.clone(),
-                        false => detail.album.clone(),
+                    match (album_page, show_page) {
+                        (true, _) => detail.performer.clone(),
+                        (_, true) => self.listened(item.id),
+                        _ => detail.album.clone(),
                     },
                     ALBUM,
                     match album_page {
@@ -1430,7 +1454,14 @@ impl App {
                     if matches!(p.source, Source::Show(..)) { "Show" } else { "Artist" },
                     ARTIST,
                 ))
-                .push(table::heading(if album_page { "Performer" } else { "Album" }, ALBUM))
+                .push(table::heading(
+                    match (album_page, show_page) {
+                        (true, _) => "Performer",
+                        (_, true) => "Listened",
+                        _ => "Album",
+                    },
+                    ALBUM,
+                ))
                 .push(table::heading("Time", TIME)),
         )
         .width(Length::Fill)
@@ -1897,6 +1928,16 @@ impl App {
         )
     }
 
+    /// Who made what plays — and, for an episode with chapters, the one
+    /// it is in: `Full Time Nix  ·  Interview`.
+    fn creator_line(&self, track: &crate::listening::Track, position: f64) -> String {
+        let chapters = self.peer.chapters_of(track.id.0);
+        match crate::rows::chapter_at(&chapters, (position * 1000.0) as i64) {
+            Some(c) if !c.title.is_empty() => format!("{}  \u{b7}  {}", track.creator, c.title),
+            _ => track.creator.clone(),
+        }
+    }
+
     /// The now-playing bar, honest about silence: a build with no audio
     /// device says so rather than drawing a transport that does nothing.
     ///
@@ -1973,7 +2014,10 @@ impl App {
                     (!track.album.is_empty()).then(|| Source::Album(track.album.clone())),
                 ),
                 linked(
-                    Line::new(track.creator.as_str(), 12.0, Cut::End, |t| style::dim(t).color.unwrap_or_default()).into(),
+                    Line::new(self.creator_line(track, position), 12.0, Cut::End, |t| style::dim(t)
+                        .color
+                        .unwrap_or_default())
+                    .into(),
                     match show {
                         Some(s) => Some(Source::Show(s.id.clone(), s.title.clone())),
                         None => (!track.creator.is_empty()).then(|| Source::Artist(track.creator.clone())),

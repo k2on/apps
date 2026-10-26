@@ -178,9 +178,10 @@ impl Sound for Fake {
     }
 }
 
-/// What the reconciler said, as transitions by name and input.
+/// What the reconciler said, as transitions by name and input; and the
+/// places in what plays it said, in milliseconds.
 #[derive(Default)]
-struct Said(Vec<(&'static str, Vec<u8>, Option<i64>)>);
+struct Said(Vec<(&'static str, Vec<u8>, Option<i64>)>, Vec<i64>);
 
 impl Say for Said {
     fn call(&mut self, transition: &'static str, input: Vec<u8>, as_of: Option<i64>, _: &str) -> Result<(), String> {
@@ -189,6 +190,11 @@ impl Say for Said {
     }
 
     fn play(&mut self, _: RecordPlay) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn progress(&mut self, place: ReportProgress) -> Result<(), String> {
+        self.1.push(place.position_ms);
         Ok(())
     }
 }
@@ -204,6 +210,30 @@ impl Rig {
             r: Reconciler::new(ME, None),
             sound: Fake::default(),
         }
+    }
+
+    /// A rig whose plays — and so places — are its own to say.
+    fn counting() -> Rig {
+        Rig {
+            r: Reconciler::new(ME, Some(Box::new(ark_peer::Memory::default()))),
+            sound: Fake::default(),
+        }
+    }
+
+    /// One look at `s` at `now`, with the player at `ms` there: the places
+    /// said.
+    fn places(&mut self, s: &Listening, now: i64, ms: i64) -> Vec<i64> {
+        self.sound.place = Some(Place::Measured { ms, at: now });
+        let mut said = Said::default();
+        let v = View {
+            me: ME,
+            joined: true,
+            epoch: 1,
+            listening: s,
+            now,
+        };
+        self.r.reconcile(&v, &mut self.sound, &mut said);
+        said.1
     }
 
     /// One look at `s` at `now`: what was said, by transition.
@@ -562,4 +592,28 @@ fn a_player_lost_releases_the_session_and_is_not_taken_back() {
     rig.look(&session(1, 0, Clock::Paused { at_ms: 0 }, ME, true), NOW);
     assert_eq!(rig.sound.take_did(), ["load 0 0 false"], "handed again");
     assert_eq!(rig.r.mind().handoff, Handoff::None);
+}
+
+/// Where what plays has got to is said for its listener's place: every
+/// thirty seconds while it plays and not between, and once when it pauses.
+/// A player whose plays are not its own says none.
+///
+/// Falsified by `keep_place` saying a place on every look: the place at
+/// ten seconds was said.
+#[test]
+fn a_place_is_said_every_thirty_seconds_and_at_a_pause() {
+    let mut rig = Rig::counting();
+    rig.started(1, 0);
+    let s = session(1, 0, playing(0, NOW), ME, false);
+    assert_eq!(rig.places(&s, NOW + 10_000, 10_000), Vec::<i64>::new());
+    assert_eq!(rig.places(&s, NOW + 30_000, 30_000), [30_000]);
+    assert_eq!(rig.places(&s, NOW + 31_000, 31_000), Vec::<i64>::new());
+    let paused = session(1, 0, Clock::Paused { at_ms: 32_000 }, ME, false);
+    rig.places(&paused, NOW + 32_000, 32_000);
+    assert_eq!(rig.places(&paused, NOW + 32_100, 32_000), [32_000], "the pause");
+    assert_eq!(rig.places(&paused, NOW + 90_000, 32_000), Vec::<i64>::new());
+
+    let mut other = Rig::new();
+    other.started(1, 0);
+    assert_eq!(other.places(&s, NOW + 60_000, 60_000), Vec::<i64>::new());
 }

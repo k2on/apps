@@ -612,3 +612,55 @@ fn a_feed_is_followed_from_settings() {
     assert!(app.peer.shows_of("podcast").is_empty(), "the show went with its feed");
     assert_eq!(app.peer.subscriptions().len(), 1);
 }
+
+/// An episode begun says how far its listener has got where its album
+/// would be, and its menu resumes it, marks it played or not, and goes to
+/// each of its chapters. Falsified by `listened` reading another person's
+/// row as the signed-in one's: "you" was nobody.
+#[test]
+fn an_episode_keeps_each_listeners_place_and_its_chapters() {
+    let mut app = super::demo_app();
+    let id = "podcast/full-time-nix";
+    let _ = app.update(crate::Message::Select(Source::Show(id.into(), "Full Time Nix".into())));
+    let first = app.peer.rows()[0].clone();
+    let place = crate::domain::ReportProgress {
+        media_id: crate::peer::key(first.id),
+        position_ms: first.duration_ms / 2,
+        duration_ms: first.duration_ms,
+        name: "Ada".into(),
+    };
+    assert!(app.author("keep the place".into(), "report_progress", &place));
+    app.peer.refresh();
+    assert_eq!(app.listened(first.id), "you 50%");
+    let label = |app: &crate::App| app.row_entries(first.id).unwrap().1.iter().map(|e| e.label.clone()).collect::<Vec<_>>();
+    assert!(label(&app)[0].starts_with("Resume from "), "{:?}", label(&app));
+    assert!(label(&app).contains(&"Mark as played".to_string()));
+
+    let _ = app.update(crate::Message::MarkPlayed(first.id, true));
+    assert_eq!(app.listened(first.id), "you played");
+    assert_eq!(label(&app)[0], "Play", "played: from the start");
+    assert!(label(&app).contains(&"Mark as unplayed".to_string()));
+
+    let chapters = crate::domain::SetChapters {
+        file: first.file.clone(),
+        chapters: vec![
+            crate::domain::ChapterAt {
+                start_ms: 0,
+                title: "Intro".into(),
+                ..Default::default()
+            },
+            crate::domain::ChapterAt {
+                start_ms: 65_000,
+                title: "Flakes".into(),
+                ..Default::default()
+            },
+        ],
+    };
+    assert!(app.author("chapters".into(), "set_chapters", &chapters));
+    app.peer.refresh();
+    let labels = label(&app);
+    assert!(
+        labels.contains(&"0:00  Intro".to_string()) && labels.contains(&"1:05  Flakes".to_string()),
+        "{labels:?}"
+    );
+}

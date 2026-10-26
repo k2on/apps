@@ -296,6 +296,51 @@ pub struct Downloaded {
     pub file: String,
 }
 
+/// Where the caller has got to in an episode, as the device playing it
+/// measured, and what to call them beside it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ReportProgress {
+    pub media_id: Id<Media>,
+    #[ark(range = "0..=1000000000")]
+    pub position_ms: i64,
+    #[ark(range = "0..=1000000000")]
+    pub duration_ms: i64,
+    #[ark(trim, len = "0..=120")]
+    pub name: String,
+}
+
+/// An episode said to be played, or not played, by the caller.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct MarkPlayed {
+    pub media_id: Id<Media>,
+    pub finished: bool,
+    #[ark(trim, len = "0..=120")]
+    pub name: String,
+}
+
+/// One chapter as a feed says it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+pub struct ChapterAt {
+    pub start_ms: i64,
+    pub title: String,
+    pub url: String,
+    pub image: String,
+}
+
+/// An episode's chapters, by its file: they replace whatever it had.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SetChapters {
+    #[ark(trim, non_empty, why = "chapters need their file")]
+    pub file: String,
+    pub chapters: Vec<ChapterAt>,
+}
+
+/// One episode, by its media id.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct EpisodeInput {
+    pub media_id: Id<Media>,
+}
+
 /// One show, by its key, against a playlist as the library is read.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct ShowInput {
@@ -445,6 +490,27 @@ pub struct DownloadsEntry {
     pub state: String,
     pub title: String,
     pub total: i64,
+}
+
+/// How far somebody has listened to an episode.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ProgressEntry {
+    pub duration_ms: i64,
+    pub finished: bool,
+    pub media_id: Id<Media>,
+    pub name: String,
+    pub position_ms: i64,
+    pub updated_ms: i64,
+    pub user_id: String,
+}
+
+/// One chapter of an episode, as its page and its player list them.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ChaptersEntry {
+    pub image: String,
+    pub start_ms: i64,
+    pub title: String,
+    pub url: String,
 }
 
 /// What is true of a media row as an episode.

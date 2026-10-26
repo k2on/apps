@@ -482,6 +482,12 @@ pub fn take_out(db: &mut Db<Harken>, id: Id<Media>) -> Result<(), Refusal> {
     db.song.delete(id)?;
     db.episode.delete(id)?;
     db.download.delete(id)?;
+    for p in db.progress.by(Progress::MEDIA_ID).from(&id).all() {
+        db.progress.remove(&p)?;
+    }
+    for c in db.chapter.scan().into_iter().filter(|c| c.media_id == id) {
+        db.chapter.remove(&c)?;
+    }
     db.media.delete(id)
 }
 

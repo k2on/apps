@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 
 use crate::domain::Id as Key;
-use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
+use crate::domain::{browse, shows, CreatePlaylist, EpisodeInput, PlaylistInput, PlaylistsOf};
 use crate::domain::{
     AlbumCredits, AlbumInput, Artist as ArtistInput, Credits, Library, RecordingInput, Recordings, Search, ShowInput, WorkInput, Works,
 };
@@ -28,7 +28,9 @@ use ark_peer::{Patch, Watched};
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
-use crate::rows::{Album, Artist, Composer, Credit, Download, Id, Item, Playlist, Recording, Show, Subscription, TrackDetail, Work};
+use crate::rows::{
+    Album, Artist, Chapter, Composer, Credit, Download, Id, Item, Listened, Playlist, Recording, Show, Subscription, TrackDetail, Work,
+};
 
 /// One line of the sidebar: somewhere the cursor can be and something it can
 /// open.
@@ -83,6 +85,9 @@ struct Views {
     subscriptions: Watched<Subscription>,
     /// The files the server has not got yet (`downloads`).
     downloads: Watched<Download>,
+    /// How far the signed-in person has listened to each episode
+    /// (`my_progress`).
+    mine: Watched<Listened>,
     details: Watched<TrackDetail>,
     /// The page's list of tracks (`playlist`, `album`, `artist`,
     /// `recording`, a show's episodes).
@@ -96,6 +101,9 @@ struct Views {
     credits: Option<Watched<Credit>>,
     /// Which playlists one track is on (`playlists_of`).
     on: Option<Watched<Playlist>>,
+    /// How far everybody has listened to the page's show
+    /// (`show_progress`).
+    listened: Option<Watched<Listened>>,
 }
 
 /// A page slot, brought to what the source wants: kept when it is already
@@ -160,6 +168,8 @@ pub struct Peer {
     /// The store's state hash at the last refresh: the views settle against
     /// what moved since, and not on an update where nothing did.
     seen: ark::hash::StateHash,
+    /// The chapters last read, of which episode and at which state.
+    chapters: std::cell::RefCell<Option<(Id, ark::hash::StateHash, Vec<Chapter>)>>,
 }
 
 /// `()`'s bytes: a query with no input.
@@ -187,12 +197,14 @@ impl Peer {
             shows: Watched::open(c, "shows", none(), Show::from_bytes),
             subscriptions: Watched::open(c, "subscriptions", none(), Subscription::from_bytes),
             downloads: Watched::open(c, "downloads", none(), Download::from_bytes),
+            mine: Watched::open(c, "my_progress", none(), Listened::from_bytes),
             details: Watched::open(c, "track_details", none(), TrackDetail::from_bytes),
             shown: None,
             works: None,
             recordings: None,
             credits: None,
             on: None,
+            listened: None,
         };
         // What the hydrate already read is not news.
         for v in [
@@ -204,6 +216,7 @@ impl Peer {
             views.shows.view(),
             views.subscriptions.view(),
             views.downloads.view(),
+            views.mine.view(),
             views.details.view(),
         ]
         .into_iter()
@@ -224,6 +237,7 @@ impl Peer {
             moved: Vec::new(),
             art_gen: 1,
             seen,
+            chapters: Default::default(),
         };
         peer.choose();
         peer
@@ -296,6 +310,32 @@ impl Peer {
     /// going.
     pub fn download_of(&self, media: Id) -> Option<&Download> {
         self.downloads().iter().find(|d| d.media_id == media)
+    }
+
+    /// How far the signed-in person has got in an episode, when they have
+    /// begun it.
+    pub fn mine_of(&self, media: Id) -> Option<&Listened> {
+        self.views.mine.rows.iter().find(|l| l.media_id == media)
+    }
+
+    /// How far everybody has got in an episode of the page's show, the
+    /// newest listening first.
+    pub fn listened_to(&self, media: Id) -> Vec<&Listened> {
+        rows(&self.views.listened).iter().filter(|l| l.media_id == media).collect()
+    }
+
+    /// An episode's chapters, in order: read once per change of the
+    /// replica, and kept for the frames between.
+    pub fn chapters_of(&self, media: Id) -> Vec<Chapter> {
+        let mut kept = self.chapters.borrow_mut();
+        if let Some((m, at, c)) = kept.as_ref() {
+            if *m == media && *at == self.seen {
+                return c.clone();
+            }
+        }
+        let read: Vec<Chapter> = Peer::rows_of(self.client.answer(shows::chapters, EpisodeInput { media_id: key(media) }));
+        *kept = Some((media, self.seen, read.clone()));
+        read
     }
 
     /// The shows of one kind (`podcast`, `sermon`), by title.
@@ -377,6 +417,7 @@ impl Peer {
         let shows = note("shows", v.shows.settle(c, moved));
         let subscriptions = note("subscriptions", v.subscriptions.settle(c, moved));
         let downloads = note("downloads", v.downloads.settle(c, moved));
+        let mine = note("my_progress", v.mine.settle(c, moved));
         let u = v.details.take(c, moved);
         match &u {
             Update::Unchanged => {}
@@ -393,6 +434,7 @@ impl Peer {
         let recordings = slot(settle(c, &mut v.recordings, moved));
         let credits = slot(settle(c, &mut v.credits, moved));
         let on = slot(settle(c, &mut v.on, moved));
+        let listened = slot(settle(c, &mut v.listened, moved));
         self.moved = changed;
 
         // The playlist the library is read against can stop existing, and
@@ -425,6 +467,8 @@ impl Peer {
             || shows
             || subscriptions
             || downloads
+            || mine
+            || listened
             || details
             || shown
             || works
@@ -672,6 +716,19 @@ impl Peer {
             _ => None,
         };
         want(c, &mut v.credits, credits, Credit::from_bytes);
+        // A show's page says how far everybody has got in each episode.
+        let listened = match &self.source {
+            Source::Show(id, _) => Some((
+                "show_progress",
+                ShowInput {
+                    playlist_id: pl,
+                    id: id.clone(),
+                }
+                .to_bytes(),
+            )),
+            _ => None,
+        };
+        want(c, &mut v.listened, listened, Listened::from_bytes);
         if works || recordings {
             self.art_gen = self.art_gen.wrapping_add(1);
         }

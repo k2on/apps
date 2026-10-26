@@ -8,8 +8,8 @@
 //! than as a panic in the middle of a frame.
 
 use crate::domain::{
-    AlbumsEntry, ArtistsEntry, ComposersEntry, CreditsEntry, DownloadsEntry, LibraryEntry, RecordingsEntry, ShowsEntry, SubscriptionsEntry,
-    TrackDetailsEntry, WorkSummary,
+    AlbumsEntry, ArtistsEntry, ChaptersEntry, ComposersEntry, CreditsEntry, DownloadsEntry, LibraryEntry, ProgressEntry, RecordingsEntry, ShowsEntry,
+    SubscriptionsEntry, TrackDetailsEntry, WorkSummary,
 };
 use ark::format::Encode;
 
@@ -256,6 +256,77 @@ impl Download {
             _ => "Not on the server yet".into(),
         }
     }
+}
+
+/// How far somebody has listened to an episode (`my_progress`,
+/// `show_progress`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Listened {
+    pub media_id: Id,
+    pub user_id: String,
+    pub name: String,
+    pub position_ms: i64,
+    pub duration_ms: i64,
+    pub finished: bool,
+}
+
+impl From<ProgressEntry> for Listened {
+    fn from(e: ProgressEntry) -> Listened {
+        Listened {
+            media_id: e.media_id.0,
+            user_id: e.user_id,
+            name: e.name,
+            position_ms: e.position_ms,
+            duration_ms: e.duration_ms,
+            finished: e.finished,
+        }
+    }
+}
+
+impl Listened {
+    pub fn from_bytes(b: &[u8]) -> Listened {
+        ProgressEntry::from_bytes(b).map_or_else(|_| Listened::default(), Listened::from)
+    }
+
+    /// How far, short: played, or a share of it.
+    pub fn short(&self) -> String {
+        match (self.finished, self.duration_ms) {
+            (true, _) => "played".into(),
+            (false, d) if d > 0 => format!("{}%", (self.position_ms * 100 / d).clamp(0, 99)),
+            _ => "started".into(),
+        }
+    }
+
+    /// Where a play of it starts: a few seconds before where they stopped,
+    /// so the sentence it broke off in is heard again; from the start once
+    /// it is played.
+    pub fn resume_ms(&self) -> i64 {
+        match self.finished {
+            true => 0,
+            false => (self.position_ms - 3_000).max(0),
+        }
+    }
+}
+
+/// One chapter of an episode (`chapters`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Chapter {
+    pub start_ms: i64,
+    pub title: String,
+}
+
+impl From<ChaptersEntry> for Chapter {
+    fn from(e: ChaptersEntry) -> Chapter {
+        Chapter {
+            start_ms: e.start_ms,
+            title: e.title,
+        }
+    }
+}
+
+/// The chapter `ms` is in: the last that starts at or before it.
+pub fn chapter_at(chapters: &[Chapter], ms: i64) -> Option<&Chapter> {
+    chapters.iter().rev().find(|c| c.start_ms <= ms)
 }
 
 /// Whoever made something, as the artists page lists them (`artists`).

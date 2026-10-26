@@ -2,7 +2,8 @@
 //! ([`schema`]), the types ([`types`]), the library's keys ([`keys`]), the
 //! library ([`library`], [`browse`]), the playlists ([`playlists`]), the
 //! plays ([`plays`]), the shows and the feeds followed ([`shows`]), what
-//! is still to be downloaded ([`downloads`]) and the listening session
+//! is still to be downloaded ([`downloads`]), how far each person has
+//! listened to each episode ([`progress`]) and the listening session
 //! ([`listening`], [`queue`], [`devices`], [`groups`]) — one file per part
 //! — and what a host knows of
 //! it beside its functions ([`host`]). Who is signed in is `ark-auth`'s
@@ -27,6 +28,7 @@ pub mod library;
 pub mod listening;
 pub mod playlists;
 pub mod plays;
+pub mod progress;
 pub mod queue;
 pub mod schema;
 pub mod shows;
@@ -68,7 +70,8 @@ pub fn domain() -> Domain {
         groups::set_group_mute, shows::add_show, shows::add_episode, shows::shows, shows::show,
         shows::episode_details, shows::subscribe, shows::unsubscribe, shows::fetch_older, shows::feed_read,
         shows::subscriptions, downloads::queue_download, downloads::download_progress, downloads::downloaded,
-        downloads::downloads, feed)
+        downloads::downloads, progress::report_progress, progress::mark_played, progress::my_progress,
+        progress::show_progress, shows::set_chapters, shows::chapters, feed)
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
 }
@@ -96,7 +99,9 @@ pub fn feed() -> Scope<Harken> {
             .on::<Show>(all)
             .on::<Episode>(all)
             .on::<Subscription>(all)
-            .on::<Download>(all),
+            .on::<Download>(all)
+            .on::<Progress>(all)
+            .on::<Chapter>(all),
     )
 }
 

@@ -21,7 +21,7 @@ use std::time::Duration;
 use ark::format::Encode;
 
 use crate::domain::keys::show_key;
-use crate::domain::{AddEpisode, AddShow, FeedRead, Subscription};
+use crate::domain::{AddEpisode, AddShow, ChapterAt, FeedRead, SetChapters, Subscription};
 use crate::sync::{self, Call, Plan, Source, Want};
 
 /// Where under `/media` the downloads are served.
@@ -31,6 +31,14 @@ pub const DIR: &str = ".feeds";
 pub const EVERY: Duration = Duration::from_secs(60 * 60);
 
 const ITUNES: &str = "http://www.itunes.com/dtds/podcast-1.0.dtd";
+
+/// Podcasting 2.0's namespace: `<podcast:chapters url type>`, a JSON file
+/// of chapters beside the audio.
+const PODCAST: &str = "https://podcastindex.org/namespace/1.0";
+
+/// Podlove Simple Chapters: `<psc:chapter start title href image>` in the
+/// item itself.
+const PSC: &str = "http://podlove.org/simple-chapters";
 
 pub fn dir(data: &Path) -> PathBuf {
     data.join("feeds")
@@ -109,7 +117,8 @@ pub fn plan(
         return Err(format!("{url}: the feed has no title"));
     }
     let kind = &subscription.kind;
-    let mut picture = |u: &str| sync::picture(agent, u, DIR, dir, failed).unwrap_or_default();
+    let picture =
+        |u: &str, failed: &mut usize| sync::picture(agent, u, DIR, dir, failed).unwrap_or_default();
     let read = FeedRead {
         url: url.clone(),
         title: channel.title.clone(),
@@ -121,7 +130,7 @@ pub fn plan(
         title: channel.title.clone(),
         author: channel.author.clone(),
         description: channel.description.clone(),
-        art: picture(&channel.art),
+        art: picture(&channel.art, failed),
         feed: url.clone(),
         link: channel.link.clone(),
     };
@@ -139,7 +148,7 @@ pub fn plan(
         let want = Want::of(&item.url, DIR, dir);
         let art = match item.art == channel.art {
             true => String::new(),
-            false => picture(&item.art),
+            false => picture(&item.art, failed),
         };
         let episode = AddEpisode {
             show: id.clone(),
@@ -159,6 +168,17 @@ pub fn plan(
             number: item.number,
         };
         calls.push(call("library.add_episode", &episode.title, &episode));
+        let chapters = match item.chapters.is_empty() {
+            true => json_chapters(agent, &item.chapters_url, dir, failed),
+            false => item.chapters.clone(),
+        };
+        if !chapters.is_empty() {
+            let set = SetChapters {
+                file: want.file.clone(),
+                chapters,
+            };
+            calls.push(call("library.set_chapters", &episode.title, &set));
+        }
         files.push(want);
     }
     Ok(Plan {
@@ -193,6 +213,10 @@ pub struct Item {
     pub art: String,
     pub season: i64,
     pub number: i64,
+    /// Its chapters as the item says them (Podlove's), and where its JSON
+    /// chapters are (Podcasting 2.0's), when it says.
+    pub chapters: Vec<ChapterAt>,
+    pub chapters_url: String,
 }
 
 /// Read a feed's RSS. Its items newest first, those with no audio left out.
@@ -251,6 +275,13 @@ pub fn parse(xml: &str) -> Result<Channel, String> {
                 art: itunes_image(i),
                 season: text(i, "season", Some(ITUNES)).parse().unwrap_or(0),
                 number: text(i, "episode", Some(ITUNES)).parse().unwrap_or(0),
+                chapters: psc(i),
+                chapters_url: i
+                    .children()
+                    .find(|c| c.has_tag_name((PODCAST, "chapters")))
+                    .and_then(|c| c.attribute("url"))
+                    .map(|u| u.trim().to_string())
+                    .unwrap_or_default(),
                 url,
             })
         })
@@ -270,6 +301,92 @@ pub fn parse(xml: &str) -> Result<Channel, String> {
         link: text(channel, "link", None),
         items,
     })
+}
+
+/// An item's Podlove Simple Chapters, in order.
+fn psc(item: roxmltree::Node) -> Vec<ChapterAt> {
+    let Some(list) = item.children().find(|c| c.has_tag_name((PSC, "chapters"))) else {
+        return vec![];
+    };
+    let mut out: Vec<ChapterAt> = list
+        .children()
+        .filter(|c| c.has_tag_name((PSC, "chapter")))
+        .filter_map(|c| {
+            let start = c.attribute("start")?;
+            Some(ChapterAt {
+                start_ms: duration(start),
+                title: c.attribute("title").unwrap_or("").trim().to_string(),
+                url: c.attribute("href").unwrap_or("").trim().to_string(),
+                image: c.attribute("image").unwrap_or("").trim().to_string(),
+            })
+        })
+        .collect();
+    out.sort_by_key(|c| c.start_ms);
+    out
+}
+
+/// Podcasting 2.0's JSON chapters at `url`, kept in `dir` as a picture is
+/// — a file once had is not asked for again — and read: none when there
+/// is no URL or it cannot be had (counted in `failed`, so it is tried at
+/// the next read).
+fn json_chapters(agent: &ureq::Agent, url: &str, dir: &Path, failed: &mut usize) -> Vec<ChapterAt> {
+    if url.is_empty() {
+        return vec![];
+    }
+    let want = Want::of(url, DIR, dir);
+    if !want.here() {
+        if let Err(e) = sync::download(agent, url, &want.path, |_, _| {}) {
+            *failed += 1;
+            eprintln!("harken-server: feeds: chapters: {e}");
+            return vec![];
+        }
+    }
+    std::fs::read_to_string(&want.path)
+        .map(|j| chapters_of(&j))
+        .unwrap_or_default()
+}
+
+/// A JSON chapters file (`{"chapters": [{"startTime", "title", "url",
+/// "img", "toc"}]}`), in order: those marked out of the table of contents
+/// (`"toc": false`) left out.
+pub fn chapters_of(json: &str) -> Vec<ChapterAt> {
+    #[derive(serde::Deserialize)]
+    struct File {
+        #[serde(default)]
+        chapters: Vec<One>,
+    }
+    #[derive(serde::Deserialize)]
+    struct One {
+        #[serde(rename = "startTime", default)]
+        start: f64,
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        url: String,
+        #[serde(default)]
+        img: String,
+        #[serde(default = "shown")]
+        toc: bool,
+    }
+    fn shown() -> bool {
+        true
+    }
+    let Ok(file) = serde_json::from_str::<File>(json) else {
+        return vec![];
+    };
+    let mut out: Vec<ChapterAt> = file
+        .chapters
+        .into_iter()
+        .filter(|c| c.toc && c.start >= 0.0)
+        .map(|c| ChapterAt {
+            start_ms: (c.start * 1000.0) as i64,
+            title: c.title.trim().to_string(),
+            url: c.url.trim().to_string(),
+            image: c.img.trim().to_string(),
+        })
+        .collect();
+    out.sort_by_key(|c| c.start_ms);
+    out
 }
 
 /// `itunes:duration`: seconds, `MM:SS` or `HH:MM:SS`, as milliseconds; 0
@@ -436,6 +553,46 @@ mod tests {
         assert_eq!(c.items[0].description, "Wild & spontaneous");
         assert_eq!(c.items[1].duration_ms, 3_723_000);
         assert_eq!((c.items[1].guid.as_str(), c.items[1].number), ("ep-50", 50));
+    }
+
+    /// An item's chapters: Podlove's in the item, in order, and where its
+    /// JSON chapters are; the JSON read with those out of the table of
+    /// contents left out. Falsified by reading `start` as whole seconds:
+    /// the half second was lost.
+    #[test]
+    fn an_items_chapters_are_read() {
+        let rss = r#"<rss xmlns:psc="http://podlove.org/simple-chapters" xmlns:podcast="https://podcastindex.org/namespace/1.0"><channel><title>T</title>
+            <item><title>A</title><enclosure url="https://m/a.mp3" type="audio/mpeg"/>
+              <psc:chapters version="1.2"><psc:chapter start="00:01:02.500" title="News"/><psc:chapter start="0" title="Intro" href="https://x"/></psc:chapters></item>
+            <item><title>B</title><enclosure url="https://m/b.mp3" type="audio/mpeg"/>
+              <podcast:chapters url="https://m/b.json" type="application/json+chapters"/></item>
+        </channel></rss>"#;
+        let c = parse(rss).unwrap();
+        let a = c.items.iter().find(|i| i.title == "A").unwrap();
+        let read: Vec<(i64, &str, &str)> = a
+            .chapters
+            .iter()
+            .map(|c| (c.start_ms, c.title.as_str(), c.url.as_str()))
+            .collect();
+        assert_eq!(read, [(0, "Intro", "https://x"), (62_500, "News", "")]);
+        let b = c.items.iter().find(|i| i.title == "B").unwrap();
+        assert_eq!(
+            (b.chapters.len(), b.chapters_url.as_str()),
+            (0, "https://m/b.json")
+        );
+        let json = r#"{"version":"1.2.0","chapters":[{"startTime":95.5,"title":"Two","img":"https://i"},{"startTime":0,"title":"One"},{"startTime":40,"title":"Hidden","toc":false}]}"#;
+        let read: Vec<(i64, String, String)> = chapters_of(json)
+            .into_iter()
+            .map(|c| (c.start_ms, c.title, c.image))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (0, "One".into(), "".into()),
+                (95_500, "Two".into(), "https://i".into())
+            ]
+        );
+        assert!(chapters_of("not json").is_empty());
     }
 
     /// Falsified by adding the offset rather than taking it away.

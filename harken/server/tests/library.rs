@@ -958,10 +958,11 @@ fn a_feed_followed_is_downloaded_and_a_show() {
         match path {
             "/feed.xml" => Some(
                 format!(
-                    r#"<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+                    r#"<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:psc="http://podlove.org/simple-chapters"><channel>
                     <title>Gospel in Life</title><itunes:author>Tim Keller</itunes:author>
                     <item><title>Living Grace</title><guid>2</guid><pubDate>Wed, 21 Oct 2026 10:00:00 +0000</pubDate>
-                      <itunes:duration>47:04</itunes:duration><enclosure url="{base}/2.wav" type="audio/wav"/></item>
+                      <itunes:duration>47:04</itunes:duration><enclosure url="{base}/2.wav" type="audio/wav"/>
+                      <psc:chapters><psc:chapter start="0" title="Reading"/><psc:chapter start="05:00" title="Sermon"/></psc:chapters></item>
                     <item><title>The Dream of the Kingdom</title><guid>3</guid><pubDate>Mon, 26 Oct 2026 10:00:00 +0000</pubDate>
                       <enclosure url="{base}/3.wav" type="audio/wav"/></item>
                     <item><title>Too Old</title><guid>1</guid><pubDate>Mon, 19 Oct 2026 10:00:00 +0000</pubDate>
@@ -1036,6 +1037,15 @@ fn a_feed_followed_is_downloaded_and_a_show() {
     let episodes = hub_rows::<Episode>(&server, "episode");
     let grace = episodes.iter().find(|e| e.guid == "2").unwrap();
     assert_eq!(grace.source, format!("{url}/2.wav"));
+    let chapters = hub_rows::<harken_server::domain::Chapter>(&server, "chapter");
+    assert_eq!(
+        chapters
+            .iter()
+            .map(|c| (c.media_id == grace.media_id, c.start_ms, c.title.as_str()))
+            .collect::<Vec<_>>(),
+        [(true, 0, "Reading"), (true, 300_000, "Sermon")],
+        "the feed's chapters, on its episode"
+    );
     let file = &found.iter().find(|(t, _)| t == "Living Grace").unwrap().1;
     let media_rows = hub_rows::<Media>(&server, "media");
     assert_eq!(

@@ -212,4 +212,11 @@ pub trait Say {
     fn call(&mut self, transition: &'static str, input: Vec<u8>, as_of: Option<i64>, why: &str) -> Result<(), String>;
 
     fn play(&mut self, play: harken_domain::RecordPlay) -> Result<(), String>;
+
+    /// Where an episode has got to, for its listener (`library.report_progress`).
+    /// Nothing by default: a player whose plays are not its own keeps no
+    /// place either.
+    fn progress(&mut self, _place: harken_domain::ReportProgress) -> Result<(), String> {
+        Ok(())
+    }
 }

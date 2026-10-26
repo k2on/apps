@@ -254,6 +254,58 @@ public struct At: Equatable {
     public var json: String { J.obj(["\"at_ms\":" + String(atMs)]) }
 }
 
+/// The record `Chapter`.
+public struct Chapter: Equatable {
+    public var mediaId: Id
+    public var startMs: Int64
+    public var title: String
+    public var url: String
+    public var image: String
+
+    public init(mediaId: Id, startMs: Int64, title: String, url: String, image: String) { self.mediaId = mediaId; self.startMs = startMs; self.title = title; self.url = url; self.image = image; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), startMs: J.int(o["start_ms"]), title: J.text(o["title"]), url: J.text(o["url"]), image: J.text(o["image"]))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"start_ms\":" + String(startMs), "\"title\":" + J.q(title), "\"url\":" + J.q(url), "\"image\":" + J.q(image)]) }
+}
+
+/// The record `ChapterAt`.
+public struct ChapterAt: Equatable {
+    public var startMs: Int64
+    public var title: String
+    public var url: String
+    public var image: String
+
+    public init(startMs: Int64, title: String, url: String, image: String) { self.startMs = startMs; self.title = title; self.url = url; self.image = image; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(startMs: J.int(o["start_ms"]), title: J.text(o["title"]), url: J.text(o["url"]), image: J.text(o["image"]))
+    }
+
+    public var json: String { J.obj(["\"start_ms\":" + String(startMs), "\"title\":" + J.q(title), "\"url\":" + J.q(url), "\"image\":" + J.q(image)]) }
+}
+
+/// The record `ChaptersEntry`.
+public struct ChaptersEntry: Equatable {
+    public var image: String
+    public var startMs: Int64
+    public var title: String
+    public var url: String
+
+    public init(image: String, startMs: Int64, title: String, url: String) { self.image = image; self.startMs = startMs; self.title = title; self.url = url; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(image: J.text(o["image"]), startMs: J.int(o["start_ms"]), title: J.text(o["title"]), url: J.text(o["url"]))
+    }
+
+    public var json: String { J.obj(["\"image\":" + J.q(image), "\"start_ms\":" + String(startMs), "\"title\":" + J.q(title), "\"url\":" + J.q(url)]) }
+}
+
 /// The sum `Clock`.
 public indirect enum Clock: Equatable {
     case paused(atMs: Int64)
@@ -586,6 +638,20 @@ public struct EpisodeDetailsEntry: Equatable {
     }
 
     public var json: String { J.obj(["\"art\":" + J.q(art), "\"description\":" + J.q(description), "\"media_id\":" + J.q(mediaId.hex), "\"number\":" + String(number), "\"published_ms\":" + String(publishedMs), "\"season\":" + String(season), "\"show\":" + J.q(show), "\"show_id\":" + J.q(showId)]) }
+}
+
+/// The record `EpisodeInput`.
+public struct EpisodeInput: Equatable {
+    public var mediaId: Id
+
+    public init(mediaId: Id) { self.mediaId = mediaId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex)]) }
 }
 
 /// The record `Equip`.
@@ -937,6 +1003,22 @@ public struct Looked: Equatable {
     public var json: String { J.obj(["\"read\":" + String(read), "\"authored\":" + String(authored)]) }
 }
 
+/// The record `MarkPlayed`.
+public struct MarkPlayed: Equatable {
+    public var mediaId: Id
+    public var finished: Bool
+    public var name: String
+
+    public init(mediaId: Id, finished: Bool, name: String) { self.mediaId = mediaId; self.finished = finished; self.name = name; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), finished: J.bool(o["finished"]), name: J.text(o["name"]))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"finished\":" + String(finished), "\"name\":" + J.q(name)]) }
+}
+
 /// The record `Media`.
 public struct Media: Equatable {
     public var id: Id
@@ -1172,6 +1254,46 @@ public struct Present: Equatable {
     public var json: String { J.obj(["\"can_play\":" + String(canPlay), "\"can_volume\":" + String(canVolume), "\"family\":" + J.wopt(family) { v0 in J.q(v0) }, "\"follows\":" + J.wopt(follows) { v0 in J.q(v0) }, "\"id\":" + J.q(id), "\"kind\":" + J.q(kind), "\"muted\":" + String(muted), "\"name\":" + J.q(name), "\"user\":" + J.q(user), "\"volume\":" + String(volume)]) }
 }
 
+/// The record `Progress`.
+public struct Progress: Equatable {
+    public var userId: String
+    public var mediaId: Id
+    public var positionMs: Int64
+    public var durationMs: Int64
+    public var finished: Bool
+    public var name: String
+    public var updatedMs: Int64
+
+    public init(userId: String, mediaId: Id, positionMs: Int64, durationMs: Int64, finished: Bool, name: String, updatedMs: Int64) { self.userId = userId; self.mediaId = mediaId; self.positionMs = positionMs; self.durationMs = durationMs; self.finished = finished; self.name = name; self.updatedMs = updatedMs; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(userId: J.text(o["user_id"]), mediaId: Id(J.text(o["media_id"])), positionMs: J.int(o["position_ms"]), durationMs: J.int(o["duration_ms"]), finished: J.bool(o["finished"]), name: J.text(o["name"]), updatedMs: J.int(o["updated_ms"]))
+    }
+
+    public var json: String { J.obj(["\"user_id\":" + J.q(userId), "\"media_id\":" + J.q(mediaId.hex), "\"position_ms\":" + String(positionMs), "\"duration_ms\":" + String(durationMs), "\"finished\":" + String(finished), "\"name\":" + J.q(name), "\"updated_ms\":" + String(updatedMs)]) }
+}
+
+/// The record `ProgressEntry`.
+public struct ProgressEntry: Equatable {
+    public var durationMs: Int64
+    public var finished: Bool
+    public var mediaId: Id
+    public var name: String
+    public var positionMs: Int64
+    public var updatedMs: Int64
+    public var userId: String
+
+    public init(durationMs: Int64, finished: Bool, mediaId: Id, name: String, positionMs: Int64, updatedMs: Int64, userId: String) { self.durationMs = durationMs; self.finished = finished; self.mediaId = mediaId; self.name = name; self.positionMs = positionMs; self.updatedMs = updatedMs; self.userId = userId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(durationMs: J.int(o["duration_ms"]), finished: J.bool(o["finished"]), mediaId: Id(J.text(o["media_id"])), name: J.text(o["name"]), positionMs: J.int(o["position_ms"]), updatedMs: J.int(o["updated_ms"]), userId: J.text(o["user_id"]))
+    }
+
+    public var json: String { J.obj(["\"duration_ms\":" + String(durationMs), "\"finished\":" + String(finished), "\"media_id\":" + J.q(mediaId.hex), "\"name\":" + J.q(name), "\"position_ms\":" + String(positionMs), "\"updated_ms\":" + String(updatedMs), "\"user_id\":" + J.q(userId)]) }
+}
+
 /// The record `QueueDownload`.
 public struct QueueDownload: Equatable {
     public var file: String
@@ -1351,6 +1473,23 @@ public struct ReportGroup: Equatable {
     public var json: String { J.obj(["\"members\":" + J.wlist(members) { v0 in J.q(v0) }]) }
 }
 
+/// The record `ReportProgress`.
+public struct ReportProgress: Equatable {
+    public var mediaId: Id
+    public var positionMs: Int64
+    public var durationMs: Int64
+    public var name: String
+
+    public init(mediaId: Id, positionMs: Int64, durationMs: Int64, name: String) { self.mediaId = mediaId; self.positionMs = positionMs; self.durationMs = durationMs; self.name = name; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), positionMs: J.int(o["position_ms"]), durationMs: J.int(o["duration_ms"]), name: J.text(o["name"]))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"position_ms\":" + String(positionMs), "\"duration_ms\":" + String(durationMs), "\"name\":" + J.q(name)]) }
+}
+
 /// The record `ReportVolume`.
 public struct ReportVolume: Equatable {
     public var level: Int64
@@ -1458,6 +1597,21 @@ public indirect enum Session: Equatable {
         case .idle: return "\"Idle\""
         }
     }
+}
+
+/// The record `SetChapters`.
+public struct SetChapters: Equatable {
+    public var file: String
+    public var chapters: [ChapterAt]
+
+    public init(file: String, chapters: [ChapterAt]) { self.file = file; self.chapters = chapters; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(file: J.text(o["file"]), chapters: J.list(o["chapters"]) { v0 in ChapterAt(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"file\":" + J.q(file), "\"chapters\":" + J.wlist(chapters) { v0 in v0.json }]) }
 }
 
 /// The record `SetMute`.
@@ -1876,6 +2030,9 @@ public struct Harken {
     /// `library.artists`, kept.
     public func artists() throws -> LiveView<ArtistsEntry> { LiveView(try peer.view(name: "library.artists", input: "null")) { j in ArtistsEntry(json: j) } }
 
+    /// `library.chapters`, kept.
+    public func chapters(_ input: EpisodeInput) throws -> LiveView<ChaptersEntry> { LiveView(try peer.view(name: "library.chapters", input: input.json)) { j in ChaptersEntry(json: j) } }
+
     /// `library.composers`, kept.
     public func composers() throws -> LiveView<ComposersEntry> { LiveView(try peer.view(name: "library.composers", input: "null")) { j in ComposersEntry(json: j) } }
 
@@ -1918,6 +2075,12 @@ public struct Harken {
     /// `library.look`: its intent's id.
     @discardableResult public func look(_ input: LookAt) throws -> String { try peer.mutate(name: "library.look", input: input.json) }
 
+    /// `library.mark_played`: its intent's id.
+    @discardableResult public func markPlayed(_ input: MarkPlayed) throws -> String { try peer.mutate(name: "library.mark_played", input: input.json) }
+
+    /// `library.my_progress`, kept.
+    public func myProgress() throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.my_progress", input: "null")) { j in ProgressEntry(json: j) } }
+
     /// `library.queue_download`: its intent's id.
     @discardableResult public func queueDownload(_ input: QueueDownload) throws -> String { try peer.mutate(name: "library.queue_download", input: input.json) }
 
@@ -1930,11 +2093,20 @@ public struct Harken {
     /// `library.remove_media`: its intent's id.
     @discardableResult public func removeMedia(_ input: RemoveMedia) throws -> String { try peer.mutate(name: "library.remove_media", input: input.json) }
 
+    /// `library.report_progress`: its intent's id.
+    @discardableResult public func reportProgress(_ input: ReportProgress) throws -> String { try peer.mutate(name: "library.report_progress", input: input.json) }
+
     /// `library.search`, kept, its rows UniFFI's.
     public func search(_ input: Search) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.search", input: input.json)) }
 
+    /// `library.set_chapters`: its intent's id.
+    @discardableResult public func setChapters(_ input: SetChapters) throws -> String { try peer.mutate(name: "library.set_chapters", input: input.json) }
+
     /// `library.show`, kept, its rows UniFFI's.
     public func show(_ input: ShowInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.show", input: input.json)) }
+
+    /// `library.show_progress`, kept.
+    public func showProgress(_ input: ShowInput) throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.show_progress", input: input.json)) { j in ProgressEntry(json: j) } }
 
     /// `library.shows`, kept.
     public func shows() throws -> LiveView<ShowsEntry> { LiveView(try peer.view(name: "library.shows", input: "null")) { j in ShowsEntry(json: j) } }

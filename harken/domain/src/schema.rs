@@ -318,6 +318,40 @@ pub struct Download {
     pub asked_ms: i64,
 }
 
+/// How far somebody has listened to an episode: one row per person per
+/// episode, written by the device that played it (`library.report_progress`)
+/// or by a hand (`library.mark_played`). Everybody's is everybody's to read:
+/// a show's page says how far each member has got.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(media_id))]
+pub struct Progress {
+    #[ark(key)]
+    pub user_id: String,
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    /// Where they got to, and how long it is as their player had it.
+    pub position_ms: i64,
+    pub duration_ms: i64,
+    /// Played to its end, or said to have been.
+    pub finished: bool,
+    /// What to call them, as their sign-in said when they last listened.
+    pub name: String,
+    pub updated_ms: i64,
+}
+
+/// One chapter of an episode, as its feed says it: where it starts, its
+/// title, and its own link and picture where it has them.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct Chapter {
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    #[ark(key)]
+    pub start_ms: i64,
+    pub title: String,
+    pub url: String,
+    pub image: String,
+}
+
 /// harken's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Harken {
@@ -342,6 +376,8 @@ pub struct Harken {
     pub episode: Episode,
     pub subscription: Subscription,
     pub download: Download,
+    pub progress: Progress,
+    pub chapter: Chapter,
 }
 
 ark_auth::install!(Harken);
