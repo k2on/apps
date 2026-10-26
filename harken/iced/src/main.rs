@@ -152,6 +152,9 @@ pub enum Message {
     AllWorks(bool),
     PlayPause,
     Skip(i32),
+    /// Back or on this many seconds in what plays: an episode's skip, in
+    /// place of the track before and after.
+    Jog(i64),
     /// Dragging the bar's progress, in seconds: where this device's
     /// scrubber is, said to the session as the ephemeral `scrub`…
     Seek(f32),
@@ -305,6 +308,11 @@ pub fn volume_key(c: char, level: Level) -> Option<Message> {
         _ => None,
     }
 }
+
+/// How far an episode's skip goes back, and on, in seconds: what a podcast
+/// player's do.
+pub const JOG_BACK: i64 = 15;
+pub const JOG_FORWARD: i64 = 30;
 
 /// A transport button, wherever it was pressed ([`App::press`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1172,8 +1180,8 @@ impl App {
                 },
                 'd' => self.update(Message::OpenDevices),
                 'q' => self.update(Message::OpenQueue),
-                '}' => self.update(Message::Skip(1)),
-                '{' => self.update(Message::Skip(-1)),
+                '}' => self.update(self.forward()),
+                '{' => self.update(self.back()),
                 other => match volume_key(other, Level::Output) {
                     Some(m) => self.update(m),
                     None => Task::none(),
@@ -1896,6 +1904,34 @@ impl App {
     /// track, its clock counted against the server's — whichever device
     /// sounds it, so a window watching a phone says the phone's track; its
     /// own session, this device's player in its own queue.
+    /// Whether what plays is an episode of a show — no album, and its
+    /// creator a show's title — whose transport skips back and on a few
+    /// seconds rather than a track.
+    pub fn jogs(&self) -> bool {
+        self.now().is_some_and(|n| {
+            let t = n.track();
+            t.album.is_empty() && self.peer.shows().iter().any(|s| s.title == t.creator)
+        })
+    }
+
+    /// What the transport's left and right do: a track either way, or, for
+    /// an episode, back [`JOG_BACK`] and on [`JOG_FORWARD`] seconds.
+    pub fn back(&self) -> Message {
+        if self.jogs() {
+            Message::Jog(-JOG_BACK)
+        } else {
+            Message::Skip(-1)
+        }
+    }
+
+    pub fn forward(&self) -> Message {
+        if self.jogs() {
+            Message::Jog(JOG_FORWARD)
+        } else {
+            Message::Skip(1)
+        }
+    }
+
     pub fn now(&self) -> Option<Now<'_>> {
         match &self.session {
             Some(s) => {
@@ -2237,6 +2273,12 @@ impl App {
                 }
             }
             Message::Skip(delta) => return self.press(Press::Skip(delta)),
+            Message::Jog(secs) => {
+                if let Some(now) = self.now() {
+                    let to = (now.position + secs as f64).clamp(0.0, now.duration.max(0.0));
+                    return self.press(Press::Seek((to * 1000.0) as i64));
+                }
+            }
             // The queue is what is on screen.
             Message::PlayItem(id) => {
                 let rows = self.peer.rows().to_vec();
@@ -2385,6 +2427,14 @@ impl App {
             let press = match self.player.take_remote() {
                 Some(Remote::Play) => Some(Press::Play),
                 Some(Remote::Pause) => Some(Press::Pause),
+                Some(Remote::Next) if self.jogs() => {
+                    tasks.push(self.update(Message::Jog(JOG_FORWARD)));
+                    None
+                }
+                Some(Remote::Previous) if self.jogs() => {
+                    tasks.push(self.update(Message::Jog(-JOG_BACK)));
+                    None
+                }
                 Some(Remote::Next) => Some(Press::Skip(1)),
                 Some(Remote::Previous) => Some(Press::Skip(-1)),
                 Some(Remote::Seek(secs)) => Some(Press::Seek((secs * 1000.0) as i64)),

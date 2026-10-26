@@ -1804,19 +1804,19 @@ impl App {
         // Play/pause the size of the pair either side and a half again: the
         // one of the three anybody reaches for.
         let toggle = icon::tinted(if bar.playing { glyphs::PAUSE } else { glyphs::PLAY }, 22.0, |p| p.background.base.text);
+        // An episode skips back and on a few seconds, a song a track.
+        let jogs = self.jogs();
+        let (back, forward) = match jogs {
+            true => (glyphs::SKIP_BACK, glyphs::SKIP_FORWARD),
+            false => (glyphs::PREVIOUS, glyphs::NEXT),
+        };
         let transport = row![
-            button(icon::plain(glyphs::PREVIOUS, true))
-                .style(button::text)
-                .padding(6)
-                .on_press(Message::Skip(-1)),
+            button(icon::plain(back, true)).style(button::text).padding(6).on_press(self.back()),
             button(toggle)
                 .style(button::text)
                 .padding(6)
                 .on_press_maybe(workable.then_some(Message::PlayPause)),
-            button(icon::plain(glyphs::NEXT, true))
-                .style(button::text)
-                .padding(6)
-                .on_press(Message::Skip(1)),
+            button(icon::plain(forward, true)).style(button::text).padding(6).on_press(self.forward()),
         ]
         .spacing(2)
         .align_y(Alignment::Center);
@@ -2079,7 +2079,7 @@ fn view_help() -> Element<'static, Message> {
         ("D", "every number the session holds, and where your changes stand"),
         ("/", "search this pane; <Enter> accepts, <Esc> drops it"),
         ("n  N", "the next match, the one before"),
-        ("{  }", "the previous track, the next one"),
+        ("{  }", "the previous track, the next one; an episode back 15s, on 30s"),
         ("?", "this"),
     ];
     let rows = KEYS.iter().fold(column![].spacing(6), |col, (keys, what)| {

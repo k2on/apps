@@ -523,3 +523,25 @@ fn the_demo_has_a_podcast_and_sermons() {
     let (_, entries) = app.row_entries(rows[0].id).unwrap();
     assert!(entries.iter().any(|e| e.label == "Go to Full Time Nix"));
 }
+
+/// An episode's transport skips back fifteen seconds and on thirty; a
+/// song's goes a track either way. Falsified by `jogs` reading the album
+/// alone: a song of no album jogged.
+#[test]
+fn an_episode_skips_seconds_and_a_song_a_track() {
+    let mut app = super::demo_app();
+    let _ = app.update(crate::Message::Select(Source::Show(
+        "podcast/full-time-nix".into(),
+        "Full Time Nix".into(),
+    )));
+    let first = app.peer.rows()[0].id;
+    let _ = app.update(crate::Message::PlayItem(first));
+    assert!(app.jogs(), "an episode plays");
+    assert!(matches!(app.forward(), crate::Message::Jog(30)));
+    assert!(matches!(app.back(), crate::Message::Jog(-15)));
+    let _ = app.update(crate::Message::Select(Source::Library));
+    let song = app.peer.items()[0].id;
+    let _ = app.update(crate::Message::PlayItem(song));
+    assert!(!app.jogs(), "a song plays");
+    assert!(matches!(app.forward(), crate::Message::Skip(1)));
+}
