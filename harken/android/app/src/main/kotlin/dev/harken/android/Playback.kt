@@ -1257,6 +1257,12 @@ class Playback(
 
     fun previous() = press(Press.Skip(-1)) { controller?.seekToPrevious() }
 
+    /** Back or on `deltaMs` in what plays, within it: an episode's skip. */
+    fun jog(deltaMs: Long) {
+        val end = state.value.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE
+        seek((position.value + deltaMs).coerceIn(0, end))
+    }
+
     /** Seek, on release; while joined the scrubber's slot is emptied with it. */
     fun seek(ms: Long) {
         _position.value = ms

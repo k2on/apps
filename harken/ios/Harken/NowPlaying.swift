@@ -41,6 +41,11 @@ final class NowPlaying {
         on(c.togglePlayPauseCommand) { m, _ in m.toggle() }
         on(c.nextTrackCommand) { m, _ in m.next() }
         on(c.previousTrackCommand) { m, _ in m.previous() }
+        // An episode's: back and on a few seconds, offered in place of the tracks.
+        c.skipBackwardCommand.preferredIntervals = [NSNumber(value: Model.jogBack)]
+        c.skipForwardCommand.preferredIntervals = [NSNumber(value: Model.jogForward)]
+        on(c.skipBackwardCommand) { m, _ in m.jog(-Model.jogBack) }
+        on(c.skipForwardCommand) { m, _ in m.jog(Model.jogForward) }
         // A headset's stop is a pause: stopping the session would forget a queue nobody asked to lose.
         on(c.stopCommand) { m, _ in m.pause() }
         on(c.changePlaybackPositionCommand) { m, e in
@@ -58,7 +63,11 @@ final class NowPlaying {
             return
         }
         let c = MPRemoteCommandCenter.shared()
-        c.nextTrackCommand.isEnabled = s.hasNext
+        let jogs = model?.jogs ?? false
+        c.nextTrackCommand.isEnabled = s.hasNext && !jogs
+        c.previousTrackCommand.isEnabled = !jogs
+        c.skipBackwardCommand.isEnabled = jogs
+        c.skipForwardCommand.isEnabled = jogs
         c.changePlaybackPositionCommand.isEnabled = s.durationMs > 0
         let at = s.position(nowMs())
         var info: [String: Any] = [

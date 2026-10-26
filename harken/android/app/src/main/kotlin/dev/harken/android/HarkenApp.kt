@@ -394,6 +394,11 @@ fun HarkenApp(
 
             override fun previous() = playback.previous()
 
+            // An episode: no album, and its name a show's.
+            override fun jogs(): Boolean = player.now?.let { n -> n.album.isEmpty() && shows.any { it.title == n.artist } } ?: false
+
+            override fun jog(seconds: Int) = playback.jog(seconds * 1000L)
+
             override fun seek(ms: Long) = playback.seek(ms)
 
             override fun shuffle() = playback.shuffle()

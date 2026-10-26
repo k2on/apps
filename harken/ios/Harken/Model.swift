@@ -404,6 +404,23 @@ final class Model: ObservableObject {
     func next() { press(.skip(1)) { [sound] in sound.next() } }
     func previous() { press(.skip(-1)) { [sound] in sound.previous() } }
 
+    /// How far an episode's skip goes back, and on, in seconds: what a podcast player's do.
+    static let jogBack: Int64 = 15
+    static let jogForward: Int64 = 30
+
+    /// Whether what plays is an episode of a show — no album, and its name a
+    /// show's — whose transport skips seconds rather than a track.
+    var jogs: Bool {
+        guard let n = player.now, n.album.isEmpty else { return false }
+        return snapshot.shows.contains { $0.title == n.artist }
+    }
+
+    /// Back or on `seconds` in what plays, within it.
+    func jog(_ seconds: Int64) {
+        let end = player.durationMs > 0 ? player.durationMs : Int64.max
+        seek(min(max(player.position(nowMs()) + seconds * 1000, 0), end))
+    }
+
     /// Seek, on release; while joined the scrubber's slot is emptied with it.
     func seek(_ ms: Int64) {
         press(.seek(ms)) { [sound] in sound.seek(ms: ms) }

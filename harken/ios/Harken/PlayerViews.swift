@@ -39,7 +39,10 @@ struct MiniPlayer: View {
                         Image(systemName: s.playing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace)).frame(width: 32, height: 32)
                     }
                     .accessibilityLabel(s.playing ? "Pause" : "Play")
-                    if !compact {
+                    if !compact && model.jogs {
+                        Button { model.jog(Model.jogForward) } label: { Image(systemName: "goforward.30").frame(width: 32, height: 32) }
+                            .accessibilityLabel("Forward 30 seconds")
+                    } else if !compact {
                         Button { model.next() } label: { Image(systemName: "forward.fill").frame(width: 32, height: 32) }
                             .disabled(!s.hasNext)
                             .accessibilityLabel("Next")
@@ -247,8 +250,14 @@ struct Transport: View {
                     Color.clear.frame(width: 44)
                 }
                 Spacer()
-                Button { model.previous() } label: { Image(systemName: "backward.fill").font(.title) }
-                    .accessibilityLabel("Previous")
+                // An episode skips back and on a few seconds; a song goes a track.
+                if model.jogs {
+                    Button { model.jog(-Model.jogBack) } label: { Image(systemName: "gobackward.15").font(.title) }
+                        .accessibilityLabel("Back 15 seconds")
+                } else {
+                    Button { model.previous() } label: { Image(systemName: "backward.fill").font(.title) }
+                        .accessibilityLabel("Previous")
+                }
                 Spacer()
                 Button { model.toggle() } label: {
                     Image(systemName: s.playing ? "pause.fill" : "play.fill")
@@ -261,8 +270,13 @@ struct Transport: View {
                 .tint(.gold)
                 .accessibilityLabel(s.playing ? "Pause" : "Play")
                 Spacer()
-                Button { model.next() } label: { Image(systemName: "forward.fill").font(.title) }
-                    .accessibilityLabel("Next")
+                if model.jogs {
+                    Button { model.jog(Model.jogForward) } label: { Image(systemName: "goforward.30").font(.title) }
+                        .accessibilityLabel("Forward 30 seconds")
+                } else {
+                    Button { model.next() } label: { Image(systemName: "forward.fill").font(.title) }
+                        .accessibilityLabel("Next")
+                }
                 Spacer()
                 if s.alone {
                     Button { model.cycleRepeat() } label: { Image(systemName: s.repeatMode == .one ? "repeat.1" : "repeat") }

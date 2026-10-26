@@ -75,6 +75,10 @@ import dev.harken.android.ui.rememberTransientListState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** How far an episode's skip goes back, and on, in seconds: what a podcast player's do. */
+const val JOG_BACK = 15
+const val JOG_FORWARD = 30
+
 /** What the player's controls do. */
 interface Controls {
     fun open() {}
@@ -86,6 +90,15 @@ interface Controls {
     fun next() {}
 
     fun previous() {}
+
+    /**
+     * Whether what plays is an episode of a show, whose transport skips back [JOG_BACK] and on
+     * [JOG_FORWARD] seconds rather than a track.
+     */
+    fun jogs(): Boolean = false
+
+    /** Back or on this many seconds in what plays. */
+    fun jog(seconds: Int) {}
 
     fun seek(ms: Long) {}
 
@@ -184,9 +197,12 @@ fun MiniFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
             IconButton(onClick = controls::toggle) {
                 Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 20.dp)
             }
-            IconButton(onClick = controls::next, enabled = state.upNext.isNotEmpty() || state.repeat != Repeat.Off) {
-                Glyph(Glyphs.Next, "Next", size = 20.dp)
-            }
+            if (controls.jogs())
+                IconButton(onClick = { controls.jog(JOG_FORWARD) }) { Glyph(Glyphs.SkipForward, "Forward $JOG_FORWARD seconds", size = 20.dp) }
+            else
+                IconButton(onClick = controls::next, enabled = state.upNext.isNotEmpty() || state.repeat != Repeat.Off) {
+                    Glyph(Glyphs.Next, "Next", size = 20.dp)
+                }
         }
         Hairline(state.durationMs, position)
     }
@@ -270,7 +286,10 @@ fun FullFace(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             if (alone) Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
             else Spacer(Modifier.size(48.dp))
-            IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
+            // An episode skips back and on a few seconds; a song goes a track.
+            val jogs = controls.jogs()
+            if (jogs) IconButton(onClick = { controls.jog(-JOG_BACK) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipBack, "Back $JOG_BACK seconds", size = 28.dp) }
+            else IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
             FilledIconButton(
                 onClick = controls::toggle,
                 modifier = Modifier.size(72.dp),
@@ -279,7 +298,8 @@ fun FullFace(
             ) {
                 Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 30.dp)
             }
-            IconButton(onClick = controls::next, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Next, "Next", size = 28.dp) }
+            if (jogs) IconButton(onClick = { controls.jog(JOG_FORWARD) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipForward, "Forward $JOG_FORWARD seconds", size = 28.dp) }
+            else IconButton(onClick = controls::next, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Next, "Next", size = 28.dp) }
             if (alone) Toggle(
                 if (state.repeat == Repeat.One) Glyphs.RepeatOne else Glyphs.Repeat,
                 when (state.repeat) {
