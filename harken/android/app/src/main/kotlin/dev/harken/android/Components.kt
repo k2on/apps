@@ -431,13 +431,14 @@ fun WorkHeading(composer: String, work: String, ms: Long, first: Boolean) {
     }
 }
 
-/** A record's small print: when, how much, and whose label. */
+/** A record's small print: when, how much, on what terms ([Catalogue.licences]), and whose label. */
 @Composable
-fun Foot(tracks: List<Track>, year: Long, label: String) {
+fun Foot(tracks: List<Track>, year: Long, label: String, licences: List<String> = emptyList()) {
     Column(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.xl)) {
         if (year > 0) Text(year.toString(), style = quiet(MaterialTheme.typography.bodySmall))
         val ms = tracks.sumOf { it.durationMs }
         Text(Media.count(tracks.size, "track") + if (ms > 0) ", " + Media.spell(ms) else "", style = quiet(MaterialTheme.typography.bodySmall))
+        for (terms in licences) Text(terms, style = quiet(MaterialTheme.typography.bodySmall))
         if (label.isNotEmpty()) {
             Spacer(Modifier.height(Space.l))
             Text("RECORD LABEL", style = quiet(MaterialTheme.typography.labelSmall))

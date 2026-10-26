@@ -97,7 +97,9 @@ pub struct Card<M> {
 /// because the keyboard has to agree about where `l` lands: pass the same
 /// pane width the keyboard's grid was built from. `on_hover(i)` is
 /// sent when the pointer reaches card `i` — one highlight, however you moved
-/// it — and `scroll` is the scrollable's id, for [`crate::scroll::reveal`].
+/// it — `scroll` is the scrollable's id, for [`crate::scroll::reveal`], and
+/// `on_scroll` hears where it was scrolled to.
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a, M: Clone + 'a>(
     shelf: Shelf,
     cards: &[Card<M>],
@@ -106,6 +108,7 @@ pub fn view<'a, M: Clone + 'a>(
     empty: &'a str,
     on_hover: impl Fn(usize) -> M,
     scroll: &'static str,
+    on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> M + 'a,
 ) -> Element<'a, M> {
     if cards.is_empty() {
         return empty_page(empty, shelf.padding);
@@ -128,10 +131,15 @@ pub fn view<'a, M: Clone + 'a>(
         right: shelf.padding + SCROLLBAR,
         ..Padding::new(shelf.padding)
     };
-    container(scrollable(container(page).padding(padding)).id(scroll).style(style::bars))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    container(
+        scrollable(container(page).padding(padding))
+            .id(scroll)
+            .on_scroll(on_scroll)
+            .style(style::bars),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 /// One card `side` wide ([`Shelf::side`]): the picture, the name, and what

@@ -85,25 +85,34 @@ enum Catalogue {
         r.performers.isEmpty ? "Performer not named" : r.performers
     }
 
-    /// A performance's line: when, how many tracks, how long, on what terms —
+    /// A performance's line: when, how many tracks, how long —
     /// "1992 · 3 tracks · 40 min".
     static func facts(_ r: RecordingsEntry) -> String {
         Spell.facts([r.recorded > 0 ? "\(r.recorded)" : nil, Spell.count(Int(r.tracks), "track"),
-                     r.durationMs > 0 ? Spell.length(r.durationMs) : nil, r.licence])
+                     r.durationMs > 0 ? Spell.length(r.durationMs) : nil])
     }
 
-    /// Who played a track and on what terms, as one line under its title
-    /// (the desktop's `credit`): just the names, or the names and the licence.
-    static func credit(_ performer: String, _ licence: String) -> String {
-        if licence.isEmpty { return performer }
-        return performer.isEmpty ? "(\(licence))" : "\(performer) (\(licence))"
+    /// The terms a page of tracks was given on, a line each, for its foot
+    /// (the desktop's `licences`): the licence alone when there is one, and
+    /// each beside whoever gave it when there are several —
+    /// "CC BY 3.0 (Busch Chamber Players)". A page that reserves nothing has none.
+    static func licences(_ details: [TrackDetailsEntry?]) -> [String] {
+        var terms: [(licence: String, who: [String])] = []
+        for case let d? in details where !d.licence.isEmpty {
+            if !terms.contains(where: { $0.licence == d.licence }) { terms.append((d.licence, [])) }
+            let at = terms.firstIndex { $0.licence == d.licence }!
+            if !d.performer.isEmpty && !terms[at].who.contains(d.performer) { terms[at].who.append(d.performer) }
+        }
+        return terms.map { t in
+            terms.count == 1 || t.who.isEmpty ? t.licence : "\(t.licence) (\(t.who.joined(separator: ", ")))"
+        }
     }
 
     /// The line under a track on a page whose it is (`creator`): who played
     /// it — or, on a record of several people's songs, whose this one is.
     static func under(_ t: LibraryEntry, _ d: TrackDetailsEntry?, creator: String) -> String {
         let performer = d?.performer ?? ""
-        if !performer.isEmpty { return credit(performer, d?.licence ?? "") }
+        if !performer.isEmpty { return performer }
         return t.creator == creator ? "" : t.creator
     }
 

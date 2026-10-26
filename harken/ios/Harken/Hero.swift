@@ -337,17 +337,20 @@ struct CatalogueTracks: View {
     }
 }
 
-/// A record's small print: when, how much, and whose label.
+/// A record's small print: when, how much, on what terms, and whose label.
+/// The terms are the record's, said once here rather than on every track.
 struct RecordFoot: View {
     let year: Int64
     let tracks: [LibraryEntry]
     let label: String
+    @EnvironmentObject private var model: Model
 
     var body: some View {
         let length = [Spell.count(tracks.count, "track"), Spell.total(tracks)].compactMap { $0 }.joined(separator: ", ")
         VStack(alignment: .leading, spacing: 3) {
             if year > 0 { Text(String(year)) }
             Text(length)
+            ForEach(Catalogue.licences(tracks.map { model.detail($0) }), id: \.self) { Text($0) }
             if !label.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("RECORD LABEL").font(.caption2.weight(.semibold))

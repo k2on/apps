@@ -46,6 +46,7 @@ mod wake;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use ark::log::EntryId;
@@ -88,16 +89,32 @@ fn media_url(server: &str, file: &str) -> String {
     crate::domain::host::url(server, file)
 }
 
-/// Who played it and on what terms, as one line. Two facts on two rows —
-/// `credit` and `recording.licence` — put back together for the one column a
-/// table has: a recording that reserves nothing is just the names, and one
-/// that asks for attribution says so in the same breath.
-fn credit(performer: &str, licence: &str) -> String {
-    match (performer.is_empty(), licence.is_empty()) {
-        (_, true) => performer.to_string(),
-        (true, false) => format!("({licence})"),
-        (false, false) => format!("{performer} ({licence})"),
+/// The terms a page of tracks was given on, a line each, for its foot: the
+/// licence alone when there is one, and each beside whoever gave it when
+/// there are several — `CC BY 3.0 (Busch Chamber Players)`. A page that
+/// reserves nothing has none.
+fn licences(details: &[rows::TrackDetail]) -> Vec<String> {
+    let mut terms: Vec<(&str, Vec<&str>)> = Vec::new();
+    for d in details.iter().filter(|d| !d.licence.is_empty()) {
+        let at = match terms.iter().position(|(l, _)| *l == d.licence) {
+            Some(at) => at,
+            None => {
+                terms.push((&d.licence, Vec::new()));
+                terms.len() - 1
+            }
+        };
+        if !d.performer.is_empty() && !terms[at].1.contains(&d.performer.as_str()) {
+            terms[at].1.push(&d.performer);
+        }
     }
+    let one = terms.len() == 1;
+    terms
+        .into_iter()
+        .map(|(l, who)| match one || who.is_empty() {
+            true => l.to_string(),
+            false => format!("{l} ({})", who.join(", ")),
+        })
+        .collect()
 }
 
 /// Where a row's menu opens, which is decided by what asked for it: a right
@@ -237,6 +254,11 @@ pub enum Message {
     /// reach the page: a menu is pinned to a window coordinate, and a list
     /// scrolling under it would leave it beside a row it is not about.
     Swallow,
+    /// The page was scrolled to this far down (absolute, in pixels).
+    PageScrolled(f32),
+    /// Put the page's scroll where it was left, or at the top: sent once the
+    /// page it is for has been drawn, so it lands on that page's list.
+    ScrollPage(f32),
 }
 
 /// What a volume control moves.
@@ -550,6 +572,13 @@ pub struct App {
     /// A sideways trackpad gesture under way: back and forward, as a
     /// browser has them ([`arkui::swipe`]).
     pub swipe: arkui::swipe::Swipe,
+    /// How far down each page was scrolled when it was left, so back and
+    /// forward land where it was, as a browser's do.
+    pub scrolls: HashMap<Place, f32>,
+    /// Where the page just opened is to be scrolled, once it is drawn.
+    pub scroll_due: Option<f32>,
+    /// The page being opened is a step back or forward, not a new visit.
+    pub travelling: bool,
     /// Where the pointer is.
     pub cursor: Point,
     /// Where the pointer was when a key last moved the cursor, until it
@@ -640,6 +669,9 @@ impl App {
             window: Size::new(860.0, 600.0),
             router: Router::new(),
             swipe: Default::default(),
+            scrolls: HashMap::new(),
+            scroll_due: None,
+            travelling: false,
             keyed: None,
             cursor: Point::ORIGIN,
             player: Player::new(),
@@ -675,9 +707,7 @@ impl App {
     #[cfg(feature = "demo")]
     pub fn demo() -> App {
         let peer = Peer::open(seed::seeded());
-        let mut app = App::with_peer(peer, String::new(), None);
-        app.note = "a demo — nothing here leaves your browser".into();
-        app
+        App::with_peer(peer, String::new(), None)
     }
 
     /// No server named and none joined: this device's own replica, its own
@@ -686,7 +716,7 @@ impl App {
     #[cfg(not(feature = "demo"))]
     fn alone(user: Option<String>) -> App {
         let (client, note) = match auth::open_alone() {
-            Ok(c) => (c, "alone \u{2014} what you do is kept on this device until you connect".to_string()),
+            Ok(c) => (c, String::new()),
             Err(e) => (
                 App::alone_in_memory(),
                 format!("the saved library would not open ({e}) \u{2014} working in memory"),
@@ -1214,6 +1244,7 @@ impl App {
         self.router.replace_next();
         self.peer.open_page();
         self.cursors[Pane::Tracks as usize] = 0;
+        self.scroll_due = Some(0.0);
     }
 
     /// The Songs page narrowed to a search, or widened back: the cursor goes
@@ -2294,6 +2325,18 @@ impl App {
                 // Always: landing on row seventeen of a record you just opened
                 // is a cursor that remembers the wrong list.
                 self.cursors[Pane::Tracks as usize] = 0;
+                // A new visit opens at the top; back and forward where it was.
+                let back_to = match std::mem::take(&mut self.travelling) {
+                    true => self.scrolls.get(&self.peer.source.place()).copied(),
+                    false => None,
+                };
+                self.scroll_due = Some(back_to.unwrap_or(0.0));
+            }
+            Message::PageScrolled(y) => {
+                self.scrolls.insert(self.peer.source.place(), y);
+            }
+            Message::ScrollPage(y) => {
+                return iced::widget::operation::scroll_to(TRACKS, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y });
             }
             // A submenu opens by being pointed at, after a beat: arkui counts
             // the rest and answers the entry's message, and the picker it opens
@@ -2369,8 +2412,14 @@ impl App {
         if let Some(place) = self.router.poll(ready) {
             let wanted = self.peer.source_of(&place);
             if wanted != self.peer.source {
+                self.travelling = true;
                 tasks.push(self.update(Message::Select(wanted)));
             }
+        }
+        // A page just opened is drawn before this message comes back, so the
+        // scroll lands on its list rather than the one it replaced.
+        if let Some(y) = self.scroll_due.take() {
+            tasks.push(Task::done(Message::ScrollPage(y)));
         }
         #[cfg(target_arch = "wasm32")]
         {

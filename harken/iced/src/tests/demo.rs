@@ -2,13 +2,13 @@
 //! it. A silent fallback is the hardest kind of broken to see — a grid of
 //! derived squares is the same picture whether covers work or never once
 //! ran — so these are tests rather than readings.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use arkui::images::Images;
 
 use crate::peer::Peer;
 use crate::places::{Place, Source};
-use crate::{credit, media_url, seed};
+use crate::{licences, media_url, seed};
 
 /// A seeded demo replica, from nothing.
 fn fresh() -> Peer {
@@ -235,24 +235,37 @@ fn nobody_is_named_after_a_licence() {
     assert!(wrong.is_empty(), "{wrong:?}");
 }
 
-/// …and the licence is still on screen beside whoever gave it: a credit
-/// nobody draws is a condition nobody met. Falsified by dropping the licence
-/// from `credit`: the drawn string has no "CC BY", nor any licence.
+/// …and the licence is still on screen, once, at the foot of the record:
+/// a credit nobody draws is a condition nobody met. Every licensed track's
+/// terms are in its album's foot, beside whoever gave them where the album
+/// has more than one; a record that reserves nothing has no terms. Falsified
+/// by dropping the licence from `licences`.
 #[test]
 fn the_terms_are_still_drawn_beside_whoever_gave_them() {
     let details = fresh().track_details();
-    let licensed: Vec<_> = details.iter().filter(|d| !d.licence.is_empty()).collect();
-    assert!(licensed.len() > 5, "{}", licensed.len());
-    let cc = licensed.iter().find(|d| d.licence.contains("CC BY")).expect("a CC BY recording");
-    assert!(credit(&cc.performer, &cc.licence).contains("CC BY"));
-    for d in &licensed {
-        assert!(credit(&d.performer, &d.licence).contains(&d.licence), "{}", d.licence);
+    assert!(details.iter().filter(|d| !d.licence.is_empty()).count() > 5);
+    let mut albums: BTreeMap<&str, Vec<crate::rows::TrackDetail>> = BTreeMap::new();
+    for d in &details {
+        albums.entry(&d.album).or_default().push(d.clone());
     }
-    let free = details
-        .iter()
-        .find(|d| d.licence.is_empty() && !d.performer.is_empty())
-        .expect("most of it reserves nothing");
-    assert_eq!(credit(&free.performer, &free.licence), free.performer);
+    let mut several = false;
+    for (album, on_it) in &albums {
+        let foot = licences(on_it);
+        let terms: BTreeSet<&str> = on_it.iter().map(|d| d.licence.as_str()).filter(|l| !l.is_empty()).collect();
+        assert_eq!(foot.len(), terms.len(), "{album}: {foot:?}");
+        for d in on_it.iter().filter(|d| !d.licence.is_empty()) {
+            let line = foot
+                .iter()
+                .find(|f| f.starts_with(&d.licence))
+                .unwrap_or_else(|| panic!("{album}: {}", d.licence));
+            if terms.len() > 1 && !d.performer.is_empty() {
+                several = true;
+                assert!(line.contains(&d.performer), "{album}: {line}");
+            }
+        }
+    }
+    assert!(several, "an album of several terms says whose each is");
+    assert!(albums.values().any(|on_it| licences(on_it).is_empty()), "most of it reserves nothing");
 }
 
 /// One lumped string becomes two people with two roles, in billing order,

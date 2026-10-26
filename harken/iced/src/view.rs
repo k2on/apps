@@ -18,7 +18,7 @@ use crate::nav::{Layout, Mark};
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
 use crate::{
-    credit, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, QUEUE_ROWS, QUEUE_WIDTH, SHELF, SIDEBAR, SIDEBAR_WIDTH,
+    licences, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, QUEUE_ROWS, QUEUE_WIDTH, SHELF, SIDEBAR, SIDEBAR_WIDTH,
     TRACKS,
 };
 
@@ -91,25 +91,33 @@ fn volume_slider<'a>(level: Level, at: f32) -> Element<'a, Message> {
 impl App {
     pub fn view(&self) -> Element<'_, Message> {
         // The top bar on the page's own padding, clear of the account's
-        // anchors (`ACCOUNT_BOTTOM`, `account_right`); the page under it
-        // edge to edge, so a banner reaches both sides of it.
+        // anchors (`ACCOUNT_BOTTOM`, `account_right`). It floats over the
+        // page, which starts at the window's top: a banner runs up under the
+        // account's picture and edge to edge. Alone, the bar has a server's
+        // address to type, and takes its own room above the page instead.
         let top = container(self.view_top()).padding(Padding {
             top: PAGE_PADDING,
             right: PAGE_PADDING,
             bottom: 0.0,
             left: GUTTER,
         });
+        let paged: Element<'_, Message> = match !cfg!(feature = "demo") && self.peer.client.is_alone() {
+            true => column![top, self.view_page()].spacing(10).into(),
+            false => stack![self.view_page(), top].into(),
+        };
         let base = container(column![
             // The sidebar and the page share the height left once the bar
-            // has taken its own, so the bar stays at the bottom. No rule
-            // between any of them: the sidebar and the bar are a surface,
-            // a step off the page's ground, and that is the edge.
+            // has taken its own, so the bar stays at the bottom. The sidebar
+            // and the bar are a surface, a step off the page's ground, and a
+            // hairline (`style::edge`) on the side each meets the page.
             row![
                 self.view_sidebar(),
+                rule::vertical(1).style(style::edge),
                 // A swipe's arrow over the page, not the sidebar.
-                arkui::swipe::view(column![top, self.view_page()].spacing(10).into(), &self.swipe, iced::time::Instant::now(),)
+                arkui::swipe::view(paged, &self.swipe, iced::time::Instant::now(),)
             ]
             .height(Length::Fill),
+            rule::horizontal(1).style(style::edge),
             self.view_bar(),
         ])
         .width(Length::Fill)
@@ -229,7 +237,9 @@ impl App {
             );
         }
         container(scrollable(side).id(SIDEBAR).style(style::bars))
-            .width(Length::Fixed(SIDEBAR_WIDTH))
+            // Its edge, a pixel, is part of its width, so the page is as wide as
+            // `pane_width` says.
+            .width(Length::Fixed(SIDEBAR_WIDTH - 1.0))
             .height(Length::Fill)
             .style(style::surface)
             .into()
@@ -262,7 +272,9 @@ impl App {
     /// across, the same division the keyboard walks.
     fn view_cards(&self, cards: Vec<cards::Card<Message>>, empty: &'static str) -> Element<'_, Message> {
         let cursor = self.has_keys(Pane::Tracks).then_some(self.at(Pane::Tracks));
-        cards::view(SHELF, &cards, self.pane_width(), cursor, empty, Message::HoverAt, TRACKS)
+        cards::view(SHELF, &cards, self.pane_width(), cursor, empty, Message::HoverAt, TRACKS, |v| {
+            Message::PageScrolled(v.absolute_offset().y)
+        })
     }
 
     /// The header every page that is *about* something opens with.
@@ -405,8 +417,10 @@ impl App {
     /// under its last line, so a shelf is never cut off at the foot; and, on
     /// a page of tracks, the status line under it all.
     fn scrolled<'a>(&'a self, top: Option<Element<'a, Message>>, body: iced::widget::Column<'a, Message>, status: bool) -> Element<'a, Message> {
+        // With no top of its own, the page starts on the window's padding,
+        // level with the account's picture floating over it.
         let body = container(body.width(Length::Fill)).padding(Padding {
-            top: 0.0,
+            top: if top.is_some() { 0.0 } else { PAGE_PADDING },
             right: GUTTER + SCROLLBAR,
             bottom: GUTTER * 2.0,
             left: GUTTER,
@@ -415,7 +429,11 @@ impl App {
             Some(top) => column![top, body],
             None => column![body],
         };
-        let page = scrollable(page.width(Length::Fill)).id(TRACKS).style(style::bars).height(Length::Fill);
+        let page = scrollable(page.width(Length::Fill))
+            .id(TRACKS)
+            .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+            .style(style::bars)
+            .height(Length::Fill);
         match status {
             true => column![page, container(self.view_status()).padding([0.0, GUTTER])]
                 .spacing(10)
@@ -635,11 +653,7 @@ impl App {
                         color: Some(style::on_row(t, false, false, true).scale_alpha(0.8)),
                     },
                 };
-                let mut names = self.names(l, &under, |k| Mark::Performer(at, k), 11.0, tone);
-                if !d.licence.is_empty() && !d.performer.is_empty() {
-                    names = names.push(text(format!(" ({})", d.licence)).size(11).style(tone));
-                }
-                body = body.push(names);
+                body = body.push(self.names(l, &under, |k| Mark::Performer(at, k), 11.0, tone));
             }
             let line = line
                 .push(container(body).width(Length::Fill).padding([3, 0]))
@@ -687,7 +701,9 @@ impl App {
         list
     }
 
-    /// A record's small print: when, how much, and whose label.
+    /// A record's small print: when, how much, on what terms, and whose
+    /// label. The terms are the record's, said once here rather than on
+    /// every track: a credit nobody draws is a condition nobody met.
     fn view_foot(&self, year: i64, label: &str) -> Element<'_, Message> {
         let rows = self.peer.rows();
         let n = rows.len() as i64;
@@ -701,6 +717,10 @@ impl App {
             length.push_str(&format!(", {}", spell(ms)));
         }
         foot = foot.push(text(length).size(12).style(style::faint(0.5)));
+        let details: Vec<_> = rows.iter().map(|i| self.peer.detail_of(i.id)).collect();
+        for terms in licences(&details) {
+            foot = foot.push(text(terms).size(12).style(style::faint(0.5)));
+        }
         if !label.is_empty() {
             foot = foot.push(
                 column![
@@ -1029,9 +1049,6 @@ impl App {
             if r.duration_ms > 0 {
                 f.push(spell(r.duration_ms));
             }
-            if !r.licence.is_empty() {
-                f.push(r.licence.clone());
-            }
             f.join("  \u{b7}  ")
         };
         let open = |r: &crate::rows::Recording| Message::Select(Source::Recording(r.id.clone(), r.performers.clone()));
@@ -1171,10 +1188,8 @@ impl App {
                 // their middle, which is where they are alike.
                 .push(table::cell_cut(item.creator.clone(), ARTIST, Cut::End, on_cursor, false, true))
                 .push(table::cell_cut(
-                    // …and the terms it was given on, beside whoever gave it:
-                    // a credit nobody draws is a condition nobody met.
                     match album_page {
-                        true => credit(&detail.performer, &detail.licence),
+                        true => detail.performer.clone(),
                         false => detail.album.clone(),
                     },
                     ALBUM,
@@ -1264,7 +1279,13 @@ impl App {
         }
         main.push(head)
             .push(rule::horizontal(1))
-            .push(scrollable(rows).id(TRACKS).style(style::bars).height(Length::Fill))
+            .push(
+                scrollable(rows)
+                    .id(TRACKS)
+                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                    .style(style::bars)
+                    .height(Length::Fill),
+            )
             .push(self.view_status())
             .into()
     }
@@ -1898,10 +1919,17 @@ fn work_heading<'a>(composer: Element<'a, Message>, work: Element<'a, Message>, 
         .into()
 }
 
-/// A page on the gutter either side — one that is not a [`App::scrolled`]
-/// page or a shelf, which keep their own.
+/// A page on the gutter either side and the window's padding above — one
+/// that is not a [`App::scrolled`] page or a shelf, which keep their own.
 fn padded(page: Element<'_, Message>) -> Element<'_, Message> {
-    container(page).padding([0.0, GUTTER]).into()
+    container(page)
+        .padding(Padding {
+            top: PAGE_PADDING,
+            right: GUTTER,
+            bottom: 0.0,
+            left: GUTTER,
+        })
+        .into()
 }
 
 /// The bar's ground: a surface, [`BAR_HEIGHT`] tall because the device

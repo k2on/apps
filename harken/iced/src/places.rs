@@ -128,7 +128,7 @@ impl Source {
 /// id is not something a person types, so the URL says the name and the app
 /// resolves it against the playlists it has — which also decides what a stale
 /// link does: a playlist since renamed lands on the library, which is a page.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Place {
     Library,
     /// The index pages: they carry no name because they *are* the whole list.

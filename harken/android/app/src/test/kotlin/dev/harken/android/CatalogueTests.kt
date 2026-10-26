@@ -7,6 +7,7 @@
 // its most complete performance in the order the work goes.
 package dev.harken.android
 
+import dev.arkdb.ffi.Id
 import dev.harken.android.gen.AddSong
 import dev.harken.android.gen.CreditsEntry
 import dev.harken.android.gen.RecordingsEntry
@@ -84,12 +85,12 @@ class CatalogueTests {
         assertEquals("", Catalogue.span(0, 0))
     }
 
-    /** A performance's line: year, tracks, length, licence — each only when known; and nobody named is said. */
+    /** A performance's line: year, tracks, length — each only when known, the terms left to the foot; and nobody named is said. */
     @Test
     fun aPerformanceSaysWhenHowMuchAndHowLong() {
         assertEquals("2016 · 3 tracks · 22 min", Catalogue.takeFacts(take("Kimiko Ishizaka", 2016, 3, 22 * 60_000)))
         assertEquals("1 track", Catalogue.takeFacts(take("X", tracks = 1)))
-        assertEquals("4 tracks · CC BY 3.0", Catalogue.takeFacts(take("X", tracks = 4, licence = "CC BY 3.0")))
+        assertEquals("4 tracks", Catalogue.takeFacts(take("X", tracks = 4, licence = "CC BY 3.0")))
         assertEquals("Performer not named", Catalogue.who(take("")))
         assertEquals("Most Complete", Catalogue.featuredLabel(2))
         assertEquals("The Recording", Catalogue.featuredLabel(1))
@@ -97,6 +98,18 @@ class CatalogueTests {
         assertNull(Catalogue.workOf("water-music/air"))
         assertEquals("Goldberg, BWV 988", Catalogue.recordingTitle(work("Goldberg", 1, 1, "BWV 988"), "who"))
         assertEquals("who", Catalogue.recordingTitle(null, "who"))
+    }
+
+    /** A page's terms, for its foot: the licence alone, or each beside whoever gave it; none where nothing is reserved. */
+    @Test
+    fun theTermsAreSaidOnceAtTheFoot() {
+        fun d(n: Int, performer: String, licence: String) = TrackDetail(Id("%032x".format(n)), "Brandenburg Concertos", "", n.toLong(), performer, licence)
+        val busch = d(1, "Busch Chamber Players", "CC BY 3.0")
+        val advent = d(2, "Advent Chamber Orchestra", "CC BY-SA 3.0")
+        val free = d(3, "Kevin MacLeod", "")
+        assertEquals(listOf("CC BY 3.0"), Catalogue.licences(listOf(busch, busch, free)))
+        assertEquals(listOf("CC BY 3.0 (Busch Chamber Players)", "CC BY-SA 3.0 (Advent Chamber Orchestra)"), Catalogue.licences(listOf(busch, advent, free)))
+        assertEquals(emptyList<String>(), Catalogue.licences(listOf(free, null)))
     }
 
     /** The composer first, then the credits in billing order, each once with every role they had. */

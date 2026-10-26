@@ -74,9 +74,9 @@ object Catalogue {
     /** Who played a performance — or, where nobody is credited, that nobody is: never a guess. */
     fun who(r: RecordingsEntry): String = r.performers.ifEmpty { "Performer not named" }
 
-    /** A performance's line: when, how much, how long, under what licence — `2016 · 4 tracks · 22 min`. */
+    /** A performance's line: when, how much, how long — `2016 · 4 tracks · 22 min`. */
     fun takeFacts(r: RecordingsEntry): String =
-        facts(if (r.recorded > 0) r.recorded.toString() else null, Media.count(r.tracks.toInt(), "track"), if (r.durationMs > 0) Media.spell(r.durationMs) else null, r.licence)
+        facts(if (r.recorded > 0) r.recorded.toString() else null, Media.count(r.tracks.toInt(), "track"), if (r.durationMs > 0) Media.spell(r.durationMs) else null)
 
     /** What a work's page sets its first performance apart as: the fullest of several, or the only one. */
     fun featuredLabel(recordings: Int): String = if (recordings > 1) "Most Complete" else "The Recording"
@@ -92,13 +92,20 @@ object Catalogue {
             else -> "${w.title}, ${w.catalogue}"
         }
 
-    /** Who played a track, with its licence when it has one: `Busch Chamber Players (CC BY 3.0)`. */
-    fun credit(performer: String, licence: String): String =
-        when {
-            licence.isEmpty() -> performer
-            performer.isEmpty() -> "($licence)"
-            else -> "$performer ($licence)"
+    /**
+     * The terms a page of tracks was given on, a line each, for its foot (the desktop's `licences`):
+     * the licence alone when there is one, and each beside whoever gave it when there are several —
+     * `CC BY 3.0 (Busch Chamber Players)`. A page that reserves nothing has none.
+     */
+    fun licences(details: List<TrackDetail?>): List<String> {
+        val terms = LinkedHashMap<String, MutableList<String>>()
+        for (d in details) {
+            if (d == null || d.licence.isEmpty()) continue
+            val who = terms.getOrPut(d.licence) { ArrayList() }
+            if (d.performer.isNotEmpty() && d.performer !in who) who.add(d.performer)
         }
+        return terms.map { (licence, who) -> if (terms.size == 1 || who.isEmpty()) licence else "$licence (${who.joinToString(", ")})" }
+    }
 
     /** Everybody on a recording: the composer, then the credits in billing order, each once with every role they had. */
     fun people(composer: String, credits: List<CreditsEntry>): List<Pair<String, String>> {

@@ -103,7 +103,7 @@ private fun LazyListScope.underWorks(
 // Under a track: who played it — or, on a record of several people's songs, whose this one is.
 private fun songUnder(t: Track, d: TrackDetail?, creator: String): String =
     when {
-        !d?.performer.isNullOrEmpty() -> Catalogue.credit(d!!.performer, d.licence)
+        !d?.performer.isNullOrEmpty() -> d!!.performer
         t.creator != creator -> t.creator
         else -> ""
     }
@@ -137,7 +137,7 @@ fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id,
             )
         }
         underWorks(tracks, details, creator, playing, page, act)
-        item { Foot(tracks, album?.released ?: 0, album?.label ?: "") }
+        item { Foot(tracks, album?.released ?: 0, album?.label ?: "", Catalogue.licences(tracks.map { details[it.id] })) }
         item { Spacer(Modifier.height(Space.xl)) }
     }
 }
@@ -368,7 +368,7 @@ fun RecordingPage(
                 art = false,
             ) { TrackNumber(0, t.id.hex == playing) }
         }
-        item { Foot(tracks, year, take?.label ?: "") }
+        item { Foot(tracks, year, take?.label ?: "", Catalogue.licences(tracks.map { details[it.id] })) }
         if (on.isNotEmpty()) {
             item { SectionHeading(if (on.size == 1) "From the Album" else "From the Albums") }
             items(on, key = { "album:" + it.name }) { a ->

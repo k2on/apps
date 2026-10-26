@@ -11,7 +11,7 @@
 //! specified down to the width of what it walks, and the gradients are the
 //! app's ([`crate::theme::Palette`]'s `light_art` and `dark_art`), generated
 //! for every client from one description.
-use iced::widget::{image, svg};
+use iced::widget::{container, image, stack, svg, Space};
 use iced::{Color, ContentFit, Element, Length, Theme};
 
 use crate::theme::{self, Palette};
@@ -77,7 +77,7 @@ pub fn square<'a, M: 'a>(seed: &str, size: f32, corner: f32) -> Element<'a, M> {
 /// rather than letterboxed — a photograph of a person is not square, and a
 /// grid with grey bars down the sides of half its cards looks broken.
 pub fn picture<'a, M: 'a>(seed: &str, handle: Option<&image::Handle>, side: f32, corner: f32) -> Element<'a, M> {
-    match handle {
+    let drawn: Element<'a, M> = match handle {
         Some(handle) => image(handle.clone())
             .width(Length::Fixed(side))
             .height(Length::Fixed(side))
@@ -85,7 +85,13 @@ pub fn picture<'a, M: 'a>(seed: &str, handle: Option<&image::Handle>, side: f32,
             .border_radius(corner)
             .into(),
         None => square(seed, side, corner),
-    }
+    };
+    // A hairline over its edge (`style::outline`), the same round.
+    let edge = container(Space::new())
+        .width(Length::Fixed(side))
+        .height(Length::Fixed(side))
+        .style(crate::style::outline(corner));
+    stack![drawn, edge].into()
 }
 
 /// The SVG source for a square of one corner radius, in a 100-unit box the

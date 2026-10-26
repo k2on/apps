@@ -74,7 +74,7 @@ final class CatalogueTests: XCTestCase {
 
     func testAPerformanceSaysWhenHowMuchAndHowLong() {
         XCTAssertEqual(Catalogue.facts(take(1992, tracks: 3, ms: 40 * 60_000)), "1992 · 3 tracks · 40 min")
-        XCTAssertEqual(Catalogue.facts(take(0, tracks: 1, ms: 0, licence: "CC BY 4.0")), "1 track · CC BY 4.0")
+        XCTAssertEqual(Catalogue.facts(take(0, tracks: 1, ms: 0, licence: "CC BY 4.0")), "1 track", "the terms are the foot's")
         XCTAssertEqual(Catalogue.who(take(0, tracks: 1, ms: 0, performers: "")), "Performer not named")
         XCTAssertEqual(Catalogue.workKey("bach/bwv-988@kimiko-ishizaka"), "bach/bwv-988")
         XCTAssertNil(Catalogue.workKey("bach/bwv-988"))
@@ -103,7 +103,21 @@ final class CatalogueTests: XCTestCase {
         XCTAssertEqual(Catalogue.under(t, d, creator: "Bach"), "Handel")
         d.performer = "English Baroque Soloists"
         d.licence = "CC BY 4.0"
-        XCTAssertEqual(Catalogue.under(t, d, creator: "Handel"), "English Baroque Soloists (CC BY 4.0)")
+        XCTAssertEqual(Catalogue.under(t, d, creator: "Handel"), "English Baroque Soloists", "the terms are the foot's")
+    }
+
+    /// A page's terms, for its foot: the licence alone, or each beside whoever gave it.
+    func testTheTermsAreSaidOnceAtTheFoot() {
+        var a = detail(1, work: "Suite No. 1")
+        a.performer = "Busch Chamber Players"
+        a.licence = "CC BY 3.0"
+        var b = detail(2, work: "Suite No. 1")
+        b.performer = "Advent Chamber Orchestra"
+        b.licence = "CC BY-SA 3.0"
+        let free = detail(3, work: "Suite No. 2")
+        XCTAssertEqual(Catalogue.licences([a, a, free]), ["CC BY 3.0"])
+        XCTAssertEqual(Catalogue.licences([a, b, free]), ["CC BY 3.0 (Busch Chamber Players)", "CC BY-SA 3.0 (Advent Chamber Orchestra)"])
+        XCTAssertEqual(Catalogue.licences([free, nil]), [])
     }
 
     /// The composer first, then the credits in billing order, each once.

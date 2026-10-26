@@ -213,6 +213,41 @@ pub fn surface(theme: &Theme) -> container::Style {
     }
 }
 
+/// How far toward the text an [`edge`] or an [`outline`] is drawn: enough to
+/// see where one thing stops, not so much that it is one more thing to read.
+pub const EDGE_STEP: f32 = 0.12;
+
+/// The line where a [`surface`] meets the page — the sidebar's right, the
+/// play bar's top — so each reads as a pane of its own and not only a
+/// change of ground.
+pub fn edge(theme: &Theme) -> rule::Style {
+    rule::Style {
+        color: edge_color(theme),
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    }
+}
+
+/// The colour of an [`edge`] and an [`outline`].
+pub fn edge_color(theme: &Theme) -> Color {
+    let palette = of(theme);
+    mix(palette.background.base.color, palette.background.base.text, EDGE_STEP)
+}
+
+/// A picture's hairline, `corner` round to match it: a pale cover on a pale
+/// page, or a dark one on a dark page, still has an edge.
+pub fn outline(corner: f32) -> impl Fn(&Theme) -> container::Style {
+    move |theme| container::Style {
+        border: Border {
+            color: Color { a: 0.6, ..edge_color(theme) },
+            width: 1.0,
+            radius: corner.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 /// The colour a [`surface`] is painted: opaque, so what is laid over it — a
 /// row's wash, a lit entry — composes the same as it does on the page.
 pub fn surface_color(theme: &Theme) -> Color {
