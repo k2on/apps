@@ -8,8 +8,17 @@
 import SwiftUI
 
 enum LibraryTab: String, CaseIterable, Identifiable {
-    case playlists = "Playlists", albums = "Albums", artists = "Artists", songs = "Songs"
+    case playlists = "Playlists", albums = "Albums", artists = "Artists", songs = "Songs", podcasts = "Podcasts", sermons = "Sermons"
     var id: String { rawValue }
+
+    /// The show kind the tab lists, for Podcasts and Sermons.
+    var kind: String? {
+        switch self {
+        case .podcasts: return "podcast"
+        case .sermons: return "sermon"
+        default: return nil
+        }
+    }
 }
 
 struct LibraryView: View {
@@ -29,6 +38,7 @@ struct LibraryView: View {
                 // Before the artists arrive, nothing — not "no artists": they are milliseconds away.
                 case .artists: if s.complete { ArtistsList() } else { Color.clear }
                 case .songs: SongsList()
+                case .podcasts, .sermons: if s.complete { ShowsGrid(kind: tab.kind ?? "") } else { Color.clear }
                 }
             }
         }
@@ -36,7 +46,8 @@ struct LibraryView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 SwiftUI.Picker("Show", selection: $tab) {
-                    ForEach(LibraryTab.allCases) { Text($0.rawValue).tag($0) }
+                    // Podcasts and Sermons only where there is a show of the kind, unless it is the list shown.
+                    ForEach(LibraryTab.allCases.filter { t in t == tab || t.kind.map { !model.shows(of: $0).isEmpty } ?? true }) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, Space.page)
@@ -114,6 +125,41 @@ private struct AlbumsGrid: View {
                                     .padding(.bottom, Space.s - 2)
                                 Text(a.name).font(.subheadline.weight(.semibold)).lineLimit(1)
                                 Text(a.playedBy).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(Space.page)
+            }
+        }
+    }
+}
+
+private struct ShowsGrid: View {
+    let kind: String
+    @EnvironmentObject private var model: Model
+    @Environment(\.open) private var open
+    @Environment(\.zoom) private var zoom
+
+    var body: some View {
+        let shows = model.shows(of: kind)
+        if shows.isEmpty {
+            ContentUnavailableView(kind == "sermon" ? "No sermons yet" : "No podcasts yet", systemImage: "mic",
+                                   description: Text("A show appears here when the server follows its feed, or finds a folder of it under \(kind)s/."))
+        } else {
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Space.l)], spacing: Space.xl) {
+                    ForEach(shows) { s in
+                        let r = Route.page(.show(s.id))
+                        Button { open(r) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                CoverView(seed: s.title, url: RowCover.url(model, s.art), side: 180)
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .zoomSource(r, zoom)
+                                    .padding(.bottom, Space.s - 2)
+                                Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                                Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
                         .buttonStyle(.plain)

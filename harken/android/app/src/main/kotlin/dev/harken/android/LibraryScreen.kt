@@ -59,6 +59,8 @@ enum class LibraryTab(val title: String) {
     Artists("Artists"),
     Composers("Composers"),
     Songs("Songs"),
+    Podcasts("Podcasts"),
+    Sermons("Sermons"),
 }
 
 /** What the Library draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
@@ -74,6 +76,8 @@ data class LibraryData(
     val complete: Boolean = true,
     /** Everyone some work is by: none in a library of pop, which has no Composers then. */
     val composers: List<Composer> = emptyList(),
+    /** Every podcast and series of sermons: none, and there is no Podcasts or Sermons. */
+    val shows: List<Show> = emptyList(),
 )
 
 @Composable
@@ -85,8 +89,9 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             Modifier.fillMaxWidth().horizontalScroll(rememberDestinationScrollState("chips")).padding(horizontal = Space.page),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            // A library of pop has no works, so no Composers — unless it is the list already shown.
-            for (t in LibraryTab.entries.filter { it != LibraryTab.Composers || data.composers.isNotEmpty() || it == tab }) {
+            // A library of pop has no works, so no Composers, and one with no shows no Podcasts or
+            // Sermons — unless it is the list already shown.
+            for (t in LibraryTab.entries.filter { it == tab || offers(it, data) }) {
                 FilterChip(
                     selected = t == tab,
                     onClick = { onTab(t) },
@@ -109,7 +114,47 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             LibraryTab.Artists -> if (data.complete) Artists(data.artists, act)
             LibraryTab.Composers -> if (data.complete) Composers(data.composers, act)
             LibraryTab.Songs -> Songs(data.tracks, albumOf, playing, act)
+            LibraryTab.Podcasts -> if (data.complete) ShowsGrid(data.shows.filter { it.kind == "podcast" }, "podcast", act)
+            LibraryTab.Sermons -> if (data.complete) ShowsGrid(data.shows.filter { it.kind == "sermon" }, "sermon", act)
         }
+    }
+}
+
+/** Whether the Library offers `tab` over `data`: a list only where there is something on it. */
+fun offers(tab: LibraryTab, data: LibraryData): Boolean =
+    when (tab) {
+        LibraryTab.Composers -> data.composers.isNotEmpty()
+        LibraryTab.Podcasts -> data.shows.any { it.kind == "podcast" }
+        LibraryTab.Sermons -> data.shows.any { it.kind == "sermon" }
+        else -> true
+    }
+
+@Composable
+private fun ShowsGrid(shows: List<Show>, kind: String, act: Do) {
+    if (shows.isEmpty()) {
+        Empty(Glyphs.Show, if (kind == "sermon") "No sermons yet" else "No podcasts yet", "A show appears here when the server follows its feed, or finds a folder of it under $kind" + "s/.")
+        return
+    }
+    val grid = rememberDestinationGridState("shows:$kind")
+    ScrollsToTop(grid)
+    LazyVerticalGrid(
+        state = grid,
+        columns = GridCells.Adaptive(150.dp),
+        contentPadding = PaddingValues(Space.page),
+        horizontalArrangement = Arrangement.spacedBy(Space.l),
+        verticalArrangement = Arrangement.spacedBy(Space.xl),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        items(shows, key = { it.id }) { s ->
+            val hero = rememberHero(Space.corner)
+            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForShow(s.id)) })) {
+                Cover(s.title, s.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
+                Spacer(Modifier.height(Space.s))
+                Text(s.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(s.author.ifEmpty { Media.count(s.episodes.toInt(), "episode") }, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(Space.s)) }
     }
 }
 

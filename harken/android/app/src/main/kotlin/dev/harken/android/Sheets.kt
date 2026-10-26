@@ -59,9 +59,12 @@ interface MenuActions {
     fun remove() {}
 }
 
-/** A song's menu. `from` is the page its row was on: a playlist offers to take it off. */
+/**
+ * A song's menu. `from` is the page its row was on: a playlist offers to take it off. An episode
+ * goes to its `show` rather than to an artist.
+ */
 @Composable
-fun TrackMenu(track: Track, album: Album?, from: Page?, actions: MenuActions) {
+fun TrackMenu(track: Track, album: Album?, from: Page?, actions: MenuActions, show: Show? = null) {
     Column(Modifier.fillMaxWidth().padding(bottom = Space.l)) {
         Row(Modifier.padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
             Cover(album?.name ?: track.title, album?.art ?: "", 48.dp, Modifier.size(48.dp), corner = 4.dp)
@@ -76,7 +79,8 @@ fun TrackMenu(track: Track, album: Album?, from: Page?, actions: MenuActions) {
         SheetRow(Glyphs.Queue, "Add to queue", actions::addToQueue)
         SheetRow(Glyphs.AddTo, "Add to playlist", actions::addTo, trailing = { Icon(Glyphs.Chevron, null, Modifier.size(18.dp)) })
         if (album != null && from != Page.ForAlbum(album.name)) SheetRow(Glyphs.Album, "Go to album", { actions.goTo(Page.ForAlbum(album.name)) })
-        if (track.creator.isNotEmpty() && from != Page.ForArtist(track.creator))
+        if (show != null && from != Page.ForShow(show.id)) SheetRow(Glyphs.Show, "Go to show", { actions.goTo(Page.ForShow(show.id)) })
+        if (track.kind == "song" && track.creator.isNotEmpty() && from != Page.ForArtist(track.creator))
             SheetRow(Glyphs.Artist, "Go to artist", { actions.goTo(Page.ForArtist(track.creator)) })
         if (from is Page.ForPlaylist) SheetRow(Glyphs.Remove, "Remove from this playlist", actions::remove)
     }

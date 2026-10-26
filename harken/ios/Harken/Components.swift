@@ -121,7 +121,11 @@ struct TrackActions: View {
         if let a = model.album(of: track), from != .album(a.name) {
             Button { open(.page(.album(a.name))) } label: { Label("Go to Album", systemImage: "square.stack") }
         }
-        if !track.creator.isEmpty, from != .artist(track.creator) {
+        // An episode goes to its show, whose title is its creator, and to nobody's page.
+        if let s = model.show(of: track), from != .show(s.id) {
+            Button { open(.page(.show(s.id))) } label: { Label("Go to Show", systemImage: "mic") }
+        }
+        if track.kind == "song", !track.creator.isEmpty, from != .artist(track.creator) {
             Button { open(.page(.artist(track.creator))) } label: { Label("Go to Artist", systemImage: "music.microphone") }
         }
         if let c = model.detail(track)?.composer, !c.isEmpty, c != track.creator, from != .artist(c) {

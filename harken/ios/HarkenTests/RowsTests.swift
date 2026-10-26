@@ -49,6 +49,9 @@ final class RowsTests: XCTestCase {
         XCTAssertEqual(Page.work("johann-sebastian-bach/bwv-988").place([]), "#work/johann-sebastian-bach%2Fbwv-988")
         XCTAssertEqual(Page.of(place: Page.recording("bach/bwv-988@kimiko").place([]), playlists: []), .recording("bach/bwv-988@kimiko"))
         XCTAssertEqual(Page.of(place: "#composer/Antonio%20Vivaldi", playlists: []), .artist("Antonio Vivaldi"), "a composer's page is their artist page")
+        // A show's place is its key, as a work's is.
+        XCTAssertEqual(Page.show("podcast/full-time-nix").place([]), "#show/podcast%2Ffull-time-nix")
+        XCTAssertEqual(Page.of(place: "#show/podcast%2Ffull-time-nix", playlists: []), .show("podcast/full-time-nix"))
     }
 
     /// A page reads its tracks, the catalogue's views beside them, or both,

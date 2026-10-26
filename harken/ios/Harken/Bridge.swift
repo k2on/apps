@@ -45,6 +45,8 @@ struct Snapshot {
     var artists = [ArtistsEntry]()
     /// Everyone some work here is by.
     var composers = [ComposersEntry]()
+    /// Every podcast and series of sermons, by title.
+    var shows = [ShowsEntry]()
     var details = [Id: TrackDetailsEntry]()
     /// The newest play in the log, this person's.
     var lastPlayed: Play? = nil
@@ -168,6 +170,7 @@ final class Bridge {
     private let albums = Held<AlbumsEntry> { try $0.albums() }
     private let artists = Held<ArtistsEntry> { try $0.artists() }
     private let composers = Held<ComposersEntry> { try $0.composers() }
+    private let shows = Held<ShowsEntry> { try $0.shows() }
     private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
     private let played = Held<Play> { try $0.lastPlayed() }
     private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
@@ -241,10 +244,12 @@ final class Bridge {
             guard let h = self.harken else { return }
             self.artists.hydrate(h)
             self.composers.hydrate(h)
+            self.shows.hydrate(h)
             self.details.hydrate(h)
             self.played.hydrate(h)
             self.snap.artists = self.artists.rows
             self.snap.composers = self.composers.rows
+            self.snap.shows = self.shows.rows
             self.snap.details = Bridge.byMedia(self.details.rows)
             self.snap.lastPlayed = self.played.rows.first
             self.snap.complete = true
@@ -293,6 +298,7 @@ final class Bridge {
         if albums.update() { snap.albums = albums.rows }
         if artists.update() { snap.artists = artists.rows }
         if composers.update() { snap.composers = composers.rows }
+        if shows.update() { snap.shows = shows.rows }
         if details.update() { snap.details = Bridge.byMedia(details.rows) }
         if played.update() { snap.lastPlayed = played.rows.first }
         for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }

@@ -129,6 +129,7 @@ struct Destination: View {
         case .page(.playlist(let id)): PlaylistPage(model: model, id: id)
         case .page(.work(let id)): WorkPage(model: model, id: id)
         case .page(.recording(let id)): RecordingPage(model: model, id: id)
+        case .page(.show(let id)): ShowPage(model: model, id: id)
         case .page(.songs): SongsList().navigationTitle("Songs")
         case .settings: SettingsView()
         case .diagnostics: DiagnosticsView()

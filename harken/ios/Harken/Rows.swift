@@ -55,6 +55,17 @@ extension ComposersEntry: Identifiable {
 
 extension WorkSummary: Identifiable {}
 
+extension ShowsEntry: Identifiable, Hashable {
+    public func hash(into h: inout Hasher) { h.combine(id) }
+
+    /// The show an episode is of: the one of its kind its creator names;
+    /// none for a song.
+    static func of(_ track: LibraryEntry, in shows: [ShowsEntry]) -> ShowsEntry? {
+        guard track.kind != "song" else { return nil }
+        return shows.first { $0.kind == track.kind && $0.title == track.creator }
+    }
+}
+
 extension RecordingsEntry: Identifiable {}
 
 extension Play {
@@ -101,6 +112,9 @@ enum Phone {
     /// One performance's tracks, in the order the work goes.
     static func recording(_ h: Harken, _ id: String) throws -> LiveView<LibraryEntry> { try h.recording(RecordingInput(playlistId: noPlaylist, id: id)) }
 
+    /// One show's episodes, newest first.
+    static func show(_ h: Harken, _ id: String) throws -> LiveView<LibraryEntry> { try h.show(ShowInput(playlistId: noPlaylist, id: id)) }
+
     /// A page's view; none for every song, which is the library's own, and
     /// for a work's, which lists performances rather than tracks
     /// ([Page.listings]).
@@ -110,6 +124,7 @@ enum Phone {
         case let .artist(name): return try artist(h, name)
         case let .playlist(id): return try playlist(h, id)
         case let .recording(id): return try recording(h, id)
+        case let .show(id): return try show(h, id)
         case .work, .songs: return nil
         }
     }
@@ -196,6 +211,9 @@ enum Page: Hashable {
     /// One performance, in the order the work goes, by its key: the work's,
     /// `@`, and who played it.
     case recording(String)
+    /// One podcast or series of sermons and its episodes, newest first, by
+    /// its key (`podcast/full-time-nix`).
+    case show(String)
     /// Every song, in the order they were added.
     case songs
 
@@ -236,6 +254,7 @@ enum Page: Hashable {
             return "#playlist/" + Places.encode(p.name)
         case let .work(id): return "#work/" + Places.encode(id)
         case let .recording(id): return "#recording/" + Places.encode(id)
+        case let .show(id): return "#show/" + Places.encode(id)
         case .songs: return "#library"
         }
     }
@@ -255,6 +274,7 @@ enum Page: Hashable {
         case "composer": return name.isEmpty ? nil : .artist(name)
         case "work": return name.isEmpty ? nil : .work(name)
         case "recording": return name.isEmpty ? nil : .recording(name)
+        case "show": return name.isEmpty ? nil : .show(name)
         case "library": return .songs
         default: return nil
         }

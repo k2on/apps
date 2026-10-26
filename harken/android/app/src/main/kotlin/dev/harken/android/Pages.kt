@@ -389,6 +389,61 @@ fun RecordingPage(
     }
 }
 
+/**
+ * A podcast's or a series of sermons' page, laid out as a playlist's: its picture, who makes it,
+ * how many episodes, Play and Shuffle; what it is about; then its episodes newest first, each over
+ * how long it runs.
+ */
+@Composable
+fun ShowPage(id: String, show: Show?, episodes: List<Track>, playing: String?, act: Do) {
+    Recompositions.hit("ShowPage")
+    val page = Page.ForShow(id)
+    val title = show?.title ?: "Show"
+    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("show")) {
+        item { PageBar("", onBack = act::back) }
+        item {
+            PageHeader(
+                cover = { Cover(title, show?.art ?: "", Space.header, Modifier.size(Space.header)) },
+                kind = if (id.startsWith("sermon/")) "Sermons" else "Podcast",
+                title = title,
+                by = show?.author?.takeIf { it.isNotEmpty() },
+                onBy = null,
+                facts = facts(Media.count(episodes.size, "episode"), length(episodes)),
+                canPlay = episodes.isNotEmpty(),
+                onPlay = { act.play(episodes, 0, page) },
+                onShuffle = { act.shuffle(episodes, page) },
+            )
+        }
+        val about = show?.description.orEmpty()
+        if (about.isNotEmpty()) {
+            item {
+                Text(
+                    about,
+                    style = quiet(MaterialTheme.typography.bodyMedium),
+                    maxLines = 6,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = Space.page, vertical = Space.s),
+                )
+            }
+        }
+        if (show == null) {
+            item { Empty(Glyphs.Show, "This show is gone", "It was taken off this server.") }
+        } else if (episodes.isEmpty()) {
+            item { Empty(Glyphs.Show, "No episodes yet", "The server downloads a feed's newest episodes; they appear here as they arrive.") }
+        }
+        itemsIndexed(episodes, key = { _, t -> t.id.hex }) { i, t ->
+            TrackRow(
+                t,
+                under = length(listOf(t)) ?: title,
+                playing = t.id.hex == playing,
+                onClick = { act.play(episodes, i, page) },
+                onMore = { act.more(t, page) },
+            ) { Cover(title, show?.art ?: "", Space.thumb, Modifier.size(Space.thumb), corner = 4.dp) }
+        }
+        item { Spacer(Modifier.height(Space.xl)) }
+    }
+}
+
 @Composable
 fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Track) -> Album?, playing: String?, act: Do) {
     Recompositions.hit("PlaylistPage")

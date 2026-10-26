@@ -241,6 +241,13 @@ final class Model: ObservableObject {
 
     // The catalogue: everyone some work is by, and what a held page reads beside its tracks.
     var composers: [ComposersEntry] { snapshot.composers }
+
+    /// Every podcast and series of sermons, by title; and those of one kind (`podcast`, `sermon`).
+    var shows: [ShowsEntry] { snapshot.shows }
+    func shows(of kind: String) -> [ShowsEntry] { snapshot.shows.filter { $0.kind == kind } }
+    func show(_ id: String) -> ShowsEntry? { snapshot.shows.first { $0.id == id } }
+    /// The show an episode is of; none for a song.
+    func show(of t: LibraryEntry) -> ShowsEntry? { ShowsEntry.of(t, in: snapshot.shows) }
     func composer(named n: String) -> ComposersEntry? { snapshot.composers.first { $0.name == n } }
     /// A person's works, by catalogue, while their page is held; none until first read.
     func works(of composer: String) -> [WorkSummary]? { snapshot.works[composer] }

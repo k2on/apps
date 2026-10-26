@@ -326,6 +326,54 @@ private struct Face: View {
     }
 }
 
+/// A podcast's or a series of sermons' page, laid out as a playlist's: its
+/// picture, who makes it, how many episodes, Play and Shuffle; what it is
+/// about; then its episodes newest first (Android's `ShowPage`).
+struct ShowPage: View {
+    let id: String
+    @StateObject private var holding: Holding
+    @EnvironmentObject private var model: Model
+
+    init(model: Model, id: String) {
+        self.id = id
+        _holding = StateObject(wrappedValue: Holding(model, .show(id)))
+    }
+
+    var body: some View {
+        let page = Page.show(id)
+        let read = model.rows(page)
+        let episodes = read ?? []
+        let show = model.show(id)
+        let title = show?.title ?? "Show"
+        List {
+            PageHeader(kind: id.hasPrefix("sermon/") ? "Sermons" : "Podcast", title: title, by: show.flatMap { $0.author.isEmpty ? nil : $0.author },
+                       facts: Spell.facts([Spell.count(episodes.count, "episode"), Spell.total(episodes)]), canPlay: !episodes.isEmpty,
+                       onPlay: { model.play(episodes, at: 0, from: page) }, onShuffle: { model.shuffle(episodes, from: page) }) {
+                CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.header).frame(width: Space.header, height: Space.header)
+            }
+            .listRowSeparator(.hidden)
+            if let about = show?.description, !about.isEmpty {
+                Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(6)
+                    .listRowSeparator(.hidden)
+            }
+            if show == nil {
+                ContentUnavailableView("This show is gone", systemImage: "mic", description: Text("It was taken off this server."))
+                    .listRowSeparator(.hidden)
+            } else if read != nil && episodes.isEmpty {
+                ContentUnavailableView("No episodes yet", systemImage: "mic", description: Text("The server downloads a feed's newest episodes; they appear here as they arrive."))
+                    .listRowSeparator(.hidden)
+            }
+            ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
+                TrackRow(track: t, under: Spell.total([t]) ?? title, from: page, onPlay: { model.play(episodes, at: i, from: page) }) {
+                    CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.thumb)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 struct PlaylistPage: View {
     let id: Id
     @StateObject private var holding: Holding

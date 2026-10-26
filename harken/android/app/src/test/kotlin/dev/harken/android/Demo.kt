@@ -114,6 +114,19 @@ object Demo {
     val composers: List<Composer> =
         rows.filter { it.part.isNotEmpty() }.groupBy { it.composer }.map { (name, rs) -> Composer(name, "", "", 0, 0, rs.map { it.album }.distinct().size.toLong(), rs.size.toLong()) }.sortedBy { it.name }
 
+    /** The demo's two shows, as `shows` lists them: a series of sermons and a podcast. */
+    val shows: List<Show> =
+        listOf(
+            Show("podcast/full-time-nix", "podcast", "Full Time Nix", "Shahar \"Dawn\" Or", "Real chats with brilliant Nixers", "", 4),
+            Show("sermon/timothy-keller-sermons-podcast-by-gospel-in-life", "sermon", "Timothy Keller Sermons Podcast by Gospel in Life", "Tim Keller", "Sermons by Tim Keller, founder of Redeemer Presbyterian Church in NYC.", "", 3),
+        )
+
+    /** Gospel in Life's newest episodes, newest first, as `show` reads them. */
+    val sermons: List<Track> =
+        listOf("The Dream of the Kingdom" to 2_937_000L, "Love and the Future of God" to 2_725_000L, "Living Grace" to 2_824_000L).mapIndexed { i, (t, ms) ->
+            Track(id(900 + i), t, shows[1].title, "sermon", ms, ".feeds/$i.mp3", null)
+        }
+
     /** A composer's works as `works` lists them, and as many performances of each as the seed has. */
     fun works(composer: String): List<dev.harken.android.gen.WorkSummary> =
         rows.filter { it.composer == composer && it.part.isNotEmpty() }.groupBy { it.album }.map { (album, rs) ->

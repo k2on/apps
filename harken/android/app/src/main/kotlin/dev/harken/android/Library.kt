@@ -78,6 +78,12 @@ sealed class Page {
             get() = "recording/" + Hex.encode(id.toByteArray(Charsets.UTF_8))
     }
 
+    /** One podcast or series of sermons and its episodes, newest first, by its key (`podcast/full-time-nix`). */
+    data class ForShow(val id: String) : Page() {
+        override val route: String
+            get() = "show/" + Hex.encode(id.toByteArray(Charsets.UTF_8))
+    }
+
     /** Every song, in the order they were added. */
     object Songs : Page() {
         override val route: String = "songs"
@@ -96,6 +102,7 @@ sealed class Page {
             is ForPlaylist -> playlists.firstOrNull { it.id == id }?.let { "#playlist/" + Places.encode(it.name) } ?: ""
             is ForWork -> "#work/" + Places.encode(id)
             is ForRecording -> "#recording/" + Places.encode(id)
+            is ForShow -> "#show/" + Places.encode(id)
             is Songs -> "#library"
         }
 
@@ -113,6 +120,7 @@ sealed class Page {
                 "composer" -> name.takeIf { it.isNotEmpty() }?.let { ForArtist(it) }
                 "work" -> name.takeIf { it.isNotEmpty() }?.let { ForWork(it) }
                 "recording" -> name.takeIf { it.isNotEmpty() }?.let { ForRecording(it) }
+                "show" -> name.takeIf { it.isNotEmpty() }?.let { ForShow(it) }
                 "library" -> Songs
                 else -> null
             }
@@ -130,6 +138,7 @@ sealed class Page {
                     "playlist" -> ForPlaylist(Id(arg).also { require(arg.length == 32) })
                     "work" -> ForWork(name())
                     "recording" -> ForRecording(name())
+                    "show" -> ForShow(name())
                     "songs" -> Songs
                     else -> null
                 }
@@ -230,6 +239,7 @@ class Library(private val session: ArkSession) {
     private val albumsFlow = MutableStateFlow<List<Album>>(emptyList())
     private val artistsFlow = MutableStateFlow<List<Artist>>(emptyList())
     private val composersFlow = MutableStateFlow<List<Composer>>(emptyList())
+    private val showsFlow = MutableStateFlow<List<Show>>(emptyList())
     private val detailsFlow = MutableStateFlow<Map<Id, TrackDetail>>(emptyMap())
     private val noticeFlow = MutableStateFlow<String?>(null)
 
@@ -241,6 +251,9 @@ class Library(private val session: ArkSession) {
 
     /** Everyone some work is by, read with the artists; none in a library of pop. */
     val composers: StateFlow<List<Composer>> = composersFlow.asStateFlow()
+
+    /** Every podcast and series of sermons, by title; read with the artists. */
+    val shows: StateFlow<List<Show>> = showsFlow.asStateFlow()
 
     /**
      * An album's cover by its name, "" for none: the albums by name, made again only when the list
@@ -286,10 +299,11 @@ class Library(private val session: ArkSession) {
     private val albumsHeld = Held({ it.albums() }, Album::of) { albumsFlow.value = it }
     private val artistsHeld = Held({ it.artists() }, Artist::of) { artistsFlow.value = it }
     private val composersHeld = Held({ it.composers() }, Composer::of) { composersFlow.value = it }
+    private val showsHeld = Held({ it.shows() }, Show::of) { showsFlow.value = it }
     private val detailsHeld = Held({ it.trackDetails() }, TrackDetail::of) { r -> detailsFlow.value = r.associateBy { it.mediaId } }
     private val playedHeld = Held({ it.lastPlayed() }, Played::of) { lastFlow.value = it.firstOrNull() }
     private val home = listOf<Held<*, *>>(library, playlistsHeld, albumsHeld)
-    private val rest = listOf<Held<*, *>>(artistsHeld, composersHeld, detailsHeld, playedHeld)
+    private val rest = listOf<Held<*, *>>(artistsHeld, composersHeld, showsHeld, detailsHeld, playedHeld)
     private val lastFlow = MutableStateFlow<Played?>(null)
 
     /**
@@ -396,6 +410,7 @@ class Library(private val session: ArkSession) {
             is Page.ForArtist -> Held({ Phone.artist(it, page.name) }, Track::of)
             is Page.ForPlaylist -> Held({ Phone.playlist(it, page.id) }, Track::of)
             is Page.ForRecording -> Held({ Phone.recording(it, page.id) }, Track::of)
+            is Page.ForShow -> Held({ Phone.show(it, page.id) }, Track::of)
             is Page.ForWork, is Page.Songs -> null
         }
 
@@ -446,6 +461,7 @@ class Library(private val session: ArkSession) {
             is Page.ForArtist -> session.run { h -> Phone.once({ Phone.artist(h, page.name) }, Track::of) }
             is Page.ForPlaylist -> session.run { h -> Phone.once({ Phone.playlist(h, page.id) }, Track::of) }
             is Page.ForRecording -> session.run { h -> Phone.once({ Phone.recording(h, page.id) }, Track::of) }
+            is Page.ForShow -> session.run { h -> Phone.once({ Phone.show(h, page.id) }, Track::of) }
             // A work plays as its most complete performance does.
             is Page.ForWork -> recordingsOf(page.id).firstOrNull()?.let { read(Page.ForRecording(it.id)) }.orEmpty()
         }

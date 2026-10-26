@@ -101,6 +101,8 @@ object Glyphs {
     val AddTo = glyph("list-plus", "M16 5H3", "M11 12H3", "M16 19H3", "M18 9v6", "M21 12h-6")
     val Album = glyph("disc-3", circle(12f, 12f, 10f), "M6 12c0-1.7.7-3.2 1.8-4.2", circle(12f, 12f, 2f), "M18 12c0 1.7-.7 3.2-1.8 4.2")
     val Artist = glyph("user", "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2", circle(12f, 7f, 4f))
+    /** A podcast, a sermon, a show of either: Lucide's `mic`, its capsule's ends kept round. */
+    val Show = glyph("mic", "M12 19v3", "M19 10v2a7 7 0 0 1-14 0v-2", "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z")
     val Note = glyph("music", "M9 18V5l12-2v13", circle(6f, 18f, 3f), circle(18f, 16f, 3f))
     val More = ArkGlyphs.More
     val Back = ArkGlyphs.Back

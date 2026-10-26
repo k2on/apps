@@ -265,6 +265,7 @@ fun HarkenApp(
     val albums by library.albums.collectAsStateWithLifecycle()
     val artists by library.artists.collectAsStateWithLifecycle()
     val composers by library.composers.collectAsStateWithLifecycle()
+    val shows by library.shows.collectAsStateWithLifecycle()
     val details by library.details.collectAsStateWithLifecycle()
     val loaded by library.loaded.collectAsStateWithLifecycle()
     val complete by library.complete.collectAsStateWithLifecycle()
@@ -382,7 +383,9 @@ fun HarkenApp(
 
             override fun goTo(page: Page) {
                 scope.launch { sheet.close() }
-                nav().navigate(page.route)
+                // An episode's name is its show's, and the show is its page: nobody is called that.
+                val show = (page as? Page.ForArtist)?.let { p -> shows.firstOrNull { it.title == p.name }?.takeIf { artists.none { a -> a.name == p.name } } }
+                nav().navigate(show?.let { Page.ForShow(it.id) }?.route ?: page.route)
             }
 
             override fun toggle() = playback.toggle()
@@ -496,7 +499,7 @@ fun HarkenApp(
                                         )
                                     }
                                     Route.Library ->
-                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers), albumOf, playing, act)
+                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers, shows), albumOf, playing, act)
                                     Route.Album -> {
                                         val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
                                         if (page != null) {
@@ -536,6 +539,13 @@ fun HarkenApp(
                                         if (page != null) {
                                             val rows by held(library, page, back)
                                             Ready(rows) { r -> PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, r.orEmpty(), albumOf, playing, act) }
+                                        }
+                                    }
+                                    Route.Show -> {
+                                        val page = Page.parse("show/" + back.arguments?.getString("arg")) as? Page.ForShow
+                                        if (page != null) {
+                                            val rows by held(library, page, back)
+                                            Ready(rows) { r -> ShowPage(page.id, shows.firstOrNull { it.id == page.id }, r.orEmpty(), playing, act) }
                                         }
                                     }
                                     Route.Work -> {
@@ -654,7 +664,7 @@ fun HarkenApp(
                         }
                     }
                 LaunchedEffect(actions) { onMenu(actions) }
-                ModalBottomSheet(onDismissRequest = { menu = null }) { TrackMenu(track, albumOf(track), page, actions) }
+                ModalBottomSheet(onDismissRequest = { menu = null }) { TrackMenu(track, albumOf(track), page, actions, Shows.of(track, shows)) }
             }
             adding?.let { track ->
                 var on by remember(track) { mutableStateOf<Set<Id>?>(null) }
@@ -742,6 +752,7 @@ enum class Route(val pattern: String, val tab: Tab?) {
     Playlist("playlist/{arg}", null),
     Work("work/{arg}", null),
     Recording("recording/{arg}", null),
+    Show("show/{arg}", null),
     Settings("settings", null),
     Diagnostics("diagnostics", null);
 

@@ -202,7 +202,7 @@ class Screens {
         }
     }
 
-    private val data = LibraryData(true, Demo.playlists, Demo.albums, Demo.artists, Demo.tracks, null, composers = Demo.composers)
+    private val data = LibraryData(true, Demo.playlists, Demo.albums, Demo.artists, Demo.tracks, null, composers = Demo.composers, shows = Demo.shows)
 
     @Test
     fun b3_library() {
@@ -268,6 +268,13 @@ class Screens {
         shot("sunday") { tab(Tab.Library) { PlaylistPage(p.id, p, Demo.sunday, Demo::albumOf, null, Idle) } }
         shot("empty") { tab(Tab.Library, PlayerState()) { PlaylistPage(p.id, Demo.playlists[2], emptyList(), Demo::albumOf, null, Idle) } }
         shot("gone") { tab(Tab.Library, PlayerState()) { PlaylistPage(Id("ff".repeat(16)), null, emptyList(), Demo::albumOf, null, Idle) } }
+    }
+
+    @Test
+    fun c6_show() {
+        val s = Demo.shows[1]
+        shot("sermons") { tab(Tab.Library) { ShowPage(s.id, s, Demo.sermons, null, Idle) } }
+        shot("gone") { tab(Tab.Library, PlayerState()) { ShowPage("podcast/gone", null, emptyList(), null, Idle) } }
     }
 
     // The player -------------------------------------------------------------

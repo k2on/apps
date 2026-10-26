@@ -28,6 +28,8 @@ import dev.harken.android.gen.PlaylistsOf
 import dev.harken.android.gen.RecordingInput
 import dev.harken.android.gen.RemoveFromPlaylist
 import dev.harken.android.gen.Search
+import dev.harken.android.gen.ShowInput
+import dev.harken.android.gen.ShowsEntry
 import dev.harken.android.gen.TrackDetailsEntry
 
 /**
@@ -108,6 +110,32 @@ data class Composer(
     }
 }
 
+/**
+ * A row of `shows`: a podcast or a series of sermons — its key (`podcast/full-time-nix`), its kind
+ * (`podcast`, `sermon`), who makes it, what it is about, its picture, and how many of its episodes
+ * the server has.
+ */
+data class Show(
+    val id: String,
+    val kind: String,
+    val title: String,
+    val author: String,
+    val description: String,
+    val art: String,
+    val episodes: Long,
+    val newestMs: Long = 0,
+) {
+    companion object {
+        fun of(e: ShowsEntry): Show = Show(e.id, e.kind, e.title, e.author, e.description, e.art, e.episodes, e.newestMs)
+    }
+}
+
+object Shows {
+    /** The show an episode is of: the one of its kind its creator names; null for a song. */
+    fun of(track: Track, shows: List<Show>): Show? =
+        if (track.kind == "song") null else shows.firstOrNull { it.kind == track.kind && it.title == track.creator }
+}
+
 /** A row of `track_details`: what only a song has — its album, its part of a work, its number on the release. */
 data class TrackDetail(
     val mediaId: Id,
@@ -175,6 +203,9 @@ object Phone {
 
     /** One performance's tracks, in the order the work goes (`recording`). */
     fun recording(h: Harken, id: String): View<LibraryEntry> = h.recording(RecordingInput(NO_PLAYLIST, id))
+
+    /** One show's episodes, newest first. */
+    fun show(h: Harken, id: String): View<LibraryEntry> = h.show(ShowInput(NO_PLAYLIST, id))
 
     /** A view's rows once, and the view let go. */
     fun <E, T> once(v: () -> View<E>, of: (E) -> T): List<T> =

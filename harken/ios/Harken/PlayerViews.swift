@@ -134,7 +134,12 @@ struct FullPlayer: View {
                     Text(s.now?.title ?? "Nothing playing").font(.title2.bold()).lineLimit(2).multilineTextAlignment(.leading)
                 }
                 .buttonStyle(.plain)
-                Button { if let a = s.now?.artist, !a.isEmpty { open(.page(.artist(a))) } } label: {
+                // An episode's name is its show's, and the show is its page.
+                Button {
+                    guard let a = s.now?.artist, !a.isEmpty else { return }
+                    let show = model.shows.first { $0.title == a }
+                    open(.page(show != nil && model.artist(named: a) == nil ? .show(show!.id) : .artist(a)))
+                } label: {
                     Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.gold).lineLimit(1)
                 }
                 .buttonStyle(.plain)

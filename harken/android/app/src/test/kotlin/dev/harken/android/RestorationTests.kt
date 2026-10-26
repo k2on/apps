@@ -34,6 +34,8 @@
 // — no frame at the top, no frame anywhere else.
 package dev.harken.android
 
+import dev.harken.android.gen.AddEpisode
+import dev.harken.android.gen.AddShow
 import dev.harken.android.gen.AddSong
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.CreatePlaylist
@@ -123,6 +125,10 @@ object Fixture {
     var recording: String = ""
         private set
 
+    /** The podcast with thirty episodes: a show's page that scrolls, among twelve shows of each kind. */
+    var show: String = ""
+        private set
+
     private fun song(title: String, artist: String, album: String, ms: Long, track: Long, file: String, part: String = "", performer: String = "", workTitle: String = ""): AddSong =
         AddSong(
             title = title,
@@ -160,6 +166,13 @@ object Fixture {
         first = list.id
         work = Phone.once({ peer.works(Works("George Frideric Handel")) }) { it }.first { it.title == "Water Music" }.id
         recording = Phone.once({ peer.recordings(Recordings(work)) }) { it }.first().id
+        for (kind in listOf("podcast", "sermon")) for (n in 1..12) {
+            val title = "Show %02d".format(n)
+            peer.addShow(AddShow(kind, title, "Host $n", "What it is about.", "", "", ""))
+            val episodes = if (n == 1) 30 else 2
+            for (e in 1..episodes) peer.addEpisode(AddEpisode("$kind/show-%02d".format(n), "Episode $e", 1_800_000L, "$kind/$n/$e.mp3", "$e", e * 86_400_000L, "", "", "", 0, e.toLong()))
+        }
+        show = "podcast/show-01"
         return peer
     }
 }
@@ -387,6 +400,7 @@ class RestorationTests(private val case: Case) {
             Route.Playlist -> navs.getValue(tab).navigate(Page.ForPlaylist(Fixture.first!!).route)
             Route.Work -> navs.getValue(tab).navigate(Page.ForWork(Fixture.work).route)
             Route.Recording -> navs.getValue(tab).navigate(Page.ForRecording(Fixture.recording).route)
+            Route.Show -> navs.getValue(tab).navigate(Page.ForShow(Fixture.show).route)
             Route.Settings -> navs.getValue(tab).navigate(Route.Settings.pattern)
             Route.Diagnostics -> navs.getValue(tab).navigate(Route.Diagnostics.pattern)
         }
