@@ -32,6 +32,7 @@
 //! with it, its user and id the verified login's ([`device`]).
 
 pub mod assistant;
+pub mod catalogue;
 pub mod covers;
 pub mod domain;
 pub mod hosted;
@@ -64,6 +65,8 @@ pub struct Config {
     /// The media root: `music/` under it is scanned, all of it is served at
     /// `/media`.
     pub media: Option<PathBuf>,
+    /// A catalogue to import (`catalogue.rs`): the URL of its JSON.
+    pub catalogue: Option<String>,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
 }
@@ -87,6 +90,7 @@ impl Config {
         Config {
             serve: ark_peer::Serve::dev(listen, data),
             media: None,
+            catalogue: None,
             house: None,
         }
     }
@@ -98,6 +102,8 @@ impl Config {
     ///
     /// ```text
     /// HARKEN_MEDIA                  the media root
+    /// HARKEN_CATALOGUE              a catalogue's JSON URL, imported
+    ///                               (with HARKEN_MEDIA)
     /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
     ///                               all three, or none; HARKEN_HA_MEDIA
     /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
@@ -114,6 +120,7 @@ impl Config {
         Ok(Config {
             serve,
             media: env("HARKEN_MEDIA").map(PathBuf::from),
+            catalogue: env("HARKEN_CATALOGUE"),
             house: house(&env)?,
         })
     }
@@ -398,7 +405,7 @@ pub async fn start(config: Config) -> Result<Server> {
             art.display(),
             covers::ART
         );
-        server.routes = covers::routes(dir, &art);
+        server.routes = covers::routes(dir, &art, &catalogue::dir(&config.data));
     }
     // Everything the routes above do not match falls through to the page,
     // with the build as its validator: a store path cannot be one, since nix
@@ -440,6 +447,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 hub.clone(),
                 config.data.clone(),
                 login,
+                config.catalogue.clone(),
             )?)
         }
         None => None,

@@ -157,6 +157,18 @@ in
       '';
     };
 
+    catalogue = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "https://k2on.github.io/classical/catalogue.json";
+      description = ''
+        The URL of a catalogue's JSON (github.com/k2on/classical) to import,
+        with {option}`services.harken.mediaPath`: its recordings and pictures
+        downloaded into the state directory and served under
+        `/media/.catalogue/`, at boot and at every rescan. null for none.
+      '';
+    };
+
     pictureHosts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -439,6 +451,8 @@ in
           (lib.mapAttrsToList (role: ids: "${role}=${lib.concatStringsSep "," ids}") cfg.roles);
       } // lib.optionalAttrs (cfg.mediaPath != null) {
         HARKEN_MEDIA = "${cfg.mediaPath}";
+      } // lib.optionalAttrs (cfg.mediaPath != null && cfg.catalogue != null) {
+        HARKEN_CATALOGUE = cfg.catalogue;
       } // lib.optionalAttrs (cfg.web != null) {
         HARKEN_WEB = "${cfg.web}";
       } //lib.optionalAttrs (cfg.oidc != null) {

@@ -334,13 +334,14 @@ fn the_sidebar_only_offers_what_there_is() {
     assert_eq!(lines, ["Songs", "Favorites"], "an empty library");
 }
 
-/// `WORKS` is keyed by the catalogue number alone, so two sharing one would
-/// silently give a work somebody else's title.
+/// A track names its work by catalogue number alone, so two works sharing
+/// one would silently give a work somebody else's title (the catalogue's
+/// own checks refuse it too).
 #[test]
 fn the_catalogue_is_the_key() {
     let mut seen = BTreeSet::new();
-    for w in seed::WORKS {
-        assert!(seen.insert(w.catalogue), "two works both claim {}: {}", w.catalogue, w.title);
+    for w in &seed::catalogue().works {
+        assert!(seen.insert(&w.catalogue), "two works both claim {}: {}", w.catalogue, w.title);
     }
 }
 
@@ -425,4 +426,24 @@ fn a_composer_and_an_artist_are_one_page() {
         assert!(app.peer.works().is_empty());
         assert_eq!(app.card_under_cursor(0), None, "<Enter> plays a song");
     }
+}
+
+/// The catalogue's words reach the pages: a composer's description on
+/// their page, and a work's on its own. Falsified by `describe_person` or
+/// `describe_work` leaving `description` out: the rows had none.
+#[test]
+fn the_catalogue_describes_its_people_and_works() {
+    let mut app = super::demo_app();
+    let bach = app
+        .peer
+        .composers()
+        .iter()
+        .find(|c| c.name == "Johann Sebastian Bach")
+        .cloned()
+        .expect("Bach composed something here");
+    assert!(bach.description.contains("Leipzig"), "{}", bach.description);
+    let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
+    let _ = app.update(crate::Message::Select(Source::Work(id.clone(), "Goldberg Variations".into())));
+    let work = app.peer.works().iter().find(|w| w.id == id).cloned().expect("the work's own row");
+    assert!(work.description.contains("thirty variations"), "{}", work.description);
 }

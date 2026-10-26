@@ -327,70 +327,70 @@ fn step(r: &mut Rng, s: &Store) -> Step {
 
 /// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
 /// a build could write values as JSON).
-const SCHEMA: &str = "6235282eb76cd3374bf3b5980cfbc46317b3b5e84b2d46306b784c6c1ee15541";
+const SCHEMA: &str = "3e0cff580549062dd378759dccdf77b20d4aeb6f46f2b66f49e05ed587577c1d";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
 /// value format writes them (postcard, N4).
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,
-        "c798fea85dbdb47438a74e41eda0eae6614dc4003f3c1eef1ee4db118f19b4ff",
-        "b09242bf6603cfc7d7cb84d55ced73ae36a055cdd329eb677d92cf9188261714",
+        "b188bc84c2fc21b1fce6ca507afd39996194423c38ff3d3fd334afa7ede5580c",
+        "0243c575398caf1bcf6462e3fd0707ada2945f032e52800ef117b4f42eafb13a",
     ),
     (
         2,
-        "a00af9b0ffcd7bb716112919e3ddb2ccd8f6991463dfd6632a32639bbdf86e32",
-        "3459265a3499ad34016ccfe12575ed48bccb803b092d4afbf4b9dec87ce579c6",
+        "eaef2f443a35731c09e505ac2b67015411c96c22a5eaf1d6bb85bbdf61053b12",
+        "d61f5f8b8e7339c18e4dd1c0094c0e88c2a7cd190b36a5e9712ffd192495090c",
     ),
     (
         3,
-        "2fbae7d5986306336362f71f034fe61b80f48b7bd70739374950933d9f562de8",
-        "c3501a702e7a1297266278d986470b914bc88a64e716733482831364d083e268",
+        "295aa7ceb24063e681b473f5a73fd23e9b35b79e2b1149f74bf47cd1beae0cb8",
+        "0d6d0a1f91570c8d0c3f54c566b76e82c18573231a8552f083465efb1d281052",
     ),
     (
         4,
-        "c1935eb8d1e81a3691fc72f8a31af78b79a1b3f44452f6de4d4ec31191f570ec",
-        "9e048ec5dc4510d67e59e6a08021e8f56c4c98dda92cadf968aca400c56baf83",
+        "aab16ca7d5a39f4c52876fe2633974bd10a1ead90016717d67319e58fa0325c5",
+        "6e6682affd24fcf3fdb31052eaa8a25b1fa03e8b878144e34cfca12e640f334a",
     ),
     (
         5,
-        "3fa04f82d5e297fd9ba6128c3bac274e5fdc7c4190bbf243aebae35f22a03a3b",
-        "436f90abf6c88c93c44b8e333af8e05b4e636ff078e8b270c9f3f138f8c04443",
+        "0a3ec4682c9faa5eed4bfea38f8c7517ddb41a7119e2a102f3321055deb7f6f9",
+        "8c0b9b8a9767cc7f796ed8925922cb9583d7c82decd461279de862d47a79c442",
     ),
     (
         6,
-        "3eedef7b9d5f0f70c6e1155483f5c89e23e7370e2aac411579d5a4d998177245",
-        "55ebd583ca6b8a1cc5280d4b681f77bf6c975c0d8f218bccbf0cddc3066f3034",
+        "02b7670339fb50b62fde4638680ec127687f2fc8920db57eba3c9636cd71d26a",
+        "2e224305781f90c6ea08c313b3dcc23c7324d14b1b06a392edb379057d720a9d",
     ),
     (
         7,
-        "56c55a75ab6fc670ba6e9a504cc26e3294e07a88d53140a6d4b638c074144699",
-        "460cd4077cddd07052afaad9be1dc66949ed52c91d99db0676c0b9ba0347b2f4",
+        "bd0f3a54fa924fd3a91e640b0b21ba06900ec1b54dc8e96fc681b3072083e432",
+        "96fd49d6ada5ad95c2047fa05ff2ec90540acd98b5c7c4bf1599c532d993d79e",
     ),
     (
         8,
-        "9d01343e3b89e03459cf80a3b267326adb687a94f47d104f402c4ab2cdd03b80",
-        "bb5c92fc2cb33332e418328796cf6f757c94ff5c67e4e6023b1e15758848027c",
+        "0aae6375f41a61cffc570c32474a67f2a13ab40306e631edae334c396f7b608a",
+        "b1ee179646e9dd12a8e98cbbb4a14148228f28d6bcf3ce271baa05e5348fa60c",
     ),
     (
         9,
-        "68b96ce1432bc2fc732f50709474e244a36508c4e99af8d90f58bf1cef34576c",
-        "ec0671fe2fe8713fd7cf01ef4fea5f275c362a54257b604fe542397c4682f317",
+        "35c3339f69419b4228c9322839b993dbd5ffbe366e7c01b61b95415d216656bf",
+        "79dbe80c336ce68970a76d16f069fa5359c00ea8e70ee83ff8d2a8347ab6c3a1",
     ),
     (
         10,
-        "8bb57eaf75ab65bb362ddc41dd128ba1ca4dfb10eeea209446d85f1d394b1ee6",
-        "7db1f462ac89060d8e762ff99e15c24c87a25c6d28fc5c9ea286c91cb4b1c6c4",
+        "1e2e683c7de3259aadbba1271e8d7318cfe42984c9c9c3128a5377d86bdf8078",
+        "595f3e8901ec2b30b2e18df191be6f6b78fb602d312d23e15f79a77f494c314c",
     ),
     (
         11,
-        "631d2fad4b27f25e497d667e5977bc6e3f06cdecee1c24984caae29d5fce1c2e",
-        "888e402698f0e9e2f09a455c06429454138401466a4e80c244d3a7dc64b6d3fc",
+        "dc8dc0e4b92db4686707923a649a93d35558098498594a9ebec44c0aff450888",
+        "604fb7ccf0e2024cd01dda162bb4b6611d8ce9f5e59d286ea0e734db41c25e2c",
     ),
     (
         12,
-        "ae0c781122ea62c05f571b814775e94a02b7aa1af07b934d5330c0b88ba40b01",
-        "99a289fc7cf2d5d18e54ea59bf86af6d9b893fc6546915d06dbb4066d8cc4cc4",
+        "7e241f947927d9a5a707960200b19026c0dbbd242e2c8af78cfa529819612fad",
+        "9d6a6badc23761db16f12da88843660861bd160935fb2cabf4a69ebc6dcfea03",
     ),
 ];
 

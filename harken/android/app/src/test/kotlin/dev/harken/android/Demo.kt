@@ -117,7 +117,7 @@ object Demo {
     /** A composer's works as `works` lists them, and as many performances of each as the seed has. */
     fun works(composer: String): List<dev.harken.android.gen.WorkSummary> =
         rows.filter { it.composer == composer && it.part.isNotEmpty() }.groupBy { it.album }.map { (album, rs) ->
-            dev.harken.android.gen.WorkSummary("", "", composer, "", composer.lowercase().replace(' ', '-') + "/" + album.lowercase().replace(' ', '-'), "", rs.map { it.performer }.distinct().size.toLong(), album, rs.size.toLong())
+            dev.harken.android.gen.WorkSummary("", "", composer, "", "", composer.lowercase().replace(' ', '-') + "/" + album.lowercase().replace(' ', '-'), "", rs.map { it.performer }.distinct().size.toLong(), album, rs.size.toLong())
         }
 
     /** A work's performances, the most complete first, as `recordings` answers. */

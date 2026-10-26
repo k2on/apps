@@ -26,6 +26,16 @@ crates'; what is here is what only harken has:
   a picture added, replaced or removed offers the tracks under its
   directory again; audio outside `music/` is not a track; a removed track
   is ignored (the log is permanent, and an unplugged disk looks the same).
+- **`catalogue.rs`** — a catalogue imported (`HARKEN_CATALOGUE`, the URL
+  of the JSON github.com/k2on/classical publishes at
+  `https://k2on.github.io/classical/catalogue.json`). At every full look —
+  at start, and when Settings' Resync asks for one — a thread of its own
+  fetches it and downloads what it names that is not here yet into
+  `DATA/catalogue/`, each file named by its URL's hash and served at
+  `/media/.catalogue/`; the scanner then authors the mutations
+  `harken_domain::catalogue` says it is, each only if it would change
+  something, so a sync of nothing new downloads and writes nothing. A file
+  that fails to download is left out until it does.
 - **`covers.rs`** — where a cover comes from, in this order, per track:
   1. a picture beside it: `cover`, `folder`, `front` or `album` (`.jpg`,
      `.jpeg`, `.png`, `.webp`, any case), else the only picture in the

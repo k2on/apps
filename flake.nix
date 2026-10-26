@@ -14,6 +14,16 @@
     # moves with nixpkgs.
     crane.url = "https://flakehub.com/f/ipetkov/crane/0.20.*.tar.gz";
 
+    # The classical catalogue (github.com/k2on/classical): what the demo's
+    # library is made of (harken/iced/src/catalogue.json, the copy
+    # `nix run .#update-catalogue` writes and checks.catalogue holds to
+    # this). Over git for the reason above; plain files, built by its
+    # catalogue.nix.
+    classical = {
+      url = "git+https://github.com/k2on/classical?ref=main";
+      flake = false;
+    };
+
     # The pinned previous revisions of this repository (nix/versions.nix),
     # one input each, so that the lockfile pins them and an old build is
     # evaluated offline from it. Over git rather than `github:` for the
@@ -783,11 +793,22 @@
             export HARKEN_OLD_${toString n}_SERVER=${v.server}/bin/harken-server
             export HARKEN_OLD_${toString n}_PEER=${v.server}/bin/harken-peer
           '') versions;
+          # The catalogue as its repository builds it, and the copy the demo
+          # embeds made from it.
+          classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
+          update-catalogue = pkgs.writeShellScriptBin "update-catalogue" ''
+            cp ${classical} harken/iced/src/catalogue.json
+            chmod 644 harken/iced/src/catalogue.json
+            echo "harken/iced/src/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
+          '';
         in
         {
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             inherit harken-server arkdb;
+            # `nix run .#update-catalogue`, from the repository's root: the
+            # demo's copy of the catalogue made from the `classical` input.
+            inherit classical update-catalogue;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
@@ -825,6 +846,15 @@
           };
 
           checks = {
+            # The demo's copy of the catalogue is the `classical` input's:
+            # `nix flake update classical` then `nix run .#update-catalogue`.
+            catalogue = pkgs.runCommand "catalogue-current" { } ''
+              cmp ${classical} ${./harken/iced/src/catalogue.json} || {
+                echo "harken/iced/src/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
+                exit 1
+              }
+              touch $out
+            '';
             # The fleet run mixed (docs/plan-db.md D1): every pinned
             # revision's harken-server package built from its own flake, and
             # harken/server/tests/versions.rs run with each named as

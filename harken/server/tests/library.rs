@@ -162,6 +162,7 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
         server.running.hub.clone(),
         dir,
         login,
+        None,
     )
     .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1_200));

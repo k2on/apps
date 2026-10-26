@@ -71,7 +71,7 @@ final class RowsTests: XCTestCase {
 
     func testASearchFindsAlbumsAndArtistsByName() {
         let albums = [AlbumsEntry(art: "", creator: "Handel", label: "", name: "Water Music", performer: "", released: 0, tracks: 3), AlbumsEntry(art: "", creator: "Bach", label: "", name: "Goldberg", performer: "", released: 0, tracks: 1)]
-        let artists = [ArtistsEntry(art: "", banner: "", born: 0, died: 0, name: "Handel", tracks: 3)]
+        let artists = [ArtistsEntry(art: "", banner: "", born: 0, description: "", died: 0, name: "Handel", tracks: 3)]
         let r = Results.of(" handel", songs: [], albums: albums, artists: artists)
         XCTAssertEqual(r.albums.map { $0.name }, ["Water Music"])
         XCTAssertEqual(r.artists.count, 1)

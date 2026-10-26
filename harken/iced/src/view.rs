@@ -356,8 +356,46 @@ impl App {
             Source::Work(id, title) => self.view_work(id, title),
             // One performance, in the order the work goes.
             Source::Recording(id, who) => self.view_recording(id, who),
+            Source::Settings => self.view_settings(),
             _ => padded(self.view_list()),
         }
+    }
+
+    /// Settings: the library's Resync, which asks the server for a full
+    /// look — its music walked again and its catalogue synced — and what
+    /// the last one asked came to.
+    fn view_settings(&self) -> Element<'_, Message> {
+        let explain = "The server looks at its music and imports its catalogue when it starts. \
+                       Resync does both now: new recordings in the catalogue are downloaded, \
+                       and new files in the music folder are added.";
+        let resync = button(text("Resync").size(13))
+            .style(style::action)
+            .padding([5, 14])
+            .on_press(Message::Resync);
+        let mut library = column![
+            text(explain)
+                .size(14)
+                .line_height(1.45)
+                .style(style::faint(0.8))
+                .wrapping(text::Wrapping::Word),
+            resync,
+        ]
+        .spacing(14)
+        .max_width(640);
+        if let Some(said) = &self.resync {
+            library = library.push(text(said.clone()).size(12).style(style::faint(0.55)));
+        }
+        let page = column![
+            container(text("Settings").size(28).font(hero::BOLD)).padding(Padding {
+                top: PAGE_PADDING,
+                bottom: 18.0,
+                ..Padding::ZERO
+            }),
+            hero::heading("Library"),
+            container(library).padding(Padding { top: 8.0, ..Padding::ZERO }),
+        ]
+        .width(Length::Fill);
+        self.scrolled(None, page, false)
     }
 
     /// A page as one scrollable, so its top scrolls away with it: `top`
@@ -845,6 +883,15 @@ impl App {
                 None
             }
         };
+        // A few sentences about them, where the library has them.
+        let description = artist.map(|a| a.description.as_str()).filter(|d| !d.is_empty());
+        if let Some(about) = about(description.or(composer.map(|c| c.description.as_str())).unwrap_or_default()) {
+            page = page.push(container(about).padding(Padding {
+                top: 18.0,
+                bottom: 6.0,
+                ..Padding::ZERO
+            }));
+        }
         if let Some(best) = self.best_known() {
             let facts = [
                 best.catalogue.clone(),
@@ -948,6 +995,9 @@ impl App {
             .join("  \u{b7}  ");
         if !facts.is_empty() {
             head = head.push(text(facts).size(12).style(style::faint(0.55)));
+        }
+        if let Some(about) = work.and_then(|w| about(&w.description)) {
+            head = head.push(container(about).padding(Padding { top: 10.0, ..Padding::ZERO }));
         }
         let mut page = column![
             container(head).padding(Padding {
@@ -1807,6 +1857,20 @@ fn initials(name: &str) -> String {
         .collect();
     out.push(last.to_string());
     out.join(" ")
+}
+
+/// A few sentences about somebody or a work, as a paragraph kept to a width
+/// a line can be read at; nothing for none.
+fn about<'a>(description: &str) -> Option<Element<'a, Message>> {
+    if description.is_empty() {
+        return None;
+    }
+    let words = text(description.to_string())
+        .size(14)
+        .line_height(1.45)
+        .style(style::faint(0.8))
+        .wrapping(text::Wrapping::Word);
+    Some(container(words).max_width(640).into())
 }
 
 /// A page about something: its header, and what is on it.

@@ -109,6 +109,8 @@ enum Nudge {
     /// Look at one path the watcher saw appear, change or — for a picture
     /// — go.
     One(PathBuf),
+    /// A catalogue fetched, its files here: authored (`catalogue.rs`).
+    Catalogue(Box<crate::catalogue::Fetched>),
 }
 
 /// Where the scanner keeps what is its own under the server's data: its
@@ -173,6 +175,11 @@ impl Scanner {
     /// being created at all — on a fresh install it may not exist yet, and a
     /// watch on a path that is not there watches nothing forever.
     ///
+    /// With `catalogue`, the URL of one (`catalogue.rs`): fetched, and
+    /// its files downloaded, on a thread of its own at every full look
+    /// (at boot, and whenever a rescan is asked for), and its library
+    /// authored here once they are.
+    ///
     /// Returns at once: the walk happens on a thread of its own, so a
     /// library of ten thousand files does not hold up anything.
     pub fn start(
@@ -181,6 +188,7 @@ impl Scanner {
         hub: Handle,
         data: PathBuf,
         login: Login,
+        catalogue: Option<String>,
     ) -> Result<Scanner> {
         // `docs/plan-auth.md` The scanner is the library, by construction: it
         // holds the library's role whatever else its login holds, and its
@@ -214,6 +222,30 @@ impl Scanner {
         let (tx, rx) = channel();
         let stop = Arc::new(AtomicBool::new(false));
         let counts = Arc::new(Counts::default());
+        // The catalogue's own thread: a sync asked is a fetch and however
+        // long its downloads take, so it is not the scanner's to wait on;
+        // what it fetched comes back as a nudge. Syncs asked while one runs
+        // are that one.
+        let sync = catalogue.map(|url| {
+            let (sync, asked) = channel::<()>();
+            let (dir, back) = (crate::catalogue::dir(&data), tx.clone());
+            let _ = std::thread::Builder::new()
+                .name("harken-catalogue".into())
+                .spawn(move || {
+                    while asked.recv().is_ok() {
+                        while asked.try_recv().is_ok() {}
+                        match crate::catalogue::fetch(&url, &dir) {
+                            Ok(fetched) => {
+                                if back.send(Nudge::Catalogue(Box::new(fetched))).is_err() {
+                                    return;
+                                }
+                            }
+                            Err(e) => eprintln!("harken-server: catalogue: {e}"),
+                        }
+                    }
+                });
+            sync
+        });
         let thread = {
             let (stop, counts) = (stop.clone(), counts.clone());
             let scan = Scan {
@@ -221,6 +253,7 @@ impl Scanner {
                 root: root.clone(),
                 art: art_dir(&data),
                 prints: Prints::load(prints_dir(&data)),
+                sync,
             };
             std::thread::Builder::new()
                 .name("harken-scanner".into())
@@ -413,6 +446,8 @@ struct Scan {
     music: PathBuf,
     art: PathBuf,
     prints: Prints,
+    /// Asks the catalogue's thread for a sync, when there is a catalogue.
+    sync: Option<Sender<()>>,
 }
 
 /// The scanner's peer pumped — what the link said given to it, what it
@@ -438,6 +473,7 @@ fn run(
 ) {
     catch_up(&mut peer, &hub, stop);
     let root = scan.root.clone();
+    let catalogued = counts.clone();
     peer.handle::<Look>(move |p, job| {
         let nudges = match job.paths.is_empty() {
             true => vec![Nudge::All],
@@ -447,6 +483,13 @@ fn run(
                 .map(|r| Nudge::One(scan.root.join(r)))
                 .collect(),
         };
+        // A full look is the catalogue's sync too: at boot, and the
+        // rescan a person asks for.
+        if job.paths.is_empty() {
+            if let Some(sync) = &scan.sync {
+                let _ = sync.send(());
+            }
+        }
         let (authored, read) = look(p, &mut scan, nudges);
         counts.read.fetch_add(read, Ordering::Relaxed);
         if authored > 0 {
@@ -470,7 +513,19 @@ fn run(
                 std::thread::sleep(SETTLE);
             }
             nudges.extend(rx.try_iter());
-            ask(&mut peer, &root, nudges);
+            let (fetched, nudges): (Vec<_>, Vec<_>) = nudges
+                .into_iter()
+                .partition(|n| matches!(n, Nudge::Catalogue(_)));
+            for n in fetched {
+                if let Nudge::Catalogue(f) = n {
+                    let authored = import(&mut peer, &f);
+                    catalogued.authored.fetch_add(authored, Ordering::Relaxed);
+                    println!("harken-server: catalogue +{authored}");
+                }
+            }
+            if !nudges.is_empty() {
+                ask(&mut peer, &root, nudges);
+            }
         }
         // Whatever that produced, and whatever the log has for us — the
         // looks asked among it. Not conditional on a nudge: a quiet
@@ -543,6 +598,8 @@ fn look(peer: &mut ark_peer::Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usiz
             Nudge::One(p) => {
                 paths.insert(p);
             }
+            // Authored where it arrives, in `run`: a look is files.
+            Nudge::Catalogue(_) => {}
         }
     }
     let mut covers = Covers::new(&scan.root, &scan.music, &scan.art, scan.prints.art());
@@ -580,6 +637,28 @@ fn known_file(store: &Store, file: &str) -> bool {
     ark::format::put_key(file, &mut key);
     let range = Range::prefix(index, &key, Dir::Asc, 1);
     !store.scan("media", &range).is_empty()
+}
+
+/// A catalogue's library authored: each of its mutations that would change
+/// something, its files the ones here. How many it authored.
+fn import(peer: &mut ark_peer::Peer, fetched: &crate::catalogue::Fetched) -> usize {
+    let mut authored = 0;
+    for call in fetched
+        .catalogue
+        .calls(|url| fetched.here.get(url).cloned())
+    {
+        if !would_change(peer, call.name, &call.input) {
+            continue;
+        }
+        match peer.mutate_bytes(call.name, call.input) {
+            Ok(_) => authored += 1,
+            Err(why) => eprintln!(
+                "harken-server: catalogue: {} ({}) was refused: {why}",
+                call.what, call.name
+            ),
+        }
+    }
+    authored
 }
 
 /// Whether an entry would write anything over what the replica holds: the

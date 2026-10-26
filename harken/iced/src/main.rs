@@ -151,8 +151,11 @@ pub enum Message {
     /// The sign-in came back, one way or the other.
     SignedIn(Result<Login, String>),
     SignOut,
-    /// The account button at the top right: its menu, whose entry sends
-    /// `SignOut`.
+    /// Settings' Resync: a full look asked of the server, which is its
+    /// catalogue's sync too.
+    Resync,
+    /// The account button at the top right: its menu, whose entries open
+    /// Settings and send `SignOut`.
     AccountMenu,
     /// Where the pointer is, in the window: tracked on the root so a menu's
     /// `pin` shares its origin.
@@ -521,6 +524,8 @@ pub struct App {
     pub search: String,
     /// `?` — a keymap nobody can guess is a keymap nobody uses.
     pub help: bool,
+    /// What Settings' Resync last came to, to say under it.
+    pub resync: Option<String>,
     /// `D` — every number the session holds.
     pub debug: bool,
     /// A composer's page lists every work, not only the best known: its
@@ -624,6 +629,7 @@ impl App {
             keys: vim::Keys::new(),
             search: String::new(),
             help: false,
+            resync: None,
             debug: false,
             all_works: false,
             ctx: Context::new(),
@@ -1578,7 +1584,12 @@ impl App {
         };
         Some(match login.token.is_empty() {
             true => Account::turned_away(&who, Message::SignOut),
-            false => Account::signed_in(&who, Message::SignOut),
+            false => {
+                let mut a = Account::signed_in(&who, Message::SignOut);
+                let settings = arkui::menu::Entry::run(arkui::glyphs::LIBRARY, "Settings", Message::Select(Source::Settings));
+                a.entries.insert(0, settings);
+                a
+            }
         })
     }
 
@@ -1984,6 +1995,16 @@ impl App {
                     self.note = format!("could not sign in: {e} \u{2014} reload to try again");
                 }
             },
+            Message::Resync => {
+                // A full look: the server walks its music again and syncs
+                // its catalogue. Refused, `author` says why on the status
+                // line; only the library's role may ask.
+                let asked = self.author("resync the library".into(), "look", &crate::domain::LookAt { paths: Vec::new() });
+                self.resync = Some(match asked {
+                    true => "Asked. New music appears as the server finds it.".into(),
+                    false => self.note.clone(),
+                });
+            }
             Message::SignOut => {
                 // The session revoked through the domain (pushed while
                 // online, pending until the next sign-in otherwise), and

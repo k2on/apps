@@ -509,7 +509,7 @@ impl Peer {
                 None,
                 None,
             ),
-            Source::Albums | Source::Artists | Source::Composers => (None, None, None),
+            Source::Albums | Source::Artists | Source::Composers | Source::Settings => (None, None, None),
             // Both halves: the work itself, for the header, and its
             // performances. This page may have been reached without opening a
             // composer at all — a link somebody sent — so the row is read by

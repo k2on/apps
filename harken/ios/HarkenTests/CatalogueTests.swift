@@ -8,7 +8,7 @@ import Foundation
 import XCTest
 
 private func work(_ title: String, _ recordings: Int64, _ tracks: Int64, catalogue: String = "") -> WorkSummary {
-    WorkSummary(art: "", catalogue: catalogue, composer: "Johann Sebastian Bach", form: "", id: "bach/" + title, period: "",
+    WorkSummary(art: "", catalogue: catalogue, composer: "Johann Sebastian Bach", description: "", form: "", id: "bach/" + title, period: "",
                 recordings: recordings, title: title, tracks: tracks)
 }
 
@@ -18,7 +18,7 @@ private func take(_ recorded: Int64, tracks: Int64, ms: Int64, performers: Strin
 
 private func detail(_ n: Int, work: String, composer: String = "Handel", track: Int64 = 0) -> TrackDetailsEntry {
     TrackDetailsEntry(album: "Water Music", bpm: 0, catalogue: "", composer: work.isEmpty ? "" : composer, licence: "", mediaId: Fx.id(n),
-                      part: "", performer: "", track: track, work: work)
+                      part: "", performer: "", track: track, work: work, workId: "")
 }
 
 final class CatalogueTests: XCTestCase {

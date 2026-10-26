@@ -180,18 +180,19 @@ public struct ArtistsEntry: Equatable {
     public var art: String
     public var banner: String
     public var born: Int64
+    public var description: String
     public var died: Int64
     public var name: String
     public var tracks: Int64
 
-    public init(art: String, banner: String, born: Int64, died: Int64, name: String, tracks: Int64) { self.art = art; self.banner = banner; self.born = born; self.died = died; self.name = name; self.tracks = tracks; }
+    public init(art: String, banner: String, born: Int64, description: String, died: Int64, name: String, tracks: Int64) { self.art = art; self.banner = banner; self.born = born; self.description = description; self.died = died; self.name = name; self.tracks = tracks; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), born: J.int(o["born"]), died: J.int(o["died"]), name: J.text(o["name"]), tracks: J.int(o["tracks"]))
+        self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), born: J.int(o["born"]), description: J.text(o["description"]), died: J.int(o["died"]), name: J.text(o["name"]), tracks: J.int(o["tracks"]))
     }
 
-    public var json: String { J.obj(["\"art\":" + J.q(art), "\"banner\":" + J.q(banner), "\"born\":" + String(born), "\"died\":" + String(died), "\"name\":" + J.q(name), "\"tracks\":" + String(tracks)]) }
+    public var json: String { J.obj(["\"art\":" + J.q(art), "\"banner\":" + J.q(banner), "\"born\":" + String(born), "\"description\":" + J.q(description), "\"died\":" + String(died), "\"name\":" + J.q(name), "\"tracks\":" + String(tracks)]) }
 }
 
 /// The record `At`.
@@ -235,20 +236,21 @@ public struct ComposersEntry: Equatable {
     public var art: String
     public var banner: String
     public var born: Int64
+    public var description: String
     public var died: Int64
     public var name: String
     public var sortName: String
     public var tracks: Int64
     public var works: Int64
 
-    public init(art: String, banner: String, born: Int64, died: Int64, name: String, sortName: String, tracks: Int64, works: Int64) { self.art = art; self.banner = banner; self.born = born; self.died = died; self.name = name; self.sortName = sortName; self.tracks = tracks; self.works = works; }
+    public init(art: String, banner: String, born: Int64, description: String, died: Int64, name: String, sortName: String, tracks: Int64, works: Int64) { self.art = art; self.banner = banner; self.born = born; self.description = description; self.died = died; self.name = name; self.sortName = sortName; self.tracks = tracks; self.works = works; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), born: J.int(o["born"]), died: J.int(o["died"]), name: J.text(o["name"]), sortName: J.text(o["sort_name"]), tracks: J.int(o["tracks"]), works: J.int(o["works"]))
+        self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), born: J.int(o["born"]), description: J.text(o["description"]), died: J.int(o["died"]), name: J.text(o["name"]), sortName: J.text(o["sort_name"]), tracks: J.int(o["tracks"]), works: J.int(o["works"]))
     }
 
-    public var json: String { J.obj(["\"art\":" + J.q(art), "\"banner\":" + J.q(banner), "\"born\":" + String(born), "\"died\":" + String(died), "\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"tracks\":" + String(tracks), "\"works\":" + String(works)]) }
+    public var json: String { J.obj(["\"art\":" + J.q(art), "\"banner\":" + J.q(banner), "\"born\":" + String(born), "\"description\":" + J.q(description), "\"died\":" + String(died), "\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"tracks\":" + String(tracks), "\"works\":" + String(works)]) }
 }
 
 /// The record `CreatePlaylist`.
@@ -342,15 +344,16 @@ public struct DescribePerson: Equatable {
     public var died: Int64
     public var art: String
     public var banner: String
+    public var description: String
 
-    public init(name: String, sortName: String, born: Int64, died: Int64, art: String, banner: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.banner = banner; }
+    public init(name: String, sortName: String, born: Int64, died: Int64, art: String, banner: String, description: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.banner = banner; self.description = description; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), banner: J.text(o["banner"]))
+        self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), banner: J.text(o["banner"]), description: J.text(o["description"]))
     }
 
-    public var json: String { J.obj(["\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"born\":" + String(born), "\"died\":" + String(died), "\"art\":" + J.q(art), "\"banner\":" + J.q(banner)]) }
+    public var json: String { J.obj(["\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"born\":" + String(born), "\"died\":" + String(died), "\"art\":" + J.q(art), "\"banner\":" + J.q(banner), "\"description\":" + J.q(description)]) }
 }
 
 /// The record `DescribeRecording`.
@@ -381,15 +384,16 @@ public struct DescribeWork: Equatable {
     public var period: String
     public var composed: Int64
     public var art: String
+    public var description: String
 
-    public init(id: String, opus: String, keySig: String, form: String, period: String, composed: Int64, art: String) { self.id = id; self.opus = opus; self.keySig = keySig; self.form = form; self.period = period; self.composed = composed; self.art = art; }
+    public init(id: String, opus: String, keySig: String, form: String, period: String, composed: Int64, art: String, description: String) { self.id = id; self.opus = opus; self.keySig = keySig; self.form = form; self.period = period; self.composed = composed; self.art = art; self.description = description; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: J.text(o["id"]), opus: J.text(o["opus"]), keySig: J.text(o["key_sig"]), form: J.text(o["form"]), period: J.text(o["period"]), composed: J.int(o["composed"]), art: J.text(o["art"]))
+        self.init(id: J.text(o["id"]), opus: J.text(o["opus"]), keySig: J.text(o["key_sig"]), form: J.text(o["form"]), period: J.text(o["period"]), composed: J.int(o["composed"]), art: J.text(o["art"]), description: J.text(o["description"]))
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id), "\"opus\":" + J.q(opus), "\"key_sig\":" + J.q(keySig), "\"form\":" + J.q(form), "\"period\":" + J.q(period), "\"composed\":" + String(composed), "\"art\":" + J.q(art)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id), "\"opus\":" + J.q(opus), "\"key_sig\":" + J.q(keySig), "\"form\":" + J.q(form), "\"period\":" + J.q(period), "\"composed\":" + String(composed), "\"art\":" + J.q(art), "\"description\":" + J.q(description)]) }
 }
 
 /// The record `Device`.
@@ -863,15 +867,16 @@ public struct Person: Equatable {
     public var addedMs: Int64
     public var userId: String
     public var banner: String
+    public var description: String
 
-    public init(name: String, sortName: String, born: Int64, died: Int64, art: String, addedMs: Int64, userId: String, banner: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.addedMs = addedMs; self.userId = userId; self.banner = banner; }
+    public init(name: String, sortName: String, born: Int64, died: Int64, art: String, addedMs: Int64, userId: String, banner: String, description: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.addedMs = addedMs; self.userId = userId; self.banner = banner; self.description = description; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]), banner: J.text(o["banner"]))
+        self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]), banner: J.text(o["banner"]), description: J.text(o["description"]))
     }
 
-    public var json: String { J.obj(["\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"born\":" + String(born), "\"died\":" + String(died), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId), "\"banner\":" + J.q(banner)]) }
+    public var json: String { J.obj(["\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"born\":" + String(born), "\"died\":" + String(died), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId), "\"banner\":" + J.q(banner), "\"description\":" + J.q(description)]) }
 }
 
 /// The record `Play`.
@@ -1439,15 +1444,16 @@ public struct Work: Equatable {
     public var art: String
     public var addedMs: Int64
     public var userId: String
+    public var description: String
 
-    public init(id: String, composer: String, title: String, catalogue: String, opus: String, keySig: String, form: String, period: String, composed: Int64, art: String, addedMs: Int64, userId: String) { self.id = id; self.composer = composer; self.title = title; self.catalogue = catalogue; self.opus = opus; self.keySig = keySig; self.form = form; self.period = period; self.composed = composed; self.art = art; self.addedMs = addedMs; self.userId = userId; }
+    public init(id: String, composer: String, title: String, catalogue: String, opus: String, keySig: String, form: String, period: String, composed: Int64, art: String, addedMs: Int64, userId: String, description: String) { self.id = id; self.composer = composer; self.title = title; self.catalogue = catalogue; self.opus = opus; self.keySig = keySig; self.form = form; self.period = period; self.composed = composed; self.art = art; self.addedMs = addedMs; self.userId = userId; self.description = description; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: J.text(o["id"]), composer: J.text(o["composer"]), title: J.text(o["title"]), catalogue: J.text(o["catalogue"]), opus: J.text(o["opus"]), keySig: J.text(o["key_sig"]), form: J.text(o["form"]), period: J.text(o["period"]), composed: J.int(o["composed"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
+        self.init(id: J.text(o["id"]), composer: J.text(o["composer"]), title: J.text(o["title"]), catalogue: J.text(o["catalogue"]), opus: J.text(o["opus"]), keySig: J.text(o["key_sig"]), form: J.text(o["form"]), period: J.text(o["period"]), composed: J.int(o["composed"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]), description: J.text(o["description"]))
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id), "\"composer\":" + J.q(composer), "\"title\":" + J.q(title), "\"catalogue\":" + J.q(catalogue), "\"opus\":" + J.q(opus), "\"key_sig\":" + J.q(keySig), "\"form\":" + J.q(form), "\"period\":" + J.q(period), "\"composed\":" + String(composed), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id), "\"composer\":" + J.q(composer), "\"title\":" + J.q(title), "\"catalogue\":" + J.q(catalogue), "\"opus\":" + J.q(opus), "\"key_sig\":" + J.q(keySig), "\"form\":" + J.q(form), "\"period\":" + J.q(period), "\"composed\":" + String(composed), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId), "\"description\":" + J.q(description)]) }
 }
 
 /// The record `WorkInput`.
@@ -1469,6 +1475,7 @@ public struct WorkSummary: Equatable {
     public var art: String
     public var catalogue: String
     public var composer: String
+    public var description: String
     public var form: String
     public var id: String
     public var period: String
@@ -1476,14 +1483,14 @@ public struct WorkSummary: Equatable {
     public var title: String
     public var tracks: Int64
 
-    public init(art: String, catalogue: String, composer: String, form: String, id: String, period: String, recordings: Int64, title: String, tracks: Int64) { self.art = art; self.catalogue = catalogue; self.composer = composer; self.form = form; self.id = id; self.period = period; self.recordings = recordings; self.title = title; self.tracks = tracks; }
+    public init(art: String, catalogue: String, composer: String, description: String, form: String, id: String, period: String, recordings: Int64, title: String, tracks: Int64) { self.art = art; self.catalogue = catalogue; self.composer = composer; self.description = description; self.form = form; self.id = id; self.period = period; self.recordings = recordings; self.title = title; self.tracks = tracks; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(art: J.text(o["art"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), form: J.text(o["form"]), id: J.text(o["id"]), period: J.text(o["period"]), recordings: J.int(o["recordings"]), title: J.text(o["title"]), tracks: J.int(o["tracks"]))
+        self.init(art: J.text(o["art"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), description: J.text(o["description"]), form: J.text(o["form"]), id: J.text(o["id"]), period: J.text(o["period"]), recordings: J.int(o["recordings"]), title: J.text(o["title"]), tracks: J.int(o["tracks"]))
     }
 
-    public var json: String { J.obj(["\"art\":" + J.q(art), "\"catalogue\":" + J.q(catalogue), "\"composer\":" + J.q(composer), "\"form\":" + J.q(form), "\"id\":" + J.q(id), "\"period\":" + J.q(period), "\"recordings\":" + String(recordings), "\"title\":" + J.q(title), "\"tracks\":" + String(tracks)]) }
+    public var json: String { J.obj(["\"art\":" + J.q(art), "\"catalogue\":" + J.q(catalogue), "\"composer\":" + J.q(composer), "\"description\":" + J.q(description), "\"form\":" + J.q(form), "\"id\":" + J.q(id), "\"period\":" + J.q(period), "\"recordings\":" + String(recordings), "\"title\":" + J.q(title), "\"tracks\":" + String(tracks)]) }
 }
 
 /// The record `Works`.

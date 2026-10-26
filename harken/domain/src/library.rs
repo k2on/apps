@@ -90,6 +90,7 @@ pub fn work_summary(work: &Work, recordings: i64, tracks: i64) -> WorkSummary {
         art: work.art.clone(),
         catalogue: work.catalogue.clone(),
         composer: work.composer.clone(),
+        description: work.description.clone(),
         form: work.form.clone(),
         id: work.id.clone(),
         period: work.period.clone(),
@@ -202,6 +203,7 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
                 added_ms: person.as_ref().map_or(now, |p| p.added_ms),
                 user_id: person.as_ref().map_or(user.clone(), |p| p.user_id.clone()),
                 banner: or(&input.artist_banner, person.as_ref().map(|p| &p.banner)),
+                description: person.as_ref().map_or(String::new(), |p| p.description.clone()),
             })?;
         }
     }
@@ -225,6 +227,7 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
             art: work.as_ref().map_or(String::new(), |w| w.art.clone()),
             added_ms: work.as_ref().map_or(now, |w| w.added_ms),
             user_id: work.as_ref().map_or(user.clone(), |w| w.user_id.clone()),
+            description: work.as_ref().map_or(String::new(), |w| w.description.clone()),
         })?;
         let movement = db.movement.get(&movement_key);
         db.movement.put(Movement {
@@ -311,7 +314,8 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
 }
 
 /// Say more about a work. A work exists because a song named it, so an
-/// unknown one is refused; every field is fill-if-given.
+/// unknown one is refused; every field is fill-if-given, and one that says
+/// nothing new writes nothing (a catalogue says it again at every sync).
 #[mutator("library.describe_work")]
 pub fn describe_work(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeWork) -> Result<(), Refusal> {
     is_library(ctx)?;
@@ -319,19 +323,24 @@ pub fn describe_work(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeWork) -> Res
         return Err(Refusal(format!("no work {}; a work exists because a song named it", input.id)));
     };
     let or = |given: &str, was: &str| if given.is_empty() { was.to_string() } else { given.to_string() };
-    db.work.update(Work {
+    let next = Work {
         opus: or(&input.opus, &work.opus),
         key_sig: or(&input.key_sig, &work.key_sig),
         form: or(&input.form, &work.form),
         period: or(&input.period, &work.period),
         composed: if input.composed == 0 { work.composed } else { input.composed },
         art: or(&input.art, &work.art),
-        added_ms: ctx.now,
-        ..work
-    })
+        description: or(&input.description, &work.description),
+        ..work.clone()
+    };
+    if next == work {
+        return Ok(());
+    }
+    db.work.update(Work { added_ms: ctx.now, ..next })
 }
 
-/// Say more about a performance; refuses an unknown one.
+/// Say more about a performance; refuses an unknown one, and writes nothing
+/// when it says nothing new.
 #[mutator("library.describe_recording")]
 pub fn describe_recording(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeRecording) -> Result<(), Refusal> {
     is_library(ctx)?;
@@ -339,15 +348,18 @@ pub fn describe_recording(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeRecordi
         return Err(Refusal(format!("no recording {}; one exists because a song is part of it", input.id)));
     };
     let or = |given: &str, was: &str| if given.is_empty() { was.to_string() } else { given.to_string() };
-    db.recording.update(Recording {
+    let next = Recording {
         recorded: if input.recorded == 0 { r.recorded } else { input.recorded },
         venue: or(&input.venue, &r.venue),
         label: or(&input.label, &r.label),
         licence: or(&input.licence, &r.licence),
         art: or(&input.art, &r.art),
-        added_ms: ctx.now,
-        ..r
-    })
+        ..r.clone()
+    };
+    if next == r {
+        return Ok(());
+    }
+    db.recording.update(Recording { added_ms: ctx.now, ..next })
 }
 
 /// Say more about somebody, making the row when it is not there.
@@ -370,6 +382,7 @@ pub fn describe_person(ctx: &Ctx, db: &mut Db<Harken>, input: DescribePerson) ->
         died: int(input.died, p.as_ref().map(|p| p.died)),
         art: text(&input.art, p.as_ref().map(|p| &p.art)),
         banner: text(&input.banner, p.as_ref().map(|p| &p.banner)),
+        description: text(&input.description, p.as_ref().map(|p| &p.description)),
         added_ms: p.as_ref().map_or(ctx.now, |p| p.added_ms),
         user_id: p.as_ref().map_or(ctx.user().to_string(), |p| p.user_id.clone()),
     })
@@ -399,7 +412,7 @@ pub fn credit_recording(ctx: &Ctx, db: &mut Db<Harken>, input: CreditRecording) 
         input.role.clone()
     };
     let credit = db.credit.get((input.recording_id.clone(), input.person_name.clone(), role.clone()));
-    db.credit.put(Credit {
+    let next = Credit {
         recording_id: input.recording_id,
         person_name: input.person_name,
         role,
@@ -415,7 +428,19 @@ pub fn credit_recording(ctx: &Ctx, db: &mut Db<Harken>, input: CreditRecording) 
         },
         added_ms: now,
         user_id: user,
-    })
+    };
+    // The same credit again writes nothing (a catalogue gives it at every
+    // sync).
+    if credit.as_ref().is_some_and(|c| {
+        Credit {
+            added_ms: c.added_ms,
+            user_id: c.user_id.clone(),
+            ..next.clone()
+        } == *c
+    }) {
+        return Ok(());
+    }
+    db.credit.put(next)
 }
 
 /// A look at the media directory asked for: a [`Look`] due now, which the

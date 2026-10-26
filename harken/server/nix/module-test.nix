@@ -47,6 +47,8 @@ let
   noMedia = eval { devAuth = true; mediaPath = null; };
   roles = eval { devAuth = true; roles = { library = [ "alice" "bob" ]; admin = [ "alice" ]; }; };
   adminSet = eval { devAuth = true; admin.bind = "127.0.0.1:8788"; };
+  catalogued = eval { devAuth = true; catalogue = "https://k2on.github.io/classical/catalogue.json"; };
+  catalogueNoMedia = eval { devAuth = true; mediaPath = null; catalogue = "https://k2on.github.io/classical/catalogue.json"; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -73,6 +75,8 @@ let
     [ (!(env dev ? HARKEN_ROLES)) "and none, nothing" ]
     [ (!(env dev ? HARKEN_ADMIN_BIND) && dev.warnings == [ ]) "no admin listener, and nothing to warn about" ]
     [ (says adminSet "the admin page and its explorer were removed") "an admin option set says it is gone" ]
+    [ ((env catalogued).HARKEN_CATALOGUE == "https://k2on.github.io/classical/catalogue.json" && !(env dev ? HARKEN_CATALOGUE)) "a catalogue reaches the server, and none, nothing" ]
+    [ (!(env catalogueNoMedia ? HARKEN_CATALOGUE)) "and is imported only with media to serve it from" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
 in

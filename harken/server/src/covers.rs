@@ -63,13 +63,19 @@ const ALBUM: &[&str] = &["cover", "folder", "front", "album"];
 const BACKDROP: &[&str] = &["backdrop", "fanart"];
 
 /// `/media`: the media root; [`ART`] under it from `art`; and [`COVER`]
-/// under it from the media root again, its version segment dropped. The
+/// under it from the media root again, its version segment dropped. A
+/// catalogue's downloads (`crate::catalogue`) are under
+/// `crate::catalogue::DIR`, from `catalogue`. The
 /// reserved prefixes are matched before the root, and nothing but [`ART`]
 /// is asked of the data directory. `ServeDir` refuses a `..` in each,
 /// decoded or not, and guesses the type from the extension — which is what
 /// a picture extracted under its hash is named with.
-pub fn routes(media: &Path, art: &Path) -> Router {
+pub fn routes(media: &Path, art: &Path, catalogue: &Path) -> Router {
     Router::new()
+        .nest_service(
+            &format!("/media/{}", crate::catalogue::DIR),
+            ServeDir::new(catalogue),
+        )
         .nest_service(&format!("/media/{ART}"), ServeDir::new(art))
         .nest_service(&format!("/media/{COVER}/:version"), ServeDir::new(media))
         .nest_service("/media", ServeDir::new(media))

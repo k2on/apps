@@ -44,6 +44,9 @@ pub enum Source {
     /// One performance, in the order the work goes. The label is who played
     /// it, the only thing that tells two of them apart.
     Recording(String, String),
+    /// What this client and its server do: the library's resync, from the
+    /// account menu. Not in the sidebar.
+    Settings,
 }
 
 impl Source {
@@ -63,6 +66,7 @@ impl Source {
             // it and type it. What that rule forbids is a uuid.
             Source::Work(id, _) => Place::Work(id.clone()),
             Source::Recording(id, _) => Place::Recording(id.clone()),
+            Source::Settings => Place::Settings,
         }
     }
 
@@ -74,7 +78,7 @@ impl Source {
         match self {
             Source::Library | Source::Albums | Source::Artists | Source::Composers => Some("Music"),
             Source::Playlist(..) => Some("Playlists"),
-            Source::Album(_) | Source::Artist(_) | Source::Work(..) | Source::Recording(..) => None,
+            Source::Album(_) | Source::Artist(_) | Source::Work(..) | Source::Recording(..) | Source::Settings => None,
         }
     }
 
@@ -88,7 +92,7 @@ impl Source {
             Source::Albums | Source::Album(_) => glyphs::ALBUM,
             Source::Artists | Source::Artist(_) => glyphs::ARTIST,
             Source::Composers => glyphs::COMPOSER,
-            Source::Work(..) | Source::Recording(..) => glyphs::LIBRARY,
+            Source::Work(..) | Source::Recording(..) | Source::Settings => glyphs::LIBRARY,
             Source::Playlist(..) => glyphs::PLAYLIST,
         }
     }
@@ -99,6 +103,7 @@ impl Source {
             Source::Albums => "Albums",
             Source::Artists => "Artists",
             Source::Composers => "Composers",
+            Source::Settings => "Settings",
             Source::Playlist(_, name) | Source::Album(name) | Source::Artist(name) | Source::Work(_, name) | Source::Recording(_, name) => name,
         }
     }
@@ -141,6 +146,7 @@ pub enum Place {
     /// inside one is why a fragment splits on the *first* separator only.
     Work(String),
     Recording(String),
+    Settings,
 }
 
 impl Route for Place {
@@ -156,6 +162,7 @@ impl Route for Place {
             Place::Composer(n) => ("composer", Some(n)),
             Place::Work(n) => ("work", Some(n)),
             Place::Recording(n) => ("recording", Some(n)),
+            Place::Settings => ("settings", None),
         };
         join(kind, name.map(String::as_str))
     }
@@ -173,6 +180,7 @@ impl Route for Place {
             ("composer", Some(n)) => Place::Composer(n),
             ("work", Some(n)) => Place::Work(n),
             ("recording", Some(n)) => Place::Recording(n),
+            ("settings", None) => Place::Settings,
             _ => Place::Library,
         }
     }

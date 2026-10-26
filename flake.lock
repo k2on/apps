@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "classical": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792983204,
+        "narHash": "sha256-tEBrWjyOCS2FyXEbfavN59fp88j09RnHmfMJf0sFSfc=",
+        "ref": "main",
+        "rev": "7e93c75de9dc8e6863d366c2c7d10796248a6ba2",
+        "revCount": 1,
+        "type": "git",
+        "url": "https://github.com/k2on/classical"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "https://github.com/k2on/classical"
+      }
+    },
     "crane": {
       "locked": {
         "lastModified": 1745454774,
@@ -30,6 +47,7 @@
     },
     "root": {
       "inputs": {
+        "classical": "classical",
         "crane": "crane",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay"

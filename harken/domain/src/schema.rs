@@ -51,6 +51,9 @@ pub struct Person {
     /// a default it cannot be read at all.
     #[serde(default)]
     pub banner: String,
+    /// A few sentences about them, for their page. Defaulted, as `banner`.
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
@@ -69,6 +72,10 @@ pub struct Work {
     pub art: String,
     pub added_ms: i64,
     pub user_id: String,
+    /// A few sentences about it, for its page. Defaulted, as
+    /// `Person::banner`: a row written before it was added has none.
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]

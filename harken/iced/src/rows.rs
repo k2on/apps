@@ -126,6 +126,7 @@ pub struct Artist {
     pub banner: String,
     pub born: i64,
     pub died: i64,
+    pub description: String,
 }
 
 impl From<ArtistsEntry> for Artist {
@@ -137,6 +138,7 @@ impl From<ArtistsEntry> for Artist {
             banner: e.banner,
             born: e.born,
             died: e.died,
+            description: e.description,
         }
     }
 }
@@ -158,6 +160,7 @@ pub struct Composer {
     pub tracks: i64,
     pub art: String,
     pub banner: String,
+    pub description: String,
 }
 
 impl From<ComposersEntry> for Composer {
@@ -171,6 +174,7 @@ impl From<ComposersEntry> for Composer {
             tracks: e.tracks,
             art: e.art,
             banner: e.banner,
+            description: e.description,
         }
     }
 }
@@ -194,6 +198,7 @@ pub struct Work {
     pub recordings: i64,
     pub tracks: i64,
     pub art: String,
+    pub description: String,
 }
 
 impl From<WorkSummary> for Work {
@@ -208,6 +213,7 @@ impl From<WorkSummary> for Work {
             recordings: e.recordings,
             tracks: e.tracks,
             art: e.art,
+            description: e.description,
         }
     }
 }

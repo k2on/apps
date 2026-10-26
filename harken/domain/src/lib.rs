@@ -15,6 +15,7 @@ use ark::peer::Ctx;
 use ark::prelude::scope;
 
 pub mod browse;
+pub mod catalogue;
 pub mod devices;
 pub mod groups;
 pub mod host;

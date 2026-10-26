@@ -21,7 +21,7 @@ import org.junit.Test
 
 class CatalogueTests {
     private fun work(title: String, recordings: Long, tracks: Long, catalogue: String = "") =
-        WorkSummary("", catalogue, "Johann Sebastian Bach", "", "bach/" + title.lowercase(), "", recordings, title, tracks)
+        WorkSummary("", catalogue, "Johann Sebastian Bach", "", "", "bach/" + title.lowercase(), "", recordings, title, tracks)
 
     private fun take(performers: String, recorded: Long = 0, tracks: Long = 3, ms: Long = 0, licence: String = "") =
         RecordingsEntry("", ms, "w@" + performers.lowercase(), "", licence, performers, recorded, tracks)

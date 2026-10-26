@@ -54,6 +54,9 @@ pub struct DescribeWork {
     pub composed: i64,
     #[ark(trim)]
     pub art: String,
+    /// A few sentences about it; empty leaves what is there.
+    #[ark(trim)]
+    pub description: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -82,6 +85,9 @@ pub struct DescribePerson {
     pub art: String,
     #[ark(trim)]
     pub banner: String,
+    /// A few sentences about them; empty leaves what is there.
+    #[ark(trim)]
+    pub description: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -213,6 +219,7 @@ pub struct ArtistsEntry {
     pub banner: String,
     /// The years they lived, where `person` has them: 0 for unknown.
     pub born: i64,
+    pub description: String,
     pub died: i64,
     pub name: String,
     pub tracks: i64,
@@ -243,6 +250,7 @@ pub struct ComposersEntry {
     pub art: String,
     pub banner: String,
     pub born: i64,
+    pub description: String,
     pub died: i64,
     pub name: String,
     pub sort_name: String,
@@ -256,6 +264,7 @@ pub struct WorkSummary {
     pub art: String,
     pub catalogue: String,
     pub composer: String,
+    pub description: String,
     pub form: String,
     pub id: String,
     pub period: String,

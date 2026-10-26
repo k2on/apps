@@ -59,7 +59,7 @@ fn the_top_bar_has_no_account_buttons() {
     let main = include_str!("../main.rs");
     assert!(!main.contains("ToggleLink"), "a message still goes offline on purpose");
     let app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
-    assert_eq!(labels(&app), ["Sign out"]);
+    assert_eq!(labels(&app), ["Settings", "Sign out"]);
 }
 
 /// What the menu offers: signed in, signing out; turned away, signing out
@@ -208,4 +208,36 @@ fn the_demo_is_alone() {
     let a = app.account().expect("the demo has an account button");
     assert!(a.entries.is_empty(), "{:?}", a.entries);
     assert!(a.header.starts_with("A demo"), "{}", a.header);
+}
+
+/// Settings, from the account menu: its page has a route of its own, and
+/// its Resync asks the server for a full look — its music walked again and
+/// its catalogue synced — which only the library's role may ask: without
+/// it, Settings says why. Falsified by `Resync` authoring nothing: no
+/// edit was pending; and by the menu's entry opening another page.
+#[test]
+#[cfg(not(feature = "demo"))]
+fn settings_resyncs_the_library_for_the_library_alone() {
+    use crate::places::{Place, Source};
+    use arkui::route::Route;
+    assert_eq!(Place::parse(&Place::Settings.fragment()), Place::Settings, "#settings is a page");
+    let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
+    let entry = app.account().unwrap().entries.remove(0);
+    let _ = app.update(entry.message().clone());
+    assert_eq!(app.peer.source, Source::Settings, "the menu's first entry opens Settings");
+    let _ = app.update(Message::Resync);
+    assert_eq!(app.edits.last().map(|e| e.what.as_str()), Some("resync the library"));
+    assert!(app.resync.as_deref().unwrap_or("").starts_with("Asked"), "{:?}", app.resync);
+
+    // Somebody without the library's role.
+    let plain = crate::peer::Peer::open(crate::client::memory(super::who("bob"), Some("dev")));
+    let mut app = App::with_peer(plain, "http://127.0.0.1:9".into(), Some(login("bob")));
+    let _ = app.update(Message::Select(Source::Settings));
+    let _ = app.update(Message::Resync);
+    assert!(app.edits.is_empty(), "nothing asked");
+    assert!(
+        app.resync.as_deref().unwrap_or("").contains("could not resync the library"),
+        "{:?}",
+        app.resync
+    );
 }
