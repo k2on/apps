@@ -1,13 +1,18 @@
 //! Numbers as people say them: a length, a span of years, a count of things.
 
-/// Seconds as `m:ss`, which is how long one piece is written down. Empty for
-/// something that is not a length yet (a stream that has not reported one).
+/// Seconds as `m:ss`, which is how long one piece is written down, and as
+/// `h:mm:ss` from an hour — an episode of two is `2:01:43`, not `121:43`.
+/// Empty for something that is not a length yet (a stream that has not
+/// reported one).
 pub fn clock(secs: f64) -> String {
     if !secs.is_finite() || secs < 0.0 {
         return String::new();
     }
     let secs = secs as u64;
-    format!("{}:{:02}", secs / 60, secs % 60)
+    match secs / 3600 {
+        0 => format!("{}:{:02}", secs / 60, secs % 60),
+        h => format!("{h}:{:02}:{:02}", secs / 60 % 60, secs % 60),
+    }
 }
 
 /// How long a whole record runs, in the units people say it in.
@@ -55,6 +60,9 @@ mod tests {
     fn a_length_is_said_the_way_people_say_it() {
         assert_eq!(clock(261.9), "4:21");
         assert_eq!(clock(f64::NAN), "");
+        assert_eq!(clock(3599.0), "59:59");
+        assert_eq!(clock(7123.0), "1:58:43", "an episode of two hours");
+        assert_eq!(clock(3600.0 * 10.0 + 5.0), "10:00:05");
         assert_eq!(spell(150 * 60_000 + 37_000), "2 hr 30 min");
         assert_eq!(spell(60 * 60_000), "1 hr");
         assert_eq!(spell(42 * 60_000), "42 min");

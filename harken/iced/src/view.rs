@@ -30,7 +30,7 @@ const TRACK: Length = Length::Fixed(30.0);
 const NAME: Length = Length::FillPortion(5);
 const ARTIST: Length = Length::FillPortion(3);
 const ALBUM: Length = Length::FillPortion(4);
-const TIME: Length = Length::Fixed(56.0);
+const TIME: Length = Length::Fixed(64.0);
 /// Where a section heading starts: over the track numbers, not out in the
 /// transport's gutter.
 const SECTION_INDENT: f32 = 35.0;
@@ -60,7 +60,7 @@ const FEATURED_ART: f32 = 160.0;
 const BAR_ART: f32 = 44.0;
 const NOW_WIDTH: f32 = 280.0;
 /// A clock beside the seek bar: room for `1:23:45` at 11px.
-const CLOCK_WIDTH: f32 = 40.0;
+const CLOCK_WIDTH: f32 = 48.0;
 /// Between the bar's groups: the transport, what plays, the seek bar, and
 /// each control after it.
 const BAR_SPACING: f32 = 16.0;
