@@ -23,7 +23,8 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
-use ark::store::Store;
+use ark::row::Row;
+use ark::store::{Change, Store};
 use ark_peer::{Config, Live, Module};
 use arkdb::sim::{Net, Op};
 use common::domain;
@@ -107,6 +108,22 @@ impl House {
 
     fn arrive(&mut self, device: &str, can_play: bool) {
         self.arrive_as("alice", device, "computer", can_play)
+    }
+
+    /// `device` signed out: its session's sign-in revoked, as
+    /// `session.revoke` leaves it, before the hub closes its connections.
+    fn signed_out(&mut self, device: &str) {
+        let row = ark_auth::SignIn {
+            id: device.into(),
+            user: "alice".into(),
+            revoked: true,
+            ..Default::default()
+        };
+        let c = Change::Add {
+            table: ark_auth::SignIn::TABLE.into(),
+            row: row.to_bytes(),
+        };
+        self.store.apply(&c).unwrap();
     }
 
     /// Its connection goes: `on_leave`. Not a decision about the music.
@@ -260,6 +277,26 @@ fn the_sound_stays_with_a_device_whose_socket_went() {
     );
     assert!(s.device("laptop").is_none(), "gone from who is here");
     assert!(s.device("phone").is_some());
+}
+
+/// A device that signed out is not coming back — signing in again is
+/// another session, so another device — so the sound it had goes nowhere
+/// rather than away: the queue kept, paused, for whichever device plays
+/// next, and no second phone in the picker. Falsified by an `on_leave`
+/// that did not look at the sign-in: the output read away.
+#[test]
+fn the_sound_of_a_device_that_signed_out_goes_nowhere() {
+    let mut h = House::new();
+    h.arrive("phone", true);
+    h.arrive("laptop", true);
+    h.playing_on("phone", 40_000);
+    h.wait(2_000);
+    h.signed_out("phone");
+    h.leave("phone");
+    let s = h.state();
+    assert_eq!(output(&s), Output::Nowhere, "nobody has the sound");
+    assert_eq!(clock(&s), Clock::Paused { at_ms: 42_000 }, "paused where it had got to");
+    assert!(s.device("phone").is_none());
 }
 
 /// …and when the laptop comes back it has the sound again, still paused.

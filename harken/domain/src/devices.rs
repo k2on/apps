@@ -184,21 +184,27 @@ pub fn on_join(_: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result
 }
 
 /// A device leaving is gone, and so is its group; the output leaving keeps
-/// the sound, away, the clock stopped.
+/// the sound, away, the clock stopped — unless it signed out (its session,
+/// which is its id, revoked): signing in again is another session, so
+/// another device, and the sound goes nowhere, kept for whichever plays.
 #[live("listening.on_leave")]
 pub fn on_leave(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), Refusal> {
     let (user, id) = (device.user.clone(), device.id.clone());
     dissolved(db, &user, &id)?;
     db.listening_device.delete(key(&user, &id))?;
     db.listening_scrub.delete(key(&user, &id))?;
+    let signed_out = db.sign_in.get(id.clone()).is_some_and(|s| s.revoked);
     let session = session_of(db, &user);
     let next = match &session {
         Session::Active { active } if is_output(&session, &id) => Session::Active {
             active: Active {
                 clock: halted(&active.clock, &active.output, ctx.now),
-                output: Output::Away {
-                    id: id.clone(),
-                    name: device.name.clone(),
+                output: match signed_out {
+                    true => Output::Nowhere,
+                    false => Output::Away {
+                        id: id.clone(),
+                        name: device.name.clone(),
+                    },
                 },
                 ..active.clone()
             },
