@@ -304,7 +304,7 @@ struct Avatar: View {
         let rgb = set[Art.pick(set.count, name)]
         ZStack {
             Circle().fill(Color(uiColor: UIColor(rgb: rgb)))
-            Text(Avatar.initials(name))
+            Text(Spell.initials(name))
                 .font(.system(size: side * 0.4, weight: .semibold))
                 .foregroundStyle(Avatar.ink(on: rgb))
             if let i = image ?? (picture.isEmpty ? nil : Covers.shared.cached(picture, side: side)) {
@@ -318,16 +318,6 @@ struct Avatar: View {
             if picture.isEmpty { return }
             image = await Covers.shared.load(picture, side: side)
         }
-    }
-
-    /// The first letters of the name's first and last words, upper case:
-    /// `Ada Lovelace` is `AL`, `Ada` is `A` — the desktop's `Who::initials`.
-    static func initials(_ name: String) -> String {
-        func first(_ w: Substring) -> Character? { w.first { $0.isLetter || $0.isNumber } }
-        let words = name.split(whereSeparator: { $0.isWhitespace }).filter { first($0) != nil }
-        guard let a = words.first.flatMap(first) else { return "" }
-        guard words.count > 1, let z = words.last.flatMap(first) else { return String(a).uppercased() }
-        return (String(a) + String(z)).uppercased()
     }
 
     /// Black or white, whichever reads on `rgb`: the desktop's rule, on the same colours.

@@ -189,12 +189,12 @@ final class OnboardingTests: XCTestCase {
     /// A face without a picture says the first and last words' initials, as
     /// the desktop's and Android's do. Falsified by taking the second word's: `JS`.
     func testAFaceSaysWhoByItsInitials() {
-        XCTAssertEqual(Avatar.initials("Ada"), "A")
-        XCTAssertEqual(Avatar.initials("Johann Sebastian Bach"), "JB")
-        XCTAssertEqual(Avatar.initials("  ada   lovelace "), "AL")
-        XCTAssertEqual(Avatar.initials("user-0123"), "U")
-        XCTAssertEqual(Avatar.initials(""), "")
-        XCTAssertEqual(Avatar.initials("\u{e9}mile (\u{2014})"), "\u{c9}")
+        XCTAssertEqual(Spell.initials("Ada"), "A")
+        XCTAssertEqual(Spell.initials("Johann Sebastian Bach"), "JB")
+        XCTAssertEqual(Spell.initials("  ada   lovelace "), "AL")
+        XCTAssertEqual(Spell.initials("user-0123"), "U")
+        XCTAssertEqual(Spell.initials(""), "")
+        XCTAssertEqual(Spell.initials("\u{e9}mile (\u{2014})"), "\u{c9}")
     }
 }
 
