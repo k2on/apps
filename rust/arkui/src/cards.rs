@@ -152,7 +152,7 @@ pub fn view_card<'a, M: Clone + 'a>(side: f32, card: &Card<M>, on_cursor: bool, 
             // Bounded, and allowed to wrap. Unbounded with `Wrapping::None` the
             // layout node is as wide as the text, so a long title ran straight
             // through the card beside it.
-            text(card.title.clone())
+            text(crate::fit::drawable(&card.title).into_owned())
                 .size(13)
                 .width(Length::Fixed(side))
                 .style(move |theme| text::Style {
@@ -161,7 +161,10 @@ pub fn view_card<'a, M: Clone + 'a>(side: f32, card: &Card<M>, on_cursor: bool, 
                         false => crate::theme::of(theme).background.base.text,
                     }),
                 }),
-            text(card.under.clone()).size(12).width(Length::Fixed(side)).style(style::faint(0.5)),
+            text(crate::fit::drawable(&card.under).into_owned())
+                .size(12)
+                .width(Length::Fixed(side))
+                .style(style::faint(0.5)),
         ]
         .spacing(4)
         .width(Length::Fixed(side)),
@@ -207,12 +210,18 @@ pub fn header<'a, M: Clone + 'a>(
             picture,
             column![
                 Line::new(kind, 10.0, Cut::End, faint),
-                text(name).size(28).font(crate::hero::BOLD).wrapping(text::Wrapping::Word),
+                text(crate::fit::drawable(&name).into_owned())
+                    .size(28)
+                    .font(crate::hero::BOLD)
+                    .wrapping(text::Wrapping::Word),
                 match open_under {
                     Some(open) => Element::from(mouse_area(under_line(under)).on_press(open)),
                     None => under_line(under).into(),
                 },
-                text(facts).size(11).wrapping(text::Wrapping::Word).style(style::faint(0.5)),
+                text(crate::fit::drawable(&facts).into_owned())
+                    .size(11)
+                    .wrapping(text::Wrapping::Word)
+                    .style(style::faint(0.5)),
             ]
             .spacing(4)
             .width(Length::Fill),

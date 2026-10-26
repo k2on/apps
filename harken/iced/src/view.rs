@@ -6,7 +6,7 @@
 //! theme iced picked. And nothing here decides anything — which grid has the
 //! keyboard, where a panel goes, how many cards fit are all answered in
 //! `main.rs`, the same numbers the keyboard uses.
-use arkui::fit::Cut;
+use arkui::fit::{drawable, Cut};
 use arkui::format::{clock, plural, span, spell};
 use arkui::line::Line;
 use arkui::{account, art, cards, fit, glyphs, hero, icon, layer, menu, panel, picker, style, table, SCROLLBAR};
@@ -544,7 +544,12 @@ impl App {
         if let Some(line) = over.filter(|o| !o.is_empty()) {
             words = words.push(self.name(l, Mark::Over, line.to_uppercase(), 11.0, |t| style::faint(0.6)(t)));
         }
-        words = words.push(text(title.to_string()).size(26).font(hero::BOLD).wrapping(text::Wrapping::Word));
+        words = words.push(
+            text(drawable(title).into_owned())
+                .size(26)
+                .font(hero::BOLD)
+                .wrapping(text::Wrapping::Word),
+        );
         let by: Vec<String> = crate::nav::names(by).into_iter().map(str::to_string).collect();
         if !by.is_empty() {
             words = words.push(self.names(l, &by, Mark::By, 16.0, style::accent));
@@ -594,12 +599,15 @@ impl App {
         // on dark.
         let mut words = column![
             text(label.to_uppercase()).size(10).style(style::faint(0.5)),
-            text(title).size(17).wrapping(text::Wrapping::Word).style(move |t| text::Style {
-                color: Some(match on {
-                    true => arkui::theme::of(t).primary.base.color,
-                    false => style::entry_text(t, false),
+            text(drawable(&title).into_owned())
+                .size(17)
+                .wrapping(text::Wrapping::Word)
+                .style(move |t| text::Style {
+                    color: Some(match on {
+                        true => arkui::theme::of(t).primary.base.color,
+                        false => style::entry_text(t, false),
+                    }),
                 }),
-            }),
         ]
         .spacing(3);
         if !facts.is_empty() {
@@ -786,7 +794,7 @@ impl App {
             let on = self.on(l, Mark::Person(i));
             let face = column![
                 self.picture(&name, &art, 96.0, 48.0),
-                text(name.clone())
+                text(drawable(&name).into_owned())
                     .size(12)
                     .align_x(Alignment::Center)
                     .wrapping(text::Wrapping::Word)
@@ -1053,7 +1061,12 @@ impl App {
             let crumb = format!("{}  \u{203A}", composer.to_uppercase());
             head = head.push(self.name(&l, Mark::Over, crumb, 12.0, |t| style::faint(0.6)(t)));
         }
-        head = head.push(text(title.to_string()).size(28).font(hero::BOLD).wrapping(text::Wrapping::Word));
+        head = head.push(
+            text(drawable(title).into_owned())
+                .size(28)
+                .font(hero::BOLD)
+                .wrapping(text::Wrapping::Word),
+        );
         let facts = work
             .map(|w| {
                 // The catalogue number once: not again under a title that
@@ -1967,7 +1980,7 @@ fn about<'a>(description: &str) -> Option<Element<'a, Message>> {
     if description.is_empty() {
         return None;
     }
-    let words = text(description.to_string())
+    let words = text(drawable(description).into_owned())
         .size(14)
         .line_height(1.45)
         .style(style::faint(0.8))

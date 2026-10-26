@@ -29,8 +29,10 @@ impl<'a> Line<'a> {
     /// `body` at `size`, losing the part `cut` says when it does not fit,
     /// drawn in `color`.
     pub fn new(body: impl Into<String>, size: f32, cut: fit::Cut, color: impl Fn(&Theme) -> iced::Color + 'a) -> Self {
+        let body: String = body.into();
         Line {
-            body: body.into(),
+            // What the typeface cannot draw, spelt in what it can.
+            body: fit::drawable(&body).into_owned(),
             size,
             cut,
             color: Box::new(color),

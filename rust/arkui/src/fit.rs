@@ -192,3 +192,49 @@ mod tests {
         assert_eq!(within("Johann Sebastian Bach", 55.0, Cut::End, advance), "Johann\u{2026}");
     }
 }
+
+/// `body` with what the typeface cannot draw spelt in what it can: the
+/// compatibility characters a title carries for their look — Roman numerals
+/// (`NixCon 2026 Day Ⅰ`), full-width Latin, the Latin ligatures — as the
+/// letters they stand for, which is their compatibility decomposition. Fira
+/// Sans has none of them, and a browser has no system font to fall back on,
+/// so each was a box. Anything else is left as it is.
+pub fn drawable(body: &str) -> std::borrow::Cow<'_, str> {
+    const ROMAN: [&str; 16] = [
+        "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "L", "C", "D", "M",
+    ];
+    let folds = |c: char| matches!(c as u32, 0x2160..=0x217f | 0xff01..=0xff5e | 0xfb00..=0xfb04);
+    if !body.chars().any(folds) {
+        return std::borrow::Cow::Borrowed(body);
+    }
+    let mut out = String::with_capacity(body.len());
+    for c in body.chars() {
+        match c as u32 {
+            n @ 0x2160..=0x216f => out.push_str(ROMAN[(n - 0x2160) as usize]),
+            n @ 0x2170..=0x217f => out.push_str(&ROMAN[(n - 0x2170) as usize].to_lowercase()),
+            n @ 0xff01..=0xff5e => out.push(char::from_u32(n - 0xfee0).unwrap_or(c)),
+            0xfb00 => out.push_str("ff"),
+            0xfb01 => out.push_str("fi"),
+            0xfb02 => out.push_str("fl"),
+            0xfb03 => out.push_str("ffi"),
+            0xfb04 => out.push_str("ffl"),
+            _ => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+#[cfg(test)]
+mod drawable_tests {
+    use super::drawable;
+
+    /// Falsified by leaving U+2160 as it is: the episode's title was a box.
+    #[test]
+    fn what_the_typeface_lacks_is_spelt_in_what_it_has() {
+        assert_eq!(drawable("NixCon 2026 Day \u{2160}"), "NixCon 2026 Day I");
+        assert_eq!(drawable("Act \u{216b}, scene \u{2173}"), "Act XII, scene iv");
+        assert_eq!(drawable("\u{ff28}\u{ff41}\u{ff52}\u{ff4b}\u{ff45}\u{ff4e}"), "Harken");
+        assert_eq!(drawable("\u{fb01}ne"), "fine");
+        assert!(matches!(drawable("Bourrée — Air"), std::borrow::Cow::Borrowed("Bourrée — Air")));
+    }
+}
