@@ -15,10 +15,10 @@
    "zip": "sha256-0jDxOEL2D3gqhkX5yBP4+EW/NgiepyifKMSPF5eTE/E="
   },
   "android/repository/repository2-2": {
-   "xml": "sha256-OvLwVycC6zpByLfHH/i2VhKkW+WSXGU3X8yzenX1ghI="
+   "xml": "sha256-osyAqJ3VW56bBPGcHbUkgnEROjpiEdaa7ApkIT3UMzk="
   },
   "android/repository/repository2-3": {
-   "xml": "sha256-8rxiTI4dwUwyD98X5JpVAcNZNJSORqRE34s2oTigPh4="
+   "xml": "sha256-XDdFZrAJPJjhIas84p02tvkWaSOgXDysGVjILem3AmE="
   },
   "android/repository/sys-img/android-automotive-distantdisplay/sys-img2-4": {
    "xml": "sha256-p4UwNE0c09B6iRYWAqBCqwhUMMUTwJ7tcinAWIbtl1s="
@@ -36,7 +36,7 @@
    "xml": "sha256-e58y+YJJYtYzHodht4ZdUjnbjAuL2md6UNGWXnrHm4U="
   },
   "android/repository/sys-img/android-wear/sys-img2-4": {
-   "xml": "sha256-I7eNaHzYdubf03RiH579eKNFtfJisHDkM/8/X7nVOfU="
+   "xml": "sha256-TvMTkkE4rIgUEm4lDA9j87Rw2rJMs3qyhoYgDGdRJhU="
   },
   "android/repository/sys-img/android/sys-img2-4": {
    "xml": "sha256-Pc+gn/1vlwqzRIFeLYgCCzFnn7+83bGbr6GCGl4W3wg="
