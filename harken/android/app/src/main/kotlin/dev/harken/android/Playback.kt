@@ -1210,15 +1210,15 @@ class Playback(
      * order, this track first — the session's way and the player's alike, so what is drawn is what
      * plays.
      */
-    fun play(queue: List<Track>, at: Int, albumOf: (Track) -> Album?, shuffled: Boolean = false, from: String = "") {
+    fun play(queue: List<Track>, at: Int, albumOf: (Track) -> Album?, shuffled: Boolean = false, from: String = "", positionMs: Long = 0) {
         if (queue.isEmpty()) return
         val start = at.coerceIn(0, queue.size - 1)
         val list = if (shuffled) listOf(queue[start]) + (queue.take(start) + queue.drop(start + 1)).shuffled() else queue
         val first = if (shuffled) 0 else start
-        press(Press.Start(list.map { queued(it, albumOf) }, first, 0, from)) {
+        press(Press.Start(list.map { queued(it, albumOf) }, first, positionMs, from)) {
             val c = controller ?: return@press
             this.shuffled = shuffled
-            c.setMediaItems(list.map { t -> Items.of(queued(t, albumOf), server, albumOf(t)?.art ?: "", from) }, first, 0)
+            c.setMediaItems(list.map { t -> Items.of(queued(t, albumOf), server, albumOf(t)?.art ?: "", from) }, first, positionMs)
             c.prepare()
             c.play()
         }

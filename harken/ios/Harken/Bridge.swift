@@ -51,6 +51,10 @@ struct Snapshot {
     var subscriptions = [SubscriptionsEntry]()
     /// The files the server has not got yet, by their media id.
     var downloads = [Id: DownloadsEntry]()
+    /// How far the signed-in person has got in each episode, by its media id.
+    var mine = [Id: ProgressEntry]()
+    /// How far everybody has listened to a held show's episodes, by its key.
+    var progress = [String: [ProgressEntry]]()
     var details = [Id: TrackDetailsEntry]()
     /// The newest play in the log, this person's.
     var lastPlayed: Play? = nil
@@ -177,6 +181,8 @@ final class Bridge {
     private let shows = Held<ShowsEntry> { try $0.shows() }
     private let subscriptions = Held<SubscriptionsEntry> { try $0.subscriptions() }
     private let downloads = Held<DownloadsEntry> { try $0.downloads() }
+    private let mine = Held<ProgressEntry> { try $0.myProgress() }
+    private let progress = Holds<ProgressEntry> { h, show in try h.showProgress(ShowInput(playlistId: Phone.noPlaylist, id: show)) }
     private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
     private let played = Held<Play> { try $0.lastPlayed() }
     private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
@@ -253,6 +259,7 @@ final class Bridge {
             self.shows.hydrate(h)
             self.subscriptions.hydrate(h)
             self.downloads.hydrate(h)
+            self.mine.hydrate(h)
             self.details.hydrate(h)
             self.played.hydrate(h)
             self.snap.artists = self.artists.rows
@@ -260,11 +267,18 @@ final class Bridge {
             self.snap.shows = self.shows.rows
             self.snap.subscriptions = self.subscriptions.rows
             self.snap.downloads = Bridge.downloadsByMedia(self.downloads.rows)
+            self.snap.mine = Bridge.mineByMedia(self.mine.rows)
             self.snap.details = Bridge.byMedia(self.details.rows)
             self.snap.lastPlayed = self.played.rows.first
             self.snap.complete = true
             self.show()
         }
+    }
+
+    private static func mineByMedia(_ rows: [ProgressEntry]) -> [Id: ProgressEntry] {
+        var m = [Id: ProgressEntry](minimumCapacity: rows.count)
+        for r in rows { m[r.mediaId] = r }
+        return m
     }
 
     private static func downloadsByMedia(_ rows: [DownloadsEntry]) -> [Id: DownloadsEntry] {
@@ -317,6 +331,8 @@ final class Bridge {
         if shows.update() { snap.shows = shows.rows }
         if subscriptions.update() { snap.subscriptions = subscriptions.rows }
         if downloads.update() { snap.downloads = Bridge.downloadsByMedia(downloads.rows) }
+        if mine.update() { snap.mine = Bridge.mineByMedia(mine.rows) }
+        for (k, rows) in progress.update() { snap.progress[k] = rows }
         if details.update() { snap.details = Bridge.byMedia(details.rows) }
         if played.update() { snap.lastPlayed = played.rows.first }
         for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }
@@ -423,6 +439,9 @@ final class Bridge {
         case let .credits(k):
             guard let rows = credits.hold(k, h) else { return false }
             snap.credits[k] = rows
+        case let .progress(k):
+            guard let rows = progress.hold(k, h) else { return false }
+            snap.progress[k] = rows
         }
         return true
     }
@@ -448,6 +467,7 @@ final class Bridge {
         case let .work(k): if work.release(k) { snap.work[k] = nil }
         case let .recordings(k): if recordings.release(k) { snap.recordings[k] = nil }
         case let .credits(k): if credits.release(k) { snap.credits[k] = nil }
+        case let .progress(k): if progress.release(k) { snap.progress[k] = nil }
         }
     }
 
@@ -468,6 +488,20 @@ final class Bridge {
 
     /// The library's songs matching `needle`, by the domain's `search`.
     func search(_ needle: String, done: @escaping ([LibraryEntry]) -> Void) { ask([], { Phone.search($0, needle) }, done) }
+
+    /// Episodes' chapters once, each in order, by media id.
+    func chapters(_ media: [Id], done: @escaping ([Id: [ChaptersEntry]]) -> Void) {
+        ask([:], { h in
+            var out = [Id: [ChaptersEntry]]()
+            for m in media { out[m] = Phone.once({ try h.chapters(EpisodeInput(mediaId: m)) }) }
+            return out
+        }, done)
+    }
+
+    /// An episode said played, or not, by the signed-in person.
+    func markPlayed(_ track: LibraryEntry, _ finished: Bool) {
+        onPeer { h in self.record(Phone.markPlayed(h, track.id, finished), "mark \(track.title) \(finished ? "played" : "unplayed")", "Couldn't mark it") }
+    }
 
     /// Which of the person's playlists `track` is on.
     func playlistsOf(_ track: LibraryEntry, done: @escaping (Set<Id>) -> Void) {
@@ -556,6 +590,7 @@ final class Bridge {
             self.work.clear()
             self.recordings.clear()
             self.credits.clear()
+            self.progress.clear()
             self.harken = nil
         }
     }

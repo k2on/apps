@@ -206,9 +206,14 @@ struct Scrubber: View {
     var body: some View {
         let s = model.player
         let total = Double(max(s.durationMs, 1))
+        let chapters = s.now.flatMap { model.chapters[Id($0.id)] } ?? []
         TimelineView(.periodic(from: .now, by: 0.5)) { t in
             let at = dragging ?? Double(s.scrubbing ?? s.position(Int64(t.date.timeIntervalSince1970 * 1000))) / total
             VStack(spacing: 2) {
+                // The chapter it is in, for an episode that has them.
+                if let c = ChaptersEntry.at(chapters, Int64(at * total)), !c.title.isEmpty {
+                    Text(c.title).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Slider(value: Binding(get: { min(max(at, 0), 1) }, set: { v in
                     dragging = v
                     model.scrub(Int64(v * total))
@@ -229,6 +234,7 @@ struct Scrubber: View {
                 .foregroundStyle(.secondary)
             }
         }
+        .task(id: s.now?.id) { if let n = s.now { model.loadChapters([Id(n.id)]) } }
     }
 }
 

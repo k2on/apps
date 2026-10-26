@@ -105,6 +105,9 @@ object Idle : Do
  */
 val LocalDownloads = compositionLocalOf<Map<dev.arkdb.ffi.Id, Download>> { emptyMap() }
 
+/** The chapters of what plays, in order; none for a song or an episode without. */
+val LocalChapters = compositionLocalOf<List<Chapter>> { emptyList() }
+
 /**
  * One track, as every list draws it: what stands at its start (a cover, or its number on the
  * release), its title — in the gold while it plays — whoever made it, its length, and its menu.

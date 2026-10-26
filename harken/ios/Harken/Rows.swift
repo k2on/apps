@@ -68,6 +68,36 @@ extension ShowsEntry: Identifiable, Hashable {
 
 extension RecordingsEntry: Identifiable {}
 
+/// How far somebody has listened to an episode (`my_progress`,
+/// `show_progress`) — the desktop's `Listened`.
+extension ProgressEntry {
+    /// How far, short: played, or a share of it.
+    var short: String {
+        if finished { return "played" }
+        if durationMs > 0 { return "\(min(max(positionMs * 100 / durationMs, 0), 99))%" }
+        return "started"
+    }
+
+    /// Where a play of it starts: a few seconds before where they stopped;
+    /// from the start once played.
+    var resumeMs: Int64 { finished ? 0 : max(positionMs - 3_000, 0) }
+
+    /// Everybody's place in one episode, the signed-in person first as
+    /// "you": `you 40% · Ada played`.
+    static func said(_ all: [ProgressEntry], me: String) -> String {
+        all.sorted { ($0.userId == me ? 0 : 1) < ($1.userId == me ? 0 : 1) }
+            .map { "\($0.userId == me ? "you" : ($0.name.isEmpty ? $0.userId : $0.name)) \($0.short)" }
+            .joined(separator: " · ")
+    }
+}
+
+extension ChaptersEntry {
+    /// The chapter `ms` is in: the last that starts at or before it.
+    static func at(_ chapters: [ChaptersEntry], _ ms: Int64) -> ChaptersEntry? {
+        chapters.last { $0.startMs <= ms }
+    }
+}
+
 /// A feed the library follows (`subscriptions`), by its URL.
 extension SubscriptionsEntry: Identifiable {
     public var id: String { url }
@@ -203,6 +233,11 @@ enum Phone {
         wrote { try h.unsubscribe(Unsubscribe(url: url)) }
     }
 
+    /// An episode said played, or not, by the signed-in person.
+    static func markPlayed(_ h: Harken, _ media: Id, _ finished: Bool) -> Wrote {
+        wrote { try h.markPlayed(MarkPlayed(mediaId: media, finished: finished, name: "")) }
+    }
+
     /// `more` of a followed feed's older episodes, or 0 for every one.
     static func fetchOlder(_ h: Harken, _ url: String, _ more: Int64) -> Wrote {
         wrote { try h.fetchOlder(FetchOlder(url: url, more: more)) }
@@ -276,6 +311,7 @@ enum Page: Hashable {
     var listings: [Listing] {
         switch self {
         case let .artist(name): return [.works(name)]
+        case let .show(id): return [.progress(id)]
         case let .work(id): return [.work(id), .recordings(id)]
         case let .recording(id):
             guard let work = Catalogue.workKey(id) else { return [.credits(id)] }
@@ -332,6 +368,8 @@ enum Listing: Hashable {
     case work(String)
     case recordings(String)
     case credits(String)
+    /// How far everybody has listened to a show's episodes, by its key.
+    case progress(String)
 }
 
 /// A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved.

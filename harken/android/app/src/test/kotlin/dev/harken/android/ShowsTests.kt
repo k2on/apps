@@ -7,6 +7,9 @@ package dev.harken.android
 
 import dev.harken.android.gen.AddEpisode
 import dev.harken.android.gen.AddShow
+import dev.harken.android.gen.ChapterAt
+import dev.harken.android.gen.ReportProgress
+import dev.harken.android.gen.SetChapters
 import dev.harken.android.gen.DownloadProgress
 import dev.harken.android.gen.Downloaded
 import dev.harken.android.gen.FeedRead
@@ -101,5 +104,31 @@ class ShowsTests {
         assertEquals("25%", download()?.short)
         h.downloaded(Downloaded(file))
         assertNull(download())
+    }
+
+    /**
+     * An episode begun is the listener's place in it, resumed a few seconds back and said as a share;
+     * played, it starts again from the top; and its chapters come in order. Falsified by `resumeMs`
+     * keeping the place of a played episode: it resumed at its end.
+     */
+    @Test
+    fun anEpisodeKeepsItsListenersPlaceAndItsChapters() {
+        val h = alone()
+        h.addShow(AddShow("podcast", "Full Time Nix", "", "", "", "", ""))
+        h.addEpisode(episode("podcast/full-time-nix", "Bump", 1))
+        val bump = Phone.once({ Phone.show(h, "podcast/full-time-nix") }, Track::of).single()
+        h.reportProgress(ReportProgress(bump.id, 900_000, 0, "Ada"))
+        val mine = Phone.once({ h.myProgress() }, Listened::of).single()
+        assertEquals(Triple(897_000L, "50%", "you 50%"), Triple(mine.resumeMs, mine.short, Listened.said(listOf(mine), mine.userId)))
+        assertEquals("Ada 50%", Listened.said(listOf(mine), "somebody else"))
+        assertTrue(Phone.markPlayed(h, bump.id, true) is Wrote.Entry)
+        val played = Phone.once({ Phone.showProgress(h, "podcast/full-time-nix") }, Listened::of).single()
+        assertEquals(Triple(true, 0L, "played"), Triple(played.finished, played.resumeMs, played.short))
+
+        h.setChapters(SetChapters(".feeds/Bump.mp3", listOf(ChapterAt(65_000, "Flakes", "", ""), ChapterAt(0, "Intro", "", ""))))
+        val chapters = Phone.once({ Phone.chapters(h, bump.id) }, Chapter::of)
+        assertEquals(listOf("Intro", "Flakes"), chapters.map { it.title })
+        assertEquals("Flakes", Chapter.at(chapters, 70_000)?.title)
+        assertEquals("Intro", Chapter.at(chapters, 64_999)?.title)
     }
 }

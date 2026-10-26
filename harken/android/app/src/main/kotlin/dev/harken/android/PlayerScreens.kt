@@ -224,6 +224,15 @@ private fun Hairline(durationMs: Long, position: StateFlow<Long>) {
 }
 
 /** The full player on a page of its own: what a screenshot draws. In the app it is the player's open face. */
+/** The chapter `position` is in, read on its own so the ticks recompose this line alone. */
+@Composable
+private fun ChapterLine(chapters: List<Chapter>, position: StateFlow<Long>) {
+    val at by position.collectAsStateWithLifecycle()
+    Chapter.at(chapters, at)?.title?.takeIf { it.isNotEmpty() }?.let {
+        Text(it, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
 @Composable
 fun FullPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start, scrubbing: StateFlow<Long?> = Nobody) {
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { FullFace(state, controls, position, scrubbing = scrubbing) }
@@ -278,6 +287,9 @@ fun FullFace(
             maxLines = 1,
             modifier = if (artist.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForArtist(artist)) },
         )
+        // The chapter it is in, for an episode that has them.
+        val chapters = LocalChapters.current
+        if (chapters.isNotEmpty()) ChapterLine(chapters, position)
         Spacer(Modifier.height(Space.l))
         Scrubber(state, position, scrubbing, controls)
         // The session has no shuffle and no repeat: neither is drawn while the phone is part of it,

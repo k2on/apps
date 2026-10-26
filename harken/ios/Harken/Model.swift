@@ -40,6 +40,9 @@ final class Model: ObservableObject {
     @Published var fullPlayer = false
     /// What the search last found, and the last few searches.
     @Published var needle = ""
+    /// Episodes' chapters as read, by media id: read when a show's page
+    /// or the player asks ([`loadChapters`]).
+    @Published private(set) var chapters = [Id: [ChaptersEntry]]()
     @Published private(set) var results: Results? = nil
     @Published private(set) var recent: [String]
     @Published var diagnosticsUnlocked: Bool
@@ -254,6 +257,19 @@ final class Model: ObservableObject {
     var subscriptions: [SubscriptionsEntry] { snapshot.subscriptions }
     func subscription(of show: String) -> SubscriptionsEntry? { snapshot.subscriptions.first { !$0.showId.isEmpty && $0.showId == show } }
     func download(_ media: Id) -> DownloadsEntry? { snapshot.downloads[media] }
+    /// How far the signed-in person has got in an episode; and everybody,
+    /// in one of a held show's.
+    func mine(_ media: Id) -> ProgressEntry? { snapshot.mine[media] }
+    func listened(_ media: Id, on show: String) -> [ProgressEntry] { (snapshot.progress[show] ?? []).filter { $0.mediaId == media } }
+    /// Who is signed in, as a progress row names them.
+    var me: String { login?.user ?? "" }
+
+    /// Read the chapters of these episodes, those not read yet.
+    func loadChapters(_ media: [Id]) {
+        let wanted = media.filter { chapters[$0] == nil }
+        guard !wanted.isEmpty else { return }
+        bridge?.chapters(wanted) { read in self.chapters.merge(read) { _, new in new } }
+    }
     func composer(named n: String) -> ComposersEntry? { snapshot.composers.first { $0.name == n } }
     /// A person's works, by catalogue, while their page is held; none until first read.
     func works(of composer: String) -> [WorkSummary]? { snapshot.works[composer] }
@@ -370,11 +386,15 @@ final class Model: ObservableObject {
     private func albumName(_ t: LibraryEntry) -> String { album(of: t)?.name ?? "" }
 
     /// Play `list` from `at`, from the page it was on.
-    func play(_ list: [LibraryEntry], at: Int, from page: Page?, shuffled: Bool = false) {
+    func play(_ list: [LibraryEntry], at: Int, from page: Page?, shuffled: Bool = false, positionMs: Int64? = nil) {
         guard let q = Started.queue(list, at: at, shuffled: shuffled, album: albumName) else { return }
         let from = page?.place(playlists) ?? ""
-        press(.start(queue: q.queue, at: q.at, positionMs: 0, from: from)) { [sound] in sound.start(q.queue, at: q.at, from: from, shuffled: shuffled) }
+        // An episode begun picks up where its listener left it.
+        let ms = positionMs ?? (shuffled ? 0 : list.indices.contains(at) ? mine(list[at].id)?.resumeMs ?? 0 : 0)
+        press(.start(queue: q.queue, at: q.at, positionMs: ms, from: from)) { [sound] in sound.start(q.queue, at: q.at, from: from, shuffled: shuffled, positionMs: ms) }
     }
+
+    func markPlayed(_ t: LibraryEntry, _ finished: Bool) { bridge?.markPlayed(t, finished) }
 
     /// Play one performance from its first movement, its movements the
     /// queue: read when it is pressed, as the page it is pressed on lists

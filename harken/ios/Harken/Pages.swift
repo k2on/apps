@@ -387,13 +387,18 @@ struct ShowPage: View {
                     .listRowSeparator(.hidden)
             }
             ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
-                TrackRow(track: t, under: Spell.total([t]) ?? title, from: page, onPlay: { model.play(episodes, at: i, from: page) }) {
+                // How far everybody has got in it, where there is anybody; else how long it is.
+                let heard = model.listened(t.id, on: id)
+                let under = heard.isEmpty ? Spell.total([t]) ?? title : ProgressEntry.said(heard, me: model.me)
+                TrackRow(track: t, under: under, from: page, onPlay: { model.play(episodes, at: i, from: page) }) {
                     CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.thumb)
                 }
             }
         }
         .listStyle(.plain)
         .navigationBarTitleDisplayMode(.inline)
+        // Its episodes' chapters, for their menus.
+        .task(id: (model.rows(Page.show(id)) ?? []).map { $0.id.hex }) { model.loadChapters((model.rows(Page.show(id)) ?? []).map { $0.id }) }
     }
 }
 

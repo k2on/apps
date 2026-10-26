@@ -406,6 +406,8 @@ fun ShowPage(
     feed: Subscription? = null,
     downloads: Map<Id, Download> = emptyMap(),
     onFetchOlder: (Subscription, Long) -> Unit = { _, _ -> },
+    listened: List<Listened> = emptyList(),
+    me: String = "",
 ) {
     Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
@@ -470,9 +472,11 @@ fun ShowPage(
             item { Empty(Glyphs.Show, "No episodes yet", "The server downloads a feed's newest episodes; they appear here as they arrive.") }
         }
         itemsIndexed(episodes, key = { _, t -> t.id.hex }) { i, t ->
+            // How far everybody has got in it, where there is anybody; else how long it is.
+            val heard = listened.filter { it.mediaId == t.id }
             TrackRow(
                 t,
-                under = length(listOf(t)) ?: title,
+                under = if (heard.isNotEmpty()) Listened.said(heard, me) else length(listOf(t)) ?: title,
                 playing = t.id.hex == playing,
                 onClick = { act.play(episodes, i, page) },
                 onMore = { act.more(t, page) },

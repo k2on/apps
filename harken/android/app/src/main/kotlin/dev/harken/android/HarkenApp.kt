@@ -43,6 +43,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -268,6 +269,7 @@ fun HarkenApp(
     val shows by library.shows.collectAsStateWithLifecycle()
     val subscriptions by library.subscriptions.collectAsStateWithLifecycle()
     val downloads by library.downloads.collectAsStateWithLifecycle()
+    val mine by library.mine.collectAsStateWithLifecycle()
     val details by library.details.collectAsStateWithLifecycle()
     val loaded by library.loaded.collectAsStateWithLifecycle()
     val complete by library.complete.collectAsStateWithLifecycle()
@@ -316,7 +318,9 @@ fun HarkenApp(
             }
 
             override fun play(queue: List<Track>, at: Int, from: Page?) {
-                playback.play(queue, at, albumOf, from = from?.place(playlists) ?: "")
+                // An episode begun picks up where its listener left it.
+                val resume = queue.getOrNull(at)?.let { library.mine.value[it.id] }?.resumeMs ?: 0
+                playback.play(queue, at, albumOf, from = from?.place(playlists) ?: "", positionMs = resume)
             }
 
             override fun shuffle(queue: List<Track>, from: Page?) {
@@ -432,7 +436,17 @@ fun HarkenApp(
         }
     }
 
-    CompositionLocalProvider(LocalCoverLoader provides covers, LocalPageMotion provides motion, LocalDownloads provides downloads) {
+    // The chapters of what plays, read again when it changes or the library moves.
+    val changed by library.moved.collectAsStateWithLifecycle()
+    val nowChapters by produceState(emptyList<Chapter>(), playing, changed) {
+        value = playing?.let { library.chapters(Id(it)) }.orEmpty()
+    }
+    CompositionLocalProvider(
+        LocalCoverLoader provides covers,
+        LocalPageMotion provides motion,
+        LocalDownloads provides downloads,
+        LocalChapters provides nowChapters,
+    ) {
         HarkenTheme {
             // Before the player, so that the player's own back gesture registers after it and is asked
             // first; and stood down while the player is up, whatever the order. At the root of Search
@@ -552,6 +566,7 @@ fun HarkenApp(
                                         val page = Page.parse("show/" + back.arguments?.getString("arg")) as? Page.ForShow
                                         if (page != null) {
                                             val rows by held(library, page, back)
+                                            val listened by heldBy(library, progressKey(page.id), back) { it.showProgress(page.id) }
                                             Ready(rows) { r ->
                                                 ShowPage(
                                                     page.id,
@@ -562,6 +577,8 @@ fun HarkenApp(
                                                     feed = subscriptions.firstOrNull { it.showId.isNotEmpty() && it.showId == page.id },
                                                     downloads = downloads,
                                                     onFetchOlder = library::fetchOlder,
+                                                    listened = listened.orEmpty(),
+                                                    me = library.user,
                                                 )
                                             }
                                         }
@@ -682,10 +699,29 @@ fun HarkenApp(
                                 (page as? Page.ForPlaylist)?.let { library.removeFromPlaylist(track, it.id) }
                                 menu = null
                             }
+
+                            override fun markPlayed(finished: Boolean) {
+                                library.markPlayed(track, finished)
+                                menu = null
+                            }
+
+                            // The list the row was on, from this episode, this far in.
+                            override fun playFrom(ms: Long) {
+                                menu = null
+                                scope.launch {
+                                    val list = page?.let { library.read(it) }?.takeIf { l -> l.any { it.id == track.id } } ?: listOf(track)
+                                    val at = list.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+                                    playback.play(list, at, albumOf, from = page?.place(playlists) ?: "", positionMs = ms)
+                                }
+                            }
                         }
                     }
                 LaunchedEffect(actions) { onMenu(actions) }
-                ModalBottomSheet(onDismissRequest = { menu = null }) { TrackMenu(track, albumOf(track), page, actions, Shows.of(track, shows)) }
+                // An episode's chapters, read as its menu opens.
+                val chapters by produceState(emptyList<Chapter>(), track.id) { if (track.kind != "song") value = library.chapters(track.id) }
+                ModalBottomSheet(onDismissRequest = { menu = null }) {
+                    TrackMenu(track, albumOf(track), page, actions, Shows.of(track, shows), mine[track.id], chapters)
+                }
             }
             adding?.let { track ->
                 var on by remember(track) { mutableStateOf<Set<Id>?>(null) }

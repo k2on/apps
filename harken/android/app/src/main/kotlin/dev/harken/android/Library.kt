@@ -158,6 +158,8 @@ fun recordingsKey(work: String): String = "recordings:$work"
 
 fun creditsKey(recording: String): String = "credits:$recording"
 
+fun progressKey(show: String): String = "progress:$show"
+
 /** A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved. */
 object Places {
     fun encode(s: String): String {
@@ -242,6 +244,7 @@ class Library(private val session: ArkSession) {
     private val showsFlow = MutableStateFlow<List<Show>>(emptyList())
     private val subscriptionsFlow = MutableStateFlow<List<Subscription>>(emptyList())
     private val downloadsFlow = MutableStateFlow<Map<Id, Download>>(emptyMap())
+    private val mineFlow = MutableStateFlow<Map<Id, Listened>>(emptyMap())
     private val detailsFlow = MutableStateFlow<Map<Id, TrackDetail>>(emptyMap())
     private val noticeFlow = MutableStateFlow<String?>(null)
 
@@ -262,6 +265,9 @@ class Library(private val session: ArkSession) {
 
     /** The files the server has not got yet, by their media id; read with the artists. */
     val downloads: StateFlow<Map<Id, Download>> = downloadsFlow.asStateFlow()
+
+    /** How far the signed-in person has got in each episode they have begun, by its media id. */
+    val mine: StateFlow<Map<Id, Listened>> = mineFlow.asStateFlow()
 
     /**
      * An album's cover by its name, "" for none: the albums by name, made again only when the list
@@ -310,10 +316,11 @@ class Library(private val session: ArkSession) {
     private val showsHeld = Held({ it.shows() }, Show::of) { showsFlow.value = it }
     private val subscriptionsHeld = Held({ it.subscriptions() }, Subscription::of) { subscriptionsFlow.value = it }
     private val downloadsHeld = Held({ it.downloads() }, Download::of) { r -> downloadsFlow.value = r.associateBy { it.mediaId } }
+    private val mineHeld = Held({ it.myProgress() }, Listened::of) { r -> mineFlow.value = r.associateBy { it.mediaId } }
     private val detailsHeld = Held({ it.trackDetails() }, TrackDetail::of) { r -> detailsFlow.value = r.associateBy { it.mediaId } }
     private val playedHeld = Held({ it.lastPlayed() }, Played::of) { lastFlow.value = it.firstOrNull() }
     private val home = listOf<Held<*, *>>(library, playlistsHeld, albumsHeld)
-    private val rest = listOf<Held<*, *>>(artistsHeld, composersHeld, showsHeld, subscriptionsHeld, downloadsHeld, detailsHeld, playedHeld)
+    private val rest = listOf<Held<*, *>>(artistsHeld, composersHeld, showsHeld, subscriptionsHeld, downloadsHeld, mineHeld, detailsHeld, playedHeld)
     private val lastFlow = MutableStateFlow<Played?>(null)
 
     /**
@@ -456,6 +463,12 @@ class Library(private val session: ArkSession) {
     /** Who is on a performance (`credits`), in billing order. */
     fun credits(recording: String): StateFlow<List<CreditsEntry>?> = open(creditsKey(recording)) { Held({ it.credits(Credits(recording)) }, { c: CreditsEntry -> c }) }
 
+    /** How far everybody has listened to a show's episodes (`show_progress`); [release] [progressKey]. */
+    fun showProgress(show: String): StateFlow<List<Listened>?> = open(progressKey(show)) { Held({ Phone.showProgress(it, show) }, Listened::of) }
+
+    /** An episode's chapters once, in order. */
+    suspend fun chapters(media: Id): List<Chapter> = session.run { h -> Phone.once({ Phone.chapters(h, media) }, Chapter::of) }
+
     /** Let go of what [hold], [works], [work], [recordings] or [credits] held, by its key. */
     fun release(key: Any) {
         val o = pages[key] ?: return
@@ -548,6 +561,11 @@ class Library(private val session: ArkSession) {
 
     fun unfollow(feed: Subscription) = write { h ->
         record(Phone.unsubscribe(h, feed.url), "unfollow ${feed.title.ifEmpty { feed.url }}", "Couldn't unfollow it")
+    }
+
+    /** An episode said played, or not, by the signed-in person. */
+    fun markPlayed(track: Track, finished: Boolean) = write { h ->
+        record(Phone.markPlayed(h, track.id, finished), "mark ${track.title} ${if (finished) "played" else "unplayed"}", "Couldn't mark it")
     }
 
     /** `more` of a followed feed's older episodes, or 0 for every one. */

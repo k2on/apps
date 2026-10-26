@@ -288,9 +288,9 @@ final class SoundCore: PhoneSound, @unchecked Sendable {
     var queue: (tracks: [Track], index: Int) { locked { (said.queue, said.index) } }
 
     /// Play `queue` from `at`, from the start: a track pressed, alone.
-    func start(_ queue: [Track], at: Int, from: String, shuffled: Bool) {
+    func start(_ queue: [Track], at: Int, from: String, shuffled: Bool, positionMs: Int64 = 0) {
         self.shuffled = shuffled
-        load(queue: J.wlist(queue) { $0.json }, at: Int64(at), positionMs: 0, playing: true, from: from)
+        load(queue: J.wlist(queue) { $0.json }, at: Int64(at), positionMs: positionMs, playing: true, from: from)
     }
 
     func toggle() {

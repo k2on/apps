@@ -135,6 +135,24 @@ struct TrackActions: View {
         if case let .playlist(id)? = from {
             Button(role: .destructive) { model.remove(track, from: id) } label: { Label("Remove from This Playlist", systemImage: "minus.circle") }
         }
+        // An episode: played or not by hand, and each of its chapters.
+        if track.kind != "song" {
+            let played = model.mine(track.id)?.finished == true
+            Button { model.markPlayed(track, !played) } label: {
+                Label(played ? "Mark as Unplayed" : "Mark as Played", systemImage: played ? "circle" : "checkmark.circle")
+            }
+            let chapters = model.chapters[track.id] ?? []
+            if !chapters.isEmpty, case let .show(show)? = from {
+                Menu {
+                    ForEach(chapters, id: \.startMs) { c in
+                        Button("\(Spell.clock(c.startMs))  \(c.title)") {
+                            let list = model.rows(.show(show)) ?? [track]
+                            model.play(list, at: list.firstIndex { $0.id == track.id } ?? 0, from: .show(show), positionMs: c.startMs)
+                        }
+                    }
+                } label: { Label("Chapters", systemImage: "list.bullet") }
+            }
+        }
     }
 }
 

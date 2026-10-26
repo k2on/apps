@@ -57,6 +57,12 @@ interface MenuActions {
     fun goTo(page: Page) {}
 
     fun remove() {}
+
+    /** An episode said played (`true`) or not. */
+    fun markPlayed(finished: Boolean) {}
+
+    /** An episode from this far in: one of its chapters. */
+    fun playFrom(ms: Long) {}
 }
 
 /**
@@ -64,7 +70,15 @@ interface MenuActions {
  * goes to its `show` rather than to an artist.
  */
 @Composable
-fun TrackMenu(track: Track, album: Album?, from: Page?, actions: MenuActions, show: Show? = null) {
+fun TrackMenu(
+    track: Track,
+    album: Album?,
+    from: Page?,
+    actions: MenuActions,
+    show: Show? = null,
+    listened: Listened? = null,
+    chapters: List<Chapter> = emptyList(),
+) {
     Column(Modifier.fillMaxWidth().padding(bottom = Space.l)) {
         Row(Modifier.padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
             Cover(album?.name ?: track.title, album?.art ?: "", 48.dp, Modifier.size(48.dp), corner = 4.dp)
@@ -83,6 +97,12 @@ fun TrackMenu(track: Track, album: Album?, from: Page?, actions: MenuActions, sh
         if (track.kind == "song" && track.creator.isNotEmpty() && from != Page.ForArtist(track.creator))
             SheetRow(Glyphs.Artist, "Go to artist", { actions.goTo(Page.ForArtist(track.creator)) })
         if (from is Page.ForPlaylist) SheetRow(Glyphs.Remove, "Remove from this playlist", actions::remove)
+        // An episode: played or not by hand, and each of its chapters to start from.
+        if (track.kind != "song") {
+            val played = listened?.finished == true
+            SheetRow(Glyphs.Show, if (played) "Mark as unplayed" else "Mark as played", { actions.markPlayed(!played) })
+            for (c in chapters) SheetRow(Glyphs.Play, "${Media.clock(c.startMs)}  ${c.title}", { actions.playFrom(c.startMs) })
+        }
     }
 }
 

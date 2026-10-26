@@ -18,7 +18,11 @@ import dev.harken.android.gen.Artist as ArtistInput
 import dev.harken.android.gen.ArtistsEntry
 import dev.harken.android.gen.ComposersEntry
 import dev.harken.android.gen.CreatePlaylist
+import dev.harken.android.gen.ChaptersEntry
 import dev.harken.android.gen.DownloadsEntry
+import dev.harken.android.gen.EpisodeInput
+import dev.harken.android.gen.MarkPlayed
+import dev.harken.android.gen.ProgressEntry
 import dev.harken.android.gen.FetchOlder
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Library as LibraryInput
@@ -184,6 +188,43 @@ data class Download(val mediaId: Id, val state: String, val bytes: Long, val tot
     }
 }
 
+/** How far somebody has listened to an episode (`my_progress`, `show_progress`). */
+data class Listened(val mediaId: Id, val userId: String, val name: String, val positionMs: Long, val durationMs: Long, val finished: Boolean) {
+    /** How far, short: played, or a share of it — the desktop's `Listened::short`. */
+    val short: String
+        get() =
+            when {
+                finished -> "played"
+                durationMs > 0 -> "${(positionMs * 100 / durationMs).coerceIn(0, 99)}%"
+                else -> "started"
+            }
+
+    /** Where a play of it starts: a few seconds before where they stopped; from the start once played. */
+    val resumeMs: Long
+        get() = if (finished) 0 else (positionMs - 3_000).coerceAtLeast(0)
+
+    companion object {
+        fun of(e: ProgressEntry): Listened = Listened(e.mediaId, e.userId, e.name, e.positionMs, e.durationMs, e.finished)
+
+        /** Everybody's place in one episode, the signed-in person first as "you": `you 40% · Ada played`. */
+        fun said(all: List<Listened>, me: String): String =
+            all.sortedBy { it.userId != me }.joinToString(" · ") { l ->
+                val who = if (l.userId == me) "you" else l.name.ifEmpty { l.userId }
+                "$who ${l.short}"
+            }
+    }
+}
+
+/** One chapter of an episode (`chapters`). */
+data class Chapter(val startMs: Long, val title: String) {
+    companion object {
+        fun of(e: ChaptersEntry): Chapter = Chapter(e.startMs, e.title)
+
+        /** The chapter `ms` is in: the last that starts at or before it. */
+        fun at(chapters: List<Chapter>, ms: Long): Chapter? = chapters.lastOrNull { it.startMs <= ms }
+    }
+}
+
 object Shows {
     /** The show an episode is of: the one of its kind its creator names; null for a song. */
     fun of(track: Track, shows: List<Show>): Show? =
@@ -299,6 +340,13 @@ object Phone {
     fun subscribe(h: Harken, kind: String, url: String): Wrote = wrote { h.subscribe(Subscribe(kind, url)) }
 
     fun unsubscribe(h: Harken, url: String): Wrote = wrote { h.unsubscribe(Unsubscribe(url)) }
+
+    /** An episode said played, or not, by the signed-in person. */
+    fun markPlayed(h: Harken, media: Id, finished: Boolean): Wrote = wrote { h.markPlayed(MarkPlayed(media, finished, "")) }
+
+    fun showProgress(h: Harken, show: String): View<ProgressEntry> = h.showProgress(ShowInput(NO_PLAYLIST, show))
+
+    fun chapters(h: Harken, media: Id): View<ChaptersEntry> = h.chapters(EpisodeInput(media))
 
     /** `more` of a followed feed's older episodes, or 0 for every one. */
     fun fetchOlder(h: Harken, url: String, more: Long): Wrote = wrote { h.fetchOlder(FetchOlder(url, more)) }
