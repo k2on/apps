@@ -30,6 +30,24 @@ data class AddAllToPlaylist(val playlistId: Id) {
     }
 }
 
+/** The record `AddEpisode`. */
+data class AddEpisode(val show: String, val title: String, val durationMs: Long, val file: String, val guid: String, val publishedMs: Long, val description: String, val source: String, val art: String, val season: Long, val number: Long) {
+    fun json(): String = "{" + "\"show\":" + J.q(show) + "," + "\"title\":" + J.q(title) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"guid\":" + J.q(guid) + "," + "\"published_ms\":" + publishedMs.toString() + "," + "\"description\":" + J.q(description) + "," + "\"source\":" + J.q(source) + "," + "\"art\":" + J.q(art) + "," + "\"season\":" + season.toString() + "," + "\"number\":" + number.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): AddEpisode = (j as JSONObject).let { o -> AddEpisode(J.text(o.opt("show")), J.text(o.opt("title")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), J.text(o.opt("guid")), J.int(o.opt("published_ms")), J.text(o.opt("description")), J.text(o.opt("source")), J.text(o.opt("art")), J.int(o.opt("season")), J.int(o.opt("number"))) }
+    }
+}
+
+/** The record `AddShow`. */
+data class AddShow(val kind: String, val title: String, val author: String, val description: String, val art: String, val feed: String, val link: String) {
+    fun json(): String = "{" + "\"kind\":" + J.q(kind) + "," + "\"title\":" + J.q(title) + "," + "\"author\":" + J.q(author) + "," + "\"description\":" + J.q(description) + "," + "\"art\":" + J.q(art) + "," + "\"feed\":" + J.q(feed) + "," + "\"link\":" + J.q(link) + "}"
+
+    companion object {
+        fun of(j: Any?): AddShow = (j as JSONObject).let { o -> AddShow(J.text(o.opt("kind")), J.text(o.opt("title")), J.text(o.opt("author")), J.text(o.opt("description")), J.text(o.opt("art")), J.text(o.opt("feed")), J.text(o.opt("link"))) }
+    }
+}
+
 /** The record `AddSong`. */
 data class AddSong(val title: String, val artist: String, val album: String, val durationMs: Long, val file: String, val track: Long, val part: String, val catalogue: String, val performer: String, val bpm: Long, val albumArt: String, val artistArt: String, val disc: Long, val workTitle: String, val movementNo: Long, val artistBanner: String, val released: Long) {
     fun json(): String = "{" + "\"title\":" + J.q(title) + "," + "\"artist\":" + J.q(artist) + "," + "\"album\":" + J.q(album) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"track\":" + track.toString() + "," + "\"part\":" + J.q(part) + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"performer\":" + J.q(performer) + "," + "\"bpm\":" + bpm.toString() + "," + "\"album_art\":" + J.q(albumArt) + "," + "\"artist_art\":" + J.q(artistArt) + "," + "\"disc\":" + disc.toString() + "," + "\"work_title\":" + J.q(workTitle) + "," + "\"movement_no\":" + movementNo.toString() + "," + "\"artist_banner\":" + J.q(artistBanner) + "," + "\"released\":" + released.toString() + "}"
@@ -239,6 +257,24 @@ data class Enqueue(val next: Boolean, val tracks: List<Track>) {
 
     companion object {
         fun of(j: Any?): Enqueue = (j as JSONObject).let { o -> Enqueue(J.bool(o.opt("next")), J.list(o.opt("tracks")) { v0 -> Track.of(v0) }) }
+    }
+}
+
+/** The record `Episode`. */
+data class Episode(val mediaId: Id, val showId: String, val guid: String, val publishedMs: Long, val description: String, val source: String, val art: String, val season: Long, val number: Long) {
+    fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"show_id\":" + J.q(showId) + "," + "\"guid\":" + J.q(guid) + "," + "\"published_ms\":" + publishedMs.toString() + "," + "\"description\":" + J.q(description) + "," + "\"source\":" + J.q(source) + "," + "\"art\":" + J.q(art) + "," + "\"season\":" + season.toString() + "," + "\"number\":" + number.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): Episode = (j as JSONObject).let { o -> Episode(Id(J.text(o.opt("media_id"))), J.text(o.opt("show_id")), J.text(o.opt("guid")), J.int(o.opt("published_ms")), J.text(o.opt("description")), J.text(o.opt("source")), J.text(o.opt("art")), J.int(o.opt("season")), J.int(o.opt("number"))) }
+    }
+}
+
+/** The record `EpisodeDetailsEntry`. */
+data class EpisodeDetailsEntry(val art: String, val description: String, val mediaId: Id, val number: Long, val publishedMs: Long, val season: Long, val show: String, val showId: String) {
+    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"description\":" + J.q(description) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"number\":" + number.toString() + "," + "\"published_ms\":" + publishedMs.toString() + "," + "\"season\":" + season.toString() + "," + "\"show\":" + J.q(show) + "," + "\"show_id\":" + J.q(showId) + "}"
+
+    companion object {
+        fun of(j: Any?): EpisodeDetailsEntry = (j as JSONObject).let { o -> EpisodeDetailsEntry(J.text(o.opt("art")), J.text(o.opt("description")), Id(J.text(o.opt("media_id"))), J.int(o.opt("number")), J.int(o.opt("published_ms")), J.int(o.opt("season")), J.text(o.opt("show")), J.text(o.opt("show_id"))) }
     }
 }
 
@@ -778,6 +814,33 @@ data class SetVolume(val device: String, val level: Long) {
     }
 }
 
+/** The record `Show`. */
+data class Show(val id: String, val kind: String, val title: String, val author: String, val description: String, val art: String, val feed: String, val link: String, val addedMs: Long, val userId: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"kind\":" + J.q(kind) + "," + "\"title\":" + J.q(title) + "," + "\"author\":" + J.q(author) + "," + "\"description\":" + J.q(description) + "," + "\"art\":" + J.q(art) + "," + "\"feed\":" + J.q(feed) + "," + "\"link\":" + J.q(link) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+
+    companion object {
+        fun of(j: Any?): Show = (j as JSONObject).let { o -> Show(J.text(o.opt("id")), J.text(o.opt("kind")), J.text(o.opt("title")), J.text(o.opt("author")), J.text(o.opt("description")), J.text(o.opt("art")), J.text(o.opt("feed")), J.text(o.opt("link")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
+    }
+}
+
+/** The record `ShowInput`. */
+data class ShowInput(val playlistId: Id, val id: String) {
+    fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"id\":" + J.q(id) + "}"
+
+    companion object {
+        fun of(j: Any?): ShowInput = (j as JSONObject).let { o -> ShowInput(Id(J.text(o.opt("playlist_id"))), J.text(o.opt("id"))) }
+    }
+}
+
+/** The record `ShowsEntry`. */
+data class ShowsEntry(val art: String, val author: String, val description: String, val episodes: Long, val feed: String, val id: String, val kind: String, val link: String, val newestMs: Long, val title: String) {
+    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"author\":" + J.q(author) + "," + "\"description\":" + J.q(description) + "," + "\"episodes\":" + episodes.toString() + "," + "\"feed\":" + J.q(feed) + "," + "\"id\":" + J.q(id) + "," + "\"kind\":" + J.q(kind) + "," + "\"link\":" + J.q(link) + "," + "\"newest_ms\":" + newestMs.toString() + "," + "\"title\":" + J.q(title) + "}"
+
+    companion object {
+        fun of(j: Any?): ShowsEntry = (j as JSONObject).let { o -> ShowsEntry(J.text(o.opt("art")), J.text(o.opt("author")), J.text(o.opt("description")), J.int(o.opt("episodes")), J.text(o.opt("feed")), J.text(o.opt("id")), J.text(o.opt("kind")), J.text(o.opt("link")), J.int(o.opt("newest_ms")), J.text(o.opt("title"))) }
+    }
+}
+
 /** The record `SignIn`. */
 data class SignIn(val id: String, val user: String, val name: String, val email: String, val device: String, val issuedMs: Long, val expiresMs: Long, val revoked: Boolean, val roles: List<String>, val picture: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "," + "\"email\":" + J.q(email) + "," + "\"device\":" + J.q(device) + "," + "\"issued_ms\":" + issuedMs.toString() + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"revoked\":" + revoked.toString() + "," + "\"roles\":" + J.wlist(roles) { v0 -> J.q(v0) } + "," + "\"picture\":" + J.q(picture) + "}"
@@ -888,6 +951,12 @@ data class Works(val composer: String) {
 
 /** The domain's functions, each called by its name through [peer]. */
 class Harken(val peer: Peer) {
+    /** `library.add_episode`: its intent's id. */
+    fun addEpisode(input: AddEpisode): String = peer.mutate("library.add_episode", input.json())
+
+    /** `library.add_show`: its intent's id. */
+    fun addShow(input: AddShow): String = peer.mutate("library.add_show", input.json())
+
     /** `library.add_song`: its intent's id. */
     fun addSong(input: AddSong): String = peer.mutate("library.add_song", input.json())
 
@@ -924,6 +993,9 @@ class Harken(val peer: Peer) {
     /** `library.describe_work`: its intent's id. */
     fun describeWork(input: DescribeWork): String = peer.mutate("library.describe_work", input.json())
 
+    /** `library.episode_details`, kept. */
+    fun episodeDetails(): View<EpisodeDetailsEntry> = View(peer.view("library.episode_details", "null")) { j -> EpisodeDetailsEntry.of(j) }
+
     /** `library.library`, kept, its rows UniFFI's. */
     fun library(input: Library): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.library", input.json()))
 
@@ -941,6 +1013,12 @@ class Harken(val peer: Peer) {
 
     /** `library.search`, kept, its rows UniFFI's. */
     fun search(input: Search): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.search", input.json()))
+
+    /** `library.show`, kept, its rows UniFFI's. */
+    fun show(input: ShowInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.show", input.json()))
+
+    /** `library.shows`, kept. */
+    fun shows(): View<ShowsEntry> = View(peer.view("library.shows", "null")) { j -> ShowsEntry.of(j) }
 
     /** `library.track_details`, kept. */
     fun trackDetails(): View<TrackDetailsEntry> = View(peer.view("library.track_details", "null")) { j -> TrackDetailsEntry.of(j) }

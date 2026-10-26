@@ -1,7 +1,7 @@
 # harken, on ArkDB
 
 A self-hosted music system: a library a server scans from a directory,
-playlists, one listening session per account across every device, and the
+podcasts and sermons it follows by their feeds and downloads, playlists, one listening session per account across every device, and the
 speakers in the house as devices in it. All of it runs on ArkDB at spec v5
 (`docs/plan-v5.md`): one log, one domain written once in plain Rust and
 linked by the server, the desktop, the browser and the phones, and every
@@ -12,7 +12,8 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            types.rs, keys.rs, library.rs, browse.rs, playlists.rs;
            listening.rs, queue.rs, devices.rs and groups.rs, the listening
            session as volatile tables (never the log); plays.rs (the log);
-           host.rs, what an app knows of it beside its functions
+           shows.rs, the podcasts and sermons; host.rs, what an app knows
+           of it beside its functions
 server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
            bridge, sign-in, /media, the web build;
            the NixOS module (server/README.md)
@@ -39,8 +40,9 @@ domain by `ffi/tests/gen.rs`).
 
 ## The domain
 
-Eleven tables in one log: `media` and `song` (a track and what is true of
-it as a song), `album` and `person`, `work`, `movement`, `recording` and
+Thirteen tables in one log: `media` and `song` (a track and what is true of
+it as a song), `show` and `episode` (a podcast or a series of sermons, and
+what is true of a `media` row as an episode of one), `album` and `person`, `work`, `movement`, `recording` and
 `credit` (a work is not a recording, and neither is an album),
 `playlist` and `playlist_item`, and `play`, a track somebody heard. Every
 reference is checked, and `play` has none: it carries the track as it was
@@ -81,6 +83,42 @@ call its types and functions as they are. It was ported from ArkLang in N1,
 and `domain/tests/port.rs` holds it to what the ArkLang text did: the
 schema's hash and, over seeded scripts of every function, the states and
 transcripts the two agreed on, pinned.
+
+## Podcasts and sermons
+
+A **show** is a podcast or a series of sermons (`domain/src/shows.rs`),
+keyed by its kind and its title (`podcast/full-time-nix`). An episode is
+a `media` row like a song — its kind the show's (`podcast`, `sermon`), its
+creator the show's title — beside an `episode` row of what only an
+episode has: its show, when it went out, what it is about, where it was
+downloaded from. So a playlist, the queue, a play and `/media` take an
+episode as they take a song, and the music's lists — `library`,
+`artists`, an artist's songs — leave it out; `shows` lists the shows and
+`show` one show's episodes, newest first.
+
+They come from two places, and either is the server's to download:
+
+- **A feed** — any RSS with audio enclosures: a podcast host's, a
+  church's, an Audiobookshelf library's. `HARKEN_PODCASTS` and
+  `HARKEN_SERMONS` (`services.harken.podcasts` and `.sermons`) name them;
+  the server reads each at boot, at every rescan and every hour, and
+  downloads its newest `HARKEN_FEED_EPISODES` (20 unless told; 0 for all)
+  into its data directory, served at `/media/.feeds/`. Every client plays
+  the server's copy, so an episode the host takes down still plays.
+- **A folder** — `podcasts/<show>/` or `sermons/<show>/` beside `music/`
+  in the media directory: the show is the folder's name and the cover in
+  it, each audio file an episode.
+
+    HARKEN_MEDIA=$PWD/media \
+    HARKEN_PODCASTS=https://feeds.transistor.fm/full-time-nix \
+    HARKEN_SERMONS=https://podcast.gospelinlife.com/feed.xml \
+      nix run .#harken-serve
+
+The desktop and the browser have **Podcasts** and **Sermons** under a
+Shows heading, each a line only when there is a show of its kind; the
+demo has Gospel in Life's sermons and Full Time Nix, the newest ten of
+each as their feeds said them (`iced/src/shows.json`), played from their
+hosts.
 
 ## The listening session
 
@@ -421,3 +459,7 @@ groups are held against a stand-in house's `volume_set`, `volume_mute`,
 `join`, `unjoin` and template API, written from Home Assistant's
 documentation. A speaker's plays are not recorded, since the bridge is not
 a peer of the account.
+No running server has followed a real feed: the RSS reader has read Gospel
+in Life's and Full Time Nix's feeds as they were when it was written, and
+the downloads are held against a stand-in host on loopback
+(`server/tests/library.rs`); an Audiobookshelf feed has not been tried.
