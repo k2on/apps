@@ -322,7 +322,8 @@ impl App {
                 let people = self.people(&composers);
                 self.faces(&mut l, &people);
             }
-            Source::Playlist(..) if detailed => {
+            // A show's page is a playlist's: its Play, over its episodes.
+            Source::Playlist(..) | Source::Show(..) if detailed => {
                 self.play(&mut l);
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
             }
@@ -384,6 +385,8 @@ impl App {
             crate::places::Source::Albums => crate::SHELF.grid(p.albums().len(), self.pane_width()),
             Source::Artists => crate::SHELF.grid(p.artists().len(), self.pane_width()),
             Source::Composers => crate::SHELF.grid(p.composers().len(), self.pane_width()),
+            Source::Podcasts => crate::SHELF.grid(p.shows_of("podcast").len(), self.pane_width()),
+            Source::Sermons => crate::SHELF.grid(p.shows_of("sermon").len(), self.pane_width()),
             Source::Artist(_) if !p.works().is_empty() => vim::Grid {
                 cells: self.listed_works().len(),
                 columns: self.listing_columns(),

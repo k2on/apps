@@ -351,6 +351,31 @@ impl App {
                     .collect(),
                 "Nobody yet.",
             ),
+            // A show is a square, as a record is: its picture, who makes it.
+            Source::Podcasts | Source::Sermons => {
+                let kind = if p.source == Source::Podcasts { "podcast" } else { "sermon" };
+                self.view_cards(
+                    p.shows_of(kind)
+                        .into_iter()
+                        .map(|s| {
+                            let mut card = self.card(
+                                &s.title,
+                                s.author.clone(),
+                                s.episodes,
+                                Source::Show(s.id.clone(), s.title.clone()),
+                                false,
+                                &s.art,
+                            );
+                            if s.author.is_empty() {
+                                card.under = format!("{} {}", s.episodes, plural(s.episodes, "episode"));
+                            }
+                            card
+                        })
+                        .collect(),
+                    "No shows yet.",
+                )
+            }
+            Source::Show(id, title) if !(self.help || self.debug) => self.view_show(id, title),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
             Source::Album(name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
@@ -823,6 +848,34 @@ impl App {
         padded(with_header(header, self.view_list()))
     }
 
+    /// A show's page, laid out as a playlist's: its picture beside its
+    /// title, who makes it, how many episodes and a Play button, what it is
+    /// about, then its episodes newest first as the table has them.
+    fn view_show(&self, id: &str, title: &str) -> Element<'_, Message> {
+        let l = self.layout();
+        let show = self.peer.shows().iter().find(|s| s.id == id);
+        let rows = self.peer.rows();
+        let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
+        let kind = if id.starts_with("sermon/") { "SERMONS" } else { "PODCAST" };
+        let mut small = format!("{kind}  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "episode"));
+        if ms > 0 {
+            small.push_str(&format!("  \u{b7}  {}", spell(ms)));
+        }
+        let art = self.picture(title, show.map_or("", |s| s.art.as_str()), self.cover_side(), 8.0);
+        let author = show.map_or(String::new(), |s| s.author.clone());
+        let header = self.view_cover(&l, title, art, None, title, &author, small);
+        // What it is about, as much as a header wants: a feed's runs long.
+        let said = show.map_or(String::new(), |s| match s.description.chars().count() > 600 {
+            true => s.description.chars().take(599).collect::<String>() + "\u{2026}",
+            false => s.description.clone(),
+        });
+        let body = match about(&said) {
+            Some(about) => column![about, self.view_list()].spacing(12).into(),
+            None => self.view_list(),
+        };
+        padded(with_header(header, body))
+    }
+
     /// A list's cover: the first four different records on it, two by two —
     /// or the one, when it has only one — as a music library draws a
     /// playlist; nothing on it, and it is the square its name makes.
@@ -1230,7 +1283,10 @@ impl App {
         let head = container(
             headings
                 .push(table::heading("Name", NAME))
-                .push(table::heading("Artist", ARTIST))
+                .push(table::heading(
+                    if matches!(p.source, Source::Show(..)) { "Show" } else { "Artist" },
+                    ARTIST,
+                ))
                 .push(table::heading(if album_page { "Performer" } else { "Album" }, ALBUM))
                 .push(table::heading("Time", TIME)),
         )
@@ -1241,7 +1297,7 @@ impl App {
         // everywhere else this *is* the title.
         let titled = !matches!(
             p.source,
-            Source::Album(_) | Source::Artist(_) | Source::Recording(..) | Source::Playlist(..)
+            Source::Album(_) | Source::Artist(_) | Source::Recording(..) | Source::Playlist(..) | Source::Show(..)
         );
         let mut main = column![].spacing(10).width(Length::Fill);
         if titled {
@@ -1754,7 +1810,16 @@ impl App {
         // The cover its album has everywhere else, the derived square until
         // it arrives — and the words beside it cut, never run on under the
         // seek bar.
-        let art = self.peer.albums().iter().find(|a| a.name == track.album).map_or("", |a| a.art.as_str());
+        // An episode has no album: its show is its picture and its page,
+        // the show its creator names.
+        let show = match track.album.is_empty() {
+            true => self.peer.shows().iter().find(|s| s.title == track.creator),
+            false => None,
+        };
+        let art = match show {
+            Some(s) => s.art.as_str(),
+            None => self.peer.albums().iter().find(|a| a.name == track.album).map_or("", |a| a.art.as_str()),
+        };
         let playing = row![
             self.picture(&track.album, art, BAR_ART, 4.0),
             // The title opens its album and the name its person's page, as the
@@ -1766,7 +1831,10 @@ impl App {
                 ),
                 linked(
                     Line::new(track.creator.as_str(), 12.0, Cut::End, |t| style::dim(t).color.unwrap_or_default()).into(),
-                    (!track.creator.is_empty()).then(|| Source::Artist(track.creator.clone())),
+                    match show {
+                        Some(s) => Some(Source::Show(s.id.clone(), s.title.clone())),
+                        None => (!track.creator.is_empty()).then(|| Source::Artist(track.creator.clone())),
+                    },
                 ),
             ]
             .spacing(3)

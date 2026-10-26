@@ -27,6 +27,7 @@
 use std::sync::OnceLock;
 
 use crate::domain::catalogue::Catalogue;
+use crate::domain::shows::Shelf;
 use crate::domain::{AddToPlaylist, CreatePlaylist, Library, LibraryEntry};
 use ark::format::Encode;
 use ark::log::{EntryId, Record, Snapshot};
@@ -37,6 +38,16 @@ use ark_peer::{Disk, Memory};
 use crate::client::{domain, Replica};
 use crate::peer::key;
 use crate::rows::Id;
+
+/// The podcasts and sermons the demo has beside its catalogue: Gospel in
+/// Life's sermons and Full Time Nix, their newest episodes as their feeds
+/// said them, written down in `shows.json` beside this file. The demo plays
+/// them from their hosts, as it plays the catalogue's recordings; a server
+/// downloads its feeds' (`harken-server`'s `feeds.rs`).
+pub fn shelf() -> &'static Shelf {
+    static SHELF: OnceLock<Shelf> = OnceLock::new();
+    SHELF.get_or_init(|| Shelf::parse(include_str!("shows.json")).expect("shows.json is the shows"))
+}
 
 /// The catalogue the demo is, read once.
 pub fn catalogue() -> &'static Catalogue {
@@ -197,6 +208,14 @@ pub fn seeded_disk(copies: usize) -> Memory {
                 continue;
             }
             seed.apply(&call.what, call.name, &call.input);
+        }
+    }
+
+    // Then the shows, each and its episodes.
+    for (show, episodes) in shelf().calls() {
+        seed.mutate(&show.title, "add_show", &show);
+        for e in episodes {
+            seed.mutate(&e.title, "add_episode", &e);
         }
     }
 

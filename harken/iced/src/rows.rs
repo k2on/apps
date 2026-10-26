@@ -7,7 +7,9 @@
 //! the record — a module this build was not made with — read as empty rather
 //! than as a panic in the middle of a frame.
 
-use crate::domain::{AlbumsEntry, ArtistsEntry, ComposersEntry, CreditsEntry, LibraryEntry, RecordingsEntry, TrackDetailsEntry, WorkSummary};
+use crate::domain::{
+    AlbumsEntry, ArtistsEntry, ComposersEntry, CreditsEntry, LibraryEntry, RecordingsEntry, ShowsEntry, TrackDetailsEntry, WorkSummary,
+};
 use ark::format::Encode;
 
 /// A row's id: its sixteen bytes, whatever table it names.
@@ -18,7 +20,8 @@ pub type Id = [u8; 16];
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Item {
     pub id: Id,
-    /// `"song"` today; the name of the table carrying the rest.
+    /// `"song"`, or a show's kind (`"podcast"`, `"sermon"`) for an episode
+    /// of one: which table carries the rest.
     pub kind: String,
     pub title: String,
     /// Whoever made it: a song's artist, a sermon's speaker.
@@ -114,6 +117,44 @@ impl From<AlbumsEntry> for Album {
 impl Album {
     pub fn from_bytes(b: &[u8]) -> Album {
         AlbumsEntry::from_bytes(b).map_or_else(|_| Album::default(), Album::from)
+    }
+}
+
+/// A podcast or a series of sermons, as the shows pages list them
+/// (`shows`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Show {
+    /// Its key: `podcast/full-time-nix`.
+    pub id: String,
+    /// `podcast` or `sermon`.
+    pub kind: String,
+    pub title: String,
+    pub author: String,
+    pub description: String,
+    pub art: String,
+    pub episodes: i64,
+    /// When its newest episode went out; 0 is "nobody said".
+    pub newest_ms: i64,
+}
+
+impl From<ShowsEntry> for Show {
+    fn from(e: ShowsEntry) -> Show {
+        Show {
+            id: e.id,
+            kind: e.kind,
+            title: e.title,
+            author: e.author,
+            description: e.description,
+            art: e.art,
+            episodes: e.episodes,
+            newest_ms: e.newest_ms,
+        }
+    }
+}
+
+impl Show {
+    pub fn from_bytes(b: &[u8]) -> Show {
+        ShowsEntry::from_bytes(b).map_or_else(|_| Show::default(), Show::from)
     }
 }
 

@@ -491,3 +491,35 @@ fn the_catalogue_dates_its_albums() {
         .unwrap();
     assert_eq!(goldberg.performer, "Kimiko Ishizaka", "who made it");
 }
+
+/// The demo has a podcast and a series of sermons: a sidebar line each,
+/// a card each, and a show's page its episodes newest first, which the
+/// Songs page leaves out. An episode's row goes to its show. Falsified by
+/// `choose` leaving the shows out: there was no Sermons line.
+#[test]
+fn the_demo_has_a_podcast_and_sermons() {
+    let mut app = super::demo_app();
+    let lines: Vec<String> = app.peer.choices.iter().map(|c| c.label.clone()).collect();
+    assert!(
+        lines.contains(&"Podcasts".to_string()) && lines.contains(&"Sermons".to_string()),
+        "{lines:?}"
+    );
+    let sermons = app.peer.shows_of("sermon");
+    assert_eq!(sermons.len(), 1);
+    assert!(sermons[0].title.contains("Gospel in Life"), "{}", sermons[0].title);
+    let podcasts = app.peer.shows_of("podcast");
+    assert_eq!(podcasts.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), ["Full Time Nix"]);
+    assert!(app.peer.items().iter().all(|i| i.kind == "song"), "the Songs page is the music");
+
+    let _ = app.update(crate::Message::Select(Source::Podcasts));
+    assert_eq!(app.peer.source.place(), Place::Podcasts);
+    let show = Source::Show("podcast/full-time-nix".into(), "Full Time Nix".into());
+    let _ = app.update(crate::Message::Select(show.clone()));
+    let rows = app.peer.rows().to_vec();
+    assert_eq!(rows.len(), 10, "the newest ten");
+    assert!(rows.iter().all(|r| r.kind == "podcast" && r.creator == "Full Time Nix"));
+    assert_eq!(rows[0].title, "NixCon 2026 Day Ⅰ", "newest first");
+    assert_eq!(app.peer.source_of(&Place::Show("podcast/full-time-nix".into())), show);
+    let (_, entries) = app.row_entries(rows[0].id).unwrap();
+    assert!(entries.iter().any(|e| e.label == "Go to Full Time Nix"));
+}

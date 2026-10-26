@@ -147,3 +147,84 @@ pub fn episode_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<EpisodeDet
         show_id: e.show_id.clone(),
     }))
 }
+
+/// Shows written down as one JSON document: a show's fields and its
+/// episodes', as a feed says them. What the demo's library has beside its
+/// catalogue (`harken-iced`'s `shows.json`).
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct Shelf {
+    pub shows: Vec<ShelfShow>,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct ShelfShow {
+    pub kind: String,
+    pub title: String,
+    pub author: String,
+    pub description: String,
+    pub art: String,
+    pub feed: String,
+    pub link: String,
+    pub episodes: Vec<ShelfEpisode>,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct ShelfEpisode {
+    pub title: String,
+    pub guid: String,
+    pub published_ms: i64,
+    pub duration_ms: i64,
+    /// Where it plays from: a URL, or a path under the media root.
+    pub file: String,
+    pub description: String,
+    pub art: String,
+    pub season: i64,
+    pub number: i64,
+}
+
+impl Shelf {
+    pub fn parse(json: &str) -> Result<Shelf, String> {
+        serde_json::from_str(json).map_err(|e| format!("the shows: {e}"))
+    }
+
+    /// Every show and then its episodes, as the mutations that put them in
+    /// the library: in the order they run.
+    pub fn calls(&self) -> Vec<(AddShow, Vec<AddEpisode>)> {
+        self.shows
+            .iter()
+            .map(|s| {
+                let id = keys::show_key(&s.kind, &s.title);
+                let show = AddShow {
+                    kind: s.kind.clone(),
+                    title: s.title.clone(),
+                    author: s.author.clone(),
+                    description: s.description.clone(),
+                    art: s.art.clone(),
+                    feed: s.feed.clone(),
+                    link: s.link.clone(),
+                };
+                let episodes = s
+                    .episodes
+                    .iter()
+                    .map(|e| AddEpisode {
+                        show: id.clone(),
+                        title: e.title.clone(),
+                        duration_ms: e.duration_ms,
+                        file: e.file.clone(),
+                        guid: e.guid.clone(),
+                        published_ms: e.published_ms,
+                        description: e.description.clone(),
+                        source: e.file.clone(),
+                        art: e.art.clone(),
+                        season: e.season,
+                        number: e.number,
+                    })
+                    .collect();
+                (show, episodes)
+            })
+            .collect()
+    }
+}

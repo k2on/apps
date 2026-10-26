@@ -1056,6 +1056,8 @@ impl App {
                 Source::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
                 Source::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
                 Source::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
+                Source::Podcasts => p.shows_of("podcast").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
+                Source::Sermons => p.shows_of("sermon").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
                 Source::Artist(_) if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
                 Source::Work(..) => p.recordings().iter().map(|r| r.performers.clone()).collect(),
                 _ => p.rows().iter().map(|i| format!("{} {}", i.title, i.creator)).collect(),
@@ -1589,7 +1591,12 @@ impl App {
         ];
         // "Go to" takes the glyph of the *place* it goes, which is the one
         // table the sidebar draws from too.
-        for source in [Source::Album(album), Source::Artist(item.creator.clone())] {
+        // An episode goes to its show, whose title is its creator.
+        let places = match item.kind.as_str() {
+            "song" => vec![Source::Album(album), Source::Artist(item.creator.clone())],
+            kind => self.peer.show_named(kind, &item.creator).into_iter().collect(),
+        };
+        for source in places {
             if !source.title().is_empty() {
                 entries.push(Entry::run(source.glyph(), format!("Go to {}", source.title()), Message::Select(source)));
             }
@@ -1758,6 +1765,7 @@ impl App {
             .chain(p.composers().iter().map(|c| c.art.clone()))
             .chain(p.works().iter().map(|w| w.art.clone()))
             .chain(p.recordings().iter().map(|r| r.art.clone()))
+            .chain(p.shows().iter().map(|s| s.art.clone()))
             .filter(|art| !art.is_empty())
             .map(|art| media_url(&self.server, &art))
             .collect();
@@ -1802,6 +1810,8 @@ impl App {
             Source::Albums => p.albums().get(at).map(|a| Source::Album(a.name.clone())),
             Source::Artists => p.artists().get(at).map(|a| Source::Artist(a.name.clone())),
             Source::Composers => p.composers().get(at).map(|c| Source::Artist(c.name.clone())),
+            Source::Podcasts => p.shows_of("podcast").get(at).map(|s| Source::Show(s.id.clone(), s.title.clone())),
+            Source::Sermons => p.shows_of("sermon").get(at).map(|s| Source::Show(s.id.clone(), s.title.clone())),
             Source::Artist(_) if !p.works().is_empty() => self.listed_works().get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
             Source::Work(..) => p.recordings().get(at).map(|r| Source::Recording(r.id.clone(), r.performers.clone())),
             _ => None,

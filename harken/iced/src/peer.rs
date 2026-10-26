@@ -20,13 +20,15 @@ use std::collections::HashMap;
 
 use crate::domain::Id as Key;
 use crate::domain::{browse, CreatePlaylist, PlaylistInput, PlaylistsOf};
-use crate::domain::{AlbumCredits, AlbumInput, Artist as ArtistInput, Credits, Library, RecordingInput, Recordings, Search, WorkInput, Works};
+use crate::domain::{
+    AlbumCredits, AlbumInput, Artist as ArtistInput, Credits, Library, RecordingInput, Recordings, Search, ShowInput, WorkInput, Works,
+};
 use ark::format::Encode;
 use ark_peer::{Patch, Watched};
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
-use crate::rows::{Album, Artist, Composer, Credit, Id, Item, Playlist, Recording, TrackDetail, Work};
+use crate::rows::{Album, Artist, Composer, Credit, Id, Item, Playlist, Recording, Show, TrackDetail, Work};
 
 /// One line of the sidebar: somewhere the cursor can be and something it can
 /// open.
@@ -75,9 +77,11 @@ struct Views {
     albums: Watched<Album>,
     artists: Watched<Artist>,
     composers: Watched<Composer>,
+    /// Every podcast and series of sermons (`shows`).
+    shows: Watched<Show>,
     details: Watched<TrackDetail>,
     /// The page's list of tracks (`playlist`, `album`, `artist`,
-    /// `recording`).
+    /// `recording`, a show's episodes).
     shown: Option<Watched<Item>>,
     /// The page's works (`works`, or one `work` for a header).
     works: Option<Watched<Work>>,
@@ -176,6 +180,7 @@ impl Peer {
             albums: Watched::open(c, "albums", none(), Album::from_bytes),
             artists: Watched::open(c, "artists", none(), Artist::from_bytes),
             composers: Watched::open(c, "composers", none(), Composer::from_bytes),
+            shows: Watched::open(c, "shows", none(), Show::from_bytes),
             details: Watched::open(c, "track_details", none(), TrackDetail::from_bytes),
             shown: None,
             works: None,
@@ -190,6 +195,7 @@ impl Peer {
             views.albums.view(),
             views.artists.view(),
             views.composers.view(),
+            views.shows.view(),
             views.details.view(),
         ]
         .into_iter()
@@ -249,6 +255,23 @@ impl Peer {
 
     pub fn composers(&self) -> &[Composer] {
         &self.views.composers.rows
+    }
+
+    /// Every podcast and series of sermons, by title.
+    pub fn shows(&self) -> &[Show] {
+        &self.views.shows.rows
+    }
+
+    /// The page of the show of `kind` called `title`: an episode's, by the
+    /// creator it carries.
+    pub fn show_named(&self, kind: &str, title: &str) -> Option<Source> {
+        let show = self.shows().iter().find(|s| s.kind == kind && s.title == title)?;
+        Some(Source::Show(show.id.clone(), show.title.clone()))
+    }
+
+    /// The shows of one kind (`podcast`, `sermon`), by title.
+    pub fn shows_of(&self, kind: &str) -> Vec<&Show> {
+        self.shows().iter().filter(|s| s.kind == kind).collect()
     }
 
     /// What the current page shows when it is not a list of tracks: one
@@ -322,6 +345,7 @@ impl Peer {
         let albums = note("albums", v.albums.settle(c, moved));
         let artists = note("artists", v.artists.settle(c, moved));
         let composers = note("composers", v.composers.settle(c, moved));
+        let shows = note("shows", v.shows.settle(c, moved));
         let u = v.details.take(c, moved);
         match &u {
             Update::Unchanged => {}
@@ -353,16 +377,16 @@ impl Peer {
             std::mem::replace(&mut self.views.library, library).close(&mut self.client);
             self.open_page();
         }
-        if lists || library || albums || artists || composers || repointed {
+        if lists || library || albums || artists || composers || shows || repointed {
             self.choose();
         }
-        if albums || artists || composers || works || recordings {
+        if albums || artists || composers || shows || works || recordings {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
         if recordings {
             self.label_recording();
         }
-        lists || library || albums || artists || composers || details || shown || works || recordings || credits || on || repointed
+        lists || library || albums || artists || composers || shows || details || shown || works || recordings || credits || on || repointed
     }
 
     /// The sidebar, from the lists it counts. Grouping is the domain's, so
@@ -382,6 +406,18 @@ impl Peer {
             (Source::Artists, "Artists", self.artists().len()),
             (Source::Composers, "Composers", self.composers().len()),
         ] {
+            if count > 0 {
+                choices.push(Choice {
+                    source,
+                    label: label.into(),
+                    count: Some(count as i64),
+                });
+            }
+        }
+        // Then what is listened to rather than played: the podcasts and the
+        // sermons, each a line only when there is a show of its kind.
+        for (source, label, kind) in [(Source::Podcasts, "Podcasts", "podcast"), (Source::Sermons, "Sermons", "sermon")] {
+            let count = self.shows_of(kind).len();
             if count > 0 {
                 choices.push(Choice {
                     source,
@@ -509,7 +545,20 @@ impl Peer {
                 None,
                 None,
             ),
-            Source::Albums | Source::Artists | Source::Composers | Source::Settings => (None, None, None),
+            Source::Albums | Source::Artists | Source::Composers | Source::Podcasts | Source::Sermons | Source::Settings => (None, None, None),
+            // A show's episodes, newest first.
+            Source::Show(id, _) => (
+                Some((
+                    "show",
+                    ShowInput {
+                        playlist_id: pl,
+                        id: id.clone(),
+                    }
+                    .to_bytes(),
+                )),
+                None,
+                None,
+            ),
             // Both halves: the work itself, for the header, and its
             // performances. This page may have been reached without opening a
             // composer at all — a link somebody sent — so the row is read by
@@ -624,6 +673,10 @@ impl Peer {
             // arriving cold has no page yet, and the key is enough to ask with.
             Place::Work(id) => match self.work_named(id) {
                 Some(title) => Source::Work(id.clone(), title),
+                None => Source::Library,
+            },
+            Place::Show(id) => match self.shows().iter().find(|s| s.id == *id) {
+                Some(s) => Source::Show(id.clone(), s.title.clone()),
                 None => Source::Library,
             },
             Place::Recording(id) => match id.split_once('@').and_then(|(work, _)| self.work_named(work)) {

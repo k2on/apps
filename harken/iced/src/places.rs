@@ -44,6 +44,13 @@ pub enum Source {
     /// One performance, in the order the work goes. The label is who played
     /// it, the only thing that tells two of them apart.
     Recording(String, String),
+    /// Every podcast, and every series of sermons: index pages of cards,
+    /// each a line only when the library has a show of its kind.
+    Podcasts,
+    Sermons,
+    /// One show and its episodes, newest first: its key
+    /// (`podcast/full-time-nix`) and the title to draw.
+    Show(String, String),
     /// What this client and its server do: the library's resync, from the
     /// account menu. Not in the sidebar.
     Settings,
@@ -66,6 +73,9 @@ impl Source {
             // it and type it. What that rule forbids is a uuid.
             Source::Work(id, _) => Place::Work(id.clone()),
             Source::Recording(id, _) => Place::Recording(id.clone()),
+            Source::Podcasts => Place::Podcasts,
+            Source::Sermons => Place::Sermons,
+            Source::Show(id, _) => Place::Show(id.clone()),
             Source::Settings => Place::Settings,
         }
     }
@@ -77,8 +87,9 @@ impl Source {
     pub fn heading(&self) -> Option<&'static str> {
         match self {
             Source::Library | Source::Albums | Source::Artists | Source::Composers => Some("Music"),
+            Source::Podcasts | Source::Sermons => Some("Shows"),
             Source::Playlist(..) => Some("Playlists"),
-            Source::Album(_) | Source::Artist(_) | Source::Work(..) | Source::Recording(..) | Source::Settings => None,
+            Source::Album(_) | Source::Artist(_) | Source::Work(..) | Source::Recording(..) | Source::Show(..) | Source::Settings => None,
         }
     }
 
@@ -93,6 +104,7 @@ impl Source {
             Source::Artists | Source::Artist(_) => glyphs::ARTIST,
             Source::Composers => glyphs::COMPOSER,
             Source::Work(..) | Source::Recording(..) | Source::Settings => glyphs::LIBRARY,
+            Source::Podcasts | Source::Sermons | Source::Show(..) => glyphs::SHOW,
             Source::Playlist(..) => glyphs::PLAYLIST,
         }
     }
@@ -103,8 +115,15 @@ impl Source {
             Source::Albums => "Albums",
             Source::Artists => "Artists",
             Source::Composers => "Composers",
+            Source::Podcasts => "Podcasts",
+            Source::Sermons => "Sermons",
             Source::Settings => "Settings",
-            Source::Playlist(_, name) | Source::Album(name) | Source::Artist(name) | Source::Work(_, name) | Source::Recording(_, name) => name,
+            Source::Playlist(_, name)
+            | Source::Album(name)
+            | Source::Artist(name)
+            | Source::Work(_, name)
+            | Source::Recording(_, name)
+            | Source::Show(_, name) => name,
         }
     }
 
@@ -117,6 +136,8 @@ impl Source {
             Source::Artist(_) => "Artist",
             Source::Work(..) => "Work",
             Source::Recording(..) => "Recording",
+            Source::Show(id, _) if id.starts_with("sermon/") => "Sermons",
+            Source::Show(..) => "Podcast",
             _ => "",
         }
     }
@@ -146,6 +167,10 @@ pub enum Place {
     /// inside one is why a fragment splits on the *first* separator only.
     Work(String),
     Recording(String),
+    Podcasts,
+    Sermons,
+    /// A show by its key, which has a slash of its own, as a work's does.
+    Show(String),
     Settings,
 }
 
@@ -162,6 +187,9 @@ impl Route for Place {
             Place::Composer(n) => ("composer", Some(n)),
             Place::Work(n) => ("work", Some(n)),
             Place::Recording(n) => ("recording", Some(n)),
+            Place::Podcasts => ("podcasts", None),
+            Place::Sermons => ("sermons", None),
+            Place::Show(n) => ("show", Some(n)),
             Place::Settings => ("settings", None),
         };
         join(kind, name.map(String::as_str))
@@ -180,6 +208,9 @@ impl Route for Place {
             ("composer", Some(n)) => Place::Composer(n),
             ("work", Some(n)) => Place::Work(n),
             ("recording", Some(n)) => Place::Recording(n),
+            ("podcasts", None) => Place::Podcasts,
+            ("sermons", None) => Place::Sermons,
+            ("show", Some(n)) => Place::Show(n),
             ("settings", None) => Place::Settings,
             _ => Place::Library,
         }
@@ -262,6 +293,9 @@ mod tests {
             Place::Composer("Antonio Vivaldi".into()),
             Place::Work("johann-sebastian-bach/bwv-988".into()),
             Place::Recording("johann-sebastian-bach/bwv-988@kimiko-ishizaka".into()),
+            Place::Podcasts,
+            Place::Sermons,
+            Place::Show("podcast/full-time-nix".into()),
         ] {
             let fragment = place.fragment();
             assert_eq!(Place::parse(&fragment), place, "round trip of {fragment}");
