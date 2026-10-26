@@ -430,9 +430,96 @@ impl App {
             }),
             hero::heading("Library"),
             container(library).padding(Padding { top: 8.0, ..Padding::ZERO }),
+            container(hero::heading("Podcasts and sermons")).padding(Padding { top: 28.0, ..Padding::ZERO }),
+            container(self.view_feeds()).padding(Padding { top: 8.0, ..Padding::ZERO }),
         ]
         .width(Length::Fill);
         self.scrolled(None, page, false)
+    }
+
+    /// The feeds the library follows: one followed by its URL, as a podcast
+    /// or as sermons, and each followed one with how much of it is here,
+    /// what its last read said, and its Unfollow.
+    fn view_feeds(&self) -> Element<'_, Message> {
+        let explain = "Follow a podcast or a church's sermons by its RSS feed. The server downloads \
+                       its newest episodes and checks it every hour; a show's page fetches older ones.";
+        let kind = |k: &'static str, label: &'static str| {
+            button(text(label).size(13))
+                .style(if self.feed_kind == k { style::action } else { button::text })
+                .padding([5, 12])
+                .on_press(Message::FeedKind(k.into()))
+        };
+        let mut follow = button(text("Follow").size(13)).style(style::action).padding([5, 14]);
+        if !self.feed_url.trim().is_empty() {
+            follow = follow.on_press(Message::Follow);
+        }
+        let add = row![
+            kind("podcast", "Podcast"),
+            kind("sermon", "Sermons"),
+            text_input("https://\u{2026}/feed.xml", &self.feed_url)
+                .on_input(Message::FeedUrl)
+                .on_submit(Message::Follow)
+                .size(13)
+                .padding([5, 8])
+                .width(Length::Fill),
+            follow,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let mut feeds = column![
+            text(explain)
+                .size(14)
+                .line_height(1.45)
+                .style(style::faint(0.8))
+                .wrapping(text::Wrapping::Word),
+            add,
+        ]
+        .spacing(14)
+        .max_width(640);
+        if let Some(said) = &self.feed_said {
+            feeds = feeds.push(text(said.clone()).size(12).style(style::faint(0.55)));
+        }
+        for s in self.peer.subscriptions() {
+            let name = match s.title.is_empty() {
+                true => s.url.clone(),
+                false => s.title.clone(),
+            };
+            let kind = if s.kind == "sermon" { "Sermons" } else { "Podcast" };
+            let mut about = format!("{kind}  \u{b7}  ");
+            match (s.title.is_empty(), s.error.is_empty()) {
+                (true, true) => about.push_str("not read yet"),
+                _ => about.push_str(&format!("{} of {} {} here", s.episodes, s.items, plural(s.items, "episode"))),
+            }
+            let mut said = column![
+                text(name).size(14).wrapping(text::Wrapping::Word),
+                text(about).size(12).style(style::faint(0.6)),
+            ]
+            .spacing(2)
+            .width(Length::Fill);
+            if !s.error.is_empty() {
+                said = said.push(
+                    text(format!("Could not read it: {}", s.error))
+                        .size(12)
+                        .style(style::faint(0.6))
+                        .wrapping(text::Wrapping::Word),
+                );
+            }
+            let unfollow = button(text("Unfollow").size(12))
+                .style(button::text)
+                .padding([4, 10])
+                .on_press(Message::Unfollow(s.url.clone()));
+            feeds = feeds.push(row![said, unfollow].spacing(12).align_y(Alignment::Center));
+        }
+        feeds.into()
+    }
+
+    /// What a row says in its length's column: its length, or — its file
+    /// not on the server yet — how its download is going.
+    pub(crate) fn length_of(&self, item: &crate::rows::Item) -> String {
+        match self.peer.download_of(item.id) {
+            Some(d) => d.short(),
+            None => clock(item.duration_ms as f64 / 1000.0),
+        }
     }
 
     /// A page as one scrollable, so its top scrolls away with it: `top`
@@ -690,7 +777,7 @@ impl App {
             }
             let line = line
                 .push(container(body).width(Length::Fill).padding([3, 0]))
-                .push(table::cell(clock(item.duration_ms as f64 / 1000.0), TIME, on_cursor, false, true))
+                .push(table::cell(self.length_of(item), TIME, on_cursor, false, true))
                 .push(
                     button(icon::more(on_cursor))
                         .style(button::text)
@@ -877,11 +964,54 @@ impl App {
             true => s.description.chars().take(599).collect::<String>() + "\u{2026}",
             false => s.description.clone(),
         });
-        let body = match about(&said) {
-            Some(about) => column![about, self.view_list()].spacing(12).into(),
-            None => self.view_list(),
-        };
+        let mut top = column![].spacing(12);
+        if let Some(about) = about(&said) {
+            top = top.push(about);
+        }
+        if let Some(more) = self.view_more(id, rows) {
+            top = top.push(more);
+        }
+        let body = column![top, self.view_list()].spacing(12).into();
         padded(with_header(header, body))
+    }
+
+    /// Under a followed show's header: how many of its episodes are not on
+    /// the server yet, and its older episodes fetched — twenty more, or
+    /// every one — while the feed has more than the library keeps.
+    fn view_more(&self, id: &str, rows: &[crate::rows::Item]) -> Option<Element<'_, Message>> {
+        let sub = self.peer.subscription_of(id);
+        let downloads: Vec<_> = rows.iter().filter_map(|r| self.peer.download_of(r.id)).collect();
+        let older = sub.filter(|s| s.has_older());
+        if downloads.is_empty() && older.is_none() {
+            return None;
+        }
+        let mut line = row![].spacing(10).align_y(Alignment::Center);
+        if let Some(s) = older {
+            let more = |label: String, n: i64| {
+                button(text(label).size(12))
+                    .style(style::action)
+                    .padding([4, 12])
+                    .on_press(Message::FetchOlder(s.url.clone(), n))
+            };
+            let left = s.items - s.keep;
+            line = line.push(more(format!("Fetch {} older", left.min(20)), 20));
+            if left > 20 {
+                line = line.push(more(format!("Fetch all {}", s.items), 0));
+            }
+        }
+        if !downloads.is_empty() {
+            let failed = downloads.iter().filter(|d| d.state == "failed").count();
+            let going = downloads.iter().find(|d| d.state == "downloading");
+            let mut said = format!("{} not on the server yet", downloads.len());
+            if let Some(d) = going {
+                said.push_str(&format!("  \u{b7}  {}", d.said()));
+            }
+            if failed > 0 {
+                said.push_str(&format!("  \u{b7}  {failed} could not be downloaded"));
+            }
+            line = line.push(text(said).size(12).style(style::faint(0.6)));
+        }
+        Some(line.into())
     }
 
     /// A list's cover: the first four different records on it, two by two —
@@ -1267,7 +1397,7 @@ impl App {
                     false,
                     true,
                 ))
-                .push(table::cell(clock(item.duration_ms as f64 / 1000.0), TIME, on_cursor, false, true))
+                .push(table::cell(self.length_of(item), TIME, on_cursor, false, true))
                 // The same menu a right click opens, for anyone who does not
                 // know a right click opens one.
                 .push(

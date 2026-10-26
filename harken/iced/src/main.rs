@@ -174,6 +174,16 @@ pub enum Message {
     /// Settings' Resync: a full look asked of the server, which is its
     /// catalogue's sync too.
     Resync,
+    /// What Settings' feed entry says, and which kind it is followed as.
+    FeedUrl(String),
+    FeedKind(String),
+    /// Follow that feed (`library.subscribe`).
+    Follow,
+    /// Follow a feed no more, by its URL (`library.unsubscribe`).
+    Unfollow(String),
+    /// More of a followed feed's older episodes: this many more, or 0 for
+    /// every one (`library.fetch_older`).
+    FetchOlder(String, i64),
     /// The account button at the top right: its menu, whose entries open
     /// Settings and send `SignOut`.
     AccountMenu,
@@ -556,6 +566,11 @@ pub struct App {
     pub help: bool,
     /// What Settings' Resync last came to, to say under it.
     pub resync: Option<String>,
+    /// Settings' feed entry: the URL typed, the kind it is followed as
+    /// (`podcast`, `sermon`), and what the last Follow came to.
+    pub feed_url: String,
+    pub feed_kind: String,
+    pub feed_said: Option<String>,
     /// `D` — every number the session holds.
     pub debug: bool,
     /// A composer's page lists every work, not only the best known: its
@@ -667,6 +682,9 @@ impl App {
             search: String::new(),
             help: false,
             resync: None,
+            feed_url: String::new(),
+            feed_kind: "podcast".into(),
+            feed_said: None,
             debug: false,
             all_works: false,
             ctx: Context::new(),
@@ -2081,6 +2099,30 @@ impl App {
                     true => "Asked. New music appears as the server finds it.".into(),
                     false => self.note.clone(),
                 });
+            }
+            Message::FeedUrl(url) => self.feed_url = url,
+            Message::FeedKind(kind) => self.feed_kind = kind,
+            Message::Follow => {
+                let url = self.feed_url.trim().to_string();
+                if !url.is_empty() {
+                    let input = crate::domain::Subscribe {
+                        kind: self.feed_kind.clone(),
+                        url,
+                    };
+                    self.feed_said = Some(match self.author("follow the feed".into(), "subscribe", &input) {
+                        true => {
+                            self.feed_url.clear();
+                            "Following. Its episodes appear as the server reads it.".into()
+                        }
+                        false => self.note.clone(),
+                    });
+                }
+            }
+            Message::Unfollow(url) => {
+                let _ = self.author("unfollow the feed".into(), "unsubscribe", &crate::domain::Unsubscribe { url });
+            }
+            Message::FetchOlder(url, more) => {
+                let _ = self.author("fetch older episodes".into(), "fetch_older", &crate::domain::FetchOlder { url, more });
             }
             Message::SignOut => {
                 // The session revoked through the domain (pushed while

@@ -28,7 +28,7 @@ use ark_peer::{Patch, Watched};
 
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
-use crate::rows::{Album, Artist, Composer, Credit, Id, Item, Playlist, Recording, Show, TrackDetail, Work};
+use crate::rows::{Album, Artist, Composer, Credit, Download, Id, Item, Playlist, Recording, Show, Subscription, TrackDetail, Work};
 
 /// One line of the sidebar: somewhere the cursor can be and something it can
 /// open.
@@ -79,6 +79,10 @@ struct Views {
     composers: Watched<Composer>,
     /// Every podcast and series of sermons (`shows`).
     shows: Watched<Show>,
+    /// The feeds the library follows (`subscriptions`).
+    subscriptions: Watched<Subscription>,
+    /// The files the server has not got yet (`downloads`).
+    downloads: Watched<Download>,
     details: Watched<TrackDetail>,
     /// The page's list of tracks (`playlist`, `album`, `artist`,
     /// `recording`, a show's episodes).
@@ -181,6 +185,8 @@ impl Peer {
             artists: Watched::open(c, "artists", none(), Artist::from_bytes),
             composers: Watched::open(c, "composers", none(), Composer::from_bytes),
             shows: Watched::open(c, "shows", none(), Show::from_bytes),
+            subscriptions: Watched::open(c, "subscriptions", none(), Subscription::from_bytes),
+            downloads: Watched::open(c, "downloads", none(), Download::from_bytes),
             details: Watched::open(c, "track_details", none(), TrackDetail::from_bytes),
             shown: None,
             works: None,
@@ -196,6 +202,8 @@ impl Peer {
             views.artists.view(),
             views.composers.view(),
             views.shows.view(),
+            views.subscriptions.view(),
+            views.downloads.view(),
             views.details.view(),
         ]
         .into_iter()
@@ -267,6 +275,27 @@ impl Peer {
     pub fn show_named(&self, kind: &str, title: &str) -> Option<Source> {
         let show = self.shows().iter().find(|s| s.kind == kind && s.title == title)?;
         Some(Source::Show(show.id.clone(), show.title.clone()))
+    }
+
+    /// The feeds the library follows, by when each was added.
+    pub fn subscriptions(&self) -> &[Subscription] {
+        &self.views.subscriptions.rows
+    }
+
+    /// The feed a show is read from, when the library follows it.
+    pub fn subscription_of(&self, show: &str) -> Option<&Subscription> {
+        self.subscriptions().iter().find(|s| !s.show_id.is_empty() && s.show_id == show)
+    }
+
+    /// The files the server has not got yet.
+    pub fn downloads(&self) -> &[Download] {
+        &self.views.downloads.rows
+    }
+
+    /// Whether a media row's file is not on the server yet, and how it is
+    /// going.
+    pub fn download_of(&self, media: Id) -> Option<&Download> {
+        self.downloads().iter().find(|d| d.media_id == media)
     }
 
     /// The shows of one kind (`podcast`, `sermon`), by title.
@@ -346,6 +375,8 @@ impl Peer {
         let artists = note("artists", v.artists.settle(c, moved));
         let composers = note("composers", v.composers.settle(c, moved));
         let shows = note("shows", v.shows.settle(c, moved));
+        let subscriptions = note("subscriptions", v.subscriptions.settle(c, moved));
+        let downloads = note("downloads", v.downloads.settle(c, moved));
         let u = v.details.take(c, moved);
         match &u {
             Update::Unchanged => {}
@@ -386,7 +417,21 @@ impl Peer {
         if recordings {
             self.label_recording();
         }
-        lists || library || albums || artists || composers || shows || details || shown || works || recordings || credits || on || repointed
+        lists
+            || library
+            || albums
+            || artists
+            || composers
+            || shows
+            || subscriptions
+            || downloads
+            || details
+            || shown
+            || works
+            || recordings
+            || credits
+            || on
+            || repointed
     }
 
     /// The sidebar, from the lists it counts. Grouping is the domain's, so

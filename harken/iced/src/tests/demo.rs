@@ -545,3 +545,70 @@ fn an_episode_skips_seconds_and_a_song_a_track() {
     assert!(!app.jogs(), "a song plays");
     assert!(matches!(app.forward(), crate::Message::Skip(1)));
 }
+
+/// A feed followed from Settings is the library's: a subscription keeping
+/// the newest twenty, its show's page offering older episodes once the
+/// server has said the feed has more, and an episode whose file is not on
+/// the server yet saying so where its length goes; unfollowed, the show is
+/// gone. Falsified by `length_of` reading the row's length alone: the
+/// queued episode said its length.
+#[test]
+fn a_feed_is_followed_from_settings() {
+    const FEED: &str = "https://feeds.transistor.fm/full-time-nix";
+    let mut app = super::demo_app();
+    let _ = app.update(crate::Message::FeedKind("sermon".into()));
+    let _ = app.update(crate::Message::FeedUrl("https://example.org/sermons.xml".into()));
+    let _ = app.update(crate::Message::Follow);
+    assert!(app.feed_url.is_empty(), "{:?}", app.feed_said);
+    let _ = app.update(crate::Message::FeedKind("podcast".into()));
+    let _ = app.update(crate::Message::FeedUrl(FEED.into()));
+    let _ = app.update(crate::Message::Follow);
+    let subs: Vec<(String, String, i64)> = app.peer.subscriptions().iter().map(|s| (s.url.clone(), s.kind.clone(), s.keep)).collect();
+    assert_eq!(subs.len(), 2, "{subs:?}");
+    assert!(subs.contains(&("https://example.org/sermons.xml".into(), "sermon".into(), 20)));
+    assert!(app.peer.subscription_of("sermon/gospel-in-life").is_none(), "nobody follows its feed");
+
+    // The server's read: the feed has fifty, and the library keeps twenty.
+    let read = crate::domain::FeedRead {
+        url: FEED.into(),
+        title: "Full Time Nix".into(),
+        items: 50,
+        error: String::new(),
+    };
+    assert!(app.author("say a read".into(), "feed_read", &read));
+    app.peer.refresh();
+    let id = "podcast/full-time-nix";
+    let sub = app.peer.subscription_of(id).expect("its show followed").clone();
+    assert!(sub.has_older());
+    let _ = app.update(crate::Message::FetchOlder(FEED.into(), 20));
+    assert_eq!(app.peer.subscription_of(id).unwrap().keep, 40);
+
+    // An episode in the library before its file: queued, then how far.
+    let _ = app.update(crate::Message::Select(Source::Show(id.into(), "Full Time Nix".into())));
+    let first = app.peer.rows()[0].clone();
+    let queue = crate::domain::QueueDownload {
+        file: first.file.clone(),
+        source: "https://media/1.mp3".into(),
+    };
+    assert!(app.author("queue".into(), "queue_download", &queue));
+    app.peer.refresh();
+    assert_eq!(app.length_of(&first), "queued");
+    assert_eq!(app.peer.download_of(first.id).unwrap().said(), "Not on the server yet");
+    let going = crate::domain::DownloadProgress {
+        file: first.file.clone(),
+        state: "downloading".into(),
+        bytes: 25,
+        total: 100,
+        error: String::new(),
+    };
+    assert!(app.author("progress".into(), "download_progress", &going));
+    app.peer.refresh();
+    assert_eq!(app.length_of(&first), "25%");
+    assert!(app.author("here".into(), "downloaded", &crate::domain::Downloaded { file: first.file.clone() }));
+    app.peer.refresh();
+    assert_ne!(app.length_of(&first), "25%", "its length again");
+
+    let _ = app.update(crate::Message::Unfollow(FEED.into()));
+    assert!(app.peer.shows_of("podcast").is_empty(), "the show went with its feed");
+    assert_eq!(app.peer.subscriptions().len(), 1);
+}

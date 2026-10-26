@@ -8,7 +8,8 @@
 //! than as a panic in the middle of a frame.
 
 use crate::domain::{
-    AlbumsEntry, ArtistsEntry, ComposersEntry, CreditsEntry, LibraryEntry, RecordingsEntry, ShowsEntry, TrackDetailsEntry, WorkSummary,
+    AlbumsEntry, ArtistsEntry, ComposersEntry, CreditsEntry, DownloadsEntry, LibraryEntry, RecordingsEntry, ShowsEntry, SubscriptionsEntry,
+    TrackDetailsEntry, WorkSummary,
 };
 use ark::format::Encode;
 
@@ -155,6 +156,105 @@ impl From<ShowsEntry> for Show {
 impl Show {
     pub fn from_bytes(b: &[u8]) -> Show {
         ShowsEntry::from_bytes(b).map_or_else(|_| Show::default(), Show::from)
+    }
+}
+
+/// A feed the library follows, as Settings and a show's page list them
+/// (`subscriptions`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Subscription {
+    pub url: String,
+    /// `podcast` or `sermon`.
+    pub kind: String,
+    /// Its show's title; empty until the server has read it.
+    pub title: String,
+    /// Its show's key; empty until a read has made the show.
+    pub show_id: String,
+    /// How many of its episodes are in the library, and how many the feed
+    /// has.
+    pub episodes: i64,
+    pub items: i64,
+    /// The newest this many are downloaded; 0 for every one.
+    pub keep: i64,
+    /// Why the last read failed; empty when it did not.
+    pub error: String,
+}
+
+impl From<SubscriptionsEntry> for Subscription {
+    fn from(e: SubscriptionsEntry) -> Subscription {
+        Subscription {
+            url: e.url,
+            kind: e.kind,
+            title: e.title,
+            show_id: e.show_id,
+            episodes: e.episodes,
+            items: e.items,
+            keep: e.keep,
+            error: e.error,
+        }
+    }
+}
+
+impl Subscription {
+    pub fn from_bytes(b: &[u8]) -> Subscription {
+        SubscriptionsEntry::from_bytes(b).map_or_else(|_| Subscription::default(), Subscription::from)
+    }
+
+    /// Whether the feed has older episodes than the library keeps of it.
+    pub fn has_older(&self) -> bool {
+        self.keep > 0 && self.items > self.keep
+    }
+}
+
+/// A file the server has not got yet (`downloads`): what its row says
+/// instead of its length.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Download {
+    pub media_id: Id,
+    /// `queued`, `downloading` or `failed`.
+    pub state: String,
+    pub bytes: i64,
+    pub total: i64,
+    pub error: String,
+}
+
+impl From<DownloadsEntry> for Download {
+    fn from(e: DownloadsEntry) -> Download {
+        Download {
+            media_id: e.media_id.0,
+            state: e.state,
+            bytes: e.bytes,
+            total: e.total,
+            error: e.error,
+        }
+    }
+}
+
+impl Download {
+    pub fn from_bytes(b: &[u8]) -> Download {
+        DownloadsEntry::from_bytes(b).map_or_else(|_| Download::default(), Download::from)
+    }
+
+    /// What a row says in place of its length, short enough for the
+    /// column: queued, how far it has got, or that it failed.
+    pub fn short(&self) -> String {
+        match self.state.as_str() {
+            "downloading" if self.total > 0 => format!("{}%", (self.bytes * 100 / self.total).clamp(0, 99)),
+            "downloading" => "\u{2193}".into(),
+            "failed" => "failed".into(),
+            _ => "queued".into(),
+        }
+    }
+
+    /// What it is, said whole.
+    pub fn said(&self) -> String {
+        match self.state.as_str() {
+            "downloading" if self.total > 0 => format!("Downloading to the server: {}", self.short()),
+            "downloading" => "Downloading to the server".into(),
+            "failed" if !self.error.is_empty() => format!("Could not download: {}", self.error),
+            "failed" => "Could not download".into(),
+            _ => "Not on the server yet".into(),
+        }
     }
 }
 
