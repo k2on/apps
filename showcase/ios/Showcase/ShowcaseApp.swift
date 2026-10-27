@@ -65,9 +65,9 @@ final class Go: ObservableObject {
     }
 }
 
-/// How many frames the app draws a second once told to go, said on its
-/// standard output (`simctl launch --stdout`), beside what the recording
-/// caught: which of the two keeps a recording short of frames.
+/// How many frames the app draws a second once told to go, written to
+/// Documents/frames.log in its container, which ios.sh prints beside what
+/// the recording caught: which of the two keeps a recording short of frames.
 final class Frames: NSObject {
     static let shared = Frames()
     private var link: CADisplayLink?
@@ -78,11 +78,25 @@ final class Frames: NSObject {
 
     func count() {
         guard link == nil else { return }
-        setvbuf(stdout, nil, _IOLBF, 0)
+        try? FileManager.default.removeItem(at: Self.log)
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         self.link = link
+    }
+
+    static let log = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("frames.log")
+
+    private func say(_ line: String) {
+        let data = Data((line + "\n").utf8)
+        if let file = try? FileHandle(forWritingTo: Self.log) {
+            file.seekToEndOfFile()
+            file.write(data)
+            try? file.close()
+        } else {
+            try? data.write(to: Self.log)
+        }
     }
 
     @objc private func tick(_ link: CADisplayLink) {
@@ -92,7 +106,7 @@ final class Frames: NSObject {
         if second == 0 { second = now }
         frames += 1
         if now - second >= 1 {
-            print("app drew \(frames) frames in \(String(format: "%.2f", now - second))s, longest gap \(Int(longest * 1000)) ms")
+            say("app drew \(frames) frames in \(String(format: "%.2f", now - second))s, longest gap \(Int(longest * 1000)) ms")
             (second, frames, longest) = (now, 0, 0)
         }
     }
