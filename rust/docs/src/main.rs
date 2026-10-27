@@ -1,17 +1,22 @@
 //! arkui's documentation, drawn by arkui.
 //!
-//! A sidebar of the modules (`arkui::sidebar`, harken's), a theme dropdown
-//! (`arkui::menu`, anchored to its control) and, for each module, what it is,
-//! a working example, its API, its rules, and where harken draws with it.
-//! What it says is [`catalogue`]; how each example is built is [`examples`].
+//! A sidebar of the components (`arkui::sidebar`), a theme dropdown
+//! (`arkui::menu`, anchored to its control) and, for each component, how to
+//! use it on the desktop — a working example, its API, its rules — and on a
+//! phone, Android or iOS, with the latest
+//! capture from a real device in a frame of that device ([`screens`]).
+//! What it says is [`components`] and [`catalogue`]; how each example is
+//! built is [`examples`].
 //!
 //! `docs --json` prints the catalogue for a site that wants it as data.
 // `--json` and the tests are native; in a browser the page only draws the
 // entries.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod catalogue;
+mod components;
 mod examples;
 mod pages;
+mod screens;
 
 use arkui::context::{Context, Layer};
 use arkui::menu::{self, Anchor, Entry, Menu};
@@ -23,7 +28,8 @@ use iced::keyboard::{Key, Modifiers};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, stack, text, Space};
 use iced::{Alignment, Element, Length, Padding, Point, Size, Subscription, Task, Theme};
 
-use catalogue::{Group, ENTRIES};
+use components::{Section, COMPONENTS};
+use screens::{Fetched, Phone, Pictures};
 
 /// The chrome's padding: above the top bar and either side of the page.
 pub const PADDING: f32 = 16.0;
@@ -31,22 +37,24 @@ pub const PADDING: f32 = 16.0;
 pub const BAR: f32 = arkui::account::HEIGHT;
 /// The sidebar's scrollable, and the page's.
 const SIDEBAR: &str = "sidebar";
+/// Below this the window is a phone's: no sidebar beside the page, but a
+/// dropdown of the same places in the top bar.
+pub const NARROW: f32 = 760.0;
 const PAGE: &str = "page";
 
 /// A page of the docs, which is also its fragment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     Overview,
-    Harken,
-    Module(&'static str),
+    Component(&'static str),
 }
 
 impl Place {
     /// Every place, in the sidebar's order.
     pub fn all() -> Vec<Place> {
-        let mut out = vec![Place::Overview, Place::Harken];
-        for group in Group::ALL {
-            out.extend(ENTRIES.iter().filter(|e| e.group == group).map(|e| Place::Module(e.module)));
+        let mut out = vec![Place::Overview];
+        for section in Section::ALL {
+            out.extend(COMPONENTS.iter().filter(|c| c.section == section).map(|c| Place::Component(c.id)));
         }
         out
     }
@@ -56,16 +64,54 @@ impl Route for Place {
     fn fragment(&self) -> String {
         match self {
             Place::Overview => "#overview".into(),
-            Place::Harken => "#harken".into(),
-            Place::Module(m) => format!("#{m}"),
+            Place::Component(c) => format!("#{c}"),
         }
     }
 
     fn parse(fragment: &str) -> Self {
-        match fragment.trim_start_matches('#') {
-            "harken" => Place::Harken,
-            m => catalogue::find(m).map(|e| Place::Module(e.module)).unwrap_or(Place::Overview),
-        }
+        // A component, or an arkui module's name for the component it is in.
+        let id = fragment.trim_start_matches('#');
+        components::find(id)
+            .or_else(|| components::of_module(id))
+            .map(|c| Place::Component(c.id))
+            .unwrap_or(Place::Overview)
+    }
+}
+
+/// A finger's scrolling, from the page (`web/index.html`): iced's
+/// scrollable does not scroll for a touch in a browser, so the page measures
+/// the drag and says how far, and the next update scrolls by it.
+mod finger {
+    use std::cell::{Cell, RefCell};
+
+    use arkui::wake::Bell;
+
+    thread_local! {
+        static OWED: Cell<f32> = const { Cell::new(0.0) };
+        static BELL: RefCell<Option<Bell>> = const { RefCell::new(None) };
+    }
+
+    /// Ring `bell` when a finger has moved.
+    pub fn wire(bell: &Bell) {
+        BELL.with(|b| *b.borrow_mut() = Some(bell.clone()));
+    }
+
+    /// How far fingers have scrolled since the last ask, down positive.
+    pub fn take() -> f32 {
+        OWED.with(|o| o.replace(0.0))
+    }
+
+    /// Scroll the page `dy` logical pixels, down positive. Called from the
+    /// page's script; nothing calls it natively.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+    pub fn scroll_by(dy: f32) {
+        OWED.with(|o| o.set(o.get() + dy));
+        BELL.with(|b| {
+            if let Some(b) = &*b.borrow() {
+                b.ring();
+            }
+        });
     }
 }
 
@@ -107,6 +153,14 @@ pub enum Message {
     RowAt(usize),
     CardAt(usize),
     SideAt(usize),
+    // The phones.
+    Phone(Phone),
+    Manifest(Fetched),
+    Picture(arkui::images::Loaded),
+    SystemTheme(iced::theme::Mode),
+    Play,
+    /// The places, as a dropdown on a narrow window.
+    Places(bool),
 }
 
 pub struct App {
@@ -128,6 +182,16 @@ pub struct App {
     pub row: usize,
     pub card: usize,
     pub side: usize,
+    /// Which phone the Mobile half shows.
+    pub phone: Phone,
+    pub fetched: Fetched,
+    pub pictures: Pictures,
+    /// What the system said, for "follow the system".
+    pub system_dark: bool,
+    /// Frames played since the page opened, for a recording.
+    pub played: u64,
+    /// Whether a narrow window's places are open over the page.
+    pub places: bool,
 }
 
 impl App {
@@ -135,6 +199,7 @@ impl App {
         let bell = Bell::new();
         let ring = bell.clone();
         arkui::wake::page_changes(move || ring.ring());
+        finger::wire(&bell);
         let mut app = App {
             place: Place::Overview,
             keys: vim::Keys::new(),
@@ -152,19 +217,25 @@ impl App {
             row: 1,
             card: 0,
             side: 1,
+            phone: Phone::Android,
+            fetched: Fetched::Asking,
+            pictures: Pictures::new(),
+            system_dark: false,
+            played: 0,
+            places: false,
         };
         // A fragment typed into the bar lands where it says.
         if let Some(place) = app.router.poll(true) {
             app.place = place;
         }
-        (app, Task::none())
+        let ask = Task::batch([screens::fetch().map(Message::Manifest), iced::system::theme().map(Message::SystemTheme)]);
+        (app, ask)
     }
 
     fn title(&self) -> String {
         match self.place {
             Place::Overview => "arkui".into(),
-            Place::Harken => "arkui — harken".into(),
-            Place::Module(m) => format!("arkui — {}", catalogue::find(m).map(|e| e.name).unwrap_or(m)),
+            Place::Component(c) => format!("arkui — {}", components::find(c).map(|c| c.name).unwrap_or(c)),
         }
     }
 
@@ -174,6 +245,71 @@ impl App {
             Tone::Light => Some(Theme::Light),
             Tone::Dark => Some(Theme::Dark),
         }
+    }
+
+    /// Whether the page is drawn dark: what the dropdown says, or what the
+    /// system said.
+    pub fn dark(&self) -> bool {
+        match self.tone {
+            Tone::System => self.system_dark,
+            Tone::Light => false,
+            Tone::Dark => true,
+        }
+    }
+
+    /// The captures the page in view shows on the phone in view, asked for:
+    /// on arrival, a switch of phone or theme, and when the manifest lands.
+    fn want_pictures(&mut self) -> Task<Message> {
+        let Place::Component(id) = self.place else { return Task::none() };
+        let Some(c) = components::find(id) else { return Task::none() };
+        let Some(m) = self.fetched.manifest().cloned() else {
+            return Task::none();
+        };
+        let dark = self.dark();
+        let mut tasks = Vec::new();
+        for shot in c.shots {
+            if let Some((_, got)) = self.fetched.find(self.phone, shot.id) {
+                let got = got.clone();
+                tasks.push(
+                    self.pictures
+                        .want(&got.kind, screens::urls(&m, self.phone, &got, dark))
+                        .map(Message::Picture),
+                );
+            }
+        }
+        Task::batch(tasks)
+    }
+
+    /// The fastest recording on the page in view whose frames have all
+    /// arrived, which the flipbook's clock runs at.
+    fn playing(&self) -> Option<u32> {
+        let Place::Component(id) = self.place else { return None };
+        let m = self.fetched.manifest()?;
+        components::find(id)?
+            .shots
+            .iter()
+            .filter_map(|s| self.fetched.find(self.phone, s.id))
+            .filter(|(_, got)| got.kind == "recording" && got.fps > 0)
+            .filter(|(_, got)| {
+                screens::urls(m, self.phone, got, self.dark())
+                    .iter()
+                    .all(|u| self.pictures.frames.handle(u).is_some())
+            })
+            .map(|(_, got)| got.fps)
+            .max()
+    }
+
+    /// A phone's width, or a window made that narrow.
+    pub fn narrow(&self) -> bool {
+        self.window.width < NARROW
+    }
+
+    /// How wide the page's content is: the window less the sidebar, the
+    /// gutters and, on the desktop, the scrollbar.
+    pub fn content(&self) -> f32 {
+        let side = if self.narrow() { 0.0 } else { sidebar::WIDTH };
+        let bar = if self.narrow() { 0.0 } else { arkui::SCROLLBAR };
+        (self.window.width - side - 2.0 * pages::gutter(self) - bar).max(200.0)
     }
 
     fn cursor(&self) -> usize {
@@ -191,9 +327,12 @@ impl App {
             return Task::none();
         }
         self.place = place;
+        self.played = 0;
+        let pictures = self.want_pictures();
         let all = Place::all();
         let at = all.iter().position(|p| *p == place).unwrap_or(0);
         Task::batch([
+            pictures,
             arkui::scroll::reveal(SIDEBAR, vim::Grid::column(all.len()), at),
             iced::widget::operation::snap_to(PAGE, iced::widget::scrollable::RelativeOffset::START),
         ])
@@ -201,12 +340,22 @@ impl App {
 
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Go(place) => return self.go(place),
+            Message::Go(place) => {
+                self.places = false;
+                return self.go(place);
+            }
+            Message::Places(open) => self.places = open,
             Message::Key(key, mods) => return self.key(&key, mods),
             Message::Hover(at) => self.pointer = at,
             Message::Resized(size) => self.window = size,
             Message::Wake => {
                 self.rung = self.bell.rung();
+                let dy = finger::take();
+                if dy != 0.0 {
+                    // The places over a narrow page scroll, or the page does.
+                    let id = if self.narrow() && self.places { SIDEBAR } else { PAGE };
+                    return iced::widget::operation::scroll_by(id, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: dy });
+                }
                 if let Some(place) = self.router.poll(true) {
                     return self.go(place);
                 }
@@ -230,6 +379,7 @@ impl App {
             Message::SetTone(tone) => {
                 self.tone = tone;
                 self.ctx.close_menu();
+                return self.want_pictures();
             }
             Message::RowMenu => {
                 let entries = vec![
@@ -301,6 +451,21 @@ impl App {
             Message::RowAt(at) => self.row = at,
             Message::CardAt(at) => self.card = at,
             Message::SideAt(at) => self.side = at,
+            Message::Phone(phone) => {
+                self.phone = phone;
+                self.played = 0;
+                return self.want_pictures();
+            }
+            Message::Manifest(fetched) => {
+                self.fetched = fetched;
+                return self.want_pictures();
+            }
+            Message::Picture(done) => self.pictures.loaded(done),
+            Message::SystemTheme(mode) => {
+                self.system_dark = mode == iced::theme::Mode::Dark;
+                return self.want_pictures();
+            }
+            Message::Play => self.played += 1,
         }
         Task::none()
     }
@@ -330,6 +495,10 @@ impl App {
                 _ => Task::none(),
             };
         }
+        if self.places && action == vim::Action::Cancel {
+            self.places = false;
+            return Task::none();
+        }
         if self.dialog.is_some() {
             if action == vim::Action::Cancel {
                 self.dialog = None;
@@ -353,7 +522,12 @@ impl App {
             self.bell.subscription().map(|()| Message::Wake),
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),
+            iced::system::theme_changes().map(Message::SystemTheme),
         ];
+        // A recording's clock, only while one is on screen with its frames in.
+        if let Some(fps) = self.playing() {
+            subs.push(iced::time::every(std::time::Duration::from_millis(1000 / fps as u64)).map(|_| Message::Play));
+        }
         // A clock only while something moves: a submenu's dwell, a dialog
         // rising.
         if self.ctx.dwelling() {
@@ -368,25 +542,44 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let page = column![
             self.view_top(),
-            scrollable(pages::view(self)).id(PAGE).style(style::bars).height(Length::Fill)
+            scrollable(pages::view(self))
+                .id(PAGE)
+                // A bar on the desktop, where it is how a mouse finds the
+                // page's length; none on a phone, where a finger scrolls and
+                // the strip of chrome is room the page does not have.
+                .direction(iced::widget::scrollable::Direction::Vertical(match self.narrow() {
+                    true => iced::widget::scrollable::Scrollbar::hidden(),
+                    false => iced::widget::scrollable::Scrollbar::default(),
+                }))
+                .style(style::bars)
+                .height(Length::Fill)
         ]
         .spacing(8);
-        let base = container(row![
-            self.view_sidebar(),
-            rule::vertical(1).style(style::edge),
-            container(page).padding(Padding {
-                top: PADDING,
-                right: 0.0,
-                bottom: 0.0,
-                left: 0.0,
-            })
-        ])
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(style::page);
+        let page = container(page).padding(Padding {
+            top: PADDING,
+            right: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+        });
+        let body: Element<'_, Message> = match self.narrow() {
+            true => page.into(),
+            false => row![self.view_sidebar(), rule::vertical(1).style(style::edge), page].into(),
+        };
+        let base = container(body).width(Length::Fill).height(Length::Fill).style(style::page);
 
         let mut layers = stack![mouse_area(base).on_move(Message::Hover)];
         let focus = self.ctx.focus();
+
+        // A narrow window's places: the sidebar, over the page, from the top
+        // bar's button down.
+        if self.narrow() && self.places {
+            layers = layers.push(layer::dimmed(Message::Places(false), Message::Swallow)).push(
+                container(self.view_sidebar()).height(Length::Fill).padding(Padding {
+                    top: PADDING + BAR + 4.0,
+                    ..Padding::ZERO
+                }),
+            );
+        }
 
         if let Some(since) = self.dialog {
             let open = arkui::dialog::opened(since, iced::time::Instant::now());
@@ -394,18 +587,16 @@ impl App {
                 .style(style::quiet)
                 .padding(6)
                 .on_press(Message::Dialog(false));
-            let body = column![
-                text("A dialog rises over the page as the page dims. A click on the dimmed page, the ×, or <Esc> closes it.").size(13),
-                text("harken follows a podcast in one.").size(13).style(style::dim),
-            ]
-            .spacing(8);
+            let body =
+                column![text("A dialog rises over the page as the page dims. A click on the dimmed page, the ×, or <Esc> closes it.").size(13),]
+                    .spacing(8);
             layers = layers
                 .push(arkui::dialog::backdrop(Message::Dialog(false), Message::Swallow, open))
                 .push(arkui::dialog::view(
                     "Follow a podcast".into(),
                     close.into(),
                     body.into(),
-                    420.0,
+                    (self.window.width - 32.0).min(420.0),
                     300.0,
                     open,
                 ));
@@ -440,7 +631,7 @@ impl App {
         layers.into()
     }
 
-    /// Overview and harken, then every module under its group.
+    /// The overview, then every component under its section.
     fn view_sidebar(&self) -> Element<'_, Message> {
         let items: Vec<sidebar::Item<Message>> = Place::all()
             .into_iter()
@@ -449,22 +640,15 @@ impl App {
                     glyph: glyphs::HOME,
                     label: "Overview".into(),
                     heading: Some("arkui"),
-                    count: Some(ENTRIES.len() as i64),
+                    count: Some(COMPONENTS.len() as i64),
                     press: Message::Go(place),
                 },
-                Place::Harken => sidebar::Item {
-                    glyph: glyphs::NOTE,
-                    label: "In harken".into(),
-                    heading: Some("arkui"),
-                    count: Some(catalogue::HARKEN_ONLY.len() as i64),
-                    press: Message::Go(place),
-                },
-                Place::Module(m) => {
-                    let e = catalogue::find(m).expect("a place is an entry");
+                Place::Component(id) => {
+                    let c = components::find(id).expect("a place is a component");
                     sidebar::Item {
-                        glyph: e.glyph,
-                        label: e.name.into(),
-                        heading: Some(e.group.heading()),
+                        glyph: c.glyph,
+                        label: c.name.into(),
+                        heading: Some(c.section.heading()),
                         count: None,
                         press: Message::Go(place),
                     }
@@ -490,19 +674,51 @@ impl App {
         };
         let path = match self.place {
             Place::Overview => "arkui".to_string(),
-            Place::Harken => "arkui · in harken".to_string(),
-            Place::Module(m) => format!("arkui::{m}"),
+            Place::Component(c) => {
+                let c = components::find(c).expect("a place is a component");
+                match c.desktop.is_empty() {
+                    true => c.name.to_lowercase(),
+                    false => c.desktop.iter().map(|m| format!("arkui::{m}")).collect::<Vec<_>>().join(" · "),
+                }
+            }
         };
         let dropdown = button(
-            row![text(format!("Theme: {tone}")).size(12), icon::plain(glyphs::DOWN, true)]
-                .spacing(4)
-                .align_y(Alignment::Center),
+            row![
+                text(match self.narrow() {
+                    true => tone.to_string(),
+                    false => format!("Theme: {tone}"),
+                })
+                .size(12),
+                icon::plain(glyphs::DOWN, true)
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
         )
         .style(style::quiet)
         .padding([4, 8])
         .on_press(Message::ThemeMenu);
+        // Narrow, the place is a button that opens every place; wide, the
+        // sidebar is there and this says where in arkui the page is.
+        let left: Element<'_, Message> = match self.narrow() {
+            true => {
+                let here = match self.place {
+                    Place::Overview => "Overview",
+                    Place::Component(c) => components::find(c).map(|c| c.name).unwrap_or("arkui"),
+                };
+                button(
+                    row![icon::plain(glyphs::LIBRARY, false), text(here).size(13), icon::plain(glyphs::DOWN, true)]
+                        .spacing(6)
+                        .align_y(Alignment::Center),
+                )
+                .style(style::quiet)
+                .padding([4, 8])
+                .on_press(Message::Places(!self.places))
+                .into()
+            }
+            false => text(path).size(12).style(style::dim).into(),
+        };
         container(
-            row![text(path).size(12).style(style::dim), Space::new().width(Length::Fill), dropdown]
+            row![left, Space::new().width(Length::Fill), dropdown]
                 .align_y(Alignment::Center)
                 .height(Length::Fixed(BAR)),
         )
@@ -510,7 +726,7 @@ impl App {
             top: 0.0,
             right: PADDING,
             bottom: 0.0,
-            left: pages::GUTTER,
+            left: pages::gutter(self) - if self.narrow() { 8.0 } else { 0.0 },
         })
         .into()
     }

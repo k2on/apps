@@ -1,6 +1,6 @@
 //! One working example per module, built from arkui exactly as an app would
 //! build it. The overlays (menu, picker, dialog) open the window's own layers
-//! in `main.rs`, so they behave here as they do in harken.
+//! in `main.rs`, so they behave here as they do in an app.
 use arkui::account::{self, Account, Who};
 use arkui::cards::{self, Card};
 use arkui::fit::Cut;
@@ -69,22 +69,41 @@ const TRACKS: [(&str, &str, &str, &str); 4] = [
     ("Clair de lune", "Claudio Arrau", "Debussy: Suite bergamasque", "5:21"),
 ];
 
+/// The example a component's Desktop half draws: its modules', together.
+pub fn for_component<'a>(app: &'a App, id: &str) -> Element<'a, Message> {
+    let both = |a: Element<'a, Message>, b: Element<'a, Message>| column![a, b].spacing(24).into();
+    match id {
+        "icons" => both(glyphs_(room(app)), icon_(room(app))),
+        "text" => both(cut(room(app)), format_()),
+        "art" => both(art_(room(app)), said(app, "images")),
+        "navigation" => sidebar_(app),
+        "rows" => table_(app),
+        "header" => hero_(app),
+        "dialog" => both(dialog_(), picker_(app)),
+        "pages" => said(app, "swipe"),
+        "keys" => keys(app),
+        "routes" => both(route_(app), url_()),
+        "waking" => wake_(app),
+        other => view(app, other),
+    }
+}
+
 pub fn view<'a>(app: &'a App, module: &str) -> Element<'a, Message> {
     match module {
-        "theme" => theme(),
+        "theme" => theme(room(app)),
         "style" => style_(app),
-        "glyphs" => glyphs_(),
-        "icon" => icon_(),
+        "glyphs" => glyphs_(room(app)),
+        "icon" => icon_(room(app)),
         "format" => format_(),
-        "fit" | "line" => cut(),
+        "fit" | "line" => cut(room(app)),
         "url" => url_(),
         "sidebar" => sidebar_(app),
         "panel" => panel_(),
         "table" => table_(app),
         "cards" => cards_(app),
         "hero" => hero_(app),
-        "art" => art_(),
-        "account" => account_(),
+        "art" => art_(room(app)),
+        "account" => account_(room(app)),
         "menu" | "context" => menu_(app),
         "picker" | "layer" => picker_(app),
         "dialog" => dialog_(),
@@ -93,6 +112,29 @@ pub fn view<'a>(app: &'a App, module: &str) -> Element<'a, Message> {
         "wake" => wake_(app),
         _ => said(app, module),
     }
+}
+
+/// `items`, each `item` wide, in as many rows as `room` needs: an example
+/// on a phone's width wraps rather than running off its box.
+fn wrap<'a>(items: Vec<Element<'a, Message>>, item: f32, gap: f32, room: f32) -> Element<'a, Message> {
+    let per = (((room + gap) / (item + gap)).floor() as usize).max(1);
+    let mut rows = column![].spacing(gap);
+    let mut items = items.into_iter().peekable();
+    while items.peek().is_some() {
+        rows = rows.push(
+            items
+                .by_ref()
+                .take(per)
+                .fold(row![].spacing(gap).align_y(Alignment::Start), |r, e| r.push(e)),
+        );
+    }
+    rows.into()
+}
+
+/// How wide an example may be: the page's content less the example box's
+/// padding and outline.
+fn room(app: &App) -> f32 {
+    app.content() - 42.0
 }
 
 fn label<'a>(s: impl Into<String>) -> Element<'a, Message> {
@@ -116,22 +158,30 @@ fn swatch<'a>(name: &'static str, colour: fn(&iced::Theme) -> Color) -> Element<
     .into()
 }
 
-fn theme<'a>() -> Element<'a, Message> {
-    let colours = row![
-        swatch("background", |t| theme::of(t).background.base.color),
-        swatch("weak", |t| theme::of(t).background.weak.color),
-        swatch("strong", |t| theme::of(t).background.strong.color),
-        swatch("surface", style::surface_color),
-        swatch("text", |t| theme::of(t).background.base.text),
-        swatch("primary", |t| theme::of(t).primary.base.color),
-        swatch("danger", |t| theme::of(t).danger.base.color),
-    ]
-    .spacing(12);
-    let squares = ["Bach", "Debussy", "Gould", "Arrau", "Callas", "Satie"]
-        .iter()
-        .fold(row![].spacing(12), |r, seed| {
-            r.push(column![art::square(seed, 48.0, 6.0), label(*seed)].spacing(4))
-        });
+fn theme<'a>(room: f32) -> Element<'a, Message> {
+    let colours = wrap(
+        vec![
+            swatch("background", |t| theme::of(t).background.base.color),
+            swatch("weak", |t| theme::of(t).background.weak.color),
+            swatch("strong", |t| theme::of(t).background.strong.color),
+            swatch("surface", style::surface_color),
+            swatch("text", |t| theme::of(t).background.base.text),
+            swatch("primary", |t| theme::of(t).primary.base.color),
+            swatch("danger", |t| theme::of(t).danger.base.color),
+        ],
+        64.0,
+        12.0,
+        room,
+    );
+    let squares = wrap(
+        ["Bach", "Debussy", "Gould", "Arrau", "Callas", "Satie"]
+            .iter()
+            .map(|seed| column![art::square(seed, 48.0, 6.0), label(*seed)].spacing(4).into())
+            .collect(),
+        48.0,
+        12.0,
+        room,
+    );
     column![
         colours,
         label("The art pairs, picked by name:"),
@@ -173,7 +223,7 @@ fn style_(app: &App) -> Element<'_, Message> {
                     true,
                     i % 2 == 1,
                 )
-                .width(360),
+                .width(room(app).min(360.0)),
             )
             .on_enter(Message::RowAt(i)),
         )
@@ -183,9 +233,9 @@ fn style_(app: &App) -> Element<'_, Message> {
         .into()
 }
 
-fn glyphs_<'a>() -> Element<'a, Message> {
+fn glyphs_<'a>(room: f32) -> Element<'a, Message> {
     let mut grid = column![].spacing(14);
-    for chunk in GLYPHS.chunks(6) {
+    for chunk in GLYPHS.chunks((((room + 8.0) / 104.0) as usize).clamp(1, 6)) {
         let line = chunk.iter().fold(row![].spacing(8), |r, (name, shape)| {
             r.push(
                 column![icon::tinted(shape, 20.0, |p| p.background.base.text), label(*name)]
@@ -199,24 +249,28 @@ fn glyphs_<'a>() -> Element<'a, Message> {
     grid.into()
 }
 
-fn icon_<'a>() -> Element<'a, Message> {
+fn icon_<'a>(room: f32) -> Element<'a, Message> {
     let tone = |name: &'static str, drawn: iced::widget::Svg<'a>| column![drawn, label(name)].spacing(6).align_x(Alignment::Center).width(110);
-    row![
-        tone("plain", icon::plain(glyphs::PLAY, false)),
-        tone("plain, dim", icon::plain(glyphs::PLAY, true)),
-        tone("accent", icon::accent(glyphs::PLAY, false)),
-        tone("line", icon::line(glyphs::PLAY, false)),
-        tone("faint", icon::faint(glyphs::PLAY, false)),
-        tone("tick", icon::tick(false)),
-        tone("more", icon::more(false)),
-        tone("chevron", icon::chevron(false)),
-    ]
-    .spacing(4)
-    .into()
+    let tones: Vec<Element<'a, Message>> = vec![
+        tone("plain", icon::plain(glyphs::PLAY, false)).into(),
+        tone("plain, dim", icon::plain(glyphs::PLAY, true)).into(),
+        tone("accent", icon::accent(glyphs::PLAY, false)).into(),
+        tone("line", icon::line(glyphs::PLAY, false)).into(),
+        tone("faint", icon::faint(glyphs::PLAY, false)).into(),
+        tone("tick", icon::tick(false)).into(),
+        tone("more", icon::more(false)).into(),
+        tone("chevron", icon::chevron(false)).into(),
+    ];
+    wrap(tones, 110.0, 4.0, room)
 }
 
 fn pair<'a>(call: &str, answer: String) -> Element<'a, Message> {
-    row![text(call.to_string()).size(13).style(style::dim).width(260), text(answer).size(13)].into()
+    row![
+        text(call.to_string()).size(13).style(style::dim).width(Length::FillPortion(1)),
+        text(answer).size(13).width(Length::FillPortion(1))
+    ]
+    .spacing(8)
+    .into()
 }
 
 fn format_<'a>() -> Element<'a, Message> {
@@ -232,7 +286,7 @@ fn format_<'a>() -> Element<'a, Message> {
     .into()
 }
 
-fn cut<'a>() -> Element<'a, Message> {
+fn cut<'a>(room: f32) -> Element<'a, Message> {
     let long = "Goldberg Variations, BWV 988: Variatio 25. a 2 Clav. (Adagio)";
     let at = |w: f32, c: Cut| {
         row![
@@ -247,7 +301,7 @@ fn cut<'a>() -> Element<'a, Message> {
     };
     column![
         label("Cut::Middle — a name"),
-        at(420.0, Cut::Middle),
+        at((room - 60.0).min(420.0), Cut::Middle),
         at(240.0, Cut::Middle),
         at(140.0, Cut::Middle),
         label("Cut::End — a heading"),
@@ -290,11 +344,12 @@ fn sidebar_(app: &App) -> Element<'_, Message> {
             press: Message::SideAt(i),
         })
         .collect();
-    row![
-        container(sidebar::view(&items, app.side, true, sidebar::WIDTH, 8.0, "example-sidebar")).height(300),
-        container(text(format!("The page for {}", places.get(app.side).map(|p| p.1).unwrap_or("—"))).size(13)).padding(16),
-    ]
-    .into()
+    let bar = container(sidebar::view(&items, app.side, true, sidebar::WIDTH, 8.0, "example-sidebar")).height(300);
+    let page = container(text(format!("The page for {}", places.get(app.side).map(|p| p.1).unwrap_or("—"))).size(13)).padding(16);
+    match room(app) < sidebar::WIDTH + 160.0 {
+        true => column![bar, page].into(),
+        false => row![bar, page].into(),
+    }
 }
 
 fn panel_<'a>() -> Element<'a, Message> {
@@ -382,9 +437,16 @@ fn cards_(app: &App) -> Element<'_, Message> {
         open: Message::Ran("open"),
     })
     .collect();
-    let line = cards.iter().enumerate().fold(row![].spacing(20).align_y(Alignment::Start), |r, (i, c)| {
-        r.push(cards::view_card(150.0, c, i == app.card, Message::CardAt(i)))
-    });
+    let line = wrap(
+        cards
+            .iter()
+            .enumerate()
+            .map(|(i, c)| cards::view_card(150.0, c, i == app.card, Message::CardAt(i)))
+            .collect(),
+        150.0,
+        20.0,
+        room(app),
+    );
     column![
         line,
         label("A record is a square and a person a circle. Without a picture, the derived square."),
@@ -417,9 +479,10 @@ fn hero_(app: &App) -> Element<'_, Message> {
         open: Message::Ran("open"),
     })
     .collect();
-    let listing = hero::listing(&entries, 2, Some(app.card.min(entries.len() - 1)), Message::CardAt);
+    let columns = if room(app) < 560.0 { 1 } else { 2 };
+    let listing = hero::listing(&entries, columns, Some(app.card.min(entries.len() - 1)), Message::CardAt);
     column![
-        hero::banner(None, "ARTIST", "Johann Sebastian Bach", 640.0),
+        hero::banner(None, "ARTIST", "Johann Sebastian Bach", room(app).min(640.0)),
         hero::heading("Works"),
         listing,
         hero::more("All 1,128 works", false),
@@ -428,10 +491,10 @@ fn hero_(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-fn art_<'a>() -> Element<'a, Message> {
+fn art_<'a>(room: f32) -> Element<'a, Message> {
     let seeds = ["Goldberg Variations", "Clair de lune", "Maria Callas", "Gymnopédies", "Kind of Blue"];
-    let squares = seeds.iter().fold(row![].spacing(14), |r, s| r.push(art::square(s, 72.0, 6.0)));
-    let circles = seeds.iter().fold(row![].spacing(14), |r, s| r.push(art::square(s, 72.0, 36.0)));
+    let squares = wrap(seeds.iter().map(|s| art::square(s, 72.0, 6.0)).collect(), 72.0, 14.0, room);
+    let circles = wrap(seeds.iter().map(|s| art::square(s, 72.0, 36.0)).collect(), 72.0, 14.0, room);
     column![
         squares,
         circles,
@@ -444,28 +507,35 @@ fn art_<'a>() -> Element<'a, Message> {
     .into()
 }
 
-fn account_<'a>() -> Element<'a, Message> {
+fn account_<'a>(room: f32) -> Element<'a, Message> {
     let who = |name: &str| Who {
         name: name.to_string(),
         id: "someone".into(),
     };
     let alone: Account<Message> = Account::alone("Alone on this device");
-    row![
+    let faces: Vec<Element<'a, Message>> = vec![
         column![account::face(Some(&who("Ada Lovelace")), None, 48.0), label("Ada Lovelace")]
             .spacing(6)
-            .align_x(Alignment::Center),
+            .align_x(Alignment::Center)
+            .width(110)
+            .into(),
         column![account::face(Some(&who("Grace Hopper")), None, 48.0), label("Grace Hopper")]
             .spacing(6)
-            .align_x(Alignment::Center),
+            .align_x(Alignment::Center)
+            .width(110)
+            .into(),
         column![account::face(Some(&who("")), None, 48.0), label("no name: the id")]
             .spacing(6)
-            .align_x(Alignment::Center),
+            .align_x(Alignment::Center)
+            .width(110)
+            .into(),
         column![account::button(&alone, None, Message::Ran("account")), label("alone, as a button")]
             .spacing(6)
-            .align_x(Alignment::Center),
-    ]
-    .spacing(28)
-    .into()
+            .align_x(Alignment::Center)
+            .width(110)
+            .into(),
+    ];
+    wrap(faces, 110.0, 16.0, room)
 }
 
 fn menu_(app: &App) -> Element<'_, Message> {
@@ -560,7 +630,7 @@ fn said<'a>(_app: &App, module: &str) -> Element<'a, Message> {
         "scroll" => "Walk the sidebar with j and k past the bottom of the window: scroll::reveal keeps the cursor on screen.",
         "swipe" => "On the desktop build, two fingers sideways over the page go back and forward. In a browser the browser's own back does it.",
         "images" => {
-            "Every picture in harken comes through it; the examples here draw the derived square, which is what a picture shows until it arrives."
+            "Every picture an app shows comes through it; the examples here draw the derived square, which is what a picture shows until it arrives."
         }
         _ => "No example yet.",
     };

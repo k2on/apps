@@ -1,9 +1,603 @@
 {
+  "components": [
+    {
+      "id": "theme",
+      "name": "Theme",
+      "section": "foundations",
+      "summary": "An app's colours for light and dark, installed once, and the gradient pairs the derived square picks from. Nothing draws a colour it did not ask the theme for.",
+      "desktop": [
+        "theme"
+      ],
+      "android": {
+        "at": [
+          "ui/Theme.kt: ArkTheme, Space",
+          "Theme.kt: the app's MaterialTheme and Palette"
+        ],
+        "how": [
+          "The app's theme wraps the root in MaterialTheme(colorScheme for dark or light); read colours from MaterialTheme.colorScheme.",
+          "Space.xs … Space.xl, Space.corner: the spacing scale every screen uses.",
+          "ArkTheme(art) carries the derived square's pairs; an app hands it its own, as the desktop installs its palette."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Theme.swift: Space, Squares"
+        ],
+        "how": [
+          "Space.* for spacing; the system's colours, with the app's colour as the accent.",
+          "Squares holds the derived square's pairs."
+        ]
+      },
+      "shots": []
+    },
+    {
+      "id": "style",
+      "name": "Style",
+      "section": "foundations",
+      "summary": "Text tones, buttons, scrollbars, grounds and surfaces, and the rows a cursor lights.",
+      "desktop": [
+        "style"
+      ],
+      "android": {
+        "at": [
+          "Theme.kt: Palette, the app's Typography"
+        ],
+        "how": [
+          "Material 3's roles: onSurfaceVariant for a dim line, primary for the accent.",
+          "The typography sets names and headings in bold, as on the desktop."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Theme.swift"
+        ],
+        "how": [
+          ".foregroundStyle(.secondary) for a dim line, .tint for the accent."
+        ]
+      },
+      "shots": []
+    },
+    {
+      "id": "icons",
+      "name": "Icons",
+      "section": "foundations",
+      "summary": "The Lucide drawings, tinted from the theme.",
+      "desktop": [
+        "glyphs",
+        "icon"
+      ],
+      "android": {
+        "at": [
+          "ui/Glyphs.kt: ArkGlyphs",
+          "Glyphs.kt: Glyphs",
+          "ui/Components.kt: Glyph"
+        ],
+        "how": [
+          "Glyph(icon, description, modifier, size = 24.dp)",
+          "ArkGlyphs.* and Glyphs.* are ImageVectors; tint with LocalContentColor."
+        ]
+      },
+      "ios": {
+        "at": [
+          "SF Symbols; Assets.xcassets for the pulpit"
+        ],
+        "how": [
+          "Image(systemName:) for everything SF Symbols has; Image(\"pulpit\") is a template vector."
+        ]
+      },
+      "shots": []
+    },
+    {
+      "id": "text",
+      "name": "Text",
+      "section": "foundations",
+      "summary": "Words fitted to a width, cut where a reader loses least, and numbers said as words.",
+      "desktop": [
+        "fit",
+        "line",
+        "format"
+      ],
+      "android": {
+        "at": [
+          "Compose Text"
+        ],
+        "how": [
+          "maxLines = 1 and overflow = TextOverflow.Ellipsis cut the end; the platform has no middle cut."
+        ]
+      },
+      "ios": {
+        "at": [
+          "SwiftUI Text"
+        ],
+        "how": [
+          ".lineLimit(1) and .truncationMode(.middle) for a name, .tail for a heading."
+        ]
+      },
+      "shots": []
+    },
+    {
+      "id": "art",
+      "name": "Art",
+      "section": "foundations",
+      "summary": "The derived square, the same on every device for one name, and the real picture over it once it arrives.",
+      "desktop": [
+        "art",
+        "images"
+      ],
+      "android": {
+        "at": [
+          "ui/Art.kt: Art, Square, Cover"
+        ],
+        "how": [
+          "Square(seed, modifier)",
+          "Cover(seed, art, side, modifier, round = false, corner = Space.corner): the square until the picture loads.",
+          "Art.hash is FNV-1a over UTF-16, the desktop's."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Theme.swift: Square",
+          "Covers.swift: CoverView"
+        ],
+        "how": [
+          "Square(seed:)",
+          "CoverView(seed:url:side:round:corner:)"
+        ]
+      },
+      "shots": []
+    },
+    {
+      "id": "navigation",
+      "name": "Navigation",
+      "section": "components",
+      "summary": "Where the places are: a sidebar on the desktop, a tab bar on a phone. The one under the cursor, or the tab that is lit, is the page.",
+      "desktop": [
+        "sidebar"
+      ],
+      "android": {
+        "at": [
+          "ui/Tabs.kt: TabStack, Reselect",
+          "the app's Chrome: the tab bar and the mini player"
+        ],
+        "how": [
+          "Chrome(tab, player, controls, onTab) { page }: the tab bar and the mini player around a page.",
+          "TabStack keeps each tab's page alive; tapping the lit tab again is Reselect."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Shell.swift: Shell"
+        ],
+        "how": [
+          "Shell is a TabView, Home, Library and Search, each tab its own NavigationStack; the mini player is its tabViewBottomAccessory.",
+          ".tabBarMinimizeBehavior(.onScrollDown): the bar shrinks as a page scrolls."
+        ]
+      },
+      "shots": [
+        {
+          "id": "library",
+          "kind": "screenshot",
+          "what": "Library: the tab bar, the mini player, and the songs."
+        }
+      ]
+    },
+    {
+      "id": "rows",
+      "name": "Rows",
+      "section": "components",
+      "summary": "A list of tracks or episodes: what it is, what is under it, and which one is playing.",
+      "desktop": [
+        "table"
+      ],
+      "android": {
+        "at": [
+          "Components.kt: TrackRow, TrackNumber",
+          "ui/Components.kt: ListRow, Chevron",
+          "Pages.kt: EpisodeRow"
+        ],
+        "how": [
+          "TrackRow(track, under, playing, onClick, onMore, art = true) { leading }",
+          "ListRow(onClick, title, under, trailing = { Chevron() }) { picture }",
+          "TrackNumber(n, playing) is the leading slot on an album's page."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Components.swift: TrackRow, EpisodeRow, TrackNumber"
+        ],
+        "how": [
+          "TrackRow(track:under:from:onPlay:)",
+          "Its context menu is TrackActions, the same entries as Android's sheet."
+        ]
+      },
+      "shots": [
+        {
+          "id": "album",
+          "kind": "screenshot",
+          "what": "An album's page: its header, then its tracks, one playing."
+        }
+      ]
+    },
+    {
+      "id": "cards",
+      "name": "Cards",
+      "section": "components",
+      "summary": "Pictures with a name and a line under each, in a grid or a shelf. A record is a square and a person a circle.",
+      "desktop": [
+        "cards"
+      ],
+      "android": {
+        "at": [
+          "ui/Components.kt: CoverCard"
+        ],
+        "how": [
+          "CoverCard(seed, art, title, under, side, onClick, round = false, opens = false)",
+          "A shelf is a LazyRow of them, side from the screen's width."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Components.swift: CoverCard, CoverShelf"
+        ],
+        "how": [
+          "CoverCard(seed:url:title:under:side:round:opens:onTap:)",
+          "CoverShelf(items:…) is a horizontal ScrollView of them."
+        ]
+      },
+      "shots": [
+        {
+          "id": "home",
+          "kind": "screenshot",
+          "what": "Home: shelves of covers and people."
+        }
+      ]
+    },
+    {
+      "id": "header",
+      "name": "Headers",
+      "section": "components",
+      "summary": "How a page opens: a banner, or a picture beside the name and its facts, with play and shuffle; then section headings and listings.",
+      "desktop": [
+        "hero"
+      ],
+      "android": {
+        "at": [
+          "Components.kt: PageHeader, Banner, CoverHeader, SectionHeading, Entry, MoreLine, Featured, PlayPill"
+        ],
+        "how": [
+          "PageHeader(cover, kind, title, by, onBy, facts, canPlay, onPlay, onShuffle)",
+          "Banner(seed, art, kind, name, onBack): an artist's page, under the status bar.",
+          "Entry(title, over, under, count, onOpen, picture = null) and MoreLine(label, onOpen) for listings."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Hero.swift: Banner, RecordHeader, SectionHeading, EntryRow, MoreRow, PlayShuffle",
+          "Components.swift: PageHeader"
+        ],
+        "how": [
+          "PageHeader(kind:title:by:onBy:facts:canPlay:onPlay:onShuffle:)",
+          "Banner(url:kind:name:)",
+          "EntryRow(over:title:under:count:onOpen:)"
+        ]
+      },
+      "shots": [
+        {
+          "id": "artist",
+          "kind": "screenshot",
+          "what": "An artist's page: the banner, then their works."
+        }
+      ]
+    },
+    {
+      "id": "account",
+      "name": "Account",
+      "section": "components",
+      "summary": "Who is signed in, as a circle of their picture or their initials, and signing in.",
+      "desktop": [
+        "account"
+      ],
+      "android": {
+        "at": [
+          "Components.kt: Face",
+          "ui/Onboarding.kt: OpeningScreen, ServerScreen, SignInScreen, PermissionScreen"
+        ],
+        "how": [
+          "Face(name, art, role, onOpen)",
+          "SignInScreen(mark, host, error, phase, onSignIn, onChangeServer)",
+          "The onboarding's screens take an AppIdentity: the app's name, mark and colours."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Components.swift: Avatar, AccountMenu",
+          "OnboardingViews.swift: OpeningScreen, ServerScreen, SignInScreen"
+        ],
+        "how": [
+          "Avatar(name:picture:side:)",
+          "SignInScreen(server:phase:error:)"
+        ]
+      },
+      "shots": [
+        {
+          "id": "sign-in",
+          "kind": "screenshot",
+          "what": "Signing in to a server."
+        }
+      ]
+    },
+    {
+      "id": "menu",
+      "name": "Menu",
+      "section": "overlays",
+      "summary": "What can be done about one thing: a dropdown at the pointer or under a control on the desktop, a sheet from the foot of a phone.",
+      "desktop": [
+        "menu",
+        "context",
+        "panel"
+      ],
+      "android": {
+        "at": [
+          "Sheets.kt: TrackMenu",
+          "ui/Components.kt: MoreButton, SheetRow"
+        ],
+        "how": [
+          "TrackMenu(track, album, from, actions)",
+          "SheetRow(icon, label, onClick, trailing = {}, emphasis = false) is one entry.",
+          "MoreButton(about, origin, onMore) opens it from a row."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Components.swift: TrackActions"
+        ],
+        "how": [
+          "TrackActions(track:from:) is a .contextMenu's content: long-press a row."
+        ]
+      },
+      "shots": [
+        {
+          "id": "track-menu",
+          "kind": "screenshot",
+          "what": "A track's menu."
+        }
+      ]
+    },
+    {
+      "id": "picker",
+      "name": "Picker",
+      "section": "overlays",
+      "summary": "Choices each ticked or not, and a last row that names a new one.",
+      "desktop": [
+        "picker"
+      ],
+      "android": {
+        "at": [
+          "Sheets.kt: AddToPlaylist, DevicesSheet"
+        ],
+        "how": [
+          "AddToPlaylist(track, playlists, on, onToggle, onNew)",
+          "DevicesSheet(rows, cursor, actions): the speakers, each with its volume."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Sheets.swift: AddToPlaylistSheet, DevicesSheet"
+        ],
+        "how": [
+          "AddToPlaylistSheet(track:)",
+          "DevicesSheet()"
+        ]
+      },
+      "shots": [
+        {
+          "id": "add-to-playlist",
+          "kind": "screenshot",
+          "what": "Adding a track to playlists."
+        }
+      ]
+    },
+    {
+      "id": "dialog",
+      "name": "Dialog",
+      "section": "overlays",
+      "summary": "A window over the page as the page dims, and what goes under every overlay.",
+      "desktop": [
+        "dialog",
+        "layer"
+      ],
+      "android": {
+        "at": [
+          "Sheets.kt: NewPlaylistCard, NewPlaylist, FindShow"
+        ],
+        "how": [
+          "NewPlaylistCard(name, problem, adding, onName, onMake, onCancel)",
+          "FindShow(kind, feeds, onFollow): following a show."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Sheets.swift: NewPlaylist, FollowSheet",
+          "Shell.swift: SheetHost"
+        ],
+        "how": [
+          "NewPlaylist(then:)",
+          "SheetHost raises every sheet from the model's state."
+        ]
+      },
+      "shots": [
+        {
+          "id": "new-playlist",
+          "kind": "screenshot",
+          "what": "Naming a new playlist."
+        }
+      ]
+    },
+    {
+      "id": "player",
+      "name": "Player",
+      "section": "motion",
+      "summary": "What is playing: a bar at the foot that rises into the whole screen and falls back.",
+      "desktop": [],
+      "android": {
+        "at": [
+          "ui/ExpandingCard.kt: ExpandingCard, ExpandingCardState",
+          "PlayerScreens.kt: MiniPlayer, FullPlayer, QueueSheet",
+          "PlayerSheet.kt: PlayerCard"
+        ],
+        "how": [
+          "ExpandingCard(state, stand, onOpen, collapsed, expanded, traveler): the bar's bounds to the screen's, on a spring.",
+          "MiniPlayer(state, controls, position) and FullPlayer(state, controls, position) are its two faces."
+        ]
+      },
+      "ios": {
+        "at": [
+          "PlayerViews.swift: MiniPlayer, FullPlayer, Scrubber, Transport, QueueSheet"
+        ],
+        "how": [
+          "MiniPlayer(open:) is the TabView's bottom accessory, its matchedTransitionSource.",
+          "FullPlayer(close:) is a fullScreenCover that zooms out of it (navigationTransition(.zoom)): iOS's ExpandingCard."
+        ]
+      },
+      "shots": [
+        {
+          "id": "player",
+          "kind": "recording",
+          "what": "The mini player rising into the full player, and falling back."
+        }
+      ]
+    },
+    {
+      "id": "pages",
+      "name": "Page motion",
+      "section": "motion",
+      "summary": "Going in and coming back: a page slides over the last, and a swipe from the edge takes it away.",
+      "desktop": [
+        "swipe"
+      ],
+      "android": {
+        "at": [
+          "ui/Motion.kt: PageFrame, Moving, PageBack, Hero"
+        ],
+        "how": [
+          "PageBack(motion, blocked, toFirst): the edge swipe, following the finger.",
+          "Hero carries a cover from the card to the page's header."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Shell.swift: stack",
+          "Components.swift: zoomed"
+        ],
+        "how": [
+          "Pages are pushed on the tab's NavigationStack (environment \\.open appends a Route); its own edge swipe goes back.",
+          "A page opened from a card zooms out of it: .zoomed(route, zoom), navigationTransition(.zoom)."
+        ]
+      },
+      "shots": [
+        {
+          "id": "page",
+          "kind": "recording",
+          "what": "Opening an album from Home, and swiping back."
+        }
+      ]
+    },
+    {
+      "id": "scroll",
+      "name": "Scroll",
+      "section": "motion",
+      "summary": "Keeping the cursor on screen, and back to the top when the lit tab is chosen again.",
+      "desktop": [
+        "scroll"
+      ],
+      "android": {
+        "at": [
+          "ui/Tabs.kt: ScrollsToTop, Reselect"
+        ],
+        "how": [
+          "ScrollsToTop(listState) inside a tab's page: a reselect scrolls it home."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Shell.swift: Shell"
+        ],
+        "how": [
+          "The system's own: tapping the lit tab pops its NavigationStack, then scrolls to the top."
+        ]
+      },
+      "shots": [
+        {
+          "id": "scroll-to-top",
+          "kind": "recording",
+          "what": "A long list scrolled down, then the lit tab tapped again."
+        }
+      ]
+    },
+    {
+      "id": "keys",
+      "name": "Keys",
+      "section": "behaviour",
+      "summary": "The keyboard grammar and the grids it moves a cursor over. j and k walk this page's sidebar.",
+      "desktop": [
+        "vim"
+      ],
+      "android": null,
+      "ios": null,
+      "shots": []
+    },
+    {
+      "id": "routes",
+      "name": "Routes",
+      "section": "behaviour",
+      "summary": "Places as addresses, kept in step with the address bar or the back stack.",
+      "desktop": [
+        "route",
+        "url"
+      ],
+      "android": {
+        "at": [
+          "ui/Destination.kt: Destination, Destinations"
+        ],
+        "how": [
+          "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack."
+        ]
+      },
+      "ios": {
+        "at": [
+          "Model.swift: Route",
+          "Shell.swift: Destination"
+        ],
+        "how": [
+          "Route is the NavigationStack's value; .navigationDestination(for: Route.self) draws Destination(route:)."
+        ]
+      },
+      "shots": []
+    },
+    {
+      "id": "waking",
+      "name": "Waking",
+      "section": "behaviour",
+      "summary": "What wakes a window that runs no loop, and what holds the splash until the first screen is ready.",
+      "desktop": [
+        "wake"
+      ],
+      "android": {
+        "at": [
+          "ui/Splash.kt: holdSplashUntil"
+        ],
+        "how": [
+          "holdSplashUntil(ceilingMs) { ready }: in onCreate, before setContent."
+        ]
+      },
+      "ios": null,
+      "shots": []
+    }
+  ],
   "entries": [
     {
       "module": "theme",
       "name": "Theme",
-      "group": "foundations",
       "summary": "An app's palette, installed once: light and dark iced palettes and the derived square's gradient pairs for each. Every style closure asks `of(theme)` rather than writing a colour down, which is why dark mode works.",
       "api": [
         "Palette { light, dark, light_art, dark_art }",
@@ -17,20 +611,11 @@
       "rules": [
         "Install before the first frame; a second install is refused, so one window has one answer to \"what colour is this\".",
         "NEUTRAL (AppKit greys, system blue) is the only colour arkui owns. This page draws with it."
-      ],
-      "harken": [
-        "palette.rs: HARKEN, AppKit greys and the gold",
-        "every style closure in view.rs, through of(theme)"
-      ],
-      "phones": [
-        "android ui/Theme.kt: Space, ArkTheme; Theme.kt: Palette, HarkenTheme",
-        "ios Theme.swift: Space, Squares"
       ]
     },
     {
       "module": "style",
       "name": "Style",
-      "group": "foundations",
       "summary": "The style closures every widget is handed: text tones, buttons, scrollbars, the page's ground and the surface a step off it, hairlines, and the rows a cursor lights.",
       "api": [
         "dim, faint(alpha), accent (text)",
@@ -46,38 +631,22 @@
       "rules": [
         "A scrollbar is never the accent.",
         "A row under the cursor is marked whether or not its pane has the keys, and lit only while it has."
-      ],
-      "harken": [
-        "everywhere in view.rs: the page, the sidebar and bar surfaces, every row and button"
-      ],
-      "phones": [
-        "android ui/Theme.kt",
-        "ios Theme.swift"
       ]
     },
     {
       "module": "glyphs",
       "name": "Glyphs",
-      "group": "foundations",
       "summary": "The table of Lucide drawings, as SVG bytes. `LICENSE.lucide` sits beside it.",
       "api": [
         "ADD_TO, ALBUM, ARTIST, BACK, CHEVRON, CLOSE, COMPOSER, DEBUG, DEVICES, DOWN, HOME, LAPTOP, LIBRARY, MINUS, MORE, MUTED, NEXT, NOTE, OFFLINE, ONLINE, PAUSE, PHONE, PLAY, PLAYING, PLAYLIST, PLUS, PREVIOUS, PULPIT, SEARCH, SHOW, SHUFFLE, SIGN_OUT, SKIP_BACK, SKIP_FORWARD, SPEAKER, STOP, TICK, TICKED, UNTICK, VOLUME"
       ],
       "rules": [
         "Drawn with currentColor; the colour is the icon's tint, never the file's."
-      ],
-      "harken": [
-        "the sidebar's places, the transport, every menu entry"
-      ],
-      "phones": [
-        "android ui/Glyphs.kt: ArkGlyphs; Glyphs.kt",
-        "ios: SF Symbols"
       ]
     },
     {
       "module": "icon",
       "name": "Icon",
-      "group": "foundations",
       "summary": "A glyph drawn at a size in a colour asked of the palette. The named ones are the tones a row, a panel or a control needs.",
       "api": [
         "SIZE (15)",
@@ -92,18 +661,11 @@
       ],
       "rules": [
         "The colour goes through the svg style filter, so one drawing serves every tone."
-      ],
-      "harken": [
-        "the play/pause on the playing row, the speaker in the bar, the close on a dialog"
-      ],
-      "phones": [
-        "android ui/Components.kt: Glyph"
       ]
     },
     {
       "module": "format",
       "name": "Format",
-      "group": "foundations",
       "summary": "Words for numbers: a clock, a count spelt out, a plural, a span of time, a day.",
       "api": [
         "clock(secs)",
@@ -114,16 +676,11 @@
       ],
       "rules": [
         "A length past an hour is h:mm:ss."
-      ],
-      "harken": [
-        "the bar's clocks, a page's facts line, an episode's day"
-      ],
-      "phones": []
+      ]
     },
     {
       "module": "fit",
       "name": "Fit",
-      "group": "foundations",
       "summary": "Cutting text to a width: from the end or through the middle, measured in pixels, and the characters the typeface cannot draw spelt in ones it can.",
       "api": [
         "Cut::{End, Middle}",
@@ -134,32 +691,22 @@
       ],
       "rules": [
         "A name loses its middle, a heading its end."
-      ],
-      "harken": [
-        "menu titles, track and album names in the table"
-      ],
-      "phones": []
+      ]
     },
     {
       "module": "url",
       "name": "URL",
-      "group": "foundations",
       "summary": "Percent-encoding for a fragment, so a `/`, a `#` or an accent survives the address bar.",
       "api": [
         "encode(s, &mut out)",
         "encoded(s)",
         "decode(s)"
       ],
-      "rules": [],
-      "harken": [
-        "a picture's address on the server"
-      ],
-      "phones": []
+      "rules": []
     },
     {
       "module": "sidebar",
       "name": "Sidebar",
-      "group": "components",
       "summary": "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it. This page's own sidebar is one.",
       "api": [
         "Item { glyph, label, heading, count, press }",
@@ -170,19 +717,11 @@
         "One highlight, not two: the cursor is what the page shows, marked always, lit only while the sidebar has the keys.",
         "A heading is drawn where the group changes, not stored as a row, so row n is the cursor's n.",
         "Its pixel of edge is part of its width."
-      ],
-      "harken": [
-        "Music, Shows and the playlists down the left (view.rs: view_sidebar)"
-      ],
-      "phones": [
-        "android: the tab bar (HarkenApp.kt: TabBar, ui/Tabs.kt: TabStack)",
-        "ios Shell.swift: Shell, a TabView"
       ]
     },
     {
       "module": "panel",
       "name": "Panel",
-      "group": "components",
       "summary": "The shape every context window is: a bordered panel, a title, and fixed-height entries with a glyph column that is there whether or not it has a glyph.",
       "api": [
         "panel(body, width)",
@@ -197,19 +736,11 @@
       ],
       "rules": [
         "Heights are declared constants: a panel is placed before iced lays it out."
-      ],
-      "harken": [
-        "the queue and devices panels over the bar"
-      ],
-      "phones": [
-        "android ui/Components.kt: SheetRow",
-        "ios Shell.swift: SheetHost"
       ]
     },
     {
       "module": "table",
       "name": "Table",
-      "group": "components",
       "summary": "Rows of cells cut to their columns at layout, headings over them, section labels and the transport's gutter.",
       "api": [
         "cell(body, width, on_cursor, accent, dim)",
@@ -223,19 +754,11 @@
       "rules": [
         "A cell loses its middle and a heading its end, each to its own column.",
         "Columns are portions, so no text column pushes another off a narrow window."
-      ],
-      "harken": [
-        "Songs, an album's tracks, a show's episodes (view.rs: view_list, view_tracks)"
-      ],
-      "phones": [
-        "android Components.kt: TrackRow, TrackNumber",
-        "ios Components.swift: TrackRow, EpisodeRow"
       ]
     },
     {
       "module": "line",
       "name": "Line",
-      "group": "components",
       "summary": "One line of text cut, at layout, to the width it is given; `gives_way` lays it out after the rest of its row.",
       "api": [
         "Line::new(body, size, cut, colour)",
@@ -243,16 +766,11 @@
       ],
       "rules": [
         "A row lays out in order, so a line first in it would take everything; giving way puts it last."
-      ],
-      "harken": [
-        "a page's title before its count"
-      ],
-      "phones": []
+      ]
     },
     {
       "module": "cards",
       "name": "Cards",
-      "group": "components",
       "summary": "A grid of pictures with a name and a line under each, the arithmetic of how many fit, and a page's header of picture, name and facts.",
       "api": [
         "Shelf { card, gap, padding }, Shelf::DEFAULT",
@@ -266,19 +784,11 @@
       "rules": [
         "A person is a circle and a record a square.",
         "The keyboard and the view divide the same pane width, so `l` lands where it looks."
-      ],
-      "harken": [
-        "Albums, Artists, Composers, Podcasts (view.rs: view_cards, view_header)"
-      ],
-      "phones": [
-        "android Components.kt: CoverCard, PageHeader",
-        "ios Components.swift: CoverShelf, CoverCard, PageHeader"
       ]
     },
     {
       "module": "hero",
       "name": "Hero",
-      "group": "components",
       "summary": "The wide banner a page can open with, the bold face, section headings, and a listing of entries in columns with a \"more\" after them.",
       "api": [
         "banner(picture, kind, name, width)",
@@ -294,19 +804,11 @@
       ],
       "rules": [
         "Fira Sans Bold is embedded: a browser has no system fonts, and with none bold is not bold."
-      ],
-      "harken": [
-        "an artist's banner and sections (view.rs: view_artist, view_work)"
-      ],
-      "phones": [
-        "android Components.kt: Banner, Entry, MoreLine; ui/Motion.kt: Hero",
-        "ios Hero.swift: Banner, EntryRow, MoreRow"
       ]
     },
     {
       "module": "art",
       "name": "Art",
-      "group": "components",
       "summary": "The derived square: a gradient picked from a name, the same on every device, and the real picture over it once it arrives.",
       "api": [
         "hash(s) (FNV-1a over UTF-16)",
@@ -316,19 +818,11 @@
       ],
       "rules": [
         "The hash is the phones' too, so a name has one square everywhere."
-      ],
-      "harken": [
-        "every cover before its picture arrives"
-      ],
-      "phones": [
-        "android ui/Art.kt: Art, Square, Cover",
-        "ios Theme.swift: Square; Covers.swift: CoverView"
       ]
     },
     {
       "module": "account",
       "name": "Account",
-      "group": "components",
       "summary": "Who is signed in as a circle — their picture, or initials on a colour picked from their name — and the menu that hangs off it.",
       "api": [
         "Who { name, id }, Who::full(), Who::initials()",
@@ -342,19 +836,11 @@
       ],
       "rules": [
         "Nobody goes offline by hand: the menu signs out, and nothing else."
-      ],
-      "harken": [
-        "the account at the top right (view.rs: view_top)"
-      ],
-      "phones": [
-        "android Components.kt: Face",
-        "ios Components.swift: Avatar, AccountMenu"
       ]
     },
     {
       "module": "menu",
       "name": "Menu",
-      "group": "overlays",
       "summary": "The dropdown: a title and entries, as wide as its longest entry, opened at the pointer or lined up under a control, with submenus beside it. The theme control at the top of this page is one.",
       "api": [
         "Menu::open(title, entries, cursor, window, anchor)",
@@ -370,19 +856,11 @@
         "As wide as its longest entry, within 198..=420: AppKit's rule.",
         "A submenu laps the parent by exactly its padding, so the lit row touches its edge.",
         "A submenu opens after a 200ms rest, not on the way past."
-      ],
-      "harken": [
-        "a row's more button and right click, the account's menu (main.rs: Menu::open)"
-      ],
-      "phones": [
-        "android Sheets.kt: TrackMenu; ui/Components.kt: MoreButton",
-        "ios Components.swift: TrackActions"
       ]
     },
     {
       "module": "picker",
       "name": "Picker",
-      "group": "overlays",
       "summary": "A list of choices each ticked or not, with an optional last row that names a new one — on its own in the middle, or as a menu's submenu.",
       "api": [
         "Picker::new(title, choices, new_row)",
@@ -395,19 +873,11 @@
       ],
       "rules": [
         "A submenu draws no header: the menu it hangs off is still up with the title."
-      ],
-      "harken": [
-        "Add to playlist (main.rs: open_picker)"
-      ],
-      "phones": [
-        "android Sheets.kt: AddToPlaylist, DevicesSheet",
-        "ios Sheets.swift: AddToPlaylistSheet, DevicesSheet"
       ]
     },
     {
       "module": "context",
       "name": "Context",
-      "group": "overlays",
       "summary": "A menu, its submenu, or a picker alone, and the rules for them together: which one has the keys, the dwell, `l` in and `h` out, `<Esc>`.",
       "api": [
         "Context::new()",
@@ -420,16 +890,11 @@
       "rules": [
         "Closing a menu takes its submenu with it.",
         "An app refuses its rows' hover while a layer is up: a backdrop cannot swallow a hover."
-      ],
-      "harken": [
-        "App::ctx, every menu and picker (main.rs)"
-      ],
-      "phones": []
+      ]
     },
     {
       "module": "layer",
       "name": "Layer",
-      "group": "overlays",
       "summary": "What goes under and around an overlay: a backdrop that closes on a click and swallows the wheel, a dimmed one, and pinned or centred placement.",
       "api": [
         "backdrop(close, swallow)",
@@ -439,18 +904,11 @@
       ],
       "rules": [
         "A submenu gets no backdrop of its own: a second one over the menu would eat its clicks."
-      ],
-      "harken": [
-        "under every menu, picker and panel (view.rs: view)"
-      ],
-      "phones": [
-        "ios Shell.swift: SheetHost"
       ]
     },
     {
       "module": "dialog",
       "name": "Dialog",
-      "group": "overlays",
       "summary": "A titled window rising over a page as the page dims.",
       "api": [
         "view(title, close, body, width, height, open)",
@@ -461,19 +919,11 @@
       ],
       "rules": [
         "`open` is eased; ask `opening` whether to keep a clock running."
-      ],
-      "harken": [
-        "Follow a podcast (view.rs: view_adding)"
-      ],
-      "phones": [
-        "android Sheets.kt: FindShow, NewPlaylistCard",
-        "ios Sheets.swift: FollowSheet, NewPlaylist"
       ]
     },
     {
       "module": "vim",
       "name": "Keys",
-      "group": "behaviour",
       "summary": "The keyboard grammar — counts, gg/G, ^d/^u, / and n/N, <Tab>, <Esc> — and the grids it moves a cursor over. j and k move this page's sidebar.",
       "api": [
         "Keys::new(), press(key, mods) -> Option<Action>, pending(), mode()",
@@ -487,16 +937,11 @@
       ],
       "rules": [
         "`step` returns None only at that edge, which means \"not mine\": the app says what lies past it."
-      ],
-      "harken": [
-        "every pane, menu and picker"
-      ],
-      "phones": []
+      ]
     },
     {
       "module": "route",
       "name": "Route",
-      "group": "behaviour",
       "summary": "Places as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
       "api": [
         "trait Route { fragment(), parse() }",
@@ -507,36 +952,21 @@
       "rules": [
         "`parse` never fails: an unknown fragment is home.",
         "Call `sync` after every update."
-      ],
-      "harken": [
-        "App::router, the Place of every page"
-      ],
-      "phones": [
-        "android ui/Destination.kt: Destination",
-        "ios Shell.swift: Destination"
       ]
     },
     {
       "module": "scroll",
       "name": "Scroll",
-      "group": "behaviour",
       "summary": "Keeping a keyboard cursor on screen.",
       "api": [
         "reveal(id, grid, at)",
         "reveal_to(id, progress)"
       ],
-      "rules": [],
-      "harken": [
-        "the sidebar, the table and the cards follow the cursor"
-      ],
-      "phones": [
-        "android ui/Tabs.kt: ScrollsToTop"
-      ]
+      "rules": []
     },
     {
       "module": "swipe",
       "name": "Swipe",
-      "group": "behaviour",
       "summary": "Two fingers sideways as back and forward, with the arrow drawn over the page as they go.",
       "api": [
         "Swipe::feed, tick, allow, active, offset, arrow",
@@ -547,18 +977,11 @@
       "rules": [
         "It goes when the fingers lift, and only where there is somewhere to go.",
         "In a browser the browser's own back does this instead."
-      ],
-      "harken": [
-        "the page beside the sidebar (view.rs: view)"
-      ],
-      "phones": [
-        "android ui/Motion.kt: PageBack"
       ]
     },
     {
       "module": "wake",
       "name": "Wake",
-      "group": "behaviour",
       "summary": "What wakes a window that runs no loop: a bell anything can ring, one timer at a deadline, and the browser's address bar moving.",
       "api": [
         "Bell::new(), ring(), rung(), subscription()",
@@ -567,18 +990,11 @@
       ],
       "rules": [
         "With nothing playing, dwelling or arriving, a window runs no timer."
-      ],
-      "harken": [
-        "the peer's socket and the page's events ring App::bell (wake.rs)"
-      ],
-      "phones": [
-        "android ui/Splash.kt: holdSplashUntil"
       ]
     },
     {
       "module": "images",
       "name": "Images",
-      "group": "behaviour",
       "summary": "A picture cache: fetched off the render thread, decoded and bounded, kept on disk natively and in the Cache API in a browser. A failure is remembered.",
       "api": [
         "Images::new(name)",
@@ -589,260 +1005,7 @@
       ],
       "rules": [
         "The renderer is handed pixels at the size they are drawn, not a megapixel JPEG to decode inside a frame."
-      ],
-      "harken": [
-        "covers, banners and faces"
-      ],
-      "phones": [
-        "android ui/Art.kt: Cover",
-        "ios Covers.swift: CoverView"
       ]
-    }
-  ],
-  "harken_only": [
-    {
-      "name": "Now-playing bar",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_bar",
-      "what": "The bar along the bottom: cover, title and artist, the transport, the seek bar between two clocks, then volume, queue and devices.",
-      "built_on": [
-        "style",
-        "icon",
-        "art",
-        "format"
-      ]
-    },
-    {
-      "name": "Transport",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_bar",
-      "what": "Previous, play/pause, next and the skips, as icon buttons.",
-      "built_on": [
-        "icon",
-        "glyphs"
-      ]
-    },
-    {
-      "name": "Seek bar",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_bar, progress",
-      "what": "An iced slider in style::seek, and a thin progress line under a row.",
-      "built_on": [
-        "style"
-      ]
-    },
-    {
-      "name": "Volume slider and mute",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: volume_slider, mute_button",
-      "what": "0 to 100, sending as dragged and once on release; the speaker or the speaker struck through.",
-      "built_on": [
-        "style",
-        "icon"
-      ]
-    },
-    {
-      "name": "Queue panel",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_queue, view_queue_button",
-      "what": "What plays next, a panel over the bar.",
-      "built_on": [
-        "panel",
-        "layer"
-      ]
-    },
-    {
-      "name": "Devices picker",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_devices, view_output",
-      "what": "The speakers in the house, each with join, mute and volume, a panel over the bar.",
-      "built_on": [
-        "panel",
-        "layer",
-        "icon"
-      ]
-    },
-    {
-      "name": "Top bar",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_top",
-      "what": "A server address to type and connect when alone; the account at the right.",
-      "built_on": [
-        "account",
-        "style"
-      ]
-    },
-    {
-      "name": "Status line",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_status",
-      "what": "The last thing worth saying and the keys half typed; whole under D.",
-      "built_on": [
-        "vim",
-        "style"
-      ]
-    },
-    {
-      "name": "Debug view",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_debug",
-      "what": "Every number the session holds, as a table.",
-      "built_on": [
-        "table"
-      ]
-    },
-    {
-      "name": "Keymap",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_help",
-      "what": "The keys and what they do, under ?.",
-      "built_on": []
-    },
-    {
-      "name": "Settings page",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_settings",
-      "what": "The licences and the window's settings.",
-      "built_on": [
-        "hero"
-      ]
-    },
-    {
-      "name": "Cover with play button",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_cover, play_button",
-      "what": "A record's cover with play over it.",
-      "built_on": [
-        "art",
-        "icon"
-      ]
-    },
-    {
-      "name": "Featured",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_featured",
-      "what": "The best-known work set apart over a list.",
-      "built_on": [
-        "art",
-        "hero"
-      ]
-    },
-    {
-      "name": "Faces",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: view_faces, initials",
-      "what": "A row of people as circles.",
-      "built_on": [
-        "art",
-        "cards"
-      ]
-    },
-    {
-      "name": "Mosaic",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: mosaic",
-      "what": "A playlist's picture made of its first four covers.",
-      "built_on": [
-        "art"
-      ]
-    },
-    {
-      "name": "Unread ring",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: ringed, view_unread",
-      "what": "A ring round a show with episodes not yet heard.",
-      "built_on": [
-        "art"
-      ]
-    },
-    {
-      "name": "Work heading and record foot",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: work_heading, view_foot",
-      "what": "A composer and work over their movements; the year and label under a record.",
-      "built_on": [
-        "table",
-        "format"
-      ]
-    },
-    {
-      "name": "Linked names",
-      "platform": "desktop",
-      "at": "harken/iced/src/view.rs: names, opens",
-      "what": "Names in a line that each open their page.",
-      "built_on": [
-        "style"
-      ]
-    },
-    {
-      "name": "Expanding player card",
-      "platform": "android",
-      "at": "harken/android/.../ui/ExpandingCard.kt: ExpandingCard; PlayerSheet.kt: PlayerCard",
-      "what": "The player as a bar that grows to the screen, swipes sideways and closes on back.",
-      "built_on": []
-    },
-    {
-      "name": "Tab stack",
-      "platform": "android",
-      "at": "harken/android/.../ui/Tabs.kt: TabStack",
-      "what": "Each tab kept alive; a tab tapped again scrolls to top.",
-      "built_on": []
-    },
-    {
-      "name": "Page motion",
-      "platform": "android",
-      "at": "harken/android/.../ui/Motion.kt: Hero, PageFrame, PageBack, Pull",
-      "what": "The page transitions and the back gesture.",
-      "built_on": []
-    },
-    {
-      "name": "Springs",
-      "platform": "android",
-      "at": "harken/android/.../ui/Springs.kt; ios Theme.swift: Springs",
-      "what": "The spring numbers every animation moves by.",
-      "built_on": []
-    },
-    {
-      "name": "Volume slider",
-      "platform": "android",
-      "at": "harken/android/.../ui/Volume.kt: VolumeSlider; ios PlayerViews.swift: VolumeSlider",
-      "what": "A volume slider.",
-      "built_on": []
-    },
-    {
-      "name": "Splash",
-      "platform": "android",
-      "at": "harken/android/.../ui/Splash.kt: holdSplashUntil",
-      "what": "The splash held until the app is ready, up to a limit.",
-      "built_on": []
-    },
-    {
-      "name": "Onboarding",
-      "platform": "android",
-      "at": "harken/android/.../ui/Onboarding.kt; ios OnboardingViews.swift",
-      "what": "The opening, server, sign-in and permission screens.",
-      "built_on": []
-    },
-    {
-      "name": "Fetching and offline",
-      "platform": "android",
-      "at": "harken/android/.../ui/Components.kt: Fetching, Offline; ios Components.swift",
-      "what": "A delayed \"fetching from host\" and the offline note.",
-      "built_on": []
-    },
-    {
-      "name": "Play and shuffle pill",
-      "platform": "android",
-      "at": "harken/android/.../Components.kt: PlayPill; ios Hero.swift: PlayShuffle",
-      "what": "Play and shuffle under a record's header.",
-      "built_on": []
-    },
-    {
-      "name": "Mini and full player",
-      "platform": "ios",
-      "at": "harken/ios/Harken/PlayerViews.swift: MiniPlayer, FullPlayer, Scrubber, Transport, QueueSheet",
-      "what": "The bar and the full-screen player as separate views.",
-      "built_on": []
     }
   ]
 }

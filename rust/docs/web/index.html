@@ -17,8 +17,11 @@
         color-scheme: light dark;
         overflow: hidden;
       }
-      /* iced appends its canvas to <body> and sizes it to 100%. */
-      canvas { display: block; }
+      /* iced appends its canvas to <body> and sizes it to 100%. A finger on
+         it is the page's to read, not the browser's to pan or zoom with:
+         without this a phone's browser keeps the touch and the page never
+         scrolls. */
+      canvas { display: block; touch-action: none; }
     </style>
   </head>
   <body>
@@ -26,13 +29,71 @@
       // `?v=dev` is rewritten to the build's store hash (flake.nix,
       // `wasmPage`), so a browser holding the last build is sent URLs its
       // cache has never seen.
-      import init from "./pkg/docs.js?v=dev";
+      import init, { scroll_by } from "./pkg/docs.js?v=dev";
       await init({ module_or_path: new URL("pkg/docs_bg.wasm?v=dev", document.baseURI) });
 
       // The keyboard reaches the page only while its canvas has the focus.
       const grab = () => document.querySelector("canvas")?.focus();
       addEventListener("focus", grab);
       grab();
+
+      // A finger scrolls. iced's scrollable hears a touch and does not
+      // scroll for it in a browser, so the page measures the drag and hands
+      // the app each move's distance (`scroll_by`, main.rs), then a glide
+      // that slows as a phone's does. A touch that does not move past a few
+      // pixels is left alone and is a tap. One that does is taken from iced
+      // from there on and ended as cancelled, so the button it started on is
+      // let go without being pressed.
+      const canvas = document.querySelector("canvas");
+      const SLOP = 8;
+      let finger = null;
+      let glide = 0;
+      const wheel = (dy) => scroll_by(dy);
+      addEventListener(
+        "pointerdown",
+        (e) => {
+          if (e.pointerType !== "touch" || finger) return;
+          cancelAnimationFrame(glide);
+          finger = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, v: 0, dragging: false };
+        },
+        { capture: true },
+      );
+      addEventListener(
+        "pointermove",
+        (e) => {
+          if (!finger || e.pointerId !== finger.id) return;
+          const dy = finger.y - e.clientY;
+          if (!finger.dragging) {
+            if (Math.abs(dy) < SLOP) return;
+            finger.dragging = true;
+            canvas.dispatchEvent(new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: "touch", isPrimary: true, bubbles: true, clientX: e.clientX, clientY: e.clientY }));
+          }
+          e.stopImmediatePropagation();
+          const dt = Math.max(1, e.timeStamp - finger.t);
+          finger.v = 0.8 * (dy / dt) + 0.2 * finger.v;
+          finger.y = e.clientY;
+          finger.t = e.timeStamp;
+          wheel(dy);
+        },
+        { capture: true },
+      );
+      const lift = (e) => {
+        if (!finger || e.pointerId !== finger.id) return;
+        const { dragging } = finger;
+        let v = finger.v * 16;
+        finger = null;
+        if (!dragging) return;
+        e.stopImmediatePropagation();
+        const step = () => {
+          if (Math.abs(v) < 0.5) return;
+          wheel(v);
+          v *= 0.95;
+          glide = requestAnimationFrame(step);
+        };
+        glide = requestAnimationFrame(step);
+      };
+      addEventListener("pointerup", lift, { capture: true });
+      addEventListener("pointercancel", (e) => e.isTrusted && lift(e), { capture: true });
     </script>
   </body>
 </html>
