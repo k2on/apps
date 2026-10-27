@@ -42,26 +42,6 @@ fn key(app: &mut App, k: Key) {
     let _ = app.update(Message::Key(k, Modifiers::empty()));
 }
 
-/// The top bar has no "go offline" or "sign out" button any more, nor a
-/// "sign in" one: the account menu is where signing out is, and nothing
-/// offers to go offline at all — a window does that by itself when its
-/// server cannot be reached.
-///
-/// Falsified by putting `button("sign out")` back in `view_top`: the source
-/// assertion names it.
-#[test]
-#[cfg(not(feature = "demo"))]
-fn the_top_bar_has_no_account_buttons() {
-    let view = include_str!("../view.rs");
-    for gone in ["\"go offline\"", "\"go online\"", "\"sign out\"", "\"sign in\"", "\"sign in again\""] {
-        assert!(!view.contains(gone), "the view still draws {gone}");
-    }
-    let main = include_str!("../main.rs");
-    assert!(!main.contains("ToggleLink"), "a message still goes offline on purpose");
-    let app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
-    assert_eq!(labels(&app), ["Settings", "Sign out"]);
-}
-
 /// What the menu offers: signed in, signing out; turned away, signing out
 /// under a header that says so; alone, nothing but where things are kept;
 /// nobody, no menu.

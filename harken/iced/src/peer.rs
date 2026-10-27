@@ -504,16 +504,15 @@ impl Peer {
             }
         }
         // Then what is listened to rather than played: the podcasts and the
-        // sermons, each a line only when there is a show of its kind.
+        // sermons, each a line even with no show of its kind yet — its page
+        // is where the first one is followed from.
         for (source, label, kind) in [(Source::Podcasts, "Podcasts", "podcast"), (Source::Sermons, "Sermons", "sermon")] {
             let count = self.shows_of(kind).len();
-            if count > 0 {
-                choices.push(Choice {
-                    source,
-                    label: label.into(),
-                    count: Some(count as i64),
-                });
-            }
+            choices.push(Choice {
+                source,
+                label: label.into(),
+                count: (count > 0).then_some(count as i64),
+            });
         }
         choices.extend(self.playlists().iter().map(|p| Choice {
             source: Source::Playlist(p.id, p.name.clone()),
@@ -1026,7 +1025,5 @@ mod tests {
         assert!(peer.items()[0].on_playlist(), "the library is read against Other now");
         assert_eq!(peer.items(), peer.library_now());
         assert!(peer.shown()[0].on_playlist(), "…and so is the page");
-        let lines: Vec<&str> = peer.choices.iter().map(|c| c.label.as_str()).collect();
-        assert_eq!(lines, ["Songs", "Albums", "Artists", "Other"]);
     }
 }

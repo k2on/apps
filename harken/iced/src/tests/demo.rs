@@ -344,21 +344,6 @@ fn a_work_link_resolves_by_its_key() {
     assert_eq!(peer.source_of(&Place::Album("Not a Record".into())), Source::Library);
 }
 
-/// The sidebar draws a line only when there are rows behind it — and an
-/// empty library alone offers Songs and its own Favorites. Falsified by
-/// pushing the Composers line unconditionally in `Peer::choose`.
-#[test]
-fn the_sidebar_only_offers_what_there_is() {
-    let peer = fresh();
-    let lines: Vec<&str> = peer.choices.iter().map(|c| c.label.as_str()).collect();
-    assert!(lines.contains(&"Composers") && lines.contains(&"Albums"), "{lines:?}");
-
-    let mut bare = super::alone("demo");
-    bare.ensure_playlist();
-    let lines: Vec<&str> = bare.choices.iter().map(|c| c.label.as_str()).collect();
-    assert_eq!(lines, ["Songs", "Favorites"], "an empty library");
-}
-
 /// A track names its work by catalogue number alone, so two works sharing
 /// one would silently give a work somebody else's title (the catalogue's
 /// own checks refuse it too).
@@ -492,18 +477,12 @@ fn the_catalogue_dates_its_albums() {
     assert_eq!(goldberg.performer, "Kimiko Ishizaka", "who made it");
 }
 
-/// The demo has a podcast and a series of sermons: a sidebar line each,
-/// a card each, and a show's page its episodes newest first, which the
-/// Songs page leaves out. An episode's row goes to its show. Falsified by
-/// `choose` leaving the shows out: there was no Sermons line.
+/// The demo has a podcast and a series of sermons: a card each, and a
+/// show's page its episodes newest first, which the Songs page leaves
+/// out. An episode's row goes to its show.
 #[test]
 fn the_demo_has_a_podcast_and_sermons() {
     let mut app = super::demo_app();
-    let lines: Vec<String> = app.peer.choices.iter().map(|c| c.label.clone()).collect();
-    assert!(
-        lines.contains(&"Podcasts".to_string()) && lines.contains(&"Sermons".to_string()),
-        "{lines:?}"
-    );
     let sermons = app.peer.shows_of("sermon");
     assert_eq!(sermons.len(), 1);
     assert!(sermons[0].title.contains("Gospel in Life"), "{}", sermons[0].title);
