@@ -457,11 +457,13 @@ fn a_device_that_cannot_be_heard_never_takes_the_sound() {
     assert!(s.sounding());
 }
 
-/// A track pressed goes where the sound is while one is sounding, and here
-/// while nothing is. Falsified by a `start` that kept a reachable output
-/// whatever its clock: the phone's track went to the paused laptop.
+/// A track pressed goes to the device the session has chosen — playing or
+/// paused, a device somebody picked stays picked — and here only when there
+/// is none, or the one there was has gone. Falsified by the `start` that
+/// kept the output only while it sounded: the phone's track, pressed with
+/// the laptop paused, went to the phone.
 #[test]
-fn a_track_pressed_plays_where_the_sound_is_or_here_when_it_is_nowhere() {
+fn a_track_pressed_plays_on_the_chosen_device_or_here_when_there_is_none() {
     let mut h = House::new();
     h.arrive("laptop", true);
     h.arrive("phone", true);
@@ -474,8 +476,12 @@ fn a_track_pressed_plays_where_the_sound_is_or_here_when_it_is_nowhere() {
     h.ok("phone", "pause", &());
     h.ok("phone", "start", &start(&queue(), 0, 61_000, ""));
     let s = h.state();
-    assert_eq!(output(&s).id(), Some("phone"), "nothing is sounding, so the press is a sound here");
+    assert_eq!(output(&s).id(), Some("laptop"), "paused, the laptop is still the one chosen");
     assert_eq!(clock(&s), Clock::Playing { at_ms: 61_000, since: h.now });
+    h.leave("laptop");
+    h.ok("phone", "start", &start(&queue(), 1, 0, ""));
+    let s = h.state();
+    assert_eq!(output(&s).id(), Some("phone"), "the laptop has gone, so the press is a sound here");
 }
 
 /// Picking a speaker halfway through a track picks up there, connecting

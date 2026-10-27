@@ -223,9 +223,10 @@ fn playable(db: &Db<Harken, Volatile>, ctx: &Ctx, session: &Session) -> Result<(
 
 // * The presses
 
-/// A track pressed: this queue, from here, at this point, playing. While
-/// something is sounding the press goes to the device making it; otherwise
-/// the caller takes the sound if it can play.
+/// A track pressed: this queue, from here, at this point, playing. It goes to
+/// the device the session has chosen while that device is here, playing or
+/// paused — a device somebody picked stays picked; with none, or the one
+/// there was gone, the caller takes the sound if it can play.
 #[live("listening.start")]
 pub fn start(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Start) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
@@ -236,7 +237,7 @@ pub fn start(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Start) -> Result<(
     if !(sounding(&session) || reachable(&session) || can) {
         return refuse("nothing here can play it");
     }
-    let stays = sounding(&session) || !can;
+    let stays = reachable(&session) || !can;
     let output = match &session {
         Session::Active { active } if stays => active.output.clone(),
         _ => here(ctx.device()),

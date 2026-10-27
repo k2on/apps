@@ -1043,17 +1043,16 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
 /// The desktop hands the browser's sound to the kitchen and pauses it from
 /// where it sits, which pauses the kitchen; hands it back to the browser;
 /// and the browser's socket drops, which leaves the sound with the browser,
-/// away, paused. Then the decided rule for coming back, both ways: with the
-/// kitchen playing meanwhile, the browser's return takes nothing and the
-/// kitchen plays on; and with nothing playing, the browser — which was
-/// playing on its own while it was away — offers what it was doing as a
-/// `start`, and the session becomes that, on the browser.
+/// away, paused. Then the rule for coming back to a speaker that is chosen,
+/// both ways: with the kitchen playing meanwhile, the browser's return takes
+/// nothing and the kitchen plays on; and with the kitchen paused, it takes
+/// nothing either — a device somebody picked stays picked — and a track
+/// pressed on the browser plays in the kitchen.
 ///
-/// The browser's half of the rule — its own sound going quiet when the
-/// session is sounding elsewhere — is its reconciler's, and tested there
-/// (`harken-iced`'s `listening` tests); what is held here is that the
-/// session the browser comes back to says so, and takes its `start` when
-/// nothing is sounding.
+/// The browser's half of the rule — offering what it played while it was
+/// away only to a session no other device has — is its reconciler's, and
+/// tested there (`harken-player`'s tests); what is held here is that the
+/// session the browser comes back to says so.
 ///
 /// Falsified by an `on_join` that gave a present output to whoever joined
 /// (`returned`'s `device` arm answering `here(id)`): the browser's return
@@ -1186,9 +1185,9 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
         "the kitchen plays on: {s:?}"
     );
 
-    // …and away again; the kitchen is stopped; and the browser, which went
-    // on playing on its own, comes back to nothing sounding and offers what
-    // it was doing.
+    // …and away again; the kitchen is paused, and still the one chosen; and
+    // the browser comes back to it: it takes nothing, and a track pressed on
+    // it plays in the kitchen — a device somebody picked stays picked.
     browser.disconnect();
     told_among(
         &mut [&mut desktop, &mut browser],
@@ -1208,9 +1207,10 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
         s.device(&b).is_some()
     });
     assert!(
-        !s.sounding(),
-        "nothing is sounding, so the browser's own sound becomes the session"
+        s.outputs(KITCHEN) && !s.sounding(),
+        "the kitchen is still the one chosen, paused: {s:?}"
     );
+    fake.playing(KITCHEN, "playing", &media_url("music/x.mp3"), 95.0);
     call(
         &mut browser,
         "start",
@@ -1219,8 +1219,8 @@ fn a_browser_a_desktop_and_a_speaker_share_one_session() {
     let s = told_among(
         &mut [&mut desktop, &mut browser],
         0,
-        "the browser's queue, on the browser",
-        |s| s.outputs(&b) && s.sounding(),
+        "the browser's track, in the kitchen",
+        |s| s.outputs(KITCHEN) && s.sounding(),
     );
     let a = s.session.unwrap();
     assert_eq!((a.queue, a.at), (queue(&["x", "y"]), 1));

@@ -103,7 +103,10 @@ impl Reconciler {
             m.met = v.epoch;
             if m.alone == Alone::Playing && !heard.queue.is_empty() {
                 m.alone = Alone::Quiet;
-                if !(s.sounding() && !s.outputs(v.me)) {
+                // Only to a session with no device chosen but this one: a
+                // device somebody picked stays picked, playing or paused, as
+                // a pressed track does (`listening.start`).
+                if s.leader().is_none_or(|l| l == v.me) {
                     let tracks = sound.tracks();
                     let at = heard.at.unwrap_or(0).min(tracks.len().saturating_sub(1));
                     let start = harken_domain::Start {
@@ -112,14 +115,14 @@ impl Reconciler {
                         position: heard.place.ms().unwrap_or(0).max(0),
                         queue: tracks,
                     };
-                    let _ = say.call("start", start.to_bytes(), None, "it came back playing to a quiet session");
+                    let _ = say.call("start", start.to_bytes(), None, "it came back playing to a session nothing else has");
                     // Its own sound goes on: the session it has just made
                     // says what it is doing.
                     m.expect = Expect::At { at: at as i64 };
                     return;
                 }
-                // Somebody else is playing: a controller of it now, and its
-                // own sound stops below.
+                // Another device has it, playing or paused: a controller of
+                // it now, and its own sound stops below.
             }
         }
         if !equipped {

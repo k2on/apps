@@ -617,3 +617,40 @@ fn a_place_is_said_every_thirty_seconds_and_at_a_pause() {
     other.started(1, 0);
     assert_eq!(other.places(&s, NOW + 60_000, 60_000), Vec::<i64>::new());
 }
+
+/// What a player played on its own while it was away is offered as a
+/// `start` when it comes back — only to a session no other device has. A
+/// device somebody picked stays picked, paused as much as playing; with
+/// the one there was gone, the offer is taken. Falsified by the offer's old
+/// test, "nothing sounding elsewhere": the kitchen's own queue was offered
+/// over the phone, paused but chosen.
+#[test]
+fn coming_back_playing_offers_only_to_a_session_no_other_device_has() {
+    let back = |output: Output| {
+        let mut rig = Rig::new();
+        (rig.sound.queue, rig.sound.at, rig.sound.playing) = (vec![track(7), track(8)], Some(1), true);
+        rig.sound.place = Some(Place::Measured { ms: 30_000, at: NOW });
+        let alone = Listening::default();
+        let v = View {
+            me: ME,
+            joined: false,
+            epoch: 0,
+            listening: &alone,
+            now: NOW,
+        };
+        rig.r.reconcile(&v, &mut rig.sound, &mut Said::default());
+        let mut s = session(2, 0, Clock::Paused { at_ms: 5_000 }, "phone", false);
+        s.session.as_mut().unwrap().output = output;
+        rig.names(&s, NOW).contains(&"start")
+    };
+    let phone = Output::Device {
+        id: "phone".into(),
+        moving: false,
+    };
+    assert!(!back(phone), "the phone is paused, and still the one chosen");
+    let gone = Output::Away {
+        id: "phone".into(),
+        name: "Phone".into(),
+    };
+    assert!(back(gone), "the phone has gone: the kitchen's own queue is offered");
+}
