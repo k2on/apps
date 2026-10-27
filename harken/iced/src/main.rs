@@ -127,18 +127,35 @@ pub enum Anchor {
     Dots,
 }
 
-/// The search for a show to follow, open on a shows page: what its box
-/// says, and what the directory found for it (`directory`).
-#[derive(Debug, Clone, Default)]
+/// The dialog a shows page's + opens, to follow a show: the kind it
+/// follows as, what its box says, what the directory found for it
+/// (`directory`), and where its cursor is among the rows.
+#[derive(Debug, Clone)]
 pub struct Adding {
+    /// `podcast` or `sermon`: the page's.
+    pub kind: &'static str,
     pub query: String,
     pub found: Vec<directory::Found>,
     /// What the search came to when it is not a list: searching, nothing
     /// found, why it failed; or why a follow was refused.
     pub said: Option<String>,
+    pub at: usize,
+    /// When it opened, for its rise (`arkui::dialog`).
+    pub opened: iced::time::Instant,
 }
 
 impl Adding {
+    pub fn new(kind: &'static str) -> Adding {
+        Adding {
+            kind,
+            query: String::new(),
+            found: vec![],
+            said: None,
+            at: 0,
+            opened: iced::time::Instant::now(),
+        }
+    }
+
     /// The shows its rows are: a feed's address is the one show it names;
     /// words, what the directory found for them.
     pub fn shows(&self) -> Vec<directory::Found> {
@@ -153,11 +170,17 @@ impl Adding {
     }
 }
 
-/// The search box's id, for putting the keys in it.
+/// The search box's id, for putting the keys in it; and what it found's,
+/// for keeping the cursor's row in sight.
 pub const QUERY: &str = "harken-show-search";
+pub const FOUND: &str = "harken-show-found";
 
 /// How many works a composer's page lists before its "See All".
 pub const KNOWN_WORKS: usize = 6;
+
+/// How many older episodes of a followed show the button under its list
+/// fetches at a time.
+pub const OLDER: i64 = 20;
 
 /// Works best known first: the most recorded, then the most tracks, the
 /// catalogue's order between equals.
@@ -220,6 +243,10 @@ pub enum Message {
     Searched(String, Result<Vec<directory::Found>, String>),
     /// Put the keys in the search box.
     FocusQuery,
+    /// The dialog's cursor onto a row of what it found.
+    AddingAt(usize),
+    /// A followed show's menu, from the ⋯ in its header: its Unfollow.
+    ShowMenu(String),
     /// Follow this feed, as the kind of show the page lists
     /// (`library.subscribe`).
     FollowFeed(String),
@@ -1071,6 +1098,7 @@ impl App {
         match self.ctx.focus() {
             Some(Layer::Picker) => Focus::Picker,
             Some(Layer::Menu) => Focus::Menu,
+            None if self.adding.is_some() => Focus::Adding,
             None => Focus::Pane(self.pane),
         }
     }
@@ -1121,12 +1149,6 @@ impl App {
                 Source::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
                 Source::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
                 Source::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
-                Source::Podcasts | Source::Sermons if self.adding.is_some() => self
-                    .adding
-                    .iter()
-                    .flat_map(|a| a.shows())
-                    .map(|f| format!("{} {}", f.title, f.author))
-                    .collect(),
                 Source::Podcasts => p.shows_of("podcast").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
                 Source::Sermons => p.shows_of("sermon").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
                 Source::Artist(_) if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
@@ -1161,12 +1183,18 @@ impl App {
                     Some(m) => self.update(m),
                     None => Task::none(),
                 },
+                // In the dialog, `i` is back to typing, as in vim.
+                vim::Action::Key('i') if focus == Focus::Adding => self.update(Message::FocusQuery),
                 vim::Action::Key(c) => match volume_key(c, Level::Output) {
                     Some(m) => self.update(m),
                     None => Task::none(),
                 },
                 vim::Action::Activate => match focus {
                     Focus::Menu => self.update(Message::MenuActivate),
+                    Focus::Adding => match self.adding.as_ref().and_then(|a| a.shows().get(a.at).cloned()) {
+                        Some(found) => self.update(Message::FollowFeed(found.feed)),
+                        None => Task::none(),
+                    },
                     Focus::Picker => self.update(Message::PickerActivate),
                     Focus::Queue => match self.queue_rows().get(self.queue_panel.unwrap_or(0)) {
                         Some((index, _)) => self.update(Message::QueueJump(*index)),
@@ -1177,6 +1205,7 @@ impl App {
                 vim::Action::Cancel => match focus {
                     Focus::Devices => self.update(Message::CloseDevices),
                     Focus::Queue => self.update(Message::CloseQueue),
+                    Focus::Adding => self.update(Message::Adding(false)),
                     // A menu and its submenu are one thing, so `<Esc>` takes
                     // both; `a`'s picker has no parent and is only itself.
                     _ => {
@@ -1212,7 +1241,6 @@ impl App {
             }
             vim::Action::Match(delta) => self.seek(Some(self.at(self.pane)), delta),
             vim::Action::Cancel => {
-                self.adding = None;
                 self.help = false;
                 self.debug = false;
                 self.note.clear();
@@ -1270,6 +1298,22 @@ impl App {
                     self.devices = Some(at);
                 }
                 Task::none()
+            }
+            // Up off the first row is back into the box, where it began.
+            Focus::Adding => {
+                let rows = self.adding.as_ref().map_or(0, |a| a.shows().len());
+                let grid = vim::Grid::column(rows);
+                let at = self.adding.as_ref().map_or(0, |a| a.at);
+                match grid.step(at, motion) {
+                    Some(to) => {
+                        if let Some(a) = self.adding.as_mut() {
+                            a.at = to;
+                        }
+                        arkui::scroll::reveal(FOUND, grid, to)
+                    }
+                    None if matches!(motion, vim::Motion::Up(_)) => self.update(Message::FocusQuery),
+                    None => Task::none(),
+                }
             }
             Focus::Queue => {
                 let grid = vim::Grid::column(self.queue_rows().len());
@@ -1821,11 +1865,6 @@ impl App {
                 if let Some(m) = self.layout().message(at).cloned() {
                     return self.update(m);
                 }
-                // Searching for a show: its rows are what it found, and
-                // opening one follows it.
-                if let Some(found) = self.adding_here().and_then(|a| a.shows().get(at).cloned()) {
-                    return self.update(Message::FollowFeed(found.feed));
-                }
                 if let Some(source) = self.card_under_cursor(at) {
                     return self.update(Message::Select(source));
                 }
@@ -2178,33 +2217,28 @@ impl App {
                 });
             }
             Message::Adding(open) => {
-                self.adding = open.then(Adding::default);
-                // The keys go where the + was, the box: what opening it
-                // was for is typing.
-                if let Some(cell) = self.layout().cell(nav::Mark::Query) {
-                    self.pane = Pane::Tracks;
-                    self.cursors[Pane::Tracks as usize] = cell;
-                }
+                self.adding = open.then(|| Adding::new(self.shows_kind()));
+                // The keys go in the box: what opening it was for is typing.
                 if open {
                     return iced::widget::operation::focus(QUERY);
                 }
             }
             Message::Query(query) => {
-                // Taken before the box changes: what it says decides how
-                // many rows there are before the marks.
-                let mark = self.cursor_mark();
                 let Some(adding) = self.adding.as_mut() else {
                     return Task::none();
                 };
                 adding.query = query.clone();
                 adding.said = None;
-                let search = !(directory::is_feed(&query) || query.trim().is_empty());
-                if !search {
+                adding.at = 0;
+                if directory::is_feed(&query) || query.trim().is_empty() {
                     adding.found.clear();
+                    return Task::none();
                 }
-                self.keep_on(mark);
-                if search {
-                    return directory::after(directory::PAUSE).map(move |()| Message::SearchDue(query.clone()));
+                return directory::after(directory::PAUSE).map(move |()| Message::SearchDue(query.clone()));
+            }
+            Message::AddingAt(at) => {
+                if let Some(adding) = self.adding.as_mut() {
+                    adding.at = at;
                 }
             }
             Message::SearchDue(words) => {
@@ -2219,7 +2253,6 @@ impl App {
                 return directory::search(words).map(|(words, answer)| Message::Searched(words, answer));
             }
             Message::Searched(words, answer) => {
-                let mark = self.cursor_mark();
                 let Some(adding) = self.adding.as_mut().filter(|a| a.query == words) else {
                     return Task::none();
                 };
@@ -2233,8 +2266,8 @@ impl App {
                         adding.found.clear();
                     }
                 }
+                adding.at = 0;
                 let arts: Vec<String> = adding.found.iter().map(|f| f.art.clone()).filter(|a| !a.is_empty()).collect();
-                self.keep_on(mark);
                 let wanted: Vec<_> = arts
                     .into_iter()
                     .filter_map(|art| self.covers.want(art))
@@ -2244,10 +2277,7 @@ impl App {
             }
             Message::FocusQuery => return iced::widget::operation::focus(QUERY),
             Message::FollowFeed(url) => {
-                let kind = match self.peer.source {
-                    Source::Sermons => "sermon",
-                    _ => "podcast",
-                };
+                let kind = self.adding.as_ref().map_or(self.shows_kind(), |a| a.kind);
                 let input = crate::domain::Subscribe {
                     kind: kind.into(),
                     url: url.trim().to_string(),
@@ -2257,6 +2287,16 @@ impl App {
                 if let Some(adding) = self.adding.as_mut() {
                     adding.said = (!followed).then_some(note);
                 }
+            }
+            Message::ShowMenu(id) => {
+                let Some(sub) = self.peer.subscription_of(&id) else {
+                    return Task::none();
+                };
+                let entries = vec![arkui::menu::Entry::run(glyphs::CLOSE, "Unfollow", Message::Unfollow(sub.url.clone()))];
+                let title = self.peer.shows().iter().find(|s| s.id == id).map_or(sub.url.clone(), |s| s.title.clone());
+                self.ctx
+                    .open_menu(Menu::open(title, entries, self.cursor, self.window, menu::Anchor::Pointer));
+                self.menu_about = None;
             }
             Message::Unfollow(url) => {
                 let _ = self.author("unfollow the feed".into(), "unsubscribe", &crate::domain::Unsubscribe { url });
@@ -2708,6 +2748,14 @@ impl App {
         // A swipe under way draws a frame at a time: the page follows the
         // fingers, and springs back.
         if self.swipe.active() {
+            return Some(Duration::from_millis(16));
+        }
+        // …and so does a dialog rising into place.
+        if self
+            .adding
+            .as_ref()
+            .is_some_and(|a| arkui::dialog::opening(a.opened, iced::time::Instant::now()))
+        {
             return Some(Duration::from_millis(16));
         }
         if self.ctx.dwelling() || self.volume_held.is_some() {

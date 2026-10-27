@@ -8,8 +8,8 @@
 //! than as a panic in the middle of a frame.
 
 use crate::domain::{
-    AlbumsEntry, ArtistsEntry, ChaptersEntry, ComposersEntry, CreditsEntry, DownloadsEntry, LibraryEntry, ProgressEntry, RecordingsEntry, ShowsEntry,
-    SubscriptionsEntry, TrackDetailsEntry, WorkSummary,
+    AlbumsEntry, ArtistsEntry, ChaptersEntry, ComposersEntry, CreditsEntry, DownloadsEntry, EpisodeDetailsEntry, LibraryEntry, ProgressEntry,
+    RecordingsEntry, ShowsEntry, SubscriptionsEntry, TrackDetailsEntry, WorkSummary,
 };
 use ark::format::Encode;
 
@@ -255,6 +255,29 @@ impl Download {
             "failed" => "Could not download".into(),
             _ => "Not on the server yet".into(),
         }
+    }
+}
+
+/// What a show's page says of an episode beside its row
+/// (`episode_details`): what it is about, and when it went out.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EpisodeDetail {
+    pub media_id: Id,
+    pub description: String,
+    /// 0 for "nobody said".
+    pub published_ms: i64,
+}
+
+impl EpisodeDetail {
+    pub fn from_bytes(b: &[u8]) -> EpisodeDetail {
+        EpisodeDetailsEntry::from_bytes(b).map_or_else(
+            |_| EpisodeDetail::default(),
+            |e| EpisodeDetail {
+                media_id: e.media_id.0,
+                description: e.description,
+                published_ms: e.published_ms,
+            },
+        )
     }
 }
 

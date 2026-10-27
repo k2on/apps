@@ -29,7 +29,7 @@ use ark_peer::{Patch, Watched};
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
 use crate::rows::{
-    Album, Artist, Chapter, Composer, Credit, Download, Id, Item, Listened, Playlist, Recording, Show, Subscription, TrackDetail, Work,
+    Album, Artist, Chapter, Composer, Credit, Download, EpisodeDetail, Id, Item, Listened, Playlist, Recording, Show, Subscription, TrackDetail, Work,
 };
 
 /// One line of the sidebar: somewhere the cursor can be and something it can
@@ -104,6 +104,9 @@ struct Views {
     /// How far everybody has listened to the page's show
     /// (`show_progress`).
     listened: Option<Watched<Listened>>,
+    /// What each of the page's show's episodes is about, and when it went
+    /// out (`episode_details`).
+    episodes: Option<Watched<EpisodeDetail>>,
 }
 
 /// A page slot, brought to what the source wants: kept when it is already
@@ -205,6 +208,7 @@ impl Peer {
             credits: None,
             on: None,
             listened: None,
+            episodes: None,
         };
         // What the hydrate already read is not news.
         for v in [
@@ -316,6 +320,11 @@ impl Peer {
     /// begun it.
     pub fn mine_of(&self, media: Id) -> Option<&Listened> {
         self.views.mine.rows.iter().find(|l| l.media_id == media)
+    }
+
+    /// What an episode of the page's show is about, and when it went out.
+    pub fn episode_of(&self, media: Id) -> Option<&EpisodeDetail> {
+        rows(&self.views.episodes).iter().find(|e| e.media_id == media)
     }
 
     /// How far everybody has got in an episode of the page's show, the
@@ -435,6 +444,7 @@ impl Peer {
         let credits = slot(settle(c, &mut v.credits, moved));
         let on = slot(settle(c, &mut v.on, moved));
         let listened = slot(settle(c, &mut v.listened, moved));
+        let episodes = slot(settle(c, &mut v.episodes, moved));
         self.moved = changed;
 
         // The playlist the library is read against can stop existing, and
@@ -469,6 +479,7 @@ impl Peer {
             || downloads
             || mine
             || listened
+            || episodes
             || details
             || shown
             || works
@@ -728,6 +739,19 @@ impl Peer {
             _ => None,
         };
         want(c, &mut v.listened, listened, Listened::from_bytes);
+        // …and what each episode is about.
+        let episodes = match &self.source {
+            Source::Show(id, _) => Some((
+                "episode_details",
+                ShowInput {
+                    playlist_id: pl,
+                    id: id.clone(),
+                }
+                .to_bytes(),
+            )),
+            _ => None,
+        };
+        want(c, &mut v.episodes, episodes, EpisodeDetail::from_bytes);
         if works || recordings {
             self.art_gen = self.art_gen.wrapping_add(1);
         }

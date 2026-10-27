@@ -131,6 +131,23 @@ impl App {
         let mut layers = stack![mouse_area(base).on_move(Message::Hover)];
         let focus = self.focus();
 
+        // Following a show: the dialog rising over the page as it dims.
+        if let Some(a) = &self.adding {
+            let open = arkui::dialog::opened(a.opened, iced::time::Instant::now());
+            let title = match a.kind {
+                "sermon" => "Follow sermons",
+                _ => "Follow a podcast",
+            };
+            let close = button(icon::tinted(glyphs::CLOSE, 14.0, |p| p.background.base.text))
+                .style(style::quiet)
+                .padding(6)
+                .on_press(Message::Adding(false));
+            let height = (self.window.height - 2.0 * BAR_HEIGHT).max(240.0);
+            layers = layers
+                .push(arkui::dialog::backdrop(Message::Adding(false), Message::Swallow, open))
+                .push(arkui::dialog::view(title.into(), close.into(), self.view_adding(a), 560.0, height, open));
+        }
+
         if let Some(m) = &self.ctx.menu {
             // A backdrop under it: a click away closes it, and the wheel does
             // not reach a list that would scroll out from under a pinned menu.
@@ -412,26 +429,19 @@ impl App {
         self.scrolled(None, page, false)
     }
 
-    /// A shows page: its title and its +, then the search the + opens — or
-    /// the feeds followed that are no show yet, over the shows, each a
-    /// square as a record is: its picture, who makes it.
+    /// A shows page: its title and its +, which opens the dialog that
+    /// follows one; the feeds followed that are no show yet; then the
+    /// shows, each a square as a record is: its picture, who makes it.
     fn view_shows(&self) -> Element<'_, Message> {
         let l = self.layout();
-        let adding = self.adding_here();
         let title = if self.shows_kind() == "sermon" { "Sermons" } else { "Podcasts" };
-        let glyph = if adding.is_some() { glyphs::CLOSE } else { glyphs::PLUS };
-        let add = self.ringed(&l, Mark::Add, icon::tinted(glyph, 16.0, |p| p.background.base.text).into(), false);
+        let add = self.ringed(&l, Mark::Add, icon::tinted(glyphs::PLUS, 16.0, |p| p.background.base.text).into(), false);
         let bar = row![text(title).size(28).font(hero::BOLD), add].spacing(10).align_y(Alignment::Center);
         let mut page = column![bar].spacing(18);
-        match adding {
-            Some(a) => page = page.push(self.view_search(&l, a)),
-            None => {
-                for (k, s) in self.unread_feeds() {
-                    page = page.push(self.view_unread(&l, k, s));
-                }
-                page = page.push(self.view_show_cards());
-            }
+        for (k, s) in self.unread_feeds() {
+            page = page.push(self.view_unread(&l, k, s));
         }
+        page = page.push(self.view_show_cards());
         self.scrolled(None, page, false)
     }
 
@@ -466,64 +476,47 @@ impl App {
         grid.into()
     }
 
-    /// The search for a show to follow: the box, what the search came to,
-    /// and a row per show found — its picture, its name and who makes it,
-    /// and its Follow, or that it is followed.
-    fn view_search<'a>(&'a self, l: &Layout, a: &'a crate::Adding) -> Element<'a, Message> {
+    /// The dialog a shows page's + opens (`arkui::dialog`): the box — words
+    /// for Apple's directory, or a feed's address — what the search came
+    /// to, and a row per show found: its picture, its name and who makes
+    /// it, and its Follow, or that it is followed.
+    fn view_adding<'a>(&'a self, a: &'a crate::Adding) -> Element<'a, Message> {
         let submit = match crate::directory::is_feed(&a.query) {
             true => Message::FollowFeed(a.query.clone()),
             false => Message::SearchDue(a.query.clone()),
         };
-        let on = self.on(l, Mark::Query);
         let input = text_input("Search Apple Podcasts, or paste a feed\u{2019}s address", &a.query)
             .id(crate::QUERY)
             .on_input(Message::Query)
             .on_submit(submit)
             .size(15)
             .padding([8, 12]);
-        let input = container(input).padding(2).style(move |t| container::Style {
-            border: iced::border::rounded(8.0)
-                .width(if on { 2.0 } else { 0.0 })
-                .color(arkui::theme::of(t).background.base.text),
-            ..container::Style::default()
-        });
-        let explain = "The server downloads a show\u{2019}s newest episodes and reads its feed every hour; \
-                       the show\u{2019}s page fetches older ones.";
-        let mut page = column![
-            self.opens(l, Mark::Query, input),
-            text(explain).size(12).style(style::faint(0.55)).wrapping(text::Wrapping::Word),
-        ]
-        .spacing(10)
-        .max_width(720);
+        let explain = "The server downloads a show\u{2019}s newest episodes and reads its feed every hour.";
+        let mut body = column![input, text(explain).size(12).style(style::faint(0.55)).wrapping(text::Wrapping::Word)].spacing(10);
         if let Some(said) = &a.said {
-            page = page.push(text(said.clone()).size(13).style(style::faint(0.7)).wrapping(text::Wrapping::Word));
+            body = body.push(text(said.clone()).size(13).style(style::faint(0.7)).wrapping(text::Wrapping::Word));
         }
-        let cursor = self.page_cursor();
+        let focused = self.focus() == Focus::Adding;
         let feed = crate::directory::is_feed(&a.query);
         let mut found = column![].spacing(2);
         for (i, f) in a.shows().into_iter().enumerate() {
-            let on = cursor == Some(i);
+            let on = focused && a.at == i;
             let followed = self.peer.subscriptions().iter().any(|s| s.url == f.feed);
             let (name, under) = match feed {
                 true => ("This feed".to_string(), f.feed.clone()),
                 false => (f.title.clone(), f.author.clone()),
             };
+            let tone = move |dim: bool| {
+                move |t: &iced::Theme| text::Style {
+                    color: Some(style::on_row(t, on, false, dim)),
+                }
+            };
             let words = column![
                 text(drawable(&name).into_owned())
                     .size(14)
                     .wrapping(text::Wrapping::Word)
-                    .style(move |t| text::Style {
-                        color: Some(match on {
-                            true => arkui::theme::of(t).primary.base.text,
-                            false => style::entry_text(t, false),
-                        }),
-                    }),
-                text(under).size(12).wrapping(text::Wrapping::Word).style(move |t| match on {
-                    true => text::Style {
-                        color: Some(arkui::theme::of(t).primary.base.text),
-                    },
-                    false => style::faint(0.6)(t),
-                }),
+                    .style(tone(false)),
+                text(under).size(12).wrapping(text::Wrapping::Word).style(tone(true)),
             ]
             .spacing(2)
             .width(Length::Fill);
@@ -534,13 +527,10 @@ impl App {
                         true => icon::tinted(glyphs::TICK, 13.0, |p| p.primary.base.text),
                         false => icon::tinted(glyphs::TICK, 13.0, |p| p.background.base.text),
                     };
-                    let words = text("Following").size(12).style(move |t| text::Style {
-                        color: Some(match on {
-                            true => arkui::theme::of(t).primary.base.text,
-                            false => arkui::theme::of(t).background.base.text,
-                        }),
-                    });
-                    row![tick, words].spacing(5).align_y(Alignment::Center).into()
+                    row![tick, text("Following").size(12).style(tone(false))]
+                        .spacing(5)
+                        .align_y(Alignment::Center)
+                        .into()
                 }
                 false => button(text("Follow").size(12))
                     .style(style::action)
@@ -548,16 +538,23 @@ impl App {
                     .on_press(Message::FollowFeed(f.feed.clone()))
                     .into(),
             };
-            let line = row![art::picture(&f.title, self.covers.handle(&f.art), 56.0, 6.0), words, action]
-                .spacing(14)
+            let line = row![art::picture(&f.title, self.covers.handle(&f.art), 48.0, 6.0), words, action]
+                .spacing(12)
                 .align_y(Alignment::Center);
             let line = container(line)
                 .padding([6, 8])
                 .width(Length::Fill)
-                .style(move |t| style::row(t, on, true, false));
-            found = found.push(mouse_area(line).on_enter(Message::HoverAt(i)));
+                .style(move |t| style::entry(t, on, true));
+            found = found.push(mouse_area(line).on_enter(Message::AddingAt(i)));
         }
-        page.push(found).into()
+        let found = scrollable(container(found).padding(Padding {
+            right: SCROLLBAR,
+            ..Padding::ZERO
+        }))
+        .id(crate::FOUND)
+        .style(style::bars)
+        .height(Length::Shrink);
+        body.push(found).into()
     }
 
     /// A feed followed that is no show yet: its address, whether the server
@@ -755,7 +752,17 @@ impl App {
             words = words.push(text(small).size(11).style(style::faint(0.5)));
         }
         if l.cell(Mark::Play).is_some() {
-            words = words.push(container(self.play_button(l, Mark::Play)).padding(Padding { top: 12.0, ..Padding::ZERO }));
+            let mut buttons = row![self.play_button(l, Mark::Play)].spacing(6).align_y(Alignment::Center);
+            // A followed show's menu beside it: its Unfollow.
+            if l.cell(Mark::ShowMenu).is_some() {
+                buttons = buttons.push(self.ringed(
+                    l,
+                    Mark::ShowMenu,
+                    icon::tinted(glyphs::MORE, 16.0, |p| p.background.base.text).into(),
+                    false,
+                ));
+            }
+            words = words.push(container(buttons).padding(Padding { top: 12.0, ..Padding::ZERO }));
         }
         let _ = name;
         container(row![art, words].spacing(28).align_y(Alignment::Center))
@@ -1044,9 +1051,11 @@ impl App {
         padded(with_header(header, self.view_list()))
     }
 
-    /// A show's page, laid out as a playlist's: its picture beside its
-    /// title, who makes it, how many episodes and a Play button, what it is
-    /// about, then its episodes newest first as the table has them.
+    /// A show's page, as a podcast app sets one: its picture beside its
+    /// title, who makes it, how many episodes, its Play and — followed —
+    /// its ⋯; what it is about; then its episodes newest first, each with
+    /// when it went out, what it is about and how far you are in it; and
+    /// under them, while the feed has more, its older ones fetched.
     fn view_show(&self, id: &str, title: &str) -> Element<'_, Message> {
         let l = self.layout();
         let show = self.peer.shows().iter().find(|s| s.id == id);
@@ -1065,41 +1074,166 @@ impl App {
             true => s.description.chars().take(599).collect::<String>() + "\u{2026}",
             false => s.description.clone(),
         });
-        let mut top = column![].spacing(12);
+        let mut page = column![header].spacing(12);
         if let Some(about) = about(&said) {
-            top = top.push(about);
+            page = page.push(about);
         }
-        if let Some(more) = self.view_more(&l, id, rows) {
-            top = top.push(more);
+        if let Some(more) = self.view_more(id, rows) {
+            page = page.push(more);
         }
-        let body = column![top, self.view_list()].spacing(12).into();
-        padded(with_header(header, body))
+        page = page.push(container(self.view_episodes()).padding(Padding { top: 8.0, ..Padding::ZERO }));
+        if let Some(s) = self.peer.subscription_of(id).filter(|s| s.has_older()) {
+            let n = (s.items - s.keep).min(crate::OLDER);
+            let label = text(format!("Fetch {n} older {}", plural(n, "episode"))).size(13).into();
+            page = page.push(container(self.ringed(&l, Mark::Older, label, false)).center_x(Length::Fill));
+        }
+        self.scrolled(None, page, false)
     }
 
-    /// Under a followed show's header: its older episodes fetched — twenty
-    /// more, or every one — while the feed has more than the library keeps,
-    /// its Unfollow, how many of its episodes are not on the server yet,
-    /// and why its last read failed.
-    fn view_more(&self, l: &Layout, id: &str, rows: &[crate::rows::Item]) -> Option<Element<'_, Message>> {
+    /// A show's episodes as a podcast app lists them: when each went out in
+    /// small capitals, its title, what it is about in three lines, then its
+    /// play and how long it is — or how long is left, or that it is played
+    /// — and, once begun, how far in as a bar across the row. The cursor's
+    /// row is filled as an entry is; a click plays it.
+    fn view_episodes(&self) -> Element<'_, Message> {
+        let p = &self.peer;
+        let (playing_id, sounding) = self.highlighted().map_or((None, false), |(id, sounding)| (Some(id), sounding));
+        let focused = self.has_keys(Pane::Tracks);
+        let cursor = focused.then_some(self.at(Pane::Tracks));
+        let now = crate::client::now_ms();
+        // About three lines of the description at its size, from the room
+        // the page leaves it: iced does not end a text at a line.
+        let room = (self.pane_width() - 2.0 * GUTTER - SCROLLBAR - 48.0).max(200.0);
+        let chars = (room / 6.6) as usize * 3;
+        let me = p.client.me().actor.clone();
+        let mut list = column![].spacing(0);
+        for (i, item) in p.rows().iter().enumerate() {
+            let on = cursor == Some(i);
+            let here = playing_id == Some(item.id);
+            let detail = p.episode_of(item.id);
+            let tone = move |dim: bool| {
+                move |t: &iced::Theme| text::Style {
+                    color: Some(style::on_row(t, on, false, dim)),
+                }
+            };
+            let mut words = column![].spacing(4).width(Length::Fill);
+            let day = arkui::format::day(detail.map_or(0, |d| d.published_ms), now);
+            if !day.is_empty() {
+                words = words.push(text(day.to_uppercase()).size(11).style(tone(true)));
+            }
+            words = words.push(
+                text(drawable(&item.title).into_owned())
+                    .size(15)
+                    .font(hero::BOLD)
+                    .wrapping(text::Wrapping::Word)
+                    .style(move |t| text::Style {
+                        color: Some(style::on_row(t, on, here, false)),
+                    }),
+            );
+            if let Some(d) = detail.filter(|d| !d.description.is_empty()) {
+                let about = match d.description.chars().count() > chars {
+                    true => {
+                        d.description
+                            .chars()
+                            .take(chars.saturating_sub(1))
+                            .collect::<String>()
+                            .trim_end()
+                            .to_string()
+                            + "\u{2026}"
+                    }
+                    false => d.description.clone(),
+                };
+                words = words.push(text(about).size(13).line_height(1.4).wrapping(text::Wrapping::Word).style(tone(true)));
+            }
+            // Its play — a pause while it is what sounds — and how much of
+            // it there is to hear.
+            let mine = p.mine_of(item.id);
+            let left = match (p.download_of(item.id), mine) {
+                (Some(_), _) => self.length_of(item),
+                (None, Some(m)) if m.finished => "Played".to_string(),
+                (None, Some(m)) if m.position_ms > 0 && m.duration_ms > m.position_ms => {
+                    format!("{} left", spell(m.duration_ms - m.position_ms))
+                }
+                (None, _) if item.duration_ms > 0 => spell(item.duration_ms),
+                _ => String::new(),
+            };
+            let (glyph, press) = match here && sounding {
+                true => (glyphs::PAUSE, Message::PlayPause),
+                false => (glyphs::PLAY, Message::PlayItem(item.id)),
+            };
+            let pill = row![
+                match on {
+                    true => icon::tinted(glyph, 11.0, |p| p.primary.base.color),
+                    false => icon::tinted(glyph, 11.0, |p| p.primary.base.text),
+                },
+                text(left).size(12)
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center);
+            let pill = button(pill)
+                .padding([4, 12])
+                .style(move |t, s| match on {
+                    // On the accent's fill, the colours swapped round.
+                    true => button::Style {
+                        background: Some(iced::Background::Color(arkui::theme::of(t).primary.base.text)),
+                        text_color: arkui::theme::of(t).primary.base.color,
+                        border: iced::border::rounded(14.0),
+                        ..button::Style::default()
+                    },
+                    false => button::Style {
+                        border: iced::border::rounded(14.0),
+                        ..style::action(t, s)
+                    },
+                })
+                .on_press(press);
+            let mut foot = row![pill].spacing(12).align_y(Alignment::Center);
+            // Where everybody else is in it, quietly.
+            let others: Vec<String> = p
+                .listened_to(item.id)
+                .into_iter()
+                .filter(|l| l.user_id != me)
+                .map(|l| format!("{} {}", if l.name.is_empty() { &l.user_id } else { &l.name }, l.short()))
+                .collect();
+            foot = foot.push(text(others.join("  \u{b7}  ")).size(12).style(tone(true)).width(Length::Fill));
+            foot = foot.push(
+                button(icon::more(on))
+                    .style(button::text)
+                    .padding([0, 6])
+                    .on_press(Message::RowMenu(item.id, crate::Anchor::Dots)),
+            );
+            let mut block = column![words, foot].spacing(10);
+            if let Some(m) = mine.filter(|m| !m.finished && m.position_ms > 0 && m.duration_ms > 0) {
+                block = block.push(progress(m.position_ms as f32 / m.duration_ms as f32, on));
+            }
+            let row = container(block)
+                .padding([14, 12])
+                .width(Length::Fill)
+                .style(move |t| style::entry(t, on, focused));
+            if i > 0 {
+                list = list.push(rule::horizontal(1).style(style::hairline));
+            }
+            list = list.push(
+                mouse_area(row)
+                    .on_enter(Message::HoverAt(i))
+                    .on_press(Message::PlayItem(item.id))
+                    .on_right_press(Message::RowMenu(item.id, crate::Anchor::Pointer)),
+            );
+        }
+        list.into()
+    }
+
+    /// Under a followed show's header: how many of its episodes are not on
+    /// the server yet, and why its feed's last read failed.
+    fn view_more(&self, id: &str, rows: &[crate::rows::Item]) -> Option<Element<'_, Message>> {
         let sub = self.peer.subscription_of(id);
         let downloads: Vec<_> = rows.iter().filter_map(|r| self.peer.download_of(r.id)).collect();
-        if downloads.is_empty() && sub.is_none() {
+        let why = sub.map(|s| &s.error).filter(|e| !e.is_empty());
+        if downloads.is_empty() && why.is_none() {
             return None;
         }
         let mut line = row![].spacing(10).align_y(Alignment::Center);
-        if let Some(s) = sub.filter(|s| s.has_older()) {
-            let left = s.items - s.keep;
-            let label = |words: String| text(words).size(12).into();
-            line = line.push(self.ringed(l, Mark::Older(false), label(format!("Fetch {} older", left.min(20))), true));
-            if left > 20 {
-                line = line.push(self.ringed(l, Mark::Older(true), label(format!("Fetch all {}", s.items)), true));
-            }
-        }
-        if let Some(k) = sub.and_then(|s| self.peer.subscriptions().iter().position(|t| t.url == s.url)) {
-            line = line.push(self.ringed(l, Mark::Unfollow(k), text("Unfollow").size(12).into(), false));
-        }
-        if let Some(why) = sub.map(|s| &s.error).filter(|e| !e.is_empty()) {
-            line = line.push(text(format!("Could not read it: {why}")).size(12).style(style::faint(0.6)));
+        if let Some(why) = why {
+            line = line.push(text(format!("Could not read its feed: {why}")).size(12).style(style::faint(0.6)));
         }
         if !downloads.is_empty() {
             let failed = downloads.iter().filter(|d| d.state == "failed").count();
@@ -1694,6 +1828,7 @@ impl App {
             Focus::Picker => "playlists",
             Focus::Devices => "devices",
             Focus::Queue => "queue",
+            Focus::Adding => "follow",
         };
         row![
             text(line).size(12).style(style::dim).width(Length::Fill),
@@ -2345,4 +2480,34 @@ fn view_help() -> Element<'static, Message> {
         .padding(12)
         .height(Length::Fill)
         .into()
+}
+
+/// How far in an episode is, as a bar across its row: the accent over a
+/// faint track — on the cursor's accent fill, the colour paired with it.
+fn progress<'a>(share: f32, on: bool) -> Element<'a, Message> {
+    let done = (share.clamp(0.0, 1.0) * 1000.0).round() as u16;
+    let bar = move |filled: bool| {
+        container(Space::new()).height(Length::Fixed(4.0)).style(move |t: &iced::Theme| {
+            let palette = arkui::theme::of(t);
+            let ink = match on {
+                true => palette.primary.base.text,
+                false => palette.primary.base.color,
+            };
+            container::Style {
+                background: Some(iced::Background::Color(match filled {
+                    true => ink,
+                    false => ink.scale_alpha(0.22),
+                })),
+                border: iced::border::rounded(2.0),
+                ..container::Style::default()
+            }
+        })
+    };
+    row![
+        bar(true).width(Length::FillPortion(done.max(1))),
+        bar(false).width(Length::FillPortion((1000 - done).max(1))),
+    ]
+    .spacing(0)
+    .width(Length::Fill)
+    .into()
 }

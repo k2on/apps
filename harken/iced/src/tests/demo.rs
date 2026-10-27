@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use arkui::images::Images;
 
 use crate::peer::Peer;
-use crate::places::{Pane, Place, Source};
+use crate::places::{Place, Source};
 use crate::{licences, media_url, seed};
 
 /// A seeded demo replica, from nothing.
@@ -525,19 +525,22 @@ fn an_episode_skips_seconds_and_a_song_a_track() {
     assert!(matches!(app.forward(), crate::Message::Skip(1)));
 }
 
-/// A feed followed from a shows page's + is the library's, as the kind of
-/// show the page lists: a feed's address pasted, the one row it is; words,
-/// what the directory found, `<Enter>` on one following it. A subscription
-/// keeps the newest twenty, its show's page offering older episodes once
-/// the server has said the feed has more, and an episode whose file is not
-/// on the server yet saying so where its length goes; unfollowed, the show
-/// is gone. Falsified by following as a podcast whatever the page: the
-/// sermons' feed was a podcast; and by `length_of` reading the row's
-/// length alone: the queued episode said its length.
+/// A feed followed from the dialog a shows page's + opens is the library's,
+/// as the kind of show that page lists: a feed's address pasted, the one
+/// row it is; words, what the directory found, `j` onto one and `<Enter>`
+/// following it; an answer for words typed over since, not listed. A
+/// subscription keeps the newest twenty, its show's page offering older
+/// episodes under its list once the server has said the feed has more and
+/// its Unfollow in its ⋯; an episode whose file is not on the server yet
+/// says so where its length goes; unfollowed, the show is gone. Falsified
+/// by following as a podcast whatever the page: the sermons' feed was a
+/// podcast; and by `length_of` reading the row's length alone: the queued
+/// episode said its length.
 #[test]
 fn a_feed_is_followed_from_its_shows_page() {
     use crate::directory::Found;
     use crate::nav::Mark;
+    use crate::places::Focus;
     const FEED: &str = "https://feeds.transistor.fm/full-time-nix";
     let mut app = super::demo_app();
     let _ = app.update(crate::Message::Select(Source::Sermons));
@@ -545,18 +548,17 @@ fn a_feed_is_followed_from_its_shows_page() {
     let _ = app.update(crate::Message::HoverAt(add));
     app.keyed = None;
     let _ = app.act(arkui::vim::Action::Activate);
-    assert!(app.adding.is_some(), "<Enter> on the + opens the search");
-    assert_eq!(app.at(Pane::Tracks), app.layout().cell(Mark::Query).unwrap(), "the cursor on the box");
+    assert_eq!(app.focus(), Focus::Adding, "<Enter> on the + opens the dialog, and it has the keys");
     let _ = app.update(crate::Message::Query("https://example.org/sermons.xml".into()));
     assert_eq!(app.adding.as_ref().unwrap().shows().len(), 1, "an address is the one row");
-    let _ = app.update(crate::Message::HoverAt(0));
     let _ = app.act(arkui::vim::Action::Activate);
     assert_eq!(app.adding.as_ref().unwrap().said, None, "followed, nothing to say");
+    let _ = app.act(arkui::vim::Action::Cancel);
+    assert!(app.adding.is_none(), "<Esc> shuts it");
 
     let _ = app.update(crate::Message::Select(Source::Podcasts));
+    let _ = app.update(crate::Message::Adding(true));
     let _ = app.update(crate::Message::Query("full time nix".into()));
-    // What the directory answered, for what the box still says: a later
-    // answer, for words typed over, is not listed.
     let nix = Found {
         title: "Full Time Nix".into(),
         author: "Shahar \"Dawn\" Or".into(),
@@ -564,19 +566,11 @@ fn a_feed_is_followed_from_its_shows_page() {
         art: String::new(),
     };
     let _ = app.update(crate::Message::Searched("full time".into(), Ok(vec![Found::default()])));
-    let on_box = app.layout().cell(Mark::Query).unwrap();
-    app.cursors[Pane::Tracks as usize] = on_box;
-    let _ = app.update(crate::Message::Searched("full time nix".into(), Ok(vec![nix])));
-    assert_eq!(app.adding.as_ref().unwrap().shows().len(), 1);
-    assert_eq!(
-        app.cursor_mark(),
-        Some(Mark::Query),
-        "the cursor stays on the box as what it found comes in under it"
-    );
-    let _ = app.update(crate::Message::HoverAt(0));
+    assert!(app.adding.as_ref().unwrap().found.is_empty(), "an answer for words typed over");
+    let _ = app.update(crate::Message::Searched("full time nix".into(), Ok(vec![Found::default(), nix])));
+    let _ = app.act(arkui::vim::Action::Move(arkui::vim::Motion::Down(1)));
     let _ = app.act(arkui::vim::Action::Activate);
     let _ = app.act(arkui::vim::Action::Cancel);
-    assert!(app.adding.is_none(), "<Esc> shuts the search");
 
     let subs: Vec<(String, String, i64)> = app.peer.subscriptions().iter().map(|s| (s.url.clone(), s.kind.clone(), s.keep)).collect();
     assert_eq!(subs.len(), 2, "{subs:?}");
@@ -600,12 +594,16 @@ fn a_feed_is_followed_from_its_shows_page() {
     let id = "podcast/full-time-nix";
     let sub = app.peer.subscription_of(id).expect("its show followed").clone();
     assert!(sub.has_older());
-    let _ = app.update(crate::Message::FetchOlder(FEED.into(), 20));
+    let _ = app.update(crate::Message::Select(Source::Show(id.into(), "Full Time Nix".into())));
+    let older = app.layout().cell(Mark::Older).expect("older ones under the list");
+    assert!(older > app.layout().page.main, "after the episodes");
+    let _ = app.update(crate::Message::HoverAt(older));
+    let _ = app.act(arkui::vim::Action::Activate);
     assert_eq!(app.peer.subscription_of(id).unwrap().keep, 40);
+    let first = app.peer.rows()[0].clone();
+    assert!(app.peer.episode_of(first.id).is_some(), "what each episode is about, beside it");
 
     // An episode in the library before its file: queued, then how far.
-    let _ = app.update(crate::Message::Select(Source::Show(id.into(), "Full Time Nix".into())));
-    let first = app.peer.rows()[0].clone();
     let queue = crate::domain::QueueDownload {
         file: first.file.clone(),
         source: "https://media/1.mp3".into(),
@@ -628,8 +626,12 @@ fn a_feed_is_followed_from_its_shows_page() {
     app.peer.refresh();
     assert_ne!(app.length_of(&first), "25%", "its length again");
 
-    let _ = app.update(crate::Message::Unfollow(FEED.into()));
-    assert!(app.peer.shows_of("podcast").is_empty(), "the show went with its feed");
+    let _ = app.update(crate::Message::ShowMenu(id.into()));
+    let _ = app.update(crate::Message::MenuActivate);
+    assert!(
+        app.peer.shows_of("podcast").is_empty(),
+        "unfollowed from its ⋯, the show went with its feed"
+    );
     assert_eq!(app.peer.subscriptions().len(), 1);
 }
 

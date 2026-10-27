@@ -23,6 +23,7 @@ pub mod account;
 pub mod art;
 pub mod cards;
 pub mod context;
+pub mod dialog;
 pub mod fit;
 pub mod format;
 pub mod glyphs;

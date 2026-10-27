@@ -266,6 +266,8 @@ pub enum Focus {
     Picker,
     Devices,
     Queue,
+    /// The dialog a shows page's + opens.
+    Adding,
 }
 
 #[cfg(test)]
