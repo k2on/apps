@@ -20,6 +20,11 @@ read -r w h < <(adb shell wm size | tr -d '\r' | awk -F'[ x]' '/Physical/ {print
 mkdir -p "$out"
 printf '{"name":"Pixel 7","width":%s,"height":%s,"corner":110,"cutout":"hole"}\n' "$w" "$h" > "$out/device.json"
 
+# No "isn't responding" dialog over a capture: a slow emulator's launcher
+# otherwise gets one, and it lands in the picture.
+adb shell settings put global hide_error_dialogs 1
+adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
+
 # A quiet status bar: noon, full, no notifications.
 adb shell settings put global sysui_demo_allowed 1
 demo() { adb shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null; }
@@ -39,6 +44,7 @@ for theme in light dark; do
     [ -n "$id" ] || continue
     echo "android $theme $id ($kind)"
     adb shell am force-stop "$pkg"
+    adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
     if [ "$kind" = recording ]; then
       # Opened and settled first, so the launch is never recorded; then
       # told to move, by the same shot asked again with `go`.
