@@ -143,22 +143,24 @@ jobs:
           xcodebuild -version
 
       # The simulator boots and the showcase builds under the nix steps
-      # (meanwhile.sh); both are waited for before the capture. The newest
-      # iPhone Pro the newest iOS runtime has.
+      # (meanwhile.sh), and both are waited for before the capture; even
+      # choosing the device is in the background, as the first simctl call
+      # starts CoreSimulator and takes a minute and a half. The newest
+      # iPhone Pro the newest iOS runtime has, its name left in device.
       - name: Start booting a simulator
-        id: sim
         run: |
-          device=$(xcrun simctl list devices available -j | jq -r '
-            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value
-            | map(select(.name | test("^iPhone [0-9]+ Pro$"))) | sort_by(.name) | last | .name')
-          echo "Booting $device"
-          echo "device=$device" >> "$GITHUB_OUTPUT"
-          bash .github/screens/meanwhile.sh start boot bash -c 'xcrun simctl boot "$1" && xcrun simctl bootstatus "$1" -b' boot "$device"
+          bash .github/screens/meanwhile.sh start boot bash -c '
+            device=$(xcrun simctl list devices available -j | jq -r "
+              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value
+              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .name")
+            echo "Booting $device"
+            echo "$device" > "$RUNNER_TEMP/device"
+            xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
 
       - name: Start building the showcase for the simulator
         run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           bash .github/screens/meanwhile.sh start showcase bash -c '
+            { command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; } &&
             cd showcase/ios && xcodegen generate &&
             xcodebuild build \
               -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
@@ -202,7 +204,7 @@ jobs:
         run: |
           bash .github/screens/ios.sh "$RUNNER_TEMP/out/ios" \
             "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app" \
-            dev.arkui.showcase "${{ steps.sim.outputs.device }}"
+            dev.arkui.showcase "$(cat "$RUNNER_TEMP/device")"
 
       - uses: actions/upload-artifact@v4
         with:
