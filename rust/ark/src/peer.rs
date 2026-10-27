@@ -96,7 +96,7 @@
 //! intents are rebased by their own changes over the head, never by an
 //! entry below it, so a replica folds as an authority does.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -454,16 +454,6 @@ pub struct Peer {
     /// A replica whose authority runs another schema: the state a
     /// confirmed entry carries is taken as it says.
     pub faith: bool,
-    /// An authority's sessions that have said `Hello` from a history its log
-    /// does not have, and pushed nothing since: the next intent each pushes
-    /// is its oldest pending one, and what it let go of before that was
-    /// confirmed in that history.
-    hellos: BTreeSet<String>,
-    /// The `local`s an authority has answered `Held`, by origin, while it
-    /// runs: a gap behind one of those is filled when it is pushed again,
-    /// and is never crossed. Not kept across a restart, which a replica
-    /// meets by pushing the held one first again.
-    held: BTreeMap<Origin, BTreeSet<i64>>,
 }
 
 /// Facts as some schema wrote them, read under `schema`: rows completed or
@@ -536,8 +526,6 @@ impl Peer {
             local: 0,
             diverged: vec![],
             asked: None,
-            hellos: BTreeSet::new(),
-            held: BTreeMap::new(),
             served: BTreeMap::new(),
             device: None,
             version: String::new(),
@@ -811,18 +799,8 @@ impl Peer {
         }
         let scoped = from.as_ref().filter(|w| self.served.contains_key(&w.session)).map(|w| w.session.clone());
         match (f, self.is_authority(), from) {
-            (Frame::Hello { cursor, hash, .. }, true, from) => match scoped {
-                Some(s) => self.serve_scoped(&s, cursor, hash, o),
-                // A replica standing in a history this log does not have:
-                // what it pushes first is judged past any gap before it
-                // (`verdict_on`).
-                None if !self.serve(cursor, hash, o) => {
-                    if let (Space::Durable, Some(w)) = (self.space, &from) {
-                        self.hellos.insert(w.session.clone());
-                    }
-                }
-                None => {}
-            },
+            (Frame::Hello { cursor, hash, .. }, true, _) if scoped.is_some() => self.serve_scoped(&scoped.unwrap(), cursor, hash, o),
+            (Frame::Hello { cursor, hash, .. }, true, _) => self.serve(cursor, hash, o),
             // A peer's intents, each a push.
             (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
@@ -839,10 +817,8 @@ impl Peer {
     }
 
     /// A `Hello` at `(cursor, hash)`: the pages from there when this log has
-    /// that hash there, the snapshot at the head when it does not — and
-    /// which it was: `false` for a replica that has seen what this log has
-    /// not.
-    fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) -> bool {
+    /// that hash there, the snapshot at the head when it does not.
+    fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
         let has = self.foreign.is_none_or(|f| cursor >= f)
             && match hash {
                 Some(h) => self.log().has(cursor, &h),
@@ -856,8 +832,7 @@ impl Peer {
                 state: self.store.state_hash(),
                 rows: self.store.snapshot_rows(),
             };
-            o.send(Frame::Snapshot { space: self.space, snapshot });
-            return false;
+            return o.send(Frame::Snapshot { space: self.space, snapshot });
         }
         for page in self.log().after(cursor).collect::<Vec<_>>().chunks(PAGE) {
             o.send(Frame::Page {
@@ -866,7 +841,6 @@ impl Peer {
                 logged: page.to_vec(),
             });
         }
-        true
     }
 
     /// A scope's verdict on a row of `table`, for the connection it serves.
@@ -955,8 +929,7 @@ impl Peer {
     /// past a gap.
     fn push(&mut self, who: &Who, entry: Entry, o: &mut Out) {
         let id = entry.id;
-        let first = self.hellos.remove(&who.session);
-        if let Some(verdict) = self.verdict_on(who, entry, first, o) {
+        if let Some(verdict) = self.verdict_on(who, entry, o) {
             o.send(Frame::Verdict {
                 space: self.space,
                 id,
@@ -965,7 +938,7 @@ impl Peer {
         }
     }
 
-    fn verdict_on(&mut self, who: &Who, mut entry: Entry, first: bool, o: &mut Out) -> Option<Verdict> {
+    fn verdict_on(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Option<Verdict> {
         let (space, j) = (self.space, self.journal());
         if let Some(verdict) = j.verdicts.get(&entry.id) {
             return Some(verdict.clone());
@@ -986,27 +959,12 @@ impl Peer {
                 },
             });
         }
-        // Past a gap no push can fill: the first intent after a `Hello` from
-        // a history this log does not have (a log cut short, or started
-        // again) is the replica's oldest pending one, and it let go of
-        // every one before it only once it was confirmed — there. Waiting would be for
-        // ever; so the gap is crossed. Never past one this authority held,
-        // which the replica still has and pushes again.
-        let held = self.held.get(&entry.origin).is_some_and(|h| h.range(last + 1..).next().is_some());
-        let last = match space == Space::Durable && first && entry.local > last + 1 && !held {
-            true => {
-                self.journal().pass(entry.origin, &who.actor, entry.local - 1);
-                entry.local - 1
-            }
-            false => last,
-        };
         // Past a gap (behind a held one, too): nothing, until it is pushed
         // again after the ones before it, after a `Hello`.
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             return None;
         }
         if self.functions.of(&entry.func).is_none() {
-            self.held.entry(entry.origin).or_default().insert(entry.local);
             return Some(Verdict::Held { func: entry.func });
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
