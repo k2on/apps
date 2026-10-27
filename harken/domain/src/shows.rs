@@ -308,15 +308,15 @@ pub fn episode_details(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan
             (Desc(e.published_ms), Desc(pos))
         })
         .map_with(|db, e| EpisodeDetailsEntry {
-        art: e.art.clone(),
-        description: e.description.clone(),
-        media_id: e.media_id,
-        number: e.number,
-        published_ms: e.published_ms,
-        season: e.season,
-        show: db.show.get(&e.show_id).map(|s| s.title).unwrap_or_default(),
-        show_id: e.show_id.clone(),
-    }))
+            art: e.art.clone(),
+            description: e.description.clone(),
+            media_id: e.media_id,
+            number: e.number,
+            published_ms: e.published_ms,
+            season: e.season,
+            show: db.show.get(&e.show_id).map(|s| s.title).unwrap_or_default(),
+            show_id: e.show_id.clone(),
+        }))
 }
 
 /// Shows written down as one JSON document: a show's fields and its

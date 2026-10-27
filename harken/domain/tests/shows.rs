@@ -73,11 +73,7 @@ fn an_episode_is_media_of_its_shows_kind_and_not_music() {
         },
     );
     assert!(details.iter().all(|d| d.show == "Gospel in Life" && d.show_id == id));
-    assert_eq!(
-        each(&details, |d| d.published_ms),
-        [20, 10, 0],
-        "as `show` lists them, newest first"
-    );
+    assert_eq!(each(&details, |d| d.published_ms), [20, 10, 0], "as `show` lists them, newest first");
     assert!(c
         .list::<EpisodeDetailsEntry>(
             "episode_details",
