@@ -6,9 +6,13 @@
 // few seconds after launch, in the theme it set. A recording's shot is
 // opened and left to settle first, then told to move by a Darwin
 // notification (`notifyutil -p dev.arkui.showcase.go`, sent through
-// `simctl spawn`), so the launch is never in the recording.
+// `simctl spawn`), so the launch is never in the recording. With `-slow 8`
+// it moves eight times slower than life, its pauses too, and the workflow
+// speeds the recording back up: life's timing, with eight times the frames
+// the simulator could draw.
 import ArkUI
 import SwiftUI
+import UIKit
 
 @main
 struct ShowcaseApp: App {
@@ -19,10 +23,29 @@ struct ShowcaseApp: App {
     }
 
     /// The shot this launch was asked for: `art` when none was.
-    static var shot: String {
+    static var shot: String { argument("-showcase") ?? "art" }
+
+    static func argument(_ name: String) -> String? {
         let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: "-showcase"), i + 1 < args.count else { return "art" }
+        guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
         return args[i + 1]
+    }
+}
+
+/// How many times slower than life a recording's shot moves (`-slow`): its
+/// animations and its pauses alike.
+let slow = ShowcaseApp.argument("-slow").flatMap(Double.init) ?? 1
+
+/// `seconds` of life, slowed.
+func later(_ seconds: Double, _ then: @escaping () -> Void) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds * slow, execute: then)
+}
+
+/// The system's own animations, the zoom of a transition included, slowed
+/// as SwiftUI's are by `.speed`: Core Animation's clock for the whole window.
+func slowTheWindow() {
+    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+        for window in scene.windows { window.layer.speed = Float(1 / slow) }
     }
 }
 
@@ -135,14 +158,16 @@ private struct ExpandingCardShot: View {
             .padding(Space.xl)
         }
         .onChange(of: go.told) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { open = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { open = false }
+            slowTheWindow()
+            later(0.4) { open = true }
+            later(2.2) { open = false }
         }
     }
 }
 
 /// A long list scrolled down, then taken back to its top: what the shown
-/// tab, tapped again, does on iOS.
+/// tab, tapped again, does on iOS. A ScrollView, as `scrollTo` animates
+/// there and not in a List.
 private struct ScrollToTopShot: View {
     @EnvironmentObject private var go: Go
     private let rows = (1...60).map { "\(places[$0 % places.count]) \($0)" }
@@ -150,17 +175,18 @@ private struct ScrollToTopShot: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { list in
-                List(rows, id: \.self) { Row(name: $0) }
-                    .listStyle(.plain)
-                    .navigationTitle("A page")
-                    .onChange(of: go.told) {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                            withAnimation(Springs.move) { list.scrollTo(rows[30], anchor: .top) }
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-                            withAnimation(Springs.move) { list.scrollTo(rows[0], anchor: .top) }
-                        }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: Space.m) {
+                        ForEach(rows, id: \.self) { Row(name: $0) }
                     }
+                    .padding(.horizontal, Space.page)
+                }
+                .navigationTitle("A page")
+                .onChange(of: go.told) {
+                    let move = Springs.move.speed(1 / slow)
+                    later(0.4) { withAnimation(move) { list.scrollTo(rows[30], anchor: .top) } }
+                    later(1.6) { withAnimation(move) { list.scrollTo(rows[0], anchor: .top) } }
+                }
             }
         }
     }

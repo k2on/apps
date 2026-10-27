@@ -6,9 +6,12 @@
 // workflow (.github/workflows/screens.yaml) captures each from an emulator:
 // a still a few seconds after it opens, or a recording: the shot opened and
 // left to settle, the recording started, then the shot asked again with
-// `--ez go true`, which reaches the activity already up (it is singleTop)
+// `--ei go <slow>`, which reaches the activity already up (it is singleTop)
 // and sets it moving — so what is recorded is the motion, and never the
-// launch. The theme is the system's, which the workflow sets before each
+// launch. `<slow>` is how many times slower than life the workflow has set
+// the system's animations (animator_duration_scale, which Compose obeys);
+// the shot's own pauses are stretched to match, so the recording, sped back
+// up by as much, is life's timing with `<slow>` times the frames. The theme is the system's, which the workflow sets before each
 // capture.
 package dev.arkui.showcase
 
@@ -79,19 +82,19 @@ import kotlinx.coroutines.delay
 
 class ShowcaseActivity : ComponentActivity() {
     /** Whether a recording's shot has been told to move. */
-    private val go = mutableStateOf(false)
+    private val go = mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val shot = intent.getStringExtra("shot") ?: "cards"
-        go.value = intent.getBooleanExtra("go", false)
-        setContent { Neutral { Showcase(shot, go.value) } }
+        go.intValue = intent.getIntExtra("go", 0)
+        setContent { Neutral { Showcase(shot, go.intValue) } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra("go", false)) go.value = true
+        intent.getIntExtra("go", 0).takeIf { it > 0 }?.let { go.intValue = it }
     }
 }
 
@@ -113,9 +116,9 @@ private val places = listOf("Harbour", "Orchard", "Meadow", "Summit", "Delta", "
 @Composable
 private fun Screen(content: @Composable () -> Unit) = Box(Modifier.fillMaxSize().safeDrawingPadding()) { content() }
 
-/** One shot, by the id the docs give it; a recording's moves once `go`. */
+/** One shot, by the id the docs give it; a recording's moves once `go`, its pauses `go` times life's. */
 @Composable
-fun Showcase(shot: String, go: Boolean) {
+fun Showcase(shot: String, go: Int) {
     when (shot) {
         "cards" -> Screen {
             Column(Modifier.padding(Space.page), verticalArrangement = Arrangement.spacedBy(Space.l)) {
@@ -172,10 +175,10 @@ fun Showcase(shot: String, go: Boolean) {
         "expanding-card" -> {
             val card = rememberExpandingCard()
             LaunchedEffect(card, go) {
-                if (!go) return@LaunchedEffect
-                delay(400)
+                if (go == 0) return@LaunchedEffect
+                delay(400L * go)
                 card.open()
-                delay(1_500)
+                delay(1_500L * go)
                 card.close()
             }
             Box(Modifier.fillMaxSize()) {
@@ -207,10 +210,10 @@ fun Showcase(shot: String, go: Boolean) {
             val reselect = remember { Reselect() }
             val list = rememberLazyListState()
             LaunchedEffect(go) {
-                if (!go) return@LaunchedEffect
-                delay(400)
+                if (go == 0) return@LaunchedEffect
+                delay(400L * go)
                 list.animateScrollToItem(30)
-                delay(800)
+                delay(800L * go)
                 reselect.ask()
             }
             CompositionLocalProvider(LocalReselect provides reselect) {

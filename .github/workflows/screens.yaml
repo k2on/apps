@@ -37,6 +37,9 @@ concurrency:
 
 env:
   FPS: "60"
+  # How many times slower than life a recording is taken, then sped back up
+  # (.github/screens/encode.sh): the CI devices draw too few frames to keep up.
+  SLOW: "8"
 
 jobs:
   android:

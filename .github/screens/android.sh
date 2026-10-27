@@ -13,6 +13,10 @@ set -euo pipefail
 out=$1
 apk=$2
 fps=${FPS:-60}
+# How many times slower than life the system's animations run while a
+# recording is taken: an emulator in CI draws a dozen frames a second, so
+# slowed this much and sped back up (encode.sh) the motion has $fps.
+slow=${SLOW:-8}
 pkg=dev.arkui.showcase
 tmp=$(mktemp -d)
 
@@ -48,21 +52,21 @@ for theme in light dark; do
     adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
     if [ "$kind" = recording ]; then
       # Opened and settled first, so the launch is never recorded; then
-      # told to move, by the same shot asked again with `go`.
+      # told to move, by the same shot asked again with `go`, its animations
+      # $slow times slower than life.
       adb shell am start -W -n "$pkg/.ShowcaseActivity" --es shot "$id" >/dev/null
       sleep 4
       adb shell rm -f /sdcard/shot.mp4
-      adb shell screenrecord --time-limit 4 --bit-rate 20000000 /sdcard/shot.mp4 &
+      adb shell settings put global animator_duration_scale "$slow"
+      adb shell screenrecord --time-limit $((4 * slow)) --bit-rate 20000000 /sdcard/shot.mp4 &
       rec=$!
       sleep 0.5
-      adb shell am start -n "$pkg/.ShowcaseActivity" --es shot "$id" --ez go true >/dev/null
+      adb shell am start -n "$pkg/.ShowcaseActivity" --es shot "$id" --ei go "$slow" >/dev/null
       wait "$rec" || true
+      adb shell settings put global animator_duration_scale 1
       sleep 1
       adb pull /sdcard/shot.mp4 "$tmp/$id.mp4" >/dev/null
-      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mp4" -vf "fps=$fps,scale=540:-2:flags=lanczos,format=yuv420p" -an -c:v libx264 -preset slow -crf 24 -profile:v high -movflags +faststart "$out/$theme/$id.mp4"
-      # What the device itself drew: the MP4 is $fps a second, a frame held
-      # where the device drew none.
-      echo "  recorded $(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$tmp/$id.mp4") frames in $(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp/$id.mp4")s"
+      bash .github/screens/encode.sh "$tmp/$id.mp4" "$out/$theme/$id.mp4" "$slow" "$fps"
     else
       adb shell am start -W -n "$pkg/.ShowcaseActivity" --es shot "$id" >/dev/null
       sleep 3

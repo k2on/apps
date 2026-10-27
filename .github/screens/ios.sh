@@ -14,6 +14,10 @@ app=$2
 bundle=$3
 device=$4
 fps=${FPS:-60}
+# How many times slower than life the shot moves while a recording is
+# taken (`-slow`, ShowcaseApp.swift), sped back up after (encode.sh), so the
+# motion has $fps frames a second whatever the simulator could draw.
+slow=${SLOW:-8}
 tmp=$(mktemp -d)
 
 xcrun simctl install booted "$app"
@@ -34,19 +38,16 @@ for theme in light dark; do
       command -v ffmpeg >/dev/null || brew install ffmpeg
       # Opened and settled first, so the launch is never recorded; then
       # told to move, by the Darwin notification the showcase listens for.
-      xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
+      xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$slow" >/dev/null
       sleep 4
       xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
       rec=$!
       sleep 1
       xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
-      sleep 4
+      sleep $((4 * slow))
       kill -INT "$rec"
       wait "$rec" || true
-      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mov" -vf "fps=$fps,scale=540:-2:flags=lanczos,format=yuv420p" -an -c:v libx264 -preset slow -crf 24 -profile:v high -movflags +faststart "$out/$theme/$id.mp4"
-      # What the device itself drew: the MP4 is $fps a second, a frame held
-      # where the device drew none.
-      echo "  recorded $(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$tmp/$id.mov") frames in $(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp/$id.mov")s"
+      bash .github/screens/encode.sh "$tmp/$id.mov" "$out/$theme/$id.mp4" "$slow" "$fps"
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4
