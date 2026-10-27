@@ -1,6 +1,5 @@
 // Settings: who is signed in, which server and whether it can be reached,
-// the podcasts and sermons the library follows, signing out, and what this
-// is. Nothing a person sees here is a cursor, a
+// signing out, and what this is. Nothing a person sees here is a cursor, a
 // hash or a count of pending intents: those are the diagnostics, behind
 // the version — tapped seven times, the way Android's own build number
 // unlocks its developer options — and remembered once found. And who is
@@ -26,10 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -122,16 +118,7 @@ fun Avatar(who: Who, side: Dp, description: String? = null, modifier: Modifier =
 }
 
 @Composable
-fun SettingsScreen(
-    data: SettingsData,
-    onBack: () -> Unit,
-    onSignOut: () -> Unit,
-    onVersion: () -> Unit,
-    onDiagnostics: () -> Unit,
-    feeds: List<Subscription> = emptyList(),
-    onFollow: (kind: String, url: String) -> Unit = { _, _ -> },
-    onUnfollow: (Subscription) -> Unit = {},
-) {
+fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit, onVersion: () -> Unit, onDiagnostics: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Settings", onBack)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("settings")).padding(horizontal = Space.page)) {
@@ -148,7 +135,6 @@ fun SettingsScreen(
             Group("Server") {
                 Line(hostOf(data.server), if (data.linked) "Connected" else "Can't reach it right now — what's on this phone still works")
             }
-            Group("Podcasts and sermons") { Feeds(feeds, onFollow, onUnfollow) }
             Spacer(Modifier.height(Space.l))
             OutlinedButton(
                 onClick = onSignOut,
@@ -170,56 +156,6 @@ fun SettingsScreen(
                 if (data.diagnostics) Line("Diagnostics", "What this phone's copy of the library is doing", onClick = onDiagnostics, chevron = true)
             }
             Spacer(Modifier.height(Space.xl))
-        }
-    }
-}
-
-/**
- * The feeds the library follows, each with how much of it is here, why its last read failed and
- * its Unfollow; and one followed by its URL, as a podcast or as sermons — the desktop's Settings.
- */
-@Composable
-private fun Feeds(feeds: List<Subscription>, onFollow: (String, String) -> Unit, onUnfollow: (Subscription) -> Unit) {
-    var url by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf("podcast") }
-    for (f in feeds) {
-        Row(Modifier.fillMaxWidth().padding(start = Space.l, end = Space.s, top = Space.s, bottom = Space.s), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(f.title.ifEmpty { f.url }, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
-                val what = if (f.kind == "sermon") "Sermons" else "Podcast"
-                val here = if (f.title.isEmpty() && f.error.isEmpty()) "not read yet" else "${f.episodes} of ${Media.count(f.items.toInt(), "episode")} here"
-                Text("$what · $here", style = quiet(MaterialTheme.typography.bodyMedium))
-                if (f.error.isNotEmpty()) Text("Could not read it: ${f.error}", style = quiet(MaterialTheme.typography.bodySmall))
-            }
-            TextButton(onClick = { onUnfollow(f) }) { Text("Unfollow") }
-        }
-    }
-    Column(Modifier.padding(Space.l)) {
-        Text(
-            "Follow a podcast or a church's sermons by its RSS feed. The server downloads its newest episodes and checks it every hour; a show's page fetches older ones.",
-            style = quiet(MaterialTheme.typography.bodyMedium),
-        )
-        Row(Modifier.padding(top = Space.s), verticalAlignment = Alignment.CenterVertically) {
-            FilterChip(selected = kind == "podcast", onClick = { kind = "podcast" }, label = { Text("Podcast") })
-            Spacer(Modifier.width(Space.s))
-            FilterChip(selected = kind == "sermon", onClick = { kind = "sermon" }, label = { Text("Sermons") })
-        }
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it },
-            label = { Text("Feed URL") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(top = Space.s),
-        )
-        OutlinedButton(
-            onClick = {
-                onFollow(kind, url)
-                url = ""
-            },
-            enabled = url.isNotBlank(),
-            modifier = Modifier.padding(top = Space.s),
-        ) {
-            Text("Follow")
         }
     }
 }

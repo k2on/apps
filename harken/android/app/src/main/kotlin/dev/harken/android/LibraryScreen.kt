@@ -1,7 +1,8 @@
 // Library: everything, five ways — the person's playlists, the albums, the
 // artists, the composers (where there are works), and every song in the
 // order it arrived — each opening the page it stands for. The playlists tab is where a new one is made; the
-// module's own checks decide whether a name will do, and say why not.
+// module's own checks decide whether a name will do, and say why not. And the podcasts and the
+// sermons, always there, whose + finds a show to follow (`FindShow`, Sheets.kt).
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
@@ -33,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
@@ -53,14 +55,15 @@ import dev.harken.android.ui.rememberDestinationListState
 import dev.harken.android.ui.rememberDestinationScrollState
 import dev.harken.android.ui.rememberHero
 
-enum class LibraryTab(val title: String) {
+/** The Library's lists; a list of shows says which kind (`podcast`, `sermon`), which its + follows a feed as. */
+enum class LibraryTab(val title: String, val kind: String? = null) {
     Playlists("Playlists"),
     Albums("Albums"),
     Artists("Artists"),
     Composers("Composers"),
     Songs("Songs"),
-    Podcasts("Podcasts"),
-    Sermons("Sermons"),
+    Podcasts("Podcasts", "podcast"),
+    Sermons("Sermons", "sermon"),
 }
 
 /** What the Library draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
@@ -76,21 +79,31 @@ data class LibraryData(
     val complete: Boolean = true,
     /** Everyone some work is by: none in a library of pop, which has no Composers then. */
     val composers: List<Composer> = emptyList(),
-    /** Every podcast and series of sermons: none, and there is no Podcasts or Sermons. */
+    /** Every podcast and series of sermons. */
     val shows: List<Show> = emptyList(),
+    /** The feeds the library follows: one that is no show yet is listed over the shows of its kind. */
+    val feeds: List<Subscription> = emptyList(),
 )
 
 @Composable
 fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryData, albumOf: (Track) -> Album?, playing: String?, act: Do) {
     Recompositions.hit("LibraryScreen")
     Column(Modifier.fillMaxSize()) {
-        TabTitle("Library") { IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") } }
+        // The + makes what the list shown is of: a playlist, or — over the podcasts or the sermons —
+        // a show found to follow.
+        val kind = tab.kind
+        TabTitle("Library") {
+            if (kind != null) {
+                IconButton(onClick = { act.findShow(kind) }) { Glyph(Glyphs.Plus, if (kind == "sermon") "Add sermons" else "Add a podcast") }
+            } else {
+                IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") }
+            }
+        }
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberDestinationScrollState("chips")).padding(horizontal = Space.page),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            // A library of pop has no works, so no Composers, and one with no shows no Podcasts or
-            // Sermons — unless it is the list already shown.
+            // A library of pop has no works, so no Composers — unless it is the list already shown.
             for (t in LibraryTab.entries.filter { it == tab || offers(it, data) }) {
                 FilterChip(
                     selected = t == tab,
@@ -114,25 +127,36 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             LibraryTab.Artists -> if (data.complete) Artists(data.artists, act)
             LibraryTab.Composers -> if (data.complete) Composers(data.composers, act)
             LibraryTab.Songs -> Songs(data.tracks, albumOf, playing, act)
-            LibraryTab.Podcasts -> if (data.complete) ShowsGrid(data.shows.filter { it.kind == "podcast" }, "podcast", act)
-            LibraryTab.Sermons -> if (data.complete) ShowsGrid(data.shows.filter { it.kind == "sermon" }, "sermon", act)
+            LibraryTab.Podcasts -> if (data.complete) ShowsGrid(data.shows.filter { it.kind == "podcast" }, unread("podcast", data.feeds, data.shows), "podcast", act)
+            LibraryTab.Sermons -> if (data.complete) ShowsGrid(data.shows.filter { it.kind == "sermon" }, unread("sermon", data.feeds, data.shows), "sermon", act)
         }
     }
 }
 
-/** Whether the Library offers `tab` over `data`: a list only where there is something on it. */
+/**
+ * Whether the Library offers `tab` over `data`: a list only where there is something on it — but
+ * Podcasts and Sermons always, since their + is where the first show is followed.
+ */
 fun offers(tab: LibraryTab, data: LibraryData): Boolean =
     when (tab) {
         LibraryTab.Composers -> data.composers.isNotEmpty()
-        LibraryTab.Podcasts -> data.shows.any { it.kind == "podcast" }
-        LibraryTab.Sermons -> data.shows.any { it.kind == "sermon" }
         else -> true
     }
 
+/** The feeds of `kind` the library follows that are no show yet: not read, or never read right. */
+fun unread(kind: String, feeds: List<Subscription>, shows: List<Show>): List<Subscription> =
+    feeds.filter { f -> f.kind == kind && shows.none { it.id == f.showId } }
+
 @Composable
-private fun ShowsGrid(shows: List<Show>, kind: String, act: Do) {
-    if (shows.isEmpty()) {
-        Empty(Glyphs.Show, if (kind == "sermon") "No sermons yet" else "No podcasts yet", "A show appears here when the server follows its feed, or finds a folder of it under $kind" + "s/.")
+private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: String, act: Do) {
+    if (shows.isEmpty() && waiting.isEmpty()) {
+        Empty(
+            Glyphs.Show,
+            if (kind == "sermon") "No sermons yet" else "No podcasts yet",
+            "Tap + to find one in Apple Podcasts, or paste its feed's address. The server downloads its newest episodes and keeps it up to date.",
+            action = if (kind == "sermon") "Add sermons" else "Add a podcast",
+            onAction = { act.findShow(kind) },
+        )
         return
     }
     val grid = rememberDestinationGridState("shows:$kind")
@@ -145,6 +169,22 @@ private fun ShowsGrid(shows: List<Show>, kind: String, act: Do) {
         verticalArrangement = Arrangement.spacedBy(Space.xl),
         modifier = Modifier.fillMaxSize(),
     ) {
+        // A feed followed that is no show yet, over the shows: that it is waiting to be read, or why
+        // it could not be, and its Unfollow — the one place it can be let go before it is a show.
+        items(waiting, key = { "feed:" + it.url }, span = { GridItemSpan(maxLineSpan) }) { f ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(f.title.ifEmpty { f.url }, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (f.error.isNotEmpty()) "Could not read it: ${f.error}" else "not read yet",
+                        style = quiet(MaterialTheme.typography.bodySmall),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TextButton(onClick = { act.unfollow(f) }) { Text("Unfollow") }
+            }
+        }
         items(shows, key = { it.id }) { s ->
             val hero = rememberHero(Space.corner)
             Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForShow(s.id)) })) {

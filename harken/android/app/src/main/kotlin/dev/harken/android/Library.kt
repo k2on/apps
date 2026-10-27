@@ -160,6 +160,8 @@ fun creditsKey(recording: String): String = "credits:$recording"
 
 fun progressKey(show: String): String = "progress:$show"
 
+fun episodesKey(show: String): String = "episodes:$show"
+
 /** A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved. */
 object Places {
     fun encode(s: String): String {
@@ -465,6 +467,9 @@ class Library(private val session: ArkSession) {
 
     /** How far everybody has listened to a show's episodes (`show_progress`); [release] [progressKey]. */
     fun showProgress(show: String): StateFlow<List<Listened>?> = open(progressKey(show)) { Held({ Phone.showProgress(it, show) }, Listened::of) }
+
+    /** What a show's episodes are about and when each came out (`episode_details`); [release] [episodesKey]. */
+    fun episodeDetails(show: String): StateFlow<List<EpisodeDetail>?> = open(episodesKey(show)) { Held({ Phone.episodeDetails(it, show) }, EpisodeDetail::of) }
 
     /** An episode's chapters once, in order. */
     suspend fun chapters(media: Id): List<Chapter> = session.run { h -> Phone.once({ Phone.chapters(h, media) }, Chapter::of) }

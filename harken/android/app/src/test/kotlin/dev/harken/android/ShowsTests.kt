@@ -1,8 +1,10 @@
 // The podcasts and sermons, through the real kernel: a show and its episodes
 // as the server's feeds author them, read as the Library reads them — the
 // shows by title, a show's episodes newest first, which the songs leave out
-// — and where a show's page is, as a route and as a place; a feed followed
-// from the phone, and an episode whose file is not on the server yet.
+// — and where a show's page is, as a route and as a place; a feed found
+// in the directory or pasted, and followed from a shows page's +; an
+// episode whose file is not on the server yet; and what an episode's row
+// says — when, what about, and how much is left.
 package dev.harken.android
 
 import dev.harken.android.gen.AddEpisode
@@ -20,8 +22,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShowsTests {
-    private fun episode(show: String, title: String, at: Long) =
-        AddEpisode(show, title, 1_800_000L, ".feeds/$title.mp3", title, at, "", "", "", 0, 0)
+    private fun episode(show: String, title: String, at: Long, description: String = "") =
+        AddEpisode(show, title, 1_800_000L, ".feeds/$title.mp3", title, at, description, "", "", 0, 0)
 
     /** Falsified by reading `library` for a show's episodes: the songs came back instead. */
     @Test
@@ -53,30 +55,30 @@ class ShowsTests {
         assertEquals(page, Page.ofPlace(page.place(emptyList()), emptyList()))
     }
 
-    /** The Library offers Podcasts and Sermons only where there is a show of the kind. */
-    @Test
-    fun theLibraryOffersOnlyTheShowsThereAre() {
-        val none = LibraryData(true, emptyList(), emptyList(), emptyList(), emptyList(), null)
-        assertTrue(!offers(LibraryTab.Podcasts, none) && !offers(LibraryTab.Sermons, none))
-        val one = none.copy(shows = listOf(Show("sermon/x", "sermon", "X", "", "", "", 1)))
-        assertTrue(!offers(LibraryTab.Podcasts, one) && offers(LibraryTab.Sermons, one))
-    }
-
     /**
-     * A feed followed from the phone is a subscription keeping twenty, its show's once the server
-     * has read it, with older episodes to fetch; fetched, it keeps forty. Falsified by `hasOlder`
-     * reading `episodes` for `items`: there were none to fetch.
+     * A feed's address pasted into the Podcasts page's sheet is the one row it lists; followed from
+     * there, as a podcast, it is a subscription — its row says Following, and it is listed over the
+     * podcasts until the server has read it — keeping twenty, its show's once read, with older
+     * episodes to fetch; fetched, it keeps forty. Falsified by `hasOlder` reading `episodes` for
+     * `items`: there were none to fetch.
      */
     @Test
     fun aFeedIsFollowedAndItsOlderEpisodesFetched() {
         val h = alone()
         val url = "https://feeds.transistor.fm/full-time-nix"
-        assertTrue(Phone.subscribe(h, "podcast", url) is Wrote.Entry)
+        val row = Directory.rows(" $url ", emptyList()).single()
+        assertEquals(url, row.feed)
+        assertTrue(Phone.subscribe(h, LibraryTab.Podcasts.kind!!, row.feed) is Wrote.Entry)
         assertTrue("a feed is a URL", Phone.subscribe(h, "podcast", "feed.xml") is Wrote.Refused)
+        val followed = Phone.once({ h.subscriptions() }, Subscription::of)
+        assertTrue("its Follow says Following", Directory.following(row, followed))
+        assertEquals("not read yet, it is over the podcasts", listOf(url), unread("podcast", followed, emptyList()).map { it.url })
+        assertTrue("and not over the sermons", unread("sermon", followed, emptyList()).isEmpty())
         h.addShow(AddShow("podcast", "Full Time Nix", "", "", "", url, ""))
         h.feedRead(FeedRead(url, "Full Time Nix", 50, ""))
         val feed = Phone.once({ h.subscriptions() }, Subscription::of).single()
         assertEquals(Triple("podcast/full-time-nix", 20L, 50L), Triple(feed.showId, feed.keep, feed.items))
+        assertTrue("read, it is a show", unread("podcast", listOf(feed), Phone.once({ h.shows() }, Show::of)).isEmpty())
         assertTrue(feed.hasOlder)
         Phone.fetchOlder(h, url, 20)
         assertEquals(40L, Phone.once({ h.subscriptions() }, Subscription::of).single().keep)
@@ -130,5 +132,80 @@ class ShowsTests {
         assertEquals(listOf("Intro", "Flakes"), chapters.map { it.title })
         assertEquals("Flakes", Chapter.at(chapters, 70_000)?.title)
         assertEquals("Intro", Chapter.at(chapters, 64_999)?.title)
+    }
+
+    /**
+     * The directory's answer, as it spells it: a show with no feed cannot be followed, so it is not
+     * listed, and one with no large picture keeps its small one; an address is followed as it is,
+     * words are searched for, escaped. Falsified by listing every result: the one with no `feedUrl`
+     * was there.
+     */
+    @Test
+    fun aSearchListsTheShowsWithFeeds() {
+        val json =
+            """{"resultCount":3,"results":[
+              {"kind":"podcast","collectionName":"Full Time Nix","artistName":"Shahar \"Dawn\" Or",
+               "feedUrl":"https://feeds.transistor.fm/full-time-nix",
+               "artworkUrl100":"https://a/100x100bb.jpg","artworkUrl600":"https://a/600x600bb.jpg"},
+              {"kind":"podcast","collectionName":"No Feed","artistName":"Somebody"},
+              {"kind":"podcast","collectionName":"Small","feedUrl":"https://s/feed.xml","artworkUrl100":"https://s/100x100bb.jpg"}]}"""
+        assertEquals(
+            listOf(
+                Directory.Found("Full Time Nix", "Shahar \"Dawn\" Or", "https://feeds.transistor.fm/full-time-nix", "https://a/600x600bb.jpg"),
+                Directory.Found("Small", "", "https://s/feed.xml", "https://s/100x100bb.jpg"),
+            ),
+            Directory.parse(json).getOrThrow(),
+        )
+        assertTrue(Directory.parse("<html>").isFailure)
+        assertTrue(Directory.isFeed(" https://feeds.transistor.fm/full-time-nix") && !Directory.isFeed("full time nix"))
+        assertTrue(Directory.searchUrl("gospel & life").endsWith("&term=gospel%20%26%20life"))
+        val found = Directory.parse(json).getOrThrow()
+        assertEquals("words list what was found", found, Directory.rows("nix", found))
+    }
+
+    /**
+     * An episode's row: what it is about and when it came out, in the order the show lists them;
+     * its length, then once begun the time left and a bar a third along, then Played and no bar;
+     * and how its download goes while its file is not on the server. Falsified by `left` counting
+     * from the start rather than what is left: it said 10 min left a third of the way in.
+     */
+    @Test
+    fun anEpisodesRowSaysWhenWhatAboutAndHowMuchIsLeft() {
+        val h = alone()
+        h.addShow(AddShow("podcast", "Full Time Nix", "", "", "", "", ""))
+        h.addEpisode(episode("podcast/full-time-nix", "Bump", 1_000, "Flakes, and why they are worth it."))
+        h.addEpisode(episode("podcast/full-time-nix", "Nix on macOS", 2_000))
+        val shown = Phone.once({ Phone.show(h, "podcast/full-time-nix") }, Track::of)
+        val details = Phone.once({ Phone.episodeDetails(h, "podcast/full-time-nix") }, EpisodeDetail::of)
+        assertEquals(shown.map { it.id }, details.map { it.mediaId })
+        assertEquals(listOf("", "Flakes, and why they are worth it."), details.map { it.description })
+        assertEquals(listOf(2_000L, 1_000L), details.map { it.publishedMs })
+
+        val bump = shown.single { it.title == "Bump" }
+        assertEquals("30 min", Episodes.left(bump, null, null))
+        assertNull(Episodes.progress(bump, null))
+        h.reportProgress(ReportProgress(bump.id, 600_000, 0, "Ada"))
+        val begun = Phone.once({ h.myProgress() }, Listened::of).single()
+        assertEquals("20 min left", Episodes.left(bump, begun, null))
+        assertEquals(1f / 3, Episodes.progress(bump, begun)!!, 0.001f)
+        assertTrue(Phone.markPlayed(h, bump.id, true) is Wrote.Entry)
+        val played = Phone.once({ h.myProgress() }, Listened::of).single()
+        assertEquals("Played", Episodes.left(bump, played, null))
+        assertNull(Episodes.progress(bump, played))
+        assertEquals("queued", Episodes.left(bump, null, Download(bump.id, "queued", 0, 0, "")))
+    }
+
+    /** When an episode came out, as its row says it: today, a few days ago, a day, a day of another year. */
+    @Test
+    fun anEpisodeIsDatedAsAPodcastAppDatesIt() {
+        val utc = java.time.ZoneOffset.UTC
+        fun on(y: Int, m: Int, d: Int, hour: Int = 9): Long = java.time.ZonedDateTime.of(y, m, d, hour, 0, 0, 0, utc).toInstant().toEpochMilli()
+        val now = on(2026, 10, 27, 12)
+        assertEquals("TODAY", Episodes.dated(on(2026, 10, 27, 1), now, utc))
+        assertEquals("YESTERDAY", Episodes.dated(on(2026, 10, 26, 23), now, utc))
+        assertEquals("2 DAYS AGO", Episodes.dated(on(2026, 10, 25), now, utc))
+        assertEquals("OCT 20", Episodes.dated(on(2026, 10, 20), now, utc))
+        assertEquals("DEC 31, 2025", Episodes.dated(on(2025, 12, 31), now, utc))
+        assertEquals("nobody said", "", Episodes.dated(0, now, utc))
     }
 }

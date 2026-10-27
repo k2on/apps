@@ -20,6 +20,7 @@ import dev.harken.android.gen.ComposersEntry
 import dev.harken.android.gen.CreatePlaylist
 import dev.harken.android.gen.ChaptersEntry
 import dev.harken.android.gen.DownloadsEntry
+import dev.harken.android.gen.EpisodeDetailsEntry
 import dev.harken.android.gen.EpisodeInput
 import dev.harken.android.gen.MarkPlayed
 import dev.harken.android.gen.ProgressEntry
@@ -215,6 +216,62 @@ data class Listened(val mediaId: Id, val userId: String, val name: String, val p
     }
 }
 
+/**
+ * What an episode's row says beyond its title (`episode_details`): what it is about, in plain text,
+ * and when it came out (0 for nobody said).
+ */
+data class EpisodeDetail(val mediaId: Id, val description: String, val publishedMs: Long) {
+    companion object {
+        fun of(e: EpisodeDetailsEntry): EpisodeDetail = EpisodeDetail(e.mediaId, e.description, e.publishedMs)
+    }
+}
+
+/** What an episode's row says, as a podcast app's do: when it came out, and how much of it is left. */
+object Episodes {
+    private val MONTHS = arrayOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+    /**
+     * When it came out, in small capitals: "TODAY", "YESTERDAY", "3 DAYS AGO" in its first week, then
+     * its day — "OCT 21" — with its year when that is not this one. Nothing, for nobody said.
+     */
+    fun dated(publishedMs: Long, nowMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+        if (publishedMs <= 0) return ""
+        val day = java.time.Instant.ofEpochMilli(publishedMs).atZone(zone).toLocalDate()
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        val ago = java.time.temporal.ChronoUnit.DAYS.between(day, today)
+        return when {
+            ago == 0L -> "TODAY"
+            ago == 1L -> "YESTERDAY"
+            ago in 2L..6L -> "$ago DAYS AGO"
+            day.year == today.year -> "${MONTHS[day.monthValue - 1]} ${day.dayOfMonth}"
+            else -> "${MONTHS[day.monthValue - 1]} ${day.dayOfMonth}, ${day.year}"
+        }
+    }
+
+    /**
+     * What stands beside its play: how its download to the server goes while its file is not
+     * there yet, "Played", the time left once begun, or its length.
+     */
+    fun left(track: Track, mine: Listened?, download: Download?): String {
+        val whole = mine?.durationMs?.takeIf { it > 0 } ?: track.durationMs
+        return when {
+            download != null -> download.short
+            mine?.finished == true -> "Played"
+            mine != null && mine.positionMs > 0 && whole > 0 -> "${Media.spell((whole - mine.positionMs).coerceAtLeast(0))} left"
+            track.durationMs > 0 -> Media.spell(track.durationMs)
+            else -> ""
+        }
+    }
+
+    /** How far through it the listener is, 0 to 1; null for not begun, played, or no length known. */
+    fun progress(track: Track, mine: Listened?): Float? {
+        if (mine == null || mine.finished || mine.positionMs <= 0) return null
+        val whole = mine.durationMs.takeIf { it > 0 } ?: track.durationMs
+        if (whole <= 0) return null
+        return (mine.positionMs.toFloat() / whole).coerceIn(0f, 1f)
+    }
+}
+
 /** One chapter of an episode (`chapters`). */
 data class Chapter(val startMs: Long, val title: String) {
     companion object {
@@ -345,6 +402,9 @@ object Phone {
     fun markPlayed(h: Harken, media: Id, finished: Boolean): Wrote = wrote { h.markPlayed(MarkPlayed(media, finished, "")) }
 
     fun showProgress(h: Harken, show: String): View<ProgressEntry> = h.showProgress(ShowInput(NO_PLAYLIST, show))
+
+    /** One show's episodes' descriptions and dates, in the order its page lists them. */
+    fun episodeDetails(h: Harken, show: String): View<EpisodeDetailsEntry> = h.episodeDetails(ShowInput(NO_PLAYLIST, show))
 
     fun chapters(h: Harken, media: Id): View<ChaptersEntry> = h.chapters(EpisodeInput(media))
 

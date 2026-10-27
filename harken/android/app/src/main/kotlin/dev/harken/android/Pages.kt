@@ -10,7 +10,13 @@
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,7 +24,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,15 +31,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.harken.android.gen.RecordingsEntry
@@ -43,6 +58,7 @@ import dev.harken.android.ui.Cover
 import dev.harken.android.ui.CoverCard
 import dev.harken.android.ui.Empty
 import dev.harken.android.ui.Glyph
+import dev.harken.android.ui.MoreButton
 import dev.harken.android.ui.PageBar
 import dev.harken.android.ui.Recompositions
 import dev.harken.android.ui.Shelf
@@ -392,9 +408,11 @@ fun RecordingPage(
 }
 
 /**
- * A podcast's or a series of sermons' page, laid out as a playlist's: its picture, who makes it,
- * how many episodes, Play and Shuffle; what it is about; then its episodes newest first, each over
- * how long it runs.
+ * A podcast's or a series of sermons' page, as a podcast app lays one out: its picture, who makes
+ * it, how many episodes, Play and Shuffle, and what it is about; why its feed's last read failed,
+ * and how many of its episodes are not on the server yet; then its episodes newest first
+ * ([EpisodeRow]), and at their foot the older ones fetched while the feed has more than the library
+ * keeps. A followed show's own settings — its Unfollow — are in its bar's menu.
  */
 @Composable
 fun ShowPage(
@@ -408,12 +426,16 @@ fun ShowPage(
     onFetchOlder: (Subscription, Long) -> Unit = { _, _ -> },
     listened: List<Listened> = emptyList(),
     me: String = "",
+    details: Map<Id, EpisodeDetail> = emptyMap(),
+    onUnfollow: (Subscription) -> Unit = {},
 ) {
     Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
     val title = show?.title ?: "Show"
+    // What "2 days ago" is counted from: the page's opening, not every frame.
+    val now = remember { System.currentTimeMillis() }
     LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("show")) {
-        item { PageBar("", onBack = act::back) }
+        item { PageBar("", onBack = act::back) { if (feed != null) ShowMenu(title, feed, onUnfollow) } }
         item {
             PageHeader(
                 cover = { Cover(title, show?.art ?: "", Space.header, Modifier.size(Space.header)) },
@@ -434,17 +456,19 @@ fun ShowPage(
                     about,
                     style = quiet(MaterialTheme.typography.bodyMedium),
                     maxLines = 6,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = Space.page, vertical = Space.s),
                 )
             }
         }
-        // How many of its episodes are not on the server yet, and its older ones fetched — twenty
-        // more, or every one — while the feed has more than the library keeps: the desktop's.
+        // Why its feed's last read failed, and how many of its episodes are not on the server yet:
+        // the desktop's.
         val waiting = episodes.mapNotNull { downloads[it.id] }
-        if (waiting.isNotEmpty() || feed?.hasOlder == true) {
+        val error = feed?.error.orEmpty()
+        if (waiting.isNotEmpty() || error.isNotEmpty()) {
             item {
                 Column(Modifier.padding(horizontal = Space.page, vertical = Space.s)) {
+                    if (error.isNotEmpty()) Text("Could not read it: $error", style = quiet(MaterialTheme.typography.bodySmall))
                     if (waiting.isNotEmpty()) {
                         val failed = waiting.count { it.state == "failed" }
                         val going = waiting.firstOrNull { it.state == "downloading" }
@@ -456,13 +480,6 @@ fun ShowPage(
                             ).joinToString(" · ")
                         Text(said, style = quiet(MaterialTheme.typography.bodySmall))
                     }
-                    if (feed != null && feed.hasOlder) {
-                        val left = feed.items - feed.keep
-                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(top = Space.s)) {
-                            OutlinedButton(onClick = { onFetchOlder(feed, 20) }) { Text("Fetch ${minOf(left, 20L)} older") }
-                            if (left > 20) OutlinedButton(onClick = { onFetchOlder(feed, 0) }) { Text("Fetch all ${feed.items}") }
-                        }
-                    }
                 }
             }
         }
@@ -471,18 +488,124 @@ fun ShowPage(
         } else if (episodes.isEmpty()) {
             item { Empty(Glyphs.Show, "No episodes yet", "The server downloads a feed's newest episodes; they appear here as they arrive.") }
         }
+        if (episodes.isNotEmpty()) item { HorizontalDivider(Modifier.padding(start = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
         itemsIndexed(episodes, key = { _, t -> t.id.hex }) { i, t ->
-            // How far everybody has got in it, where there is anybody; else how long it is.
+            // The signed-in person's place in it is the row's; anybody else's is said beside it.
             val heard = listened.filter { it.mediaId == t.id }
-            TrackRow(
+            EpisodeRow(
                 t,
-                under = if (heard.isNotEmpty()) Listened.said(heard, me) else length(listOf(t)) ?: title,
+                details[t.id],
+                mine = heard.firstOrNull { it.userId == me },
+                others = heard.filter { it.userId != me },
+                download = downloads[t.id],
                 playing = t.id.hex == playing,
+                now = now,
                 onClick = { act.play(episodes, i, page) },
                 onMore = { act.more(t, page) },
-            ) { Cover(title, show?.art ?: "", Space.thumb, Modifier.size(Space.thumb), corner = 4.dp) }
+            )
+        }
+        // Older ones, twenty at a time, while the feed has more than the library keeps.
+        if (feed != null && feed.hasOlder) {
+            item(key = "older") {
+                OutlinedButton(onClick = { onFetchOlder(feed, 20) }, modifier = Modifier.padding(start = Space.page, end = Space.page, top = Space.l)) {
+                    Text("Fetch ${minOf(feed.items - feed.keep, 20L)} older")
+                }
+            }
         }
         item { Spacer(Modifier.height(Space.xl)) }
+    }
+}
+
+// A followed show's settings, behind its bar's menu: its Unfollow.
+@Composable
+private fun ShowMenu(title: String, feed: Subscription, onUnfollow: (Subscription) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) { Glyph(Glyphs.More, "More for $title") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Unfollow") },
+                leadingIcon = { Glyph(Glyphs.Close, null, size = 20.dp) },
+                onClick = {
+                    open = false
+                    onUnfollow(feed)
+                },
+            )
+        }
+    }
+}
+
+/**
+ * One episode, as a podcast app lists them: when it came out, in small capitals; its title, bold;
+ * what it is about, a few lines of it; and under them its play and how much of it there is — its
+ * length, the time left once begun, Played, or how its download to the server goes while the file
+ * is not there yet — with anybody else's place beside it. Begun, a bar across the row says how far
+ * in the listener is. The whole row plays it; its menu is at its top right.
+ */
+@Composable
+fun EpisodeRow(
+    track: Track,
+    detail: EpisodeDetail?,
+    mine: Listened?,
+    others: List<Listened>,
+    download: Download?,
+    playing: Boolean,
+    now: Long,
+    onClick: () -> Unit,
+    onMore: () -> Unit,
+) {
+    Recompositions.hit("EpisodeRow")
+    val dated = Episodes.dated(detail?.publishedMs ?: 0, now)
+    val about = detail?.description.orEmpty()
+    val progress = Episodes.progress(track, mine)
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs, top = Space.m), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f).padding(top = Space.xs)) {
+                if (dated.isNotEmpty()) Text(dated, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
+                Text(
+                    track.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (about.isNotEmpty()) {
+                    Text(about, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Space.xs))
+                }
+            }
+            MoreButton(track.title, null, onMore)
+        }
+        Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.s), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                Icon(if (playing) Glyphs.Playing else Glyphs.Play, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+            }
+            Spacer(Modifier.width(Space.s))
+            Text(Episodes.left(track, mine, download), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+            if (others.isNotEmpty()) {
+                Text(
+                    " · " + Listened.said(others, ""),
+                    style = quiet(MaterialTheme.typography.labelMedium),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
+        }
+        if (progress != null) {
+            // The whole row's width is the whole episode.
+            Box(
+                Modifier.fillMaxWidth()
+                    .padding(start = Space.page, end = Space.page, top = Space.s)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+            }
+        }
+        Spacer(Modifier.height(Space.m))
+        HorizontalDivider(Modifier.padding(start = Space.page), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 

@@ -26,6 +26,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -284,6 +285,8 @@ fun HarkenApp(
     var adding by remember { mutableStateOf<Track?>(null) }
     var naming by remember { mutableStateOf<Pair<Boolean, Track?>?>(null) }
     var devices by remember { mutableStateOf(false) }
+    // The kind of show a shows page's + is finding one to follow as, while its sheet is up.
+    var finding by remember { mutableStateOf<String?>(null) }
 
     val offline = if (status.link == "waiting" || status.link == "offline") session.server.substringAfter("://") else null
     val fetching = if (!status.synced) session.server.substringAfter("://") else null
@@ -362,6 +365,14 @@ fun HarkenApp(
 
             override fun newPlaylist() {
                 naming = true to null
+            }
+
+            override fun findShow(kind: String) {
+                finding = kind
+            }
+
+            override fun unfollow(feed: Subscription) {
+                library.unfollow(feed)
             }
 
             override fun library(tab: LibraryTab) {
@@ -520,7 +531,7 @@ fun HarkenApp(
                                         )
                                     }
                                     Route.Library ->
-                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers, shows), albumOf, playing, act)
+                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers, shows, subscriptions), albumOf, playing, act)
                                     Route.Album -> {
                                         val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
                                         if (page != null) {
@@ -567,7 +578,11 @@ fun HarkenApp(
                                         if (page != null) {
                                             val rows by held(library, page, back)
                                             val listened by heldBy(library, progressKey(page.id), back) { it.showProgress(page.id) }
-                                            Ready(rows) { r ->
+                                            // What each episode is about and when it came out: waited for, as the
+                                            // rows are, since it is most of a row's height.
+                                            val about by heldBy(library, episodesKey(page.id), back) { it.episodeDetails(page.id) }
+                                            val aboutById = remember(about) { about.orEmpty().associateBy { it.mediaId } }
+                                            Ready(if (about == null) null else rows) { r ->
                                                 ShowPage(
                                                     page.id,
                                                     shows.firstOrNull { it.id == page.id },
@@ -579,6 +594,12 @@ fun HarkenApp(
                                                     onFetchOlder = library::fetchOlder,
                                                     listened = listened.orEmpty(),
                                                     me = library.user,
+                                                    details = aboutById,
+                                                    onUnfollow = { feed ->
+                                                        library.unfollow(feed)
+                                                        // Its show goes with it: nothing is left here to look at.
+                                                        act.back()
+                                                    },
                                                 )
                                             }
                                         }
@@ -644,9 +665,6 @@ fun HarkenApp(
                                                 }
                                             },
                                             onDiagnostics = { nav().navigate(Route.Diagnostics.pattern) },
-                                            feeds = subscriptions,
-                                            onFollow = library::follow,
-                                            onUnfollow = library::unfollow,
                                         )
                                     }
                                     Route.Diagnostics -> {
@@ -762,6 +780,12 @@ fun HarkenApp(
             }
             if (queue) {
                 ModalBottomSheet(onDismissRequest = { queue = false }) { QueueSheet(player, controls) }
+            }
+            finding?.let { kind ->
+                // Opened all the way: the keyboard comes up with it, and the results want the room.
+                ModalBottomSheet(onDismissRequest = { finding = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+                    FindShow(kind, subscriptions, onFollow = { feed -> library.follow(kind, feed) })
+                }
             }
             if (devices) {
                 val rows = heard.listening?.let { Picker.rows(it, heard.me) }.orEmpty()

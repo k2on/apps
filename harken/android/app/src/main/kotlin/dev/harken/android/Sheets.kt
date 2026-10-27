@@ -5,14 +5,19 @@
 // checked as it is typed by `create_playlist`'s own input checks, whose
 // sentence is shown under the field. And the device picker: where the
 // sound is, where it could go, each device's volume and the speakers
-// joined.
+// joined. And finding a show to follow, from a shows page's +: Apple's
+// podcast directory searched as it is typed (Directory.kt), or a feed's
+// address pasted.
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,7 +28,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,8 +41,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
@@ -45,6 +62,7 @@ import dev.harken.android.ui.VolumeSlider
 import dev.harken.android.ui.quiet
 import dev.harken.android.ui.rememberTransientListState
 import dev.harken.android.ui.rememberTransientScrollState
+import kotlinx.coroutines.delay
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -268,6 +286,99 @@ private fun DeviceLine(r: DeviceRow, at: Boolean, actions: PickerActions) {
                 Modifier.fillMaxWidth().padding(start = Space.xl + 22.dp + Space.l - 12.dp, end = Space.xl).padding(bottom = Space.xs),
                 about = r.name,
             )
+        }
+    }
+}
+
+/**
+ * Finding a show to follow, from a shows page's +: the box — the keys in it as the sheet rises —
+ * searched in Apple's podcast directory a moment after the typing stops, or a feed's address
+ * pasted, which is the one show it names; each show found with its picture, who makes it and its
+ * Follow, which says Following once the library follows that feed. Followed as `kind`, the kind
+ * of show the page lists: what `onFollow` is handed is the feed.
+ */
+@Composable
+fun FindShow(kind: String, feeds: List<Subscription>, onFollow: (String) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var found by remember { mutableStateOf(emptyList<Directory.Found>()) }
+    // What the search came to when it is not a list: searching, nothing found, or why it failed.
+    var said by remember { mutableStateOf<String?>(null) }
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // What opening it was for is typing.
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    // A key typed starts this again, which cancels the last: a search goes only once the typing
+    // has paused, and an answer for words the box no longer says is never shown.
+    LaunchedEffect(query) {
+        said = null
+        if (query.isBlank() || Directory.isFeed(query)) {
+            found = emptyList()
+            return@LaunchedEffect
+        }
+        delay(Directory.PAUSE)
+        said = "Searching…"
+        Directory.search(query).fold(
+            onSuccess = { shows ->
+                found = shows
+                said = if (shows.isEmpty()) "Nothing found for “${query.trim()}”." else null
+            },
+            onFailure = { e ->
+                found = emptyList()
+                said = e.message ?: "Could not search."
+            },
+        )
+    }
+    val rows = Directory.rows(query, found)
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            if (kind == "sermon") "Add sermons" else "Add a podcast",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
+        )
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("Search Apple Podcasts, or paste a feed") },
+            leadingIcon = { Icon(Glyphs.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Space.xl).focusRequester(focus),
+        )
+        AnimatedVisibility(visible = said != null) {
+            Text(said.orEmpty(), style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.m))
+        }
+        LazyColumn(Modifier.fillMaxWidth(), state = rememberTransientListState(), contentPadding = PaddingValues(top = Space.s, bottom = Space.l)) {
+            items(rows, key = { it.feed }) { s ->
+                // Each comes in, and goes, gently, as the answers for the words change under it.
+                FoundShow(s, Directory.following(s, feeds), onFollow = { onFollow(s.feed) }, modifier = Modifier.animateItem())
+            }
+        }
+    }
+}
+
+// One show the directory found: its picture, its title, who makes it, and its Follow — or, once
+// followed, the tick.
+@Composable
+private fun FoundShow(s: Directory.Found, following: Boolean, onFollow: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
+        Cover(s.title, s.art, 56.dp, Modifier.size(56.dp), corner = 6.dp)
+        Spacer(Modifier.width(Space.m))
+        Column(Modifier.weight(1f)) {
+            Text(s.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (s.author.isNotEmpty()) Text(s.author, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(Space.s))
+        Crossfade(following, label = "following") { on ->
+            if (on) {
+                Row(Modifier.height(40.dp).padding(horizontal = Space.s), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Glyphs.Tick, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(Space.xs))
+                    Text("Following", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                }
+            } else {
+                FilledTonalButton(onClick = onFollow) { Text("Follow") }
+            }
         }
     }
 }

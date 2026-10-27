@@ -89,6 +89,12 @@ interface Do {
 
     fun newPlaylist() {}
 
+    /** The sheet that finds a show to follow, as `kind` (`podcast`, `sermon`): the shows page's +. */
+    fun findShow(kind: String) {}
+
+    /** Stop following a feed, and let its show go. */
+    fun unfollow(feed: Subscription) {}
+
     fun library(tab: LibraryTab) {}
 
     fun settings() {}
