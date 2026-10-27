@@ -219,6 +219,17 @@ in
         default = 2;
         description = "How many of the host's cores whisper.cpp hears with.";
       };
+
+      chapters = lib.mkOption {
+        type = lib.types.listOf (lib.types.enum [ "outline" "tiling" ]);
+        default = [ "outline" "tiling" ];
+        description = ''
+          How an episode its feed gave no chapters is given some from what
+          was heard in it (`harken/server/src/chapters.rs`), each tried in
+          turn: `outline`, where each topic its description lists is said;
+          `tiling`, where the words said change. Empty for none.
+        '';
+      };
     };
 
     pictureHosts = lib.mkOption {
@@ -507,6 +518,7 @@ in
         HARKEN_CATALOGUE = cfg.catalogue;
       } // lib.optionalAttrs (cfg.mediaPath != null && cfg.transcripts.enable) {
         HARKEN_TRANSCRIBER = "${transcriber}";
+        HARKEN_CHAPTERS = if cfg.transcripts.chapters == [ ] then "none" else lib.concatStringsSep "," cfg.transcripts.chapters;
       } // lib.optionalAttrs (cfg.web != null) {
         HARKEN_WEB = "${cfg.web}";
       } //lib.optionalAttrs (cfg.oidc != null) {

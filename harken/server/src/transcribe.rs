@@ -14,6 +14,9 @@
 //! What it wrote is kept in the data directory by the file's hash, so an
 //! episode is heard once whatever restarts, and a restart says it again
 //! (which writes nothing when the log already has it).
+//!
+//! An episode its feed gave no chapters is given some from what was heard
+//! in it, by whichever chapterers the server names (`chapters.rs`).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -24,7 +27,8 @@ use std::sync::{Arc, Mutex};
 use ark::format::Encode;
 
 use crate::captions;
-use crate::domain::{CueAt, SetTranscript};
+use crate::chapters::{self, About, Chapterer};
+use crate::domain::{CueAt, SetChapters, SetTranscript};
 use crate::sync::{name_of, Call, Plan, Said};
 
 pub fn dir(data: &Path) -> PathBuf {
@@ -32,12 +36,21 @@ pub fn dir(data: &Path) -> PathBuf {
 }
 
 /// An episode here to be heard: its file as its row says it, where that
-/// is on disk, and what to call it in what the server prints.
+/// is on disk, what it is, and whether it has chapters already.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Job {
     pub file: String,
     pub path: PathBuf,
     pub title: String,
+    pub description: String,
+    pub chaptered: bool,
+}
+
+/// How the server hears: the program, and who makes chapters of what it
+/// heard, in the order to try them.
+pub struct Hearing {
+    pub program: PathBuf,
+    pub chapters: Vec<Box<dyn Chapterer>>,
 }
 
 /// The transcriber's thread, as the scanner holds it.
@@ -47,15 +60,16 @@ pub struct Transcriber {
 }
 
 impl Transcriber {
-    /// `program` run as `program <audio> <captions.vtt>` on each episode
-    /// wanted, its captions kept in `dir`, each transcript said to `said`.
-    pub fn start(program: PathBuf, dir: PathBuf, said: Sender<Said>) -> Transcriber {
+    /// `hearing.program` run as `program <audio> <captions.vtt>` on each
+    /// episode wanted, its captions kept in `dir`, each transcript (and the
+    /// chapters of an episode with none) said to `said`.
+    pub fn start(hearing: Hearing, dir: PathBuf, said: Sender<Said>) -> Transcriber {
         let wanted = Arc::new(Mutex::new(Vec::new()));
         let (wake, woken) = channel();
         let list = wanted.clone();
         let _ = std::thread::Builder::new()
             .name("harken-transcribe".into())
-            .spawn(move || run(&program, &dir, &list, &woken, &said));
+            .spawn(move || run(&hearing, &dir, &list, &woken, &said));
         Transcriber { wanted, wake }
     }
 
@@ -73,7 +87,7 @@ impl Transcriber {
 }
 
 fn run(
-    program: &Path,
+    hearing: &Hearing,
     dir: &Path,
     wanted: &Mutex<Vec<Job>>,
     woken: &Receiver<()>,
@@ -94,7 +108,7 @@ fn run(
             continue;
         };
         tried.insert(job.file.clone());
-        let cues = match heard(program, dir, &job) {
+        let cues = match heard(&hearing.program, dir, &job) {
             Ok(cues) => cues,
             Err(e) => {
                 eprintln!("harken-server: transcribe: {}: {e}", job.title);
@@ -104,18 +118,35 @@ fn run(
         if cues.is_empty() {
             continue;
         }
+        let call = |name: &'static str, input: Vec<u8>| Call {
+            name,
+            what: job.title.clone(),
+            input,
+            if_there: false,
+        };
+        let mut calls = vec![];
+        if !job.chaptered {
+            let about = About {
+                title: &job.title,
+                description: &job.description,
+            };
+            let made = chapters::first(&hearing.chapters, &about, &cues);
+            if !made.is_empty() {
+                let set = SetChapters {
+                    file: job.file.clone(),
+                    chapters: made,
+                };
+                calls.push(call("library.set_chapters", set.to_bytes()));
+            }
+        }
         let set = SetTranscript {
             file: job.file.clone(),
             cues,
         };
+        calls.insert(0, call("library.set_transcript", set.to_bytes()));
         let plan = Plan {
             what: job.title.clone(),
-            calls: vec![Call {
-                name: "library.set_transcript",
-                what: job.title.clone(),
-                input: set.to_bytes(),
-                if_there: false,
-            }],
+            calls,
             gate: false,
             files: vec![],
         };

@@ -517,20 +517,34 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 }
 
 /// A feed's description as plain text: its HTML tags taken out, its
-/// entities read, its white space one space, and no longer than a page
-/// wants.
+/// entities read, and no longer than a page wants. Its lines are kept — a
+/// paragraph, a break, a list item each a line, an item begun `• ` — and
+/// the white space in each is one space: what a show's notes list is what
+/// its chapters can be made from (`chapters.rs`).
 pub fn plain(html: &str) -> String {
     let mut out = String::new();
-    let mut in_tag = false;
+    let mut tag: Option<String> = None;
     for c in html.chars() {
-        match c {
-            '<' => {
-                in_tag = true;
-                out.push(' ');
+        match (&mut tag, c) {
+            (None, '<') => tag = Some(String::new()),
+            (Some(t), '>') => {
+                let name: String = t
+                    .trim_start_matches('/')
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric())
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+                let closing = t.starts_with('/');
+                out.push_str(match name.as_str() {
+                    "li" if !closing => "\n• ",
+                    "li" | "p" | "br" | "div" | "ol" | "ul" | "h1" | "h2" | "h3" | "h4" | "h5"
+                    | "h6" => "\n",
+                    _ => " ",
+                });
+                tag = None;
             }
-            '>' if in_tag => in_tag = false,
-            c if !in_tag => out.push(c),
-            _ => {}
+            (Some(t), c) => t.push(c),
+            (None, c) => out.push(c),
         }
     }
     let out = out
@@ -544,8 +558,12 @@ pub fn plain(html: &str) -> String {
         .replace("&lsquo;", "\u{2018}")
         .replace("&rdquo;", "\u{201d}")
         .replace("&ldquo;", "\u{201c}");
-    let words: Vec<&str> = out.split_whitespace().collect();
-    let mut said = words.join(" ");
+    let lines: Vec<String> = out
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty() && l != "•")
+        .collect();
+    let mut said = lines.join("\n");
     if said.chars().count() > 2000 {
         said = said.chars().take(1999).collect::<String>() + "\u{2026}";
     }

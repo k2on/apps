@@ -209,7 +209,7 @@ impl Scanner {
         data: PathBuf,
         login: Login,
         catalogue: Option<String>,
-        transcriber: Option<PathBuf>,
+        transcriber: Option<crate::transcribe::Hearing>,
     ) -> Result<Scanner> {
         // `docs/plan-auth.md` The scanner is the library, by construction: it
         // holds the library's role whatever else its login holds, and its
@@ -253,9 +253,9 @@ impl Scanner {
             crate::sync::start(crate::catalogue::Import { url, dir }, said.clone())
         });
         let subscriptions = Arc::new(Mutex::new(Vec::new()));
-        let transcribe = transcriber.map(|program| {
+        let transcribe = transcriber.map(|hearing| {
             crate::transcribe::Transcriber::start(
-                program,
+                hearing,
                 crate::transcribe::dir(&data),
                 said.clone(),
             )
@@ -534,11 +534,14 @@ impl Scan {
         self.listed = Some(head);
         let mut here: Vec<(i64, i64, crate::transcribe::Job)> =
             ark::db::read::<Harken, _>(&peer.log.store, |db| {
+                let chaptered: std::collections::HashSet<_> =
+                    db.chapter.scan().into_iter().map(|c| c.media_id).collect();
                 db.episode
                     .scan()
                     .into_iter()
                     .filter_map(|e| {
                         let m = db.media.get(e.media_id)?;
+                        let chaptered = chaptered.contains(&e.media_id);
                         let path = match m.file.strip_prefix(&format!("{}/", crate::feeds::DIR)) {
                             Some(name) => self.feeds.join(name),
                             None => self.root.join(&m.file),
@@ -547,6 +550,8 @@ impl Scan {
                             file: m.file.clone(),
                             path,
                             title: m.title.clone(),
+                            description: e.description.clone(),
+                            chaptered,
                         };
                         Some((e.published_ms, m.pos, job))
                     })

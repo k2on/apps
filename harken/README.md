@@ -125,7 +125,13 @@ They come from two places:
   writing WebVTT, read into a `cue` per line (`library.set_transcript`),
   so it keeps time with what plays and a phone has it offline with the
   episode. What it wrote is kept in the state directory, so an episode is
-  heard once.
+  heard once. An episode its feed gave no chapters is given some from
+  it, by counting words (`server/src/chapters.rs`, whichever of them
+  `services.harken.transcripts.chapters` names, in turn): `outline` finds
+  where each topic its description lists is said, in the list's order —
+  a description keeps its lines, a list item each begun `• ` — and
+  `tiling` (TextTiling) cuts where the words said change, each part titled
+  by the words most its own.
 - **A folder** — `podcasts/<show>/` or `sermons/<show>/` beside `music/`
   in the media directory: the show is the folder's name and the cover in
   it, each audio file an episode.
