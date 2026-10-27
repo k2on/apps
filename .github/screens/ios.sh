@@ -5,7 +5,7 @@
 #
 #   ios.sh <out> <app> <bundle id> <device name>
 #
-# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>/NNN.jpg.
+# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>.webp.
 set -euo pipefail
 out=$1
 app=$2
@@ -37,8 +37,7 @@ for theme in light dark; do
       sleep 6
       kill -INT "$rec"
       wait "$rec" || true
-      mkdir -p "$out/$theme/$id"
-      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mov" -vf "fps=$fps,scale=540:-2" -q:v 4 "$out/$theme/$id/%03d.jpg"
+      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mov" -vf "fps=$fps,scale=540:-2" -an -c:v libwebp -lossless 0 -q:v 70 -loop 0 "$out/$theme/$id.webp"
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4

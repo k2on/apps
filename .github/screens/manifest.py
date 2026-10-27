@@ -3,10 +3,10 @@
     python3 manifest.py <dir> <version> <commit>
 
 <dir> is the branch: a directory per phone (`android`, `ios`) with its
-device.json and, per theme, `<id>.png` for a screenshot and `<id>/NNN.jpg`
-for a recording's frames. A phone whose capture failed this run keeps the
+device.json and, per theme, `<id>.png` for a screenshot and `<id>.webp`
+for a recording, animated. A phone whose capture failed this run keeps the
 directory it had, so it is listed as it was. The docs read this
-(docs/site/src/screens.rs).
+(docs/site/web/site.js).
 """
 import datetime
 import json
@@ -24,16 +24,10 @@ def platform(path):
         if not os.path.isdir(at):
             continue
         for name in sorted(os.listdir(at)):
-            full = os.path.join(at, name)
-            if os.path.isdir(full):
-                frames = len([f for f in os.listdir(full) if f.endswith(".jpg")])
-                if frames:
-                    s = shots.setdefault(name, {"id": name, "kind": "recording", "themes": [], "frames": frames, "fps": FPS})
-                    s["frames"] = min(s["frames"], frames)
-                    s["themes"].append(theme)
-            elif name.endswith(".png"):
-                id = name[: -len(".png")]
-                shots.setdefault(id, {"id": id, "kind": "screenshot", "themes": [], "frames": 1, "fps": 0})["themes"].append(theme)
+            for ext, kind in ((".png", "screenshot"), (".webp", "recording")):
+                if name.endswith(ext):
+                    id = name[: -len(ext)]
+                    shots.setdefault(id, {"id": id, "kind": kind, "themes": [], "fps": FPS if kind == "recording" else 0})["themes"].append(theme)
     return {"device": device, "shots": sorted(shots.values(), key=lambda s: s["id"])}
 
 

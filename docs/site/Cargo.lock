@@ -867,12 +867,10 @@ version = "0.1.0"
 dependencies = [
  "arkui",
  "iced",
+ "iced_runtime",
+ "image",
  "serde",
  "serde_json",
- "ureq",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

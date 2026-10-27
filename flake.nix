@@ -310,17 +310,13 @@
           # What harken-server serves as its web directory.
           harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
           # The docs (docs/site): a Cargo workspace of its own, built on a
-          # chain of its own — its dependencies for wasm32, then the page —
+          # chain of its own — its dependencies, then the generator, run —
           # from a source that is only the docs and the crates they name by
           # path: arkui, and rust/Cargo.toml for what arkui inherits from its
           # workspace. So the docs and ArkDB's kernel never rebuild each
           # other: an edit to the docs is no input to the kernel, the kernel
           # is no input to the docs, and arkui is an input to both. ArkDB's
-          # docs, when they join, add its crates here. The wasm-bindgen it
-          # locks has to be the apps' (the CLI below is built for that one).
-          docsWasmBindgen =
-            let lock = builtins.fromTOML (builtins.readFile ./docs/site/Cargo.lock);
-            in (lib.findFirst (p: p.name == "wasm-bindgen") (throw "docs/site/Cargo.lock has no wasm-bindgen") lock.package).version;
+          # docs, when they join, add its crates here.
           docsCommon = {
             pname = "docs";
             version = "0.1.0";
@@ -328,42 +324,19 @@
             sourceRoot = "source/docs/site";
             cargoVendorDir = craneLib.vendorCargoDeps { cargoLock = ./docs/site/Cargo.lock; };
           };
-          docsDepsArgs = docsCommon // {
+          docsDeps = craneLib.buildDepsOnly (docsCommon // {
+            pname = "docs-deps";
             extraDummyScript = "cp ${./docs/site/Cargo.lock} $out/docs/site/Cargo.lock";
-          };
-          docsWasm = "cargoWithProfile build --locked --target wasm32-unknown-unknown";
-          docsWasmDeps = wasmCrane.buildDepsOnly (docsDepsArgs // {
-            pname = "docs-wasm-deps";
-            doCheck = false;
-            buildPhaseCargoCommand = docsWasm;
           });
-          docs =
-            assert lib.assertMsg (docsWasmBindgen == wasmBindgenVersion)
-              "docs/site locks wasm-bindgen ${docsWasmBindgen} and rust/ ${wasmBindgenVersion}: they have to be one";
-            wasmCrane.mkCargoDerivation (docsCommon // {
-              cargoArtifacts = docsWasmDeps;
-              doInstallCargoArtifacts = false;
-              nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ];
-              buildPhaseCargoCommand = ''
-                ${docsWasm}
-                wasm-bindgen --target web --no-typescript --out-dir pkg \
-                  target/wasm32-unknown-unknown/release/docs.wasm
-                wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
-                  --enable-sign-ext --enable-mutable-globals --enable-reference-types \
-                  -o pkg/docs_bg.wasm pkg/docs_bg.wasm
-              '';
-              # The page names the module and the wasm with `?v=dev`; this
-              # output's own hash replaces it, as `wasmPage`'s does.
-              installPhaseCommand = ''
-                mkdir -p $out
-                cp -r pkg $out/
-                cp web/index.html web/favicon.svg catalogue.json $out/
-                substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
-              '';
-            });
-          # …and on the host, for its checks: formatted, lint-clean, and its
-          # tests (the catalogue held to arkui and to catalogue.json).
-          docsHostDeps = craneLib.buildDepsOnly (docsDepsArgs // { pname = "docs-deps"; });
+          # The site: plain HTML, CSS and a few lines of script, and each
+          # desktop component's pictures drawn by iced's own renderer on the
+          # CPU (tiny-skia: no window, no GPU), which the sandbox allows.
+          docs = craneLib.mkCargoDerivation (docsCommon // {
+            cargoArtifacts = docsDeps;
+            doInstallCargoArtifacts = false;
+            buildPhaseCargoCommand = "cargoWithProfile build --locked";
+            installPhaseCommand = "target/release/docs $out";
+          });
 
           # The server (harken/server: the server and harken-peer), on a
           # chain of its own as the APK's host part is below — dependencies,
@@ -982,7 +955,7 @@
             # The workspace formatted as rust/rustfmt.toml says.
             docs = craneLib.cargoTest (docsCommon // {
               pname = "docs-checks";
-              cargoArtifacts = docsHostDeps;
+              cargoArtifacts = docsDeps;
               cargoExtraArgs = "--locked";
               preBuild = ''
                 cargo fmt --check
@@ -1083,7 +1056,7 @@
             {
               pages = [
                 (page "harken" "harken-web" "harken" "the browser peer: the same engine compiled to wasm. Open it alone to run it entirely in the tab, or point it at a harken server.")
-                (page "docs" "docs" "docs" "the components every app here shares (arkui), each drawn by itself, and catalogue.json beside it.")
+                (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each, pictured by arkui itself, and catalogue.json beside it.")
               ];
               apks = [
                 # The kernel for every ABI first, so its failure reads on its own.

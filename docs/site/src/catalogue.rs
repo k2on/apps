@@ -58,7 +58,7 @@ pub const ENTRIES: &[Entry] = &[
         api: &["Palette { light, dark, light_art, dark_art }", "Palette::NEUTRAL", "install(palette) -> bool", "palette()", "of(&Theme) -> &Extended", "is_dark(&Theme)", "art(&Theme)"],
         rules: &[
             "Install before the first frame; a second install is refused, so one window has one answer to \"what colour is this\".",
-            "NEUTRAL (AppKit greys, system blue) is the only colour arkui owns. This page draws with it.",
+            "NEUTRAL (AppKit greys, system blue) is the only colour arkui owns. The docs' pictures are drawn in it.",
         ],
     },
     Entry {
@@ -117,7 +117,7 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "sidebar",
         name: "Sidebar",
-        summary: "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it. This page's own sidebar is one.",
+        summary: "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it.",
         api: &["Item { glyph, label, heading, count, press }", "WIDTH (200)", "view(items, cursor, focused, width, padding, id)"],
         rules: &[
             "One highlight, not two: the cursor is what the page shows, marked always, lit only while the sidebar has the keys.",
@@ -178,7 +178,7 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "menu",
         name: "Menu",
-        summary: "The dropdown: a title and entries, as wide as its longest entry, opened at the pointer or lined up under a control, with submenus beside it. The theme control at the top of this page is one.",
+        summary: "The dropdown: a title and entries, as wide as its longest entry, opened at the pointer or lined up under a control, with submenus beside it.",
         api: &["Menu::open(title, entries, cursor, window, anchor)", "Entry::run(glyph, label, msg), Entry::submenu(…)", "Anchor::{Pointer, RightEdge(x)}", "view(menu, focused, at, activate)", "Menu::submenu_origin, origin_for, height, width_for", "fit, right_aligned, submenu_height", "MIN_WIDTH, MAX_WIDTH, SUBMENU_OVERLAP, DWELL"],
         rules: &[
             "A right click opens at the pointer; a control's menu opens at the control.",
@@ -219,7 +219,7 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "vim",
         name: "Keys",
-        summary: "The keyboard grammar — counts, gg/G, ^d/^u, / and n/N, <Tab>, <Esc> — and the grids it moves a cursor over. j and k move this page's sidebar.",
+        summary: "The keyboard grammar — counts, gg/G, ^d/^u, / and n/N, <Tab>, <Esc> — and the grids it moves a cursor over.",
         api: &["Keys::new(), press(key, mods) -> Option<Action>, pending(), mode()", "Action::{Move, Activate, Toggle, Search, Match, Cycle, Cancel, Jump, Key}", "Motion::{Down, Up, Left, Right, First, Last, To}", "Grid { cells, columns }, column, row, step, progress", "Section, Page", "presses()", "find(labels, needle, at, delta)", "PAGE"],
         rules: &["`step` returns None only at that edge, which means \"not mine\": the app says what lies past it."],
     },

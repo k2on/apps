@@ -3,11 +3,11 @@
 # docs/site/catalogue.json says Android has, in light and in dark, from the
 # showcase app (showcase/android, ShowcaseActivity). A screenshot is a PNG a few
 # seconds after the shot opens; a recording is the screen recorded while the
-# open shot moves, once told to, cut into JPEG frames.
+# open shot moves, once told to, as an animated WebP, which a page plays in an <img>.
 #
 #   android.sh <out> <apk>
 #
-# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>/NNN.jpg.
+# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>.webp.
 set -euo pipefail
 out=$1
 apk=$2
@@ -52,8 +52,7 @@ for theme in light dark; do
       wait "$rec" || true
       sleep 1
       adb pull /sdcard/shot.mp4 "$tmp/$id.mp4" >/dev/null
-      mkdir -p "$out/$theme/$id"
-      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mp4" -vf "fps=$fps,scale=540:-2" -q:v 4 "$out/$theme/$id/%03d.jpg"
+      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mp4" -vf "fps=$fps,scale=540:-2" -an -c:v libwebp -lossless 0 -q:v 70 -loop 0 "$out/$theme/$id.webp"
     else
       adb shell am start -W -n "$pkg/.ShowcaseActivity" --es shot "$id" >/dev/null
       sleep 3

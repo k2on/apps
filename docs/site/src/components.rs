@@ -3,7 +3,7 @@
 //!
 //! A component is the thing an app is made of — a menu, a card, a list —
 //! whatever each platform calls it. Only what is shared: on the desktop it
-//! is arkui's, and its page draws the live example; on a phone it is the
+//! is arkui's, and its page shows it drawn by arkui itself; on a phone it is the
 //! shared Compose (`ui/`, ark-ui for Android) or SwiftUI (ArkUI for SwiftUI,
 //! `swift/ArkUI`), and its page says where and how, with the latest capture
 //! from a real emulator and simulator: `shots` names them, the showcase apps
@@ -96,15 +96,6 @@ pub struct Component {
     pub android: Option<Mobile>,
     pub ios: Option<Mobile>,
     pub shots: &'static [Shot],
-}
-
-pub fn find(id: &str) -> Option<&'static Component> {
-    COMPONENTS.iter().find(|c| c.id == id)
-}
-
-/// The component an arkui module belongs to.
-pub fn of_module(module: &str) -> Option<&'static Component> {
-    COMPONENTS.iter().find(|c| c.desktop.contains(&module))
 }
 
 const ANDROID: &[&str] = &["android"];
@@ -411,7 +402,7 @@ pub const COMPONENTS: &[Component] = &[
         name: "Keys",
         section: Section::Behaviour,
         glyph: glyphs::NEXT,
-        summary: "The keyboard grammar and the grids it moves a cursor over. j and k walk this page's sidebar.",
+        summary: "The keyboard grammar and the grids it moves a cursor over.",
         desktop: &["vim"],
         android: None,
         ios: None,

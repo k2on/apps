@@ -464,7 +464,7 @@
       "id": "keys",
       "name": "Keys",
       "section": "behaviour",
-      "summary": "The keyboard grammar and the grids it moves a cursor over. j and k walk this page's sidebar.",
+      "summary": "The keyboard grammar and the grids it moves a cursor over.",
       "desktop": [
         "vim"
       ],
@@ -528,7 +528,7 @@
       ],
       "rules": [
         "Install before the first frame; a second install is refused, so one window has one answer to \"what colour is this\".",
-        "NEUTRAL (AppKit greys, system blue) is the only colour arkui owns. This page draws with it."
+        "NEUTRAL (AppKit greys, system blue) is the only colour arkui owns. The docs' pictures are drawn in it."
       ]
     },
     {
@@ -625,7 +625,7 @@
     {
       "module": "sidebar",
       "name": "Sidebar",
-      "summary": "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it. This page's own sidebar is one.",
+      "summary": "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it.",
       "api": [
         "Item { glyph, label, heading, count, press }",
         "WIDTH (200)",
@@ -759,7 +759,7 @@
     {
       "module": "menu",
       "name": "Menu",
-      "summary": "The dropdown: a title and entries, as wide as its longest entry, opened at the pointer or lined up under a control, with submenus beside it. The theme control at the top of this page is one.",
+      "summary": "The dropdown: a title and entries, as wide as its longest entry, opened at the pointer or lined up under a control, with submenus beside it.",
       "api": [
         "Menu::open(title, entries, cursor, window, anchor)",
         "Entry::run(glyph, label, msg), Entry::submenu(…)",
@@ -842,7 +842,7 @@
     {
       "module": "vim",
       "name": "Keys",
-      "summary": "The keyboard grammar — counts, gg/G, ^d/^u, / and n/N, <Tab>, <Esc> — and the grids it moves a cursor over. j and k move this page's sidebar.",
+      "summary": "The keyboard grammar — counts, gg/G, ^d/^u, / and n/N, <Tab>, <Esc> — and the grids it moves a cursor over.",
       "api": [
         "Keys::new(), press(key, mods) -> Option<Action>, pending(), mode()",
         "Action::{Move, Activate, Toggle, Search, Match, Cycle, Cancel, Jump, Key}",
