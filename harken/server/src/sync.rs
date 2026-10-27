@@ -49,6 +49,13 @@ const PAUSE: Duration = Duration::from_millis(500);
 const TRIES: u32 = 5;
 const LONGEST: Duration = Duration::from_secs(300);
 
+/// How many redirects a download follows. A podcast's episode is routinely
+/// a chain of them: each analytics service a show uses (op3, Podtrac,
+/// Chartable…) wraps the next one's link before the host's CDN — seven
+/// hops for Full Time Nix's, where ureq's own five gave up on every
+/// episode.
+pub const REDIRECTS: u32 = 20;
+
 /// How often a download says how far it has got: each saying is an entry
 /// every client is sent, so a file is a handful of them, not one a block.
 pub const EVERY_SAID: Duration = Duration::from_secs(2);
@@ -255,6 +262,7 @@ pub fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(30))
         .timeout_read(Duration::from_secs(120))
+        .redirects(REDIRECTS)
         .user_agent(AGENT)
         .build()
 }
