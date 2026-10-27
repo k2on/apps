@@ -214,6 +214,7 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
                 user_id: person.as_ref().map_or(user.clone(), |p| p.user_id.clone()),
                 banner: or(&input.artist_banner, person.as_ref().map(|p| &p.banner)),
                 description: person.as_ref().map_or(String::new(), |p| p.description.clone()),
+                link: person.as_ref().map_or(String::new(), |p| p.link.clone()),
             })?;
         }
     }
@@ -393,6 +394,7 @@ pub fn describe_person(ctx: &Ctx, db: &mut Db<Harken>, input: DescribePerson) ->
         art: text(&input.art, p.as_ref().map(|p| &p.art)),
         banner: text(&input.banner, p.as_ref().map(|p| &p.banner)),
         description: text(&input.description, p.as_ref().map(|p| &p.description)),
+        link: p.as_ref().map_or(String::new(), |p| p.link.clone()),
         added_ms: p.as_ref().map_or(ctx.now, |p| p.added_ms),
         user_id: p.as_ref().map_or(ctx.user().to_string(), |p| p.user_id.clone()),
     })
@@ -487,6 +489,12 @@ pub fn take_out(db: &mut Db<Harken>, id: Id<Media>) -> Result<(), Refusal> {
     }
     for c in db.chapter.scan().into_iter().filter(|c| c.media_id == id) {
         db.chapter.remove(&c)?;
+    }
+    for a in db.appearance.scan().into_iter().filter(|a| a.media_id == id) {
+        db.appearance.remove(&a)?;
+    }
+    for c in db.cue.scan().into_iter().filter(|c| c.media_id == id) {
+        db.cue.remove(&c)?;
     }
     db.media.delete(id)
 }

@@ -483,3 +483,101 @@ fn an_episodes_chapters_are_its_feeds() {
     c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
     assert!(c.rows::<Chapter>("chapter").is_empty() && c.rows::<Progress>("progress").is_empty());
 }
+
+/// An episode's people are its feed's, in its order, each a `person`
+/// whose page lists the episode; replaced when the feed says others, and
+/// gone with the episode. A person a catalogue described keeps their
+/// picture. Falsified by `set_people` putting the feed's picture over the
+/// one the person had.
+#[test]
+fn an_episodes_people_are_its_feeds() {
+    let mut c = Lib::new();
+    let ep = one_episode(&mut c);
+    c.mutate(
+        "library",
+        "describe_person",
+        &DescribePerson {
+            name: "Jacek Galowicz".into(),
+            art: "art/jacek.jpg".into(),
+            ..DescribePerson::default()
+        },
+    )
+    .unwrap();
+    let on = |name: &str, role: &str| PersonOn {
+        name: name.into(),
+        role: role.into(),
+        link: format!("https://{}.example", name.len()),
+        art: format!(".feeds/{}.jpg", name.len()),
+    };
+    let set = |people: Vec<PersonOn>| SetPeople {
+        file: ".feeds/51.mp3".into(),
+        people,
+    };
+    let both = vec![on("Shahar \"Dawn\" Or", "Host"), on("Jacek Galowicz", "Guest")];
+    c.mutate("library", "set_people", &set(both.clone())).unwrap();
+    assert_eq!(c.mutate("library", "set_people", &set(both)), Ok(0));
+    let read = |c: &Lib| {
+        each(&c.list::<PeopleEntry>("people", &EpisodeInput { media_id: ep }), |p| {
+            (p.name.clone(), p.role.clone(), p.art.clone())
+        })
+    };
+    assert_eq!(
+        read(&c),
+        [
+            ("Shahar \"Dawn\" Or".to_string(), "Host".to_string(), ".feeds/16.jpg".to_string()),
+            ("Jacek Galowicz".to_string(), "Guest".to_string(), "art/jacek.jpg".to_string()),
+        ]
+    );
+    let page = |c: &Lib, name: &str| {
+        let on = Artist {
+            name: name.into(),
+            ..Artist::default()
+        };
+        each(&c.list::<LibraryEntry>("appearances", &on), |e| e.title.clone())
+    };
+    assert_eq!(page(&c, "Jacek Galowicz"), ["Nix Freaks 51"]);
+    c.mutate("library", "set_people", &set(vec![on("Shahar \"Dawn\" Or", "Host")])).unwrap();
+    assert!(page(&c, "Jacek Galowicz").is_empty());
+    assert_eq!(read(&c).len(), 1);
+    c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
+    assert!(c.rows::<Appearance>("appearance").is_empty());
+}
+
+/// An episode's transcript is its feed's captions, in the order they are
+/// said, replaced when the feed says others, and gone with the episode.
+/// Falsified by `set_transcript` adding without taking away.
+#[test]
+fn an_episodes_transcript_is_its_feeds() {
+    let mut c = Lib::new();
+    let ep = one_episode(&mut c);
+    let at = |start_ms: i64, text: &str| CueAt {
+        start_ms,
+        end_ms: start_ms + 2_000,
+        text: text.into(),
+        ..CueAt::default()
+    };
+    let set = |cues: Vec<CueAt>| SetTranscript {
+        file: ".feeds/51.mp3".into(),
+        cues,
+    };
+    c.mutate(
+        "library",
+        "set_transcript",
+        &set(vec![at(3_000, "Hi, Jacek."), at(0, "Hello."), at(5_000, " ")]),
+    )
+    .unwrap();
+    assert_eq!(
+        c.mutate("library", "set_transcript", &set(vec![at(0, "Hello."), at(3_000, "Hi, Jacek.")])),
+        Ok(0)
+    );
+    let read = |c: &Lib| {
+        each(&c.list::<TranscriptEntry>("transcript", &EpisodeInput { media_id: ep }), |c| {
+            (c.start_ms, c.text.clone())
+        })
+    };
+    assert_eq!(read(&c), [(0, "Hello.".to_string()), (3_000, "Hi, Jacek.".to_string())]);
+    c.mutate("library", "set_transcript", &set(vec![at(0, "Hello.")])).unwrap();
+    assert_eq!(read(&c), [(0, "Hello.".to_string())]);
+    c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
+    assert!(c.rows::<Cue>("cue").is_empty());
+}

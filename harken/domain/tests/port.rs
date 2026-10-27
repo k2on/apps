@@ -328,70 +328,70 @@ fn step(r: &mut Rng, s: &Store) -> Step {
 
 /// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
 /// a build could write values as JSON).
-const SCHEMA: &str = "3b5ce74c2fc660653588dded7e131a9246cfbe7e4c88a62d30a808e8908b9571";
+const SCHEMA: &str = "e9e8886f65fe413f49db98c53d72ba24da5c1eaab2a7f422dc234c3b22bfb9bf";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
 /// value format writes them (postcard, N4).
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,
-        "ab7b7c34b8922679d4b9999638d88c908c9e97d694259420720985f31d08adf5",
-        "7f249616ed9c8d9c615164f08dbd2a2c449bb08839906c909ee29427b28545f4",
+        "5135e274efc3892088ac3f7c3c0fc1c89df3be01956aae3f7364140afa99e173",
+        "c95ded72322ca02534dd248e59ee82145d1ba6de3a5bdfef84ca387b74795a13",
     ),
     (
         2,
-        "eeb604de803e98e3cb03d8e6739bf43310589348ff27b2bd81d49289a98b337e",
-        "96fe35040f3ed18e9b95857981237b391bbb3d4bdcf335a95b8db329827fc40b",
+        "6a8a260bd83c75cf03e424b5842d946a378f889bc59727d20e52ecba46689c3e",
+        "a68e36699eb83687e88abe5594839054957ead49c8cba341dafc023e8ecaf633",
     ),
     (
         3,
-        "9ba4cd2ae10ace8c64b91a0092d19c5ffe19f29ab74f28710bf18878d4123c27",
-        "c1b41806ee5be6bf800cd7511291540764d9fff819d2ed1c361f081a1b46c5fc",
+        "2d5bec88b63850ed0f9c4232402e36bcd447c478cda961cd0d2ed1b10cc80a23",
+        "92cb584f29384f5f1b38e2d29dcdd0ad8310145fa936eb9bf31a60b65b9dff18",
     ),
     (
         4,
-        "0235905a49b9e7fa20ce90d468468871f86b8f2fceaad61148af571b1f022af1",
-        "6590188dd7539cb47e29b1e7fcedb2eaa13ea2027f1057dbc2a63548a901f5de",
+        "618b1dc118ae7be780284c67630f61d8a28d09b8dfbbcb8f05e54e560e15c33b",
+        "775a52909cd339623e11a293094c576006198484695355e91d7b87a07e91e773",
     ),
     (
         5,
-        "cd40af4bb37448e9f090c3d4d03b1962c8a52370e6de118a5a074466ae44df4d",
-        "8b8d51d4ec2a0a626461ddd46c0e1043dfc1eb5152daa9ea7163685c69987a75",
+        "35355f895d27a019fceb28f5e5e9c124fe18d00a502134a5c24087a2676542e2",
+        "aeac66b4d88a51c005597629ae32810da41b60f62fe0d31013f4ccad1cb2ada3",
     ),
     (
         6,
-        "9e95c6c1ec7ae0e1d87eaf460fa6cfc756b4864b7792a83517aeb42e833fe8b7",
-        "2e3db855d4a9bfb56ca8675230f8cf5beadced236112ad19e26126bb4b24d9f7",
+        "8e55f85d4259822106baa69eb7ab3340db8335c81e0cc87f005c62ff35cd8ed8",
+        "0f1b0f87ad42c5887bb014eabd423e1b2ecbda8cd610762574d0d1e25e6ff3ea",
     ),
     (
         7,
-        "8afb17dbf1bd9f88cc225dc4d18db2e7f0cddfccfba178fcf593ab29cc79c10f",
-        "fb89441ab79a23b856494baa44917402cb3dd2b63c90242d007e3e92d13846a9",
+        "6f9377205d2a021d49109a9999bf5f57507134c354a347dbc83f94081b88528e",
+        "6ea1ecebdf06715cdaaa25b23dd76c26b2c540d6afc7bd9455f56faa5d0bbffd",
     ),
     (
         8,
-        "18b3b6e6edda0e7e678ca7ece78ee255b7606ae5c1f83faeba94abc0f032629a",
-        "5f3b49642f6b4d298e119679ec2ca37175b2a11f7fe2a0cbd9bbf5a7c3302169",
+        "c09a92790d7188d8eca5b4fd1b551975cca1323682cb9b7fc4d98da3d527fd01",
+        "0f32f994ebe907ab5e0c2240666c779147d6e786e538f04faa3c5d4265f41d58",
     ),
     (
         9,
-        "6e5a731c91028360aed8a587bd58a95f9bf720bb03d77e282ea5401cff2c6c56",
-        "3a7eb221104e03ff60a2f480a6186a6de561150cc79e862eebd5ae41ed7b4168",
+        "1b58d95544ffe669ea76be2c78fa9977eb37b30d66c4183d1db04878551c8d06",
+        "1534f4946088713e692c311b59c6135c94f6a7f8248119bead51d8500494e754",
     ),
     (
         10,
-        "692eb6f9237d7882f1e94bdd9d5da26974f498c01285947abc13042ad9c7a6eb",
-        "07cf8b54ebe6f65bea7f0663a2c4de561d364150fa91bdb55157d2911594ce3c",
+        "45face3685f58d84460c2c46ba37e1a19352262f2d28c1618adee029df7a86cf",
+        "1425bda8d26bf34ae732952b90c12f651d41ada80612cdd668c9c0215200f0a2",
     ),
     (
         11,
-        "48ceaeed87c9f28ed11ac9d847cc62b4950f9f0f06b878a27f875132e1d82338",
-        "a80c6762894e9ec70dc4e3acdea70813fa1c928dd333919cfae20b8885608ce3",
+        "8e47f5738c0b8ace92da92c7d8a111265168bee3a347b99e6d4fe0ed4665a3d9",
+        "ea6cfd7af5f3575a430c2397329f6a80a1b9a6acaefb5b84c23ca7fa5068174d",
     ),
     (
         12,
-        "0c59514299edacbb3e3628d0eb35586b250a139ce61b9d56adf777629ad8c323",
-        "b50c2a5bcb4da6c3dab70b6310ddcff06646685e4d9179b8fd1e8e3f1dd0a43a",
+        "65db77909c6376a4a70ef358f4b03f31595939f4c2f5da1db8229b19073ddf20",
+        "dffbe579f788b17e280c8315984d0156968ac40d2b11eaa58e8876b12958a685",
     ),
 ];
 
@@ -433,7 +433,7 @@ fn run(seed: u64) -> (String, String, usize, usize) {
         .filter(|f| f.kind == ark::domain::Kind::View)
         .map(|f| f.name.as_str())
         .collect();
-    assert_eq!(views.len(), 28);
+    assert_eq!(views.len(), 31);
     let (mut refused, mut moved) = (0, 0);
     let mut a = Store::new(native.schema.clone(), ark::schema::Space::Durable);
     let mut r = Rng(seed);

@@ -295,6 +295,151 @@ pub fn chapters(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<Cha
         }))
 }
 
+/// The episode a file is, for what its feed says of it beside it.
+fn episode_of_file(db: &Db<Harken>, file: &str, what: &str) -> Result<Id<Media>, Refusal> {
+    let Some(media) = db.media.by(Media::FILE).from(&file.to_string()).first().filter(|m| m.file == file) else {
+        return Err(Refusal(format!("no media has the file {file}")));
+    };
+    if !db.episode.has(media.id) {
+        return Err(Refusal(format!("only an episode has {what}")));
+    }
+    Ok(media.id)
+}
+
+/// An episode's people, by its file: whoever its feed names now, in its
+/// order, in place of whoever it named before. Each is a `person` — made
+/// when there is none, and given the feed's picture and link where they
+/// have none, without taking anything a catalogue said of them. Said again
+/// the same, it writes nothing.
+#[mutator("library.set_people")]
+pub fn set_people(ctx: &Ctx, db: &mut Db<Harken>, input: SetPeople) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    let id = episode_of_file(db, &input.file, "people")?;
+    let mut next: Vec<Appearance> = Vec::new();
+    for p in &input.people {
+        let name = p.name.trim().to_string();
+        if name.is_empty() || next.iter().any(|a| a.person_name == name) {
+            continue;
+        }
+        let was = db.person.get(&name);
+        let or = |was: Option<&String>, given: &str| match was.filter(|w| !w.is_empty()) {
+            Some(w) => w.clone(),
+            None => given.trim().to_string(),
+        };
+        let art = or(was.as_ref().map(|w| &w.art), &p.art);
+        let link = or(was.as_ref().map(|w| &w.link), &p.link);
+        if was.as_ref().is_none_or(|w| w.art != art || w.link != link) {
+            db.person.put(Person {
+                name: name.clone(),
+                art,
+                link,
+                added_ms: was.as_ref().map_or(ctx.now, |w| w.added_ms),
+                user_id: was.as_ref().map_or(ctx.user().to_string(), |w| w.user_id.clone()),
+                ..was.clone().unwrap_or_default()
+            })?;
+        }
+        next.push(Appearance {
+            media_id: id,
+            person_name: name,
+            role: p.role.trim().to_string(),
+            pos: next.len() as i64,
+        });
+    }
+    for was in db.appearance.scan().into_iter().filter(|a| a.media_id == id) {
+        if !next.contains(&was) {
+            db.appearance.remove(&was)?;
+        }
+    }
+    for a in next {
+        db.appearance.put(a)?;
+    }
+    Ok(())
+}
+
+/// An episode's people, as its feed lists them.
+#[view("library.people")]
+pub fn people(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<PeopleEntry>, Refusal> {
+    let id = input.media_id;
+    Ok(scan::<Harken, Appearance>()
+        .filter(move |a| a.media_id == id)
+        .sort(|a| a.pos)
+        .map_with(|db, a| {
+            let p = db.person.get(&a.person_name).unwrap_or_default();
+            PeopleEntry {
+                art: p.art,
+                link: p.link,
+                name: a.person_name.clone(),
+                role: a.role.clone(),
+            }
+        }))
+}
+
+/// Every episode somebody is on, newest first: their page's episodes.
+#[view("library.appearances")]
+pub fn appearances(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntry>, Refusal> {
+    let (on, name) = (input.playlist_id, input.name);
+    Ok(scan::<Harken, Appearance>()
+        .filter_with(move |db, a| a.person_name == name && db.media.has(a.media_id))
+        .sort_with(|db, a| {
+            let published = db.episode.get(a.media_id).map_or(0, |e| e.published_ms);
+            let pos = db.media.get(a.media_id).map_or(0, |m| m.pos);
+            (Desc(published), Desc(pos))
+        })
+        .map_with(move |db, a| {
+            library_entry(
+                &db.media.get(a.media_id).expect("an appearance's media"),
+                playlist_pos(db, on, a.media_id),
+            )
+        }))
+}
+
+/// An episode's transcript, by its file: what its feed's captions say
+/// now, in place of what they said before. Said again the same, it
+/// writes nothing.
+#[mutator("library.set_transcript")]
+pub fn set_transcript(ctx: &Ctx, db: &mut Db<Harken>, input: SetTranscript) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    let id = episode_of_file(db, &input.file, "a transcript")?;
+    let mut next: Vec<Cue> = input
+        .cues
+        .into_iter()
+        .filter(|c| !c.text.trim().is_empty())
+        .map(|c| Cue {
+            media_id: id,
+            start_ms: c.start_ms.max(0),
+            end_ms: c.end_ms.max(c.start_ms.max(0)),
+            speaker: c.speaker.trim().to_string(),
+            text: c.text.trim().to_string(),
+        })
+        .collect();
+    next.sort_by_key(|c| c.start_ms);
+    next.dedup_by_key(|c| c.start_ms);
+    for was in db.cue.scan().into_iter().filter(|c| c.media_id == id) {
+        if !next.contains(&was) {
+            db.cue.remove(&was)?;
+        }
+    }
+    for c in next {
+        db.cue.put(c)?;
+    }
+    Ok(())
+}
+
+/// An episode's transcript, line by line in the order it is said.
+#[view("library.transcript")]
+pub fn transcript(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<TranscriptEntry>, Refusal> {
+    let id = input.media_id;
+    Ok(scan::<Harken, Cue>()
+        .filter(move |c| c.media_id == id)
+        .sort(|c| c.start_ms)
+        .map(|c| TranscriptEntry {
+            end_ms: c.end_ms,
+            speaker: c.speaker.clone(),
+            start_ms: c.start_ms,
+            text: c.text.clone(),
+        }))
+}
+
 /// One show's episodes with the columns only an episode has — what it is
 /// about, when it went out — in the order `show` lists them, so a show's
 /// page can say each beside its row.

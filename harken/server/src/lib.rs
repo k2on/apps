@@ -32,6 +32,7 @@
 //! with it, its user and id the verified login's ([`device`]).
 
 pub mod assistant;
+pub mod captions;
 pub mod catalogue;
 pub mod covers;
 pub mod domain;

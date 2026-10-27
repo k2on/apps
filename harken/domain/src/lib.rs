@@ -71,7 +71,8 @@ pub fn domain() -> Domain {
         shows::episode_details, shows::subscribe, shows::unsubscribe, shows::fetch_older, shows::feed_read,
         shows::subscriptions, downloads::queue_download, downloads::download_progress, downloads::downloaded,
         downloads::downloads, progress::report_progress, progress::mark_played, progress::my_progress,
-        progress::show_progress, shows::set_chapters, shows::chapters, feed)
+        progress::show_progress, shows::set_chapters, shows::chapters, shows::set_people, shows::people,
+        shows::appearances, shows::set_transcript, shows::transcript, feed)
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
 }
@@ -101,7 +102,9 @@ pub fn feed() -> Scope<Harken> {
             .on::<Subscription>(all)
             .on::<Download>(all)
             .on::<Progress>(all)
-            .on::<Chapter>(all),
+            .on::<Chapter>(all)
+            .on::<Appearance>(all)
+            .on::<Cue>(all),
     )
 }
 

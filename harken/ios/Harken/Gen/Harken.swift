@@ -205,6 +205,23 @@ public struct AlbumsEntry: Equatable {
     public var json: String { J.obj(["\"art\":" + J.q(art), "\"creator\":" + J.q(creator), "\"label\":" + J.q(label), "\"name\":" + J.q(name), "\"performer\":" + J.q(performer), "\"released\":" + String(released), "\"tracks\":" + String(tracks)]) }
 }
 
+/// The record `Appearance`.
+public struct Appearance: Equatable {
+    public var mediaId: Id
+    public var personName: String
+    public var role: String
+    public var pos: Int64
+
+    public init(mediaId: Id, personName: String, role: String, pos: Int64) { self.mediaId = mediaId; self.personName = personName; self.role = role; self.pos = pos; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), personName: J.text(o["person_name"]), role: J.text(o["role"]), pos: J.int(o["pos"]))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"person_name\":" + J.q(personName), "\"role\":" + J.q(role), "\"pos\":" + String(pos)]) }
+}
+
 /// The record `Artist`.
 public struct Artist: Equatable {
     public var playlistId: Id
@@ -431,6 +448,41 @@ public struct CreditsEntry: Equatable {
     }
 
     public var json: String { J.obj(["\"instrument\":" + J.q(instrument), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"role\":" + J.q(role)]) }
+}
+
+/// The record `Cue`.
+public struct Cue: Equatable {
+    public var mediaId: Id
+    public var startMs: Int64
+    public var endMs: Int64
+    public var speaker: String
+    public var text: String
+
+    public init(mediaId: Id, startMs: Int64, endMs: Int64, speaker: String, text: String) { self.mediaId = mediaId; self.startMs = startMs; self.endMs = endMs; self.speaker = speaker; self.text = text; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), startMs: J.int(o["start_ms"]), endMs: J.int(o["end_ms"]), speaker: J.text(o["speaker"]), text: J.text(o["text"]))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"start_ms\":" + String(startMs), "\"end_ms\":" + String(endMs), "\"speaker\":" + J.q(speaker), "\"text\":" + J.q(text)]) }
+}
+
+/// The record `CueAt`.
+public struct CueAt: Equatable {
+    public var startMs: Int64
+    public var endMs: Int64
+    public var speaker: String
+    public var text: String
+
+    public init(startMs: Int64, endMs: Int64, speaker: String, text: String) { self.startMs = startMs; self.endMs = endMs; self.speaker = speaker; self.text = text; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(startMs: J.int(o["start_ms"]), endMs: J.int(o["end_ms"]), speaker: J.text(o["speaker"]), text: J.text(o["text"]))
+    }
+
+    public var json: String { J.obj(["\"start_ms\":" + String(startMs), "\"end_ms\":" + String(endMs), "\"speaker\":" + J.q(speaker), "\"text\":" + J.q(text)]) }
 }
 
 /// The record `DescribePerson`.
@@ -1130,6 +1182,23 @@ public indirect enum Output: Equatable {
     }
 }
 
+/// The record `PeopleEntry`.
+public struct PeopleEntry: Equatable {
+    public var art: String
+    public var link: String
+    public var name: String
+    public var role: String
+
+    public init(art: String, link: String, name: String, role: String) { self.art = art; self.link = link; self.name = name; self.role = role; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(art: J.text(o["art"]), link: J.text(o["link"]), name: J.text(o["name"]), role: J.text(o["role"]))
+    }
+
+    public var json: String { J.obj(["\"art\":" + J.q(art), "\"link\":" + J.q(link), "\"name\":" + J.q(name), "\"role\":" + J.q(role)]) }
+}
+
 /// The record `Person`.
 public struct Person: Equatable {
     public var name: String
@@ -1141,15 +1210,33 @@ public struct Person: Equatable {
     public var userId: String
     public var banner: String
     public var description: String
+    public var link: String
 
-    public init(name: String, sortName: String, born: Int64, died: Int64, art: String, addedMs: Int64, userId: String, banner: String, description: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.addedMs = addedMs; self.userId = userId; self.banner = banner; self.description = description; }
+    public init(name: String, sortName: String, born: Int64, died: Int64, art: String, addedMs: Int64, userId: String, banner: String, description: String, link: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.addedMs = addedMs; self.userId = userId; self.banner = banner; self.description = description; self.link = link; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]), banner: J.text(o["banner"]), description: J.text(o["description"]))
+        self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]), banner: J.text(o["banner"]), description: J.text(o["description"]), link: J.text(o["link"]))
     }
 
-    public var json: String { J.obj(["\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"born\":" + String(born), "\"died\":" + String(died), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId), "\"banner\":" + J.q(banner), "\"description\":" + J.q(description)]) }
+    public var json: String { J.obj(["\"name\":" + J.q(name), "\"sort_name\":" + J.q(sortName), "\"born\":" + String(born), "\"died\":" + String(died), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId), "\"banner\":" + J.q(banner), "\"description\":" + J.q(description), "\"link\":" + J.q(link)]) }
+}
+
+/// The record `PersonOn`.
+public struct PersonOn: Equatable {
+    public var name: String
+    public var role: String
+    public var link: String
+    public var art: String
+
+    public init(name: String, role: String, link: String, art: String) { self.name = name; self.role = role; self.link = link; self.art = art; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(name: J.text(o["name"]), role: J.text(o["role"]), link: J.text(o["link"]), art: J.text(o["art"]))
+    }
+
+    public var json: String { J.obj(["\"name\":" + J.q(name), "\"role\":" + J.q(role), "\"link\":" + J.q(link), "\"art\":" + J.q(art)]) }
 }
 
 /// The record `Play`.
@@ -1629,6 +1716,36 @@ public struct SetMute: Equatable {
     public var json: String { J.obj(["\"device\":" + J.q(device), "\"muted\":" + String(muted)]) }
 }
 
+/// The record `SetPeople`.
+public struct SetPeople: Equatable {
+    public var file: String
+    public var people: [PersonOn]
+
+    public init(file: String, people: [PersonOn]) { self.file = file; self.people = people; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(file: J.text(o["file"]), people: J.list(o["people"]) { v0 in PersonOn(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"file\":" + J.q(file), "\"people\":" + J.wlist(people) { v0 in v0.json }]) }
+}
+
+/// The record `SetTranscript`.
+public struct SetTranscript: Equatable {
+    public var file: String
+    public var cues: [CueAt]
+
+    public init(file: String, cues: [CueAt]) { self.file = file; self.cues = cues; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(file: J.text(o["file"]), cues: J.list(o["cues"]) { v0 in CueAt(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"file\":" + J.q(file), "\"cues\":" + J.wlist(cues) { v0 in v0.json }]) }
+}
+
 /// The record `SetVolume`.
 public struct SetVolume: Equatable {
     public var device: String
@@ -1880,6 +1997,23 @@ public struct TrackDetailsEntry: Equatable {
     public var json: String { J.obj(["\"album\":" + J.q(album), "\"bpm\":" + String(bpm), "\"catalogue\":" + J.q(catalogue), "\"composer\":" + J.q(composer), "\"licence\":" + J.q(licence), "\"media_id\":" + J.q(mediaId.hex), "\"part\":" + J.q(part), "\"performer\":" + J.q(performer), "\"track\":" + String(track), "\"work\":" + J.q(work), "\"work_id\":" + J.q(workId)]) }
 }
 
+/// The record `TranscriptEntry`.
+public struct TranscriptEntry: Equatable {
+    public var endMs: Int64
+    public var speaker: String
+    public var startMs: Int64
+    public var text: String
+
+    public init(endMs: Int64, speaker: String, startMs: Int64, text: String) { self.endMs = endMs; self.speaker = speaker; self.startMs = startMs; self.text = text; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(endMs: J.int(o["end_ms"]), speaker: J.text(o["speaker"]), startMs: J.int(o["start_ms"]), text: J.text(o["text"]))
+    }
+
+    public var json: String { J.obj(["\"end_ms\":" + String(endMs), "\"speaker\":" + J.q(speaker), "\"start_ms\":" + String(startMs), "\"text\":" + J.q(text)]) }
+}
+
 /// The record `Transfer`.
 public struct Transfer: Equatable {
     public var to: String
@@ -2024,6 +2158,9 @@ public struct Harken {
     /// `library.albums`, kept.
     public func albums() throws -> LiveView<AlbumsEntry> { LiveView(try peer.view(name: "library.albums", input: "null")) { j in AlbumsEntry(json: j) } }
 
+    /// `library.appearances`, kept, its rows UniFFI's.
+    public func appearances(_ input: Artist) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.appearances", input: input.json)) }
+
     /// `library.artist`, kept, its rows UniFFI's.
     public func artist(_ input: Artist) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.artist", input: input.json)) }
 
@@ -2081,6 +2218,9 @@ public struct Harken {
     /// `library.my_progress`, kept.
     public func myProgress() throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.my_progress", input: "null")) { j in ProgressEntry(json: j) } }
 
+    /// `library.people`, kept.
+    public func people(_ input: EpisodeInput) throws -> LiveView<PeopleEntry> { LiveView(try peer.view(name: "library.people", input: input.json)) { j in PeopleEntry(json: j) } }
+
     /// `library.queue_download`: its intent's id.
     @discardableResult public func queueDownload(_ input: QueueDownload) throws -> String { try peer.mutate(name: "library.queue_download", input: input.json) }
 
@@ -2102,6 +2242,12 @@ public struct Harken {
     /// `library.set_chapters`: its intent's id.
     @discardableResult public func setChapters(_ input: SetChapters) throws -> String { try peer.mutate(name: "library.set_chapters", input: input.json) }
 
+    /// `library.set_people`: its intent's id.
+    @discardableResult public func setPeople(_ input: SetPeople) throws -> String { try peer.mutate(name: "library.set_people", input: input.json) }
+
+    /// `library.set_transcript`: its intent's id.
+    @discardableResult public func setTranscript(_ input: SetTranscript) throws -> String { try peer.mutate(name: "library.set_transcript", input: input.json) }
+
     /// `library.show`, kept, its rows UniFFI's.
     public func show(_ input: ShowInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.show", input: input.json)) }
 
@@ -2119,6 +2265,9 @@ public struct Harken {
 
     /// `library.track_details`, kept.
     public func trackDetails() throws -> LiveView<TrackDetailsEntry> { LiveView(try peer.view(name: "library.track_details", input: "null")) { j in TrackDetailsEntry(json: j) } }
+
+    /// `library.transcript`, kept.
+    public func transcript(_ input: EpisodeInput) throws -> LiveView<TranscriptEntry> { LiveView(try peer.view(name: "library.transcript", input: input.json)) { j in TranscriptEntry(json: j) } }
 
     /// `library.unsubscribe`: its intent's id.
     @discardableResult public func unsubscribe(_ input: Unsubscribe) throws -> String { try peer.mutate(name: "library.unsubscribe", input: input.json) }

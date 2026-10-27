@@ -155,6 +155,11 @@
           "name": "description",
           "ty": "Text",
           "default": ""
+        },
+        {
+          "name": "link",
+          "ty": "Text",
+          "default": ""
         }
       ],
       "key": 1,
@@ -1411,6 +1416,94 @@
         },
         {
           "name": "image",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "appearance",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "person_name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "role",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "pos",
+          "ty": "Int",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [
+        {
+          "columns": [
+            1
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        },
+        {
+          "column": 1,
+          "table": "person"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "cue",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "start_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "end_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "speaker",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "text",
           "ty": "Text",
           "default": null
         }

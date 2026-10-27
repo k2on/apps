@@ -112,7 +112,15 @@ They come from two places:
   (`library.fetch_older`, twenty more or every one), and Unfollow takes
   the feed, its show and its episodes out (`library.unsubscribe`). Every
   client plays the server's copy, so an episode the host takes down still
-  plays.
+  plays. Beside each episode go what the feed says of it: its chapters
+  (`library.set_chapters`), who is on it — Podcasting 2.0's
+  `<podcast:person>`, each a `person` row with an `appearance` on the
+  episode, so a guest's page lists the episodes they are on
+  (`library.set_people`, `library.appearances`) — and its transcript, the
+  feed's best timed one (SubRip, WebVTT or Podcast Index JSON;
+  `server/src/captions.rs`) as a `cue` per line (`library.set_transcript`),
+  so a phone has it offline with the episode. Plain-text transcripts have
+  no times and are not read.
 - **A folder** — `podcasts/<show>/` or `sermons/<show>/` beside `music/`
   in the media directory: the show is the folder's name and the cover in
   it, each audio file an episode.
