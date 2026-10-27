@@ -26,9 +26,26 @@ mkdir -p "$out"
 
 shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
 
-for theme in light dark; do
-  xcrun simctl ui booted appearance "$theme"
-  sleep 2
+# The simulator in `theme`, as it says back: just after a first boot it
+# can take the setting and not yet show it.
+appearance() {
+  for _ in $(seq 1 30); do
+    xcrun simctl ui booted appearance "$1"
+    [ "$(xcrun simctl ui booted appearance)" = "$1" ] && break
+    sleep 2
+  done
+  sleep 3
+}
+
+# How bright a capture's first frame is, 0 to 255.
+brightness() {
+  ffmpeg -nostdin -loglevel error -i "$1" -vf "scale=1:1,format=gray" -frames:v 1 -f rawvideo - | od -An -tu1 | tr -d ' \n'
+}
+
+# Every shot in `theme`; fails if a capture is not in it (light bright,
+# dark dark), which a theme set but not yet shown gives.
+capture() {
+  theme=$1
   mkdir -p "$out/$theme"
   while read -r id kind <&3; do
     [ -n "$id" ] || continue
@@ -56,7 +73,23 @@ for theme in light dark; do
       sleep 4
       xcrun simctl io booted screenshot "$out/$theme/$id.png" >/dev/null
     fi
+    file=$(ls "$out/$theme/$id".* | head -1)
+    level=$(brightness "$file")
+    if { [ "$theme" = light ] && [ "$level" -lt 128 ]; } || { [ "$theme" = dark ] && [ "$level" -ge 128 ]; }; then
+      echo "  $id is not $theme (brightness $level)"
+      return 1
+    fi
   done 3<<< "$shots"
+}
+
+for theme in light dark; do
+  appearance "$theme"
+  if ! capture "$theme"; then
+    echo "::warning::the simulator was not yet $theme; setting it again and taking $theme again"
+    sleep 10
+    appearance "$theme"
+    capture "$theme" || { echo "::error::the simulator would not show $theme"; exit 1; }
+  fi
 done
 
 # The device, from what it drew.
