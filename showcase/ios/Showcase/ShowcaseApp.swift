@@ -11,6 +11,7 @@
 // speeds the recording back up: life's timing, with eight times the frames
 // the simulator could draw.
 import ArkUI
+import QuartzCore
 import SwiftUI
 
 @main
@@ -159,28 +160,60 @@ private struct ExpandingCardShot: View {
 }
 
 /// A long list scrolled down, then taken back to its top: what the shown
-/// tab, tapped again, does on iOS. A ScrollView over a plain stack: a List's
-/// `scrollTo` jumps, and so does a lazy stack's to a row not yet built.
+/// tab, tapped again, does on iOS. The offset is set once a frame along
+/// Springs.move's own curve, rather than left to an animated `scrollTo`
+/// (a List's jumps; a ScrollView's jumped here too), so every frame the
+/// simulator draws is a place along the way.
 private struct ScrollToTopShot: View {
-    @EnvironmentObject private var go: Go
-    private let rows = (1...60).map { "\(places[$0 % places.count]) \($0)" }
-
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { list in
+        if #available(iOS 18.0, *) { Stepped() } else { Text("Needs iOS 18") }
+    }
+
+    @available(iOS 18.0, *)
+    private struct Stepped: View {
+        @EnvironmentObject private var go: Go
+        @State private var position = ScrollPosition(edge: .top)
+        private let rows = (1...60).map { "\(places[$0 % places.count]) \($0)" }
+
+        var body: some View {
+            NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.m) {
                         ForEach(rows, id: \.self) { Row(name: $0) }
                     }
                     .padding(.horizontal, Space.page)
                 }
+                .scrollPosition($position)
                 .navigationTitle("A page")
                 .onChange(of: go.told) {
-                    let move = Springs.move.speed(1 / slow)
-                    later(0.4) { withAnimation(move) { list.scrollTo(rows[30], anchor: .top) } }
-                    later(1.6) { withAnimation(move) { list.scrollTo(rows[0], anchor: .top) } }
+                    // Thirty rows down: a row is its picture and the gap under it.
+                    let down = 30 * (Space.thumb + Space.m)
+                    later(0.4) { glide(from: 0, to: down) }
+                    later(1.6) { glide(from: down, to: 0) }
                 }
             }
         }
+
+        /// From `a` to `b` on the spring, a step each tick, in life's time
+        /// (the clock divided by `slow`).
+        private func glide(from a: CGFloat, to b: CGFloat) {
+            let start = CACurrentMediaTime()
+            Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
+                let t = (CACurrentMediaTime() - start) / slow
+                let done = t >= 0.6
+                position.scrollTo(y: a + (b - a) * CGFloat(done ? 1 : sprung(t)))
+                if done { timer.invalidate() }
+            }
+        }
     }
+}
+
+/// Where Springs.move is at `t` seconds, from 0 to 1: a unit mass on
+/// Springs.stiffness, damped at 0.88 of critical, as SwiftUI's
+/// `spring(response:dampingFraction:)` it is built from.
+func sprung(_ t: Double) -> Double {
+    let zeta = 0.88
+    let omega = Springs.stiffness.squareRoot()
+    let damped = omega * (1 - zeta * zeta).squareRoot()
+    return 1 - exp(-zeta * omega * t) * (cos(damped * t) + zeta * omega / damped * sin(damped * t))
 }
