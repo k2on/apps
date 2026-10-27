@@ -50,6 +50,13 @@ final class Go: ObservableObject {
                 guard let me else { return }
                 let go = Unmanaged<Go>.fromOpaque(me).takeUnretainedValue()
                 DispatchQueue.main.async {
+                    // A probe's (probe.yaml): the windows' layer speed, as
+                    // told to go, for every shot.
+                    if let speed = ShowcaseApp.argument("-layerSpeed").flatMap(Float.init) {
+                        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                            for window in scene.windows { window.layer.speed = speed }
+                        }
+                    }
                     go.told = true
                     Frames.shared.count()
                 }
@@ -268,7 +275,6 @@ func sprung(_ t: Double) -> Double {
 /// three clocks: UIKit's (UIView.animate), SwiftUI's (withAnimation), and
 /// the render server's (a CABasicAnimation). Recorded with each way of
 /// slowing a simulator's animations, it says which clock each slows.
-/// `-layerSpeed` sets the windows' layer speed when told to go.
 private struct ClocksShot: View {
     @EnvironmentObject private var go: Go
     @State private var across = false
@@ -283,11 +289,6 @@ private struct ClocksShot: View {
             .padding(.top, 160)
         }
         .onChange(of: go.told) {
-            if let speed = ShowcaseApp.argument("-layerSpeed").flatMap(Float.init) {
-                for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
-                    for window in scene.windows { window.layer.speed = speed }
-                }
-            }
             withAnimation(.linear(duration: 1)) { across = true }
         }
     }

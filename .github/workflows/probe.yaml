@@ -1,8 +1,10 @@
-# A probe, for a branch: which clock each way of slowing a simulator's
-# animations slows. The showcase's `clocks` probe moves three squares across
-# the screen in one second each, by UIKit, SwiftUI and the render server,
-# and is recorded at life's speed with each way in turn; a slowed square
-# takes ten seconds. The recordings are uploaded to be measured.
+# A probe, for a branch: what the expanding card's recording is short of
+# frames for, and whether its zoom slows. It is recorded plainly; with the
+# windows' layer speed at 0.1, which slows Core Animation's clock exactly
+# (the `clocks` probe: UIKit's and the render server's squares took ten
+# times as long, SwiftUI's did not); with Reduce Transparency, to see what
+# Liquid Glass costs; and as an iPhone SE, to see what the screen's size
+# costs. The recordings are uploaded to be measured.
 name: probe
 
 on:
@@ -15,7 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        slowed: [none, render-server, drag-coefficient, layer-speed]
+        include:
+          - { case: plain, device: "iPhone 17 Pro" }
+          - { case: layer-speed, device: "iPhone 17 Pro" }
+          - { case: reduce-transparency, device: "iPhone 17 Pro" }
+          - { case: plain-se, device: "iPhone SE (3rd generation)" }
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -26,10 +32,10 @@ jobs:
           xcode=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
           sudo xcode-select -s "$xcode/Contents/Developer"
 
-      - name: Boot an iPhone 17 Pro
+      - name: Boot ${{ matrix.device }}
         run: |
           runtime=$(xcrun simctl list runtimes -j | jq -r '[.runtimes[] | select(.platform == "iOS" and .isAvailable)] | sort_by(.version) | last | .identifier')
-          type=$(xcrun simctl list devicetypes -j | jq -r '.devicetypes[] | select(.name == "iPhone 17 Pro") | .identifier')
+          type=$(xcrun simctl list devicetypes -j | jq -r --arg n "${{ matrix.device }}" '.devicetypes[] | select(.name == $n) | .identifier')
           udid=$(xcrun simctl create probe "$type" "$runtime")
           echo "$udid" > "$RUNNER_TEMP/udid"
           xcrun simctl boot "$udid"
@@ -49,29 +55,27 @@ jobs:
             -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
             -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO ARCHS=arm64
 
-      - name: Record the clocks, slowed by ${{ matrix.slowed }}
+      - name: Record the expanding card, ${{ matrix.case }}
         run: |
           udid=$(cat "$RUNNER_TEMP/udid")
           xcrun swiftc -O .github/screens/record.swift -o "$RUNNER_TEMP/record"
           xcrun simctl install "$udid" "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app"
           extra=()
-          case "${{ matrix.slowed }}" in
-            render-server)
-              xcrun swiftc -O .github/probe/slow-animations.swift -o "$RUNNER_TEMP/slow-animations"
-              "$RUNNER_TEMP/slow-animations" "$udid" on ;;
-            drag-coefficient)
-              xcrun simctl spawn "$udid" defaults write com.apple.UIKit UIAnimationDragCoefficient -float 10 ;;
-            layer-speed)
-              extra=(-layerSpeed 0.1) ;;
+          case "${{ matrix.case }}" in
+            layer-speed) extra=(-layerSpeed 0.1) ;;
+            reduce-transparency)
+              xcrun simctl spawn "$udid" defaults write com.apple.Accessibility EnhancedBackgroundContrastEnabled -bool true
+              xcrun simctl spawn "$udid" launchctl kickstart -k system/com.apple.SpringBoard || true
+              sleep 10 ;;
           esac
-          xcrun simctl launch "$udid" dev.arkui.showcase -showcase clocks ${extra[@]+"${extra[@]}"} > /dev/null
+          xcrun simctl launch "$udid" dev.arkui.showcase -showcase expanding-card ${extra[@]+"${extra[@]}"} > /dev/null
           sleep 6
-          "$RUNNER_TEMP/record" "$udid" 14 540 "$RUNNER_TEMP/clocks-${{ matrix.slowed }}.mov" &
+          "$RUNNER_TEMP/record" "$udid" 14 540 "$RUNNER_TEMP/card-${{ matrix.case }}.mov" &
           sleep 1
           xcrun simctl spawn "$udid" notifyutil -p dev.arkui.showcase.go
           wait
 
       - uses: actions/upload-artifact@v4
         with:
-          name: clocks-${{ matrix.slowed }}
-          path: ${{ runner.temp }}/clocks-${{ matrix.slowed }}.mov
+          name: card-${{ matrix.case }}
+          path: ${{ runner.temp }}/card-${{ matrix.case }}.mov
