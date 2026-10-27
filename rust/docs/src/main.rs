@@ -177,7 +177,7 @@ pub struct App {
     pub tone: Tone,
     /// What the last menu entry run was, for the Menu example.
     pub ran: String,
-    pub playlists: Vec<(String, bool)>,
+    pub collections: Vec<(String, bool)>,
     pub dialog: Option<iced::time::Instant>,
     pub row: usize,
     pub card: usize,
@@ -212,7 +212,7 @@ impl App {
             window: Size::new(1100.0, 760.0),
             tone: Tone::System,
             ran: String::new(),
-            playlists: vec![("Favorites".into(), true), ("Road trip".into(), false), ("Sunday".into(), false)],
+            collections: vec![("Favourites".into(), true), ("Trips".into(), false), ("Later".into(), false)],
             dialog: None,
             row: 1,
             card: 0,
@@ -383,15 +383,19 @@ impl App {
             }
             Message::RowMenu => {
                 let entries = vec![
-                    Entry::run(glyphs::PLAY, "Play", Message::Ran("Play")),
-                    Entry::run(glyphs::NEXT, "Play next", Message::Ran("Play next")),
-                    Entry::run(glyphs::ALBUM, "Go to Goldberg Variations, BWV 988", Message::Ran("Go to the album")),
-                    Entry::submenu(glyphs::ADD_TO, "Add to playlist", Message::OpenPicker),
-                    Entry::run(glyphs::MINUS, "Remove from library", Message::Ran("Remove")),
+                    Entry::run(glyphs::CHEVRON, "Open", Message::Ran("Open")),
+                    Entry::run(glyphs::NEXT, "Open beside", Message::Ran("Open beside")),
+                    Entry::run(
+                        glyphs::HOME,
+                        "Go to Coastal places, a collection with a long name",
+                        Message::Ran("Go to the collection"),
+                    ),
+                    Entry::submenu(glyphs::ADD_TO, "Add to collection", Message::OpenPicker),
+                    Entry::run(glyphs::MINUS, "Remove", Message::Ran("Remove")),
                 ];
                 // A right click opens at the pointer.
                 self.ctx
-                    .open_menu(Menu::open("Aria", entries, self.pointer, self.window, Anchor::Pointer));
+                    .open_menu(Menu::open("Harbour", entries, self.pointer, self.window, Anchor::Pointer));
             }
             Message::MenuAt(at) => self.ctx.land(at),
             Message::MenuActivate => {
@@ -406,7 +410,7 @@ impl App {
             }
             Message::OpenPicker => {
                 let choices = self
-                    .playlists
+                    .collections
                     .iter()
                     .enumerate()
                     .map(|(i, (name, on))| Choice {
@@ -416,12 +420,12 @@ impl App {
                     })
                     .collect();
                 self.ctx
-                    .open_picker(Picker::new("Add to playlist", choices, Some("New playlist…".into())), self.window);
+                    .open_picker(Picker::new("Add to collection", choices, Some("New collection…".into())), self.window);
             }
             Message::PickerAt(at) => self.ctx.picker_at(at),
             Message::PickerActivate => match self.ctx.activate_picker() {
                 Some(Picked::Toggled { value, on }) => {
-                    if let Some(p) = self.playlists.get_mut(value) {
+                    if let Some(p) = self.collections.get_mut(value) {
                         p.1 = on;
                     }
                 }
@@ -436,7 +440,7 @@ impl App {
             Message::PickerCreate => {
                 let name = self.ctx.picker.as_ref().and_then(|p| p.naming.clone()).unwrap_or_default();
                 if !name.trim().is_empty() {
-                    self.playlists.push((name.trim().to_string(), true));
+                    self.collections.push((name.trim().to_string(), true));
                 }
                 self.ctx.close_menu();
                 self.ctx.close_picker();
@@ -593,7 +597,7 @@ impl App {
             layers = layers
                 .push(arkui::dialog::backdrop(Message::Dialog(false), Message::Swallow, open))
                 .push(arkui::dialog::view(
-                    "Follow a podcast".into(),
+                    "A dialog".into(),
                     close.into(),
                     body.into(),
                     (self.window.width - 32.0).min(420.0),

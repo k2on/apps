@@ -4,8 +4,8 @@ The documentation site: for now arkui's, and ArkDB's can join it.
 
 An iced app that is a page in a browser (`nix build .#docs`, published at
 https://k2on.github.io/apps/docs/) and a window on the desktop
-(`cargo run -p docs`). It is organised by component — a menu, cards, the
-player — and each page says how to use it:
+(`cargo run -p docs`). It is organised by component — a menu, cards, a
+list — and each page says how to use it:
 
 - **Desktop**: arkui's modules for it, a working example drawn by arkui
   itself in the renderer the apps use, each module's API and rules.

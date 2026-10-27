@@ -135,7 +135,7 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "table",
         name: "Table",
-        summary: "Rows of cells cut to their columns at layout, headings over them, section labels and the transport's gutter.",
+        summary: "Rows of cells cut to their columns at layout, headings over them, section labels and a gutter for a row's mark.",
         api: &["cell(body, width, on_cursor, accent, dim)", "cell_cut(…, cut, …)", "heading(label, width)", "section(label, indent)", "gutter()", "row(line, on_cursor, focused, odd)", "GUTTER, ROW_PADDING, SPACING, CELL_SIZE, HEADING_SIZE"],
         rules: &["A cell loses its middle and a heading its end, each to its own column.", "Columns are portions, so no text column pushes another off a narrow window."],
     },
@@ -151,7 +151,7 @@ pub const ENTRIES: &[Entry] = &[
         name: "Cards",
         summary: "A grid of pictures with a name and a line under each, the arithmetic of how many fit, and a page's header of picture, name and facts.",
         api: &["Shelf { card, gap, padding }, Shelf::DEFAULT", "Shelf::columns(pane), side(pane), room(pane), grid(cells, pane)", "Card { seed, title, under, round, picture, open }", "view(shelf, cards, pane, cursor, empty, on_hover, scroll, on_scroll)", "view_card(side, card, on_cursor, hover)", "header(picture, kind, name, under, open_under, facts, padding)", "empty_page(message, padding)"],
-        rules: &["A person is a circle and a record a square.", "The keyboard and the view divide the same pane width, so `l` lands where it looks."],
+        rules: &["A person is a circle and a thing a square.", "The keyboard and the view divide the same pane width, so `l` lands where it looks."],
     },
     Entry {
         module: "hero",

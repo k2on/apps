@@ -229,18 +229,19 @@ fn mobile<'a>(app: &'a App, c: &'static Component) -> Element<'a, Message> {
         Phone::Ios => (c.ios.as_ref(), "iOS"),
     };
     let Some(half) = half else {
-        return none(format!("Nothing for this on {name}."));
+        return none(format!("Nothing shared for this on {name} yet."));
     };
     let words = column![label("Where"), bullets(half.at), label("How"), bullets(half.how)]
         .spacing(6)
         .width(Length::Fill);
-    if c.shots.is_empty() {
+    let shots: Vec<&'static crate::components::Shot> = c.shots.iter().filter(|s| s.phones.contains(&app.phone.key())).collect();
+    if shots.is_empty() {
         return words.into();
     }
     // As many phones to a row as fit: one on a phone.
     let per = (((app.content() + 24.0) / (screens::PHONE + 44.0)) as usize).max(1);
     let mut phones = column![].spacing(24);
-    for line in c.shots.chunks(per) {
+    for line in shots.chunks(per) {
         phones = phones.push(line.iter().fold(row![].spacing(24), |r, shot| r.push(captured(app, shot))));
     }
     column![phones, words].spacing(16).into()

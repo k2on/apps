@@ -55,21 +55,23 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("VOLUME", glyphs::VOLUME),
 ];
 
-/// Names to draw with: long enough to be cut, and with the characters a
-/// typeface may lack.
-const TRACKS: [(&str, &str, &str, &str); 4] = [
-    ("Aria", "Glenn Gould", "Goldberg Variations, BWV 988", "3:05"),
-    ("Variatio 1. a 1 Clav.", "Glenn Gould", "Goldberg Variations, BWV 988", "1:45"),
+/// Rows to draw with: places, long enough to be cut, and with the
+/// characters a typeface may lack.
+const ROWS: [(&str, &str, &str, &str); 4] = [
+    ("Harbour", "North coast", "Coastal places", "3 km"),
+    ("Orchard", "The valley", "Farmland", "1 km"),
     (
-        "Symphony No. 9 in D minor, Op. 125 \"Choral\": IV. Presto",
-        "Wiener Philharmoniker",
-        "Beethoven: Symphony No. 9",
-        "24:12",
+        "A place with a name far too long for its column, cut through the middle",
+        "Somewhere a long way off",
+        "Places with long names",
+        "12 km",
     ),
-    ("Clair de lune", "Claudio Arrau", "Debussy: Suite bergamasque", "5:21"),
+    ("Prairie", "The plains", "Open country", "5 km"),
 ];
 
-/// The example a component's Desktop half draws: its modules', together.
+/// Names a square or a card is drawn from.
+const PLACES: [&str; 6] = ["Harbour", "Orchard", "Meadow", "Summit", "Delta", "Lagoon"];
+
 pub fn for_component<'a>(app: &'a App, id: &str) -> Element<'a, Message> {
     let both = |a: Element<'a, Message>, b: Element<'a, Message>| column![a, b].spacing(24).into();
     match id {
@@ -77,8 +79,8 @@ pub fn for_component<'a>(app: &'a App, id: &str) -> Element<'a, Message> {
         "text" => both(cut(room(app)), format_()),
         "art" => both(art_(room(app)), said(app, "images")),
         "navigation" => sidebar_(app),
-        "rows" => table_(app),
-        "header" => hero_(app),
+        "lists" => table_(app),
+        "headers" => hero_(app),
         "dialog" => both(dialog_(), picker_(app)),
         "pages" => said(app, "swipe"),
         "keys" => keys(app),
@@ -174,7 +176,7 @@ fn theme<'a>(room: f32) -> Element<'a, Message> {
         room,
     );
     let squares = wrap(
-        ["Bach", "Debussy", "Gould", "Arrau", "Callas", "Satie"]
+        PLACES
             .iter()
             .map(|seed| column![art::square(seed, 48.0, 6.0), label(*seed)].spacing(4).into())
             .collect(),
@@ -278,8 +280,8 @@ fn format_<'a>() -> Element<'a, Message> {
         pair("clock(261.0)", format::clock(261.0)),
         pair("clock(3725.0)", format::clock(3725.0)),
         pair("spell(3_725_000)", format::spell(3_725_000)),
-        pair("plural(1, \"song\")", format::plural(1, "song")),
-        pair("plural(12, \"song\")", format::plural(12, "song")),
+        pair("plural(1, \"place\")", format::plural(1, "place")),
+        pair("plural(12, \"place\")", format::plural(12, "place")),
         pair("span(1685, 1750)", format::span(1685, 1750)),
     ]
     .spacing(6)
@@ -287,7 +289,7 @@ fn format_<'a>() -> Element<'a, Message> {
 }
 
 fn cut<'a>(room: f32) -> Element<'a, Message> {
-    let long = "Goldberg Variations, BWV 988: Variatio 25. a 2 Clav. (Adagio)";
+    let long = "A name far too long for where it goes, which has to lose its end or its middle (2026)";
     let at = |w: f32, c: Cut| {
         row![
             text(format!("{w}px")).size(11).style(style::faint(0.6)).width(52),
@@ -314,11 +316,11 @@ fn cut<'a>(room: f32) -> Element<'a, Message> {
 }
 
 fn url_<'a>() -> Element<'a, Message> {
-    let name = "Bach/Goldberg #1 · é";
+    let name = "North/South #1 · é";
     column![
-        pair("encoded(\"Bach/Goldberg #1 · é\")", url::encoded(name)),
+        pair("encoded(\"North/South #1 · é\")", url::encoded(name)),
         pair("decode(encoded(…))", url::decode(&url::encoded(name))),
-        pair("route::join(\"album\", Some(…))", arkui::route::join("album", Some(name))),
+        pair("route::join(\"place\", Some(…))", arkui::route::join("place", Some(name))),
     ]
     .spacing(6)
     .into()
@@ -326,12 +328,12 @@ fn url_<'a>() -> Element<'a, Message> {
 
 fn sidebar_(app: &App) -> Element<'_, Message> {
     let places = [
-        (glyphs::NOTE, "Songs", Some("Music"), Some(1204)),
-        (glyphs::ALBUM, "Albums", Some("Music"), Some(96)),
-        (glyphs::ARTIST, "Artists", Some("Music"), Some(41)),
-        (glyphs::SHOW, "Podcasts", Some("Shows"), Some(3)),
-        (glyphs::PULPIT, "Sermons", Some("Shows"), None),
-        (glyphs::PLAYLIST, "Favorites", Some("Playlists"), Some(18)),
+        (glyphs::HOME, "Home", Some("Places"), None),
+        (glyphs::LIBRARY, "Collections", Some("Places"), Some(12)),
+        (glyphs::SEARCH, "Search", Some("Places"), None),
+        (glyphs::TICK, "Done", Some("Lists"), Some(3)),
+        (glyphs::MORE, "Later", Some("Lists"), Some(8)),
+        (glyphs::ARTIST, "People", Some("Lists"), Some(41)),
     ];
     let items: Vec<sidebar::Item<Message>> = places
         .iter()
@@ -371,7 +373,7 @@ fn panel_<'a>() -> Element<'a, Message> {
 }
 
 fn table_(app: &App) -> Element<'_, Message> {
-    let (name, artist, album, time) = (
+    let (name, place, collection, time) = (
         Length::FillPortion(5),
         Length::FillPortion(3),
         Length::FillPortion(4),
@@ -381,23 +383,23 @@ fn table_(app: &App) -> Element<'_, Message> {
         table::row(
             row![
                 table::gutter(),
-                table::heading("Title", name),
-                table::heading("Artist", artist),
-                table::heading("Album", album),
-                table::heading("Time", time)
+                table::heading("Name", name),
+                table::heading("Where", place),
+                table::heading("Collection", collection),
+                table::heading("Length", time)
             ]
             .spacing(table::SPACING),
             false,
             false,
             false
         ),
-        table::section("Disc 1".into(), table::GUTTER),
+        table::section("Section one".into(), table::GUTTER),
     ];
-    for (i, (title, by, on, length)) in TRACKS.iter().enumerate() {
+    for (i, (title, by, on, length)) in ROWS.iter().enumerate() {
         let here = i == app.row;
         let playing = i == 0;
         let gutter: Element<'_, Message> = match playing {
-            true => container(icon::accent(glyphs::PLAYING, here)).width(table::GUTTER).into(),
+            true => container(icon::accent(glyphs::TICK, here)).width(table::GUTTER).into(),
             false => table::gutter(),
         };
         rows = rows.push(
@@ -405,8 +407,8 @@ fn table_(app: &App) -> Element<'_, Message> {
                 row![
                     gutter,
                     table::cell(title.to_string(), name, here, playing, false),
-                    table::cell(by.to_string(), artist, here, false, true),
-                    table::cell(on.to_string(), album, here, false, true),
+                    table::cell(by.to_string(), place, here, false, true),
+                    table::cell(on.to_string(), collection, here, false, true),
                     table::cell_cut(length.to_string(), time, Cut::End, here, false, true),
                 ]
                 .spacing(table::SPACING),
@@ -422,10 +424,10 @@ fn table_(app: &App) -> Element<'_, Message> {
 
 fn cards_(app: &App) -> Element<'_, Message> {
     let cards: Vec<Card<Message>> = [
-        ("Goldberg Variations", "Glenn Gould", false),
-        ("Suite bergamasque", "Claudio Arrau", false),
-        ("Maria Callas", "12 albums", true),
-        ("Symphony No. 9", "Wiener Philharmoniker", false),
+        ("Harbour", "North coast", false),
+        ("Orchard", "The valley", false),
+        ("Ada Lovelace", "Someone", true),
+        ("Summit", "The highlands", false),
     ]
     .iter()
     .map(|(title, under, round)| Card {
@@ -451,12 +453,12 @@ fn cards_(app: &App) -> Element<'_, Message> {
         line,
         label("A record is a square and a person a circle. Without a picture, the derived square."),
         cards::header(
-            art::square("Goldberg Variations", 120.0, 6.0),
-            "ALBUM",
-            "Goldberg Variations".into(),
-            "Glenn Gould".into(),
+            art::square("Coastal places", 120.0, 6.0),
+            "COLLECTION",
+            "Coastal places".into(),
+            "North coast".into(),
             None,
-            "1981 · 32 songs · 51 minutes".into(),
+            "2026 · 12 places · 40 km".into(),
             0.0,
         ),
     ]
@@ -466,9 +468,9 @@ fn cards_(app: &App) -> Element<'_, Message> {
 
 fn hero_(app: &App) -> Element<'_, Message> {
     let entries: Vec<hero::Entry<Message>> = [
-        ("Bach", "Goldberg Variations", "BWV 988", "32"),
-        ("Bach", "The Well-Tempered Clavier", "BWV 846–893", "48"),
-        ("Debussy", "Suite bergamasque", "L. 75", "4"),
+        ("Coast", "Harbour", "The north", "12"),
+        ("Coast", "Lagoon", "The south", "8"),
+        ("Hills", "Summit", "The highlands", "4"),
     ]
     .iter()
     .map(|(over, title, under, count)| hero::Entry {
@@ -482,26 +484,23 @@ fn hero_(app: &App) -> Element<'_, Message> {
     let columns = if room(app) < 560.0 { 1 } else { 2 };
     let listing = hero::listing(&entries, columns, Some(app.card.min(entries.len() - 1)), Message::CardAt);
     column![
-        hero::banner(None, "ARTIST", "Johann Sebastian Bach", room(app).min(640.0)),
-        hero::heading("Works"),
+        hero::banner(None, "COLLECTION", "Coastal places", room(app).min(640.0)),
+        hero::heading("Places"),
         listing,
-        hero::more("All 1,128 works", false),
+        hero::more("All 128 places", false),
     ]
     .spacing(8)
     .into()
 }
 
 fn art_<'a>(room: f32) -> Element<'a, Message> {
-    let seeds = ["Goldberg Variations", "Clair de lune", "Maria Callas", "Gymnopédies", "Kind of Blue"];
+    let seeds = ["Harbour", "Orchard", "Ada Lovelace", "Gymnopédies", "Summit"];
     let squares = wrap(seeds.iter().map(|s| art::square(s, 72.0, 6.0)).collect(), 72.0, 14.0, room);
     let circles = wrap(seeds.iter().map(|s| art::square(s, 72.0, 36.0)).collect(), 72.0, 14.0, room);
     column![
         squares,
         circles,
-        label(format!(
-            "art::hash(\"Goldberg Variations\") = {:#010x}, the phones' too",
-            art::hash("Goldberg Variations")
-        )),
+        label(format!("art::hash(\"Harbour\") = {:#010x}, the phones' too", art::hash("Harbour"))),
     ]
     .spacing(12)
     .into()
@@ -541,7 +540,7 @@ fn account_<'a>(room: f32) -> Element<'a, Message> {
 fn menu_(app: &App) -> Element<'_, Message> {
     let area = mouse_area(
         container(
-            text("Right-click anywhere in here for a row's menu. Rest on \"Add to playlist\" for its submenu; j, k, l, h and <Esc> work too.")
+            text("Right-click anywhere in here for a row's menu. Rest on \"Add to collection\" for its submenu; j, k, l, h and <Esc> work too.")
                 .size(13)
                 .style(style::dim),
         )
@@ -567,13 +566,13 @@ fn menu_(app: &App) -> Element<'_, Message> {
 
 fn picker_(app: &App) -> Element<'_, Message> {
     let lists = app
-        .playlists
+        .collections
         .iter()
         .map(|(n, on)| format!("{n}{}", if *on { " ✓" } else { "" }))
         .collect::<Vec<_>>()
         .join("   ");
     column![
-        button(text("Add to playlist…").size(12)).style(style::action).on_press(Message::OpenPicker),
+        button(text("Add to a collection…").size(12)).style(style::action).on_press(Message::OpenPicker),
         label("On its own, a picker is centred over a dimmed page (layer::dimmed, layer::centred); off a menu it is that menu's submenu (layer::pinned)."),
         label(lists),
     ]
@@ -594,7 +593,7 @@ fn dialog_<'a>() -> Element<'a, Message> {
 
 fn keys(app: &App) -> Element<'_, Message> {
     column![
-        text("Press keys: 3j, gg, G, ^d, /bach, n, <Tab>, <Esc>.").size(13),
+        text("Press keys: 3j, gg, G, ^d, /dial, n, <Tab>, <Esc>.").size(13),
         pair("pending", app.keys.pending().to_string()),
         pair("last action", if app.last.is_empty() { "—".into() } else { app.last.clone() }),
         label("A Move walks this page's sidebar; the rest are only said here."),

@@ -653,8 +653,21 @@
                   ${pkgs.python3}/bin/python3 ${./nix/screens-index.py} $out ${lib.escapeShellArg title} ${lib.escapeShellArg note} > $out/index.html
                 '';
               });
+              # The debug build, which has the showcase the docs' captures are
+              # taken from (`app/src/debug`, .github/workflows/screens.yaml):
+              # no version, so it moves only with what it is built from. The
+              # recorded graph already covers `assembleDebug`.
+              showcase = apk.overrideAttrs (old: {
+                pname = "${name}-apk-showcase";
+                gradleBuildTask = ":app:assembleDebug";
+                versionFlags = [ ];
+                installPhase = ''
+                  mkdir -p $out
+                  cp app/build/outputs/apk/debug/app-debug.apk $out/${name}-showcase.apk
+                '';
+              });
             in
-            { inherit apk screens; deps = apk.mitmCache.updateScript; };
+            { inherit apk screens showcase; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
@@ -669,6 +682,7 @@
           };
           harken-apk = harken.apk;
           harken-android-screens = harken.screens;
+          harken-apk-showcase = harken.showcase;
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
           # docs/plan-bible.md): plain Kotlin, no native library and none of
@@ -825,7 +839,7 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced docs;
             default = ark;
-            inherit harken-apk harken-android-screens;
+            inherit harken-apk harken-android-screens harken-apk-showcase;
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
             revelation-android-screens = revelation.screens;

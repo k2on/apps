@@ -26,10 +26,21 @@ struct HarkenApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Root()
-                .environmentObject(model)
-                .tint(.gold)
-                .onOpenURL { model.open(url: $0) }
+            Group {
+                #if DEBUG
+                // The docs' captures: one screen of the demo library, not the app.
+                if let shot = Showcase.shot {
+                    Showcase.Screen(shot: shot)
+                } else {
+                    Root()
+                }
+                #else
+                Root()
+                #endif
+            }
+            .environmentObject(model)
+            .tint(.gold)
+            .onOpenURL { model.open(url: $0) }
         }
         .onChange(of: phase) { _, now in
             if now == .background { wasAway = true }

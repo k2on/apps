@@ -1,0 +1,226 @@
+# The docs' phone captures (https://k2on.github.io/apps/docs/): every shot
+# rust/docs/src/components.rs names, taken from a real Android emulator and a
+# real iOS simulator, in light and dark, and committed to the `screens`
+# branch with a manifest.json saying what is there and on which device.
+#
+# On its own time, after a push: nothing waits on it, and the docs page reads
+# the branch through raw.githubusercontent.com when it loads, so a capture
+# appears with nothing redeployed. A phone whose job fails keeps what it had
+# on the branch. Pushed from a claude/** branch it captures and uploads, and
+# publishes nothing.
+#
+# The shots come from each app's debug-only showcase, which draws the shared
+# components on their own with placeholder content
+# (harken/android/app/src/debug/.../Showcase.kt, harken/ios/Harken/Showcase.swift).
+name: screens
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "harken/android/app/src/debug/**"
+      - "harken/android/app/src/main/kotlin/dev/harken/android/ui/**"
+      - "harken/ios/Harken/**"
+      - "rust/docs/src/components.rs"
+      - ".github/screens/**"
+      - ".github/workflows/screens.yaml"
+  workflow_dispatch:
+
+permissions:
+  # The publish job's push to `screens`.
+  contents: write
+
+concurrency:
+  group: screens-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FPS: "10"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The emulator wants KVM; the hosted runner has it, behind a udev rule.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Google's SDK stays out of a public cache (build.yaml says why).
+          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
+
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-showcase-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'rust/Cargo.lock', 'harken/android/deps.json') }}
+          restore-prefixes-first-match: nix-showcase-${{ runner.os }}-
+          gc-max-store-size-linux: 6G
+          purge: true
+          purge-prefixes: nix-showcase-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      # The debug build, with the showcase in it.
+      - name: Build the showcase
+        run: |
+          nix build .#harken-apk-showcase --print-build-logs
+          cp result/harken-showcase.apk "$RUNNER_TEMP/showcase.apk"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+
+      - name: Capture
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          # The recordings are of animations: leave them on.
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash .github/screens/android.sh "$RUNNER_TEMP/out/android" "$RUNNER_TEMP/showcase.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens-android
+          path: ${{ runner.temp }}/out/android
+          if-no-files-found: error
+
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'us.koon.harken' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The newest Xcode 26 on the image, as ios.yaml: the app needs the iOS 26 SDK.
+      - name: Select Xcode
+        run: |
+          xcode=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
+          if [ -z "$xcode" ]; then
+            echo "::error::no Xcode 26 on this runner image"; exit 1
+          fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      # The kernel for the simulator alone, bound as ios.yaml binds it.
+      - name: Build the kernel for the simulator
+        working-directory: rust
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        run: |
+          cargo build --locked --release -p harken-ffi --lib --target aarch64-apple-ios-sim
+          cargo build --locked --release -p harken-ffi --lib
+          cargo run --locked --release -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/release/libharken_ffi.dylib \
+            --language swift --no-format --out-dir "$RUNNER_TEMP/bindings"
+          mkdir -p "$RUNNER_TEMP/headers"
+          cp "$RUNNER_TEMP"/bindings/*.h "$RUNNER_TEMP/headers/"
+          cat "$RUNNER_TEMP"/bindings/*.modulemap > "$RUNNER_TEMP/headers/module.modulemap"
+          out=../harken/ffi/ios
+          rm -rf "$out" && mkdir -p "$out/swift"
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers "$RUNNER_TEMP/headers" \
+            -output "$out/HarkenFFI.xcframework"
+          cp "$RUNNER_TEMP"/bindings/*.swift ark-ffi/swift/Typed.swift "$out/swift/"
+
+      - name: Build the app for the simulator
+        working-directory: harken/ios
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate
+          xcodebuild build \
+            -project Harken.xcodeproj -scheme Harken -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/derived" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" CODE_SIGNING_ALLOWED=NO
+
+      # The newest iPhone Pro the newest iOS runtime has.
+      - name: Boot a simulator
+        id: sim
+        run: |
+          device=$(xcrun simctl list devices available -j | jq -r '
+            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value
+            | map(select(.name | test("^iPhone [0-9]+ Pro$"))) | sort_by(.name) | last | .name')
+          echo "Booting $device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          echo "device=$device" >> "$GITHUB_OUTPUT"
+
+      - name: Capture
+        run: |
+          bash .github/screens/ios.sh "$RUNNER_TEMP/out/ios" \
+            "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Harken.app" \
+            "$BUNDLE_ID" "${{ steps.sim.outputs.device }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens-ios
+          path: ${{ runner.temp }}/out/ios
+          if-no-files-found: error
+
+  # The branch, one commit: what it had, each phone that captured this run
+  # replaced, and the manifest written over all of it.
+  publish:
+    needs: [android, ios]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.android.result == 'success' || needs.ios.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: screens-*
+          path: ${{ runner.temp }}/new
+
+      - name: Lay out the branch
+        run: |
+          branch="$RUNNER_TEMP/branch"
+          mkdir -p "$branch"
+          if git fetch --depth 1 origin screens; then
+            git --work-tree="$branch" checkout FETCH_HEAD -- .
+          fi
+          for p in android ios; do
+            if [ -d "$RUNNER_TEMP/new/screens-$p" ]; then
+              rm -rf "${branch:?}/$p"
+              cp -r "$RUNNER_TEMP/new/screens-$p" "$branch/$p"
+            fi
+          done
+          python3 -I .github/screens/manifest.py "$branch" "${{ github.run_id }}" "${{ github.sha }}"
+          cat "$branch/manifest.json"
+
+      - name: Publish
+        working-directory: ${{ runner.temp }}/branch
+        run: |
+          git init -q -b screens
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "screens from ${{ github.sha }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screens

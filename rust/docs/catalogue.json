@@ -10,13 +10,11 @@
       ],
       "android": {
         "at": [
-          "ui/Theme.kt: ArkTheme, Space",
-          "Theme.kt: the app's MaterialTheme and Palette"
+          "ui/Theme.kt: ArkTheme, LocalArkTheme, Space"
         ],
         "how": [
-          "The app's theme wraps the root in MaterialTheme(colorScheme for dark or light); read colours from MaterialTheme.colorScheme.",
-          "Space.xs … Space.xl, Space.corner: the spacing scale every screen uses.",
-          "ArkTheme(art) carries the derived square's pairs; an app hands it its own, as the desktop installs its palette."
+          "Inside a MaterialTheme, provide LocalArkTheme with ArkTheme(art): the derived square's pairs, ArkTheme.NeutralLight and NeutralDark until an app gives its own.",
+          "Space.xs … Space.xxl, Space.page, Space.corner: the spacing every shared component lays out by."
         ]
       },
       "ios": {
@@ -24,7 +22,7 @@
           "Theme.swift: Space, Squares"
         ],
         "how": [
-          "Space.* for spacing; the system's colours, with the app's colour as the accent.",
+          "Space.xs … Space.xxl and Space.page for spacing.",
           "Squares holds the derived square's pairs."
         ]
       },
@@ -38,23 +36,8 @@
       "desktop": [
         "style"
       ],
-      "android": {
-        "at": [
-          "Theme.kt: Palette, the app's Typography"
-        ],
-        "how": [
-          "Material 3's roles: onSurfaceVariant for a dim line, primary for the accent.",
-          "The typography sets names and headings in bold, as on the desktop."
-        ]
-      },
-      "ios": {
-        "at": [
-          "Theme.swift"
-        ],
-        "how": [
-          ".foregroundStyle(.secondary) for a dim line, .tint for the accent."
-        ]
-      },
+      "android": null,
+      "ios": null,
       "shots": []
     },
     {
@@ -69,22 +52,14 @@
       "android": {
         "at": [
           "ui/Glyphs.kt: ArkGlyphs",
-          "Glyphs.kt: Glyphs",
           "ui/Components.kt: Glyph"
         ],
         "how": [
           "Glyph(icon, description, modifier, size = 24.dp)",
-          "ArkGlyphs.* and Glyphs.* are ImageVectors; tint with LocalContentColor."
+          "ArkGlyphs.More, Back, Chevron, Volume, Muted are ImageVectors; tinted by LocalContentColor."
         ]
       },
-      "ios": {
-        "at": [
-          "SF Symbols; Assets.xcassets for the pulpit"
-        ],
-        "how": [
-          "Image(systemName:) for everything SF Symbols has; Image(\"pulpit\") is a template vector."
-        ]
-      },
+      "ios": null,
       "shots": []
     },
     {
@@ -97,22 +72,8 @@
         "line",
         "format"
       ],
-      "android": {
-        "at": [
-          "Compose Text"
-        ],
-        "how": [
-          "maxLines = 1 and overflow = TextOverflow.Ellipsis cut the end; the platform has no middle cut."
-        ]
-      },
-      "ios": {
-        "at": [
-          "SwiftUI Text"
-        ],
-        "how": [
-          ".lineLimit(1) and .truncationMode(.middle) for a name, .tail for a heading."
-        ]
-      },
+      "android": null,
+      "ios": null,
       "shots": []
     },
     {
@@ -136,85 +97,69 @@
       },
       "ios": {
         "at": [
-          "Theme.swift: Square",
-          "Covers.swift: CoverView"
+          "Theme.swift: Square"
         ],
         "how": [
-          "Square(seed:)",
-          "CoverView(seed:url:side:round:corner:)"
+          "Square(seed:): the same square for the same name as Android's and the desktop's."
         ]
       },
-      "shots": []
+      "shots": [
+        {
+          "id": "art",
+          "kind": "screenshot",
+          "what": "Squares derived from twelve names.",
+          "phones": [
+            "android",
+            "ios"
+          ]
+        }
+      ]
     },
     {
       "id": "navigation",
       "name": "Navigation",
       "section": "components",
-      "summary": "Where the places are: a sidebar on the desktop, a tab bar on a phone. The one under the cursor, or the tab that is lit, is the page.",
+      "summary": "Where the places are: a sidebar on the desktop, tabs on a phone. The place under the cursor, or the tab that is lit, is the page.",
       "desktop": [
         "sidebar"
       ],
       "android": {
         "at": [
-          "ui/Tabs.kt: TabStack, Reselect",
-          "the app's Chrome: the tab bar and the mini player"
+          "ui/Tabs.kt: TabStack, Reselect, LocalReselect"
         ],
         "how": [
-          "Chrome(tab, player, controls, onTab) { page }: the tab bar and the mini player around a page.",
-          "TabStack keeps each tab's page alive; tapping the lit tab again is Reselect."
+          "TabStack keeps each tab's content alive while another is shown, each with its Reselect in LocalReselect.",
+          "Reselect.ask() is the lit tab tapped again."
         ]
       },
-      "ios": {
-        "at": [
-          "Shell.swift: Shell"
-        ],
-        "how": [
-          "Shell is a TabView, Home, Library and Search, each tab its own NavigationStack; the mini player is its tabViewBottomAccessory.",
-          ".tabBarMinimizeBehavior(.onScrollDown): the bar shrinks as a page scrolls."
-        ]
-      },
-      "shots": [
-        {
-          "id": "library",
-          "kind": "screenshot",
-          "what": "Library: the tab bar, the mini player, and the songs."
-        }
-      ]
+      "ios": null,
+      "shots": []
     },
     {
-      "id": "rows",
-      "name": "Rows",
+      "id": "lists",
+      "name": "Lists",
       "section": "components",
-      "summary": "A list of tracks or episodes: what it is, what is under it, and which one is playing.",
+      "summary": "Rows of what a page holds: what each is, a line under it, and where it goes.",
       "desktop": [
         "table"
       ],
       "android": {
         "at": [
-          "Components.kt: TrackRow, TrackNumber",
-          "ui/Components.kt: ListRow, Chevron",
-          "Pages.kt: EpisodeRow"
+          "ui/Components.kt: ListRow, Chevron"
         ],
         "how": [
-          "TrackRow(track, under, playing, onClick, onMore, art = true) { leading }",
-          "ListRow(onClick, title, under, trailing = { Chevron() }) { picture }",
-          "TrackNumber(n, playing) is the leading slot on an album's page."
+          "ListRow(onClick, title, under, trailing = { Chevron() }) { picture }"
         ]
       },
-      "ios": {
-        "at": [
-          "Components.swift: TrackRow, EpisodeRow, TrackNumber"
-        ],
-        "how": [
-          "TrackRow(track:under:from:onPlay:)",
-          "Its context menu is TrackActions, the same entries as Android's sheet."
-        ]
-      },
+      "ios": null,
       "shots": [
         {
-          "id": "album",
+          "id": "lists",
           "kind": "screenshot",
-          "what": "An album's page: its header, then its tracks, one playing."
+          "what": "Rows with a picture and a line under each.",
+          "phones": [
+            "android"
+          ]
         }
       ]
     },
@@ -222,7 +167,7 @@
       "id": "cards",
       "name": "Cards",
       "section": "components",
-      "summary": "Pictures with a name and a line under each, in a grid or a shelf. A record is a square and a person a circle.",
+      "summary": "Pictures with a name and a line under each, in a grid or a shelf; a square, or a circle.",
       "desktop": [
         "cards"
       ],
@@ -232,97 +177,130 @@
         ],
         "how": [
           "CoverCard(seed, art, title, under, side, onClick, round = false, opens = false)",
-          "A shelf is a LazyRow of them, side from the screen's width."
+          "A shelf is a LazyRow of them, `side` from the screen's width."
         ]
       },
-      "ios": {
-        "at": [
-          "Components.swift: CoverCard, CoverShelf"
-        ],
-        "how": [
-          "CoverCard(seed:url:title:under:side:round:opens:onTap:)",
-          "CoverShelf(items:…) is a horizontal ScrollView of them."
-        ]
-      },
+      "ios": null,
       "shots": [
         {
-          "id": "home",
+          "id": "cards",
           "kind": "screenshot",
-          "what": "Home: shelves of covers and people."
+          "what": "Cards, square and round.",
+          "phones": [
+            "android"
+          ]
         }
       ]
     },
     {
-      "id": "header",
+      "id": "headers",
       "name": "Headers",
       "section": "components",
-      "summary": "How a page opens: a banner, or a picture beside the name and its facts, with play and shuffle; then section headings and listings.",
+      "summary": "How a page opens: a banner or a bar with its title and back, then headings over its sections.",
       "desktop": [
         "hero"
       ],
       "android": {
         "at": [
-          "Components.kt: PageHeader, Banner, CoverHeader, SectionHeading, Entry, MoreLine, Featured, PlayPill"
+          "ui/Components.kt: PageBar, TabTitle, Heading"
         ],
         "how": [
-          "PageHeader(cover, kind, title, by, onBy, facts, canPlay, onPlay, onShuffle)",
-          "Banner(seed, art, kind, name, onBack): an artist's page, under the status bar.",
-          "Entry(title, over, under, count, onOpen, picture = null) and MoreLine(label, onOpen) for listings."
+          "PageBar(title, onBack, actions = {})",
+          "TabTitle(title, actions = {})",
+          "Heading(title, modifier, action = null, onAction = {})"
         ]
       },
-      "ios": {
-        "at": [
-          "Hero.swift: Banner, RecordHeader, SectionHeading, EntryRow, MoreRow, PlayShuffle",
-          "Components.swift: PageHeader"
-        ],
-        "how": [
-          "PageHeader(kind:title:by:onBy:facts:canPlay:onPlay:onShuffle:)",
-          "Banner(url:kind:name:)",
-          "EntryRow(over:title:under:count:onOpen:)"
-        ]
-      },
+      "ios": null,
       "shots": [
         {
-          "id": "artist",
+          "id": "headers",
           "kind": "screenshot",
-          "what": "An artist's page: the banner, then their works."
+          "what": "A page's bar, a tab's title, a heading.",
+          "phones": [
+            "android"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "empty",
+      "name": "Empty states",
+      "section": "components",
+      "summary": "What a page says while it has nothing to show, or is still asking for it.",
+      "desktop": [],
+      "android": {
+        "at": [
+          "ui/Components.kt: Empty, Fetching"
+        ],
+        "how": [
+          "Empty(icon, title, sentence, modifier, action = null, onAction = {})",
+          "Fetching(host, delayMs): said only after a beat, so a quick answer never flashes it."
+        ]
+      },
+      "ios": null,
+      "shots": [
+        {
+          "id": "empty",
+          "kind": "screenshot",
+          "what": "Nothing here yet, and still asking.",
+          "phones": [
+            "android"
+          ]
         }
       ]
     },
     {
       "id": "account",
-      "name": "Account",
+      "name": "Account and sign-in",
       "section": "components",
-      "summary": "Who is signed in, as a circle of their picture or their initials, and signing in.",
+      "summary": "Who is signed in, as a circle of their picture or their initials, and the screens that get them signed in.",
       "desktop": [
         "account"
       ],
       "android": {
         "at": [
-          "Components.kt: Face",
-          "ui/Onboarding.kt: OpeningScreen, ServerScreen, SignInScreen, PermissionScreen"
+          "ui/Onboarding.kt: OpeningScreen, ServerScreen, SignInScreen, PermissionScreen, OnboardingPage"
         ],
         "how": [
-          "Face(name, art, role, onOpen)",
           "SignInScreen(mark, host, error, phase, onSignIn, onChangeServer)",
-          "The onboarding's screens take an AppIdentity: the app's name, mark and colours."
+          "OnboardingPage is the frame each screen is drawn in: the mark, a title, a sentence, then its own."
         ]
       },
-      "ios": {
-        "at": [
-          "Components.swift: Avatar, AccountMenu",
-          "OnboardingViews.swift: OpeningScreen, ServerScreen, SignInScreen"
-        ],
-        "how": [
-          "Avatar(name:picture:side:)",
-          "SignInScreen(server:phase:error:)"
-        ]
-      },
+      "ios": null,
       "shots": [
         {
           "id": "sign-in",
           "kind": "screenshot",
-          "what": "Signing in to a server."
+          "what": "Signing in to a server.",
+          "phones": [
+            "android"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "slider",
+      "name": "Slider",
+      "section": "components",
+      "summary": "A level to drag, and a button beside it to mute it.",
+      "desktop": [],
+      "android": {
+        "at": [
+          "ui/Volume.kt: VolumeSlider"
+        ],
+        "how": [
+          "VolumeSlider(level, muted, onLevel, onDone, onMute, modifier, enabled = true, about = \"Volume\")"
+        ]
+      },
+      "ios": null,
+      "shots": [
+        {
+          "id": "slider",
+          "kind": "screenshot",
+          "what": "A level and its mute.",
+          "phones": [
+            "android"
+          ]
         }
       ]
     },
@@ -338,28 +316,22 @@
       ],
       "android": {
         "at": [
-          "Sheets.kt: TrackMenu",
-          "ui/Components.kt: MoreButton, SheetRow"
+          "ui/Components.kt: SheetRow, MoreButton"
         ],
         "how": [
-          "TrackMenu(track, album, from, actions)",
-          "SheetRow(icon, label, onClick, trailing = {}, emphasis = false) is one entry.",
+          "SheetRow(icon, label, onClick, trailing = {}, emphasis = false) is one entry of a sheet.",
           "MoreButton(about, origin, onMore) opens it from a row."
         ]
       },
-      "ios": {
-        "at": [
-          "Components.swift: TrackActions"
-        ],
-        "how": [
-          "TrackActions(track:from:) is a .contextMenu's content: long-press a row."
-        ]
-      },
+      "ios": null,
       "shots": [
         {
-          "id": "track-menu",
+          "id": "sheet",
           "kind": "screenshot",
-          "what": "A track's menu."
+          "what": "A sheet's entries.",
+          "phones": [
+            "android"
+          ]
         }
       ]
     },
@@ -371,31 +343,9 @@
       "desktop": [
         "picker"
       ],
-      "android": {
-        "at": [
-          "Sheets.kt: AddToPlaylist, DevicesSheet"
-        ],
-        "how": [
-          "AddToPlaylist(track, playlists, on, onToggle, onNew)",
-          "DevicesSheet(rows, cursor, actions): the speakers, each with its volume."
-        ]
-      },
-      "ios": {
-        "at": [
-          "Sheets.swift: AddToPlaylistSheet, DevicesSheet"
-        ],
-        "how": [
-          "AddToPlaylistSheet(track:)",
-          "DevicesSheet()"
-        ]
-      },
-      "shots": [
-        {
-          "id": "add-to-playlist",
-          "kind": "screenshot",
-          "what": "Adding a track to playlists."
-        }
-      ]
+      "android": null,
+      "ios": null,
+      "shots": []
     },
     {
       "id": "dialog",
@@ -406,64 +356,34 @@
         "dialog",
         "layer"
       ],
-      "android": {
-        "at": [
-          "Sheets.kt: NewPlaylistCard, NewPlaylist, FindShow"
-        ],
-        "how": [
-          "NewPlaylistCard(name, problem, adding, onName, onMake, onCancel)",
-          "FindShow(kind, feeds, onFollow): following a show."
-        ]
-      },
-      "ios": {
-        "at": [
-          "Sheets.swift: NewPlaylist, FollowSheet",
-          "Shell.swift: SheetHost"
-        ],
-        "how": [
-          "NewPlaylist(then:)",
-          "SheetHost raises every sheet from the model's state."
-        ]
-      },
-      "shots": [
-        {
-          "id": "new-playlist",
-          "kind": "screenshot",
-          "what": "Naming a new playlist."
-        }
-      ]
+      "android": null,
+      "ios": null,
+      "shots": []
     },
     {
-      "id": "player",
-      "name": "Player",
+      "id": "expanding-card",
+      "name": "Expanding card",
       "section": "motion",
-      "summary": "What is playing: a bar at the foot that rises into the whole screen and falls back.",
+      "summary": "A bar at the foot of the screen that rises into the whole screen and falls back, following a finger or on its own.",
       "desktop": [],
       "android": {
         "at": [
-          "ui/ExpandingCard.kt: ExpandingCard, ExpandingCardState",
-          "PlayerScreens.kt: MiniPlayer, FullPlayer, QueueSheet",
-          "PlayerSheet.kt: PlayerCard"
+          "ui/ExpandingCard.kt: ExpandingCard, ExpandingCardState, rememberExpandingCard"
         ],
         "how": [
-          "ExpandingCard(state, stand, onOpen, collapsed, expanded, traveler): the bar's bounds to the screen's, on a spring.",
-          "MiniPlayer(state, controls, position) and FullPlayer(state, controls, position) are its two faces."
+          "ExpandingCard(state, stand, onOpen, collapsed, expanded, traveler): `collapsed` is the bar's face, `expanded` the screen's with a `slot` where `traveler`, the picture, lands.",
+          "state.open() and state.close() move it on its springs; ExpandingCardState.held(p, density) holds it at p for a screenshot."
         ]
       },
-      "ios": {
-        "at": [
-          "PlayerViews.swift: MiniPlayer, FullPlayer, Scrubber, Transport, QueueSheet"
-        ],
-        "how": [
-          "MiniPlayer(open:) is the TabView's bottom accessory, its matchedTransitionSource.",
-          "FullPlayer(close:) is a fullScreenCover that zooms out of it (navigationTransition(.zoom)): iOS's ExpandingCard."
-        ]
-      },
+      "ios": null,
       "shots": [
         {
-          "id": "player",
+          "id": "expanding-card",
           "kind": "recording",
-          "what": "The mini player rising into the full player, and falling back."
+          "what": "The bar rising to the screen, and falling back.",
+          "phones": [
+            "android"
+          ]
         }
       ]
     },
@@ -471,7 +391,7 @@
       "id": "pages",
       "name": "Page motion",
       "section": "motion",
-      "summary": "Going in and coming back: a page slides over the last, and a swipe from the edge takes it away.",
+      "summary": "Going in and coming back: a page grows over the last, and a swipe from the edge takes it away.",
       "desktop": [
         "swipe"
       ],
@@ -481,26 +401,35 @@
         ],
         "how": [
           "PageBack(motion, blocked, toFirst): the edge swipe, following the finger.",
-          "Hero carries a cover from the card to the page's header."
+          "Hero carries a picture from the card to the page's header."
+        ]
+      },
+      "ios": null,
+      "shots": []
+    },
+    {
+      "id": "springs",
+      "name": "Springs",
+      "section": "motion",
+      "summary": "The numbers everything moves by, the same on both phones.",
+      "desktop": [],
+      "android": {
+        "at": [
+          "ui/Springs.kt: Springs"
+        ],
+        "how": [
+          "Springs.settle() and the rest: spring specs with a cap on how long any move takes."
         ]
       },
       "ios": {
         "at": [
-          "Shell.swift: stack",
-          "Components.swift: zoomed"
+          "Theme.swift: Springs"
         ],
         "how": [
-          "Pages are pushed on the tab's NavigationStack (environment \\.open appends a Route); its own edge swipe goes back.",
-          "A page opened from a card zooms out of it: .zoomed(route, zoom), navigationTransition(.zoom)."
+          "The same springs as Android's, converted exactly (docs/plan-arkui-swift.md)."
         ]
       },
-      "shots": [
-        {
-          "id": "page",
-          "kind": "recording",
-          "what": "Opening an album from Home, and swiping back."
-        }
-      ]
+      "shots": []
     },
     {
       "id": "scroll",
@@ -512,25 +441,21 @@
       ],
       "android": {
         "at": [
-          "ui/Tabs.kt: ScrollsToTop, Reselect"
+          "ui/Tabs.kt: ScrollsToTop"
         ],
         "how": [
-          "ScrollsToTop(listState) inside a tab's page: a reselect scrolls it home."
+          "ScrollsToTop(listState) or ScrollsToTop(gridState) inside a tab's page: a Reselect scrolls it home."
         ]
       },
-      "ios": {
-        "at": [
-          "Shell.swift: Shell"
-        ],
-        "how": [
-          "The system's own: tapping the lit tab pops its NavigationStack, then scrolls to the top."
-        ]
-      },
+      "ios": null,
       "shots": [
         {
           "id": "scroll-to-top",
           "kind": "recording",
-          "what": "A long list scrolled down, then the lit tab tapped again."
+          "what": "A long list scrolled down, then asked to go to its top.",
+          "phones": [
+            "android"
+          ]
         }
       ]
     },
@@ -563,15 +488,7 @@
           "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack."
         ]
       },
-      "ios": {
-        "at": [
-          "Model.swift: Route",
-          "Shell.swift: Destination"
-        ],
-        "how": [
-          "Route is the NavigationStack's value; .navigationDestination(for: Route.self) draws Destination(route:)."
-        ]
-      },
+      "ios": null,
       "shots": []
     },
     {
@@ -741,7 +658,7 @@
     {
       "module": "table",
       "name": "Table",
-      "summary": "Rows of cells cut to their columns at layout, headings over them, section labels and the transport's gutter.",
+      "summary": "Rows of cells cut to their columns at layout, headings over them, section labels and a gutter for a row's mark.",
       "api": [
         "cell(body, width, on_cursor, accent, dim)",
         "cell_cut(…, cut, …)",
@@ -782,7 +699,7 @@
         "empty_page(message, padding)"
       ],
       "rules": [
-        "A person is a circle and a record a square.",
+        "A person is a circle and a thing a square.",
         "The keyboard and the view divide the same pane width, so `l` lands where it looks."
       ]
     },
