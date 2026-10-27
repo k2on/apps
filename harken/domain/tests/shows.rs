@@ -65,8 +65,28 @@ fn an_episode_is_media_of_its_shows_kind_and_not_music() {
         [("sermon".to_string(), 3, 20)]
     );
     assert_eq!(shows[0].author, "Timothy Keller");
-    let details = c.list::<EpisodeDetailsEntry>("episode_details", &());
+    let details = c.list::<EpisodeDetailsEntry>(
+        "episode_details",
+        &ShowInput {
+            playlist_id: NONE,
+            id: id.clone(),
+        },
+    );
     assert!(details.iter().all(|d| d.show == "Gospel in Life" && d.show_id == id));
+    assert_eq!(
+        each(&details, |d| d.published_ms),
+        [20, 10, 0],
+        "as `show` lists them, newest first"
+    );
+    assert!(c
+        .list::<EpisodeDetailsEntry>(
+            "episode_details",
+            &ShowInput {
+                playlist_id: NONE,
+                id: "podcast/nobody".into(),
+            },
+        )
+        .is_empty());
 }
 
 /// A show or an episode said again with nothing new writes nothing, and an

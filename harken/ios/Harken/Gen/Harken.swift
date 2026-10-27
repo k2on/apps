@@ -2061,7 +2061,7 @@ public struct Harken {
     public func downloads() throws -> LiveView<DownloadsEntry> { LiveView(try peer.view(name: "library.downloads", input: "null")) { j in DownloadsEntry(json: j) } }
 
     /// `library.episode_details`, kept.
-    public func episodeDetails() throws -> LiveView<EpisodeDetailsEntry> { LiveView(try peer.view(name: "library.episode_details", input: "null")) { j in EpisodeDetailsEntry(json: j) } }
+    public func episodeDetails(_ input: ShowInput) throws -> LiveView<EpisodeDetailsEntry> { LiveView(try peer.view(name: "library.episode_details", input: input.json)) { j in EpisodeDetailsEntry(json: j) } }
 
     /// `library.feed_read`: its intent's id.
     @discardableResult public func feedRead(_ input: FeedRead) throws -> String { try peer.mutate(name: "library.feed_read", input: input.json) }

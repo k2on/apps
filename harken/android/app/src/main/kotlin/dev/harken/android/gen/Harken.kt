@@ -1186,7 +1186,7 @@ class Harken(val peer: Peer) {
     fun downloads(): View<DownloadsEntry> = View(peer.view("library.downloads", "null")) { j -> DownloadsEntry.of(j) }
 
     /** `library.episode_details`, kept. */
-    fun episodeDetails(): View<EpisodeDetailsEntry> = View(peer.view("library.episode_details", "null")) { j -> EpisodeDetailsEntry.of(j) }
+    fun episodeDetails(input: ShowInput): View<EpisodeDetailsEntry> = View(peer.view("library.episode_details", input.json())) { j -> EpisodeDetailsEntry.of(j) }
 
     /** `library.feed_read`: its intent's id. */
     fun feedRead(input: FeedRead): String = peer.mutate("library.feed_read", input.json())

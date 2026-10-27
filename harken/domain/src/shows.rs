@@ -295,10 +295,19 @@ pub fn chapters(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<Cha
         }))
 }
 
-/// Every episode, with the columns only an episode has.
+/// One show's episodes with the columns only an episode has — what it is
+/// about, when it went out — in the order `show` lists them, so a show's
+/// page can say each beside its row.
 #[view("library.episode_details")]
-pub fn episode_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<EpisodeDetailsEntry>, Refusal> {
-    Ok(scan::<Harken, Episode>().map_with(|db, e| EpisodeDetailsEntry {
+pub fn episode_details(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<EpisodeDetailsEntry>, Refusal> {
+    let id = input.id;
+    Ok(scan::<Harken, Episode>()
+        .filter_with(move |db, e| e.show_id == id && db.media.has(e.media_id))
+        .sort_with(|db, e| {
+            let pos = db.media.get(e.media_id).map_or(0, |m| m.pos);
+            (Desc(e.published_ms), Desc(pos))
+        })
+        .map_with(|db, e| EpisodeDetailsEntry {
         art: e.art.clone(),
         description: e.description.clone(),
         media_id: e.media_id,
