@@ -70,10 +70,13 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Build the showcase
+      # Built under the nix steps (meanwhile.sh), and waited for before the
+      # capture.
+      - name: Start building the showcase
         run: |
-          gradle -p showcase/android :app:assembleDebug
-          cp showcase/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/showcase.apk"
+          bash .github/screens/meanwhile.sh start showcase bash -c '
+            gradle -p showcase/android :app:assembleDebug &&
+            cp showcase/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/showcase.apk"'
 
       # ffmpeg from the flake (screens-ffmpeg): x264, MP4, the filters
       # encode.sh uses and nothing else, from the cache once built, in place
@@ -101,6 +104,9 @@ jobs:
           bin=$(nix build .#screens-ffmpeg --no-link --print-out-paths --print-build-logs | grep -- '-bin$')
           echo "$bin/bin" >> "$GITHUB_PATH"
           "$bin/bin/ffmpeg" -hide_banner -version | head -1
+
+      - name: The showcase, built
+        run: bash .github/screens/meanwhile.sh wait showcase
 
       - name: Capture
         uses: reactivecircus/android-emulator-runner@v2
@@ -136,27 +142,28 @@ jobs:
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
 
-      - name: Build the showcase for the simulator
-        working-directory: showcase/ios
-        run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
-          xcodegen generate
-          xcodebuild build \
-            -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO
-
-      # The newest iPhone Pro the newest iOS runtime has.
-      - name: Boot a simulator
+      # The simulator boots and the showcase builds under the nix steps
+      # (meanwhile.sh); both are waited for before the capture. The newest
+      # iPhone Pro the newest iOS runtime has.
+      - name: Start booting a simulator
         id: sim
         run: |
           device=$(xcrun simctl list devices available -j | jq -r '
             .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value
             | map(select(.name | test("^iPhone [0-9]+ Pro$"))) | sort_by(.name) | last | .name')
           echo "Booting $device"
-          xcrun simctl boot "$device"
-          xcrun simctl bootstatus "$device" -b
           echo "device=$device" >> "$GITHUB_OUTPUT"
+          bash .github/screens/meanwhile.sh start boot bash -c 'xcrun simctl boot "$1" && xcrun simctl bootstatus "$1" -b' boot "$device"
+
+      - name: Start building the showcase for the simulator
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          bash .github/screens/meanwhile.sh start showcase bash -c '
+            cd showcase/ios && xcodegen generate &&
+            xcodebuild build \
+              -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
+              -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+              -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO'
 
       # ffmpeg from the flake (screens-ffmpeg): x264, MP4, the filters
       # encode.sh uses and nothing else, from the cache once built, in place
@@ -184,6 +191,12 @@ jobs:
           bin=$(nix build .#screens-ffmpeg --no-link --print-out-paths --print-build-logs | grep -- '-bin$')
           echo "$bin/bin" >> "$GITHUB_PATH"
           "$bin/bin/ffmpeg" -hide_banner -version | head -1
+
+      - name: The showcase, built
+        run: bash .github/screens/meanwhile.sh wait showcase
+
+      - name: The simulator, booted
+        run: bash .github/screens/meanwhile.sh wait boot
 
       - name: Capture
         run: |
