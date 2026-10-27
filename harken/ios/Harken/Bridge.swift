@@ -55,6 +55,9 @@ struct Snapshot {
     var mine = [Id: ProgressEntry]()
     /// How far everybody has listened to a held show's episodes, by its key.
     var progress = [String: [ProgressEntry]]()
+    /// A held show's episodes as its feed tells them — what each is about,
+    /// when it came out — by the show's key, each by its media id.
+    var episodes = [String: [Id: EpisodeDetailsEntry]]()
     var details = [Id: TrackDetailsEntry]()
     /// The newest play in the log, this person's.
     var lastPlayed: Play? = nil
@@ -183,6 +186,7 @@ final class Bridge {
     private let downloads = Held<DownloadsEntry> { try $0.downloads() }
     private let mine = Held<ProgressEntry> { try $0.myProgress() }
     private let progress = Holds<ProgressEntry> { h, show in try h.showProgress(ShowInput(playlistId: Phone.noPlaylist, id: show)) }
+    private let episodes = Holds<EpisodeDetailsEntry> { h, show in try h.episodeDetails(ShowInput(playlistId: Phone.noPlaylist, id: show)) }
     private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
     private let played = Held<Play> { try $0.lastPlayed() }
     private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
@@ -281,6 +285,12 @@ final class Bridge {
         return m
     }
 
+    private static func episodesByMedia(_ rows: [EpisodeDetailsEntry]) -> [Id: EpisodeDetailsEntry] {
+        var m = [Id: EpisodeDetailsEntry](minimumCapacity: rows.count)
+        for r in rows { m[r.mediaId] = r }
+        return m
+    }
+
     private static func downloadsByMedia(_ rows: [DownloadsEntry]) -> [Id: DownloadsEntry] {
         var m = [Id: DownloadsEntry](minimumCapacity: rows.count)
         for r in rows { m[r.mediaId] = r }
@@ -333,6 +343,7 @@ final class Bridge {
         if downloads.update() { snap.downloads = Bridge.downloadsByMedia(downloads.rows) }
         if mine.update() { snap.mine = Bridge.mineByMedia(mine.rows) }
         for (k, rows) in progress.update() { snap.progress[k] = rows }
+        for (k, rows) in episodes.update() { snap.episodes[k] = Bridge.episodesByMedia(rows) }
         if details.update() { snap.details = Bridge.byMedia(details.rows) }
         if played.update() { snap.lastPlayed = played.rows.first }
         for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }
@@ -442,6 +453,9 @@ final class Bridge {
         case let .progress(k):
             guard let rows = progress.hold(k, h) else { return false }
             snap.progress[k] = rows
+        case let .episodes(k):
+            guard let rows = episodes.hold(k, h) else { return false }
+            snap.episodes[k] = Bridge.episodesByMedia(rows)
         }
         return true
     }
@@ -468,6 +482,7 @@ final class Bridge {
         case let .recordings(k): if recordings.release(k) { snap.recordings[k] = nil }
         case let .credits(k): if credits.release(k) { snap.credits[k] = nil }
         case let .progress(k): if progress.release(k) { snap.progress[k] = nil }
+        case let .episodes(k): if episodes.release(k) { snap.episodes[k] = nil }
         }
     }
 
@@ -591,6 +606,7 @@ final class Bridge {
             self.recordings.clear()
             self.credits.clear()
             self.progress.clear()
+            self.episodes.clear()
             self.harken = nil
         }
     }

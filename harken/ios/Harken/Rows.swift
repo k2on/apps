@@ -311,7 +311,7 @@ enum Page: Hashable {
     var listings: [Listing] {
         switch self {
         case let .artist(name): return [.works(name)]
-        case let .show(id): return [.progress(id)]
+        case let .show(id): return [.progress(id), .episodes(id)]
         case let .work(id): return [.work(id), .recordings(id)]
         case let .recording(id):
             guard let work = Catalogue.workKey(id) else { return [.credits(id)] }
@@ -370,6 +370,8 @@ enum Listing: Hashable {
     case credits(String)
     /// How far everybody has listened to a show's episodes, by its key.
     case progress(String)
+    /// A show's episodes as its feed tells them, by its key.
+    case episodes(String)
 }
 
 /// A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved.
@@ -453,6 +455,39 @@ enum Spell {
         if min < 60 { return "\(min) min" }
         if min % 60 == 0 { return "\(min / 60) hr" }
         return "\(min / 60) hr \(min % 60) min"
+    }
+
+    /// How much of an episode is left to hear, as its row says it: its
+    /// length (`47 min`) until the signed-in person begins it, then what is
+    /// left (`12 min left`), then `Played`. Nothing for a length not known.
+    static func left(_ durationMs: Int64, _ mine: ProgressEntry?) -> String {
+        if mine?.finished == true { return "Played" }
+        let whole = (mine?.durationMs ?? 0) > 0 ? mine!.durationMs : durationMs
+        guard whole > 0 else { return "" }
+        guard let m = mine, m.positionMs > 0 else { return length(whole) }
+        return length(max(whole - m.positionMs, 0)) + " left"
+    }
+
+    private static let thisYear: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMd")
+        return f
+    }()
+
+    private static let anotherYear: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMdyyyy")
+        return f
+    }()
+
+    /// When an episode came out, as a podcast app's row says it: `Today`,
+    /// `Yesterday`, `Oct 21`, and its year when that is not this one.
+    static func day(_ ms: Int64, now: Date = Date()) -> String {
+        let d = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+        let cal = Calendar.current
+        if cal.isDate(d, inSameDayAs: now) { return "Today" }
+        if let y = cal.date(byAdding: .day, value: -1, to: now), cal.isDate(d, inSameDayAs: y) { return "Yesterday" }
+        return (cal.isDate(d, equalTo: now, toGranularity: .year) ? thisYear : anotherYear).string(from: d)
     }
 
     /// `1 song`, `12 songs`.

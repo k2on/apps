@@ -25,6 +25,18 @@ final class RowsTests: XCTestCase {
         XCTAssertEqual(Spell.facts([Spell.count(2, "song"), nil, ""]), "2 songs")
     }
 
+    /// An episode's row says its length, then what is left of it, then that it is played.
+    func testAnEpisodesRowSaysWhatIsLeft() {
+        func mine(_ at: Int64, _ of: Int64, finished: Bool = false) -> ProgressEntry {
+            ProgressEntry(durationMs: of, finished: finished, mediaId: Id.none, name: "", positionMs: at, updatedMs: 0, userId: "u")
+        }
+        XCTAssertEqual(Spell.left(47 * 60_000, nil), "47 min")
+        XCTAssertEqual(Spell.left(47 * 60_000, mine(35 * 60_000, 47 * 60_000)), "12 min left")
+        XCTAssertEqual(Spell.left(47 * 60_000, mine(0, 0)), "47 min", "not begun")
+        XCTAssertEqual(Spell.left(47 * 60_000, mine(47 * 60_000, 47 * 60_000, finished: true)), "Played")
+        XCTAssertEqual(Spell.left(0, nil), "")
+    }
+
     /// `arkui::art::hash`'s own pins: one album is one square everywhere.
     func testTheDerivedSquaresHashIsTheDesktops() {
         XCTAssertEqual(Art.hash(""), 0x811c9dc5)
@@ -64,6 +76,7 @@ final class RowsTests: XCTestCase {
         XCTAssertEqual(Page.recording("bach/bwv-988@k").listings, [.credits("bach/bwv-988@k"), .work("bach/bwv-988"), .recordings("bach/bwv-988")])
         XCTAssertEqual(Page.recording("loose").listings, [.credits("loose")])
         XCTAssertEqual(Page.album("Water Music").listings, [])
+        XCTAssertEqual(Page.show("podcast/nix").listings, [.progress("podcast/nix"), .episodes("podcast/nix")])
     }
 
     func testRecentSearchesAreNewestFirstOnce() {

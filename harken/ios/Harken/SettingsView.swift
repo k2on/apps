@@ -1,10 +1,10 @@
 // Settings: who is signed in, which server and whether it can be reached,
-// the podcasts and sermons the library follows, signing out, and what this
-// is (Android's `SettingsScreen.kt`). Nothing a
-// person sees here is a cursor, a hash or a count of pending intents: those
-// are the diagnostics, behind the version — tapped seven times, the way a
-// phone's build number unlocks its developer options — and remembered once
-// found.
+// signing out, and what this is (Android's `SettingsScreen.kt`). The feeds
+// the library follows are not here: a show is followed from the + on
+// Podcasts and Sermons, and unfollowed from its own page. Nothing a person
+// sees here is a cursor, a hash or a count of pending intents: those are the
+// diagnostics, behind the version — tapped seven times, the way a phone's
+// build number unlocks its developer options — and remembered once found.
 import SwiftUI
 
 struct SettingsView: View {
@@ -12,8 +12,6 @@ struct SettingsView: View {
     @Environment(\.open) private var open
     @State private var taps = 0
     @State private var said: String? = nil
-    @State private var feedUrl = ""
-    @State private var feedKind = "podcast"
 
     var body: some View {
         Form {
@@ -31,33 +29,6 @@ struct SettingsView: View {
                 LabeledContent(Probe.display(model.server)) {
                     Text(model.snapshot.status?.linked == true ? "Connected" : "Can't reach it right now")
                 }
-            }
-            Section {
-                ForEach(model.subscriptions) { f in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(f.title.isEmpty ? f.url : f.title).lineLimit(2)
-                        let here = f.title.isEmpty && f.error.isEmpty ? "not read yet" : "\(f.episodes) of \(Spell.count(Int(f.items), "episode")) here"
-                        Text("\(f.kind == "sermon" ? "Sermons" : "Podcast") · \(here)").font(.subheadline).foregroundStyle(.secondary)
-                        if !f.error.isEmpty { Text("Could not read it: \(f.error)").font(.footnote).foregroundStyle(.secondary) }
-                    }
-                    .swipeActions { Button("Unfollow", role: .destructive) { model.unfollow(f) } }
-                    .contextMenu { Button("Unfollow", role: .destructive) { model.unfollow(f) } }
-                }
-                Picker("Kind", selection: $feedKind) {
-                    Text("Podcast").tag("podcast")
-                    Text("Sermons").tag("sermon")
-                }
-                .pickerStyle(.segmented)
-                TextField("Feed URL", text: $feedUrl)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onSubmit(follow)
-                Button("Follow", action: follow).disabled(feedUrl.trimmingCharacters(in: .whitespaces).isEmpty)
-            } header: {
-                Text("Podcasts and sermons")
-            } footer: {
-                Text("Follow a podcast or a church's sermons by its RSS feed. The server downloads its newest episodes and checks it every hour; a show's page fetches older ones.")
             }
             Section {
                 Button(role: .destructive) { model.signOut() } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }
@@ -85,13 +56,6 @@ struct SettingsView: View {
             }
         }
         .animation(Springs.move, value: said)
-    }
-
-    private func follow() {
-        let url = feedUrl.trimmingCharacters(in: .whitespaces)
-        guard !url.isEmpty else { return }
-        model.follow(feedKind, url)
-        feedUrl = ""
     }
 
     private func tapped() {

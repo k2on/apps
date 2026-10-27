@@ -328,7 +328,10 @@ private struct Face: View {
 
 /// A podcast's or a series of sermons' page, laid out as a playlist's: its
 /// picture, who makes it, how many episodes, Play and Shuffle; what it is
-/// about; then its episodes newest first (Android's `ShowPage`).
+/// about; then its episodes newest first, each as a podcast app has it
+/// (`EpisodeRow`), and older ones fetched at the foot while the feed has
+/// more than the library keeps. Followed, its `…` unfollows it (Android's
+/// `ShowPage`).
 struct ShowPage: View {
     let id: String
     @StateObject private var holding: Holding
@@ -345,6 +348,8 @@ struct ShowPage: View {
         let episodes = read ?? []
         let show = model.show(id)
         let title = show?.title ?? "Show"
+        // The feed it is read from, when it is followed.
+        let feed = model.subscription(of: id)
         List {
             PageHeader(kind: id.hasPrefix("sermon/") ? "Sermons" : "Podcast", title: title, by: show.flatMap { $0.author.isEmpty ? nil : $0.author },
                        facts: Spell.facts([Spell.count(episodes.count, "episode"), Spell.total(episodes)]), canPlay: !episodes.isEmpty,
@@ -356,25 +361,19 @@ struct ShowPage: View {
                 Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(6)
                     .listRowSeparator(.hidden)
             }
-            // How many of its episodes are not on the server yet, and its older
-            // ones fetched — twenty more, or every one — while the feed has
-            // more than the library keeps: the desktop's.
+            // How many of its episodes are not on the server yet, and why its
+            // feed could not be read last time: the desktop's.
             let waiting = episodes.compactMap { model.download($0.id) }
-            let feed = model.subscription(of: id)
-            if !waiting.isEmpty || feed?.hasOlder == true {
-                VStack(alignment: .leading, spacing: Space.s) {
+            if !waiting.isEmpty || feed.map({ !$0.error.isEmpty }) == true {
+                VStack(alignment: .leading, spacing: Space.xs) {
                     if !waiting.isEmpty {
                         let failed = waiting.filter { $0.state == "failed" }.count
                         let going = waiting.first { $0.state == "downloading" }
                         let said = ["\(waiting.count) not on the server yet", going?.said, failed > 0 ? "\(failed) could not be downloaded" : nil]
                         Text(said.compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary)
                     }
-                    if let f = feed, f.hasOlder {
-                        let left = f.items - f.keep
-                        HStack(spacing: Space.s) {
-                            Button("Fetch \(min(left, 20)) older") { model.fetchOlder(f, 20) }.buttonStyle(.bordered)
-                            if left > 20 { Button("Fetch all \(f.items)") { model.fetchOlder(f, 0) }.buttonStyle(.bordered) }
-                        }
+                    if let f = feed, !f.error.isEmpty {
+                        Text("Could not read its feed: \(f.error)").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
                 .listRowSeparator(.hidden)
@@ -387,16 +386,35 @@ struct ShowPage: View {
                     .listRowSeparator(.hidden)
             }
             ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
-                // How far everybody has got in it, where there is anybody; else how long it is.
-                let heard = model.listened(t.id, on: id)
-                let under = heard.isEmpty ? Spell.total([t]) ?? title : ProgressEntry.said(heard, me: model.me)
-                TrackRow(track: t, under: under, from: page, onPlay: { model.play(episodes, at: i, from: page) }) {
-                    CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.thumb)
-                }
+                // The signed-in person's place is the row's bar; everybody else's is said beside its play button.
+                let others = model.listened(t.id, on: id).filter { $0.userId != model.me }
+                EpisodeRow(track: t, detail: model.episode(t.id, on: id), others: ProgressEntry.said(others, me: model.me), from: page,
+                           onPlay: { model.play(episodes, at: i, from: page) })
+            }
+            // Older episodes, twenty at a time, while the feed has more than the library keeps.
+            if let f = feed, f.hasOlder {
+                Button("Fetch \(min(f.items - f.keep, 20)) Older Episodes") { model.fetchOlder(f, 20) }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Space.s)
+                    .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // The show's own settings, where it is followed: Unfollow.
+            if let f = feed {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button(role: .destructive) { model.unfollow(f) } label: { Label("Unfollow", systemImage: "minus.circle") }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .accessibilityLabel("More for \(title)")
+                }
+            }
+        }
         // Its episodes' chapters, for their menus.
         .task(id: (model.rows(Page.show(id)) ?? []).map { $0.id.hex }) { model.loadChapters((model.rows(Page.show(id)) ?? []).map { $0.id }) }
     }

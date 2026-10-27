@@ -1,4 +1,4 @@
-// The pieces harken's screens are made of: a track's row and its menu, a
+// The pieces harken's screens are made of: a track's row, an episode's, and their menu, a
 // page's header with Play and Shuffle, a shelf of covers and the card that
 // opens a page out of its cover, a section's heading, and the banner a
 // server that cannot be reached puts over a tab — Android's `Components.kt`
@@ -13,6 +13,8 @@ enum Sheet: Identifiable, Equatable {
     case newPlaylist(then: LibraryEntry?)
     case queue
     case devices
+    /// Finding a show to follow, as a podcast (`podcast`) or as sermons (`sermon`).
+    case follow(kind: String)
 
     var id: String {
         switch self {
@@ -20,6 +22,7 @@ enum Sheet: Identifiable, Equatable {
         case .newPlaylist(let t): return "new:" + (t?.id.hex ?? "")
         case .queue: return "queue"
         case .devices: return "devices"
+        case .follow(let kind): return "follow:" + kind
         }
     }
 }
@@ -101,6 +104,79 @@ struct TrackRow<Leading: View>: View {
         .onTapGesture(perform: onPlay)
         .contextMenu { TrackActions(track: track, from: from) }
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// An episode's row, as a podcast app has it: when it came out, in small
+/// capitals; its title, bold; what it is about; and a play button that says
+/// how long it is, how much is left of it or that it is played — or, while
+/// its file is not on the server yet, how its download goes — beside who
+/// else has listened, with how far the signed-in person has got under it
+/// once they have begun. Tapped anywhere, it plays; its menu is also its
+/// long press.
+struct EpisodeRow: View {
+    let track: LibraryEntry
+    /// What its feed says of it; none until the show's details are read.
+    let detail: EpisodeDetailsEntry?
+    /// How far everybody else has got in it: "Ada played".
+    let others: String
+    let from: Page?
+    let onPlay: () -> Void
+    @EnvironmentObject private var model: Model
+
+    var body: some View {
+        let playing = model.playingId == track.id.hex
+        let mine = model.mine(track.id)
+        let whole = (mine?.durationMs ?? 0) > 0 ? mine!.durationMs : track.durationMs
+        let begun = mine.map { !$0.finished && $0.positionMs > 0 && whole > 0 } ?? false
+        let said = model.download(track.id)?.short ?? Spell.left(track.durationMs, mine)
+        VStack(alignment: .leading, spacing: Space.xs) {
+            if let ms = detail?.publishedMs, ms > 0 {
+                Text(Spell.day(ms).uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            Text(track.title).font(.headline).foregroundStyle(playing ? Color.gold : Color.primary).lineLimit(2)
+            if let about = detail?.description, !about.isEmpty {
+                Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+            }
+            HStack(spacing: Space.m) {
+                Button(action: onPlay) {
+                    HStack(spacing: Space.xs) {
+                        if playing {
+                            Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: true)
+                        } else {
+                            Image(systemName: mine?.finished == true ? "arrow.counterclockwise" : "play.fill")
+                        }
+                        if !said.isEmpty { Text(said).monospacedDigit() }
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .tint(Color.gold)
+                .accessibilityLabel(said.isEmpty ? "Play \(track.title)" : "Play \(track.title), \(said)")
+                if !others.isEmpty {
+                    Text(others).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Menu { TrackActions(track: track, from: from) } label: {
+                    Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
+                }
+                .accessibilityLabel("More for \(track.title)")
+                .foregroundStyle(.secondary)
+            }
+            .padding(.top, Space.xs)
+            if begun, let m = mine {
+                ProgressView(value: Double(min(m.positionMs, whole)), total: Double(whole))
+                    .tint(Color.gold)
+                    .accessibilityLabel("\(Spell.left(track.durationMs, m))")
+            }
+        }
+        .padding(.vertical, Space.s)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onPlay)
+        .contextMenu { TrackActions(track: track, from: from) }
+        .accessibilityElement(children: .contain)
     }
 }
 

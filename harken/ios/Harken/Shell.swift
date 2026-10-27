@@ -113,6 +113,7 @@ struct SheetHost: ViewModifier {
         case .newPlaylist(let then): NewPlaylist(then: then).presentationDetents([.height(280)])
         case .queue: QueueSheet().presentationDetents([.medium, .large])
         case .devices: DevicesSheet().presentationDetents([.medium, .large])
+        case .follow(let kind): FollowSheet(kind: kind).presentationDetents([.medium, .large])
         }
     }
 }

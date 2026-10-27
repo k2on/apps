@@ -1,10 +1,12 @@
 // Library: everything, four ways — the person's playlists, the albums, the
 // people (the composers some work here is by, then everyone else who made
 // something), and every song in the order it arrived — each opening the page
-// it stands for, zooming out of its cover (Android's `LibraryScreen.kt`). The
-// four are a segmented control in the glass of the navigation bar's bottom;
-// the playlists list is where a new one is made, and the domain's own checks
-// decide whether a name will do.
+// it stands for, zooming out of its cover (Android's `LibraryScreen.kt`) —
+// and the podcasts and the sermons, always there, so the first can be
+// followed. They are a segmented control in the glass of the navigation
+// bar's bottom; the playlists list is where a new one is made, and the
+// domain's own checks decide whether a name will do; the + on Podcasts and
+// Sermons finds a show to follow (`FollowSheet`).
 import SwiftUI
 
 enum LibraryTab: String, CaseIterable, Identifiable {
@@ -46,8 +48,8 @@ struct LibraryView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 SwiftUI.Picker("Show", selection: $tab) {
-                    // Podcasts and Sermons only where there is a show of the kind, unless it is the list shown.
-                    ForEach(LibraryTab.allCases.filter { t in t == tab || t.kind.map { !model.shows(of: $0).isEmpty } ?? true }) { Text($0.rawValue).tag($0) }
+                    // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.
+                    ForEach(LibraryTab.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, Space.page)
@@ -56,9 +58,15 @@ struct LibraryView: View {
             }
         }
         .toolbar {
+            // On Podcasts and Sermons the + finds a show to follow; on the rest it makes a playlist.
             ToolbarItem(placement: .topBarLeading) {
-                Button { present(.newPlaylist(then: nil)) } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New playlist")
+                if let kind = tab.kind {
+                    Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
+                        .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
+                } else {
+                    Button { present(.newPlaylist(then: nil)) } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("New playlist")
+                }
             }
         }
     }
@@ -140,34 +148,74 @@ private struct ShowsGrid: View {
     let kind: String
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
+    @Environment(\.present) private var present
     @Environment(\.zoom) private var zoom
 
     var body: some View {
         let shows = model.shows(of: kind)
-        if shows.isEmpty {
-            ContentUnavailableView(kind == "sermon" ? "No sermons yet" : "No podcasts yet", systemImage: "mic",
-                                   description: Text("A show appears here when the server follows its feed, or finds a folder of it under \(kind)s/."))
+        let unread = model.unread(of: kind)
+        if shows.isEmpty && unread.isEmpty {
+            ContentUnavailableView {
+                Label(kind == "sermon" ? "No sermons yet" : "No podcasts yet", systemImage: "mic")
+            } description: {
+                Text("Tap + to follow one: search Apple Podcasts, or paste its feed's address. A folder of it under \(kind)s/ on the server appears here too.")
+            } actions: {
+                Button(kind == "sermon" ? "Follow Sermons" : "Follow a Podcast") { present(.follow(kind: kind)) }
+                    .buttonStyle(.glassProminent)
+            }
         } else {
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Space.l)], spacing: Space.xl) {
-                    ForEach(shows) { s in
-                        let r = Route.page(.show(s.id))
-                        Button { open(r) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                CoverView(seed: s.title, url: RowCover.url(model, s.art), side: 180)
-                                    .aspectRatio(1, contentMode: .fit)
-                                    .zoomSource(r, zoom)
-                                    .padding(.bottom, Space.s - 2)
-                                Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
+                VStack(spacing: Space.xl) {
+                    // Followed and not a show yet: the server has not read its feed, or could not.
+                    if !unread.isEmpty {
+                        VStack(spacing: Space.s) {
+                            ForEach(unread) { f in UnreadFeed(feed: f) }
                         }
-                        .buttonStyle(.plain)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Space.l)], spacing: Space.xl) {
+                        ForEach(shows) { s in
+                            let r = Route.page(.show(s.id))
+                            Button { open(r) } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    CoverView(seed: s.title, url: RowCover.url(model, s.art), side: 180)
+                                        .aspectRatio(1, contentMode: .fit)
+                                        .zoomSource(r, zoom)
+                                        .padding(.bottom, Space.s - 2)
+                                    Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                                    Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 .padding(Space.page)
+                .animation(Springs.move, value: unread.map { $0.url })
             }
         }
+    }
+}
+
+/// A feed followed and not read into a show yet: its address, whether the
+/// server has read it at all or why it could not, and Unfollow — on glass.
+private struct UnreadFeed: View {
+    let feed: SubscriptionsEntry
+    @EnvironmentObject private var model: Model
+
+    var body: some View {
+        HStack(spacing: Space.m) {
+            Image(systemName: feed.error.isEmpty ? "clock" : "exclamationmark.triangle").foregroundStyle(.secondary).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feed.title.isEmpty ? feed.url : feed.title).font(.subheadline.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                Text(feed.error.isEmpty ? "Not read yet" : "Could not read it: \(feed.error)").font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            }
+            Spacer(minLength: 0)
+            Button("Unfollow", role: .destructive) { model.unfollow(feed) }.buttonStyle(.borderless).font(.subheadline)
+        }
+        .padding(Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 }
 

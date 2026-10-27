@@ -257,6 +257,13 @@ final class Model: ObservableObject {
     var subscriptions: [SubscriptionsEntry] { snapshot.subscriptions }
     func subscription(of show: String) -> SubscriptionsEntry? { snapshot.subscriptions.first { !$0.showId.isEmpty && $0.showId == show } }
     func download(_ media: Id) -> DownloadsEntry? { snapshot.downloads[media] }
+    /// The feeds of a kind followed and not read into a show yet: listed
+    /// over the shows, so one just followed is there at once.
+    func unread(of kind: String) -> [SubscriptionsEntry] {
+        snapshot.subscriptions.filter { f in f.kind == kind && (f.showId.isEmpty || show(f.showId) == nil) }
+    }
+    /// An episode of a held show as its feed tells it: what it is about, when it came out.
+    func episode(_ media: Id, on show: String) -> EpisodeDetailsEntry? { snapshot.episodes[show]?[media] }
     /// How far the signed-in person has got in an episode; and everybody,
     /// in one of a held show's.
     func mine(_ media: Id) -> ProgressEntry? { snapshot.mine[media] }
