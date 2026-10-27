@@ -1,7 +1,10 @@
-// The covers, for a car: a picture something outside the app loads by a
-// `content://` URI — Android Auto draws a browse list in its own process and
-// takes a list item's art as a URI, never a bitmap, and an `http` one it
-// will not load.
+// The covers, for a car and the lock screen: a picture something outside
+// the app loads by a `content://` URI — Android Auto draws a browse list,
+// and the playing track beside a map, in its own process and takes the art
+// as a URI, never a bitmap, and an `http` one it will not load. So the
+// playing track's cover is one of these too (`Items.of`), at [CarArt.PLAYING]:
+// Media3 reads it in this process for the notification's bitmap, and a car
+// reads it itself, granted the URI as the queue is set.
 //
 // A URI names the size the car asked for, the record's name and where its
 // cover is (`uri`): the provider takes the cover's original from the
@@ -14,8 +17,9 @@
 // colour.
 //
 // Not exported: a car reads only the URIs it was handed, each granted to
-// its package as it is handed over (PlaybackService), so nothing else can
-// ask this provider to fetch anything at all.
+// its package as it is handed over — a browse list's as it is answered, the
+// queue's as it is set (PlaybackService) — so nothing else can ask this
+// provider to fetch anything at all.
 package dev.harken.android
 
 import android.content.ContentProvider
@@ -59,6 +63,9 @@ object CarArt {
 
     /** What a car is given when it does not say what size it draws at. */
     const val SIZE = 320
+
+    /** What the playing track's picture is given at: the lock screen's, a car's now-playing. */
+    const val PLAYING = 512
 
     /** The most a car is given across, whatever it asks: a cover is decoded to [Covers.BOUND] anyway. */
     const val MAX = 768

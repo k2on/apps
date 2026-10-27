@@ -1483,10 +1483,14 @@ be fetched, is the derived square the screens draw, rendered to a bitmap
 provider is not exported: every URI is granted to the controller's package
 as it is handed over (`grantUriPermission`, the provider declaring
 `grantUriPermissions`), so nothing else can make it fetch anything. The
-now-playing item keeps its cover's `http` URL, which Media3 loads into a
-bitmap itself, and a track with no cover now carries the square's URI
-there too, so the notification and the car's player draw the square rather
-than nothing.
+now-playing item carries such a URI too (`Items.of`, at `CarArt.PLAYING`,
+512 across), cover or square alike: Media3 loads it into the notification's
+bitmap in the app's own process, and the car — which draws the playing track
+beside a map from the URI alone, and will not load an `http` one — is
+granted the queue's URIs as the queue is set and when it connects
+(`grantQueue`, `onConnect`), the way a browse list's are as it is answered.
+(It once kept the cover's `http` URL there, trusting Media3's bitmap; the
+lock screen drew it and Android Auto's card did not.)
 
 **Search and voice.** `onSearch` is the phone's own search, grouped as its
 screen groups it (`Results.of`): albums, artists, songs. "Play X on

@@ -17,8 +17,10 @@
 // session has — the session's, as a press, or this phone's own — the same
 // way as anything else that sets a queue. One rule is the car's alone: a
 // choice made in it plays on this phone, whatever is sounding elsewhere
-// ([RemotePlayer.fromCar]); a car's covers are `content://` URIs
-// (CoverProvider.kt), granted to it as it is handed them. What it plays is
+// ([RemotePlayer.fromCar]); every cover is a `content://` URI
+// (CoverProvider.kt) — a browse list's and the playing track's alike, since
+// a car will not load an `http` one beside a map — each granted to the car
+// as it is handed over, and the queue's as it is set. What it plays is
 // `/media/<file>` from the session's server (`Media.url`), streamed with
 // range requests, which is what makes seeking work. Notifications are the
 // one permission the onboarding asks for, because they are what the
@@ -93,6 +95,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
@@ -178,6 +181,14 @@ class PlaybackService : MediaLibraryService() {
         session = made
         // A choice in a car plays here: the media session says which controller is asking.
         remote.fromCar = { made.controllerForCurrentRequest?.let { isCar(made, it) } == true }
+        // The queue's covers, granted to every car as the queue changes — on whichever player the
+        // session has, so the one it is swapped to is already granted when it is.
+        val granting =
+            object : Player.Listener {
+                override fun onTimelineChanged(timeline: Timeline, reason: Int) = grantQueue()
+            }
+        exo.addListener(granting)
+        remote.addListener(granting)
         // Streaming needs the server: a stream that cannot be fetched is said, in a sentence, to
         // whatever is showing the player — a car's screen most of all — rather than a silence.
         exo.addListener(
@@ -250,7 +261,9 @@ class PlaybackService : MediaLibraryService() {
     // notification and a headset reach.
     private fun use(p: Player) {
         val s = session ?: return
-        if (s.player !== p) s.player = p
+        if (s.player === p) return
+        s.player = p
+        grantQueue()
     }
 
     private fun isCar(s: MediaSession, c: MediaSession.ControllerInfo): Boolean = s.isAutomotiveController(c) || s.isAutoCompanionController(c)
@@ -288,6 +301,9 @@ class PlaybackService : MediaLibraryService() {
         return out
     }
 
+    /** The pictures each package was granted, so a queue set again costs nothing. */
+    private val granted = HashSet<Pair<String, Uri>>()
+
     // A car reads only the pictures it was handed: each granted to it as it is.
     private fun grant(c: MediaSession.ControllerInfo, items: List<MediaItem>) {
         val to = c.packageName
@@ -295,12 +311,26 @@ class PlaybackService : MediaLibraryService() {
         for (i in items) {
             val uri = i.mediaMetadata.artworkUri ?: continue
             if (uri.authority != CarArt.AUTHORITY) continue
+            if (!granted.add(to to uri)) continue
             try {
                 grantUriPermission(to, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             } catch (e: SecurityException) {
                 // A package this phone cannot name: it draws no picture.
             }
         }
+    }
+
+    /** What the session's player holds, as media items. */
+    private fun queue(p: Player): List<MediaItem> = (0 until p.mediaItemCount).map { p.getMediaItemAt(it) }
+
+    // The playing track's cover, and the rest of the queue's, to every car connected: what a car
+    // draws beside a map it reads itself, from the URI, and never browsed for.
+    private fun grantQueue() {
+        val s = session ?: return
+        val cars = s.connectedControllers.filter { isCar(s, it) }
+        if (cars.isEmpty()) return
+        val items = queue(s.player)
+        for (c in cars) grant(c, items)
     }
 
     private val signIn = SessionError(SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED, "Sign in to Harken on your phone.")
@@ -320,6 +350,12 @@ class PlaybackService : MediaLibraryService() {
      * carrying it.
      */
     private inner class Browsing : MediaLibrarySession.Callback {
+        // A car arriving while something plays is handed the queue's covers before it draws them.
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+            if (isCar(session, controller)) grant(controller, queue(session.player))
+            return super.onConnect(session, controller)
+        }
+
         override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: MediaLibraryService.LibraryParams?): ListenableFuture<LibraryResult<MediaItem>> {
             val extras = params?.extras
             tabs = extras?.getInt(MediaConstants.EXTRAS_KEY_ROOT_CHILDREN_LIMIT, Car.TABS)?.takeIf { it > 0 } ?: Car.TABS
@@ -460,9 +496,11 @@ object Items {
     private const val FROM = "harken.from"
 
     /**
-     * `t` as a media item for `server`, with its cover's path and the route it was played from. A
-     * track whose album has no cover carries the derived square, as a URI the app answers itself
-     * (CoverProvider.kt): what the notification and a car draw, where the screens draw the square.
+     * `t` as a media item for `server`, with its cover's path and the route it was played from. Its
+     * picture is a `content://` URI the app answers itself (CoverProvider.kt), [CarArt.PLAYING]
+     * across — the cover, cropped square, or the derived square for an album without one. The
+     * notification and the lock screen draw it through Media3's own loader, in this process; a car
+     * reads it from its own, which will not load an `http` URL, granted it as the queue is set.
      */
     fun of(t: Queued, server: String, art: String, from: String): MediaItem {
         val uri = Uri.parse(Media.url(server, t.file))
@@ -480,7 +518,7 @@ object Items {
                     .setTitle(t.title)
                     .setArtist(t.creator)
                     .setAlbumTitle(t.album)
-                    .setArtworkUri(art.takeIf { it.isNotEmpty() }?.let { Uri.parse(Media.url(server, it)) } ?: CarArt.uri(null, t.album.ifEmpty { t.title }))
+                    .setArtworkUri(CarArt.uri(art.takeIf { it.isNotEmpty() }?.let { Media.url(server, it) }, t.album.ifEmpty { t.title }, CarArt.PLAYING))
                     .setIsPlayable(true)
                     .setIsBrowsable(false)
                     .setExtras(extras)
