@@ -372,7 +372,7 @@
             version = "2.46.0";
             src = pkgs.fetchzip {
               url = "https://github.com/yonaskolb/XcodeGen/releases/download/${version}/xcodegen.zip";
-              hash = "sha256-7NjCsInBjkOL1RqWSaWKGDJxp/gn71rmhTWG2ErHDqA=";
+              hash = "sha256-fq+E9cXnbGlqEsiTYlxPxT+L+ezxGdktnDOf3O9LNl0=";
               stripRoot = false;
             };
             # Signed as it is: stripping or patching it would break that.
