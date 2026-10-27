@@ -107,15 +107,17 @@ struct AlbumPage: View {
 /// out as a catalogue opens a composer's: their banner (or, for somebody
 /// with no wide picture, their portrait beside their name); their most
 /// recorded work set apart with a Play; their best known works and a "See
-/// All" that lists every one by catalogue; their records; and, for somebody
-/// who wrote nothing here, their songs. Each section only when it has
-/// something in it.
+/// All" that lists every one by catalogue; their records; for somebody
+/// who wrote nothing here, their songs; and every episode they are on, with
+/// their picture and their web page as a feed gives them. Each section only
+/// when it has something in it.
 struct ArtistPage: View {
     let name: String
     @StateObject private var holding: Holding
     @State private var all = false
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
+    @Environment(\.openURL) private var openURL
 
     init(model: Model, name: String) {
         self.name = name
@@ -129,13 +131,22 @@ struct ArtistPage: View {
         let albums = model.albums(by: name)
         let artist = model.artist(named: name)
         let composer = model.composer(named: name)
-        let counts = Spell.facts([Spell.count(albums.count, "album"), Spell.count(tracks.count, "track")])
+        // The episodes they are on, and how the feeds name them: somebody on
+        // podcasts and nothing else is said by those.
+        let episodes = model.appearances(of: name) ?? []
+        let face = model.face(name)
+        let onlyOn = !episodes.isEmpty && works.isEmpty && tracks.isEmpty && albums.isEmpty
+        let counts = onlyOn ? Spell.count(episodes.count, "episode")
+            : Spell.facts([Spell.count(albums.count, "album"), Spell.count(tracks.count, "track")])
         // What they are and when they lived, as a catalogue heads a person;
         // nobody's years known, and it is how much of them there is here.
         let lived = Catalogue.life(born: artist?.born ?? 0, died: artist?.died ?? 0)
         let life = lived.isEmpty ? Catalogue.life(born: composer?.born ?? 0, died: composer?.died ?? 0) : lived
-        let kicker = Spell.facts([works.isEmpty ? "Artist" : "Composer", life.isEmpty ? counts : life])
-        let portrait = [artist?.art, composer?.art].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
+        // Somebody only on podcasts is what their newest episode calls them: "Guest", "Host".
+        let role = episodes.first.flatMap { model.people[$0.id] }?.first(where: { $0.name == name })?.role ?? ""
+        let what = !works.isEmpty ? "Composer" : onlyOn ? role : "Artist"
+        let kicker = Spell.facts([what, life.isEmpty ? counts : life])
+        let portrait = [artist?.art, composer?.art, face?.art].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
         // Their wide picture across the page, or else their portrait cropped
         // to it: only somebody with no picture at all has the round header.
         let wide = [artist?.banner, composer?.banner].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
@@ -160,6 +171,16 @@ struct ArtistPage: View {
                 RecordHeader(over: kicker, title: name, small: life.isEmpty ? "" : counts, onPlay: play, onShuffle: shuffle) {
                     CoverView(seed: name, url: RowCover.url(model, portrait), side: Space.record, round: true)
                 }
+            }
+            // Their own page on the web, where a feed gives one.
+            if let web = face?.web {
+                Button { openURL(web) } label: { Label(face?.site ?? "", systemImage: "safari") }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .tint(Color.gold)
+                    .padding(.horizontal, Space.page)
+                    .padding(.top, Space.m)
+                    .accessibilityLabel("Open \(face?.site ?? "their page") in the browser")
             }
             if let best = Catalogue.featured(works) {
                 Featured(label: "Most Recorded", seed: best.id, url: RowCover.url(model, best.art), title: best.title,
@@ -186,7 +207,21 @@ struct ArtistPage: View {
                 SectionHeading(title: "Songs")
                 CatalogueTracks(tracks: tracks, page: page, creator: name)
             }
+            // Every episode they are on, newest first, each under its show
+            // and with whoever else is on it, playing as a show's do.
+            if !episodes.isEmpty {
+                SectionHeading(title: "Episodes")
+                ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
+                    let others = PeopleEntry.guests(model.people[t.id] ?? []).filter { $0.name != name }
+                    EpisodeRow(track: t, detail: nil, others: "", people: others, show: model.show(of: t)?.title ?? t.creator, from: page,
+                               onPlay: { model.play(episodes, at: i, from: page) })
+                        .padding(.horizontal, Space.page)
+                    Divider().padding(.leading, Space.page)
+                }
+            }
         }
+        // Who is on each of their episodes: their own picture and link among them.
+        .task(id: episodes.map { $0.id.hex }) { model.loadPeople(episodes.map { $0.id }) }
     }
 }
 
@@ -328,9 +363,10 @@ private struct Face: View {
 }
 
 /// A podcast's or a series of sermons' page, laid out as a playlist's: its
-/// picture, who makes it, how many episodes, Play and Shuffle; what it is
-/// about; then its episodes newest first, each as a podcast app has it
-/// (`EpisodeRow`), and older ones fetched at the foot while the feed has
+/// picture, who makes it, how many episodes, Play and Shuffle; who hosts it,
+/// as its newest episode names them; what it is about; then its episodes
+/// newest first, each as a podcast app has it (`EpisodeRow`) with whoever
+/// else is on it, and older ones fetched at the foot while the feed has
 /// more than the library keeps. Followed, its `…` unfollows it (Android's
 /// `ShowPage`).
 struct ShowPage: View {
@@ -358,6 +394,13 @@ struct ShowPage: View {
                 CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.header).frame(width: Space.header, height: Space.header)
             }
             .listRowSeparator(.hidden)
+            // Who hosts it, once: the newest episode's hosts, as its feed names them.
+            let hosts = PeopleEntry.hosts(episodes.first.flatMap { model.people[$0.id] } ?? [])
+            if !hosts.isEmpty {
+                PeopleLine(people: hosts, words: "Hosted by " + PeopleEntry.named(hosts), side: 26, font: .subheadline)
+                    .frame(maxWidth: .infinity)
+                    .listRowSeparator(.hidden)
+            }
             if let about = show?.description, !about.isEmpty {
                 Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(6)
                     .listRowSeparator(.hidden)
@@ -397,7 +440,8 @@ struct ShowPage: View {
             ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
                 // The signed-in person's place is the row's bar; everybody else's is said beside its play button.
                 let others = model.listened(t.id, on: id).filter { $0.userId != model.me }
-                EpisodeRow(track: t, detail: model.episode(t.id, on: id), others: ProgressEntry.said(others, me: model.me), from: page,
+                EpisodeRow(track: t, detail: model.episode(t.id, on: id), others: ProgressEntry.said(others, me: model.me),
+                           people: PeopleEntry.guests(model.people[t.id] ?? []), from: page,
                            onPlay: { model.play(episodes, at: i, from: page) })
             }
             // Older episodes, twenty at a time, while the feed has more than the library keeps.
@@ -424,8 +468,12 @@ struct ShowPage: View {
                 }
             }
         }
-        // Its episodes' chapters, for their menus.
-        .task(id: (model.rows(Page.show(id)) ?? []).map { $0.id.hex }) { model.loadChapters((model.rows(Page.show(id)) ?? []).map { $0.id }) }
+        // Its episodes' chapters, for their menus, and who is on each.
+        .task(id: (model.rows(Page.show(id)) ?? []).map { $0.id.hex }) {
+            let media = (model.rows(Page.show(id)) ?? []).map { $0.id }
+            model.loadChapters(media)
+            model.loadPeople(media)
+        }
     }
 }
 

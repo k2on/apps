@@ -19,8 +19,10 @@
 // again. A page — an album, an artist, a playlist, a performance — is a view
 // too, held while a screen shows it ([hold]) and let go when the last one
 // leaves; and so are the catalogue's views a page reads beside its tracks
-// (`Page.listings`: a person's works, a work and its performances, who is
-// on one), each held by its key for as long as some page holds it.
+// (`Page.listings`: a person's works and the episodes they are on, a work
+// and its performances, who is on one), each held by its key for as long
+// as some page holds it. Who is on an episode, and its transcript, are read
+// once when a screen asks.
 //
 // **The listening session is the reconciler's** (`Player`, harken's one
 // reconciler, S3b): each drain steps it, which makes this phone's player
@@ -70,6 +72,8 @@ struct Snapshot {
     var work = [String: WorkSummary]()
     var recordings = [String: [RecordingsEntry]]()
     var credits = [String: [CreditsEntry]]()
+    /// The episodes a held person is on, newest first, by their name.
+    var appearances = [String: [LibraryEntry]]()
     var status: Status? = nil
     var heard = Heard()
     /// How many changes the peer has reported: what the diagnostics read again on.
@@ -194,6 +198,7 @@ final class Bridge {
     private let work = Holds<WorkSummary> { h, id in try h.work(WorkInput(id: id)) }
     private let recordings = Holds<RecordingsEntry> { h, work in try h.recordings(Recordings(workId: work)) }
     private let credits = Holds<CreditsEntry> { h, take in try h.credits(Credits(recordingId: take)) }
+    private let appearances = Holds<LibraryEntry> { h, name in try Phone.appearances(h, name) }
 
     /// The session for `login` at `server`, its replica under `root`; this
     /// phone named `name` in the listening session, playing through `sound`.
@@ -351,6 +356,7 @@ final class Bridge {
         for (k, rows) in work.update() { snap.work[k] = rows.first }
         for (k, rows) in recordings.update() { snap.recordings[k] = rows }
         for (k, rows) in credits.update() { snap.credits[k] = rows }
+        for (k, rows) in appearances.update() { snap.appearances[k] = rows }
     }
 
     private func step() {
@@ -456,6 +462,9 @@ final class Bridge {
         case let .episodes(k):
             guard let rows = episodes.hold(k, h) else { return false }
             snap.episodes[k] = Bridge.episodesByMedia(rows)
+        case let .appearances(k):
+            guard let rows = appearances.hold(k, h) else { return false }
+            snap.appearances[k] = rows
         }
         return true
     }
@@ -483,13 +492,19 @@ final class Bridge {
         case let .credits(k): if credits.release(k) { snap.credits[k] = nil }
         case let .progress(k): if progress.release(k) { snap.progress[k] = nil }
         case let .episodes(k): if episodes.release(k) { snap.episodes[k] = nil }
+        case let .appearances(k): if appearances.release(k) { snap.appearances[k] = nil }
         }
     }
 
     /// A page's tracks once, for playing it from somewhere that does not show
-    /// it (Home's last played; a performance's Play on a page of performances).
+    /// it (Home's last played; a performance's Play on a page of performances):
+    /// a person's, their songs and then the episodes they are on.
     func read(_ page: Page, done: @escaping ([LibraryEntry]) -> Void) {
-        ask([], { h in page == .songs ? self.library.rows : Phone.rows(h, page) }, done)
+        ask([], { h -> [LibraryEntry] in
+            if page == .songs { return self.library.rows }
+            if case let .artist(name) = page { return Phone.rows(h, page) + Phone.once({ try Phone.appearances(h, name) }) }
+            return Phone.rows(h, page)
+        }, done)
     }
 
     /// A work's fullest performance — the first of its `recordings` — and its
@@ -511,6 +526,20 @@ final class Bridge {
             for m in media { out[m] = Phone.once({ try h.chapters(EpisodeInput(mediaId: m)) }) }
             return out
         }, done)
+    }
+
+    /// Who is on episodes once, each in the feed's order, by media id.
+    func people(_ media: [Id], done: @escaping ([Id: [PeopleEntry]]) -> Void) {
+        ask([:], { h in
+            var out = [Id: [PeopleEntry]]()
+            for m in media { out[m] = Phone.once({ try h.people(EpisodeInput(mediaId: m)) }) }
+            return out
+        }, done)
+    }
+
+    /// An episode's transcript once, its lines in the order they start.
+    func transcript(_ media: Id, done: @escaping ([TranscriptEntry]) -> Void) {
+        ask([], { h in Phone.once({ try h.transcript(EpisodeInput(mediaId: media)) }) }, done)
     }
 
     /// An episode said played, or not, by the signed-in person.
@@ -607,6 +636,7 @@ final class Bridge {
             self.credits.clear()
             self.progress.clear()
             self.episodes.clear()
+            self.appearances.clear()
             self.harken = nil
         }
     }
