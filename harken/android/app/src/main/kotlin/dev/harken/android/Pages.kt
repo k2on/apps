@@ -484,9 +484,9 @@ fun ShowPage(
             }
         }
         if (show == null) {
-            item { Empty(Glyphs.Show, "This show is gone", "It was taken off this server.") }
+            item { Empty(if (id.startsWith("sermon/")) Glyphs.Pulpit else Glyphs.Show, "This show is gone", "It was taken off this server.") }
         } else if (episodes.isEmpty()) {
-            item { Empty(Glyphs.Show, "No episodes yet", "The server downloads a feed's newest episodes; they appear here as they arrive.") }
+            item { Empty(if (id.startsWith("sermon/")) Glyphs.Pulpit else Glyphs.Show, "No episodes yet", "The server downloads a feed's newest episodes; they appear here as they arrive.") }
         }
         if (episodes.isNotEmpty()) item { HorizontalDivider(Modifier.padding(start = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
         itemsIndexed(episodes, key = { _, t -> t.id.hex }) { i, t ->

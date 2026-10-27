@@ -104,7 +104,9 @@ impl Source {
             Source::Artists | Source::Artist(_) => glyphs::ARTIST,
             Source::Composers => glyphs::COMPOSER,
             Source::Work(..) | Source::Recording(..) | Source::Settings => glyphs::LIBRARY,
-            Source::Podcasts | Source::Sermons | Source::Show(..) => glyphs::SHOW,
+            Source::Sermons => glyphs::PULPIT,
+            Source::Show(id, _) if id.starts_with("sermon/") => glyphs::PULPIT,
+            Source::Podcasts | Source::Show(..) => glyphs::SHOW,
             Source::Playlist(..) => glyphs::PLAYLIST,
         }
     }

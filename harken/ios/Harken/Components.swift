@@ -485,3 +485,11 @@ struct AccountMenu: View {
         return "Can't reach \(Probe.display(model.server)) right now"
     }
 }
+
+extension Image {
+    /// A show's mark: a pulpit for sermons — drawn, in the asset catalog,
+    /// as SF Symbols has none — and a microphone for a podcast.
+    static func show(sermon: Bool) -> Image {
+        sermon ? Image("Pulpit") : Image(systemName: "mic")
+    }
+}

@@ -379,11 +379,19 @@ struct ShowPage: View {
                 .listRowSeparator(.hidden)
             }
             if show == nil {
-                ContentUnavailableView("This show is gone", systemImage: "mic", description: Text("It was taken off this server."))
-                    .listRowSeparator(.hidden)
+                ContentUnavailableView {
+                    Label { Text("This show is gone") } icon: { Image.show(sermon: id.hasPrefix("sermon/")) }
+                } description: {
+                    Text("It was taken off this server.")
+                }
+                .listRowSeparator(.hidden)
             } else if read != nil && episodes.isEmpty {
-                ContentUnavailableView("No episodes yet", systemImage: "mic", description: Text("The server downloads a feed's newest episodes; they appear here as they arrive."))
-                    .listRowSeparator(.hidden)
+                ContentUnavailableView {
+                    Label { Text("No episodes yet") } icon: { Image.show(sermon: id.hasPrefix("sermon/")) }
+                } description: {
+                    Text("The server downloads a feed's newest episodes; they appear here as they arrive.")
+                }
+                .listRowSeparator(.hidden)
             }
             ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
                 // The signed-in person's place is the row's bar; everybody else's is said beside its play button.

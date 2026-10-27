@@ -108,8 +108,13 @@ pub const SKIP_BACK: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBo
 /// `rotate-cw`: on a few seconds, in place of the next track.
 pub const SKIP_FORWARD: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>"##;
 
-/// `mic`: a podcast, a sermon, a show of either. Its capsule keeps its
-/// rounded ends, which are the drawing.
+/// A sermon, and a series of them: a pulpit — a reading desk tilted on a
+/// stand that narrows to its foot. Not Lucide's: it has none, so this is
+/// drawn in its grid and its stroke, to sit beside them.
+pub const PULPIT: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M3 8l18-4"/><path d="M5 7.6V10h14V5.6"/><path d="M8 10l1 9h6l1-9"/><path d="M6 21h12"/></svg>"##;
+
+/// `mic`: a podcast, a show. Its capsule keeps its rounded ends, which
+/// are the drawing.
 pub const SHOW: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></svg>"##;
 
 /// `shuffle`

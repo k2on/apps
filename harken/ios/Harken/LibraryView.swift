@@ -156,7 +156,11 @@ private struct ShowsGrid: View {
         let unread = model.unread(of: kind)
         if shows.isEmpty && unread.isEmpty {
             ContentUnavailableView {
-                Label(kind == "sermon" ? "No sermons yet" : "No podcasts yet", systemImage: "mic")
+                Label {
+                    Text(kind == "sermon" ? "No sermons yet" : "No podcasts yet")
+                } icon: {
+                    Image.show(sermon: kind == "sermon")
+                }
             } description: {
                 Text("Tap + to follow one: search Apple Podcasts, or paste its feed's address. A folder of it under \(kind)s/ on the server appears here too.")
             } actions: {

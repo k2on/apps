@@ -151,7 +151,7 @@ fun unread(kind: String, feeds: List<Subscription>, shows: List<Show>): List<Sub
 private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: String, act: Do) {
     if (shows.isEmpty() && waiting.isEmpty()) {
         Empty(
-            Glyphs.Show,
+            if (kind == "sermon") Glyphs.Pulpit else Glyphs.Show,
             if (kind == "sermon") "No sermons yet" else "No podcasts yet",
             "Tap + to find one in Apple Podcasts, or paste its feed's address. The server downloads its newest episodes and keeps it up to date.",
             action = if (kind == "sermon") "Add sermons" else "Add a podcast",

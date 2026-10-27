@@ -107,6 +107,8 @@ object Glyphs {
 
     /** A podcast, a sermon, a show of either: Lucide's `mic`, its capsule's ends kept round. */
     val Show = glyph("mic", "M12 19v3", "M19 10v2a7 7 0 0 1-14 0v-2", "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z")
+    /** Sermons, and a series of them: a pulpit, its reading desk tilted on a stand. Not Lucide's, which has none: drawn in its grid. */
+    val Pulpit = glyph("pulpit", "M3 8l18-4", "M5 7.6V10h14V5.6", "M8 10l1 9h6l1-9", "M6 21h12")
     val Note = glyph("music", "M9 18V5l12-2v13", circle(6f, 18f, 3f), circle(18f, 16f, 3f))
     val More = ArkGlyphs.More
     val Back = ArkGlyphs.Back
