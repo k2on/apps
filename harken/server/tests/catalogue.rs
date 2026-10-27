@@ -137,9 +137,12 @@ fn a_catalogue_is_downloaded_once_and_is_the_library() {
     })
     .expect("the catalogue imported, to its last credit");
     // And its files downloaded: none left to do but the one that cannot be.
+    // The downloads are queued after the rows, and a failure is said after
+    // every one is: until a failure is here, an empty list is one not
+    // queued yet.
     eventually(20, || {
         let downloads = hub_rows::<Download>(&server, "download");
-        downloads.iter().all(|d| d.state == "failed").then_some(())
+        (!downloads.is_empty() && downloads.iter().all(|d| d.state == "failed")).then_some(())
     })
     .expect("the downloads done");
     let work = row::<Work>(&server, "work", |w| w.catalogue == "BWV 1068").expect("the work");

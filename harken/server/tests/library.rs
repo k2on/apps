@@ -992,13 +992,17 @@ fn a_feed_followed_is_downloaded_and_a_show() {
             url: feed.clone(),
         },
     );
-    // Downloaded: in the library, and no download of it left.
+    // Downloaded: in the library, and no download of it left but the one
+    // that cannot be. Its episodes are listed before their downloads are
+    // queued, and a failure is said after every one is: until a failure is
+    // here, an empty list is one not queued yet.
     let here = |server: &Server, admin: &mut Peer, n: usize| {
         eventually(20, || {
             admin.pump();
             let downloads = hub_rows::<Download>(server, "download");
             let songs = songs(server);
-            (songs.len() >= n && downloads.iter().all(|d| d.state == "failed")).then_some(songs)
+            let done = !downloads.is_empty() && downloads.iter().all(|d| d.state == "failed");
+            (songs.len() >= n && done).then_some(songs)
         })
     };
     let found = here(&server, &mut admin, 4).expect("every episode listed");
