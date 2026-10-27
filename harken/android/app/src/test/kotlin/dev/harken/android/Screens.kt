@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -275,6 +276,12 @@ class Screens {
         val s = Demo.shows[1]
         shot("sermons") { tab(Tab.Library) { ShowPage(s.id, s, Demo.sermons, null, Idle) } }
         shot("gone") { tab(Tab.Library, PlayerState()) { ShowPage("podcast/gone", null, emptyList(), null, Idle) } }
+        // Its host named once, and a guest under the episode they were on.
+        val keller = OnEpisode("Tim Keller", "Host", "", "")
+        val guests = listOf(OnEpisode("Kathy Keller", "Guest", "", ""), OnEpisode("Timothy Paul Jones", "Guest", "", ""))
+        shot("people") {
+            tab(Tab.Library) { ShowPage(s.id, s, Demo.sermons, null, Idle, hosts = listOf(keller), people = Demo.sermons.associate { t -> t.id to if (t == Demo.sermons[1]) listOf(keller) + guests else listOf(keller) }) }
+        }
     }
 
     // The player -------------------------------------------------------------
@@ -291,6 +298,19 @@ class Screens {
         shot("full") { FullPlayer(player, Still, at) }
         shot("full-shuffle-repeat-one") { FullPlayer(player.copy(playing = false, shuffle = true, repeat = Repeat.One), Still, still(201_000)) }
         shot("queue") { Sheet { QueueSheet(player.copy(shuffle = true), Still) } }
+        // An episode with a transcript: its Transcript beside the queue, and its sheet, a line being said.
+        val said =
+            listOf(
+                Cue(60_000, 66_000, "Tim Keller", "Turn with me to the gospel of Luke."),
+                Cue(66_000, 74_000, "Tim Keller", "Jesus is at a dinner party, and the guests are choosing their seats."),
+                Cue(74_000, 80_000, "Tim Keller", "Everybody wants the place nearest the host."),
+                Cue(80_000, 88_000, "Tim Keller", "And he tells them a story about a wedding feast."),
+                Cue(88_000, 95_000, "Tim Keller", "When you are invited, go and sit in the lowest place."),
+                Cue(95_000, 101_000, "", "Laughter."),
+                Cue(101_000, 108_000, "Tim Keller", "That is not career advice."),
+            )
+        shot("full-transcript") { CompositionLocalProvider(LocalTranscript provides said) { FullPlayer(player, Still, at) } }
+        shot("transcript") { Sheet { TranscriptSheet("The Dream of the Kingdom", said, at) } }
     }
 
     // The player on its way up from the bar, held at each quarter: the card between the bar's

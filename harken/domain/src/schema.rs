@@ -54,6 +54,10 @@ pub struct Person {
     /// A few sentences about them, for their page. Defaulted, as `banner`.
     #[serde(default)]
     pub description: String,
+    /// Their own page on the web, as a feed links them. Defaulted, as
+    /// `banner`.
+    #[serde(default)]
+    pub link: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
@@ -352,6 +356,36 @@ pub struct Chapter {
     pub image: String,
 }
 
+/// Somebody on an episode, as its feed names them (Podcasting 2.0's
+/// `<podcast:person>`): its host, a guest. Who they are is their `person`
+/// row, so their page lists the episodes they are on beside anything else
+/// they made.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(person_name))]
+pub struct Appearance {
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    #[ark(key, refs(Person))]
+    pub person_name: String,
+    /// As the feed says it: `Host`, `Guest`, `Producer`…
+    pub role: String,
+    /// Where the feed lists them among the episode's people.
+    pub pos: i64,
+}
+
+/// One line of an episode's transcript, as the server heard it in its copy:
+/// when it is said, until when, by whom where they say, and what.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct Cue {
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    #[ark(key)]
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub speaker: String,
+    pub text: String,
+}
+
 /// harken's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Harken {
@@ -378,6 +412,8 @@ pub struct Harken {
     pub download: Download,
     pub progress: Progress,
     pub chapter: Chapter,
+    pub appearance: Appearance,
+    pub cue: Cue,
 }
 
 ark_auth::install!(Harken);

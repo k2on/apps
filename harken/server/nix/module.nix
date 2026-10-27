@@ -26,6 +26,21 @@ let
   # Whether what is bound answers on this machine and nowhere else. `0.0.0.0`
   # is deliberately not in here: as a *bind* it means every interface, which
   # is the opposite of what it means in a URL.
+  # `transcriber <audio> <out.vtt>`, as the server runs it
+  # (`harken/server/src/transcribe.rs`): the audio as whisper.cpp reads it,
+  # 16 kHz mono, heard at the lowest priority the host has, its captions
+  # written only once they are whole.
+  transcriber = pkgs.writeShellScript "harken-transcriber" ''
+    set -eu
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    run() { ${pkgs.util-linux}/bin/ionice -c 3 ${pkgs.coreutils}/bin/nice -n 19 "$@"; }
+    run ${lib.getExe pkgs.ffmpeg-headless} -nostdin -loglevel error -i "$1" -ar 16000 -ac 1 -c:a pcm_s16le "$tmp/in.wav"
+    run ${lib.getExe cfg.transcripts.package} -np -l en -t ${toString cfg.transcripts.threads} \
+      -m ${cfg.transcripts.model} -f "$tmp/in.wav" -ovtt -of "$tmp/out" >/dev/null
+    mv "$tmp/out.vtt" "$2"
+  '';
+
   loopbackOnly = lib.elem cfg.address [
     "127.0.0.1"
     "localhost"
@@ -167,6 +182,43 @@ in
         downloaded into the state directory and served under
         `/media/.catalogue/`, at boot and at every rescan. null for none.
       '';
+    };
+
+    transcripts = {
+      enable = lib.mkEnableOption ''
+        hearing each episode on the server with whisper.cpp, newest first, for
+        a transcript that keeps time with the server's own copy (a feed's
+        is timed to the host's file, which an advertisement stitched in
+        moves). An hour of speech is a while of the host's cores, at the
+        lowest priority there is'';
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = pkgs.whisper-cpp;
+        defaultText = lib.literalExpression "pkgs.whisper-cpp";
+        description = "whisper.cpp, its command line as {option}`lib.getExe` names it.";
+      };
+
+      model = lib.mkOption {
+        type = lib.types.path;
+        default = pkgs.fetchurl {
+          url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
+          sha256 = "1qm7zxamlvac564c3270wqqqks5wc7532q3fqi01zbfmkiq22hir";
+        };
+        defaultText = lib.literalMD "whisper's `large-v3-turbo`, quantised (q5_0, 550 MB)";
+        description = ''
+          The ggml model to hear with. `large-v3-turbo` hears names, and
+          where a line starts, far better than `small.en`, at about four
+          times the time: an hour of speech is hours of a small host's
+          cores, newest episode first.
+        '';
+      };
+
+      threads = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 2;
+        description = "How many of the host's cores whisper.cpp hears with.";
+      };
     };
 
     pictureHosts = lib.mkOption {
@@ -453,6 +505,8 @@ in
         HARKEN_MEDIA = "${cfg.mediaPath}";
       } // lib.optionalAttrs (cfg.mediaPath != null && cfg.catalogue != null) {
         HARKEN_CATALOGUE = cfg.catalogue;
+      } // lib.optionalAttrs (cfg.mediaPath != null && cfg.transcripts.enable) {
+        HARKEN_TRANSCRIBER = "${transcriber}";
       } // lib.optionalAttrs (cfg.web != null) {
         HARKEN_WEB = "${cfg.web}";
       } //lib.optionalAttrs (cfg.oidc != null) {

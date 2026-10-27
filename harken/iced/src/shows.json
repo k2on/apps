@@ -128,7 +128,111 @@
      "file": "https://media.transistor.fm/e7d9633a/97c6d721.mp3",
      "description": "Pre-roll transcript: Before you is an episode of the Full Time Nix podcast. For silence skipping and other useful features consider using a podcast app. Podcast gear sponsored by nixbuild.net . --- NixCon 2026 Sponsored by nixbuild.net Felix Schröter https://nixos.org/community/commercial-support/ atvari — Software & Cloud Engineering Consulting Diego Turchetto TonioGela Yifei Sun garnix | the nix CI atelier the talk Lisanna Dettwyler nix-scheduler-hook The new .devShell interface for nix develop The panel at NixCon parzivale finix finix talk the tangled talk RTUnreal JanLikar Scrumplex fetch…",
      "season": 0,
-     "number": 179
+     "number": 179,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      },
+      {
+       "name": "Felix Schröter",
+       "role": "Guest",
+       "link": "https://felschr.com",
+       "art": "https://img.transistorcdn.com/EDN7SWfYaFY-pNMhi8j-f7o4VEkTSSy053-jY3LnR3k/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9jNWI4/MzQ4OTMyMzJkNjRi/M2RkMGIzMmFiMWE2/NTgwMy5qcGVn.jpg"
+      },
+      {
+       "name": "Diego Turchetto",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/diego-turchetto",
+       "art": "https://img.transistorcdn.com/rtsc-EYyvMnfeDi4TVpvU-BtDVAwfZP7i-nOP-JBDOQ/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8xMDQ1/MTQ2NDgwN2VhM2Q3/ZjE2OGRiYTZjNDBj/NTZjOC5qcGVn.jpg"
+      },
+      {
+       "name": "Antonio Gelameris",
+       "role": "Guest",
+       "link": "https://toniogela.dev",
+       "art": "https://img.transistorcdn.com/QacO6DdCj0ILN25fmT3RagFN9m48m7J25yowMSI7DBk/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8wMDU1/ODAwODIzYmVlZjEz/ZWQyOGQ0ZTAzODg0/MDFmYS5qcGVn.jpg"
+      },
+      {
+       "name": "Yifei Sun",
+       "role": "Guest",
+       "link": "https://stepbrobd.com",
+       "art": "https://img.transistorcdn.com/ArDQIwI11M85nplvbtTpa7XlbU0F_Ncwsm7HEjuU60I/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8wYmUx/YmRjNjRmY2JiZjhk/OWQ4N2RjNmZlNmUw/NDI5Mi5qcGVn.jpg"
+      },
+      {
+       "name": "Lisanna Dettwyler",
+       "role": "Guest",
+       "link": "https://lisanna.neocities.org/",
+       "art": "https://img.transistorcdn.com/iR_nOKbbUdWTFi5E0RbgDYJcQW3VtPuR9afelFR91ws/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS82YmYx/YTBiNGI4ZjZlNGU4/MmY4YzY3MjczNzlm/N2U0My5wbmc.jpg"
+      },
+      {
+       "name": "parzivale",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/parzivale",
+       "art": "https://img.transistorcdn.com/NFi1GU1h6z3IQMc2J5Rjvzm3xRiuVYxb3J8UzKzYH3s/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9mNjIw/ODg2OGEwNDliNTMw/YzkzNzAyY2Q3OTBm/NDllYi5wbmc.jpg"
+      },
+      {
+       "name": "Sefa Eyeoglu",
+       "role": "Guest",
+       "link": "https://scrumplex.net",
+       "art": "https://img.transistorcdn.com/Iwh-YWDgP2BboO0CdVif23kdeJMgMHJbjhzCnbqIpQo/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9lOTY3/MDA0NWVjMGRjNmE1/Mjg0NDliOWQ2MzRh/NTM0ZC5wbmc.jpg"
+      },
+      {
+       "name": "Vimjoyer",
+       "role": "Guest",
+       "link": "https://vimjoyer.com",
+       "art": "https://img.transistorcdn.com/lbpzzbmjyNmQI3tkJIRQSMHDIJeGtBASaU34nl3rMK4/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS81ZTMx/YjQ1ZWVlNmJhZWY5/ZGJjNjYzNGIyNDY5/MjQ4Mi5qcGVn.jpg"
+      },
+      {
+       "name": "Grimmauld",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/grimmauld",
+       "art": "https://img.transistorcdn.com/b1E15_YdWRmZR86TJCRSF6UYwjyloznVEzwKFlZzGjA/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS83M2I3/ZTMyODg2MTlmM2Mz/NTI1MDI3YTM4NDJl/NDJiZi5qcGVn.jpg"
+      },
+      {
+       "name": "RTUnreal",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/rtunreal",
+       "art": "https://img.transistorcdn.com/ePyZyYV7Tp5yYXEWePMc_Aa1jD6PvLsdOh29kiSUURM/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8xODk4/ZDEyZmUwOTU4Nzkx/ODFkYzliOTdiMWMz/OWMyNy5wbmc.jpg"
+      },
+      {
+       "name": "Alexandru Nechita",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/alexandru-nechita",
+       "art": "https://img.transistorcdn.com/JZtTzbgWZuCjo5Hs5h8XjYc3iKLaPpQA1BtU9spDDdQ/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS82MmE3/ODUyY2M1YTM5Mjkw/M2Y0YTAzNDhlNWJj/ODNkNS5qcGVn.jpg"
+      },
+      {
+       "name": "pentane",
+       "role": "Guest",
+       "link": "https://codeberg.org/cyclopentane",
+       "art": "https://img.transistorcdn.com/-ybl0lQSmB5CMfU7WYgxhsKFNnd6SL6eT8-Ut4DFcPY/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9hYjZl/YjM0NzM1MGU0YzE0/OWQyNTE2YWMwZGU2/ZjgzOC5wbmc.jpg"
+      },
+      {
+       "name": "Jan Likar",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/jan-likar",
+       "art": "https://img.transistorcdn.com/SZtPznEknBZHreWKTVXijlOuV3sCXbhVnaBSFgez_n0/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9iOTRm/NmQzOTE1MWEwY2Qw/NGUzNGRjMjFkNmU3/ZGRjOS5qcGVn.jpg"
+      },
+      {
+       "name": "Daniel Baker",
+       "role": "Guest",
+       "link": "https://djacu.dev/",
+       "art": "https://img.transistorcdn.com/b3piuMY3pSN0s9dHWmYSD-kcTNHaLqTQ-0oxjU1w9Ss/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS82NTdi/NzE0OGVhNjAxMmJi/ZWJlYTMwYzMwYjYy/Nzg4NC5wbmc.jpg"
+      },
+      {
+       "name": "Jacek Galowicz",
+       "role": "Guest",
+       "link": "https://galowicz.de",
+       "art": "https://img.transistorcdn.com/OI-AqrhVWYXS52Xs0qleLuLnDQ4PwbPWStoDPrb87-o/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9hMDE5/MDA2OTFiMDMxZDY4/YmEwMTAzMThmYzgw/N2U1MS5qcGc.jpg"
+      },
+      {
+       "name": "Kiara Grouwstra",
+       "role": "Guest",
+       "link": "https://codeberg.org/kiara",
+       "art": "https://img.transistorcdn.com/--1bykVTaJUQ-f6J2VGYXgfktVKPw2tCBsCG4Agi0aA/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zMTdj/YjQ4ZjYzNzkxZDk3/MDA2NGEzMjFiNTU2/MjkxMi5wbmc.jpg"
+      }
+     ]
     },
     {
      "title": "Bump 2026-10-19",
@@ -138,7 +242,15 @@
      "file": "https://media.transistor.fm/e2171104/a0e34207.mp3",
      "description": "Pre-roll transcript: Bump! Nix ecosystem news. --- home-manager claude-code mutable settings nixos/nftables: switch location of rules to be removed Security Advisory: makeBinaryWrapper: empty PATH segments enable current-directory hijacking Security advisory for Nix and Lix home-manager opencode mutable settings SC election candidates nixos programs.ssh.hosts Full-stack job at Treat Health, Helsinki nixmap home-manager removed deprecated features nixos-version new flags numtide/iets: Fast Nix evaluator and remote-build client in Rust --- Post-roll transcript: Submit news items! By messaging m…",
      "season": 0,
-     "number": 178
+     "number": 178,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      }
+     ]
     },
     {
      "title": "Nix Freaks 51",
@@ -148,7 +260,21 @@
      "file": "https://media.transistor.fm/5908d06e/e5a283ce.mp3",
      "description": "Pre-roll transcript: Nix Freaks: Spontaneous topics Passionate discussions Wild takes Programmer humor A Full Time Nix production For silence skipping and other useful features consider using a podcast app. --- Nix Freaks A build graph that rolls dice | Farid Zakaria’s Blog Nix SC election 2026 Shahar \"Dawn\" Or (@mightyiam) nomination --- Post-roll transcript: For past and future episodes search \"Full Time Nix\" on a podcast app or visit fulltimenix.com . Nix Freaks takes place weekly. You are welcome to show up and chat or even ask to join the call. For details visit fulltimenix.com .",
      "season": 0,
-     "number": 177
+     "number": 177,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      },
+      {
+       "name": "Jacek Galowicz",
+       "role": "Guest",
+       "link": "https://galowicz.de",
+       "art": "https://img.transistorcdn.com/OI-AqrhVWYXS52Xs0qleLuLnDQ4PwbPWStoDPrb87-o/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9hMDE5/MDA2OTFiMDMxZDY4/YmEwMTAzMThmYzgw/N2U1MS5qcGc.jpg"
+      }
+     ]
     },
     {
      "title": "Bump 2026-10-12",
@@ -158,7 +284,15 @@
      "file": "https://media.transistor.fm/0d7b5cbd/c907fb46.mp3",
      "description": "Pre-roll transcript: Bump! Nix ecosystem news. --- services.hydra.adHoc.enable home-manager libreoffice module Frontend Job @ bevuta IT (global, remote) home-manager vscode mutable user settings NixOS and robot infra job, in-person, Massachusetts, Tutor Intelligence Turkish Nix users group is forming SC candidates so far SC election timeline shift Breaking changes to Release Critical packages now restricted --- Post-roll transcript: Submit news items! By messaging me. Of course. fulltimenix.com For 1-on-1 mentoring sessions with me visit mightyi.am .",
      "season": 0,
-     "number": 176
+     "number": 176,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      }
+     ]
     },
     {
      "title": "Nix 2.35 with Jonathan Ringer",
@@ -168,7 +302,21 @@
      "file": "https://media.transistor.fm/b7cf9aa8/d255473f.mp3",
      "description": "Pre-roll transcript: Before you is an episode of the Full Time Nix podcast. For silence skipping and other useful features consider using a podcast app. Podcast gear sponsored by nixbuild.net . --- https://releases.nixos.org/nix/nix-2.35.1/manual/release-notes/rl-2.35.html --- Nixcademy ad transcript: Statistically speaking, Nix is a novel technology. As such, adoption comes at an immediate cost of productivity. Team members who know Nix find themselves preoccupied providing support and the emergence of anti-patterns adds technical debt. What's worse; morale is affected. But, with training, t…",
      "season": 0,
-     "number": 175
+     "number": 175,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      },
+      {
+       "name": "Jonathan Ringer",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/jonathan-ringer",
+       "art": "https://img.transistorcdn.com/Xc9fta4UbB0ezyTrM1O93GwXNb_qsv8jx0Mn-uemOM8/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS81ZTY2/YzU0Njg1ODJkZWU2/MDYyMTUxNDAzMDNk/Mzc5ZC5wbmc.jpg"
+      }
+     ]
     },
     {
      "title": "Nix Freaks 50",
@@ -178,7 +326,33 @@
      "file": "https://media.transistor.fm/e44390ea/ba67ea28.mp3",
      "description": "Pre-roll transcript: Nix Freaks: Spontaneous topics Passionate discussions Wild takes Programmer humor A Full Time Nix production For silence skipping and other useful features consider using a podcast app. --- Nix Freaks 𝗠𝗮𝗹𝗶𝘅 (@Malix_Labs) / X vaxry (@vaxryy) / X mightyi.am · Tangled Proposal: Team initiatives, grant program and purpose-bound funding by infinisil · Pull Request #270 · NixOS/org Why fricklerhandwerk changed his mind about flakes (talk) SC election Nominees Nominate @toastal for SC-election-2026 treewide: enable strictDeps and structuredAttrs for various low-level packages by…",
      "season": 0,
-     "number": 174
+     "number": 174,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      },
+      {
+       "name": "Jonathan Ringer",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/jonathan-ringer",
+       "art": "https://img.transistorcdn.com/Xc9fta4UbB0ezyTrM1O93GwXNb_qsv8jx0Mn-uemOM8/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS81ZTY2/YzU0Njg1ODJkZWU2/MDYyMTUxNDAzMDNk/Mzc5ZC5wbmc.jpg"
+      },
+      {
+       "name": "Thomas Bereknyei",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/thomas-bereknyei",
+       "art": "https://img.transistorcdn.com/T2eQHRUiXfeE1N7x7C6Qw5xQ0QuPHRI1gkBRYlpNYQw/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8yOGU2/YTllYTIwYjk2MTBm/ZTA5Y2M0ZjE1Zjdi/OThjZC5wbmc.jpg"
+      },
+      {
+       "name": "toastal",
+       "role": "Guest",
+       "link": "https://toast.al/",
+       "art": "https://img.transistorcdn.com/JcZAuNx319OImGnt8_t3klif3H4akszxbiAy2_r07fo/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS82MTNi/ZWRlOThiNGQ3YzMx/Mzg2OWFjNTBkNWNh/NWM3MS5qcGVn.jpg"
+      }
+     ]
     },
     {
      "title": "Bump 2026-10-05",
@@ -188,7 +362,15 @@
      "file": "https://media.transistor.fm/193a573c/8bbbc5d9.mp3",
      "description": "Pre-roll transcript: Bump! Nix ecosystem news. --- Nixtamal 2.0.0 26.11 release cycle Nix Workshop in OpenFest, Sofia, Bulgaria, Nov 7-8 NixOS Meetup Darmstadt, Oct 5, 6:30pm Old generated CephX keys vulnerability Nix(OS) Vienna meetup Oct 29, 6pm programs.fish.shellFunctions swift 6 breaking changes NixNL Meetup, December 9, 7pm Boston area Nix Users Group Netherlands government is building a NixOS based desktop services.grafana.declarativePlugins no longer includes default data-sources hydra bump and NixOS module breaking changes Nix Unconference #12, Milan, Oct 17, 9:30 AM home-manager sec…",
      "season": 0,
-     "number": 173
+     "number": 173,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      }
+     ]
     },
     {
      "title": "Bump 2026-09-27",
@@ -198,7 +380,15 @@
      "file": "https://media.transistor.fm/174bada7/029cd3e0.mp3",
      "description": "Pre-roll transcript: Bump! Nix ecosystem news. --- How would better Windows support help you? Breaking config structure change in hostapd CFP: Guix and Nix at Capitole du Libre 2026, Toulouse, France Senior Nix Engineer at Tweag (remote) SecretSpec 0.21: Resolver IPC, external providers, and binary secrets Bay Area Nix Meetup October 2nd 6PM Devenv 2.4: Machines Nix Vegas: Recovering our agency at DEF CON 34 Rewriting Nix in Rust; Casita: content-addressed store --- Post-roll transcript: Submit news items! By messaging me. Of course. fulltimenix.com For 1-on-1 mentoring sessions with me visit…",
      "season": 0,
-     "number": 172
+     "number": 172,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      }
+     ]
     },
     {
      "title": "Nix Freaks 49",
@@ -208,7 +398,27 @@
      "file": "https://media.transistor.fm/08456971/b1040f29.mp3",
      "description": "Pre-roll transcript: Nix Freaks: Spontaneous topics Passionate discussions Wild takes Programmer humor A Full Time Nix production For silence skipping and other useful features consider using a podcast app. --- Nix Freaks Mic92/repkgs ekala-project/ekapkgs nickel-lang/nickel hydra-ad-hoc by amaanq Nixpkgs AI policy Nix AI policy Nixpkgs vcunat pull requests tomberek/FHSpkgs Jev AI Quint --- Post-roll transcript: For past and future episodes search \"Full Time Nix\" on a podcast app or visit fulltimenix.com . Nix Freaks takes place weekly. You are welcome to show up and chat or even ask to join…",
      "season": 0,
-     "number": 171
+     "number": 171,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      },
+      {
+       "name": "Thomas Bereknyei",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/thomas-bereknyei",
+       "art": "https://img.transistorcdn.com/T2eQHRUiXfeE1N7x7C6Qw5xQ0QuPHRI1gkBRYlpNYQw/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8yOGU2/YTllYTIwYjk2MTBm/ZTA5Y2M0ZjE1Zjdi/OThjZC5wbmc.jpg"
+      },
+      {
+       "name": "Jonathan Ringer",
+       "role": "Guest",
+       "link": "https://fulltimenix.com/people/jonathan-ringer",
+       "art": "https://img.transistorcdn.com/Xc9fta4UbB0ezyTrM1O93GwXNb_qsv8jx0Mn-uemOM8/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS81ZTY2/YzU0Njg1ODJkZWU2/MDYyMTUxNDAzMDNk/Mzc5ZC5wbmc.jpg"
+      }
+     ]
     },
     {
      "title": "Bump 2026-09-20",
@@ -218,7 +428,269 @@
      "file": "https://media.transistor.fm/3e42462a/4177d43a.mp3",
      "description": "Pre-roll transcript: Bump! Nix ecosystem news. --- ensure-printers.service has been replaced with an ExecStartPost hook in cups.service services.k3s and services.rke2: fixed an image updating problem Nix & Rust Meetup Mannheim, Germany, October 6, 6pm NixCon 2026 --- Post-roll transcript: Submit news items! By messaging me. Of course. fulltimenix.com For 1-on-1 mentoring sessions with me visit mightyi.am .",
      "season": 0,
-     "number": 170
+     "number": 170,
+     "people": [
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      }
+     ]
+    },
+    {
+     "title": "Nix 2.23.0 release with Jacek Galowicz",
+     "guid": "48d07ceb-1e38-40be-a93b-626147e6de98",
+     "published_ms": 1720448388000,
+     "duration_ms": 3128000,
+     "file": "https://media.transistor.fm/66c2ec4c/cb887ff2.mp3",
+     "description": "Pre-roll transcript: Before you is an episode of the Full Time Nix podcast. For silence skipping and other useful features consider using a podcast app. Podcast gear sponsored by nixbuild.net. --- https://nix.dev/manual/nix/2.23/release-notes/rl-2.23 https://galowicz.de/ --- Nixcademy ad transcript: Statistically speaking, Nix is a novel technology. As such, adoption comes at an immediate cost of productivity. Team members who know Nix find themselves preoccupied providing support and the emergence of anti-patterns adds technical debt. What's worse; morale is affected. But, with training, the…",
+     "season": 0,
+     "number": 7,
+     "people": [
+      {
+       "name": "Jacek Galowicz",
+       "role": "Guest",
+       "link": "https://galowicz.de",
+       "art": "https://img.transistorcdn.com/OI-AqrhVWYXS52Xs0qleLuLnDQ4PwbPWStoDPrb87-o/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS9hMDE5/MDA2OTFiMDMxZDY4/YmEwMTAzMThmYzgw/N2U1MS5qcGc.jpg"
+      },
+      {
+       "name": "Shahar \"Dawn\" Or",
+       "role": "Host",
+       "link": "https://fulltimenix.com/people/shahar-dawn-or",
+       "art": "https://img.transistorcdn.com/Nhr_Hrlu2wIvxShZix5QP3Sglw21FNYCfPvRNmn8KSE/rs:fill:0:0:1/w:800/h:800/q:60/mb:500000/aHR0cHM6Ly9pbWct/dXBsb2FkLXByb2R1/Y3Rpb24udHJhbnNp/c3Rvci5mbS8zNmNl/MmU2NjQ4MTQxZGI5/MWE4ZWJiMjUxZjE1/YzI2My5qcGc.jpg"
+      }
+     ],
+     "transcript": [
+      {
+       "start_ms": 3096,
+       "end_ms": 6476,
+       "speaker": "",
+       "text": "Hello and welcome to Full Time Nix."
+      },
+      {
+       "start_ms": 6736,
+       "end_ms": 18520,
+       "speaker": "",
+       "text": "This is an episode about release notes of Nix 2.23.0 with Jacek Galowicz."
+      },
+      {
+       "start_ms": 18520,
+       "end_ms": 19612,
+       "speaker": "",
+       "text": "Hi, Jacek."
+      },
+      {
+       "start_ms": 20590,
+       "end_ms": 23096,
+       "speaker": "",
+       "text": "Hey, Shahar how are you?"
+      },
+      {
+       "start_ms": 23096,
+       "end_ms": 25336,
+       "speaker": "",
+       "text": "Pretty good, pretty good."
+      },
+      {
+       "start_ms": 25916,
+       "end_ms": 29614,
+       "speaker": "",
+       "text": "Well, let's talk about it."
+      },
+      {
+       "start_ms": 29614,
+       "end_ms": 35427,
+       "speaker": "",
+       "text": "Yes, let's go."
+      },
+      {
+       "start_ms": 35427,
+       "end_ms": 40308,
+       "speaker": "",
+       "text": "There are two new features."
+      },
+      {
+       "start_ms": 40308,
+       "end_ms": 43501,
+       "speaker": "",
+       "text": "One is a new built-in."
+      },
+      {
+       "start_ms": 43501,
+       "end_ms": 53368,
+       "speaker": "",
+       "text": "and as all built-ins it can be found under the global scope `builtins` attrset and"
+      },
+      {
+       "start_ms": 53368,
+       "end_ms": 54808,
+       "speaker": "",
+       "text": "it's called warn."
+      },
+      {
+       "start_ms": 54808,
+       "end_ms": 56928,
+       "speaker": "",
+       "text": "So it'll be `builtins.warn`."
+      },
+      {
+       "start_ms": 57328,
+       "end_ms": 60206,
+       "speaker": "",
+       "text": "What does it do?"
+      },
+      {
+       "start_ms": 60206,
+       "end_ms": 66386,
+       "speaker": "",
+       "text": "Yeah, so when you use `builtins.warn`, it has a very similar semantics to"
+      },
+      {
+       "start_ms": 66386,
+       "end_ms": 67706,
+       "speaker": "",
+       "text": "`builtins.trace`."
+      },
+      {
+       "start_ms": 67706,
+       "end_ms": 71726,
+       "speaker": "",
+       "text": "Basically, `builtins.trace` is a function that takes two parameters."
+      },
+      {
+       "start_ms": 71726,
+       "end_ms": 76306,
+       "speaker": "",
+       "text": "The first one is a string that will be printed on the user's shell."
+      },
+      {
+       "start_ms": 76306,
+       "end_ms": 79796,
+       "speaker": "",
+       "text": "It will not go into the program itself."
+      },
+      {
+       "start_ms": 79796,
+       "end_ms": 82960,
+       "speaker": "",
+       "text": "It will not change how your program behaves."
+      },
+      {
+       "start_ms": 83470,
+       "end_ms": 87510,
+       "speaker": "",
+       "text": "and the second parameter to it will be some kind of value that goes from"
+      },
+      {
+       "start_ms": 87510,
+       "end_ms": 92850,
+       "speaker": "",
+       "text": "somewhere somewhere else and will just be forwarded while your message is printed on"
+      },
+      {
+       "start_ms": 92850,
+       "end_ms": 96070,
+       "speaker": "",
+       "text": "the terminal only visible to the user."
+      },
+      {
+       "start_ms": 97030,
+       "end_ms": 103650,
+       "speaker": "",
+       "text": "Developers use this for deprecation warnings or just printf style debugging or"
+      },
+      {
+       "start_ms": 103650,
+       "end_ms": 105710,
+       "speaker": "",
+       "text": "whatever else."
+      },
+      {
+       "start_ms": 106250,
+       "end_ms": 110560,
+       "speaker": "",
+       "text": "Generally, traces don't really do anything and it's"
+      },
+      {
+       "start_ms": 110670,
+       "end_ms": 115670,
+       "speaker": "",
+       "text": "relatively difficult for the end user if you are triggering a warning somewhere"
+      },
+      {
+       "start_ms": 115670,
+       "end_ms": 125590,
+       "speaker": "",
+       "text": "that is disguised as a trace kind of to find out where it comes from and we kind"
+      },
+      {
+       "start_ms": 125590,
+       "end_ms": 132270,
+       "speaker": "",
+       "text": "of lately got this new debugging features in Nix and you can start a debugger on"
+      },
+      {
+       "start_ms": 132270,
+       "end_ms": 135668,
+       "speaker": "",
+       "text": "traces but then the problem is if you're"
+      },
+      {
+       "start_ms": 137414,
+       "end_ms": 142514,
+       "speaker": "",
+       "text": "you just want to catch the one specific trace that is a warning about something"
+      },
+      {
+       "start_ms": 142514,
+       "end_ms": 145814,
+       "speaker": "",
+       "text": "that you're doing wrong because of deprecation or whatever."
+      },
+      {
+       "start_ms": 147194,
+       "end_ms": 150454,
+       "speaker": "",
+       "text": "Yeah, you get in trouble distinguishing that."
+      },
+      {
+       "start_ms": 150454,
+       "end_ms": 156374,
+       "speaker": "",
+       "text": "So they introduced `builtins.warn`, which is kind of a special trace, which is meant"
+      },
+      {
+       "start_ms": 156374,
+       "end_ms": 161934,
+       "speaker": "",
+       "text": "to be only used for actual warnings, warnings that users ought to fix."
+      },
+      {
+       "start_ms": 164174,
+       "end_ms": 169694,
+       "speaker": "",
+       "text": "it is now possible to tell the debugger that it should only trigger not on traces"
+      },
+      {
+       "start_ms": 169694,
+       "end_ms": 173514,
+       "speaker": "",
+       "text": "but only on warnings or even abort on warnings."
+      },
+      {
+       "start_ms": 173514,
+       "end_ms": 180854,
+       "speaker": "",
+       "text": "So you could either as a developer say, OK, you activate the option debugger on"
+      },
+      {
+       "start_ms": 180854,
+       "end_ms": 186754,
+       "speaker": "",
+       "text": "warn and then your debugger will jump into the code and give you the context as soon"
+      }
+     ]
     }
    ]
   }

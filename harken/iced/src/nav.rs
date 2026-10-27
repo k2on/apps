@@ -16,7 +16,7 @@
 use arkui::vim::{self, Page, Section};
 
 use crate::places::Source;
-use crate::rows::TrackDetail;
+use crate::rows::{Item, Person, TrackDetail};
 use crate::{App, Message};
 
 /// A thing on a page that is not its main list.
@@ -53,6 +53,15 @@ pub enum Mark {
     ShowMenu,
     /// A followed show's next older episodes fetched, under its list.
     Older,
+    /// The `n`th episode on a person's page.
+    Episode(usize),
+    /// The `k`th person beside the `n`th episode's row: who is on it that
+    /// does not host it.
+    Guest(usize, usize),
+    /// A person's web page.
+    Link,
+    /// A transcript's Follow: back to the line being said.
+    Follow,
 }
 
 /// A page, as the keyboard walks it.
@@ -73,6 +82,11 @@ impl Layout {
     /// What opening cell `at` does, when it is not one of the main list's.
     pub fn message(&self, at: usize) -> Option<&Message> {
         at.checked_sub(self.page.main).and_then(|k| self.marks.get(k)).map(|(_, m)| m)
+    }
+
+    /// What cell `at` is, when it is not one of the main list's.
+    pub fn mark_at(&self, at: usize) -> Option<Mark> {
+        at.checked_sub(self.page.main).and_then(|k| self.marks.get(k)).map(|(m, _)| *m)
     }
 
     /// Give `mark` the next number, opening `go`.
@@ -227,6 +241,52 @@ impl App {
         l.block(ids, n);
     }
 
+    /// Who hosts the page's show, as its newest episode names them: said
+    /// once, in its header, rather than on every row.
+    pub fn hosts(&self) -> Vec<Person> {
+        match self.peer.rows().first() {
+            Some(newest) => self.peer.people_of(newest.id).into_iter().filter(Person::hosts).collect(),
+            None => vec![],
+        }
+    }
+
+    /// Who an episode's row names: whoever is on it but its hosts, and but
+    /// the person whose page it is on.
+    pub fn guests(&self, item: &Item) -> Vec<Person> {
+        let page = match &self.peer.source {
+            Source::Artist(name) => Some(name.as_str()),
+            _ => None,
+        };
+        let on = self.peer.people_of(item.id).into_iter();
+        on.filter(|p| !p.hosts() && Some(p.name.as_str()) != page).collect()
+    }
+
+    /// Episodes, each row and beside it who is on it, each a cell, the rows
+    /// as wide as the widest — as a track's names are. `row` numbers a row:
+    /// the main list's own number on a show's page, a mark of its own on a
+    /// person's.
+    fn episodes(&self, l: &mut Layout, items: &[Item], row: impl Fn(&mut Layout, usize) -> usize) {
+        let rows: Vec<(usize, Vec<usize>)> = items
+            .iter()
+            .enumerate()
+            .map(|(at, item)| {
+                let cell = row(l, at);
+                let guests = self.guests(item).into_iter().enumerate();
+                let names = guests.map(|(k, p)| l.mark(Mark::Guest(at, k), Message::Select(Source::Artist(p.name))));
+                (cell, names.collect())
+            })
+            .collect();
+        let columns = 1 + rows.iter().map(|(_, names)| names.len()).max().unwrap_or(0);
+        let mut ids = vec![];
+        for (cell, names) in rows {
+            ids.push(cell);
+            ids.extend(&names);
+            let last = *ids.last().unwrap_or(&cell);
+            ids.extend(std::iter::repeat_n(last, columns - 1 - names.len()));
+        }
+        l.block(ids, columns);
+    }
+
     /// Who is on the album or the recording the page is: the composers
     /// first, then everybody credited, each once with their roles.
     pub fn people(&self, composers: &[String]) -> Vec<(String, String)> {
@@ -300,8 +360,17 @@ impl App {
             }
             // One person's page: a composer's works, or anybody else's songs.
             Source::Artist(name) if detailed => {
+                // Beside their portrait, their Play and their web page.
                 if self.banner_of(name).is_none() {
-                    self.play(&mut l);
+                    let mut ids = vec![];
+                    if let Some(first) = p.rows().first() {
+                        ids.push(l.mark(Mark::Play, Message::PlayItem(first.id)));
+                    }
+                    if let Some(link) = p.person_named(name).map(|p| p.link).filter(|l| !l.is_empty()) {
+                        ids.push(l.mark(Mark::Link, Message::OpenLink(link)));
+                    }
+                    let n = ids.len();
+                    l.block(ids, n);
                 }
                 let works = !p.works().is_empty();
                 if let Some(best) = self.best_known() {
@@ -319,6 +388,9 @@ impl App {
                 if !works {
                     self.tracks(&mut l, name, true);
                 }
+                // …and the episodes they are on.
+                let on = p.appearances();
+                self.episodes(&mut l, on, |l, at| l.mark(Mark::Episode(at), Message::PlayItem(on[at].id)));
             }
             Source::Recording(_, who) if detailed => {
                 let composer = p.works().first().map(|w| w.composer.clone()).unwrap_or_default();
@@ -331,11 +403,20 @@ impl App {
                 let people = self.people(&composers);
                 self.faces(&mut l, &people);
             }
-            // A show's page: its Play and, followed, its ⋯ beside it; its
-            // episodes; and under them its older ones fetched, while the
-            // feed has more than the library keeps.
+            // A show's page: its hosts; its Play and, followed, its ⋯ beside
+            // it; its episodes, each beside who is on it; and under them its
+            // older ones fetched, while the feed has more than the library
+            // keeps.
             Source::Show(id, _) if detailed => {
                 let sub = p.subscription_of(id);
+                let hosts: Vec<usize> = self
+                    .hosts()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(k, h)| l.mark(Mark::By(k), Message::Select(Source::Artist(h.name))))
+                    .collect();
+                let n = hosts.len();
+                l.block(hosts, n);
                 let mut ids = vec![];
                 if let Some(first) = p.rows().first() {
                     ids.push(l.mark(Mark::Play, Message::PlayItem(first.id)));
@@ -345,7 +426,7 @@ impl App {
                 }
                 let n = ids.len();
                 l.block(ids, n);
-                l.page.sections.push(Section::run(0, grid.cells, grid.columns));
+                self.episodes(&mut l, p.rows(), |_, at| at);
                 if let Some(s) = sub.filter(|s| s.has_older()) {
                     let id = l.mark(Mark::Older, Message::FetchOlder(s.url.clone(), crate::OLDER));
                     l.block(vec![id], 1);
@@ -353,6 +434,15 @@ impl App {
             }
             Source::Playlist(..) if detailed => {
                 self.play(&mut l);
+                l.page.sections.push(Section::run(0, grid.cells, grid.columns));
+            }
+            // A transcript: its Follow, while it is not following the line
+            // being said, then its lines.
+            Source::Transcript if detailed => {
+                if !self.following {
+                    let id = l.mark(Mark::Follow, Message::Follow(true));
+                    l.block(vec![id], 1);
+                }
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
             }
             // A shows page: its +, the feeds followed that are no show yet
@@ -456,6 +546,7 @@ impl App {
                 cells: p.recordings().len(),
                 columns: self.listing_columns(),
             },
+            Source::Transcript => vim::Grid::column(self.cues().len()),
             _ => vim::Grid::column(p.rows().len()),
         }
     }

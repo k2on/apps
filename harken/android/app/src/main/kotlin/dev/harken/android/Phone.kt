@@ -23,6 +23,7 @@ import dev.harken.android.gen.DownloadsEntry
 import dev.harken.android.gen.EpisodeDetailsEntry
 import dev.harken.android.gen.EpisodeInput
 import dev.harken.android.gen.MarkPlayed
+import dev.harken.android.gen.PeopleEntry
 import dev.harken.android.gen.ProgressEntry
 import dev.harken.android.gen.FetchOlder
 import dev.harken.android.gen.Harken
@@ -36,11 +37,13 @@ import dev.harken.android.gen.RecordingInput
 import dev.harken.android.gen.RemoveFromPlaylist
 import dev.harken.android.gen.Search
 import dev.harken.android.gen.ShowInput
+import dev.harken.android.gen.ShowPeopleEntry
 import dev.harken.android.gen.ShowsEntry
 import dev.harken.android.gen.Subscribe
 import dev.harken.android.gen.SubscriptionsEntry
 import dev.harken.android.gen.Unsubscribe
 import dev.harken.android.gen.TrackDetailsEntry
+import dev.harken.android.gen.TranscriptEntry
 
 /**
  * Something playable as a list draws it: a row of the `library` or `playlist` view (the domain's
@@ -282,6 +285,49 @@ data class Chapter(val startMs: Long, val title: String) {
     }
 }
 
+/**
+ * Somebody on an episode (`people`), as its feed names them: what they are on it as the feed says
+ * it — "Host", "Guest" — their picture, a media path drawn as a cover is, and their own page on the
+ * web, empty for none.
+ */
+data class OnEpisode(val name: String, val role: String, val art: String, val link: String) {
+    /** Whether they make the show rather than visit it. */
+    val hosts: Boolean
+        get() = role.equals("host", ignoreCase = true)
+
+    companion object {
+        fun of(e: PeopleEntry): OnEpisode = OnEpisode(e.name, e.role, e.art, e.link)
+
+        /** Who an episode's row names: everybody on it but its hosts, whom the show's page names once. */
+        fun guests(all: List<OnEpisode>): List<OnEpisode> = all.filterNot { it.hosts }
+
+        /** Their names as a sentence lists them: "Ada", "Ada and Grace", "Ada, Grace and Edsger". */
+        fun named(all: List<OnEpisode>): String =
+            if (all.size < 2) all.firstOrNull()?.name.orEmpty() else all.dropLast(1).joinToString(", ") { it.name } + " and " + all.last().name
+    }
+}
+
+/** Somebody on one of a show's episodes (`show_people`): which, and who. */
+data class Appearing(val media: Id, val person: OnEpisode) {
+    companion object {
+        fun of(e: ShowPeopleEntry): Appearing = Appearing(e.mediaId, OnEpisode(e.name, e.role, e.art, e.link))
+    }
+}
+
+/** One line of an episode's transcript (`transcript`): when it is said, by whom (often nobody says), and what. */
+data class Cue(val startMs: Long, val endMs: Long, val speaker: String, val text: String) {
+    companion object {
+        fun of(e: TranscriptEntry): Cue = Cue(e.startMs, e.endMs, e.speaker, e.text)
+
+        /** The line being said `ms` in, by its place: the last that starts at or before it; -1 before the first. */
+        fun at(lines: List<Cue>, ms: Long): Int = lines.indexOfLast { it.startMs <= ms }
+
+        /** The name over each line: its speaker's where the speaker changes, else nothing. */
+        fun speakers(lines: List<Cue>): List<String> =
+            lines.mapIndexed { i, l -> if (l.speaker.isNotEmpty() && (i == 0 || lines[i - 1].speaker != l.speaker)) l.speaker else "" }
+    }
+}
+
 object Shows {
     /** The show an episode is of: the one of its kind its creator names; null for a song. */
     fun of(track: Track, shows: List<Show>): Show? =
@@ -407,6 +453,18 @@ object Phone {
     fun episodeDetails(h: Harken, show: String): View<EpisodeDetailsEntry> = h.episodeDetails(ShowInput(NO_PLAYLIST, show))
 
     fun chapters(h: Harken, media: Id): View<ChaptersEntry> = h.chapters(EpisodeInput(media))
+
+    /** Who is on an episode, in its feed's order. */
+    fun people(h: Harken, media: Id): View<PeopleEntry> = h.people(EpisodeInput(media))
+
+    /** Who is on each of a show's episodes, in the order its page lists them. */
+    fun showPeople(h: Harken, show: String): View<ShowPeopleEntry> = h.showPeople(ShowInput(NO_PLAYLIST, show))
+
+    /** An episode's transcript, line by line in the order it is said. */
+    fun transcript(h: Harken, media: Id): View<TranscriptEntry> = h.transcript(EpisodeInput(media))
+
+    /** Every episode somebody is on, newest first: their page's episodes. */
+    fun appearances(h: Harken, name: String): View<LibraryEntry> = h.appearances(ArtistInput(NO_PLAYLIST, name))
 
     /** `more` of a followed feed's older episodes, or 0 for every one. */
     fun fetchOlder(h: Harken, url: String, more: Long): Wrote = wrote { h.fetchOlder(FetchOlder(url, more)) }

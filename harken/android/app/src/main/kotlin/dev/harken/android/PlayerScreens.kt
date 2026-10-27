@@ -22,17 +22,32 @@
 // group's while the output leads one, the output's while it is another
 // device, this phone's own while the sound is here or nowhere, and its media
 // stream while it is its own session. The mini player draws none.
+//
+// An episode with a transcript has a Transcript beside the queue's chip,
+// which opens the transcript's sheet ([TranscriptSheet]): its lines followed
+// along by the same position flow, the one being said kept at the middle.
 package dev.harken.android
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,10 +56,12 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -54,13 +71,17 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,6 +95,7 @@ import dev.harken.android.ui.quiet
 import dev.harken.android.ui.rememberTransientListState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 
 /** How far an episode's skip goes back, and on, in seconds: what a podcast player's do. */
 const val JOG_BACK = 15
@@ -117,6 +139,9 @@ interface Controls {
 
     /** Open the device picker. */
     fun devices() {}
+
+    /** Open what plays' transcript, following along. */
+    fun transcript() {}
 
     /** The scrubber is being dragged to `ms`: said to the session's other devices. */
     fun scrub(ms: Long) {}
@@ -330,11 +355,19 @@ fun FullFace(
         }
         Spacer(Modifier.height(Space.l))
         val on = state.on
-        if (on == null) Box(Modifier.align(Alignment.CenterHorizontally)) { QueueChip(state, controls) }
+        // An episode with a transcript has it beside the queue: named while there is room.
+        val lines = LocalTranscript.current.isNotEmpty()
+        if (on == null && !lines) Box(Modifier.align(Alignment.CenterHorizontally)) { QueueChip(state, controls) }
         else
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                DeviceChip(on, controls, Modifier.weight(1f, fill = false))
-                Spacer(Modifier.width(Space.s))
+                if (on != null) {
+                    DeviceChip(on, controls, Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(Space.s))
+                }
+                if (lines) {
+                    TranscriptChip(controls, named = on == null)
+                    Spacer(Modifier.width(Space.s))
+                }
                 QueueChip(state, controls, Modifier.weight(1f, fill = false))
             }
         Spacer(Modifier.height(Space.l))
@@ -351,6 +384,21 @@ private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier
         Glyph(Glyphs.Queue, null, size = 18.dp)
         Spacer(Modifier.width(Space.s))
         Text(if (state.upNext.isEmpty()) "Nothing up next" else "Up next: ${state.upNext.first().title}", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+// What is being said, a line at a time: the transcript's sheet. Its glyph alone beside the device's chip.
+@Composable
+private fun TranscriptChip(controls: Controls, named: Boolean) {
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::transcript).padding(horizontal = Space.l, vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Glyph(Glyphs.Transcript, if (named) null else "Transcript", size = 18.dp)
+        if (named) {
+            Spacer(Modifier.width(Space.s))
+            Text("Transcript", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        }
     }
 }
 
@@ -441,6 +489,120 @@ fun QueueSheet(state: PlayerState, controls: Controls) {
         }
         itemsIndexed(state.upNext) { i, p -> QueueRow(p, current = false, onClick = { controls.skipAhead(i) }) }
     }
+}
+
+/**
+ * What plays' transcript, followed along as a podcast app's is: every line, the one being said lit
+ * and kept at the middle, gliding there as it moves on, those already said dimmed, and a speaker's
+ * name where the speaker changes. A line tapped plays from its start. Dragged by hand, it stops
+ * following — until Follow Along is pressed, or the line being said comes to the middle of where it
+ * was left. The position is read here, and only for which line it is in: a tick that stays in the
+ * line recomposes nothing.
+ */
+@Composable
+fun TranscriptSheet(title: String, lines: List<Cue>, position: StateFlow<Long> = Start, onSeek: (Long) -> Unit = {}) {
+    val ms = position.collectAsStateWithLifecycle()
+    // Which line is being said moves a few times a minute, not at every tick.
+    val at by remember(lines) { derivedStateOf { Cue.at(lines, ms.value) } }
+    val speakers = remember(lines) { Cue.speakers(lines) }
+    val list = rememberTransientListState()
+    var following by remember { mutableStateOf(true) }
+    val dragged by list.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragged) { if (dragged) following = false }
+    // Following, the line being said is brought to the middle: at once as the sheet opens, gliding after.
+    var placed by remember { mutableStateOf(false) }
+    LaunchedEffect(at, following, lines) {
+        if (!following) return@LaunchedEffect
+        list.centre(at.coerceAtLeast(0), glide = placed)
+        placed = true
+    }
+    // Left where the hand left it, it takes up following again once the line being said reaches the middle.
+    LaunchedEffect(list, lines) {
+        snapshotFlow { !following && !list.isScrollInProgress && at >= 0 && list.middle() == at }.collect { if (it) following = true }
+    }
+    Column(Modifier.fillMaxWidth().fillMaxHeight()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
+            Glyph(Glyphs.Transcript, null, size = 20.dp)
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text("Transcript", style = MaterialTheme.typography.titleMedium)
+                if (title.isNotEmpty()) Text(title, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            // Room above the first line and below the last, so that either can stand at the middle.
+            LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = maxOf(maxHeight / 2 - LINE_HALF, 0.dp))) {
+                itemsIndexed(lines) { i, line ->
+                    TranscriptLine(
+                        line,
+                        speakers[i],
+                        said = i < at,
+                        now = i == at,
+                        onClick = {
+                            onSeek(line.startMs)
+                            following = true
+                        },
+                    )
+                }
+            }
+            FollowAlong(!following, { following = true }, Modifier.align(Alignment.BottomCenter).padding(bottom = Space.xl))
+        }
+    }
+}
+
+// Back to the line being said, while the transcript is not following it.
+@Composable
+private fun FollowAlong(shown: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    AnimatedVisibility(shown, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+        FilledTonalButton(onClick = onClick) {
+            Glyph(Glyphs.Follow, null, size = 16.dp)
+            Spacer(Modifier.width(Space.s))
+            Text("Follow Along")
+        }
+    }
+}
+
+/** About half a line's height: what the transcript's padding leaves of the middle for its first and last line. */
+private val LINE_HALF = 24.dp
+
+// One line of a transcript: the speaker's name over it where the speaker changes, and the line, lit
+// while it is said and dimmed once it has been, fading between.
+@Composable
+private fun TranscriptLine(line: Cue, speaker: String, said: Boolean, now: Boolean, onClick: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    val colour by animateColorAsState(
+        when {
+            now -> ink
+            said -> ink.copy(alpha = 0.3f)
+            else -> ink.copy(alpha = 0.55f)
+        },
+        label = "line",
+    )
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.s).clip(RoundedCornerShape(Space.corner)).clickable(onClick = onClick).padding(horizontal = Space.l, vertical = Space.s)) {
+        if (speaker.isNotEmpty()) {
+            Text(speaker.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs))
+        }
+        Text(line.text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = colour)
+    }
+}
+
+// The item at the middle of the list's viewport, or -1 for none.
+private fun LazyListState.middle(): Int {
+    val info = layoutInfo
+    val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
+    return info.visibleItemsInfo.firstOrNull { it.offset <= middle && it.offset + it.size > middle }?.index ?: -1
+}
+
+// Item `index` brought to the middle of the viewport: gliding when it is near, or after a jump to it
+// when it is far — a seek's — and at once when it need not glide.
+private suspend fun LazyListState.centre(index: Int, glide: Boolean) {
+    // Not before the list has been laid out once: the sheet's first frame.
+    snapshotFlow { layoutInfo.totalItemsCount }.first { it > index }
+    if (layoutInfo.visibleItemsInfo.none { it.index == index }) scrollToItem(index)
+    val info = layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val by = (item.offset + item.size / 2 - (info.viewportStartOffset + info.viewportEndOffset) / 2).toFloat()
+    if (glide) animateScrollBy(by, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow)) else scrollBy(by)
 }
 
 @Composable

@@ -2,7 +2,8 @@
 // `harken/iced/src/view.rs`): an album, its tracks under the works they are
 // movements of; a person — one page whether they made songs or wrote works
 // — under their banner, their most recorded work set apart, their best
-// known works, their records, and their songs where they wrote no works; a
+// known works, their records, their songs where they wrote no works, and
+// the episodes they are on; a
 // work and its performances; a performance, its
 // movements, its records and everybody on it; and a playlist, in the order
 // it was made. The lists are views held while the page is shown
@@ -11,6 +12,7 @@ package dev.harken.android
 
 import uniffi.harken_domain.Playlist
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -48,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +69,7 @@ import dev.harken.android.ui.Space
 import dev.harken.android.ui.UnderStatusBar
 import dev.harken.android.ui.quiet
 import dev.harken.android.ui.rememberDestinationListState
+import dev.harken.android.ui.rememberDestinationScrollState
 
 private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
 
@@ -164,9 +168,11 @@ fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id,
  * A person's page, one for everybody — whoever made a song and whoever wrote a work: their banner
  * (or, for somebody with no wide picture, their portrait beside their name), what they are and
  * when they lived; their most recorded work set apart with a Play, when one is; their best known
- * works and a "See All" that lists every one by catalogue (`all`); the records that are theirs; and,
- * for somebody who wrote no works, their songs as an album lists them. Each section only when it has
- * something in it.
+ * works and a "See All" that lists every one by catalogue (`all`); the records that are theirs;
+ * for somebody who wrote no works, their songs as an album lists them; and the episodes they are on
+ * (`appearances`), newest first, played as a show's are. Each section only when it has something in
+ * it. Somebody only ever on episodes — a podcast's guest — is what the newest of them called them,
+ * under their picture there (`person`), with their own page on the web where they have one.
  */
 @Composable
 fun ArtistPage(
@@ -182,14 +188,30 @@ fun ArtistPage(
     works: List<WorkSummary> = emptyList(),
     all: Boolean = false,
     onAll: (Boolean) -> Unit = {},
+    appearances: List<Track> = emptyList(),
+    person: OnEpisode? = null,
+    mine: Map<Id, Listened> = emptyMap(),
 ) {
     Recompositions.hit("ArtistPage")
     val page = Page.ForArtist(name)
-    val counts = facts(if (albums.isEmpty()) null else Media.count(albums.size, "album"), Media.count(tracks.size, "song"), length(tracks))
+    val counts =
+        facts(
+            if (albums.isEmpty()) null else Media.count(albums.size, "album"),
+            if (tracks.isEmpty() && appearances.isNotEmpty()) null else Media.count(tracks.size, "song"),
+            length(tracks),
+            if (appearances.isEmpty()) null else Media.count(appearances.size, "episode"),
+        )
     // What they are and when they lived, as a catalogue heads a person; nobody's years known, and
     // it is how much of them there is here.
     val life = artist?.let { Catalogue.span(it.born, it.died) }?.takeIf { it.isNotEmpty() } ?: composer?.let { Catalogue.span(it.born, it.died) } ?: ""
-    val kind = if (works.isNotEmpty()) "Composer" else "Artist"
+    val kind =
+        when {
+            works.isNotEmpty() -> "Composer"
+            tracks.isEmpty() && appearances.isNotEmpty() -> person?.role?.ifEmpty { null } ?: "Guest"
+            else -> "Artist"
+        }
+    // What their header's Play plays: their songs, or else the episodes they are on.
+    val plays = tracks.ifEmpty { appearances }
     val listed = Catalogue.listed(works, all)
     val short = Catalogue.short(listed, works)
     val best = Catalogue.mostRecorded(works)
@@ -224,16 +246,19 @@ fun ArtistPage(
             item {
                 CoverHeader(
                     seed = name,
-                    art = artist?.art?.ifEmpty { null } ?: composer?.art.orEmpty(),
+                    art = artist?.art?.ifEmpty { null } ?: composer?.art?.ifEmpty { null } ?: person?.art.orEmpty(),
                     title = name,
                     over = facts(kind, life.ifEmpty { counts }),
                     round = true,
-                    canPlay = tracks.isNotEmpty(),
-                    onPlay = { act.play(tracks, 0, page) },
-                    onShuffle = { act.shuffle(tracks, page) },
+                    canPlay = plays.isNotEmpty(),
+                    onPlay = { act.play(plays, 0, page) },
+                    onShuffle = { act.shuffle(plays, page) },
                 )
             }
         }
+        // Their own page on the web, as the feed gives it.
+        val link = person?.link.orEmpty()
+        if (link.isNotEmpty()) item(key = "link") { WebLink(link) }
         // The most recorded work, set apart with a Play — when one is.
         if (best != null) {
             item(key = "featured") {
@@ -273,7 +298,41 @@ fun ArtistPage(
                 Cover(album?.name ?: t.title, album?.art ?: "", Space.thumb, Modifier.size(Space.thumb), corner = 4.dp)
             }
         }
+        // The episodes they are on, newest first, each saying whose show it is.
+        if (appearances.isNotEmpty()) {
+            item { SectionHeading("Episodes") }
+            item { HorizontalDivider(Modifier.padding(start = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
+            itemsIndexed(appearances, key = { _, t -> "episode:" + t.id.hex }) { i, t ->
+                EpisodeRow(
+                    t,
+                    null,
+                    mine = mine[t.id],
+                    others = emptyList(),
+                    download = LocalDownloads.current[t.id],
+                    playing = t.id.hex == playing,
+                    now = 0,
+                    onClick = { act.play(appearances, i, page) },
+                    onMore = { act.more(t, page) },
+                    show = t.creator,
+                )
+            }
+        }
         item { Spacer(Modifier.height(Space.xl)) }
+    }
+}
+
+// Somebody's own page on the web, by its host, opened in the browser.
+@Composable
+private fun WebLink(link: String) {
+    val uri = LocalUriHandler.current
+    val host = link.substringAfter("://").substringBefore('/').removePrefix("www.").ifEmpty { link }
+    Row(
+        Modifier.padding(horizontal = Space.page - Space.s).clip(RoundedCornerShape(50)).clickable { runCatching { uri.openUri(link) } }.padding(horizontal = Space.s, vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(Space.s))
+        Text(host, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -409,10 +468,11 @@ fun RecordingPage(
 
 /**
  * A podcast's or a series of sermons' page, as a podcast app lays one out: its picture, who makes
- * it, how many episodes, Play and Shuffle, and what it is about; why its feed's last read failed,
- * and how many of its episodes are not on the server yet; then its episodes newest first
- * ([EpisodeRow]), and at their foot the older ones fetched while the feed has more than the library
- * keeps. A followed show's own settings — its Unfollow — are in its bar's menu.
+ * it, how many episodes, Play and Shuffle, who hosts it, and what it is about; why its feed's last
+ * read failed, and how many of its episodes are not on the server yet; then its episodes newest
+ * first ([EpisodeRow]), each with whoever was on it besides the hosts, and at their foot the older
+ * ones fetched while the feed has more than the library keeps. A followed show's own settings — its
+ * Unfollow — are in its bar's menu.
  */
 @Composable
 fun ShowPage(
@@ -428,12 +488,19 @@ fun ShowPage(
     me: String = "",
     details: Map<Id, EpisodeDetail> = emptyMap(),
     onUnfollow: (Subscription) -> Unit = {},
+    /** Who makes it: the hosts its newest episode names. */
+    hosts: List<OnEpisode> = emptyList(),
+    /** Who is on each episode, by its media id: the show's, read once (`Library.showPeople`). */
+    people: Map<Id, List<OnEpisode>> = emptyMap(),
 ) {
     Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
     val title = show?.title ?: "Show"
     // What "2 days ago" is counted from: the page's opening, not every frame.
     val now = remember { System.currentTimeMillis() }
+    // Each row's, found once rather than by every row as it scrolls in.
+    val heardBy = remember(listened) { listened.groupBy { it.mediaId } }
+    val guestsBy = remember(people) { people.mapValues { OnEpisode.guests(it.value) } }
     LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("show")) {
         item { PageBar("", onBack = act::back) { if (feed != null) ShowMenu(title, feed, onUnfollow) } }
         item {
@@ -449,6 +516,8 @@ fun ShowPage(
                 onShuffle = { act.shuffle(episodes, page) },
             )
         }
+        // Its hosts, named once here rather than on every episode.
+        if (hosts.isNotEmpty()) item(key = "hosts") { Hosts(hosts, onOpen = { act.open(Page.ForArtist(it.name)) }) }
         val about = show?.description.orEmpty()
         if (about.isNotEmpty()) {
             item {
@@ -491,7 +560,7 @@ fun ShowPage(
         if (episodes.isNotEmpty()) item { HorizontalDivider(Modifier.padding(start = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
         itemsIndexed(episodes, key = { _, t -> t.id.hex }) { i, t ->
             // The signed-in person's place in it is the row's; anybody else's is said beside it.
-            val heard = listened.filter { it.mediaId == t.id }
+            val heard = heardBy[t.id].orEmpty()
             EpisodeRow(
                 t,
                 details[t.id],
@@ -502,6 +571,8 @@ fun ShowPage(
                 now = now,
                 onClick = { act.play(episodes, i, page) },
                 onMore = { act.more(t, page) },
+                guests = guestsBy[t.id].orEmpty(),
+                onPerson = { act.open(Page.ForArtist(it.name)) },
             )
         }
         // Older ones, twenty at a time, while the feed has more than the library keeps.
@@ -535,12 +606,76 @@ private fun ShowMenu(title: String, feed: Subscription, onUnfollow: (Subscriptio
     }
 }
 
+// "Hosted by" under a show's header, each host a face and a name that opens their page.
+@Composable
+private fun Hosts(hosts: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = Space.page), contentAlignment = Alignment.Center) {
+        Row(Modifier.horizontalScroll(rememberDestinationScrollState("hosts")), verticalAlignment = Alignment.CenterVertically) {
+            Text("Hosted by", style = quiet(MaterialTheme.typography.labelLarge), maxLines = 1)
+            for (h in hosts) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(50)).clickable { onOpen(h) }.padding(horizontal = Space.s, vertical = Space.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Cover(h.name, h.art, 24.dp, Modifier.size(24.dp), round = true)
+                    Spacer(Modifier.width(Space.s))
+                    Text(h.name, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+// Who else was on an episode, under what it is about: their faces overlapping, and "with" their
+// names. Somebody alone opens their page; several are a menu of them, each opening theirs.
+@Composable
+private fun Guests(guests: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
+    var choosing by remember { mutableStateOf(false) }
+    Box(Modifier.padding(top = Space.s)) {
+        Row(
+            Modifier.clip(RoundedCornerShape(50)).clickable { if (guests.size == 1) onOpen(guests[0]) else choosing = true }.padding(vertical = Space.xs, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val faces = guests.take(3)
+            Box {
+                for ((i, g) in faces.withIndex()) {
+                    // Each over the last, ringed in the ground so the overlap reads.
+                    Box(Modifier.padding(start = 14.dp * i).size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.background).padding(1.5.dp)) {
+                        Cover(g.name, g.art, 22.dp, Modifier.fillMaxSize(), round = true)
+                    }
+                }
+            }
+            Spacer(Modifier.width(Space.s))
+            Text(
+                "with " + OnEpisode.named(guests),
+                style = quiet(MaterialTheme.typography.labelMedium),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+            for (g in guests) {
+                DropdownMenuItem(
+                    text = { Text(if (g.role.isEmpty()) g.name else "${g.name} · ${g.role}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    leadingIcon = { Cover(g.name, g.art, 28.dp, Modifier.size(28.dp), round = true) },
+                    onClick = {
+                        choosing = false
+                        onOpen(g)
+                    },
+                )
+            }
+        }
+    }
+}
+
 /**
  * One episode, as a podcast app lists them: when it came out, in small capitals; its title, bold;
  * what it is about, a few lines of it; and under them its play and how much of it there is — its
  * length, the time left once begun, Played, or how its download to the server goes while the file
  * is not there yet — with anybody else's place beside it. Begun, a bar across the row says how far
- * in the listener is. The whole row plays it; its menu is at its top right.
+ * in the listener is. Whoever else was on it (`guests`) is under what it is about, their faces and
+ * their names, opening their page. The whole row plays it; its menu is at its top right. Off its
+ * show's page, the small capitals name the `show` too.
  */
 @Composable
 fun EpisodeRow(
@@ -553,15 +688,18 @@ fun EpisodeRow(
     now: Long,
     onClick: () -> Unit,
     onMore: () -> Unit,
+    guests: List<OnEpisode> = emptyList(),
+    onPerson: (OnEpisode) -> Unit = {},
+    show: String = "",
 ) {
     Recompositions.hit("EpisodeRow")
-    val dated = Episodes.dated(detail?.publishedMs ?: 0, now)
+    val dated = facts(show.uppercase(), Episodes.dated(detail?.publishedMs ?: 0, now))
     val about = detail?.description.orEmpty()
     val progress = Episodes.progress(track, mine)
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs, top = Space.m), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f).padding(top = Space.xs)) {
-                if (dated.isNotEmpty()) Text(dated, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
+                if (dated.isNotEmpty()) Text(dated, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     track.title,
                     style = MaterialTheme.typography.titleMedium,
@@ -573,6 +711,7 @@ fun EpisodeRow(
                 if (about.isNotEmpty()) {
                     Text(about, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Space.xs))
                 }
+                if (guests.isNotEmpty()) Guests(guests, onPerson)
             }
             MoreButton(track.title, null, onMore)
         }

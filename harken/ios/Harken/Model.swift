@@ -43,6 +43,10 @@ final class Model: ObservableObject {
     /// Episodes' chapters as read, by media id: read when a show's page
     /// or the player asks ([`loadChapters`]).
     @Published private(set) var chapters = [Id: [ChaptersEntry]]()
+    /// Who is on episodes, and episodes' transcripts, as read, by media id:
+    /// read when a page or the player asks ([`loadPeople`], [`loadTranscript`]).
+    @Published private(set) var people = [Id: [PeopleEntry]]()
+    @Published private(set) var transcripts = [Id: [TranscriptEntry]]()
     @Published private(set) var results: Results? = nil
     @Published private(set) var recent: [String]
     @Published var diagnosticsUnlocked: Bool
@@ -277,6 +281,28 @@ final class Model: ObservableObject {
         guard !wanted.isEmpty else { return }
         bridge?.chapters(wanted) { read in self.chapters.merge(read) { _, new in new } }
     }
+
+    /// Read who is on these episodes, those not read yet.
+    func loadPeople(_ media: [Id]) {
+        let wanted = media.filter { people[$0] == nil }
+        guard !wanted.isEmpty else { return }
+        bridge?.people(wanted) { read in self.people.merge(read) { _, new in new } }
+    }
+
+    /// Read an episode's transcript, once.
+    func loadTranscript(_ media: Id) {
+        guard transcripts[media] == nil else { return }
+        bridge?.transcript(media) { read in self.transcripts[media] = read }
+    }
+
+    /// Somebody as the episodes read so far name them — their picture and
+    /// their link — the first with either, else the first at all.
+    func face(_ name: String) -> PeopleEntry? {
+        let all = people.values.joined().filter { $0.name == name }
+        return all.first { !$0.art.isEmpty || !$0.link.isEmpty } ?? all.first
+    }
+    /// The episodes somebody is on, newest first, while their page is held; none until first read.
+    func appearances(of name: String) -> [LibraryEntry]? { snapshot.appearances[name] }
     func composer(named n: String) -> ComposersEntry? { snapshot.composers.first { $0.name == n } }
     /// A person's works, by catalogue, while their page is held; none until first read.
     func works(of composer: String) -> [WorkSummary]? { snapshot.works[composer] }

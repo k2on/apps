@@ -32,6 +32,7 @@
 //! with it, its user and id the verified login's ([`device`]).
 
 pub mod assistant;
+pub mod captions;
 pub mod catalogue;
 pub mod covers;
 pub mod domain;
@@ -39,6 +40,7 @@ pub mod feeds;
 pub mod hosted;
 pub mod library;
 pub mod sync;
+pub mod transcribe;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -69,6 +71,9 @@ pub struct Config {
     pub media: Option<PathBuf>,
     /// A catalogue to import (`catalogue.rs`): the URL of its JSON.
     pub catalogue: Option<String>,
+    /// What hears the episodes here (`transcribe.rs`): a program run as
+    /// `program <audio> <captions.vtt>`.
+    pub transcriber: Option<PathBuf>,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
 }
@@ -93,6 +98,7 @@ impl Config {
             serve: ark_peer::Serve::dev(listen, data),
             media: None,
             catalogue: None,
+            transcriber: None,
             house: None,
         }
     }
@@ -106,6 +112,9 @@ impl Config {
     /// HARKEN_MEDIA                  the media root
     /// HARKEN_CATALOGUE              a catalogue's JSON URL, imported
     ///                               (with HARKEN_MEDIA)
+    /// HARKEN_TRANSCRIBER            a program writing an episode's captions,
+    ///                               `program <audio> <out.vtt>` (with
+    ///                               HARKEN_MEDIA)
     /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
     ///                               all three, or none; HARKEN_HA_MEDIA
     /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
@@ -123,6 +132,7 @@ impl Config {
             serve,
             media: env("HARKEN_MEDIA").map(PathBuf::from),
             catalogue: env("HARKEN_CATALOGUE"),
+            transcriber: env("HARKEN_TRANSCRIBER").map(PathBuf::from),
             house: house(&env)?,
         })
     }
@@ -470,6 +480,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 config.data.clone(),
                 login,
                 config.catalogue.clone(),
+                config.transcriber.clone(),
             )?)
         }
         None => None,

@@ -163,6 +163,7 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
         dir,
         login,
         None,
+        None,
     )
     .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1_200));
@@ -958,11 +959,12 @@ fn a_feed_followed_is_downloaded_and_a_show() {
         match path {
             "/feed.xml" => Some(
                 format!(
-                    r#"<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:psc="http://podlove.org/simple-chapters"><channel>
+                    r#"<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:psc="http://podlove.org/simple-chapters" xmlns:podcast="https://podcastindex.org/namespace/1.0"><channel>
                     <title>Gospel in Life</title><itunes:author>Tim Keller</itunes:author>
                     <item><title>Living Grace</title><guid>2</guid><pubDate>Wed, 21 Oct 2026 10:00:00 +0000</pubDate>
                       <itunes:duration>47:04</itunes:duration><enclosure url="{base}/2.wav" type="audio/wav"/>
-                      <psc:chapters><psc:chapter start="0" title="Reading"/><psc:chapter start="05:00" title="Sermon"/></psc:chapters></item>
+                      <psc:chapters><psc:chapter start="0" title="Reading"/><psc:chapter start="05:00" title="Sermon"/></psc:chapters>
+                      <podcast:person role="guest" href="https://redeemer.com">Tim Keller</podcast:person></item>
                     <item><title>The Dream of the Kingdom</title><guid>3</guid><pubDate>Mon, 26 Oct 2026 10:00:00 +0000</pubDate>
                       <enclosure url="{base}/3.wav" type="audio/wav"/></item>
                     <item><title>Too Old</title><guid>1</guid><pubDate>Mon, 19 Oct 2026 10:00:00 +0000</pubDate>
@@ -978,8 +980,22 @@ fn a_feed_followed_is_downloaded_and_a_show() {
         }
     });
     base.set(url.clone()).unwrap();
+    // What hears each episode: whisper.cpp on a server, and here a script
+    // that says the same two lines of every file it is given.
+    let transcriber = root.path().join("transcriber");
+    std::fs::write(
+        &transcriber,
+        "#!/bin/sh\ntest -f \"$1\" || exit 1\nprintf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:04.000\\n Grace and peace.\\n\\n00:00:05.000 --> 00:00:07.500\\n Let us pray.\\n' > \"$2\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        &transcriber,
+        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+    )
+    .unwrap();
     let server = serve(&rt, &data, |c| {
         c.media = Some(media.clone());
+        c.transcriber = Some(transcriber.clone());
         c.roles.insert(LIBRARY.into(), vec!["admin".into()]);
     });
     let feed = format!("{url}/feed.xml");
@@ -1049,6 +1065,43 @@ fn a_feed_followed_is_downloaded_and_a_show() {
             .collect::<Vec<_>>(),
         [(true, 0, "Reading"), (true, 300_000, "Sermon")],
         "the feed's chapters, on its episode"
+    );
+    let people = hub_rows::<harken_server::domain::Appearance>(&server, "appearance");
+    assert_eq!(
+        people
+            .iter()
+            .map(|a| (
+                a.media_id == grace.media_id,
+                a.person_name.as_str(),
+                a.role.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        [(true, "Tim Keller", "Guest")],
+        "the feed's people, on its episode"
+    );
+    // Heard once the file is here, from the server's own copy.
+    let cues = eventually(30, || {
+        let cues = hub_rows::<harken_server::domain::Cue>(&server, "cue");
+        cues.iter()
+            .any(|c| c.media_id == grace.media_id)
+            .then_some(cues)
+    })
+    .expect("the episode heard");
+    assert_eq!(
+        cues.iter()
+            .filter(|c| c.media_id == grace.media_id)
+            .map(|c| (
+                c.media_id == grace.media_id,
+                c.start_ms,
+                c.end_ms,
+                c.text.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (true, 1_000, 4_000, "Grace and peace."),
+            (true, 5_000, 7_500, "Let us pray.")
+        ],
+        "what was heard in it, on its episode"
     );
     let file = &found.iter().find(|(t, _)| t == "Living Grace").unwrap().1;
     let media_rows = hub_rows::<Media>(&server, "media");

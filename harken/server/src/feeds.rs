@@ -21,7 +21,9 @@ use std::time::Duration;
 use ark::format::Encode;
 
 use crate::domain::keys::show_key;
-use crate::domain::{AddEpisode, AddShow, ChapterAt, FeedRead, SetChapters, Subscription};
+use crate::domain::{
+    AddEpisode, AddShow, ChapterAt, FeedRead, PersonOn, SetChapters, SetPeople, Subscription,
+};
 use crate::sync::{self, Call, Plan, Source, Want};
 
 /// Where under `/media` the downloads are served.
@@ -33,7 +35,9 @@ pub const EVERY: Duration = Duration::from_secs(60 * 60);
 const ITUNES: &str = "http://www.itunes.com/dtds/podcast-1.0.dtd";
 
 /// Podcasting 2.0's namespace: `<podcast:chapters url type>`, a JSON file
-/// of chapters beside the audio.
+/// of chapters beside the audio; `<podcast:person role href img>`,
+/// somebody on it. (Its `<podcast:transcript>` is not read: timed to the
+/// host's file, it is not to this one; `transcribe.rs` hears this one.)
 const PODCAST: &str = "https://podcastindex.org/namespace/1.0";
 
 /// Podlove Simple Chapters: `<psc:chapter start title href image>` in the
@@ -179,6 +183,23 @@ pub fn plan(
             };
             calls.push(call("library.set_chapters", &episode.title, &set));
         }
+        let people = match item.people.is_empty() {
+            true => &channel.people,
+            false => &item.people,
+        };
+        if !people.is_empty() {
+            let set = SetPeople {
+                file: want.file.clone(),
+                people: people
+                    .iter()
+                    .map(|p| PersonOn {
+                        art: picture(&p.art, failed),
+                        ..p.clone()
+                    })
+                    .collect(),
+            };
+            calls.push(call("library.set_people", &episode.title, &set));
+        }
         files.push(want);
     }
     Ok(Plan {
@@ -197,6 +218,8 @@ pub struct Channel {
     pub description: String,
     pub art: String,
     pub link: String,
+    /// Who is on every episode, unless an episode names its own.
+    pub people: Vec<PersonOn>,
     pub items: Vec<Item>,
 }
 
@@ -217,6 +240,9 @@ pub struct Item {
     /// chapters are (Podcasting 2.0's), when it says.
     pub chapters: Vec<ChapterAt>,
     pub chapters_url: String,
+    /// Who is on it, their pictures where the feed has them (not yet
+    /// downloaded).
+    pub people: Vec<PersonOn>,
 }
 
 /// Read a feed's RSS. Its items newest first, those with no audio left out.
@@ -282,6 +308,7 @@ pub fn parse(xml: &str) -> Result<Channel, String> {
                     .and_then(|c| c.attribute("url"))
                     .map(|u| u.trim().to_string())
                     .unwrap_or_default(),
+                people: people(i),
                 url,
             })
         })
@@ -299,8 +326,39 @@ pub fn parse(xml: &str) -> Result<Channel, String> {
         )),
         art: or(itunes_image(channel), rss_image),
         link: text(channel, "link", None),
+        people: people(channel),
         items,
     })
+}
+
+/// The `<podcast:person>`s right under a channel or an item, in order.
+/// Their role is as the feed says it, `Host` when it says none (the
+/// namespace's default).
+fn people(node: roxmltree::Node) -> Vec<PersonOn> {
+    node.children()
+        .filter(|c| c.has_tag_name((PODCAST, "person")))
+        .filter_map(|c| {
+            let name = c.text().unwrap_or("").trim().to_string();
+            let attr = |a: &str| c.attribute(a).unwrap_or("").trim().to_string();
+            let role = match attr("role") {
+                r if r.is_empty() => "Host".to_string(),
+                r => capitalised(&r),
+            };
+            (!name.is_empty()).then(|| PersonOn {
+                name,
+                role,
+                link: attr("href"),
+                art: attr("img"),
+            })
+        })
+        .collect()
+}
+
+fn capitalised(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 /// An item's Podlove Simple Chapters, in order.
@@ -593,6 +651,46 @@ mod tests {
             ]
         );
         assert!(chapters_of("not json").is_empty());
+    }
+
+    /// An item's people are its own, or else its channel's. Full Time
+    /// Nix's, cut down.
+    #[test]
+    fn an_items_people_are_read() {
+        let rss = r#"<rss xmlns:podcast="https://podcastindex.org/namespace/1.0"><channel><title>T</title>
+            <podcast:person href="https://h">Shahar "Dawn" Or</podcast:person>
+            <item><title>A</title><enclosure url="https://m/a.mp3" type="audio/mpeg"/>
+              <podcast:person role="host" href="https://h" img="https://i/h.jpg">Shahar "Dawn" Or</podcast:person>
+              <podcast:person role="Guest" href="https://galowicz.de">Jacek Galowicz</podcast:person>
+              </item>
+            <item><title>B</title><enclosure url="https://m/b.mp3" type="audio/mpeg"/>
+              </item>
+        </channel></rss>"#;
+        let c = parse(rss).unwrap();
+        let who = |people: &[PersonOn]| -> Vec<(String, String, String)> {
+            people
+                .iter()
+                .map(|p| (p.name.clone(), p.role.clone(), p.art.clone()))
+                .collect()
+        };
+        assert_eq!(
+            who(&c.people),
+            [("Shahar \"Dawn\" Or".into(), "Host".into(), "".into())]
+        );
+        let a = c.items.iter().find(|i| i.title == "A").unwrap();
+        assert_eq!(
+            who(&a.people),
+            [
+                (
+                    "Shahar \"Dawn\" Or".into(),
+                    "Host".into(),
+                    "https://i/h.jpg".into()
+                ),
+                ("Jacek Galowicz".into(), "Guest".into(), "".into())
+            ]
+        );
+        let b = c.items.iter().find(|i| i.title == "B").unwrap();
+        assert!(b.people.is_empty());
     }
 
     /// Falsified by adding the offset rather than taking it away.

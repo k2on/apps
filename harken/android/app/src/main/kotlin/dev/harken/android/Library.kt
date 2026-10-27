@@ -162,6 +162,14 @@ fun progressKey(show: String): String = "progress:$show"
 
 fun episodesKey(show: String): String = "episodes:$show"
 
+fun peopleKey(media: Id): String = "people:${media.hex}"
+
+fun showPeopleKey(show: String): String = "show-people:$show"
+
+fun transcriptKey(media: Id): String = "transcript:${media.hex}"
+
+fun appearancesKey(name: String): String = "appearances:$name"
+
 /** A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved. */
 object Places {
     fun encode(s: String): String {
@@ -474,6 +482,21 @@ class Library(private val session: ArkSession) {
     /** An episode's chapters once, in order. */
     suspend fun chapters(media: Id): List<Chapter> = session.run { h -> Phone.once({ Phone.chapters(h, media) }, Chapter::of) }
 
+    /** Who is on an episode (`people`), in its feed's order; [release] [peopleKey]. */
+    fun people(media: Id): StateFlow<List<OnEpisode>?> = open(peopleKey(media)) { Held({ Phone.people(it, media) }, OnEpisode::of) }
+
+    /** Who is on each of a show's episodes (`show_people`), held by its page; [release] [showPeopleKey]. */
+    fun showPeople(show: String): StateFlow<List<Appearing>?> = open(showPeopleKey(show)) { Held({ Phone.showPeople(it, show) }, Appearing::of) }
+
+    /**
+     * An episode's transcript (`transcript`), in the order it is said: held, so a transcript the server
+     * reads after the episode began comes in while it plays; [release] [transcriptKey].
+     */
+    fun transcript(media: Id): StateFlow<List<Cue>?> = open(transcriptKey(media)) { Held({ Phone.transcript(it, media) }, Cue::of) }
+
+    /** Every episode somebody is on (`appearances`), newest first; [release] [appearancesKey]. */
+    fun appearances(name: String): StateFlow<List<Track>?> = open(appearancesKey(name)) { Held({ Phone.appearances(it, name) }, Track::of) }
+
     /** Let go of what [hold], [works], [work], [recordings] or [credits] held, by its key. */
     fun release(key: Any) {
         val o = pages[key] ?: return
@@ -486,7 +509,8 @@ class Library(private val session: ArkSession) {
         when (page) {
             is Page.Songs -> tracks.value
             is Page.ForAlbum -> session.run { h -> Phone.once({ Phone.album(h, page.name) }, Track::of) }
-            is Page.ForArtist -> session.run { h -> Phone.once({ Phone.artist(h, page.name) }, Track::of) }
+            // Their songs; somebody with none, the episodes they are on, which their page plays.
+            is Page.ForArtist -> session.run { h -> Phone.once({ Phone.artist(h, page.name) }, Track::of).ifEmpty { Phone.once({ Phone.appearances(h, page.name) }, Track::of) } }
             is Page.ForPlaylist -> session.run { h -> Phone.once({ Phone.playlist(h, page.id) }, Track::of) }
             is Page.ForRecording -> session.run { h -> Phone.once({ Phone.recording(h, page.id) }, Track::of) }
             is Page.ForShow -> session.run { h -> Phone.once({ Phone.show(h, page.id) }, Track::of) }

@@ -229,6 +229,13 @@ pub enum Message {
     Resync,
     /// An episode from this far in: one of its chapters.
     PlayFrom(Id, i64),
+    /// The episode playing, from this far in: a line of its transcript.
+    Cue(i64),
+    /// The transcript follows the line being said (`true`: its Follow, and
+    /// `f`), or no longer does (`false`: it was scrolled by hand).
+    Follow(bool),
+    /// Somebody's web page, opened outside the app.
+    OpenLink(String),
     /// An episode said played (`true`) or not by the signed-in person.
     MarkPlayed(Id, bool),
     /// A shows page's +: the search for a show to follow, open or shut.
@@ -623,6 +630,11 @@ pub const QUEUE_WIDTH: f32 = 336.0;
 pub const QUEUE_ROWS: usize = 12;
 /// The last row of the playlist picker, which is a row and not a key.
 pub const NEW_PLAYLIST: &str = "New playlist\u{2026}";
+/// About how tall a transcript's header is, over its lines, which scroll
+/// under it; and one of its lines, a line of words and its padding — what
+/// keeps the line being said in the middle of the room left.
+pub const TRANSCRIPT_HEAD: f32 = 132.0;
+pub const TRANSCRIPT_LINE: f32 = 40.0;
 
 pub struct App {
     /// Which pane the cursor is in, and where it is in each: a cursor per
@@ -644,6 +656,13 @@ pub struct App {
     /// A composer's page lists every work, not only the best known: its
     /// "See All" was pressed. Gone with the page.
     pub all_works: bool,
+    /// The transcript keeps its cursor on the line being said, in the
+    /// middle of the page — until the cursor is moved or the page scrolled
+    /// by hand, and again once the line being said is the cursor's, or
+    /// Follow is pressed.
+    pub following: bool,
+    /// The line being said, as the transcript last followed it.
+    pub said: Option<usize>,
     /// A row's menu, and the playlist picker that is its submenu — or the one
     /// `a` opens alone. arkui holds the rules; the playlists are the values.
     pub ctx: Context<Message, Id>,
@@ -753,6 +772,8 @@ impl App {
             adding: None,
             debug: false,
             all_works: false,
+            following: true,
+            said: None,
             ctx: Context::new(),
             menu_about: None,
             picker_about: None,
@@ -1153,6 +1174,7 @@ impl App {
                 Source::Sermons => p.shows_of("sermon").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
                 Source::Artist(_) if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
                 Source::Work(..) => p.recordings().iter().map(|r| r.performers.clone()).collect(),
+                Source::Transcript => self.cues().into_iter().map(|c| c.text).collect(),
                 _ => p.rows().iter().map(|i| format!("{} {}", i.title, i.creator)).collect(),
             },
         }
@@ -1263,7 +1285,7 @@ impl App {
                 'a' => self.update(Message::OpenPicker),
                 // The same menu the dots and a right click open, on the ⋯
                 // column — by key there is no pointer to land on.
-                'm' => match self.peer.rows().get(self.at(Pane::Tracks)).map(|i| i.id) {
+                'm' => match self.row_under_cursor() {
                     Some(id) => {
                         self.cursor.y = MENU_BY_KEY_Y;
                         self.update(Message::RowMenu(id, Anchor::Dots))
@@ -1272,6 +1294,8 @@ impl App {
                 },
                 'd' => self.update(Message::OpenDevices),
                 'q' => self.update(Message::OpenQueue),
+                't' => self.update(Message::Select(Source::Transcript)),
+                'f' if self.peer.source == Source::Transcript => self.update(Message::Follow(true)),
                 '}' => self.update(self.forward()),
                 '{' => self.update(self.back()),
                 other => match volume_key(other, Level::Output) {
@@ -1345,7 +1369,21 @@ impl App {
         if pane == Pane::Sidebar {
             self.show_under_cursor();
         }
+        // A transcript's cursor moved by hand is not on the line being
+        // said: it stops following it.
+        if pane == Pane::Tracks && self.peer.source == Source::Transcript {
+            self.following = false;
+        }
         self.reveal()
+    }
+
+    /// The row the page's cursor is on, whichever list it is in.
+    fn row_under_cursor(&self) -> Option<Id> {
+        let at = self.at(Pane::Tracks);
+        match self.layout().mark_at(at) {
+            Some(nav::Mark::Episode(k)) => self.peer.appearances().get(k).map(|i| i.id),
+            _ => self.peer.rows().get(at).map(|i| i.id),
+        }
     }
 
     /// Point the page at whatever the sidebar's cursor is on.
@@ -1373,13 +1411,57 @@ impl App {
         }
     }
 
-    /// Keep the cursor on screen.
+    /// Keep the cursor on screen — on a transcript's line, in the middle.
     fn reveal(&self) -> Task<Message> {
+        let at = self.at(self.pane);
         let id = match self.pane {
             Pane::Sidebar => SIDEBAR,
+            Pane::Tracks if self.peer.source == Source::Transcript && at < self.cues().len() => return self.centre(at),
             Pane::Tracks => TRACKS,
         };
-        arkui::scroll::reveal_to(id, self.shape(self.pane).progress(self.at(self.pane)))
+        arkui::scroll::reveal_to(id, self.shape(self.pane).progress(at))
+    }
+
+    /// What is said in the episode playing, line by line: none for a song,
+    /// or an episode whose feed has no timed transcript.
+    pub fn cues(&self) -> Vec<rows::Cue> {
+        self.now().map(|n| self.peer.transcript_of(n.track().id.0)).unwrap_or_default()
+    }
+
+    /// The line of the transcript being said now, if one has begun.
+    pub fn cue_now(&self) -> Option<usize> {
+        let ms = (self.now()?.position * 1000.0) as i64;
+        rows::cue_at(&self.cues(), ms)
+    }
+
+    /// Put a transcript's line in the middle of the room under its header.
+    fn centre(&self, at: usize) -> Task<Message> {
+        let seen = (self.window.height - BAR_HEIGHT - TRANSCRIPT_HEAD) / TRANSCRIPT_LINE;
+        arkui::scroll::centre(TRACKS, at, self.cues().len(), seen)
+    }
+
+    /// Keep the transcript on the line being said while it follows it: its
+    /// cursor there and the line in the middle, once each time the line
+    /// changes — and follow again once the line being said is the one the
+    /// cursor was left on.
+    fn follow(&mut self) -> Task<Message> {
+        if self.peer.source != Source::Transcript {
+            return Task::none();
+        }
+        let now = self.cue_now();
+        if now == self.said {
+            return Task::none();
+        }
+        self.said = now;
+        let Some(at) = now else { return Task::none() };
+        if at == self.at(Pane::Tracks) {
+            self.following = true;
+        }
+        if !self.following {
+            return Task::none();
+        }
+        self.cursors[Pane::Tracks as usize] = at;
+        self.centre(at)
     }
 
     /// Jump to the next label matching the last search, from `from`
@@ -1446,7 +1528,7 @@ impl App {
     /// and its file the path as the log carries it, which each device joins
     /// to *its* server.
     fn queued(&self, id: Id) -> Option<listening::Track> {
-        let i = self.peer.rows().iter().find(|i| i.id == id)?;
+        let i = self.peer.row(id)?;
         Some(listening::Track {
             id: key(i.id),
             title: i.title.clone(),
@@ -1696,7 +1778,7 @@ impl App {
     /// opens, and the one definition — the view draws them and `<Enter>`
     /// runs them.
     pub fn row_entries(&self, id: Id) -> Option<(String, Vec<Entry<Message>>)> {
-        let item = self.peer.rows().iter().find(|i| i.id == id)?;
+        let item = self.peer.row(id)?;
         let album = self.peer.detail_of(id).album;
         let mine = self.peer.mine_of(id);
         let play = match mine.filter(|l| !l.finished && l.position_ms > 0) {
@@ -1712,10 +1794,14 @@ impl App {
         ];
         // "Go to" takes the glyph of the *place* it goes, which is the one
         // table the sidebar draws from too.
-        // An episode goes to its show, whose title is its creator.
+        // An episode goes to its show, whose title is its creator, and to
+        // everybody on it.
         let places = match item.kind.as_str() {
             "song" => vec![Source::Album(album), Source::Artist(item.creator.clone())],
-            kind => self.peer.show_named(kind, &item.creator).into_iter().collect(),
+            kind => {
+                let people = self.peer.people_of(id).into_iter().map(|p| Source::Artist(p.name));
+                self.peer.show_named(kind, &item.creator).into_iter().chain(people).collect()
+            }
         };
         for source in places {
             if !source.title().is_empty() {
@@ -1825,10 +1911,7 @@ impl App {
             true => self.menu_about,
             false => None,
         };
-        let found = match wanted {
-            Some(id) => self.peer.rows().iter().find(|i| i.id == id).cloned(),
-            None => self.peer.rows().get(self.at(Pane::Tracks)).cloned(),
-        };
+        let found = wanted.or_else(|| self.row_under_cursor()).and_then(|id| self.peer.row(id)).cloned();
         let Some(item) = found else {
             return Task::none();
         };
@@ -1868,6 +1951,13 @@ impl App {
                 if let Some(source) = self.card_under_cursor(at) {
                     return self.update(Message::Select(source));
                 }
+                // A transcript's line: the episode from there.
+                if self.peer.source == Source::Transcript {
+                    return match self.cues().get(at) {
+                        Some(c) => self.update(Message::Cue(c.start_ms)),
+                        None => Task::none(),
+                    };
+                }
                 match self.peer.rows().get(at).map(|i| i.id) {
                     Some(id) => self.update(Message::PlayItem(id)),
                     None => Task::none(),
@@ -1899,6 +1989,7 @@ impl App {
             .chain(p.works().iter().map(|w| w.art.clone()))
             .chain(p.recordings().iter().map(|r| r.art.clone()))
             .chain(p.shows().iter().map(|s| s.art.clone()))
+            .chain(self.faces_here())
             .filter(|art| !art.is_empty())
             .map(|art| media_url(&self.server, &art))
             .collect();
@@ -1922,6 +2013,14 @@ impl App {
                 .map(|t| t.map(Message::Banner)),
         );
         Task::batch(tasks)
+    }
+
+    /// The pictures of everybody on the page's episodes — a show's, or the
+    /// ones a person is on, whose own is among them.
+    fn faces_here(&self) -> Vec<String> {
+        let p = &self.peer;
+        let episodes = p.rows().iter().chain(p.appearances()).filter(|i| i.kind != "song");
+        episodes.flat_map(|i| p.people_of(i.id)).map(|person| person.art).collect()
     }
 
     /// The works a composer's page lists, in the order it lists them: every
@@ -2389,7 +2488,11 @@ impl App {
                 // The selection moves to what the menu is about before the
                 // menu takes the keyboard off it — or the window draws a menu
                 // about one row and a highlight on another.
-                if let Some(row) = self.peer.rows().iter().position(|i| i.id == id) {
+                let row = self.peer.rows().iter().position(|i| i.id == id).or_else(|| {
+                    let k = self.peer.appearances().iter().position(|i| i.id == id)?;
+                    self.layout().cell(nav::Mark::Episode(k))
+                });
+                if let Some(row) = row {
                     self.pane = Pane::Tracks;
                     self.cursors[Pane::Tracks as usize] = row;
                 }
@@ -2415,13 +2518,7 @@ impl App {
                     let Some(media) = self.picker_about else {
                         return Task::none();
                     };
-                    let title = self
-                        .peer
-                        .rows()
-                        .iter()
-                        .find(|i| i.id == media)
-                        .map(|i| i.title.clone())
-                        .unwrap_or_default();
+                    let title = self.peer.row(media).map(|i| i.title.clone()).unwrap_or_default();
                     let list = self
                         .peer
                         .playlists()
@@ -2501,20 +2598,34 @@ impl App {
                     return self.press(Press::Seek((to * 1000.0) as i64));
                 }
             }
-            // The queue is what is on screen.
+            // The queue is what is on screen: the list the row is in.
             Message::PlayItem(id) => {
-                let rows = self.peer.rows().to_vec();
+                let rows = self.peer.list_of(id).to_vec();
                 return self.play_rows(&rows, Some(id), self.from());
             }
             // An episode from one of its chapters: the page's list, from it.
             Message::PlayFrom(id, ms) => {
-                let rows = self.peer.rows().to_vec();
+                let rows = self.peer.list_of(id).to_vec();
                 let Some(at) = self.load_queue(&rows, Some(id)) else {
                     return Task::none();
                 };
                 self.queued_from = self.from();
                 return self.press(Press::Start(at, ms));
             }
+            // A line of the transcript: what plays, from there — and the
+            // line being said is the one pressed, so it is followed again.
+            Message::Cue(ms) => {
+                self.following = true;
+                return self.press(Press::Seek(ms));
+            }
+            Message::Follow(follow) => {
+                self.following = follow;
+                // Put back on the line being said, wherever it was left.
+                if follow {
+                    self.said = None;
+                }
+            }
+            Message::OpenLink(url) => open_link(&url),
             Message::MarkPlayed(id, finished) => {
                 let input = crate::domain::MarkPlayed {
                     media_id: key(id),
@@ -2623,6 +2734,16 @@ impl App {
                     false => None,
                 };
                 self.scroll_due = Some(back_to.unwrap_or(0.0));
+                // A transcript opens following the line being said, its
+                // cursor on it — put in the middle once the page is drawn,
+                // as any page's scroll is.
+                if self.peer.source == Source::Transcript {
+                    self.following = true;
+                    self.said = self.cue_now();
+                    self.cursors[Pane::Tracks as usize] = self.said.unwrap_or(0);
+                    self.scroll_due = None;
+                    return Task::done(Message::Follow(true));
+                }
             }
             Message::PageScrolled(y) => {
                 self.scrolls.insert(self.peer.source.place(), y);
@@ -2721,6 +2842,8 @@ impl App {
         if let Some(y) = self.scroll_due.take() {
             tasks.push(Task::done(Message::ScrollPage(y)));
         }
+        // The line being said moves on as what plays does.
+        tasks.push(self.follow());
         #[cfg(target_arch = "wasm32")]
         {
             let now = self.now().map(|n| (n.track().clone(), n.playing, n.duration, n.position));
@@ -2835,8 +2958,32 @@ impl App {
         if let Some(every) = self.clock() {
             subs.push(iced::time::every(every).map(|_| Message::Tick));
         }
+        // A transcript following the line being said stops when the wheel
+        // scrolls it by hand.
+        if self.peer.source == Source::Transcript && self.following {
+            subs.push(iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                    let (x, y) = match delta {
+                        iced::mouse::ScrollDelta::Pixels { x, y } | iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
+                    };
+                    (y.abs() > x.abs()).then_some(Message::Follow(false))
+                }
+                _ => None,
+            }));
+        }
         Subscription::batch(subs)
     }
+}
+
+/// Open somebody's web page outside the app: a tab of the browser the app
+/// is in, or the desktop's browser.
+fn open_link(url: &str) {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(window) = web_sys::window() {
+        let _ = window.open_with_url_and_target(url, "_blank");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    ark_auth::client::open_browser(url);
 }
 
 /// A blocking sign-in on a thread of its own — it takes as long as a person

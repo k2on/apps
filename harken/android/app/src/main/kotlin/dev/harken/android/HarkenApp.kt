@@ -285,6 +285,7 @@ fun HarkenApp(
     var adding by remember { mutableStateOf<Track?>(null) }
     var naming by remember { mutableStateOf<Pair<Boolean, Track?>?>(null) }
     var devices by remember { mutableStateOf(false) }
+    var transcript by remember { mutableStateOf(false) }
     // The kind of show a shows page's + is finding one to follow as, while its sheet is up.
     var finding by remember { mutableStateOf<String?>(null) }
 
@@ -432,6 +433,10 @@ fun HarkenApp(
                 devices = true
             }
 
+            override fun transcript() {
+                transcript = true
+            }
+
             override fun scrub(ms: Long) = playback.scrub(ms)
 
             override fun volume(level: Int) = playback.volume(level)
@@ -452,11 +457,14 @@ fun HarkenApp(
     val nowChapters by produceState(emptyList<Chapter>(), playing, changed) {
         value = playing?.let { library.chapters(Id(it)) }.orEmpty()
     }
+    // Its transcript, held while it plays: one the server reads meanwhile comes in.
+    val nowLines = playing?.let { p -> heldWhile(library, transcriptKey(Id(p))) { it.transcript(Id(p)) }.value }.orEmpty()
     CompositionLocalProvider(
         LocalCoverLoader provides covers,
         LocalPageMotion provides motion,
         LocalDownloads provides downloads,
         LocalChapters provides nowChapters,
+        LocalTranscript provides nowLines,
     ) {
         HarkenTheme {
             // Before the player, so that the player's own back gesture registers after it and is asked
@@ -545,9 +553,14 @@ fun HarkenApp(
                                             val rows by held(library, page, back)
                                             // The works they wrote, if any: a composer's page is their artist page.
                                             val works by heldBy(library, worksKey(page.name), back) { it.works(page.name) }
+                                            // The episodes they are on, if any, and their picture and link as the
+                                            // newest of them names them.
+                                            val on by heldBy(library, appearancesKey(page.name), back) { it.appearances(page.name) }
+                                            val newest = on?.firstOrNull()?.id
+                                            val person = newest?.let { m -> heldWhile(library, peopleKey(m)) { it.people(m) }.value }?.firstOrNull { it.name == page.name }
                                             // "See All", the destination's: kept while it is on the stack, as its scroll is.
                                             var all by rememberSaveable { mutableStateOf(false) }
-                                            Ready(if (works == null) null else rows) { read ->
+                                            Ready(if (works == null || on == null) null else rows) { read ->
                                                 ArtistPage(
                                                     page.name,
                                                     artists.firstOrNull { it.name == page.name },
@@ -562,6 +575,9 @@ fun HarkenApp(
                                                     works.orEmpty(),
                                                     all,
                                                     { all = it },
+                                                    appearances = on.orEmpty(),
+                                                    person = person,
+                                                    mine = mine,
                                                 )
                                             }
                                         }
@@ -582,7 +598,14 @@ fun HarkenApp(
                                             // rows are, since it is most of a row's height.
                                             val about by heldBy(library, episodesKey(page.id), back) { it.episodeDetails(page.id) }
                                             val aboutById = remember(about) { about.orEmpty().associateBy { it.mediaId } }
-                                            Ready(if (about == null) null else rows) { r ->
+                                            // Who is on each episode, the show's at once and waited for as what
+                                            // they are about is: a row's people are part of its height, and a
+                                            // view a row opened and closed as it scrolled by.
+                                            val people by heldBy(library, showPeopleKey(page.id), back) { it.showPeople(page.id) }
+                                            val peopleById = remember(people) { people.orEmpty().groupBy({ it.media }, { it.person }) }
+                                            // Who hosts it, as its newest episode says.
+                                            val hosts = rows?.firstOrNull()?.let { peopleById[it.id] }.orEmpty().filter { it.hosts }
+                                            Ready(if (about == null || people == null) null else rows) { r ->
                                                 ShowPage(
                                                     page.id,
                                                     shows.firstOrNull { it.id == page.id },
@@ -600,6 +623,8 @@ fun HarkenApp(
                                                         // Its show goes with it: nothing is left here to look at.
                                                         act.back()
                                                     },
+                                                    hosts = hosts,
+                                                    people = peopleById,
                                                 )
                                             }
                                         }
@@ -781,6 +806,12 @@ fun HarkenApp(
             if (queue) {
                 ModalBottomSheet(onDismissRequest = { queue = false }) { QueueSheet(player, controls) }
             }
+            // All the way up, the lines want the room; gone with the last line, at a song.
+            if (transcript && nowLines.isNotEmpty()) {
+                ModalBottomSheet(onDismissRequest = { transcript = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+                    TranscriptSheet(player.now?.title.orEmpty(), nowLines, playback.position, onSeek = playback::seek)
+                }
+            }
             finding?.let { kind ->
                 // Opened all the way: the keyboard comes up with it, and the results want the room.
                 ModalBottomSheet(onDismissRequest = { finding = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -882,6 +913,17 @@ private fun <T> heldBy(library: Library, key: Any, entry: NavBackStackEntry, hol
     val name = if (key is Page) key.route else key.toString()
     val holding = remember(entry, key) { kept(entry, "held:$name") { Holding(library, key, hold) } }
     return holding.rows.collectAsStateWithLifecycle()
+}
+
+/**
+ * A list held while it is drawn, rather than while a back stack entry is — a guest's newest episode's people,
+ * what plays' transcript — by its key, and let go when the key changes or it leaves.
+ */
+@Composable
+private fun <T> heldWhile(library: Library, key: String, hold: (Library) -> StateFlow<List<T>?>): androidx.compose.runtime.State<List<T>?> {
+    val rows = remember(key) { hold(library) }
+    DisposableEffect(key) { onDispose { library.release(key) } }
+    return rows.collectAsStateWithLifecycle()
 }
 
 /** The diagnostics' numbers, held by their entry as a page's rows are. */

@@ -115,6 +115,7 @@ struct SheetHost: ViewModifier {
         case .queue: QueueSheet().presentationDetents([.medium, .large])
         case .devices: DevicesSheet().presentationDetents([.medium, .large])
         case .follow(let kind): FollowSheet(kind: kind).presentationDetents([.medium, .large])
+        case .transcript: TranscriptSheet().presentationDetents([.large])
         }
     }
 }

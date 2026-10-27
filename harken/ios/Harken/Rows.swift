@@ -99,6 +99,83 @@ extension ChaptersEntry {
     }
 }
 
+/// Somebody on an episode as its feed names them (`people`), in the feed's
+/// order: a host, a guest, whatever the feed calls them, capitalised as it
+/// has it; their picture a path under the server's media, as a cover's is.
+extension PeopleEntry: Identifiable {
+    public var id: String { name }
+
+    /// A host: said once, over the show, rather than on every episode.
+    var isHost: Bool { role.caseInsensitiveCompare("Host") == .orderedSame }
+
+    /// Who hosts an episode, once each.
+    static func hosts(_ all: [PeopleEntry]) -> [PeopleEntry] { once(all.filter { $0.isHost }) }
+
+    /// Who else is on it: everybody but its hosts, once each.
+    static func guests(_ all: [PeopleEntry]) -> [PeopleEntry] {
+        let hosts = Set(all.filter { $0.isHost }.map { $0.name })
+        return once(all.filter { !hosts.contains($0.name) })
+    }
+
+    private static func once(_ people: [PeopleEntry]) -> [PeopleEntry] {
+        var seen = Set<String>()
+        return people.filter { seen.insert($0.name).inserted }
+    }
+
+    /// Their names in a line, in the feed's order: `Jacek Galowicz, Kiara Grouwstra`.
+    static func named(_ people: [PeopleEntry]) -> String { people.map { $0.name }.joined(separator: ", ") }
+
+    /// Their web page, when the feed gives one a browser opens.
+    var web: URL? {
+        guard let c = URLComponents(string: link.trimmingCharacters(in: .whitespaces)),
+              let scheme = c.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = c.host, !host.isEmpty else { return nil }
+        return c.url
+    }
+
+    /// Where it is, as its button says it: the site's name, without `www.`.
+    var site: String {
+        guard let u = web, let host = URLComponents(url: u, resolvingAgainstBaseURL: false)?.host else { return "" }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+}
+
+/// One line of an episode's transcript (`transcript`), timed by its feed's
+/// captions, the lines in the order they start.
+extension TranscriptEntry {
+    /// The line playing at `ms`: the last that starts at or before it; none
+    /// before the first. As `ChaptersEntry.at`, by halves.
+    static func at(_ lines: [TranscriptEntry], _ ms: Int64) -> Int? {
+        var lo = 0, hi = lines.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if lines[mid].startMs <= ms { lo = mid + 1 } else { hi = mid }
+        }
+        return lo == 0 ? nil : lo - 1
+    }
+
+    /// Whether line `i` says who speaks it: when it names somebody, and not
+    /// whoever the last line that named anybody named.
+    static func names(_ lines: [TranscriptEntry], _ i: Int) -> Bool {
+        let who = lines[i].speaker
+        if who.isEmpty { return false }
+        var j = i - 1
+        while j >= 0 && lines[j].speaker.isEmpty { j -= 1 }
+        return j < 0 || lines[j].speaker != who
+    }
+
+    /// Whether playback has caught up with a transcript scrolled by hand:
+    /// the line playing, moving on from `before` to `now`, has come down to
+    /// the middle of the lines that show. A line playing below them, or
+    /// already past the middle when the hand let go — somebody reading back —
+    /// has not.
+    static func caughtUp(from before: Int?, to now: Int?, showing: [Int]) -> Bool {
+        guard let now = now, let lo = showing.min(), let hi = showing.max() else { return false }
+        let mid = (lo + hi) / 2
+        return (before ?? -1) < mid && now >= mid && now <= hi
+    }
+}
+
 /// A feed the library follows (`subscriptions`), by its URL.
 extension SubscriptionsEntry: Identifiable {
     public var id: String { url }
@@ -165,6 +242,9 @@ enum Phone {
     static func album(_ h: Harken, _ name: String) throws -> LiveView<LibraryEntry> { try h.album(AlbumInput(playlistId: noPlaylist, name: name)) }
 
     static func artist(_ h: Harken, _ name: String) throws -> LiveView<LibraryEntry> { try h.artist(Artist(playlistId: noPlaylist, name: name)) }
+
+    /// Every episode somebody is on, newest first.
+    static func appearances(_ h: Harken, _ name: String) throws -> LiveView<LibraryEntry> { try h.appearances(Artist(playlistId: noPlaylist, name: name)) }
 
     static func playlist(_ h: Harken, _ id: Id) throws -> LiveView<LibraryEntry> { try h.playlist(PlaylistInput(playlistId: id)) }
 
@@ -305,13 +385,14 @@ enum Page: Hashable {
 
     /// The catalogue's views the page reads beside its tracks, as the
     /// desktop's `Peer::open_page` opens them: a person's works (none, for
-    /// somebody who wrote nothing here); a work's row and its performances;
+    /// somebody who wrote nothing here) and the episodes they are on (none,
+    /// for somebody on none); a work's row and its performances;
     /// a performance's credits, and its work's row and performances — the
     /// work's key is everything before the `@` — so its header can say what
     /// it is a performance of and who played it.
     var listings: [Listing] {
         switch self {
-        case let .artist(name): return [.works(name)]
+        case let .artist(name): return [.works(name), .appearances(name)]
         case let .show(id): return [.progress(id), .episodes(id)]
         case let .work(id): return [.work(id), .recordings(id)]
         case let .recording(id):
@@ -373,6 +454,8 @@ enum Listing: Hashable {
     case progress(String)
     /// A show's episodes as its feed tells them, by its key.
     case episodes(String)
+    /// Every episode somebody is on, newest first, by their name.
+    case appearances(String)
 }
 
 /// A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved.

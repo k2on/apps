@@ -17,6 +17,7 @@ use crate::listening::{self, Clock, Output};
 use crate::nav::{Layout, Mark};
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
+use crate::rows::{Item, Person};
 use crate::{
     licences, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, QUEUE_ROWS, QUEUE_WIDTH, SHELF, SIDEBAR, SIDEBAR_WIDTH,
     TRACKS,
@@ -64,6 +65,10 @@ const CLOCK_WIDTH: f32 = 48.0;
 /// Between the bar's groups: the transport, what plays, the seek bar, and
 /// each control after it.
 const BAR_SPACING: f32 = 16.0;
+/// How many faces of who is on an episode go beside its row before only
+/// their names do, and how big.
+const GUEST_FACES: usize = 5;
+const GUEST_FACE: f32 = 20.0;
 
 /// The mute button: the speaker, or the speaker struck through. Dimmed
 /// beside the transport, which it should not compete with for the eye; on a
@@ -328,6 +333,7 @@ impl App {
             ),
             Source::Podcasts | Source::Sermons if !(self.help || self.debug) => self.view_shows(),
             Source::Show(id, title) if !(self.help || self.debug) => self.view_show(id, title),
+            Source::Transcript if !(self.help || self.debug) => self.view_transcript(),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
             Source::Album(name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
@@ -679,8 +685,9 @@ impl App {
 
     /// The header a record's page opens with, as a catalogue sets one: the
     /// cover beside a line of small capitals (`over`, whose it is), the title
-    /// in bold, who played it in the accent — each name a link — a
-    /// small line under (`small`), and a Play button for the first track.
+    /// in bold, who played it in the accent — each name a link, after
+    /// `before` where it says what they are to it ("Hosted by") — a small
+    /// line under (`small`), and a Play button for the first track.
     #[allow(clippy::too_many_arguments)]
     fn view_cover<'a>(
         &'a self,
@@ -689,6 +696,7 @@ impl App {
         art: Element<'a, Message>,
         over: Option<String>,
         title: &str,
+        before: &str,
         by: &str,
         small: String,
     ) -> Element<'a, Message> {
@@ -704,22 +712,38 @@ impl App {
         );
         let by: Vec<String> = crate::nav::names(by).into_iter().map(str::to_string).collect();
         if !by.is_empty() {
-            words = words.push(self.names(l, &by, Mark::By, 16.0, style::accent));
+            let names = self.names(l, &by, Mark::By, 16.0, style::accent);
+            words = words.push(match before.is_empty() {
+                true => names,
+                false => row![text(format!("{before} ")).size(16).style(style::faint(0.6)), names].align_y(Alignment::Center),
+            });
         }
         if !small.is_empty() {
             words = words.push(text(small).size(11).style(style::faint(0.5)));
         }
+        let mut buttons: Vec<Element<'a, Message>> = vec![];
         if l.cell(Mark::Play).is_some() {
-            let mut buttons = row![self.play_button(l, Mark::Play)].spacing(6).align_y(Alignment::Center);
-            // A followed show's menu beside it: its Unfollow.
-            if l.cell(Mark::ShowMenu).is_some() {
-                buttons = buttons.push(self.ringed(
-                    l,
-                    Mark::ShowMenu,
-                    icon::tinted(glyphs::MORE, 16.0, |p| p.background.base.text).into(),
-                    false,
-                ));
-            }
+            buttons.push(self.play_button(l, Mark::Play));
+        }
+        // A followed show's menu beside it: its Unfollow.
+        if l.cell(Mark::ShowMenu).is_some() {
+            buttons.push(self.ringed(
+                l,
+                Mark::ShowMenu,
+                icon::tinted(glyphs::MORE, 16.0, |p| p.background.base.text).into(),
+                false,
+            ));
+        }
+        // A person's web page, by where it is.
+        if let Some(Message::OpenLink(url)) = l.cell(Mark::Link).and_then(|c| l.message(c)) {
+            let site = url.split("://").last().unwrap_or(url).trim_end_matches('/').to_string();
+            let link = row![icon::tinted(glyphs::LINK, 12.0, |p| p.background.base.text), text(site).size(13)]
+                .spacing(6)
+                .align_y(Alignment::Center);
+            buttons.push(self.ringed(l, Mark::Link, link.into(), false));
+        }
+        if !buttons.is_empty() {
+            let buttons = Row::with_children(buttons).spacing(6).align_y(Alignment::Center);
             words = words.push(container(buttons).padding(Padding { top: 12.0, ..Padding::ZERO }));
         }
         let _ = name;
@@ -982,7 +1006,7 @@ impl App {
         let year = album.map_or(0, |a| a.released);
         let small = if year > 0 { year.to_string() } else { String::new() };
         let art = self.picture(name, album.map(|a| a.art.as_str()).unwrap_or_default(), self.cover_side(), 8.0);
-        let header = self.view_cover(&l, name, art, None, name, &self.album_by(name), small);
+        let header = self.view_cover(&l, name, art, None, name, "", &self.album_by(name), small);
         let label = album.map(|a| a.label.as_str()).unwrap_or_default();
         let people = self.people(&self.composers_here());
         let page = column![
@@ -1005,7 +1029,7 @@ impl App {
         if ms > 0 {
             small.push_str(&format!("  \u{b7}  {}", spell(ms)));
         }
-        let header = self.view_cover(&l, name, self.mosaic(name, self.cover_side()), None, name, "", small);
+        let header = self.view_cover(&l, name, self.mosaic(name, self.cover_side()), None, name, "", "", small);
         padded(with_header(header, self.view_list()))
     }
 
@@ -1025,8 +1049,13 @@ impl App {
             small.push_str(&format!("  \u{b7}  {}", spell(ms)));
         }
         let art = self.picture(title, show.map_or("", |s| s.art.as_str()), self.cover_side(), 8.0);
-        let author = show.map_or(String::new(), |s| s.author.clone());
-        let header = self.view_cover(&l, title, art, None, title, &author, small);
+        // Who hosts it, where its feed says, each opening their page; who
+        // makes it, where it does not.
+        let hosts: Vec<String> = self.hosts().into_iter().map(|h| h.name).collect();
+        let header = match hosts.is_empty() {
+            true => self.view_cover(&l, title, art, None, title, "", &show.map_or(String::new(), |s| s.author.clone()), small),
+            false => self.view_cover(&l, title, art, None, title, "Hosted by", &hosts.join(", "), small),
+        };
         // What it is about, as much as a header wants: a feed's runs long.
         let said = show.map_or(String::new(), |s| match s.description.chars().count() > 600 {
             true => s.description.chars().take(599).collect::<String>() + "\u{2026}",
@@ -1039,7 +1068,8 @@ impl App {
         if let Some(more) = self.view_more(id, rows) {
             page = page.push(more);
         }
-        page = page.push(container(self.view_episodes()).padding(Padding { top: 8.0, ..Padding::ZERO }));
+        let episodes = self.view_episodes(&l, rows, Some, false);
+        page = page.push(container(episodes).padding(Padding { top: 8.0, ..Padding::ZERO }));
         if let Some(s) = self.peer.subscription_of(id).filter(|s| s.has_older()) {
             let n = (s.items - s.keep).min(crate::OLDER);
             let label = text(format!("Fetch {n} older {}", plural(n, "episode"))).size(13).into();
@@ -1048,12 +1078,14 @@ impl App {
         self.scrolled(None, page, false)
     }
 
-    /// A show's episodes as a podcast app lists them: when each went out in
-    /// small capitals, its title, what it is about in three lines, then its
-    /// play and how long it is — or how long is left, or that it is played
-    /// — and, once begun, how far in as a bar across the row. The cursor's
-    /// row is filled as an entry is; a click plays it.
-    fn view_episodes(&self) -> Element<'_, Message> {
+    /// Episodes as a podcast app lists them: when each went out in small
+    /// capitals — after its show's name, with `shows` — its title, what it
+    /// is about in three lines, who is on it, then its play and how long it
+    /// is — or how long is left, or that it is played — and, once begun,
+    /// how far in as a bar across the row. `cell` is the cell each row is
+    /// on the page. The cursor's row is filled as an entry is; a click
+    /// plays it.
+    fn view_episodes<'a>(&'a self, l: &Layout, items: &'a [Item], cell: impl Fn(usize) -> Option<usize>, shows: bool) -> Element<'a, Message> {
         let p = &self.peer;
         let (playing_id, sounding) = self.highlighted().map_or((None, false), |(id, sounding)| (Some(id), sounding));
         let focused = self.has_keys(Pane::Tracks);
@@ -1065,19 +1097,24 @@ impl App {
         let chars = (room / 6.6) as usize * 3;
         let me = p.client.me().actor.clone();
         let mut list = column![].spacing(0);
-        for (i, item) in p.rows().iter().enumerate() {
-            let on = cursor == Some(i);
+        for (i, item) in items.iter().enumerate() {
+            let on = cursor.is_some() && cell(i) == cursor;
             let here = playing_id == Some(item.id);
-            let detail = p.episode_of(item.id);
+            let detail = p.about(item);
             let tone = move |dim: bool| {
                 move |t: &iced::Theme| text::Style {
                     color: Some(style::on_row(t, on, false, dim)),
                 }
             };
             let mut words = column![].spacing(4).width(Length::Fill);
-            let day = arkui::format::day(detail.map_or(0, |d| d.published_ms), now);
-            if !day.is_empty() {
-                words = words.push(text(day.to_uppercase()).size(11).style(tone(true)));
+            let day = arkui::format::day(detail.as_ref().map_or(0, |d| d.published_ms), now);
+            let over: Vec<&str> = [shows.then_some(item.creator.as_str()), Some(day.as_str())]
+                .into_iter()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !over.is_empty() {
+                words = words.push(text(over.join("  \u{b7}  ").to_uppercase()).size(11).style(tone(true)));
             }
             words = words.push(
                 text(drawable(&item.title).into_owned())
@@ -1102,6 +1139,10 @@ impl App {
                     false => d.description.clone(),
                 };
                 words = words.push(text(about).size(13).line_height(1.4).wrapping(text::Wrapping::Word).style(tone(true)));
+            }
+            let guests = self.guests(item);
+            if !guests.is_empty() {
+                words = words.push(self.view_guests(l, i, &guests, on));
             }
             // Its play — a pause while it is what sounds — and how much of
             // it there is to hear.
@@ -1170,14 +1211,46 @@ impl App {
             if i > 0 {
                 list = list.push(rule::horizontal(1).style(style::hairline));
             }
-            list = list.push(
-                mouse_area(row)
-                    .on_enter(Message::HoverAt(i))
-                    .on_press(Message::PlayItem(item.id))
-                    .on_right_press(Message::RowMenu(item.id, crate::Anchor::Pointer)),
-            );
+            let mut area = mouse_area(row)
+                .on_press(Message::PlayItem(item.id))
+                .on_right_press(Message::RowMenu(item.id, crate::Anchor::Pointer));
+            if let Some(c) = cell(i) {
+                area = area.on_enter(Message::HoverAt(c));
+            }
+            list = list.push(area);
         }
         list.into()
+    }
+
+    /// Who is on an episode, under what it is about: a few of their faces,
+    /// then every name — each, face and name, opening their page.
+    fn view_guests<'a>(&'a self, l: &Layout, row: usize, guests: &[Person], on: bool) -> Element<'a, Message> {
+        let tone: fn(&iced::Theme) -> text::Style = match on {
+            true => |t| text::Style {
+                color: Some(style::on_row(t, true, false, true)),
+            },
+            false => |t| text::Style {
+                color: Some(style::on_row(t, false, false, true)),
+            },
+        };
+        let faces = guests
+            .iter()
+            .take(GUEST_FACES)
+            .enumerate()
+            .map(|(k, p)| self.opens(l, Mark::Guest(row, k), self.picture(&p.name, &p.art, GUEST_FACE, GUEST_FACE / 2.0)));
+        let mut line = row![
+            Row::with_children(faces).spacing(3),
+            container(text("with").size(12).style(tone)).padding([0, 6]),
+        ]
+        .align_y(Alignment::Center);
+        for (k, p) in guests.iter().enumerate() {
+            let mut name = row![self.name(l, Mark::Guest(row, k), p.name.clone(), 12.0, tone)].align_y(Alignment::Center);
+            if k + 1 < guests.len() {
+                name = name.push(text(", ").size(12).style(tone));
+            }
+            line = line.push(name);
+        }
+        line.wrap().vertical_spacing(4.0).into()
     }
 
     /// Under a followed show's header: how many of its episodes are not on
@@ -1206,6 +1279,127 @@ impl App {
             line = line.push(text(said).size(12).style(style::faint(0.6)));
         }
         Some(line.into())
+    }
+
+    /// The transcript of the episode playing, as a podcast app's is: its
+    /// title over its show — and, while it is not following the line being
+    /// said, its Follow — standing over its lines, which scroll under it,
+    /// each beside where it starts and under whoever says it where that
+    /// changes. The line being said is lit and those said before it dimmed;
+    /// a click on a line, or `<Enter>`, plays from there.
+    fn view_transcript(&self) -> Element<'_, Message> {
+        let l = self.layout();
+        let cues = self.cues();
+        let said = self.cue_now();
+        let focused = self.has_keys(Pane::Tracks);
+        let cursor = self.page_cursor();
+        let mut head = column![text("TRANSCRIPT").size(11).style(style::faint(0.6))]
+            .spacing(4)
+            .width(Length::Fill);
+        let track = self.now().map(|n| n.track().clone());
+        let title = track.as_ref().map_or("Nothing playing", |t| t.title.as_str());
+        head = head.push(
+            text(drawable(title).into_owned())
+                .size(24)
+                .font(hero::BOLD)
+                .wrapping(text::Wrapping::Word),
+        );
+        // As tall as the Follow that comes and goes beside the show's name,
+        // so the lines under it stay where they are.
+        let mut under = row![]
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .height(Length::Fixed(34.0));
+        if let Some(t) = &track {
+            let show = self.peer.shows().iter().find(|s| s.title == t.creator);
+            let name = text(t.creator.clone()).size(15).style(style::accent).width(Length::Fill);
+            under = under.push(linked(name.into(), show.map(|s| Source::Show(s.id.clone(), s.title.clone()))));
+        }
+        if l.cell(Mark::Follow).is_some() {
+            let follow = row![icon::tinted(glyphs::PLAYING, 12.0, |p| p.primary.base.text), text("Follow").size(13)]
+                .spacing(6)
+                .align_y(Alignment::Center);
+            under = under.push(self.ringed(&l, Mark::Follow, follow.into(), true));
+        }
+        let head = container(head.push(under)).padding(Padding {
+            top: PAGE_PADDING,
+            right: GUTTER + SCROLLBAR,
+            bottom: 12.0,
+            left: GUTTER,
+        });
+
+        let mut lines = column![].spacing(0).width(Length::Fill).max_width(720);
+        if cues.is_empty() {
+            let why = match track {
+                Some(_) => "What is playing has no transcript.",
+                None => "Nothing is playing. An episode whose feed has a transcript shows it here.",
+            };
+            lines = lines.push(text(why).size(14).style(style::faint(0.6)));
+        }
+        for (i, c) in cues.iter().enumerate() {
+            // Whoever says it, over the first of their lines in a row.
+            let before = i.checked_sub(1).map(|b| cues[b].speaker.as_str());
+            if !c.speaker.is_empty() && before != Some(c.speaker.as_str()) {
+                let who = text(c.speaker.to_uppercase()).size(11).style(style::faint(0.55));
+                lines = lines.push(container(who).padding(Padding {
+                    top: if i == 0 { 0.0 } else { 14.0 },
+                    bottom: 2.0,
+                    left: 12.0 + CLOCK_WIDTH + 12.0,
+                    ..Padding::ZERO
+                }));
+            }
+            let on = cursor == Some(i);
+            let (now, gone) = (said == Some(i), said.is_some_and(|s| i < s));
+            let ink = move |t: &iced::Theme| {
+                let palette = arkui::theme::of(t);
+                match (on, now, gone) {
+                    (true, ..) => palette.primary.base.text,
+                    (_, true, _) => palette.primary.base.color,
+                    (_, _, true) => palette.background.base.text.scale_alpha(0.4),
+                    _ => palette.background.base.text.scale_alpha(0.85),
+                }
+            };
+            let mut words = text(c.text.clone())
+                .size(15)
+                .line_height(1.4)
+                .wrapping(text::Wrapping::Word)
+                .style(move |t| text::Style { color: Some(ink(t)) });
+            if now {
+                words = words.font(hero::BOLD);
+            }
+            let at = text(clock(c.start_ms as f64 / 1000.0))
+                .size(11)
+                .width(Length::Fixed(CLOCK_WIDTH))
+                .style(move |t| text::Style {
+                    color: Some(ink(t).scale_alpha(0.7)),
+                });
+            let line = row![at, words.width(Length::Fill)].spacing(12).align_y(Alignment::Center);
+            let line = container(line)
+                .padding([7, 12])
+                .width(Length::Fill)
+                .style(move |t| style::entry(t, on, focused));
+            lines = lines.push(
+                mouse_area(line)
+                    .on_enter(Message::HoverAt(i))
+                    .on_press(Message::Cue(c.start_ms))
+                    .interaction(iced::mouse::Interaction::Pointer),
+            );
+        }
+        let lines = scrollable(container(lines).padding(Padding {
+            top: 8.0,
+            right: GUTTER + SCROLLBAR,
+            bottom: GUTTER * 2.0,
+            left: GUTTER,
+        }))
+        .id(TRACKS)
+        .style(style::bars)
+        .height(Length::Fill);
+        let mut page = column![head, rule::horizontal(1).style(style::hairline), lines].width(Length::Fill);
+        if self.says_status() {
+            page = page.push(container(self.view_status()).padding([0.0, GUTTER]));
+        }
+        page.into()
     }
 
     /// A list's cover: the first four different records on it, two by two —
@@ -1249,29 +1443,49 @@ impl App {
     /// with no wide picture, their portrait beside their name), what they
     /// are and their years on it; then, for a composer, their most recorded
     /// work set apart, their best known works and a "See All"; their
-    /// records; and, for somebody no work is by, their songs as an album
-    /// lists them.
+    /// records; for somebody no work is by, their songs as an album lists
+    /// them; and the episodes they are on, as a show lists its own.
     fn view_artist(&self, name: &str) -> Element<'_, Message> {
         let p = &self.peer;
         let l = self.layout();
         let artist = p.artists().iter().find(|a| a.name == name);
         let composer = p.composers().iter().find(|c| c.name == name);
+        // Somebody on an episode, as the newest they are on names them.
+        let person = p.person_named(name);
+        let on = p.appearances();
         let works = p.works().len() as i64;
         let albums = p.albums_by(name);
         let tracks = p.rows().len() as i64;
-        let counts = format!(
-            "{} {}  \u{b7}  {tracks} {}",
-            albums.len(),
-            plural(albums.len() as i64, "album"),
-            plural(tracks, "track")
-        );
+        let episodes = format!("{} {}", on.len(), plural(on.len() as i64, "episode"));
+        // Whether they made anything here, or are only on episodes.
+        let made = artist.is_some() || composer.is_some();
+        let counts = match made {
+            false => episodes,
+            true => {
+                let mut counts = format!(
+                    "{} {}  \u{b7}  {tracks} {}",
+                    albums.len(),
+                    plural(albums.len() as i64, "album"),
+                    plural(tracks, "track")
+                );
+                if !on.is_empty() {
+                    counts.push_str(&format!("  \u{b7}  {episodes}"));
+                }
+                counts
+            }
+        };
         // What they are and when they lived, as a catalogue heads a person;
         // nobody's years known, and it is how much of them there is here.
         let life = match artist.map(|a| span(a.born, a.died)).filter(|s| !s.is_empty()) {
             Some(s) => s,
             None => composer.map(|c| span(c.born, c.died)).unwrap_or_default(),
         };
-        let kind = if works > 0 { "Composer" } else { "Artist" };
+        // Somebody who made nothing here is what they are on episodes.
+        let kind = match (works > 0, made, &person) {
+            (true, ..) => "Composer",
+            (false, false, Some(person)) if !person.role.is_empty() => person.role.as_str(),
+            _ => "Artist",
+        };
         let kind = match life.is_empty() {
             true => format!("{kind}  \u{b7}  {counts}"),
             false => format!("{kind}  \u{b7}  {life}"),
@@ -1281,10 +1495,11 @@ impl App {
             Some(b) => Some(hero::banner(self.banners.handle(&self.art_url(b)), &kind, name, self.pane_width())),
             None => {
                 let art = artist.map(|a| a.art.as_str()).filter(|a| !a.is_empty());
-                let art_path = art.or(composer.map(|c| c.art.as_str())).unwrap_or_default();
+                let art = art.or(composer.map(|c| c.art.as_str())).filter(|a| !a.is_empty());
+                let art_path = art.or(person.as_ref().map(|p| p.art.as_str())).unwrap_or_default();
                 let side = self.cover_side();
                 let picture = self.picture(name, art_path, side, side / 2.0);
-                page = page.push(self.view_cover(&l, name, picture, None, name, "", kind.to_uppercase()));
+                page = page.push(self.view_cover(&l, name, picture, None, name, "", "", kind.to_uppercase()));
                 None
             }
         };
@@ -1335,10 +1550,15 @@ impl App {
             page = page.push(hero::heading("Albums"));
             page = page.push(self.view_shelf(&l, albums.into_iter()));
         }
-        // Somebody no work is by: their songs, which are the page's list.
-        if works == 0 {
+        // Somebody no work is by: their songs, which are the page's list —
+        // unless all they are here is on episodes.
+        if works == 0 && (made || on.is_empty()) {
             page = page.push(hero::heading("Songs"));
             page = page.push(self.view_tracks(&l, name, true));
+        }
+        if !on.is_empty() {
+            page = page.push(hero::heading("Episodes"));
+            page = page.push(self.view_episodes(&l, on, |at| l.cell(Mark::Episode(at)), true));
         }
         self.scrolled(top, page, works == 0)
     }
@@ -1492,7 +1712,7 @@ impl App {
         let year = take.map_or(0, |r| r.recorded);
         let small = if year > 0 { year.to_string() } else { String::new() };
         let art = self.picture(id, take.map(|r| r.art.as_str()).unwrap_or_default(), self.cover_side(), 8.0);
-        let header = self.view_cover(&l, id, art, Some(composer.clone()), &title, who, small);
+        let header = self.view_cover(&l, id, art, Some(composer.clone()), &title, "", who, small);
         let label = take.map(|r| r.label.as_str()).unwrap_or_default();
         let mut page = column![header, self.view_tracks(&l, "", false), self.view_foot(year, label)].width(Length::Fill);
 
@@ -2226,6 +2446,15 @@ impl App {
         if let Some(volume) = self.view_volume() {
             line = line.push(volume);
         }
+        // An episode with a transcript: the button that opens it, in the
+        // accent while it is the page.
+        if !self.cues().is_empty() {
+            let glyph = match self.peer.source == Source::Transcript {
+                true => icon::accent(glyphs::TRANSCRIPT, false),
+                false => icon::line(glyphs::TRANSCRIPT, false),
+            };
+            line = line.push(button(glyph).style(button::text).padding(2).on_press(Message::Select(Source::Transcript)));
+        }
         line = line.push(self.view_queue_button());
         if let Some(output) = self.view_output() {
             line = line.push(output);
@@ -2419,6 +2648,10 @@ fn view_help() -> Element<'static, Message> {
         ("a", "which playlists this track is on \u{2014} and make one"),
         ("d", "which device is making the sound, and move it; each one's volume"),
         ("q", "the queue: <Enter> plays a row, x takes it out, J and K move it down and up"),
+        (
+            "t",
+            "the transcript of the episode playing: <Enter> plays from a line; f follows the line being said again",
+        ),
         (
             "+  -",
             "the volume of what is playing \u{2014} the group's, when it is one; in the picker, the row's",

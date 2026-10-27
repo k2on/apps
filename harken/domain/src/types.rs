@@ -335,6 +335,42 @@ pub struct SetChapters {
     pub chapters: Vec<ChapterAt>,
 }
 
+/// Somebody on an episode as a feed names them: their picture already
+/// downloaded, as a cover is.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+pub struct PersonOn {
+    pub name: String,
+    pub role: String,
+    pub link: String,
+    pub art: String,
+}
+
+/// An episode's people, by its file, in the feed's order: they replace
+/// whoever it had.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SetPeople {
+    #[ark(trim, non_empty, why = "people need their episode's file")]
+    pub file: String,
+    pub people: Vec<PersonOn>,
+}
+
+/// One line of a transcript as it was heard: timed to the file it was heard in.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+pub struct CueAt {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub speaker: String,
+    pub text: String,
+}
+
+/// An episode's transcript, by its file: it replaces whatever it had.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SetTranscript {
+    #[ark(trim, non_empty, why = "a transcript needs its episode's file")]
+    pub file: String,
+    pub cues: Vec<CueAt>,
+}
+
 /// One episode, by its media id.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct EpisodeInput {
@@ -511,6 +547,34 @@ pub struct ChaptersEntry {
     pub start_ms: i64,
     pub title: String,
     pub url: String,
+}
+
+/// Somebody on an episode, as its page lists them.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct PeopleEntry {
+    pub art: String,
+    pub link: String,
+    pub name: String,
+    pub role: String,
+}
+
+/// Somebody on one of a show's episodes, as the show's page lists them.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ShowPeopleEntry {
+    pub art: String,
+    pub link: String,
+    pub media_id: Id<Media>,
+    pub name: String,
+    pub role: String,
+}
+
+/// One line of an episode's transcript.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct TranscriptEntry {
+    pub end_ms: i64,
+    pub speaker: String,
+    pub start_ms: i64,
+    pub text: String,
 }
 
 /// What is true of a media row as an episode.

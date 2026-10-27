@@ -1,4 +1,5 @@
-// The pieces harken's screens are made of: a track's row, an episode's, and their menu, a
+// The pieces harken's screens are made of: a track's row, an episode's, who
+// is on it, and their menu, a
 // page's header with Play and Shuffle, a shelf of covers and the card that
 // opens a page out of its cover, a section's heading, and the banner a
 // server that cannot be reached puts over a tab — Android's `Components.kt`
@@ -16,6 +17,8 @@ enum Sheet: Identifiable, Equatable {
     case devices
     /// Finding a show to follow, as a podcast (`podcast`) or as sermons (`sermon`).
     case follow(kind: String)
+    /// What plays, word for word, as it is said.
+    case transcript
 
     var id: String {
         switch self {
@@ -24,6 +27,7 @@ enum Sheet: Identifiable, Equatable {
         case .queue: return "queue"
         case .devices: return "devices"
         case .follow(let kind): return "follow:" + kind
+        case .transcript: return "transcript"
         }
     }
 }
@@ -108,19 +112,24 @@ struct TrackRow<Leading: View>: View {
     }
 }
 
-/// An episode's row, as a podcast app has it: when it came out, in small
-/// capitals; its title, bold; what it is about; and a play button that says
-/// how long it is, how much is left of it or that it is played — or, while
-/// its file is not on the server yet, how its download goes — beside who
-/// else has listened, with how far the signed-in person has got under it
-/// once they have begun. Tapped anywhere, it plays; its menu is also its
-/// long press.
+/// An episode's row, as a podcast app has it: when it came out — and, away
+/// from its show's page, which show — in small capitals; its title, bold;
+/// what it is about; who is on it besides its hosts, their faces and their
+/// names; and a play button that says how long it is, how much is left of
+/// it or that it is played — or, while its file is not on the server yet,
+/// how its download goes — beside who else has listened, with how far the
+/// signed-in person has got under it once they have begun. Tapped anywhere,
+/// it plays; its menu is also its long press.
 struct EpisodeRow: View {
     let track: LibraryEntry
     /// What its feed says of it; none until the show's details are read.
     let detail: EpisodeDetailsEntry?
     /// How far everybody else has got in it: "Ada played".
     let others: String
+    /// Who is on it to name, each opening their page: its guests.
+    var people: [PeopleEntry] = []
+    /// The show it is of, on a page that is not the show's.
+    var show: String = ""
     let from: Page?
     let onPlay: () -> Void
     @EnvironmentObject private var model: Model
@@ -131,13 +140,19 @@ struct EpisodeRow: View {
         let whole = (mine?.durationMs ?? 0) > 0 ? mine!.durationMs : track.durationMs
         let begun = mine.map { !$0.finished && $0.positionMs > 0 && whole > 0 } ?? false
         let said = model.download(track.id)?.short ?? Spell.left(track.durationMs, mine)
+        let day = (detail?.publishedMs ?? 0) > 0 ? Spell.day(detail!.publishedMs) : nil
+        let over = Spell.facts([show, day]).uppercased()
         VStack(alignment: .leading, spacing: Space.xs) {
-            if let ms = detail?.publishedMs, ms > 0 {
-                Text(Spell.day(ms).uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            if !over.isEmpty {
+                Text(over).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
             }
             Text(track.title).font(.headline).foregroundStyle(playing ? Color.gold : Color.primary).lineLimit(2)
             if let about = detail?.description, !about.isEmpty {
                 Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+            }
+            if !people.isEmpty {
+                PeopleLine(people: people, words: "with " + PeopleEntry.named(people))
+                    .padding(.top, 2)
             }
             HStack(spacing: Space.m) {
                 Button(action: onPlay) {
@@ -178,6 +193,45 @@ struct EpisodeRow: View {
         .onTapGesture(perform: onPlay)
         .contextMenu { TrackActions(track: track, from: from) }
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// People on an episode or a show in a line: their faces, overlapping —
+/// the first three — and `words`, who they are. Tapped, it opens the one
+/// person's page, or offers each of several.
+struct PeopleLine: View {
+    let people: [PeopleEntry]
+    let words: String
+    var side: CGFloat = 22
+    var font: Font = .footnote
+    @EnvironmentObject private var model: Model
+    @Environment(\.open) private var open
+
+    var body: some View {
+        let faces = Array(people.prefix(3))
+        let line = HStack(spacing: Space.s) {
+            HStack(spacing: -side / 3) {
+                ForEach(faces) { p in
+                    Avatar(name: p.name, picture: RowCover.url(model, p.art), side: side)
+                        .overlay { Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 1.5) }
+                }
+            }
+            Text(words).font(font).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .contentShape(Rectangle())
+        if people.count == 1, let p = people.first {
+            Button { open(.page(.artist(p.name))) } label: { line }
+                .buttonStyle(.plain)
+                .accessibilityLabel(words)
+                .accessibilityHint("Opens \(p.name)'s page")
+        } else {
+            Menu {
+                ForEach(people) { p in
+                    Button { open(.page(.artist(p.name))) } label: { Label(p.name, systemImage: "person") }
+                }
+            } label: { line }
+            .accessibilityLabel(words)
+        }
     }
 }
 

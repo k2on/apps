@@ -8,8 +8,8 @@
 //! than as a panic in the middle of a frame.
 
 use crate::domain::{
-    AlbumsEntry, ArtistsEntry, ChaptersEntry, ComposersEntry, CreditsEntry, DownloadsEntry, EpisodeDetailsEntry, LibraryEntry, ProgressEntry,
-    RecordingsEntry, ShowsEntry, SubscriptionsEntry, TrackDetailsEntry, WorkSummary,
+    AlbumsEntry, ArtistsEntry, ChaptersEntry, ComposersEntry, CreditsEntry, DownloadsEntry, EpisodeDetailsEntry, LibraryEntry, PeopleEntry,
+    ProgressEntry, RecordingsEntry, ShowsEntry, SubscriptionsEntry, TrackDetailsEntry, TranscriptEntry, WorkSummary,
 };
 use ark::format::Encode;
 
@@ -268,16 +268,19 @@ pub struct EpisodeDetail {
     pub published_ms: i64,
 }
 
+impl From<EpisodeDetailsEntry> for EpisodeDetail {
+    fn from(e: EpisodeDetailsEntry) -> EpisodeDetail {
+        EpisodeDetail {
+            media_id: e.media_id.0,
+            description: e.description,
+            published_ms: e.published_ms,
+        }
+    }
+}
+
 impl EpisodeDetail {
     pub fn from_bytes(b: &[u8]) -> EpisodeDetail {
-        EpisodeDetailsEntry::from_bytes(b).map_or_else(
-            |_| EpisodeDetail::default(),
-            |e| EpisodeDetail {
-                media_id: e.media_id.0,
-                description: e.description,
-                published_ms: e.published_ms,
-            },
-        )
+        EpisodeDetailsEntry::from_bytes(b).map_or_else(|_| EpisodeDetail::default(), EpisodeDetail::from)
     }
 }
 
@@ -350,6 +353,62 @@ impl From<ChaptersEntry> for Chapter {
 /// The chapter `ms` is in: the last that starts at or before it.
 pub fn chapter_at(chapters: &[Chapter], ms: i64) -> Option<&Chapter> {
     chapters.iter().rev().find(|c| c.start_ms <= ms)
+}
+
+/// Somebody on an episode (`people`), in the order its feed names them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Person {
+    pub name: String,
+    /// As the feed says it: `Host`, `Guest`.
+    pub role: String,
+    /// Their picture, as a cover is spelt.
+    pub art: String,
+    /// Their web page; empty for none.
+    pub link: String,
+}
+
+impl From<PeopleEntry> for Person {
+    fn from(e: PeopleEntry) -> Person {
+        Person {
+            name: e.name,
+            role: e.role,
+            art: e.art,
+            link: e.link,
+        }
+    }
+}
+
+impl Person {
+    /// Whether they host it, rather than being on it as a guest is.
+    pub fn hosts(&self) -> bool {
+        self.role.eq_ignore_ascii_case("host")
+    }
+}
+
+/// One line of an episode's transcript (`transcript`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Cue {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    /// Who says it; empty where the transcript does not say.
+    pub speaker: String,
+    pub text: String,
+}
+
+impl From<TranscriptEntry> for Cue {
+    fn from(e: TranscriptEntry) -> Cue {
+        Cue {
+            start_ms: e.start_ms,
+            end_ms: e.end_ms,
+            speaker: e.speaker,
+            text: e.text,
+        }
+    }
+}
+
+/// The line being said at `ms`: the last that starts at or before it.
+pub fn cue_at(cues: &[Cue], ms: i64) -> Option<usize> {
+    cues.iter().rposition(|c| c.start_ms <= ms)
 }
 
 /// Whoever made something, as the artists page lists them (`artists`).

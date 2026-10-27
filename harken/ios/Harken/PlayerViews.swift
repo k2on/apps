@@ -1,6 +1,6 @@
 // What is playing, two ways — the mini player on glass above the tab bar
 // (the tab view's bottom accessory) and the full player it zooms into — and
-// the queue. Both draw one [PlayerState]; neither knows whether the sound is
+// the queue, and an episode's transcript as it is said. Both draw one [PlayerState]; neither knows whether the sound is
 // here or on another device of the account but by what that state says
 // (`on`). The position is counted from the state's clock as it is drawn
 // (`TimelineView`), so only the hairline and the scrubber move with it.
@@ -94,7 +94,8 @@ struct Hairline: View {
 
 /// The full player: the cover, the title and who made it, a scrubber with
 /// the time gone and the time left, the transport on glass, the volume, and
-/// where it plays and what plays next.
+/// where it plays and what plays next — and, for an episode whose feed
+/// times its words, its transcript.
 struct FullPlayer: View {
     let close: () -> Void
     @EnvironmentObject private var model: Model
@@ -104,6 +105,7 @@ struct FullPlayer: View {
 
     var body: some View {
         let s = model.player
+        let cues = s.now.flatMap { model.transcripts[Id($0.id)] } ?? []
         VStack(spacing: Space.l) {
             HStack {
                 Button(action: close) { Image(systemName: "chevron.down") }
@@ -170,11 +172,20 @@ struct FullPlayer: View {
                     }
                     .buttonStyle(.glass)
                     .glassEffectID("queue", in: glass)
+                    // An episode whose feed times its words: them, as they are said.
+                    if !cues.isEmpty {
+                        Button { present(.transcript) } label: { Image(systemName: "quote.bubble") }
+                            .buttonStyle(.glass)
+                            .glassEffectID("transcript", in: glass)
+                            .accessibilityLabel("Transcript")
+                    }
                 }
                 .font(.subheadline.weight(.semibold))
             }
             .animation(Springs.move, value: s.on != nil)
+            .animation(Springs.move, value: cues.isEmpty)
         }
+        .task(id: s.now?.id) { if let n = s.now { model.loadTranscript(Id(n.id)) } }
         .padding(.horizontal, Space.xl)
         .padding(.vertical, Space.s)
         .background {
@@ -362,6 +373,136 @@ struct QueueSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { EditButton() } }
         }
+    }
+}
+
+/// What plays, word for word, as Apple Podcasts' transcript and Apple
+/// Music's lyrics have it: every line its feed's captions time, the one
+/// being said in the full colour and kept in the middle, those said already
+/// dimmed, and who speaks named where that changes. A line tapped plays from
+/// it. Scrolled by hand, it stops following the sound — until Follow Along
+/// is pressed, or the line playing comes down to the middle of what shows.
+/// The position is the player's, counted as the scrubber counts it.
+struct TranscriptSheet: View {
+    @EnvironmentObject private var model: Model
+    /// The list keeps the line playing in its middle.
+    @State private var following = true
+    /// A finger is on the list, or it is still coasting from one.
+    @State private var handled = false
+    /// The lines that show, by their place.
+    @State private var showing = [Int]()
+
+    var body: some View {
+        let s = model.player
+        let cues = s.now.flatMap { model.transcripts[Id($0.id)] } ?? []
+        NavigationStack {
+            Group {
+                if cues.isEmpty {
+                    ContentUnavailableView("No Transcript", systemImage: "quote.bubble",
+                                           description: Text("Its feed has no transcript timed to it."))
+                } else {
+                    ScrollViewReader { proxy in
+                        TimelineView(.periodic(from: .now, by: 0.5)) { t in
+                            let at = TranscriptEntry.at(cues, s.scrubbing ?? s.position(Int64(t.date.timeIntervalSince1970 * 1000)))
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: Space.l) {
+                                    ForEach(cues.indices, id: \.self) { i in
+                                        Button {
+                                            model.seek(cues[i].startMs)
+                                            following = true
+                                        } label: {
+                                            TranscriptLine(cue: cues[i], named: TranscriptEntry.names(cues, i), when: TranscriptLine.When.of(i, at))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityHint("Plays from here")
+                                        .id(i)
+                                    }
+                                }
+                                .scrollTargetLayout()
+                                .padding(.horizontal, Space.xl)
+                                .padding(.vertical, Space.xxl)
+                                .animation(Springs.move, value: at)
+                            }
+                            .onScrollPhaseChange { _, phase in
+                                handled = phase == .tracking || phase == .interacting || phase == .decelerating
+                                if phase == .interacting { following = false }
+                            }
+                            .onScrollTargetVisibilityChange(idType: Int.self) { ids in showing = ids }
+                            // The line moved on: followed, it is scrolled to the
+                            // middle; let go, it is followed again once it has
+                            // caught up with where the hand left the list.
+                            .onChange(of: at) { before, now in
+                                if !following && !handled && TranscriptEntry.caughtUp(from: before, to: now, showing: showing) { following = true }
+                                guard following, let i = now else { return }
+                                withAnimation(.smooth) { proxy.scrollTo(i, anchor: .center) }
+                            }
+                            .onAppear { if let i = at { proxy.scrollTo(i, anchor: .center) } }
+                            .overlay(alignment: .bottom) {
+                                if !following {
+                                    Button {
+                                        following = true
+                                        if let i = at { withAnimation(.smooth) { proxy.scrollTo(i, anchor: .center) } }
+                                    } label: {
+                                        Label("Follow Along", systemImage: "waveform")
+                                    }
+                                    .buttonStyle(.glassProminent)
+                                    .tint(.gold)
+                                    .padding(.bottom, Space.l)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                                }
+                            }
+                            .animation(Springs.move, value: following)
+                        }
+                    }
+                }
+            }
+            .background {
+                if let now = s.now {
+                    CoverView(seed: now.seed, url: now.art, side: 64, corner: 0)
+                        .blur(radius: 80)
+                        .opacity(0.3)
+                        .ignoresSafeArea()
+                }
+            }
+            .navigationTitle("Transcript")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .task(id: s.now?.id) { if let n = s.now { model.loadTranscript(Id(n.id)) } }
+    }
+}
+
+/// One line of a transcript: who says it, where that changes, over what is
+/// said — in the full colour while it is said, dimmer still to come, and
+/// dimmest once said.
+private struct TranscriptLine: View {
+    enum When {
+        case said, saying, coming
+
+        /// Line `i` against the line playing, `at`: before it any line is still to come.
+        static func of(_ i: Int, _ at: Int?) -> When {
+            guard let at = at else { return .coming }
+            return i < at ? .said : i == at ? .saying : .coming
+        }
+    }
+
+    let cue: TranscriptEntry
+    let named: Bool
+    let when: When
+
+    var body: some View {
+        let ink: HierarchicalShapeStyle = when == .saying ? .primary : when == .coming ? .secondary : .tertiary
+        VStack(alignment: .leading, spacing: Space.xs) {
+            if named {
+                Text(cue.speaker.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.gold)
+                    .opacity(when == .said ? 0.6 : 1)
+            }
+            Text(cue.text).font(.title3.weight(.semibold)).foregroundStyle(ink)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 

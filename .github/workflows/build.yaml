@@ -143,6 +143,22 @@ jobs:
             .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module \
             .#checks.x86_64-linux.docs
 
+  # What a server runs — the harken NixOS module's packages — built and
+  # pushed to Cachix, which ark substitutes from: a deploy of a commit this
+  # job has built downloads them rather than compiling them on the host.
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build what the server runs
+        run: nix build --print-build-logs --no-link .#harken-server .#harken-web-server .#arkdb
+
   apk:
     needs: plan
     strategy:

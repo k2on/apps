@@ -114,6 +114,9 @@ val LocalDownloads = compositionLocalOf<Map<dev.arkdb.ffi.Id, Download>> { empty
 /** The chapters of what plays, in order; none for a song or an episode without. */
 val LocalChapters = compositionLocalOf<List<Chapter>> { emptyList() }
 
+/** The transcript of what plays, line by line; none for a song or an episode without. */
+val LocalTranscript = compositionLocalOf<List<Cue>> { emptyList() }
+
 /**
  * One track, as every list draws it: what stands at its start (a cover, or its number on the
  * release), its title — in the gold while it plays — whoever made it, its length, and its menu.
