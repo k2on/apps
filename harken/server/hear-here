@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Hear a server's episodes on this machine — whisper.cpp on its GPU, many
+# times what a small server's cores can — and leave each one's captions
+# where the server keeps what it heard (src/transcribe.rs), by the name it
+# keeps them by. Its own transcriber, reaching an episode heard here, reads
+# what is there rather than hearing it again.
+#
+# Newest download first, each episode not heard yet, until there are none
+# or this is stopped; run it again to carry on. With whisper.cpp and ffmpeg
+# about, and the server an ssh host whose sudo needs no password:
+#
+#   nix shell nixpkgs#whisper-cpp-vulkan nixpkgs#ffmpeg-headless \
+#     -c harken/server/hear-here ark
+#
+# The model is the NixOS module's (services.harken.transcripts.model), so a
+# line heard here is the line the server would have heard.
+set -euo pipefail
+
+host=${1:?the server, as ssh names it}
+data=${HARKEN_DATA_DIR:-/var/lib/harken}
+model=$(nix-prefetch-url --print-path \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin \
+  1qm7zxamlvac564c3270wqqqks5wc7532q3fqi01zbfmkiq22hir 2>/dev/null | tail -1)
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# A feed's episode is kept as `.feeds/<name>` (src/feeds.rs) and what was
+# heard in it as the first 32 of that path's SHA-256 and its extension
+# (src/sync.rs, name_of), `.vtt` after.
+kept() { printf '%s.%s.vtt' "$(printf '%s' ".feeds/$1" | sha256sum | cut -c1-32)" "${1##*.}"; }
+
+# shellcheck disable=SC2029 # $data is this side's on purpose
+ssh "$host" "sudo sh -c 'cd $data/feeds && ls -t; echo ---; ls $data/transcripts 2>/dev/null'" >"$tmp/list"
+heard=$(sed '1,/^---$/d' "$tmp/list")
+sed '/^---$/q' "$tmp/list" | grep -Ei '\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$' | while read -r file; do
+  name=$(kept "$file")
+  grep -qxF "$name" <<<"$heard" && continue
+  echo "hear-here: $file" >&2
+  started=$(date +%s)
+  ssh "$host" "sudo cat $data/feeds/$file" </dev/null >"$tmp/audio"
+  ffmpeg -nostdin -loglevel error -y -i "$tmp/audio" -ar 16000 -ac 1 -c:a pcm_s16le "$tmp/in.wav"
+  whisper-cli -l en -m "$model" -f "$tmp/in.wav" -ovtt -of "$tmp/out" </dev/null >/dev/null 2>&1
+  # Whole or not at all: the server reads only a file that is there.
+  ssh "$host" "sudo sh -c 'cat > $data/transcripts/$name.part && mv $data/transcripts/$name.part $data/transcripts/$name'" <"$tmp/out.vtt"
+  echo "hear-here: heard in $(($(date +%s) - started))s" >&2
+done
