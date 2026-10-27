@@ -1,7 +1,8 @@
 # The shared components' showcase for iOS: an app of its own over ArkUI for
 # SwiftUI (swift/ArkUI) and nothing else — no app's code, no kernel. The
 # docs' captures are taken from it (.github/workflows/screens.yaml), launched
-# at one shot by name: `-showcase art`. `xcodegen generate` here writes
+# at one shot by name: `-showcase art`. `xcodegen generate` here (or
+# `nix run .#xcodegen -- generate`, the pinned one CI uses) writes
 # Showcase.xcodeproj; nothing under it is committed.
 name: Showcase
 options:

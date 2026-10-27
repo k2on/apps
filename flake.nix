@@ -364,6 +364,23 @@
             buildAvdevice = true;
           };
 
+          # XcodeGen, which writes showcase/ios's Xcode project for the
+          # screens workflow: upstream's own release, a universal macOS binary
+          # and its presets, pinned here, as nixpkgs 24.11 has none.
+          xcodegen = pkgs.stdenvNoCC.mkDerivation rec {
+            pname = "xcodegen";
+            version = "2.46.0";
+            src = pkgs.fetchzip {
+              url = "https://github.com/yonaskolb/XcodeGen/releases/download/${version}/xcodegen.zip";
+              hash = "sha256-7NjCsInBjkOL1RqWSaWKGDJxp/gn71rmhTWG2ErHDqA=";
+              stripRoot = false;
+            };
+            # Signed as it is: stripping or patching it would break that.
+            dontFixup = true;
+            installPhase = "mkdir -p $out && cp -r bin share $out/";
+            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+          };
+
           # The server (harken/server: the server and harken-peer), on a
           # chain of its own as the APK's host part is below — dependencies,
           # kernel, the crate — and not over the workspace's layers: their
@@ -870,7 +887,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg;
+            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;

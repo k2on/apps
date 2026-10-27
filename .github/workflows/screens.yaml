@@ -78,9 +78,8 @@ jobs:
             gradle -p showcase/android :app:assembleDebug &&
             cp showcase/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/showcase.apk"'
 
-      # ffmpeg from the flake (screens-ffmpeg): x264, MP4, the filters
-      # encode.sh uses and nothing else, from the cache once built, in place
-      # of apt's or Homebrew's (which built for nine minutes on macOS).
+      # The tools from the flake, from the cache once built, in place of
+      # apt's and Homebrew's (which took nine minutes for ffmpeg on macOS).
       - uses: DeterminateSystems/nix-installer-action@main
 
       - if: vars.CACHIX_NAME != ''
@@ -142,11 +141,11 @@ jobs:
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
 
-      # The simulator boots and the showcase builds under the nix steps
-      # (meanwhile.sh), and both are waited for before the capture; even
-      # choosing the device is in the background, as the first simctl call
-      # starts CoreSimulator and takes a minute and a half. The newest
-      # iPhone Pro the newest iOS runtime has, its name left in device.
+      # The simulator boots under everything after it (meanwhile.sh) and is
+      # waited for before the capture; even choosing the device is in the
+      # background, as the first simctl call starts CoreSimulator and takes
+      # a minute and a half. The newest iPhone Pro the newest iOS runtime
+      # has, its name left in $RUNNER_TEMP/device.
       - name: Start booting a simulator
         run: |
           bash .github/screens/meanwhile.sh start boot bash -c '
@@ -157,19 +156,8 @@ jobs:
             echo "$device" > "$RUNNER_TEMP/device"
             xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
 
-      - name: Start building the showcase for the simulator
-        run: |
-          bash .github/screens/meanwhile.sh start showcase bash -c '
-            { command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; } &&
-            cd showcase/ios && xcodegen generate &&
-            xcodebuild build \
-              -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
-              -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
-              -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO'
-
-      # ffmpeg from the flake (screens-ffmpeg): x264, MP4, the filters
-      # encode.sh uses and nothing else, from the cache once built, in place
-      # of apt's or Homebrew's (which built for nine minutes on macOS).
+      # The tools from the flake, from the cache once built, in place of
+      # apt's and Homebrew's (which took nine minutes for ffmpeg on macOS).
       - uses: DeterminateSystems/nix-installer-action@main
 
       - if: vars.CACHIX_NAME != ''
@@ -187,6 +175,18 @@ jobs:
           purge-prefixes: nix-screens-ios-${{ runner.os }}-
           purge-created: 0
           purge-primary-key: never
+
+      # The showcase builds under the ffmpeg step and the boot: XcodeGen
+      # from the flake (upstream's release, pinned), then xcodebuild.
+      - name: Start building the showcase for the simulator
+        run: |
+          xcodegen=$(nix build .#xcodegen --no-link --print-out-paths)
+          bash .github/screens/meanwhile.sh start showcase bash -c '
+            cd showcase/ios && "$1/bin/xcodegen" generate &&
+            xcodebuild build \
+              -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
+              -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+              -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO' build "$xcodegen"
 
       - name: ffmpeg
         run: |
