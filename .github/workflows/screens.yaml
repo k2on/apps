@@ -150,17 +150,36 @@ jobs:
             echo "$device" > "$RUNNER_TEMP/device"
             xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
 
-      # Nix, reading the tools from k2on.cachix.org by its public key: the
-      # upstream installer, lighter on macOS than Determinate's, and no
-      # cachix program unless tools.sh has something to push.
-      - uses: cachix/install-nix-action@v31
+      # The tools as one folder needing no Nix (bundle.sh), from GitHub's
+      # cache while the flake is unchanged: Nix's install on macOS (its
+      # volume, then the store) takes three minutes or more. Only when the
+      # flake has moved is Nix installed, the tools taken from it, and the
+      # folder made and kept again.
+      - name: Tools, from GitHub's cache
+        id: tools
+        uses: actions/cache@v4
+        with:
+          path: ~/screens-tools
+          key: screens-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', '.github/screens/bundle.sh') }}
+
+      - if: steps.tools.outputs.cache-hit != 'true'
+        uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             extra-substituters = https://k2on.cachix.org
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
 
-      - name: Tools
-        run: bash .github/screens/tools.sh get xcodegen screens-ffmpeg
+      - if: steps.tools.outputs.cache-hit != 'true'
+        name: Tools, from the flake, bundled
+        run: |
+          bash .github/screens/tools.sh get xcodegen screens-ffmpeg
+          bash .github/screens/bundle.sh ~/screens-tools $(while read -r o; do [ -d "$o/bin" ] && echo "$o/bin"; done < "$RUNNER_TEMP/tools")
+
+      - name: Tools, on the PATH
+        run: |
+          echo "$HOME/screens-tools/bin" >> "$GITHUB_PATH"
+          "$HOME/screens-tools/bin/ffmpeg" -hide_banner -version | head -1
+          "$HOME/screens-tools/bin/xcodegen" --version
 
       # The showcase builds under the boot: XcodeGen from the flake
       # (upstream's release, pinned), then xcodebuild.
@@ -191,7 +210,8 @@ jobs:
           path: ${{ runner.temp }}/out/ios
           if-no-files-found: error
 
-      - name: Push the tools to Cachix, if they were built here
+      - if: steps.tools.outputs.cache-hit != 'true'
+        name: Push the tools to Cachix, if they were built here
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: bash .github/screens/tools.sh push
