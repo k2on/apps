@@ -490,14 +490,17 @@ fun ShowPage(
     onUnfollow: (Subscription) -> Unit = {},
     /** Who makes it: the hosts its newest episode names. */
     hosts: List<OnEpisode> = emptyList(),
-    /** Who is on an episode, asked by its row as it is drawn (`Library.people`). */
-    people: @Composable (Track) -> List<OnEpisode> = { emptyList() },
+    /** Who is on each episode, by its media id: the show's, read once (`Library.showPeople`). */
+    people: Map<Id, List<OnEpisode>> = emptyMap(),
 ) {
     Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
     val title = show?.title ?: "Show"
     // What "2 days ago" is counted from: the page's opening, not every frame.
     val now = remember { System.currentTimeMillis() }
+    // Each row's, found once rather than by every row as it scrolls in.
+    val heardBy = remember(listened) { listened.groupBy { it.mediaId } }
+    val guestsBy = remember(people) { people.mapValues { OnEpisode.guests(it.value) } }
     LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("show")) {
         item { PageBar("", onBack = act::back) { if (feed != null) ShowMenu(title, feed, onUnfollow) } }
         item {
@@ -557,7 +560,7 @@ fun ShowPage(
         if (episodes.isNotEmpty()) item { HorizontalDivider(Modifier.padding(start = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
         itemsIndexed(episodes, key = { _, t -> t.id.hex }) { i, t ->
             // The signed-in person's place in it is the row's; anybody else's is said beside it.
-            val heard = listened.filter { it.mediaId == t.id }
+            val heard = heardBy[t.id].orEmpty()
             EpisodeRow(
                 t,
                 details[t.id],
@@ -568,7 +571,7 @@ fun ShowPage(
                 now = now,
                 onClick = { act.play(episodes, i, page) },
                 onMore = { act.more(t, page) },
-                guests = OnEpisode.guests(people(t)),
+                guests = guestsBy[t.id].orEmpty(),
                 onPerson = { act.open(Page.ForArtist(it.name)) },
             )
         }

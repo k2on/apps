@@ -1039,6 +1039,15 @@ data class ShowInput(val playlistId: Id, val id: String) {
     }
 }
 
+/** The record `ShowPeopleEntry`. */
+data class ShowPeopleEntry(val art: String, val link: String, val mediaId: Id, val name: String, val role: String) {
+    fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"link\":" + J.q(link) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"name\":" + J.q(name) + "," + "\"role\":" + J.q(role) + "}"
+
+    companion object {
+        fun of(j: Any?): ShowPeopleEntry = (j as JSONObject).let { o -> ShowPeopleEntry(J.text(o.opt("art")), J.text(o.opt("link")), Id(J.text(o.opt("media_id"))), J.text(o.opt("name")), J.text(o.opt("role"))) }
+    }
+}
+
 /** The record `ShowsEntry`. */
 data class ShowsEntry(val art: String, val author: String, val description: String, val episodes: Long, val feed: String, val id: String, val kind: String, val link: String, val newestMs: Long, val title: String) {
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"author\":" + J.q(author) + "," + "\"description\":" + J.q(description) + "," + "\"episodes\":" + episodes.toString() + "," + "\"feed\":" + J.q(feed) + "," + "\"id\":" + J.q(id) + "," + "\"kind\":" + J.q(kind) + "," + "\"link\":" + J.q(link) + "," + "\"newest_ms\":" + newestMs.toString() + "," + "\"title\":" + J.q(title) + "}"
@@ -1313,6 +1322,9 @@ class Harken(val peer: Peer) {
 
     /** `library.show`, kept, its rows UniFFI's. */
     fun show(input: ShowInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.show", input.json()))
+
+    /** `library.show_people`, kept. */
+    fun showPeople(input: ShowInput): View<ShowPeopleEntry> = View(peer.view("library.show_people", input.json())) { j -> ShowPeopleEntry.of(j) }
 
     /** `library.show_progress`, kept. */
     fun showProgress(input: ShowInput): View<ProgressEntry> = View(peer.view("library.show_progress", input.json())) { j -> ProgressEntry.of(j) }

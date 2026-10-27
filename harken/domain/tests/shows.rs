@@ -581,3 +581,42 @@ fn an_episodes_transcript_is_its_feeds() {
     c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
     assert!(c.rows::<Cue>("cue").is_empty());
 }
+
+/// A show's people are every episode's, in the order its page lists the
+/// episodes and each in its feed's order, and none of another show's.
+/// Falsified by sorting on the person's position before the episode's date.
+#[test]
+fn a_shows_people_are_read_at_once() {
+    let mut c = Lib::new();
+    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    c.mutate("library", "add_show", &show("podcast", "Other")).unwrap();
+    let ftn = keys::show_key("podcast", "Full Time Nix");
+    let other = keys::show_key("podcast", "Other");
+    for (s, title, file, at) in [
+        (&ftn, "Old", ".feeds/1.mp3", 1),
+        (&ftn, "New", ".feeds/2.mp3", 2),
+        (&other, "Elsewhere", ".feeds/3.mp3", 3),
+    ] {
+        c.mutate("library", "add_episode", &episode(s, title, file, at)).unwrap();
+    }
+    let on = |name: &str, role: &str| PersonOn {
+        name: name.into(),
+        role: role.into(),
+        ..PersonOn::default()
+    };
+    for (file, people) in [
+        (".feeds/1.mp3", vec![on("Shahar", "Host"), on("Jacek", "Guest")]),
+        (".feeds/2.mp3", vec![on("Shahar", "Host"), on("Kiara", "Guest")]),
+        (".feeds/3.mp3", vec![on("Somebody", "Host")]),
+    ] {
+        c.mutate("library", "set_people", &SetPeople { file: file.into(), people }).unwrap();
+    }
+    let read = c.list::<ShowPeopleEntry>(
+        "show_people",
+        &ShowInput {
+            id: ftn,
+            ..ShowInput::default()
+        },
+    );
+    assert_eq!(each(&read, |p| p.name.clone()), ["Shahar", "Kiara", "Shahar", "Jacek"]);
+}

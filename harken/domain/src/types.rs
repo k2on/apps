@@ -558,6 +558,16 @@ pub struct PeopleEntry {
     pub role: String,
 }
 
+/// Somebody on one of a show's episodes, as the show's page lists them.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ShowPeopleEntry {
+    pub art: String,
+    pub link: String,
+    pub media_id: Id<Media>,
+    pub name: String,
+    pub role: String,
+}
+
 /// One line of an episode's transcript.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
 pub struct TranscriptEntry {

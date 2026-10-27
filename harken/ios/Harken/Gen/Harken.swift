@@ -1799,6 +1799,24 @@ public struct ShowInput: Equatable {
     public var json: String { J.obj(["\"playlist_id\":" + J.q(playlistId.hex), "\"id\":" + J.q(id)]) }
 }
 
+/// The record `ShowPeopleEntry`.
+public struct ShowPeopleEntry: Equatable {
+    public var art: String
+    public var link: String
+    public var mediaId: Id
+    public var name: String
+    public var role: String
+
+    public init(art: String, link: String, mediaId: Id, name: String, role: String) { self.art = art; self.link = link; self.mediaId = mediaId; self.name = name; self.role = role; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(art: J.text(o["art"]), link: J.text(o["link"]), mediaId: Id(J.text(o["media_id"])), name: J.text(o["name"]), role: J.text(o["role"]))
+    }
+
+    public var json: String { J.obj(["\"art\":" + J.q(art), "\"link\":" + J.q(link), "\"media_id\":" + J.q(mediaId.hex), "\"name\":" + J.q(name), "\"role\":" + J.q(role)]) }
+}
+
 /// The record `ShowsEntry`.
 public struct ShowsEntry: Equatable {
     public var art: String
@@ -2250,6 +2268,9 @@ public struct Harken {
 
     /// `library.show`, kept, its rows UniFFI's.
     public func show(_ input: ShowInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.show", input: input.json)) }
+
+    /// `library.show_people`, kept.
+    public func showPeople(_ input: ShowInput) throws -> LiveView<ShowPeopleEntry> { LiveView(try peer.view(name: "library.show_people", input: input.json)) { j in ShowPeopleEntry(json: j) } }
 
     /// `library.show_progress`, kept.
     public func showProgress(_ input: ShowInput) throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.show_progress", input: input.json)) { j in ProgressEntry(json: j) } }

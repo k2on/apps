@@ -598,10 +598,14 @@ fun HarkenApp(
                                             // rows are, since it is most of a row's height.
                                             val about by heldBy(library, episodesKey(page.id), back) { it.episodeDetails(page.id) }
                                             val aboutById = remember(about) { about.orEmpty().associateBy { it.mediaId } }
+                                            // Who is on each episode, the show's at once and waited for as what
+                                            // they are about is: a row's people are part of its height, and a
+                                            // view a row opened and closed as it scrolled by.
+                                            val people by heldBy(library, showPeopleKey(page.id), back) { it.showPeople(page.id) }
+                                            val peopleById = remember(people) { people.orEmpty().groupBy({ it.media }, { it.person }) }
                                             // Who hosts it, as its newest episode says.
-                                            val newest = rows?.firstOrNull()?.id
-                                            val hosts = newest?.let { m -> heldWhile(library, peopleKey(m)) { it.people(m) }.value }.orEmpty().filter { it.hosts }
-                                            Ready(if (about == null) null else rows) { r ->
+                                            val hosts = rows?.firstOrNull()?.let { peopleById[it.id] }.orEmpty().filter { it.hosts }
+                                            Ready(if (about == null || people == null) null else rows) { r ->
                                                 ShowPage(
                                                     page.id,
                                                     shows.firstOrNull { it.id == page.id },
@@ -620,8 +624,7 @@ fun HarkenApp(
                                                         act.back()
                                                     },
                                                     hosts = hosts,
-                                                    // Each row's people held while the row is drawn.
-                                                    people = { t -> heldWhile(library, peopleKey(t.id)) { it.people(t.id) }.value.orEmpty() },
+                                                    people = peopleById,
                                                 )
                                             }
                                         }
@@ -913,7 +916,7 @@ private fun <T> heldBy(library: Library, key: Any, entry: NavBackStackEntry, hol
 }
 
 /**
- * A list held while it is drawn, rather than while a back stack entry is — an episode row's people,
+ * A list held while it is drawn, rather than while a back stack entry is — a guest's newest episode's people,
  * what plays' transcript — by its key, and let go when the key changes or it leaves.
  */
 @Composable

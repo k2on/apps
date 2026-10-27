@@ -72,7 +72,7 @@ pub fn domain() -> Domain {
         shows::subscriptions, downloads::queue_download, downloads::download_progress, downloads::downloaded,
         downloads::downloads, progress::report_progress, progress::mark_played, progress::my_progress,
         progress::show_progress, shows::set_chapters, shows::chapters, shows::set_people, shows::people,
-        shows::appearances, shows::set_transcript, shows::transcript, feed)
+        shows::show_people, shows::appearances, shows::set_transcript, shows::transcript, feed)
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
 }

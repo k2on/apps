@@ -164,6 +164,8 @@ fun episodesKey(show: String): String = "episodes:$show"
 
 fun peopleKey(media: Id): String = "people:${media.hex}"
 
+fun showPeopleKey(show: String): String = "show-people:$show"
+
 fun transcriptKey(media: Id): String = "transcript:${media.hex}"
 
 fun appearancesKey(name: String): String = "appearances:$name"
@@ -482,6 +484,9 @@ class Library(private val session: ArkSession) {
 
     /** Who is on an episode (`people`), in its feed's order; [release] [peopleKey]. */
     fun people(media: Id): StateFlow<List<OnEpisode>?> = open(peopleKey(media)) { Held({ Phone.people(it, media) }, OnEpisode::of) }
+
+    /** Who is on each of a show's episodes (`show_people`), held by its page; [release] [showPeopleKey]. */
+    fun showPeople(show: String): StateFlow<List<Appearing>?> = open(showPeopleKey(show)) { Held({ Phone.showPeople(it, show) }, Appearing::of) }
 
     /**
      * An episode's transcript (`transcript`), in the order it is said: held, so a transcript the server

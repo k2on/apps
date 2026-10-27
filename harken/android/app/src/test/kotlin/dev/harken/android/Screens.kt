@@ -280,7 +280,7 @@ class Screens {
         val keller = OnEpisode("Tim Keller", "Host", "", "")
         val guests = listOf(OnEpisode("Kathy Keller", "Guest", "", ""), OnEpisode("Timothy Paul Jones", "Guest", "", ""))
         shot("people") {
-            tab(Tab.Library) { ShowPage(s.id, s, Demo.sermons, null, Idle, hosts = listOf(keller), people = { t -> if (t == Demo.sermons[1]) listOf(keller) + guests else listOf(keller) }) }
+            tab(Tab.Library) { ShowPage(s.id, s, Demo.sermons, null, Idle, hosts = listOf(keller), people = Demo.sermons.associate { t -> t.id to if (t == Demo.sermons[1]) listOf(keller) + guests else listOf(keller) }) }
         }
     }
 

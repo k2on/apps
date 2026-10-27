@@ -374,6 +374,31 @@ pub fn people(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<Peopl
         }))
 }
 
+/// Who is on each of a show's episodes, in the order `show` lists them and
+/// each episode's people in its feed's order: a show's page reads its rows'
+/// people once, as it reads `episode_details`, rather than a view a row.
+#[view("library.show_people")]
+pub fn show_people(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<ShowPeopleEntry>, Refusal> {
+    let id = input.id;
+    Ok(scan::<Harken, Appearance>()
+        .filter_with(move |db, a| db.episode.get(a.media_id).is_some_and(|e| e.show_id == id))
+        .sort_with(|db, a| {
+            let published = db.episode.get(a.media_id).map_or(0, |e| e.published_ms);
+            let pos = db.media.get(a.media_id).map_or(0, |m| m.pos);
+            (Desc(published), Desc(pos), a.pos)
+        })
+        .map_with(|db, a| {
+            let p = db.person.get(&a.person_name).unwrap_or_default();
+            ShowPeopleEntry {
+                art: p.art,
+                link: p.link,
+                media_id: a.media_id,
+                name: a.person_name.clone(),
+                role: a.role.clone(),
+            }
+        }))
+}
+
 /// Every episode somebody is on, newest first: their page's episodes.
 #[view("library.appearances")]
 pub fn appearances(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntry>, Refusal> {

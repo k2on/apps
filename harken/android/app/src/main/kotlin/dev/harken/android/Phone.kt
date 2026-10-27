@@ -37,6 +37,7 @@ import dev.harken.android.gen.RecordingInput
 import dev.harken.android.gen.RemoveFromPlaylist
 import dev.harken.android.gen.Search
 import dev.harken.android.gen.ShowInput
+import dev.harken.android.gen.ShowPeopleEntry
 import dev.harken.android.gen.ShowsEntry
 import dev.harken.android.gen.Subscribe
 import dev.harken.android.gen.SubscriptionsEntry
@@ -306,6 +307,13 @@ data class OnEpisode(val name: String, val role: String, val art: String, val li
     }
 }
 
+/** Somebody on one of a show's episodes (`show_people`): which, and who. */
+data class Appearing(val media: Id, val person: OnEpisode) {
+    companion object {
+        fun of(e: ShowPeopleEntry): Appearing = Appearing(e.mediaId, OnEpisode(e.name, e.role, e.art, e.link))
+    }
+}
+
 /** One line of an episode's transcript (`transcript`): when it is said, by whom (often nobody says), and what. */
 data class Cue(val startMs: Long, val endMs: Long, val speaker: String, val text: String) {
     companion object {
@@ -448,6 +456,9 @@ object Phone {
 
     /** Who is on an episode, in its feed's order. */
     fun people(h: Harken, media: Id): View<PeopleEntry> = h.people(EpisodeInput(media))
+
+    /** Who is on each of a show's episodes, in the order its page lists them. */
+    fun showPeople(h: Harken, show: String): View<ShowPeopleEntry> = h.showPeople(ShowInput(NO_PLAYLIST, show))
 
     /** An episode's transcript, line by line in the order it is said. */
     fun transcript(h: Harken, media: Id): View<TranscriptEntry> = h.transcript(EpisodeInput(media))
