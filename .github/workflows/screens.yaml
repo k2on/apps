@@ -81,31 +81,17 @@ jobs:
             gradle -p showcase/android :app:assembleDebug &&
             cp showcase/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/showcase.apk"'
 
-      # The tools from the flake, from the cache once built, in place of
-      # apt's and Homebrew's (which took nine minutes for ffmpeg on macOS).
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - if: vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
+      # Nix, reading the tools from k2on.cachix.org by its public key: the
+      # upstream installer, lighter on macOS than Determinate's, and no
+      # cachix program unless tools.sh has something to push.
+      - uses: cachix/install-nix-action@v31
         with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          extra_nix_config: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
 
-      - if: vars.CACHIX_NAME == ''
-        uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-screens-android-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
-          restore-prefixes-first-match: nix-screens-android-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-screens-android-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
-
-      - name: ffmpeg
-        run: |
-          bin=$(nix build .#screens-ffmpeg --no-link --print-out-paths --print-build-logs | grep -- '-bin$')
-          echo "$bin/bin" >> "$GITHUB_PATH"
-          "$bin/bin/ffmpeg" -hide_banner -version | head -1
+      - name: Tools
+        run: bash .github/screens/tools.sh get screens-ffmpeg
 
       - name: The showcase, built
         run: bash .github/screens/meanwhile.sh wait showcase
@@ -127,6 +113,11 @@ jobs:
           name: screens-android
           path: ${{ runner.temp }}/out/android
           if-no-files-found: error
+
+      - name: Push the tools to Cachix, if they were built here
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: bash .github/screens/tools.sh push
 
   ios:
     runs-on: macos-15
@@ -159,43 +150,28 @@ jobs:
             echo "$device" > "$RUNNER_TEMP/device"
             xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
 
-      # The tools from the flake, from the cache once built, in place of
-      # apt's and Homebrew's (which took nine minutes for ffmpeg on macOS).
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - if: vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
+      # Nix, reading the tools from k2on.cachix.org by its public key: the
+      # upstream installer, lighter on macOS than Determinate's, and no
+      # cachix program unless tools.sh has something to push.
+      - uses: cachix/install-nix-action@v31
         with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          extra_nix_config: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
 
-      - if: vars.CACHIX_NAME == ''
-        uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-screens-ios-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
-          restore-prefixes-first-match: nix-screens-ios-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-screens-ios-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
+      - name: Tools
+        run: bash .github/screens/tools.sh get xcodegen screens-ffmpeg
 
-      # The showcase builds under the ffmpeg step and the boot: XcodeGen
-      # from the flake (upstream's release, pinned), then xcodebuild.
+      # The showcase builds under the boot: XcodeGen from the flake
+      # (upstream's release, pinned), then xcodebuild.
       - name: Start building the showcase for the simulator
         run: |
-          xcodegen=$(nix build .#xcodegen --no-link --print-out-paths)
           bash .github/screens/meanwhile.sh start showcase bash -c '
-            cd showcase/ios && "$1/bin/xcodegen" generate &&
+            cd showcase/ios && xcodegen generate &&
             xcodebuild build \
               -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
               -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
-              -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO' build "$xcodegen"
-
-      - name: ffmpeg
-        run: |
-          bin=$(nix build .#screens-ffmpeg --no-link --print-out-paths --print-build-logs | grep -- '-bin$')
-          echo "$bin/bin" >> "$GITHUB_PATH"
-          "$bin/bin/ffmpeg" -hide_banner -version | head -1
+              -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO'
 
       - name: The showcase, built
         run: bash .github/screens/meanwhile.sh wait showcase
@@ -214,6 +190,11 @@ jobs:
           name: screens-ios
           path: ${{ runner.temp }}/out/ios
           if-no-files-found: error
+
+      - name: Push the tools to Cachix, if they were built here
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: bash .github/screens/tools.sh push
 
   # The branch, one commit: what it had, each phone that captured this run
   # replaced, and the manifest written over all of it.
