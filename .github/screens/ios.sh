@@ -54,13 +54,11 @@ capture() {
     if [ "$kind" = recording ]; then
       # Opened and settled first, so the launch is never recorded; then
       # told to move, by the Darwin notification the showcase listens for.
-      # The expanding card is the system's zoom, slowed by UIKit's drag
-      # coefficient, which the simulator's Slow Animations sets and a launch
-      # argument sets as well; the showcase's own motion by `-slow`.
+      # The expanding card is the system's zoom, which nothing an app can
+      # set slows: it is taken at life's speed, with what the simulator draws.
       taken=$slow
-      drag=()
-      [ "$id" = expanding-card ] && drag=(-UIAnimationDragCoefficient "$slow")
-      xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" ${drag[@]+"${drag[@]}"} >/dev/null
+      [ "$id" = expanding-card ] && taken=1
+      xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
       sleep 4
       xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
       rec=$!

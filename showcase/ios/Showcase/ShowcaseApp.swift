@@ -149,12 +149,12 @@ private struct ExpandingCardShot: View {
             }
             .padding(Space.xl)
         }
-        // The zoom is the system's: ios.sh slows it with UIKit's own drag
-        // coefficient (`-UIAnimationDragCoefficient`, what the simulator's
-        // Slow Animations sets), and the pauses here by `-slow` to match.
+        // At life's speed, pauses too, whatever `-slow` says: the zoom is
+        // the system's and slows for nothing an app can set (a window's
+        // layer speed only breaks it), so ios.sh takes this one as it is.
         .onChange(of: go.told) {
-            later(0.4) { open = true }
-            later(2.2) { open = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { open = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { open = false }
         }
     }
 }
