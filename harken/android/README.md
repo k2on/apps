@@ -296,7 +296,7 @@ layoutlib — the onboarding's three steps and their errors, Home (full,
 offline, empty, loading), Search (recent, nothing yet, typing, results,
 none), each Library tab, an album, an artist (a composer, one under a banner, one of songs), a work, a performance, a playlist (and an empty
 and a missing one), the mini player, the full player, the player held at
-each quarter of the way up, the queue, a song's
+each quarter of the way up, the queue, an episode's transcript, a song's
 menu, adding to a playlist, naming one (and a name refused), Settings and
 diagnostics — in light and dark, at a Pixel 5's 1080×2340, from
 `app/src/test/.../Demo.kt`: rows taken from harken's demo seed

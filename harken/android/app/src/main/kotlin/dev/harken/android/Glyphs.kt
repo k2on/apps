@@ -2,8 +2,9 @@
 // ISC; the licence is `rust/arkui/src/LICENSE.lucide`), as the same paths
 // with the same butt caps and miter joins, so a play button is one shape
 // on every client. A circle or a rect there is a path here, written out.
-// `repeat`, `repeat-1` and `bell` are Lucide's too, drawn the
-// same way; the desktop has no use for them. The devices of the listening
+// `repeat`, `repeat-1`, `bell`, and `captions`, `locate-fixed` and
+// `external-link` for a transcript and a person's page, are Lucide's too,
+// drawn the same way; the desktop has no use for them. The devices of the listening
 // session's picker — `smartphone`, `laptop`, `speaker`, and `cast` for the
 // button that opens it — are the desktop's own; `globe`, for a browser, is
 // Lucide's, drawn the same way.
@@ -109,6 +110,12 @@ object Glyphs {
     val Show = glyph("mic", "M12 19v3", "M19 10v2a7 7 0 0 1-14 0v-2", "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z")
     /** Sermons, and a series of them: a pulpit, its reading desk tilted on a stand. Not Lucide's, which has none: drawn in its grid. */
     val Pulpit = glyph("pulpit", "M3 8l18-4", "M5 7.6V10h14V5.6", "M8 10l1 9h6l1-9", "M6 21h12")
+    /** What an episode says, a line at a time: Lucide's `captions`. */
+    val Transcript = glyph("captions", "M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z", "M7 15h4M15 15h2M7 11h2M13 11h4")
+    /** Back to the line being said: Lucide's `locate-fixed`. */
+    val Follow = glyph("locate-fixed", "M2 12h3", "M19 12h3", "M12 2v3", "M12 19v3", circle(12f, 12f, 7f), circle(12f, 12f, 3f))
+    /** Somebody's own page on the web: Lucide's `external-link`. */
+    val Link = glyph("external-link", "M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6")
     val Note = glyph("music", "M9 18V5l12-2v13", circle(6f, 18f, 3f), circle(18f, 16f, 3f))
     val More = ArkGlyphs.More
     val Back = ArkGlyphs.Back

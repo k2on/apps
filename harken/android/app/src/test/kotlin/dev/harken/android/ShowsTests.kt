@@ -3,15 +3,21 @@
 // shows by title, a show's episodes newest first, which the songs leave out
 // — and where a show's page is, as a route and as a place; a feed found
 // in the directory or pasted, and followed from a shows page's +; an
-// episode whose file is not on the server yet; and what an episode's row
-// says — when, what about, and how much is left.
+// episode whose file is not on the server yet; what an episode's row
+// says — when, what about, and how much is left; who is on an episode, and
+// the episodes a guest is on; and an episode's transcript, and which of its
+// lines is being said.
 package dev.harken.android
 
 import dev.harken.android.gen.AddEpisode
 import dev.harken.android.gen.AddShow
 import dev.harken.android.gen.ChapterAt
+import dev.harken.android.gen.CueAt
+import dev.harken.android.gen.PersonOn
 import dev.harken.android.gen.ReportProgress
 import dev.harken.android.gen.SetChapters
+import dev.harken.android.gen.SetPeople
+import dev.harken.android.gen.SetTranscript
 import dev.harken.android.gen.DownloadProgress
 import dev.harken.android.gen.Downloaded
 import dev.harken.android.gen.FeedRead
@@ -132,6 +138,95 @@ class ShowsTests {
         assertEquals(listOf("Intro", "Flakes"), chapters.map { it.title })
         assertEquals("Flakes", Chapter.at(chapters, 70_000)?.title)
         assertEquals("Intro", Chapter.at(chapters, 64_999)?.title)
+    }
+
+    /**
+     * Who is on an episode is its feed's people, in the feed's order, and its row names whoever is
+     * not a host; its transcript comes in the order it is said, each speaker's name where they start
+     * speaking. Falsified by `guests` keeping the hosts: the row named the show's own host.
+     */
+    @Test
+    fun anEpisodesPeopleAndTranscriptAreItsFeeds() {
+        val h = alone()
+        h.addShow(AddShow("podcast", "Full Time Nix", "", "", "", "", ""))
+        h.addEpisode(episode("podcast/full-time-nix", "Bump", 1))
+        val bump = Phone.once({ Phone.show(h, "podcast/full-time-nix") }, Track::of).single()
+        h.setPeople(
+            SetPeople(
+                ".feeds/Bump.mp3",
+                listOf(
+                    PersonOn("Shahar \"Dawn\" Or", "Host", "", ""),
+                    PersonOn("Jacek Galowicz", "Guest", "https://galowicz.de", ".feeds/jacek.jpg"),
+                    PersonOn("Kiara Grouwstra", "Guest", "", ""),
+                ),
+            ),
+        )
+        val people = Phone.once({ Phone.people(h, bump.id) }, OnEpisode::of)
+        assertEquals(listOf("Shahar \"Dawn\" Or", "Jacek Galowicz", "Kiara Grouwstra"), people.map { it.name })
+        assertEquals(listOf(true, false, false), people.map { it.hosts })
+        assertEquals(OnEpisode("Jacek Galowicz", "Guest", ".feeds/jacek.jpg", "https://galowicz.de"), people[1])
+        assertEquals("Jacek Galowicz and Kiara Grouwstra", OnEpisode.named(OnEpisode.guests(people)))
+        assertEquals("Ada, Grace and Edsger", OnEpisode.named(listOf("Ada", "Grace", "Edsger").map { OnEpisode(it, "Guest", "", "") }))
+
+        h.setTranscript(
+            SetTranscript(
+                ".feeds/Bump.mp3",
+                listOf(
+                    CueAt(4_000, 6_000, "Jacek", "Thanks for having me."),
+                    CueAt(0, 2_000, "Shahar", "Welcome to Full Time Nix."),
+                    CueAt(2_000, 4_000, "Shahar", "Today, Jacek."),
+                    CueAt(6_000, 9_000, "", "Applause."),
+                ),
+            ),
+        )
+        val lines = Phone.once({ Phone.transcript(h, bump.id) }, Cue::of)
+        assertEquals(listOf(0L, 2_000L, 4_000L, 6_000L), lines.map { it.startMs })
+        assertEquals("Welcome to Full Time Nix.", lines[0].text)
+        assertEquals(listOf("Shahar", "", "Jacek", ""), Cue.speakers(lines))
+    }
+
+    /**
+     * The line a transcript lights is the last to have started — none before the first, the last
+     * once it has started however long ago. Falsified by `at` taking the first line that ends after
+     * the position: across a gap between two lines it lit the next before it was said.
+     */
+    @Test
+    fun theLineBeingSaidIsTheLastToHaveStarted() {
+        val lines = listOf(Cue(1_000, 2_000, "", "One."), Cue(2_000, 3_000, "", "Two."), Cue(5_000, 6_000, "", "Three."))
+        assertEquals(-1, Cue.at(lines, 999))
+        assertEquals(0, Cue.at(lines, 1_000))
+        assertEquals(1, Cue.at(lines, 2_000))
+        assertEquals("said until the next starts", 1, Cue.at(lines, 4_000))
+        assertEquals(2, Cue.at(lines, 600_000))
+        assertEquals(-1, Cue.at(emptyList(), 0))
+    }
+
+    /**
+     * A guest's page is every episode they are on, newest first, from any show, and nothing of a
+     * musician's; the newest names them as the feed does, picture and link. Falsified by reading
+     * `artist` for their page: a guest made no songs, so it was empty.
+     */
+    @Test
+    fun aGuestsPageIsEveryEpisodeTheyAreOn() {
+        val h = alone()
+        h.addSong(song(1))
+        h.addShow(AddShow("podcast", "Full Time Nix", "", "", "", "", ""))
+        h.addShow(AddShow("podcast", "Nix Freaks", "", "", "", "", ""))
+        h.addEpisode(episode("podcast/full-time-nix", "Bump", 1))
+        h.addEpisode(episode("podcast/nix-freaks", "Fifty One", 2))
+        h.addEpisode(episode("podcast/full-time-nix", "Unrelated", 3))
+        val jacek = PersonOn("Jacek Galowicz", "Guest", "https://galowicz.de", ".feeds/jacek.jpg")
+        h.setPeople(SetPeople(".feeds/Bump.mp3", listOf(PersonOn("Shahar \"Dawn\" Or", "Host", "", ""), jacek)))
+        h.setPeople(SetPeople(".feeds/Fifty One.mp3", listOf(jacek)))
+        h.setPeople(SetPeople(".feeds/Unrelated.mp3", listOf(PersonOn("Shahar \"Dawn\" Or", "Host", "", ""))))
+
+        val on = Phone.once({ Phone.appearances(h, "Jacek Galowicz") }, Track::of)
+        assertEquals(listOf("Fifty One", "Bump"), on.map { it.title })
+        assertEquals(listOf("Nix Freaks", "Full Time Nix"), on.map { it.creator })
+        assertTrue("he made no songs", Phone.once({ Phone.artist(h, "Jacek Galowicz") }, Track::of).isEmpty())
+        val him = Phone.once({ Phone.people(h, on.first().id) }, OnEpisode::of).single { it.name == "Jacek Galowicz" }
+        assertEquals(".feeds/jacek.jpg" to "https://galowicz.de", him.art to him.link)
+        assertTrue("a musician is on no episode", Phone.once({ Phone.appearances(h, song(1).artist) }, Track::of).isEmpty())
     }
 
     /**
