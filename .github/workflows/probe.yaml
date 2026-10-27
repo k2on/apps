@@ -1,0 +1,68 @@
+# A probe, for a branch: how many frames a second the iOS simulator
+# composes while the expanding card moves, on each free runner image and
+# at two screen sizes, recorded as screens.yaml records (record.swift). It
+# answers whether faster drawing can bring the iOS recordings to 60.
+name: probe
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/probe.yaml"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+        device: ["iPhone 17 Pro", "iPhone SE (3rd generation)"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          xcode=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+          sw_vers
+
+      - name: Boot ${{ matrix.device }}
+        run: |
+          runtime=$(xcrun simctl list runtimes -j | jq -r '[.runtimes[] | select(.platform == "iOS" and .isAvailable)] | sort_by(.version) | last | .identifier')
+          type=$(xcrun simctl list devicetypes -j | jq -r --arg n "${{ matrix.device }}" '.devicetypes[] | select(.name == $n) | .identifier')
+          udid=$(xcrun simctl create probe "$type" "$runtime")
+          echo "$udid" > "$RUNNER_TEMP/udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b > /dev/null
+
+      - name: XcodeGen
+        uses: actions/cache@v4
+        with:
+          path: ~/screens-tools
+          key: screens-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', '.github/screens/bundle.sh') }}
+
+      - name: Build the showcase
+        working-directory: showcase/ios
+        run: |
+          ~/screens-tools/bin/xcodegen generate
+          xcodebuild build -quiet -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
+            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO ARCHS=arm64
+
+      - name: Record the expanding card
+        run: |
+          udid=$(cat "$RUNNER_TEMP/udid")
+          xcrun swiftc -O .github/screens/record.swift -o "$RUNNER_TEMP/record"
+          xcrun simctl install "$udid" "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app"
+          for take in 1 2; do
+            xcrun simctl launch "$udid" dev.arkui.showcase -showcase expanding-card > /dev/null
+            sleep 5
+            "$RUNNER_TEMP/record" "$udid" 5 540 "$RUNNER_TEMP/card-$take.mov" &
+            sleep 1
+            xcrun simctl spawn "$udid" notifyutil -p dev.arkui.showcase.go
+            wait
+            xcrun simctl terminate "$udid" dev.arkui.showcase
+          done
+          echo "${{ matrix.os }} / ${{ matrix.device }}: see 'recorded … frames' above"
