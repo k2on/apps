@@ -233,17 +233,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arkui-docs"
-version = "0.1.0"
-dependencies = [
- "arkui",
- "iced",
- "serde",
- "serde_json",
- "web-sys",
-]
-
-[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1398,6 +1387,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
  "libloading",
+]
+
+[[package]]
+name = "docs"
+version = "0.1.0"
+dependencies = [
+ "arkui",
+ "iced",
+ "serde",
+ "serde_json",
+ "web-sys",
 ]
 
 [[package]]

@@ -262,7 +262,7 @@
           # The pages' dependencies for wasm32, once for both.
           wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
           wasmBuilds = lib.concatMapStringsSep "\n" wasmBuild [
-            "-p harken-iced" "-p harken-iced --features demo" "-p arkui-docs"
+            "-p harken-iced" "-p harken-iced --features demo" "-p docs"
           ];
           wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
             pname = "arkdb-wasm";
@@ -309,12 +309,12 @@
           harken-web = icedWeb { pname = "harken-web"; demo = true; };
           # What harken-server serves as its web directory.
           harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
-          # arkui's documentation, drawn by arkui (rust/arkui-docs), with the
+          # arkui's documentation, drawn by arkui (rust/docs), with the
           # catalogue beside it as JSON for any other site to read.
-          arkui-docs = wasmPage {
-            pname = "arkui-docs";
-            crate = "arkui-docs";
-            files = "../rust/arkui-docs/web/index.html ../rust/arkui-docs/web/favicon.svg ../rust/arkui-docs/catalogue.json";
+          docs = wasmPage {
+            pname = "docs";
+            crate = "docs";
+            files = "../rust/docs/web/index.html ../rust/docs/web/favicon.svg ../rust/docs/catalogue.json";
           };
 
           # The server (harken/server: the server and harken-peer), on a
@@ -823,7 +823,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced arkui-docs;
+            inherit harken-web harken-web-server harken-iced docs;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;
@@ -1024,7 +1024,7 @@
             {
               pages = [
                 (page "harken" "harken-web" "harken" "the browser peer: the same engine compiled to wasm. Open it alone to run it entirely in the tab, or point it at a harken server.")
-                (page "arkui" "arkui-docs" "arkui" "the components every app here shares, each drawn by itself, and catalogue.json beside it.")
+                (page "docs" "docs" "docs" "the components every app here shares (arkui), each drawn by itself, and catalogue.json beside it.")
               ];
               apks = [
                 # The kernel for every ABI first, so its failure reads on its own.

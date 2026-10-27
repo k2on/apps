@@ -26,8 +26,8 @@
       // `?v=dev` is rewritten to the build's store hash (flake.nix,
       // `wasmPage`), so a browser holding the last build is sent URLs its
       // cache has never seen.
-      import init from "./pkg/arkui-docs.js?v=dev";
-      await init({ module_or_path: new URL("pkg/arkui-docs_bg.wasm?v=dev", document.baseURI) });
+      import init from "./pkg/docs.js?v=dev";
+      await init({ module_or_path: new URL("pkg/docs_bg.wasm?v=dev", document.baseURI) });
 
       // The keyboard reaches the page only while its canvas has the focus.
       const grab = () => document.querySelector("canvas")?.focus();

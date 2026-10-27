@@ -1,9 +1,11 @@
-# arkui-docs
+# docs
+
+The documentation site: for now arkui's; ArkDB's can join it.
 
 arkui's documentation, drawn by arkui: an iced app that is a page in a
-browser (`nix build .#arkui-docs`, published at
-https://k2on.github.io/apps/arkui/) and a window on the desktop
-(`cargo run -p arkui-docs`). Every example on it is the component itself, in
+browser (`nix build .#docs`, published at
+https://k2on.github.io/apps/docs/) and a window on the desktop
+(`cargo run -p docs`). Every example on it is the component itself, in
 the renderer the apps use.
 
 ## The one place the components are described
@@ -17,9 +19,9 @@ wants it without running anything (it is published beside the page).
 **If you change a component in arkui, change its entry and its example here in
 the same commit**, then regenerate the JSON:
 
-    cargo run -p arkui-docs -- --json > rust/arkui-docs/catalogue.json
+    cargo run -p docs -- --json > rust/docs/catalogue.json
 
-`cargo test -p arkui-docs` fails until you have. It checks that:
+`cargo test -p docs` fails until you have. It checks that:
 
 - every `pub mod` of arkui has an entry, and every entry is a module;
 - an entry says harken uses it exactly when `harken/iced/src` imports it;

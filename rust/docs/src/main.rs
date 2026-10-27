@@ -5,7 +5,7 @@
 //! a working example, its API, its rules, and where harken draws with it.
 //! What it says is [`catalogue`]; how each example is built is [`examples`].
 //!
-//! `arkui-docs --json` prints the catalogue for a site that wants it as data.
+//! `docs --json` prints the catalogue for a site that wants it as data.
 // `--json` and the tests are native; in a browser the page only draws the
 // entries.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]

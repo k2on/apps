@@ -55,7 +55,7 @@ fn overview<'a>() -> Element<'a, Message> {
     let used = ENTRIES.iter().filter(|e| !e.harken.is_empty()).count();
     let intro = prose([
         "The ui every app here shares, drawn by itself: every example on these pages is the arkui component, in the renderer the apps use, not a picture of one.".to_string(),
-        "This is the one place the components are described. An agent working on an app reads the page for the part it needs; one that changes a component changes its entry in rust/arkui-docs/src/catalogue.rs and its example in examples.rs in the same commit, and the tests fail until it does. Other sites pull catalogue.json, published beside this page.".to_string(),
+        "This is the one place the components are described. An agent working on an app reads the page for the part it needs; one that changes a component changes its entry in rust/docs/src/catalogue.rs and its example in examples.rs in the same commit, and the tests fail until it does. Other sites pull catalogue.json, published beside this page.".to_string(),
         format!("{} modules; harken's desktop draws with {used} of them. j and k walk the sidebar.", ENTRIES.len()),
     ]);
     // The catalogue as a table, a row per module: a row opens its page.

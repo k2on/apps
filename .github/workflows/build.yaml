@@ -1,6 +1,6 @@
 # Everything a push to main publishes, in one run: each page at
 # https://k2on.github.io/apps/<name>/ (the browser peer at harken/, arkui's
-# docs at arkui/, …) and every Android app in one F-Droid repository at
+# docs at docs/, …) and every Android app in one F-Droid repository at
 # https://k2on.github.io/apps/fdroid/repo. A `v*` tag builds the APKs alone
 # and attaches them to a release.
 #
@@ -201,7 +201,7 @@ jobs:
 
       # What the entry asks to have built first, so that its failure reads
       # on its own (harken's kernel for every ABI).
-      - name: Build ${{ join(matrix.apk.first, ', ') }}
+      - name: Build what comes first
         if: steps.seen.outputs.cache-hit != 'true' && join(matrix.apk.first, '') != ''
         run: |
           for p in ${{ join(matrix.apk.first, ' ') }}; do

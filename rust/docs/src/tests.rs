@@ -88,7 +88,7 @@ fn catalogue_json_is_what_the_catalogue_prints() {
     let committed = read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("catalogue.json"));
     assert!(
         committed == catalogue::json(),
-        "rust/arkui-docs/catalogue.json is stale: cargo run -p arkui-docs -- --json > rust/arkui-docs/catalogue.json"
+        "rust/docs/catalogue.json is stale: cargo run -p docs -- --json > rust/docs/catalogue.json"
     );
 }
 
