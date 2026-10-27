@@ -1,33 +1,34 @@
-# Everything a push to main publishes, in one run: the browser peer at
-# https://k2on.github.io/apps/harken/ and the Android apps' F-Droid repository
-# at https://k2on.github.io/apps/fdroid/repo, harken's and Revelation's
-# (revelation/, plain Kotlin and none of ArkDB). A `v*` tag builds the APKs
-# alone and attaches them to a release.
+# Everything a push to main publishes, in one run: each page at
+# https://k2on.github.io/apps/<name>/ (the browser peer at harken/, arkui's
+# docs at arkui/, …) and every Android app in one F-Droid repository at
+# https://k2on.github.io/apps/fdroid/repo. A `v*` tag builds the APKs alone
+# and attaches them to a release.
 #
-# `web`, `checks`, `apk` (harken) and `revelation-apk` build in parallel and
-# `deploy` publishes once, after the page and both APKs. They used to be two
-# workflows, apk.yml and pages.yml, with pages.yml running again when apk.yml
-# finished: every push deployed twice and built the browser peer twice.
+# **What there is to publish is not written here.** It is the flake's
+# `publish` output (flake.nix): a list of pages and a list of APKs, each with
+# a name, the package that builds it and a key. `plan` reads it, and `page`
+# and `apk` are one job per entry. A new demo, docs site or app is an entry
+# there and nothing in this file.
 #
-# A build is skipped when its inputs have not moved. Each job hashes the files
-# its nix derivation reads (the flake's source filters: `rustDirs` for the
-# page; the Rust workspace, harken's domain and ffi crates and the Android
-# app for harken's APK, which embeds the kernel through harken/ffi; the app
-# alone for Revelation's) and asks the actions cache whether that hash was
-# built before. The page's output is the cache entry, so a hit restores it in
-# seconds. An APK's version code is the commit time, so its derivation moves
-# on every commit even when nothing in it did: a hit there means "this APK
-# was already published", and the repository keeps offering it rather than
-# gaining a copy under a new number.
+# **A build is skipped when its inputs have not moved, and nix says whether
+# they have.** An entry's key is its derivation's hash — every file, flag and
+# dependency the build reads, and nothing else — so a prose edit moves no key
+# and a change to a crate moves exactly the pages that link it. Each job asks
+# the actions cache whether that key was built before. A page's output is the
+# cache entry, so a hit restores it in seconds. An APK's version code is the
+# commit time, which would move its derivation on every commit; its key is
+# the same build without the version (flake.nix says how), and a hit there
+# means "this APK was already published": the repository keeps offering it
+# rather than gaining a copy under a new number.
 #
 # The nix store comes from Cachix when the repository variable CACHIX_NAME is
 # set (with the secret CACHIX_AUTH_TOKEN to push): every path is pushed once by
-# its hash and substituted after, so aapt2, the toolchains and an unchanged
-# browser peer are never built twice. Until then, nix-community/cache-nix-action
-# keeps the store in GitHub's actions cache as before (10 GB per repository).
-# The Android SDK is Google's and its licence does not allow redistributing
-# it, so it is never pushed to Cachix; the APK jobs keep it in the actions
-# cache either way.
+# its hash and substituted after, so what does have to build pulls every
+# unchanged dependency — aapt2, the toolchains, the kernel — instead of
+# compiling it. Until then, nix-community/cache-nix-action keeps each job's
+# store in GitHub's actions cache (10 GB per repository). The Android SDK is
+# Google's and its licence does not allow redistributing it, so it is never
+# pushed to Cachix; the APK jobs keep it in the actions cache either way.
 name: build
 
 on:
@@ -50,19 +51,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  web:
+  # What there is to build, and the key each is built under: evaluated, not
+  # built, so this takes the time to install nix and read the flake.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.plan.outputs.pages }}
+      apks: ${{ steps.plan.outputs.apks }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - id: plan
+        run: |
+          nix eval --json .#publish.x86_64-linux > plan.json
+          jq . plan.json
+          echo "pages=$(jq -c .pages plan.json)" >> "$GITHUB_OUTPUT"
+          echo "apks=$(jq -c .apks plan.json)" >> "$GITHUB_OUTPUT"
+
+  page:
+    needs: plan
     if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        page: ${{ fromJSON(needs.plan.outputs.pages) }}
+    name: page (${{ matrix.page.name }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # The page's inputs: the Rust workspace and harken's crates (the flake's
-      # `rustDirs`), and the flake itself.
       - id: built
         uses: actions/cache@v4
         with:
-          path: web-out
-          key: harken-web-${{ hashFiles('rust/**', 'harken/domain/**', 'harken/player/**', 'harken/server/**', 'harken/iced/**', 'harken/ffi/**', 'flake.nix', 'flake.lock') }}
+          path: page-out
+          key: page-${{ matrix.page.name }}-${{ matrix.page.key }}
 
       - if: steps.built.outputs.cache-hit != 'true'
         uses: DeterminateSystems/nix-installer-action@main
@@ -76,25 +98,25 @@ jobs:
       - if: steps.built.outputs.cache-hit != 'true' && vars.CACHIX_NAME == ''
         uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-web-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'rust/Cargo.lock') }}
-          restore-prefixes-first-match: nix-web-${{ runner.os }}-
+          primary-key: nix-page-${{ matrix.page.name }}-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'rust/Cargo.lock') }}
+          restore-prefixes-first-match: nix-page-${{ matrix.page.name }}-${{ runner.os }}-
           gc-max-store-size-linux: 2G
           purge: true
-          purge-prefixes: nix-web-${{ runner.os }}-
+          purge-prefixes: nix-page-${{ matrix.page.name }}-${{ runner.os }}-
           purge-created: 0
           purge-primary-key: never
 
-      - name: Build the browser peer
+      - name: Build ${{ matrix.page.package }}
         if: steps.built.outputs.cache-hit != 'true'
         run: |
-          nix build .#harken-web --print-build-logs
-          cp -rL result web-out
-          chmod -R u+w web-out
+          nix build .#${{ matrix.page.package }} --print-build-logs
+          cp -rL result page-out
+          chmod -R u+w page-out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: harken-web
-          path: web-out
+          name: page-${{ matrix.page.name }}
+          path: page-out
           if-no-files-found: error
 
   # The flake's Linux checks. Each is a few test runs over one shared
@@ -121,22 +143,24 @@ jobs:
             .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module
 
   apk:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        apk: ${{ fromJSON(needs.plan.outputs.apks) }}
+    name: apk (${{ matrix.apk.name }})
     runs-on: ubuntu-latest
-    outputs:
-      built: ${{ steps.build.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
 
-      # The APK's inputs: the kernel and harken's domain and ffi crates (the
-      # app embeds them through harken-android-lib), the Android app, the
-      # flake, and nix/ (aapt2, the SDK, the F-Droid tooling). Only looked
-      # up here; the entry is written after a successful build, below.
+      # Only looked up here; the entry is written after a successful build,
+      # below. A tag builds whatever it finds.
       - id: seen
         if: "!startsWith(github.ref, 'refs/tags/v')"
         uses: actions/cache/restore@v4
         with:
           path: apk-seen
-          key: harken-apk-${{ hashFiles('rust/**', 'harken/domain/**', 'harken/ffi/**', 'harken/android/**', 'flake.nix', 'flake.lock', 'nix/**') }}
+          key: apk-${{ matrix.apk.name }}-${{ matrix.apk.key }}
           lookup-only: true
 
       # The hosted image carries ~30 GB of toolchains this build never uses;
@@ -163,11 +187,11 @@ jobs:
       - if: steps.seen.outputs.cache-hit != 'true'
         uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-apk-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'rust/Cargo.lock', 'harken/android/deps.json') }}
-          restore-prefixes-first-match: nix-apk-${{ runner.os }}-
+          primary-key: nix-apk-${{ matrix.apk.name }}-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'rust/Cargo.lock', format('{0}/android/deps.json', matrix.apk.name)) }}
+          restore-prefixes-first-match: nix-apk-${{ matrix.apk.name }}-${{ runner.os }}-
           gc-max-store-size-linux: 6G
           purge: true
-          purge-prefixes: nix-apk-${{ runner.os }}-
+          purge-prefixes: nix-apk-${{ matrix.apk.name }}-${{ runner.os }}-
           purge-created: 0
           purge-primary-key: never
 
@@ -175,23 +199,27 @@ jobs:
         if: steps.seen.outputs.cache-hit != 'true'
         run: nix build .#aapt2 .#android-sdk --out-link "$RUNNER_TEMP/android" --print-build-logs
 
-      # The kernel for every ABI first, so its failure reads on its own.
-      - name: Build the kernel for Android
-        if: steps.seen.outputs.cache-hit != 'true'
-        run: nix build .#harken-android-lib --out-link "$RUNNER_TEMP/android-lib" --print-build-logs
+      # What the entry asks to have built first, so that its failure reads
+      # on its own (harken's kernel for every ABI).
+      - name: Build ${{ join(matrix.apk.first, ', ') }}
+        if: steps.seen.outputs.cache-hit != 'true' && join(matrix.apk.first, '') != ''
+        run: |
+          for p in ${{ join(matrix.apk.first, ' ') }}; do
+            nix build ".#$p" --out-link "$RUNNER_TEMP/first-$p" --print-build-logs
+          done
 
-      - name: Build the APK
+      - name: Build ${{ matrix.apk.package }}
         id: build
         if: steps.seen.outputs.cache-hit != 'true'
         run: |
-          nix build .#harken-apk --print-build-logs
-          cp result/harken.apk harken.apk
+          nix build .#${{ matrix.apk.package }} --print-build-logs
+          cp result/${{ matrix.apk.file }} ${{ matrix.apk.file }}
 
       - if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: harken-apk
-          path: harken.apk
+          name: apk-${{ matrix.apk.name }}
+          path: ${{ matrix.apk.file }}
           if-no-files-found: error
 
       # Remember these inputs as published. Saved only once the APK exists,
@@ -205,99 +233,18 @@ jobs:
           path: apk-seen
           key: ${{ steps.seen.outputs.cache-primary-key }}
 
-  # Revelation (revelation/android): the same shape as `apk` without the
-  # kernel, since the app is plain Kotlin with no native library. Its inputs
-  # are the app, the flake and nix/ (aapt2, the SDK, the F-Droid tooling).
-  revelation-apk:
-    runs-on: ubuntu-latest
-    outputs:
-      built: ${{ steps.build.outcome == 'success' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: seen
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        uses: actions/cache/restore@v4
-        with:
-          path: apk-seen
-          key: revelation-apk-${{ hashFiles('revelation/**', 'flake.nix', 'flake.lock', 'nix/**') }}
-          lookup-only: true
-
-      # The nix store, a JDK, gradle's state and the aapt2 build want the
-      # room the hosted image's unused toolchains take.
-      - name: Free disk space
-        if: steps.seen.outputs.cache-hit != 'true'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          df -h /
-
-      - if: steps.seen.outputs.cache-hit != 'true'
-        uses: DeterminateSystems/nix-installer-action@main
-
-      - if: steps.seen.outputs.cache-hit != 'true' && vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
-        with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          # Google's SDK and the zips it is assembled from stay out of a
-          # public cache (see the top of this file).
-          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
-
-      - if: steps.seen.outputs.cache-hit != 'true'
-        uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-revelation-apk-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'revelation/android/deps.json') }}
-          restore-prefixes-first-match: nix-revelation-apk-${{ runner.os }}-
-          gc-max-store-size-linux: 4G
-          purge: true
-          purge-prefixes: nix-revelation-apk-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
-
-      - name: Build aapt2 and the SDK (kept as gc roots)
-        if: steps.seen.outputs.cache-hit != 'true'
-        run: nix build .#aapt2 .#android-sdk --out-link "$RUNNER_TEMP/android" --print-build-logs
-
-      - name: Build the APK
-        id: build
-        if: steps.seen.outputs.cache-hit != 'true'
-        run: |
-          nix build .#revelation-apk --print-build-logs
-          cp result/revelation.apk revelation.apk
-
-      - if: steps.build.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: revelation-apk
-          path: revelation.apk
-          if-no-files-found: error
-
-      # Remember these inputs as published, once the APK exists.
-      - name: Mark these inputs as built
-        if: steps.build.outcome == 'success' && !startsWith(github.ref, 'refs/tags/v')
-        run: mkdir -p apk-seen && git rev-parse HEAD > apk-seen/commit
-      - if: steps.build.outcome == 'success' && !startsWith(github.ref, 'refs/tags/v')
-        uses: actions/cache/save@v4
-        with:
-          path: apk-seen
-          key: ${{ steps.seen.outputs.cache-primary-key }}
-
-  # A tag is a release: both APKs, attached to it, by one job so the two
-  # builds never race to create the same release. The keys are public, so
-  # the APKs install anywhere and belong nowhere public
-  # (harken/android/README.md).
+  # A tag is a release: every APK, attached to it, by one job so the builds
+  # never race to create the same release. The keys are public, so the APKs
+  # install anywhere and belong nowhere public (harken/android/README.md).
   release:
-    needs: [apk, revelation-apk]
+    needs: apk
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: harken-apk
-          path: apks
-      - uses: actions/download-artifact@v4
-        with:
-          name: revelation-apk
+          pattern: apk-*
+          merge-multiple: true
           path: apks
       - uses: softprops/action-gh-release@v2
         with:
@@ -305,10 +252,11 @@ jobs:
           generate_release_notes: true
 
   deploy:
-    needs: [web, apk, revelation-apk]
-    # A failed APK does not hold the page back: the site goes up with the
-    # repository as it was, plus whichever APK did build.
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.web.result == 'success' }}
+    needs: [plan, page, apk]
+    # Every page, or none: Pages deploys the site whole, so a page that failed
+    # would vanish from it. A failed APK does not hold the site back: it goes
+    # up with the repository as it was, plus whichever APKs did build.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.page.result == 'success' }}
     runs-on: ubuntu-latest
     # One deployment at a time; a deploy in flight finishes before the next.
     concurrency:
@@ -322,20 +270,25 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: harken-web
-          path: _site/harken
+          pattern: page-*
+          path: ${{ runner.temp }}/pages
 
-      - if: needs.apk.outputs.built == 'true'
-        uses: actions/download-artifact@v4
+      # Only the APKs that built this run exist; none is not an error.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
-          name: harken-apk
+          pattern: apk-*
+          merge-multiple: true
           path: ${{ runner.temp }}/apk
 
-      - if: needs.revelation-apk.outputs.built == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: revelation-apk
-          path: ${{ runner.temp }}/apk
+      - name: Lay out the pages
+        env:
+          PAGES: ${{ needs.plan.outputs.pages }}
+        run: |
+          mkdir -p _site
+          for name in $(jq -r '.[].name' <<<"$PAGES"); do
+            cp -r "$RUNNER_TEMP/pages/page-$name" "_site/$name"
+          done
 
       - uses: DeterminateSystems/nix-installer-action@main
 
@@ -345,7 +298,7 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # The phones' F-Droid repository, one for both apps
+      # The phones' F-Droid repository, one for every app
       # (harken/android/fdroid/README.md).
       #
       # Pages deploys the site whole, so the versions the live repository
@@ -380,10 +333,15 @@ jobs:
             echo "::warning::No F-Droid repository in this deploy; the site goes up without fdroid/."
           fi
 
+      # The site's front page: what this is, then a line per page from the
+      # plan, then the F-Droid repository if this deploy has one.
       - name: Assemble the site
+        env:
+          PAGES: ${{ needs.plan.outputs.pages }}
         run: |
           chmod -R u+w _site
-          cat > _site/index.html <<'HTML'
+          {
+            cat <<'HTML'
           <!doctype html>
           <html lang="en">
           <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>apps</title>
@@ -393,18 +351,20 @@ jobs:
           <p>ArkDB is a local-first sync engine: one runtime in Rust, a domain
           written in plain Rust, and the phones embedding the same kernel.
           harken, a music library with playlists, is the first app on it.
-          <a href="harken/">harken/</a> is its browser peer — the same engine
-          compiled to wasm. Open it <em>alone</em> to run it entirely in this
-          tab, or point it at a harken server. The source is at
-          <a href="https://github.com/k2on/apps">github.com/k2on/apps</a>.</p>
-          <p>Revelation, the second app, is the Bible as one scroll zoomed
-          like a map: an Android app in plain Kotlin, on none of ArkDB.</p>
-          </body>
-          </html>
+          Revelation, the second app, is the Bible as one scroll zoomed like
+          a map: an Android app in plain Kotlin, on none of ArkDB. The source
+          is at <a href="https://github.com/k2on/apps">github.com/k2on/apps</a>.</p>
+          <ul>
           HTML
-          if [ -d _site/fdroid/repo ]; then
-            sed -i 's|^</body>|<p><a href="fdroid/repo/">fdroid/repo</a> is both Android apps as an F-Droid repository: add that address in F-Droid and each APK built from main arrives as an update.</p>\n</body>|' _site/index.html
-          fi
+            jq -r '.[] | "<li><a href=\"\(.name)/\">\(.title)</a>: \(.about)</li>"' <<<"$PAGES"
+            echo '</ul>'
+            if [ -d _site/fdroid/repo ]; then
+              echo '<p><a href="fdroid/repo/">fdroid/repo</a> is every Android app as an F-Droid repository: add that address in F-Droid and each APK built from main arrives as an update.</p>'
+            fi
+            echo '</body>'
+            echo '</html>'
+          } > _site/index.html
+          cat _site/index.html
 
       - uses: actions/configure-pages@v5
 

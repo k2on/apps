@@ -998,6 +998,41 @@
             };
           };
 
+          # Everything the workflow publishes, as data: a page goes up at
+          # k2on.github.io/apps/<name>/, an APK into the F-Droid repository
+          # (and onto a tag's release). Adding one is adding it here; the
+          # workflow builds each in a job of its own.
+          #
+          # `key` is what says whether it changed: its derivation's hash,
+          # which moves exactly when something it is built from moves. An
+          # APK's is taken without its version flags, since its version code
+          # is the commit time and would move on every commit; the same
+          # build without them is the APK's inputs and nothing else. The
+          # workflow skips what it has already built under that key, and
+          # with Cachix whatever does build is substituted, not compiled.
+          publish =
+            let
+              key = drv: builtins.substring 0 32 (baseNameOf (builtins.unsafeDiscardStringContext drv.drvPath));
+              page = name: package: title: about: { inherit name package title about; key = key self.packages.${pkgs.system}.${package}; };
+              apk = name: app: { first ? [ ] }: {
+                inherit name first;
+                package = "${name}-apk";
+                file = "${name}.apk";
+                key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
+              };
+            in
+            {
+              pages = [
+                (page "harken" "harken-web" "harken" "the browser peer: the same engine compiled to wasm. Open it alone to run it entirely in the tab, or point it at a harken server.")
+                (page "arkui" "arkui-docs" "arkui" "the components every app here shares, each drawn by itself, and catalogue.json beside it.")
+              ];
+              apks = [
+                # The kernel for every ABI first, so its failure reads on its own.
+                (apk "harken" harken { first = [ "harken-android-lib" ]; })
+                (apk "revelation" revelation { })
+              ];
+            };
+
           devShells = {
             rust = pkgs.mkShell {
               packages = [ (rust.override { extensions = [ "rust-src" "rust-analyzer" ]; }) pkgs.pkg-config ];
@@ -1018,6 +1053,9 @@
     in
     {
       packages = lib.mapAttrs (_: o: o.packages) outputs;
+      # What .github/workflows/build.yaml builds and publishes, read by its
+      # `plan` job (`nix eval --json .#publish.x86_64-linux`).
+      publish = lib.mapAttrs (_: o: o.publish) outputs;
       checks = lib.mapAttrs (_: o: o.checks) outputs;
       devShells = lib.mapAttrs (_: o: o.devShells) outputs;
       # `services.harken`: the sync server, sign-in, /media and the
