@@ -231,7 +231,7 @@ class ListenTests {
         hall.carry()
         assertEquals("a queue set from outside is a track pressed", listOf("d"), session().queue.map { it.title })
         assertEquals("#library", session().from)
-        assertTrue("and, nothing sounding, plays here", hall.state().outputs("phone"))
+        assertTrue("and plays on the laptop: chosen, though paused", hall.state().outputs("laptop"))
         assertTrue(session().output is Output.Device)
     }
 
