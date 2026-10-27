@@ -30,9 +30,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .into()
 }
 
-fn title<'a>(over: String, name: &str, summary: &str) -> Column<'a, Message> {
+fn title<'a>(name: &str, summary: &str) -> Column<'a, Message> {
     column![
-        text(over).size(11).style(style::faint(0.6)),
         text(name.to_string()).size(28).font(hero::BOLD),
         container(text(summary.to_string()).size(14)).max_width(MEASURE),
     ]
@@ -96,7 +95,6 @@ fn overview<'a>() -> Element<'a, Message> {
     }
     column![
         title(
-            "arkui".into(),
             "arkui",
             "iced components, the vim keyboard, theming, the glyph table, a picture cache and the address bar — and nothing of any app."
         ),
@@ -150,7 +148,6 @@ fn harken<'a>() -> Element<'a, Message> {
     let used = ENTRIES.iter().filter(|e| !e.harken.is_empty()).count();
     column![
         title(
-            "arkui · in harken".into(),
             "In harken",
             "What harken draws that arkui does not have yet — the candidates for lifting in. Each was written for harken first; the ones built on arkui are the easiest to lift."
         ),
@@ -173,7 +170,7 @@ fn module<'a>(app: &'a App, e: &'static Entry) -> Element<'a, Message> {
     });
     let bullet = |s: &&str| format!("•  {s}");
     column![
-        title(format!("arkui::{}", e.module), e.name, e.summary),
+        title(e.name, e.summary),
         hero::heading("Example"),
         example,
         hero::heading("API"),

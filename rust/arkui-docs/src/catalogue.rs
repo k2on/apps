@@ -294,7 +294,7 @@ pub const ENTRIES: &[Entry] = &[
             "A submenu laps the parent by exactly its padding, so the lit row touches its edge.",
             "A submenu opens after a 200ms rest, not on the way past.",
         ],
-        harken: &["a row's ⋯ and right click, the account's menu (main.rs: Menu::open)"],
+        harken: &["a row's more button and right click, the account's menu (main.rs: Menu::open)"],
         phones: &["android Sheets.kt: TrackMenu; ui/Components.kt: MoreButton", "ios Components.swift: TrackActions"],
     },
     Entry {

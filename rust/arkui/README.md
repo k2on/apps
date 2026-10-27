@@ -16,6 +16,10 @@ browser draws no text at all.
 
 ## What is in it
 
+`rust/arkui-docs` is these modules drawn, each with a working example, and
+its `catalogue.json` the same as data; change a module and change its entry
+there.
+
 | module | what it is |
 |---|---|
 | `vim` | `Keys` turns presses into an `Action` (counts, `gg`/`G`/`{n}G`, `^d`/`^u`, `/` search, `n`/`N`, `<Tab>`, `<Esc>`, anything else as `Action::Key(c)`). `Grid` turns a `Motion` into a cursor. `Grid::step` returns `None` only when the cursor is already at that edge, which means "not mine". `Grid::progress` is how far down to scroll. `presses()` is the keyboard subscription, and `find` is `/` and `n`/`N` over labels. |
@@ -23,6 +27,7 @@ browser draws no text at all.
 | `style` | `dim`, `faint(alpha)`, `accent`, `seek`, `action`, `bars` (a scrollbar is never the accent), `page` (the root's ground), `row` (the zebra and the cursor), `entry`/`entry_text` (a lit row in a panel), `on_row` (text on a row that may be the cursor). |
 | `glyphs` | Harken's generated table of Lucide drawings, copied as it is, with `LICENSE.lucide` beside it. |
 | `icon` | `tinted(shape, size, |palette| colour)` plus `plain`, `accent`, `tick`, `line`, `faint`, `more`, `chevron`. `SIZE` is 15. The colour goes through the svg style filter. |
+| `sidebar` | `Item { glyph, label, heading, count, press }` and `view`: places down the left, grouped under headings, the one under the cursor the page beside it (marked always, lit only while it has the keys). `WIDTH` is 200. |
 | `panel` | The shape every context window is: `panel`, `entry` (a fixed-height row with a glyph column that is there whether or not it has a glyph), `title`, `label`, the constants (`PADDING`, `ENTRY`, `TITLE`, `ENTRY_CHAR`, `EDGE`, …), `width_for`, `chars`, `titled_height`, and `hang_above` for a panel that opens off a button. |
 | `menu` | `Menu<M>` with `Entry<M>` (`Entry::run` / `Entry::submenu`), `Anchor::{Pointer, RightEdge(x)}`, `Menu::open` (sized to its longest entry, then placed), `origin_for`, `submenu_origin` (beside the parent, lapped by `SUBMENU_OVERLAP`, slid rather than flipped), `fit`, `right_aligned`, `submenu_height`, `DWELL`, and `view`. |
 | `picker` | `Picker<T>` of `Choice { value, name, on }` and an optional trailing "new" row. It has `width_for`, `activate` (which returns `Picked::Toggled` or `Picked::Naming`), `view` taking `Messages`, and `focus_naming`. |
