@@ -25,6 +25,9 @@ on:
       - "docs/site/src/components.rs"
       - ".github/screens/**"
       - ".github/workflows/screens.yaml"
+      # Its tools: screens-ffmpeg and xcodegen.
+      - "flake.nix"
+      - "flake.lock"
   workflow_dispatch:
 
 permissions:
