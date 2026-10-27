@@ -33,6 +33,7 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("HOME", glyphs::HOME),
     ("LAPTOP", glyphs::LAPTOP),
     ("LIBRARY", glyphs::LIBRARY),
+    ("LINK", glyphs::LINK),
     ("MINUS", glyphs::MINUS),
     ("MORE", glyphs::MORE),
     ("MUTED", glyphs::MUTED),
@@ -58,6 +59,7 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("STOP", glyphs::STOP),
     ("TICK", glyphs::TICK),
     ("TICKED", glyphs::TICKED),
+    ("TRANSCRIPT", glyphs::TRANSCRIPT),
     ("UNTICK", glyphs::UNTICK),
     ("VOLUME", glyphs::VOLUME),
 ];
