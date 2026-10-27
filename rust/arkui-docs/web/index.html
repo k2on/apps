@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>arkui</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <!-- The catalogue as data, for a site or an agent that wants it without
+         running the page: the same words the page draws. -->
+    <link rel="alternate" type="application/json" href="catalogue.json" />
+    <style>
+      /* iced picks light or dark from the system; the page behind it agrees,
+         or a dark window loads over a white flash. */
+      html, body {
+        margin: 0;
+        height: 100%;
+        color-scheme: light dark;
+        overflow: hidden;
+      }
+      /* iced appends its canvas to <body> and sizes it to 100%. */
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      // `?v=dev` is rewritten to the build's store hash (flake.nix,
+      // `wasmPage`), so a browser holding the last build is sent URLs its
+      // cache has never seen.
+      import init from "./pkg/arkui-docs.js?v=dev";
+      await init({ module_or_path: new URL("pkg/arkui-docs_bg.wasm?v=dev", document.baseURI) });
+
+      // The keyboard reaches the page only while its canvas has the focus.
+      const grab = () => document.querySelector("canvas")?.focus();
+      addEventListener("focus", grab);
+      grab();
+    </script>
+  </body>
+</html>

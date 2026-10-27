@@ -1,0 +1,848 @@
+{
+  "entries": [
+    {
+      "module": "theme",
+      "name": "Theme",
+      "group": "foundations",
+      "summary": "An app's palette, installed once: light and dark iced palettes and the derived square's gradient pairs for each. Every style closure asks `of(theme)` rather than writing a colour down, which is why dark mode works.",
+      "api": [
+        "Palette { light, dark, light_art, dark_art }",
+        "Palette::NEUTRAL",
+        "install(palette) -> bool",
+        "palette()",
+        "of(&Theme) -> &Extended",
+        "is_dark(&Theme)",
+        "art(&Theme)"
+      ],
+      "rules": [
+        "Install before the first frame; a second install is refused, so one window has one answer to \"what colour is this\".",
+        "NEUTRAL (AppKit greys, system blue) is the only colour arkui owns. This page draws with it."
+      ],
+      "harken": [
+        "palette.rs: HARKEN, AppKit greys and the gold",
+        "every style closure in view.rs, through of(theme)"
+      ],
+      "phones": [
+        "android ui/Theme.kt: Space, ArkTheme; Theme.kt: Palette, HarkenTheme",
+        "ios Theme.swift: Space, Squares"
+      ]
+    },
+    {
+      "module": "style",
+      "name": "Style",
+      "group": "foundations",
+      "summary": "The style closures every widget is handed: text tones, buttons, scrollbars, the page's ground and the surface a step off it, hairlines, and the rows a cursor lights.",
+      "api": [
+        "dim, faint(alpha), accent (text)",
+        "action, quiet (buttons)",
+        "seek (slider)",
+        "bars (scrollable: never the accent)",
+        "page, surface, SURFACE_STEP (containers)",
+        "edge, edge_color, EDGE_STEP, hairline, outline",
+        "row(theme, on_cursor, focused, odd)",
+        "entry(theme, on_cursor, focused), entry_text(theme, lit)",
+        "on_row(theme, on_cursor, accent, dim)"
+      ],
+      "rules": [
+        "A scrollbar is never the accent.",
+        "A row under the cursor is marked whether or not its pane has the keys, and lit only while it has."
+      ],
+      "harken": [
+        "everywhere in view.rs: the page, the sidebar and bar surfaces, every row and button"
+      ],
+      "phones": [
+        "android ui/Theme.kt",
+        "ios Theme.swift"
+      ]
+    },
+    {
+      "module": "glyphs",
+      "name": "Glyphs",
+      "group": "foundations",
+      "summary": "The table of Lucide drawings, as SVG bytes. `LICENSE.lucide` sits beside it.",
+      "api": [
+        "ADD_TO, ALBUM, ARTIST, BACK, CHEVRON, CLOSE, COMPOSER, DEBUG, DEVICES, DOWN, HOME, LAPTOP, LIBRARY, MINUS, MORE, MUTED, NEXT, NOTE, OFFLINE, ONLINE, PAUSE, PHONE, PLAY, PLAYING, PLAYLIST, PLUS, PREVIOUS, PULPIT, SEARCH, SHOW, SHUFFLE, SIGN_OUT, SKIP_BACK, SKIP_FORWARD, SPEAKER, STOP, TICK, TICKED, UNTICK, VOLUME"
+      ],
+      "rules": [
+        "Drawn with currentColor; the colour is the icon's tint, never the file's."
+      ],
+      "harken": [
+        "the sidebar's places, the transport, every menu entry"
+      ],
+      "phones": [
+        "android ui/Glyphs.kt: ArkGlyphs; Glyphs.kt",
+        "ios: SF Symbols"
+      ]
+    },
+    {
+      "module": "icon",
+      "name": "Icon",
+      "group": "foundations",
+      "summary": "A glyph drawn at a size in a colour asked of the palette. The named ones are the tones a row, a panel or a control needs.",
+      "api": [
+        "SIZE (15)",
+        "tinted(shape, size, |palette| colour)",
+        "plain(shape, dim)",
+        "accent(shape, on_cursor)",
+        "line(shape, lit)",
+        "faint(shape, on_cursor)",
+        "tick(on_cursor)",
+        "more(on_cursor)",
+        "chevron(lit)"
+      ],
+      "rules": [
+        "The colour goes through the svg style filter, so one drawing serves every tone."
+      ],
+      "harken": [
+        "the play/pause on the playing row, the speaker in the bar, the close on a dialog"
+      ],
+      "phones": [
+        "android ui/Components.kt: Glyph"
+      ]
+    },
+    {
+      "module": "format",
+      "name": "Format",
+      "group": "foundations",
+      "summary": "Words for numbers: a clock, a count spelt out, a plural, a span of time, a day.",
+      "api": [
+        "clock(secs)",
+        "spell(ms)",
+        "plural(n, word)",
+        "span(born, died)",
+        "day(ms, now)"
+      ],
+      "rules": [
+        "A length past an hour is h:mm:ss."
+      ],
+      "harken": [
+        "the bar's clocks, a page's facts line, an episode's day"
+      ],
+      "phones": []
+    },
+    {
+      "module": "fit",
+      "name": "Fit",
+      "group": "foundations",
+      "summary": "Cutting text to a width: from the end or through the middle, measured in pixels, and the characters the typeface cannot draw spelt in ones it can.",
+      "api": [
+        "Cut::{End, Middle}",
+        "tail(s, chars)",
+        "middle(s, chars)",
+        "within(body, px, cut, measure)",
+        "drawable(s)"
+      ],
+      "rules": [
+        "A name loses its middle, a heading its end."
+      ],
+      "harken": [
+        "menu titles, track and album names in the table"
+      ],
+      "phones": []
+    },
+    {
+      "module": "url",
+      "name": "URL",
+      "group": "foundations",
+      "summary": "Percent-encoding for a fragment, so a `/`, a `#` or an accent survives the address bar.",
+      "api": [
+        "encode(s, &mut out)",
+        "encoded(s)",
+        "decode(s)"
+      ],
+      "rules": [],
+      "harken": [
+        "a picture's address on the server"
+      ],
+      "phones": []
+    },
+    {
+      "module": "sidebar",
+      "name": "Sidebar",
+      "group": "components",
+      "summary": "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it. This page's own sidebar is one.",
+      "api": [
+        "Item { glyph, label, heading, count, press }",
+        "WIDTH (200)",
+        "view(items, cursor, focused, width, padding, id)"
+      ],
+      "rules": [
+        "One highlight, not two: the cursor is what the page shows, marked always, lit only while the sidebar has the keys.",
+        "A heading is drawn where the group changes, not stored as a row, so row n is the cursor's n.",
+        "Its pixel of edge is part of its width."
+      ],
+      "harken": [
+        "Music, Shows and the playlists down the left (view.rs: view_sidebar)"
+      ],
+      "phones": [
+        "android: the tab bar (HarkenApp.kt: TabBar, ui/Tabs.kt: TabStack)",
+        "ios Shell.swift: Shell, a TabView"
+      ]
+    },
+    {
+      "module": "panel",
+      "name": "Panel",
+      "group": "components",
+      "summary": "The shape every context window is: a bordered panel, a title, and fixed-height entries with a glyph column that is there whether or not it has a glyph.",
+      "api": [
+        "panel(body, width)",
+        "entry(glyph, label, trailing)",
+        "title(label)",
+        "label(body, lit)",
+        "width_for(labels, min, max)",
+        "chars(width, chrome)",
+        "titled_height(rows)",
+        "hang_above(right, bottom, w, h)",
+        "PADDING, ENTRY, TITLE, ENTRY_CHAR, ENTRY_CHROME, EDGE, RADIUS"
+      ],
+      "rules": [
+        "Heights are declared constants: a panel is placed before iced lays it out."
+      ],
+      "harken": [
+        "the queue and devices panels over the bar"
+      ],
+      "phones": [
+        "android ui/Components.kt: SheetRow",
+        "ios Shell.swift: SheetHost"
+      ]
+    },
+    {
+      "module": "table",
+      "name": "Table",
+      "group": "components",
+      "summary": "Rows of cells cut to their columns at layout, headings over them, section labels and the transport's gutter.",
+      "api": [
+        "cell(body, width, on_cursor, accent, dim)",
+        "cell_cut(…, cut, …)",
+        "heading(label, width)",
+        "section(label, indent)",
+        "gutter()",
+        "row(line, on_cursor, focused, odd)",
+        "GUTTER, ROW_PADDING, SPACING, CELL_SIZE, HEADING_SIZE"
+      ],
+      "rules": [
+        "A cell loses its middle and a heading its end, each to its own column.",
+        "Columns are portions, so no text column pushes another off a narrow window."
+      ],
+      "harken": [
+        "Songs, an album's tracks, a show's episodes (view.rs: view_list, view_tracks)"
+      ],
+      "phones": [
+        "android Components.kt: TrackRow, TrackNumber",
+        "ios Components.swift: TrackRow, EpisodeRow"
+      ]
+    },
+    {
+      "module": "line",
+      "name": "Line",
+      "group": "components",
+      "summary": "One line of text cut, at layout, to the width it is given; `gives_way` lays it out after the rest of its row.",
+      "api": [
+        "Line::new(body, size, cut, colour)",
+        "Line::gives_way()"
+      ],
+      "rules": [
+        "A row lays out in order, so a line first in it would take everything; giving way puts it last."
+      ],
+      "harken": [
+        "a page's title before its count"
+      ],
+      "phones": []
+    },
+    {
+      "module": "cards",
+      "name": "Cards",
+      "group": "components",
+      "summary": "A grid of pictures with a name and a line under each, the arithmetic of how many fit, and a page's header of picture, name and facts.",
+      "api": [
+        "Shelf { card, gap, padding }, Shelf::DEFAULT",
+        "Shelf::columns(pane), side(pane), room(pane), grid(cells, pane)",
+        "Card { seed, title, under, round, picture, open }",
+        "view(shelf, cards, pane, cursor, empty, on_hover, scroll, on_scroll)",
+        "view_card(side, card, on_cursor, hover)",
+        "header(picture, kind, name, under, open_under, facts, padding)",
+        "empty_page(message, padding)"
+      ],
+      "rules": [
+        "A person is a circle and a record a square.",
+        "The keyboard and the view divide the same pane width, so `l` lands where it looks."
+      ],
+      "harken": [
+        "Albums, Artists, Composers, Podcasts (view.rs: view_cards, view_header)"
+      ],
+      "phones": [
+        "android Components.kt: CoverCard, PageHeader",
+        "ios Components.swift: CoverShelf, CoverCard, PageHeader"
+      ]
+    },
+    {
+      "module": "hero",
+      "name": "Hero",
+      "group": "components",
+      "summary": "The wide banner a page can open with, the bold face, section headings, and a listing of entries in columns with a \"more\" after them.",
+      "api": [
+        "banner(picture, kind, name, width)",
+        "height(width), ASPECT, TALLEST",
+        "heading(title)",
+        "Entry { over, title, under, count, open }",
+        "listing(entries, columns, cursor, on_hover)",
+        "grid(entries, columns)",
+        "entry(picture, e, on_cursor, hover)",
+        "more(label, lit)",
+        "columns(room), COLUMN",
+        "BOLD, FIRA_SANS_BOLD"
+      ],
+      "rules": [
+        "Fira Sans Bold is embedded: a browser has no system fonts, and with none bold is not bold."
+      ],
+      "harken": [
+        "an artist's banner and sections (view.rs: view_artist, view_work)"
+      ],
+      "phones": [
+        "android Components.kt: Banner, Entry, MoreLine; ui/Motion.kt: Hero",
+        "ios Hero.swift: Banner, EntryRow, MoreRow"
+      ]
+    },
+    {
+      "module": "art",
+      "name": "Art",
+      "group": "components",
+      "summary": "The derived square: a gradient picked from a name, the same on every device, and the real picture over it once it arrives.",
+      "api": [
+        "hash(s) (FNV-1a over UTF-16)",
+        "pair(seed)",
+        "square(seed, size, corner)",
+        "picture(seed, handle, side, corner)"
+      ],
+      "rules": [
+        "The hash is the phones' too, so a name has one square everywhere."
+      ],
+      "harken": [
+        "every cover before its picture arrives"
+      ],
+      "phones": [
+        "android ui/Art.kt: Art, Square, Cover",
+        "ios Theme.swift: Square; Covers.swift: CoverView"
+      ]
+    },
+    {
+      "module": "account",
+      "name": "Account",
+      "group": "components",
+      "summary": "Who is signed in as a circle — their picture, or initials on a colour picked from their name — and the menu that hangs off it.",
+      "api": [
+        "Who { name, id }, Who::full(), Who::initials()",
+        "Account { who, header, entries }",
+        "Account::signed_in, turned_away, alone",
+        "Account::menu(right, bottom, window)",
+        "face(who, picture, side)",
+        "button(account, picture, press)",
+        "origin(…)",
+        "HEIGHT (28)"
+      ],
+      "rules": [
+        "Nobody goes offline by hand: the menu signs out, and nothing else."
+      ],
+      "harken": [
+        "the account at the top right (view.rs: view_top)"
+      ],
+      "phones": [
+        "android Components.kt: Face",
+        "ios Components.swift: Avatar, AccountMenu"
+      ]
+    },
+    {
+      "module": "menu",
+      "name": "Menu",
+      "group": "overlays",
+      "summary": "The dropdown: a title and entries, as wide as its longest entry, opened at the pointer or lined up under a control, with submenus beside it. The theme control at the top of this page is one.",
+      "api": [
+        "Menu::open(title, entries, cursor, window, anchor)",
+        "Entry::run(glyph, label, msg), Entry::submenu(…)",
+        "Anchor::{Pointer, RightEdge(x)}",
+        "view(menu, focused, at, activate)",
+        "Menu::submenu_origin, origin_for, height, width_for",
+        "fit, right_aligned, submenu_height",
+        "MIN_WIDTH, MAX_WIDTH, SUBMENU_OVERLAP, DWELL"
+      ],
+      "rules": [
+        "A right click opens at the pointer; a control's menu opens at the control.",
+        "As wide as its longest entry, within 198..=420: AppKit's rule.",
+        "A submenu laps the parent by exactly its padding, so the lit row touches its edge.",
+        "A submenu opens after a 200ms rest, not on the way past."
+      ],
+      "harken": [
+        "a row's ⋯ and right click, the account's menu (main.rs: Menu::open)"
+      ],
+      "phones": [
+        "android Sheets.kt: TrackMenu; ui/Components.kt: MoreButton",
+        "ios Components.swift: TrackActions"
+      ]
+    },
+    {
+      "module": "picker",
+      "name": "Picker",
+      "group": "overlays",
+      "summary": "A list of choices each ticked or not, with an optional last row that names a new one — on its own in the middle, or as a menu's submenu.",
+      "api": [
+        "Picker::new(title, choices, new_row)",
+        "Choice { value, name, on }",
+        "Picker::activate() -> Picked::{Toggled, Naming}",
+        "Picker::land, rows, grid, width_for",
+        "view(picker, focused, Messages { at, activate, name, create })",
+        "focus_naming()",
+        "MIN_WIDTH, MAX_WIDTH, MAX_HEIGHT"
+      ],
+      "rules": [
+        "A submenu draws no header: the menu it hangs off is still up with the title."
+      ],
+      "harken": [
+        "Add to playlist (main.rs: open_picker)"
+      ],
+      "phones": [
+        "android Sheets.kt: AddToPlaylist, DevicesSheet",
+        "ios Sheets.swift: AddToPlaylistSheet, DevicesSheet"
+      ]
+    },
+    {
+      "module": "context",
+      "name": "Context",
+      "group": "overlays",
+      "summary": "A menu, its submenu, or a picker alone, and the rules for them together: which one has the keys, the dwell, `l` in and `h` out, `<Esc>`.",
+      "api": [
+        "Context::new()",
+        "focus() -> Option<Layer>",
+        "open_menu, close_menu, open_picker, close_picker",
+        "land(i), picker_at(i), tick(), chosen(), activate_picker()",
+        "cancel(), travel(motion)",
+        "Layer::{Menu, Picker}"
+      ],
+      "rules": [
+        "Closing a menu takes its submenu with it.",
+        "An app refuses its rows' hover while a layer is up: a backdrop cannot swallow a hover."
+      ],
+      "harken": [
+        "App::ctx, every menu and picker (main.rs)"
+      ],
+      "phones": []
+    },
+    {
+      "module": "layer",
+      "name": "Layer",
+      "group": "overlays",
+      "summary": "What goes under and around an overlay: a backdrop that closes on a click and swallows the wheel, a dimmed one, and pinned or centred placement.",
+      "api": [
+        "backdrop(close, swallow)",
+        "dimmed(close, swallow)",
+        "pinned(content, at)",
+        "centred(content)"
+      ],
+      "rules": [
+        "A submenu gets no backdrop of its own: a second one over the menu would eat its clicks."
+      ],
+      "harken": [
+        "under every menu, picker and panel (view.rs: view)"
+      ],
+      "phones": [
+        "ios Shell.swift: SheetHost"
+      ]
+    },
+    {
+      "module": "dialog",
+      "name": "Dialog",
+      "group": "overlays",
+      "summary": "A titled window rising over a page as the page dims.",
+      "api": [
+        "view(title, close, body, width, height, open)",
+        "backdrop(close, swallow, open)",
+        "opened(since, now) -> 0..=1",
+        "opening(since, now)",
+        "OPENING, RISE"
+      ],
+      "rules": [
+        "`open` is eased; ask `opening` whether to keep a clock running."
+      ],
+      "harken": [
+        "Follow a podcast (view.rs: view_adding)"
+      ],
+      "phones": [
+        "android Sheets.kt: FindShow, NewPlaylistCard",
+        "ios Sheets.swift: FollowSheet, NewPlaylist"
+      ]
+    },
+    {
+      "module": "vim",
+      "name": "Keys",
+      "group": "behaviour",
+      "summary": "The keyboard grammar — counts, gg/G, ^d/^u, / and n/N, <Tab>, <Esc> — and the grids it moves a cursor over. j and k move this page's sidebar.",
+      "api": [
+        "Keys::new(), press(key, mods) -> Option<Action>, pending(), mode()",
+        "Action::{Move, Activate, Toggle, Search, Match, Cycle, Cancel, Jump, Key}",
+        "Motion::{Down, Up, Left, Right, First, Last, To}",
+        "Grid { cells, columns }, column, row, step, progress",
+        "Section, Page",
+        "presses()",
+        "find(labels, needle, at, delta)",
+        "PAGE"
+      ],
+      "rules": [
+        "`step` returns None only at that edge, which means \"not mine\": the app says what lies past it."
+      ],
+      "harken": [
+        "every pane, menu and picker"
+      ],
+      "phones": []
+    },
+    {
+      "module": "route",
+      "name": "Route",
+      "group": "behaviour",
+      "summary": "Places as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+      "api": [
+        "trait Route { fragment(), parse() }",
+        "join(kind, name), split(fragment)",
+        "Router::new(), sync(&place), replace_next(), poll(ready), go(by), can_go(by)",
+        "AddressBar, Browser, Nav"
+      ],
+      "rules": [
+        "`parse` never fails: an unknown fragment is home.",
+        "Call `sync` after every update."
+      ],
+      "harken": [
+        "App::router, the Place of every page"
+      ],
+      "phones": [
+        "android ui/Destination.kt: Destination",
+        "ios Shell.swift: Destination"
+      ]
+    },
+    {
+      "module": "scroll",
+      "name": "Scroll",
+      "group": "behaviour",
+      "summary": "Keeping a keyboard cursor on screen.",
+      "api": [
+        "reveal(id, grid, at)",
+        "reveal_to(id, progress)"
+      ],
+      "rules": [],
+      "harken": [
+        "the sidebar, the table and the cards follow the cursor"
+      ],
+      "phones": [
+        "android ui/Tabs.kt: ScrollsToTop"
+      ]
+    },
+    {
+      "module": "swipe",
+      "name": "Swipe",
+      "group": "behaviour",
+      "summary": "Two fingers sideways as back and forward, with the arrow drawn over the page as they go.",
+      "api": [
+        "Swipe::feed, tick, allow, active, offset, arrow",
+        "band(…)",
+        "view(page, swipe, now)",
+        "FAR, LET_GO, QUIET, BACK, STRETCH"
+      ],
+      "rules": [
+        "It goes when the fingers lift, and only where there is somewhere to go.",
+        "In a browser the browser's own back does this instead."
+      ],
+      "harken": [
+        "the page beside the sidebar (view.rs: view)"
+      ],
+      "phones": [
+        "android ui/Motion.kt: PageBack"
+      ]
+    },
+    {
+      "module": "wake",
+      "name": "Wake",
+      "group": "behaviour",
+      "summary": "What wakes a window that runs no loop: a bell anything can ring, one timer at a deadline, and the browser's address bar moving.",
+      "api": [
+        "Bell::new(), ring(), rung(), subscription()",
+        "at(key, delay)",
+        "page_changes(f)"
+      ],
+      "rules": [
+        "With nothing playing, dwelling or arriving, a window runs no timer."
+      ],
+      "harken": [
+        "the peer's socket and the page's events ring App::bell (wake.rs)"
+      ],
+      "phones": [
+        "android ui/Splash.kt: holdSplashUntil"
+      ]
+    },
+    {
+      "module": "images",
+      "name": "Images",
+      "group": "behaviour",
+      "summary": "A picture cache: fetched off the render thread, decoded and bounded, kept on disk natively and in the Cache API in a browser. A failure is remembered.",
+      "api": [
+        "Images::new(name)",
+        "want(url) -> Option<Task<Loaded>>",
+        "loaded(l), handle(url), bounded(url)",
+        "Loaded, Rgba",
+        "BOUND (384), WIDE (2400)"
+      ],
+      "rules": [
+        "The renderer is handed pixels at the size they are drawn, not a megapixel JPEG to decode inside a frame."
+      ],
+      "harken": [
+        "covers, banners and faces"
+      ],
+      "phones": [
+        "android ui/Art.kt: Cover",
+        "ios Covers.swift: CoverView"
+      ]
+    }
+  ],
+  "harken_only": [
+    {
+      "name": "Now-playing bar",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_bar",
+      "what": "The bar along the bottom: cover, title and artist, the transport, the seek bar between two clocks, then volume, queue and devices.",
+      "built_on": [
+        "style",
+        "icon",
+        "art",
+        "format"
+      ]
+    },
+    {
+      "name": "Transport",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_bar",
+      "what": "Previous, play/pause, next and the skips, as icon buttons.",
+      "built_on": [
+        "icon",
+        "glyphs"
+      ]
+    },
+    {
+      "name": "Seek bar",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_bar, progress",
+      "what": "An iced slider in style::seek, and a thin progress line under a row.",
+      "built_on": [
+        "style"
+      ]
+    },
+    {
+      "name": "Volume slider and mute",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: volume_slider, mute_button",
+      "what": "0 to 100, sending as dragged and once on release; the speaker or the speaker struck through.",
+      "built_on": [
+        "style",
+        "icon"
+      ]
+    },
+    {
+      "name": "Queue panel",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_queue, view_queue_button",
+      "what": "What plays next, a panel over the bar.",
+      "built_on": [
+        "panel",
+        "layer"
+      ]
+    },
+    {
+      "name": "Devices picker",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_devices, view_output",
+      "what": "The speakers in the house, each with join, mute and volume, a panel over the bar.",
+      "built_on": [
+        "panel",
+        "layer",
+        "icon"
+      ]
+    },
+    {
+      "name": "Top bar",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_top",
+      "what": "A server address to type and connect when alone; the account at the right.",
+      "built_on": [
+        "account",
+        "style"
+      ]
+    },
+    {
+      "name": "Status line",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_status",
+      "what": "The last thing worth saying and the keys half typed; whole under D.",
+      "built_on": [
+        "vim",
+        "style"
+      ]
+    },
+    {
+      "name": "Debug view",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_debug",
+      "what": "Every number the session holds, as a table.",
+      "built_on": [
+        "table"
+      ]
+    },
+    {
+      "name": "Keymap",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_help",
+      "what": "The keys and what they do, under ?.",
+      "built_on": []
+    },
+    {
+      "name": "Settings page",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_settings",
+      "what": "The licences and the window's settings.",
+      "built_on": [
+        "hero"
+      ]
+    },
+    {
+      "name": "Cover with play button",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_cover, play_button",
+      "what": "A record's cover with play over it.",
+      "built_on": [
+        "art",
+        "icon"
+      ]
+    },
+    {
+      "name": "Featured",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_featured",
+      "what": "The best-known work set apart over a list.",
+      "built_on": [
+        "art",
+        "hero"
+      ]
+    },
+    {
+      "name": "Faces",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: view_faces, initials",
+      "what": "A row of people as circles.",
+      "built_on": [
+        "art",
+        "cards"
+      ]
+    },
+    {
+      "name": "Mosaic",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: mosaic",
+      "what": "A playlist's picture made of its first four covers.",
+      "built_on": [
+        "art"
+      ]
+    },
+    {
+      "name": "Unread ring",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: ringed, view_unread",
+      "what": "A ring round a show with episodes not yet heard.",
+      "built_on": [
+        "art"
+      ]
+    },
+    {
+      "name": "Work heading and record foot",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: work_heading, view_foot",
+      "what": "A composer and work over their movements; the year and label under a record.",
+      "built_on": [
+        "table",
+        "format"
+      ]
+    },
+    {
+      "name": "Linked names",
+      "platform": "desktop",
+      "at": "harken/iced/src/view.rs: names, opens",
+      "what": "Names in a line that each open their page.",
+      "built_on": [
+        "style"
+      ]
+    },
+    {
+      "name": "Expanding player card",
+      "platform": "android",
+      "at": "harken/android/.../ui/ExpandingCard.kt: ExpandingCard; PlayerSheet.kt: PlayerCard",
+      "what": "The player as a bar that grows to the screen, swipes sideways and closes on back.",
+      "built_on": []
+    },
+    {
+      "name": "Tab stack",
+      "platform": "android",
+      "at": "harken/android/.../ui/Tabs.kt: TabStack",
+      "what": "Each tab kept alive; a tab tapped again scrolls to top.",
+      "built_on": []
+    },
+    {
+      "name": "Page motion",
+      "platform": "android",
+      "at": "harken/android/.../ui/Motion.kt: Hero, PageFrame, PageBack, Pull",
+      "what": "The page transitions and the back gesture.",
+      "built_on": []
+    },
+    {
+      "name": "Springs",
+      "platform": "android",
+      "at": "harken/android/.../ui/Springs.kt; ios Theme.swift: Springs",
+      "what": "The spring numbers every animation moves by.",
+      "built_on": []
+    },
+    {
+      "name": "Volume slider",
+      "platform": "android",
+      "at": "harken/android/.../ui/Volume.kt: VolumeSlider; ios PlayerViews.swift: VolumeSlider",
+      "what": "A volume slider.",
+      "built_on": []
+    },
+    {
+      "name": "Splash",
+      "platform": "android",
+      "at": "harken/android/.../ui/Splash.kt: holdSplashUntil",
+      "what": "The splash held until the app is ready, up to a limit.",
+      "built_on": []
+    },
+    {
+      "name": "Onboarding",
+      "platform": "android",
+      "at": "harken/android/.../ui/Onboarding.kt; ios OnboardingViews.swift",
+      "what": "The opening, server, sign-in and permission screens.",
+      "built_on": []
+    },
+    {
+      "name": "Fetching and offline",
+      "platform": "android",
+      "at": "harken/android/.../ui/Components.kt: Fetching, Offline; ios Components.swift",
+      "what": "A delayed \"fetching from host\" and the offline note.",
+      "built_on": []
+    },
+    {
+      "name": "Play and shuffle pill",
+      "platform": "android",
+      "at": "harken/android/.../Components.kt: PlayPill; ios Hero.swift: PlayShuffle",
+      "what": "Play and shuffle under a record's header.",
+      "built_on": []
+    },
+    {
+      "name": "Mini and full player",
+      "platform": "ios",
+      "at": "harken/ios/Harken/PlayerViews.swift: MiniPlayer, FullPlayer, Scrubber, Transport, QueueSheet",
+      "what": "The bar and the full-screen player as separate views.",
+      "built_on": []
+    }
+  ]
+}

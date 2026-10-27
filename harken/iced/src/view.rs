@@ -198,68 +198,26 @@ impl App {
 
     /// Music, then the lists somebody made — each read back by the domain.
     fn view_sidebar(&self) -> Element<'_, Message> {
-        let cursor = self.at(Pane::Sidebar);
-        let focused = self.has_keys(Pane::Sidebar);
-        let mut side = column![].spacing(1).padding(Padding {
-            top: PAGE_PADDING,
-            right: 10.0,
-            bottom: PAGE_PADDING,
-            left: 10.0,
-        });
-        let mut under: Option<&str> = None;
-        for (i, choice) in self.peer.choices.iter().enumerate() {
-            // Emitted when the kind changes rather than stored as a line, which
-            // keeps the cursor's line N and the reader's the same.
-            let heading = choice.source.heading();
-            if heading.is_some() && heading != under {
-                side = side.push(container(text(heading.unwrap_or_default()).size(10).style(style::faint(0.5))).padding([8, 10]));
-            }
-            under = heading;
-            // One highlight, not two: the sidebar's cursor *is* what the page
-            // is showing.
-            let on_cursor = i == cursor;
-            let lit = on_cursor && focused;
-            side = side.push(
-                mouse_area(
-                    container(
-                        row![
-                            icon::line(choice.source.glyph(), lit),
-                            text(choice.label.clone())
-                                .size(13)
-                                .width(Length::Fill)
-                                .wrapping(text::Wrapping::None)
-                                .style(move |theme| text::Style {
-                                    color: Some(style::entry_text(theme, lit)),
-                                }),
-                            text(choice.count.map(|n| n.to_string()).unwrap_or_default())
-                                .size(10)
-                                .style(move |theme| {
-                                    let p = arkui::theme::of(theme);
-                                    text::Style {
-                                        color: Some(match lit {
-                                            true => p.primary.base.text.scale_alpha(0.7),
-                                            false => p.background.base.text.scale_alpha(0.5),
-                                        }),
-                                    }
-                                }),
-                        ]
-                        .spacing(6)
-                        .align_y(Alignment::Center),
-                    )
-                    .width(Length::Fill)
-                    .padding([5, 10])
-                    .style(move |theme| style::entry(theme, on_cursor, focused)),
-                )
-                .on_press(Message::Select(choice.source.clone())),
-            );
-        }
-        container(scrollable(side).id(SIDEBAR).style(style::bars))
-            // Its edge, a pixel, is part of its width, so the page is as wide as
-            // `pane_width` says.
-            .width(Length::Fixed(SIDEBAR_WIDTH - 1.0))
-            .height(Length::Fill)
-            .style(style::surface)
-            .into()
+        let items: Vec<arkui::sidebar::Item<Message>> = self
+            .peer
+            .choices
+            .iter()
+            .map(|choice| arkui::sidebar::Item {
+                glyph: choice.source.glyph(),
+                label: choice.label.clone(),
+                heading: choice.source.heading(),
+                count: choice.count,
+                press: Message::Select(choice.source.clone()),
+            })
+            .collect();
+        arkui::sidebar::view(
+            &items,
+            self.at(Pane::Sidebar),
+            self.has_keys(Pane::Sidebar),
+            SIDEBAR_WIDTH,
+            PAGE_PADDING,
+            SIDEBAR,
+        )
     }
 
     /// The cover if one has arrived, the derived square until then.

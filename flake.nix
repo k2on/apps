@@ -262,7 +262,7 @@
           # The pages' dependencies for wasm32, once for both.
           wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
           wasmBuilds = lib.concatMapStringsSep "\n" wasmBuild [
-            "-p harken-iced" "-p harken-iced --features demo"
+            "-p harken-iced" "-p harken-iced --features demo" "-p arkui-docs"
           ];
           wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
             pname = "arkdb-wasm";
@@ -309,6 +309,13 @@
           harken-web = icedWeb { pname = "harken-web"; demo = true; };
           # What harken-server serves as its web directory.
           harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
+          # arkui's documentation, drawn by arkui (rust/arkui-docs), with the
+          # catalogue beside it as JSON for any other site to read.
+          arkui-docs = wasmPage {
+            pname = "arkui-docs";
+            crate = "arkui-docs";
+            files = "../rust/arkui-docs/web/index.html ../rust/arkui-docs/web/favicon.svg ../rust/arkui-docs/catalogue.json";
+          };
 
           # The server (harken/server: the server and harken-peer), on a
           # chain of its own as the APK's host part is below — dependencies,
@@ -816,7 +823,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced;
+            inherit harken-web harken-web-server harken-iced arkui-docs;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;
