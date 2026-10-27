@@ -54,7 +54,8 @@ func object(_ target: NSObject, _ selector: String, _ argument: Any? = nil, _ se
 
 // The device, and the framebuffer display ports of its IO.
 guard let contextClass = NSClassFromString("SimServiceContext") as? NSObject.Type,
-      let context = object(contextClass, "sharedServiceContextForDeveloperDir:error:", dev),
+      let context = contextClass.perform(NSSelectorFromString("sharedServiceContextForDeveloperDir:error:"), with: dev, with: nil)?
+          .takeUnretainedValue() as? NSObject,
       let deviceSet = object(context, "defaultDeviceSetWithError:"),
       let devices = deviceSet.value(forKey: "devices") as? [NSObject],
       let device = devices.first(where: { ($0.value(forKey: "UDID") as? NSUUID)?.uuidString == udid })
@@ -91,6 +92,9 @@ func surface(of display: NSObject) -> IOSurface? {
 /// Writes each new frame of the screen, scaled to `width`, at its time.
 final class Recorder {
     let queue = DispatchQueue(label: "record", qos: .userInteractive)
+    private let width: Int
+    private let out: URL
+    private let displays: [NSObject]
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
     private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
@@ -102,6 +106,10 @@ final class Recorder {
     private(set) var dropped = 0
     private var first: CFTimeInterval = 0
     private var last: CFTimeInterval = 0
+
+    init(width: Int, out: URL, displays: [NSObject]) {
+        (self.width, self.out, self.displays) = (width, out, displays)
+    }
 
     /// The screen: the largest display surface, the device's own (not a
     /// presentation surface of 7680x4320, which a newer Xcode adds).
@@ -176,7 +184,7 @@ final class Recorder {
     }
 }
 
-let recorder = Recorder()
+let recorder = Recorder(width: width, out: out, displays: displays)
 let id = UUID()
 for display in displays {
     let frame: @convention(block) () -> Void = { recorder.take() }
