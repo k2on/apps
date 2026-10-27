@@ -191,7 +191,7 @@ jobs:
             xcodebuild build \
               -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
               -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
-              -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO'
+              -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO ARCHS=arm64'
 
       - name: The showcase, built
         run: bash .github/screens/meanwhile.sh wait showcase

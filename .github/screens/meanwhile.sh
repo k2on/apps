@@ -14,8 +14,15 @@ name=$2
 shift 2
 case $what in
   start)
-    rm -f "$dir/$name.status"
-    nohup bash -c '"$@" > "$0.log" 2>&1; echo $? > "$0.status"' "$dir/$name" "$@" < /dev/null > /dev/null 2>&1 &
+    rm -f "$dir/$name.status" "$dir/$name.code"
+    # Each line stamped with the seconds since it started: printed only
+    # when waited for, the runner's own times would all be that moment.
+    # The status is written once the log is too (the stamping reads to
+    # the end), so a wait never prints a log still being written.
+    nohup bash -c '
+      { "$@" 2>&1; echo $? > "$0.code"; } |
+        while IFS= read -r line; do printf "%4ss  %s\n" "$SECONDS" "$line"; done > "$0.log"
+      mv "$0.code" "$0.status"' "$dir/$name" "$@" < /dev/null > /dev/null 2>&1 &
     echo "started $name in the background"
     ;;
   wait)

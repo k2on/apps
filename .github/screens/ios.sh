@@ -16,10 +16,9 @@ device=$4
 fps=${FPS:-60}
 # How many times slower than life a recording is taken, then sped back up
 # (encode.sh), so its motion has $fps frames a second whatever the
-# simulator can draw: the simulator's own Slow Animations, which slows the
-# system's motion (a transition's zoom, a bar's collapse) by this much
-# (slow-animations.swift), and the showcase's own clock set to match
-# (`-slow`, ShowcaseApp.swift).
+# simulator can draw: the device's animations slowed as the simulator's
+# own Slow Animations slows them (`slowed`), and the showcase's own clock
+# set to match (`-slow`, ShowcaseApp.swift).
 slow=${IOS_SLOW:-10}
 tmp=$(mktemp -d)
 
@@ -32,22 +31,40 @@ mkdir -p "$out"
 
 shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
 
-# Record shot `id`, `taken` times slower than life, to `to`: opened and
-# settled first, so the launch is never in it; then slowed and told to move
-# (the Darwin notification the showcase listens for); then sped back up.
+# The device's animations `factor` times slower, or back to life's with 1,
+# both ways the simulator's own Slow Animations slows them: UIKit's drag
+# coefficient (its com.apple.UIKit preference, read as an app launches),
+# for what UIKit drives in the app, a transition's zoom among it; and the
+# render server's clock (slow-animations.swift), for Core Animation's own.
+slowed() {
+  if [ "$1" = 1 ]; then
+    xcrun simctl spawn booted defaults delete com.apple.UIKit UIAnimationDragCoefficient 2>/dev/null || true
+    "$tmp/slow-animations" "$udid" off
+  else
+    xcrun simctl spawn booted defaults write com.apple.UIKit UIAnimationDragCoefficient -float "$1"
+    echo "  UIKit drag coefficient: $(xcrun simctl spawn booted defaults read com.apple.UIKit UIAnimationDragCoefficient)"
+    "$tmp/slow-animations" "$udid" on
+  fi
+}
+
+# Record shot `id`, `taken` times slower than life, to `to`: slowed, then
+# opened and left to settle, so its launch (slowed too) is never in it;
+# then told to move (the Darwin notification the showcase listens for);
+# then sped back up.
 record() {
   local id=$1 taken=$2 to=$3
+  slowed "$taken"
   xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
-  sleep 4
+  sleep $((4 + taken))
   xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
   local rec=$!
   sleep 1
-  [ "$taken" = 1 ] || "$tmp/slow-animations" "$udid" on
   xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
   sleep $((4 * taken + 1))
-  [ "$taken" = 1 ] || "$tmp/slow-animations" "$udid" off
   kill -INT "$rec"
   wait "$rec" || true
+  xcrun simctl terminate booted "$bundle" 2>/dev/null || true
+  slowed 1
   bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$taken" "$fps"
 }
 
