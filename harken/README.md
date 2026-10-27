@@ -221,6 +221,12 @@ position itself and nothing heartbeats.
   among what plays after the track playing; the button beside the
   device picker's on the bar opens it too, and a row's menu has **Play
   next** and **Add to queue**.
+- **`t`** is the transcript of the episode playing, when its feed has a
+  timed one (the button beside the queue's on the bar, there only then):
+  the line being said lit and kept in the middle, what was said dimmed,
+  whoever says it over their lines. `j` and `k` walk it and `<Enter>` or a
+  click plays from a line; a cursor moved or a page scrolled by hand stays
+  put until playback reaches the line it was left on, or **Follow** (`f`).
 - **`d`** is the picker — every device, the one away drawn and not a target,
   no row that stops it everywhere, this device ticked while nothing plays,
   every member of a playing group ticked, each row with its volume, a `+`

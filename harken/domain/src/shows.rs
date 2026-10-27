@@ -499,6 +499,11 @@ pub struct ShelfEpisode {
     pub art: String,
     pub season: i64,
     pub number: i64,
+    /// Who is on it, as its feed's `<podcast:person>` names them.
+    pub people: Vec<PersonOn>,
+    /// What is said in it, line by line, as its feed's timed transcript
+    /// has it.
+    pub transcript: Vec<CueAt>,
 }
 
 impl Shelf {
@@ -542,5 +547,27 @@ impl Shelf {
                 (show, episodes)
             })
             .collect()
+    }
+
+    /// What the feeds say beside their episodes — who is on each, and what
+    /// is said in it — as the mutations that put it there once the
+    /// episodes are in: an episode that says neither has none.
+    pub fn besides(&self) -> (Vec<SetPeople>, Vec<SetTranscript>) {
+        let episodes = || self.shows.iter().flat_map(|s| &s.episodes);
+        let people = episodes()
+            .filter(|e| !e.people.is_empty())
+            .map(|e| SetPeople {
+                file: e.file.clone(),
+                people: e.people.clone(),
+            })
+            .collect();
+        let transcripts = episodes()
+            .filter(|e| !e.transcript.is_empty())
+            .map(|e| SetTranscript {
+                file: e.file.clone(),
+                cues: e.transcript.clone(),
+            })
+            .collect();
+        (people, transcripts)
     }
 }

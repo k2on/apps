@@ -495,12 +495,70 @@ fn the_demo_has_a_podcast_and_sermons() {
     let show = Source::Show("podcast/full-time-nix".into(), "Full Time Nix".into());
     let _ = app.update(crate::Message::Select(show.clone()));
     let rows = app.peer.rows().to_vec();
-    assert_eq!(rows.len(), 10, "the newest ten");
+    assert_eq!(rows.len(), 11, "the newest ten, and an older one with a transcript");
     assert!(rows.iter().all(|r| r.kind == "podcast" && r.creator == "Full Time Nix"));
     assert_eq!(rows[0].title, "NixCon 2026 Day Ⅰ", "newest first");
     assert_eq!(app.peer.source_of(&Place::Show("podcast/full-time-nix".into())), show);
     let (_, entries) = app.row_entries(rows[0].id).unwrap();
     assert!(entries.iter().any(|e| e.label == "Go to Full Time Nix"));
+}
+
+/// Who is on an episode is beside its row but its host, who is said once,
+/// in its show's header; the keyboard steps from a row onto who is on it,
+/// as its menu goes to them. A guest's page — opened so, or by a link
+/// arriving cold — is every episode they are on, newest first, with their
+/// web page; and an episode there plays as a show's do, through the
+/// episodes on the page. Falsified by `guests` keeping the hosts: the host
+/// was beside every row; and by `source_of` knowing only the artists and
+/// the composers: the link landed on the library.
+#[test]
+fn a_guests_page_is_the_episodes_they_are_on() {
+    use crate::nav::Mark;
+    use crate::places::Pane;
+    use arkui::vim::{Action, Motion};
+    let jacek = "Jacek Galowicz";
+    let mut app = super::demo_app();
+    let show = Source::Show("podcast/full-time-nix".into(), "Full Time Nix".into());
+    let _ = app.update(crate::Message::Select(show));
+    let hosts: Vec<String> = app.hosts().into_iter().map(|h| h.name).collect();
+    assert_eq!(hosts, ["Shahar \"Dawn\" Or"], "the host, from the newest episode");
+    let rows = app.peer.rows().to_vec();
+    assert!(
+        rows.iter().flat_map(|r| app.guests(r)).all(|p| !hosts.contains(&p.name)),
+        "nor on any row"
+    );
+    assert!(app.layout().cell(Mark::By(0)).is_some(), "the host in the header opens their page too");
+
+    // From the newest episode's row, `l` along who is on it to Jacek, and
+    // `<Enter>` opens his page.
+    let k = app.guests(&rows[0]).iter().position(|p| p.name == jacek).expect("Jacek was at NixCon");
+    let (_, entries) = app.row_entries(rows[0].id).unwrap();
+    assert!(entries.iter().any(|e| e.label == format!("Go to {jacek}")), "its menu goes to him");
+    app.pane = Pane::Tracks;
+    app.cursors[Pane::Tracks as usize] = 0;
+    let _ = app.act(Action::Move(Motion::Right(k + 1)));
+    assert_eq!(Some(app.at(Pane::Tracks)), app.layout().cell(Mark::Guest(0, k)));
+    let _ = app.act(Action::Activate);
+    assert_eq!(app.peer.source, Source::Artist(jacek.into()));
+    assert_eq!(
+        app.peer.source_of(&Place::Artist(jacek.into())),
+        Source::Artist(jacek.into()),
+        "a link to him lands here"
+    );
+
+    let on: Vec<String> = app.peer.appearances().iter().map(|i| i.title.clone()).collect();
+    assert_eq!(on, ["NixCon 2026 Day Ⅰ", "Nix Freaks 51", "Nix 2.23.0 release with Jacek Galowicz"]);
+    let link = app.layout().cell(Mark::Link).and_then(|c| app.layout().message(c).cloned());
+    assert!(matches!(link, Some(crate::Message::OpenLink(url)) if url == "https://galowicz.de"));
+    // Not beside his own rows: who else was on them is.
+    assert!(app.peer.appearances().iter().flat_map(|i| app.guests(i)).all(|p| p.name != jacek));
+
+    let second = app.layout().cell(Mark::Episode(1)).unwrap();
+    let _ = app.update(crate::Message::HoverAt(second));
+    let _ = app.act(Action::Activate);
+    let queue: Vec<String> = app.queue.iter().map(|t| t.title.clone()).collect();
+    assert_eq!(queue, on, "the queue is his episodes");
+    assert_eq!(app.now().map(|n| n.track().title.clone()).as_deref(), Some("Nix Freaks 51"));
 }
 
 /// An episode's transport skips back fifteen seconds and on thirty; a

@@ -29,7 +29,8 @@ use ark_peer::{Patch, Watched};
 use crate::client::{Replica, Update};
 use crate::places::{Place, Source};
 use crate::rows::{
-    Album, Artist, Chapter, Composer, Credit, Download, EpisodeDetail, Id, Item, Listened, Playlist, Recording, Show, Subscription, TrackDetail, Work,
+    Album, Artist, Chapter, Composer, Credit, Cue, Download, EpisodeDetail, Id, Item, Listened, Person, Playlist, Recording, Show, Subscription,
+    TrackDetail, Work,
 };
 
 /// One line of the sidebar: somewhere the cursor can be and something it can
@@ -107,6 +108,22 @@ struct Views {
     /// What each of the page's show's episodes is about, and when it went
     /// out (`episode_details`).
     episodes: Option<Watched<EpisodeDetail>>,
+    /// Every episode the page's person is on, newest first
+    /// (`appearances`).
+    appearances: Option<Watched<Item>>,
+}
+
+/// What the window reads beside its views, at one state of the replica:
+/// each episode's people, an episode's transcript, and what a person's
+/// page's episodes are about — each read when it is first asked for, and
+/// kept for the frames between.
+#[derive(Default)]
+struct Kept {
+    at: Option<ark::hash::StateHash>,
+    people: HashMap<Id, Vec<Person>>,
+    transcript: Option<(Id, Vec<Cue>)>,
+    /// A show's episodes' details, by its key.
+    details: HashMap<String, Vec<EpisodeDetail>>,
 }
 
 /// A page slot, brought to what the source wants: kept when it is already
@@ -173,6 +190,8 @@ pub struct Peer {
     seen: ark::hash::StateHash,
     /// The chapters last read, of which episode and at which state.
     chapters: std::cell::RefCell<Option<(Id, ark::hash::StateHash, Vec<Chapter>)>>,
+    /// The rest of what was read beside the views, and at which state.
+    kept: std::cell::RefCell<Kept>,
 }
 
 /// `()`'s bytes: a query with no input.
@@ -209,6 +228,7 @@ impl Peer {
             on: None,
             listened: None,
             episodes: None,
+            appearances: None,
         };
         // What the hydrate already read is not news.
         for v in [
@@ -242,6 +262,7 @@ impl Peer {
             art_gen: 1,
             seen,
             chapters: Default::default(),
+            kept: Default::default(),
         };
         peer.choose();
         peer
@@ -347,6 +368,100 @@ impl Peer {
         read
     }
 
+    /// What is kept beside the views, emptied once the replica has moved
+    /// on from the state it was read at.
+    fn kept(&self) -> std::cell::RefMut<'_, Kept> {
+        let mut kept = self.kept.borrow_mut();
+        if kept.at != Some(self.seen) {
+            *kept = Kept {
+                at: Some(self.seen),
+                ..Kept::default()
+            };
+        }
+        kept
+    }
+
+    /// Who is on an episode, in its feed's order: read once per change of
+    /// the replica, and kept for the frames between.
+    pub fn people_of(&self, media: Id) -> Vec<Person> {
+        let input = EpisodeInput { media_id: key(media) };
+        let mut kept = self.kept();
+        kept.people
+            .entry(media)
+            .or_insert_with(|| Peer::rows_of(self.client.answer(shows::people, input)))
+            .clone()
+    }
+
+    /// An episode's transcript, line by line: read once per change of the
+    /// replica, and kept for the frames between.
+    pub fn transcript_of(&self, media: Id) -> Vec<Cue> {
+        let mut kept = self.kept();
+        if let Some((m, cues)) = &kept.transcript {
+            if *m == media {
+                return cues.clone();
+            }
+        }
+        let read: Vec<Cue> = Peer::rows_of(self.client.answer(shows::transcript, EpisodeInput { media_id: key(media) }));
+        kept.transcript = Some((media, read.clone()));
+        read
+    }
+
+    /// The episodes the page's person is on, newest first.
+    pub fn appearances(&self) -> &[Item] {
+        rows(&self.views.appearances)
+    }
+
+    /// Whether somebody is on any episode: a person's page to go to, for
+    /// a link that names them.
+    pub fn appears(&self, name: &str) -> bool {
+        let input = ArtistInput {
+            playlist_id: key(self.playlist),
+            name: name.into(),
+        };
+        !Peer::rows_of::<_, Item>(self.client.answer(shows::appearances, input)).is_empty()
+    }
+
+    /// Somebody as the newest episode they are on names them — their
+    /// picture, their web page — while their page is open.
+    pub fn person_named(&self, name: &str) -> Option<Person> {
+        let newest = self.appearances().first()?;
+        self.people_of(newest.id).into_iter().find(|p| p.name == name)
+    }
+
+    /// What an episode on the page is about, and when it went out: the
+    /// show's page has it beside its list; a person's page reads it by the
+    /// episode's show, once per change of the replica.
+    pub fn about(&self, item: &Item) -> Option<EpisodeDetail> {
+        if let Some(e) = self.episode_of(item.id) {
+            return Some(e.clone());
+        }
+        let show = self.shows().iter().find(|s| s.kind == item.kind && s.title == item.creator)?;
+        let input = ShowInput {
+            playlist_id: key(self.playlist),
+            id: show.id.clone(),
+        };
+        let mut kept = self.kept();
+        let details = kept
+            .details
+            .entry(show.id.clone())
+            .or_insert_with(|| Peer::rows_of(self.client.answer(shows::episode_details, input)));
+        details.iter().find(|e| e.media_id == item.id).cloned()
+    }
+
+    /// A row of the page, whichever of its lists it is on.
+    pub fn row(&self, id: Id) -> Option<&Item> {
+        self.list_of(id).iter().find(|i| i.id == id)
+    }
+
+    /// The list of the page a row is on — its tracks, or the episodes its
+    /// person is on — which is the queue a play of it plays through.
+    pub fn list_of(&self, id: Id) -> &[Item] {
+        match self.appearances().iter().any(|i| i.id == id) {
+            true => self.appearances(),
+            false => self.rows(),
+        }
+    }
+
     /// The shows of one kind (`podcast`, `sermon`), by title.
     pub fn shows_of(&self, kind: &str) -> Vec<&Show> {
         self.shows().iter().filter(|s| s.kind == kind).collect()
@@ -445,6 +560,7 @@ impl Peer {
         let on = slot(settle(c, &mut v.on, moved));
         let listened = slot(settle(c, &mut v.listened, moved));
         let episodes = slot(settle(c, &mut v.episodes, moved));
+        let appearances = slot(settle(c, &mut v.appearances, moved));
         self.moved = changed;
 
         // The playlist the library is read against can stop existing, and
@@ -463,7 +579,8 @@ impl Peer {
         if lists || library || albums || artists || composers || shows || repointed {
             self.choose();
         }
-        if albums || artists || composers || shows || works || recordings {
+        // The page's episodes carry the faces of who is on them.
+        if albums || artists || composers || shows || works || recordings || shown || appearances {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
         if recordings {
@@ -480,6 +597,7 @@ impl Peer {
             || mine
             || listened
             || episodes
+            || appearances
             || details
             || shown
             || works
@@ -644,7 +762,9 @@ impl Peer {
                 None,
                 None,
             ),
-            Source::Albums | Source::Artists | Source::Composers | Source::Podcasts | Source::Sermons | Source::Settings => (None, None, None),
+            Source::Albums | Source::Artists | Source::Composers | Source::Podcasts | Source::Sermons | Source::Settings | Source::Transcript => {
+                (None, None, None)
+            }
             // A show's episodes, newest first.
             Source::Show(id, _) => (
                 Some((
@@ -717,7 +837,7 @@ impl Peer {
             }
         };
         let (c, v) = (&mut self.client, &mut self.views);
-        want(c, &mut v.shown, shown, Item::from_bytes);
+        let tracks = want(c, &mut v.shown, shown, Item::from_bytes);
         let works = want(c, &mut v.works, works, Work::from_bytes);
         let recordings = want(c, &mut v.recordings, recordings, Recording::from_bytes);
         let credits = match &self.source {
@@ -752,7 +872,20 @@ impl Peer {
             _ => None,
         };
         want(c, &mut v.episodes, episodes, EpisodeDetail::from_bytes);
-        if works || recordings {
+        // A person's page: every episode they are on, beside their songs.
+        let appearances = match &self.source {
+            Source::Artist(name) => Some((
+                "appearances",
+                ArtistInput {
+                    playlist_id: pl,
+                    name: name.clone(),
+                }
+                .to_bytes(),
+            )),
+            _ => None,
+        };
+        let appearances = want(c, &mut v.appearances, appearances, Item::from_bytes);
+        if tracks || works || recordings || appearances {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
         self.label_recording();
@@ -786,14 +919,16 @@ impl Peer {
                 true => Source::Album(name.clone()),
                 false => Source::Library,
             },
-            // A person, whichever list they are on; an old `#composer/…` link
-            // is their page too.
+            // A person, whichever list they are on, or on an episode; an old
+            // `#composer/…` link is their page too.
             Place::Artist(name) | Place::Composer(name) => {
-                match self.artists().iter().any(|a| a.name == *name) || self.composers().iter().any(|c| c.name == *name) {
+                let known = self.artists().iter().any(|a| a.name == *name) || self.composers().iter().any(|c| c.name == *name);
+                match known || self.appears(name) {
                     true => Source::Artist(name.clone()),
                     false => Source::Library,
                 }
             }
+            Place::Transcript => Source::Transcript,
             // By *querying*, not against a list this peer holds: a link
             // arriving cold has no page yet, and the key is enough to ask with.
             Place::Work(id) => match self.work_named(id) {

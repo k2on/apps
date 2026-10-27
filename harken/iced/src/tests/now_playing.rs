@@ -39,14 +39,14 @@ fn play_first(app: &mut App) {
 }
 
 /// A harken hub in this process.
-fn hub() -> ark_peer::Handle {
+pub(super) fn hub() -> ark_peer::Handle {
     let c = harken_player::config::hub(crate::client::domain(), None);
     ark_peer::Handle::spawn(ark_peer::Peer::serve(c, Box::new(ark_peer::Memory::default()), ark_peer::now_ms()))
 }
 
 /// The hub's in-process transport and the tokens it knows: `dev` is this
 /// window (`me-device`, holding the library role), `phone` the phone.
-fn dial(hub: &ark_peer::Handle) -> impl ark_peer::link::Dial {
+pub(super) fn dial(hub: &ark_peer::Handle) -> impl ark_peer::link::Dial {
     hub.dialer(Arc::new(|t: &str| match t {
         "dev" => Some(Who {
             roles: vec![crate::domain::LIBRARY.to_string()],
@@ -58,7 +58,7 @@ fn dial(hub: &ark_peer::Handle) -> impl ark_peer::link::Dial {
 }
 
 /// The phone: the same account, its own login.
-fn phone_who() -> Who {
+pub(super) fn phone_who() -> Who {
     Who {
         actor: "me".into(),
         session: "phone".into(),
@@ -68,7 +68,7 @@ fn phone_who() -> Who {
 
 /// Everything said answered: the hub's turn, then the window's update and
 /// the phone's pump, until both have been quiet twice.
-fn carry(hub: &ark_peer::Handle, app: &mut App, phone: &mut Option<Replica>) {
+pub(super) fn carry(hub: &ark_peer::Handle, app: &mut App, phone: &mut Option<Replica>) {
     for _ in 0..64 {
         let _ = hub.with(|_| ());
         let _ = app.update(Message::Wake);

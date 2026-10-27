@@ -41,9 +41,11 @@ use crate::rows::Id;
 
 /// The podcasts and sermons the demo has beside its catalogue: Gospel in
 /// Life's sermons and Full Time Nix, their newest episodes as their feeds
-/// said them, written down in `shows.json` beside this file. The demo plays
-/// them from their hosts, as it plays the catalogue's recordings; a server
-/// downloads its feeds' (`harken-server`'s `feeds.rs`).
+/// said them — and, of Full Time Nix's, who is on each, and one older
+/// episode with the start of its transcript — written down in `shows.json`
+/// beside this file. The demo plays them from their hosts, as it plays the
+/// catalogue's recordings; a server downloads its feeds' (`harken-server`'s
+/// `feeds.rs`).
 pub fn shelf() -> &'static Shelf {
     static SHELF: OnceLock<Shelf> = OnceLock::new();
     SHELF.get_or_init(|| Shelf::parse(include_str!("shows.json")).expect("shows.json is the shows"))
@@ -217,6 +219,15 @@ pub fn seeded_disk(copies: usize) -> Memory {
         for e in episodes {
             seed.mutate(&e.title, "add_episode", &e);
         }
+    }
+    // …and what their feeds say beside them: who is on each, and what is
+    // said in it.
+    let (people, transcripts) = shelf().besides();
+    for p in people {
+        seed.mutate(&p.file, "set_people", &p);
+    }
+    for t in transcripts {
+        seed.mutate(&t.file, "set_transcript", &t);
     }
 
     // Three playlists, so the sidebar shows what a playlist *is* here: an

@@ -54,6 +54,9 @@ pub enum Source {
     /// What this client and its server do: the library's resync, from the
     /// account menu. Not in the sidebar.
     Settings,
+    /// What is said in the episode playing, line by line, the line being
+    /// said lit: from the bar, and `t`. Not in the sidebar.
+    Transcript,
 }
 
 impl Source {
@@ -77,6 +80,7 @@ impl Source {
             Source::Sermons => Place::Sermons,
             Source::Show(id, _) => Place::Show(id.clone()),
             Source::Settings => Place::Settings,
+            Source::Transcript => Place::Transcript,
         }
     }
 
@@ -89,7 +93,13 @@ impl Source {
             Source::Library | Source::Albums | Source::Artists | Source::Composers => Some("Music"),
             Source::Podcasts | Source::Sermons => Some("Shows"),
             Source::Playlist(..) => Some("Playlists"),
-            Source::Album(_) | Source::Artist(_) | Source::Work(..) | Source::Recording(..) | Source::Show(..) | Source::Settings => None,
+            Source::Album(_)
+            | Source::Artist(_)
+            | Source::Work(..)
+            | Source::Recording(..)
+            | Source::Show(..)
+            | Source::Settings
+            | Source::Transcript => None,
         }
     }
 
@@ -108,6 +118,7 @@ impl Source {
             Source::Show(id, _) if id.starts_with("sermon/") => glyphs::PULPIT,
             Source::Podcasts | Source::Show(..) => glyphs::SHOW,
             Source::Playlist(..) => glyphs::PLAYLIST,
+            Source::Transcript => glyphs::TRANSCRIPT,
         }
     }
 
@@ -120,6 +131,7 @@ impl Source {
             Source::Podcasts => "Podcasts",
             Source::Sermons => "Sermons",
             Source::Settings => "Settings",
+            Source::Transcript => "Transcript",
             Source::Playlist(_, name)
             | Source::Album(name)
             | Source::Artist(name)
@@ -174,6 +186,7 @@ pub enum Place {
     /// A show by its key, which has a slash of its own, as a work's does.
     Show(String),
     Settings,
+    Transcript,
 }
 
 impl Route for Place {
@@ -193,6 +206,7 @@ impl Route for Place {
             Place::Sermons => ("sermons", None),
             Place::Show(n) => ("show", Some(n)),
             Place::Settings => ("settings", None),
+            Place::Transcript => ("transcript", None),
         };
         join(kind, name.map(String::as_str))
     }
@@ -214,6 +228,7 @@ impl Route for Place {
             ("sermons", None) => Place::Sermons,
             ("show", Some(n)) => Place::Show(n),
             ("settings", None) => Place::Settings,
+            ("transcript", None) => Place::Transcript,
             _ => Place::Library,
         }
     }
@@ -300,6 +315,7 @@ mod tests {
             Place::Podcasts,
             Place::Sermons,
             Place::Show("podcast/full-time-nix".into()),
+            Place::Transcript,
         ] {
             let fragment = place.fragment();
             assert_eq!(Place::parse(&fragment), place, "round trip of {fragment}");
