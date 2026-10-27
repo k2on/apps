@@ -2162,7 +2162,10 @@ dependencies = [
  "harken-player",
  "iced",
  "js-sys",
+ "serde",
+ "serde_json",
  "tungstenite",
+ "ureq",
  "wasm-bindgen",
  "web-sys",
 ]

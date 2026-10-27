@@ -23,6 +23,9 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # own address in a browser; and the logins a device remembers.
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
 arkui = { path = "../../rust/arkui" }
+# The podcast directory's answer, read (`directory.rs`).
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced an executor and the clock that runs while audio plays or a
@@ -34,6 +37,9 @@ iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira
 # The sync socket natively: the token first, then frames, and the server's
 # close code read (4401 is a login turned away).
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+# Searching the podcast directory, blocking on a thread of its own, as
+# arkui fetches a picture.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach: without it wgpu finds no backend and

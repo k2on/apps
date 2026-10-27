@@ -28,6 +28,7 @@
 
 mod auth;
 mod client;
+mod directory;
 mod domain;
 mod listening;
 mod nav;
@@ -126,6 +127,35 @@ pub enum Anchor {
     Dots,
 }
 
+/// The search for a show to follow, open on a shows page: what its box
+/// says, and what the directory found for it (`directory`).
+#[derive(Debug, Clone, Default)]
+pub struct Adding {
+    pub query: String,
+    pub found: Vec<directory::Found>,
+    /// What the search came to when it is not a list: searching, nothing
+    /// found, why it failed; or why a follow was refused.
+    pub said: Option<String>,
+}
+
+impl Adding {
+    /// The shows its rows are: a feed's address is the one show it names;
+    /// words, what the directory found for them.
+    pub fn shows(&self) -> Vec<directory::Found> {
+        match directory::is_feed(&self.query) {
+            true => vec![directory::Found {
+                title: self.query.trim().to_string(),
+                feed: self.query.trim().to_string(),
+                ..Default::default()
+            }],
+            false => self.found.clone(),
+        }
+    }
+}
+
+/// The search box's id, for putting the keys in it.
+pub const QUERY: &str = "harken-show-search";
+
 /// How many works a composer's page lists before its "See All".
 pub const KNOWN_WORKS: usize = 6;
 
@@ -178,11 +208,21 @@ pub enum Message {
     PlayFrom(Id, i64),
     /// An episode said played (`true`) or not by the signed-in person.
     MarkPlayed(Id, bool),
-    /// What Settings' feed entry says, and which kind it is followed as.
-    FeedUrl(String),
-    FeedKind(String),
-    /// Follow that feed (`library.subscribe`).
-    Follow,
+    /// A shows page's +: the search for a show to follow, open or shut.
+    Adding(bool),
+    /// What the search box says: words for the directory, or a feed's
+    /// address.
+    Query(String),
+    /// The typing paused at these words: search, if they are still what
+    /// the box says.
+    SearchDue(String),
+    /// What the directory found for these words, or why it found nothing.
+    Searched(String, Result<Vec<directory::Found>, String>),
+    /// Put the keys in the search box.
+    FocusQuery,
+    /// Follow this feed, as the kind of show the page lists
+    /// (`library.subscribe`).
+    FollowFeed(String),
     /// Follow a feed no more, by its URL (`library.unsubscribe`).
     Unfollow(String),
     /// More of a followed feed's older episodes: this many more, or 0 for
@@ -570,11 +610,8 @@ pub struct App {
     pub help: bool,
     /// What Settings' Resync last came to, to say under it.
     pub resync: Option<String>,
-    /// Settings' feed entry: the URL typed, the kind it is followed as
-    /// (`podcast`, `sermon`), and what the last Follow came to.
-    pub feed_url: String,
-    pub feed_kind: String,
-    pub feed_said: Option<String>,
+    /// The search for a show to follow, while a shows page has it open.
+    pub adding: Option<Adding>,
     /// `D` — every number the session holds.
     pub debug: bool,
     /// A composer's page lists every work, not only the best known: its
@@ -686,9 +723,7 @@ impl App {
             search: String::new(),
             help: false,
             resync: None,
-            feed_url: String::new(),
-            feed_kind: "podcast".into(),
-            feed_said: None,
+            adding: None,
             debug: false,
             all_works: false,
             ctx: Context::new(),
@@ -1086,6 +1121,12 @@ impl App {
                 Source::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
                 Source::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
                 Source::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
+                Source::Podcasts | Source::Sermons if self.adding.is_some() => self
+                    .adding
+                    .iter()
+                    .flat_map(|a| a.shows())
+                    .map(|f| format!("{} {}", f.title, f.author))
+                    .collect(),
                 Source::Podcasts => p.shows_of("podcast").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
                 Source::Sermons => p.shows_of("sermon").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
                 Source::Artist(_) if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
@@ -1171,6 +1212,7 @@ impl App {
             }
             vim::Action::Match(delta) => self.seek(Some(self.at(self.pane)), delta),
             vim::Action::Cancel => {
+                self.adding = None;
                 self.help = false;
                 self.debug = false;
                 self.note.clear();
@@ -1779,6 +1821,11 @@ impl App {
                 if let Some(m) = self.layout().message(at).cloned() {
                     return self.update(m);
                 }
+                // Searching for a show: its rows are what it found, and
+                // opening one follows it.
+                if let Some(found) = self.adding_here().and_then(|a| a.shows().get(at).cloned()) {
+                    return self.update(Message::FollowFeed(found.feed));
+                }
                 if let Some(source) = self.card_under_cursor(at) {
                     return self.update(Message::Select(source));
                 }
@@ -2130,22 +2177,85 @@ impl App {
                     false => self.note.clone(),
                 });
             }
-            Message::FeedUrl(url) => self.feed_url = url,
-            Message::FeedKind(kind) => self.feed_kind = kind,
-            Message::Follow => {
-                let url = self.feed_url.trim().to_string();
-                if !url.is_empty() {
-                    let input = crate::domain::Subscribe {
-                        kind: self.feed_kind.clone(),
-                        url,
-                    };
-                    self.feed_said = Some(match self.author("follow the feed".into(), "subscribe", &input) {
-                        true => {
-                            self.feed_url.clear();
-                            "Following. Its episodes appear as the server reads it.".into()
-                        }
-                        false => self.note.clone(),
-                    });
+            Message::Adding(open) => {
+                self.adding = open.then(Adding::default);
+                // The keys go where the + was, the box: what opening it
+                // was for is typing.
+                if let Some(cell) = self.layout().cell(nav::Mark::Query) {
+                    self.pane = Pane::Tracks;
+                    self.cursors[Pane::Tracks as usize] = cell;
+                }
+                if open {
+                    return iced::widget::operation::focus(QUERY);
+                }
+            }
+            Message::Query(query) => {
+                // Taken before the box changes: what it says decides how
+                // many rows there are before the marks.
+                let mark = self.cursor_mark();
+                let Some(adding) = self.adding.as_mut() else {
+                    return Task::none();
+                };
+                adding.query = query.clone();
+                adding.said = None;
+                let search = !(directory::is_feed(&query) || query.trim().is_empty());
+                if !search {
+                    adding.found.clear();
+                }
+                self.keep_on(mark);
+                if search {
+                    return directory::after(directory::PAUSE).map(move |()| Message::SearchDue(query.clone()));
+                }
+            }
+            Message::SearchDue(words) => {
+                // Typed on since: a later pause searches for that.
+                let Some(adding) = self.adding.as_mut().filter(|a| a.query == words) else {
+                    return Task::none();
+                };
+                if directory::is_feed(&words) || words.trim().is_empty() {
+                    return Task::none();
+                }
+                adding.said = Some("Searching\u{2026}".into());
+                return directory::search(words).map(|(words, answer)| Message::Searched(words, answer));
+            }
+            Message::Searched(words, answer) => {
+                let mark = self.cursor_mark();
+                let Some(adding) = self.adding.as_mut().filter(|a| a.query == words) else {
+                    return Task::none();
+                };
+                match answer {
+                    Ok(found) => {
+                        adding.said = found.is_empty().then(|| format!("Nothing found for \u{201c}{}\u{201d}.", words.trim()));
+                        adding.found = found;
+                    }
+                    Err(why) => {
+                        adding.said = Some(why);
+                        adding.found.clear();
+                    }
+                }
+                let arts: Vec<String> = adding.found.iter().map(|f| f.art.clone()).filter(|a| !a.is_empty()).collect();
+                self.keep_on(mark);
+                let wanted: Vec<_> = arts
+                    .into_iter()
+                    .filter_map(|art| self.covers.want(art))
+                    .map(|t| t.map(Message::Cover))
+                    .collect();
+                return Task::batch(wanted);
+            }
+            Message::FocusQuery => return iced::widget::operation::focus(QUERY),
+            Message::FollowFeed(url) => {
+                let kind = match self.peer.source {
+                    Source::Sermons => "sermon",
+                    _ => "podcast",
+                };
+                let input = crate::domain::Subscribe {
+                    kind: kind.into(),
+                    url: url.trim().to_string(),
+                };
+                let followed = self.author("follow the feed".into(), "subscribe", &input);
+                let note = self.note.clone();
+                if let Some(adding) = self.adding.as_mut() {
+                    adding.said = (!followed).then_some(note);
                 }
             }
             Message::Unfollow(url) => {

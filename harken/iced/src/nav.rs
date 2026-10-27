@@ -44,6 +44,17 @@ pub enum Mark {
     Album(usize),
     /// The `n`th face on a recording or an album.
     Person(usize),
+    /// A shows page's +, which opens the search for a show to follow — or,
+    /// open, shuts it.
+    Add,
+    /// The search box.
+    Query,
+    /// The Unfollow of the `n`th feed the library follows
+    /// (`Peer::subscriptions`).
+    Unfollow(usize),
+    /// A followed show's older episodes fetched: twenty more (`false`), or
+    /// every one.
+    Older(bool),
 }
 
 /// A page, as the keyboard walks it.
@@ -322,9 +333,51 @@ impl App {
                 let people = self.people(&composers);
                 self.faces(&mut l, &people);
             }
-            // A show's page is a playlist's: its Play, over its episodes.
-            Source::Playlist(..) | Source::Show(..) if detailed => {
+            // A show's page is a playlist's: its Play, over its episodes —
+            // and, followed, its older ones fetched and its Unfollow.
+            Source::Show(id, _) if detailed => {
                 self.play(&mut l);
+                if let Some((k, s)) = p
+                    .subscriptions()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, s)| !s.show_id.is_empty() && s.show_id == *id)
+                {
+                    let mut ids = vec![];
+                    if s.has_older() {
+                        ids.push(l.mark(Mark::Older(false), Message::FetchOlder(s.url.clone(), 20)));
+                        if s.items - s.keep > 20 {
+                            ids.push(l.mark(Mark::Older(true), Message::FetchOlder(s.url.clone(), 0)));
+                        }
+                    }
+                    ids.push(l.mark(Mark::Unfollow(k), Message::Unfollow(s.url.clone())));
+                    let n = ids.len();
+                    l.block(ids, n);
+                }
+                l.page.sections.push(Section::run(0, grid.cells, grid.columns));
+            }
+            Source::Playlist(..) if detailed => {
+                self.play(&mut l);
+                l.page.sections.push(Section::run(0, grid.cells, grid.columns));
+            }
+            // A shows page: its +, then the search it opens — the box over
+            // what it found — or the feeds followed that are no show yet,
+            // each with its Unfollow, over the shows.
+            Source::Podcasts | Source::Sermons if detailed => {
+                let id = l.mark(Mark::Add, Message::Adding(self.adding.is_none()));
+                l.block(vec![id], 1);
+                match self.adding.is_some() {
+                    true => {
+                        let id = l.mark(Mark::Query, Message::FocusQuery);
+                        l.block(vec![id], 1);
+                    }
+                    false => {
+                        for (k, s) in self.unread_feeds() {
+                            let id = l.mark(Mark::Unfollow(k), Message::Unfollow(s.url.clone()));
+                            l.block(vec![id], 1);
+                        }
+                    }
+                }
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
             }
             Source::Work(..) => {
@@ -352,6 +405,52 @@ impl App {
             Some(a) => a.performer.clone(),
             None => album.map(|a| a.creator.clone()).unwrap_or_default(),
         }
+    }
+
+    /// What the page's cursor is on when it is not the main list: a mark
+    /// keeps its place when the list before it grows or shrinks, as a
+    /// search's results do under its box, and its number does not.
+    pub fn cursor_mark(&self) -> Option<Mark> {
+        let l = self.layout();
+        let at = self.at(crate::Pane::Tracks).checked_sub(l.page.main)?;
+        l.marks.get(at).map(|(m, _)| *m)
+    }
+
+    /// Put the page's cursor back on `mark`, where it is now.
+    pub fn keep_on(&mut self, mark: Option<Mark>) {
+        if let Some(cell) = mark.and_then(|m| self.layout().cell(m)) {
+            self.cursors[crate::Pane::Tracks as usize] = cell;
+        }
+    }
+
+    /// The search for a show to follow, when the page is a shows page
+    /// with it open.
+    pub fn adding_here(&self) -> Option<&crate::Adding> {
+        match self.peer.source {
+            Source::Podcasts | Source::Sermons => self.adding.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The kind of show a shows page lists.
+    pub fn shows_kind(&self) -> &'static str {
+        match self.peer.source {
+            Source::Sermons => "sermon",
+            _ => "podcast",
+        }
+    }
+
+    /// The feeds of the page's kind the library follows that are no show
+    /// yet — not read, or a read that failed — each with where it is in
+    /// `Peer::subscriptions`.
+    pub fn unread_feeds(&self) -> Vec<(usize, &crate::rows::Subscription)> {
+        let p = &self.peer;
+        let kind = self.shows_kind();
+        p.subscriptions()
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.kind == kind && !p.shows().iter().any(|show| !s.show_id.is_empty() && show.id == s.show_id))
+            .collect()
     }
 
     /// What a page sets apart, side by side: opening it, and its Play.
@@ -385,6 +484,7 @@ impl App {
             crate::places::Source::Albums => crate::SHELF.grid(p.albums().len(), self.pane_width()),
             Source::Artists => crate::SHELF.grid(p.artists().len(), self.pane_width()),
             Source::Composers => crate::SHELF.grid(p.composers().len(), self.pane_width()),
+            Source::Podcasts | Source::Sermons if self.adding.is_some() => vim::Grid::column(self.adding.as_ref().map_or(0, |a| a.shows().len())),
             Source::Podcasts => crate::SHELF.grid(p.shows_of("podcast").len(), self.pane_width()),
             Source::Sermons => crate::SHELF.grid(p.shows_of("sermon").len(), self.pane_width()),
             Source::Artist(_) if !p.works().is_empty() => vim::Grid {

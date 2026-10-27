@@ -351,30 +351,7 @@ impl App {
                     .collect(),
                 "Nobody yet.",
             ),
-            // A show is a square, as a record is: its picture, who makes it.
-            Source::Podcasts | Source::Sermons => {
-                let kind = if p.source == Source::Podcasts { "podcast" } else { "sermon" };
-                self.view_cards(
-                    p.shows_of(kind)
-                        .into_iter()
-                        .map(|s| {
-                            let mut card = self.card(
-                                &s.title,
-                                s.author.clone(),
-                                s.episodes,
-                                Source::Show(s.id.clone(), s.title.clone()),
-                                false,
-                                &s.art,
-                            );
-                            if s.author.is_empty() {
-                                card.under = format!("{} {}", s.episodes, plural(s.episodes, "episode"));
-                            }
-                            card
-                        })
-                        .collect(),
-                    "No shows yet.",
-                )
-            }
+            Source::Podcasts | Source::Sermons if !(self.help || self.debug) => self.view_shows(),
             Source::Show(id, title) if !(self.help || self.debug) => self.view_show(id, title),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
@@ -430,87 +407,200 @@ impl App {
             }),
             hero::heading("Library"),
             container(library).padding(Padding { top: 8.0, ..Padding::ZERO }),
-            container(hero::heading("Podcasts and sermons")).padding(Padding { top: 28.0, ..Padding::ZERO }),
-            container(self.view_feeds()).padding(Padding { top: 8.0, ..Padding::ZERO }),
         ]
         .width(Length::Fill);
         self.scrolled(None, page, false)
     }
 
-    /// The feeds the library follows: one followed by its URL, as a podcast
-    /// or as sermons, and each followed one with how much of it is here,
-    /// what its last read said, and its Unfollow.
-    fn view_feeds(&self) -> Element<'_, Message> {
-        let explain = "Follow a podcast or a church's sermons by its RSS feed. The server downloads \
-                       its newest episodes and checks it every hour; a show's page fetches older ones.";
-        let kind = |k: &'static str, label: &'static str| {
-            button(text(label).size(13))
-                .style(if self.feed_kind == k { style::action } else { button::text })
-                .padding([5, 12])
-                .on_press(Message::FeedKind(k.into()))
-        };
-        let mut follow = button(text("Follow").size(13)).style(style::action).padding([5, 14]);
-        if !self.feed_url.trim().is_empty() {
-            follow = follow.on_press(Message::Follow);
-        }
-        let add = row![
-            kind("podcast", "Podcast"),
-            kind("sermon", "Sermons"),
-            text_input("https://\u{2026}/feed.xml", &self.feed_url)
-                .on_input(Message::FeedUrl)
-                .on_submit(Message::Follow)
-                .size(13)
-                .padding([5, 8])
-                .width(Length::Fill),
-            follow,
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        let mut feeds = column![
-            text(explain)
-                .size(14)
-                .line_height(1.45)
-                .style(style::faint(0.8))
-                .wrapping(text::Wrapping::Word),
-            add,
-        ]
-        .spacing(14)
-        .max_width(640);
-        if let Some(said) = &self.feed_said {
-            feeds = feeds.push(text(said.clone()).size(12).style(style::faint(0.55)));
-        }
-        for s in self.peer.subscriptions() {
-            let name = match s.title.is_empty() {
-                true => s.url.clone(),
-                false => s.title.clone(),
-            };
-            let kind = if s.kind == "sermon" { "Sermons" } else { "Podcast" };
-            let mut about = format!("{kind}  \u{b7}  ");
-            match (s.title.is_empty(), s.error.is_empty()) {
-                (true, true) => about.push_str("not read yet"),
-                _ => about.push_str(&format!("{} of {} {} here", s.episodes, s.items, plural(s.items, "episode"))),
+    /// A shows page: its title and its +, then the search the + opens — or
+    /// the feeds followed that are no show yet, over the shows, each a
+    /// square as a record is: its picture, who makes it.
+    fn view_shows(&self) -> Element<'_, Message> {
+        let l = self.layout();
+        let adding = self.adding_here();
+        let title = if self.shows_kind() == "sermon" { "Sermons" } else { "Podcasts" };
+        let glyph = if adding.is_some() { glyphs::CLOSE } else { glyphs::PLUS };
+        let add = self.ringed(&l, Mark::Add, icon::tinted(glyph, 16.0, |p| p.background.base.text).into(), false);
+        let bar = row![text(title).size(28).font(hero::BOLD), add].spacing(10).align_y(Alignment::Center);
+        let mut page = column![bar].spacing(18);
+        match adding {
+            Some(a) => page = page.push(self.view_search(&l, a)),
+            None => {
+                for (k, s) in self.unread_feeds() {
+                    page = page.push(self.view_unread(&l, k, s));
+                }
+                page = page.push(self.view_show_cards());
             }
-            let mut said = column![
-                text(name).size(14).wrapping(text::Wrapping::Word),
-                text(about).size(12).style(style::faint(0.6)),
+        }
+        self.scrolled(None, page, false)
+    }
+
+    /// The shows of the page's kind, as cards.
+    fn view_show_cards(&self) -> Element<'_, Message> {
+        let shows = self.peer.shows_of(self.shows_kind());
+        if shows.is_empty() {
+            let empty = "No shows yet. The + finds one to follow.";
+            return text(empty).size(14).style(style::faint(0.6)).into();
+        }
+        let (columns, side) = (self.columns(), SHELF.side(self.pane_width()));
+        let cursor = self.page_cursor();
+        let mut grid = column![].spacing(SHELF.gap);
+        for (r, chunk) in shows.chunks(columns.max(1)).enumerate() {
+            let line = chunk.iter().enumerate().map(|(c, s)| {
+                let at = r * columns + c;
+                let mut card = self.card(
+                    &s.title,
+                    s.author.clone(),
+                    s.episodes,
+                    Source::Show(s.id.clone(), s.title.clone()),
+                    false,
+                    &s.art,
+                );
+                if s.author.is_empty() {
+                    card.under = format!("{} {}", s.episodes, plural(s.episodes, "episode"));
+                }
+                cards::view_card(side, &card, Some(at) == cursor, Message::HoverAt(at))
+            });
+            grid = grid.push(Row::with_children(line).spacing(SHELF.gap).align_y(Alignment::Start));
+        }
+        grid.into()
+    }
+
+    /// The search for a show to follow: the box, what the search came to,
+    /// and a row per show found — its picture, its name and who makes it,
+    /// and its Follow, or that it is followed.
+    fn view_search<'a>(&'a self, l: &Layout, a: &'a crate::Adding) -> Element<'a, Message> {
+        let submit = match crate::directory::is_feed(&a.query) {
+            true => Message::FollowFeed(a.query.clone()),
+            false => Message::SearchDue(a.query.clone()),
+        };
+        let on = self.on(l, Mark::Query);
+        let input = text_input("Search Apple Podcasts, or paste a feed\u{2019}s address", &a.query)
+            .id(crate::QUERY)
+            .on_input(Message::Query)
+            .on_submit(submit)
+            .size(15)
+            .padding([8, 12]);
+        let input = container(input).padding(2).style(move |t| container::Style {
+            border: iced::border::rounded(8.0)
+                .width(if on { 2.0 } else { 0.0 })
+                .color(arkui::theme::of(t).background.base.text),
+            ..container::Style::default()
+        });
+        let explain = "The server downloads a show\u{2019}s newest episodes and reads its feed every hour; \
+                       the show\u{2019}s page fetches older ones.";
+        let mut page = column![
+            self.opens(l, Mark::Query, input),
+            text(explain).size(12).style(style::faint(0.55)).wrapping(text::Wrapping::Word),
+        ]
+        .spacing(10)
+        .max_width(720);
+        if let Some(said) = &a.said {
+            page = page.push(text(said.clone()).size(13).style(style::faint(0.7)).wrapping(text::Wrapping::Word));
+        }
+        let cursor = self.page_cursor();
+        let feed = crate::directory::is_feed(&a.query);
+        let mut found = column![].spacing(2);
+        for (i, f) in a.shows().into_iter().enumerate() {
+            let on = cursor == Some(i);
+            let followed = self.peer.subscriptions().iter().any(|s| s.url == f.feed);
+            let (name, under) = match feed {
+                true => ("This feed".to_string(), f.feed.clone()),
+                false => (f.title.clone(), f.author.clone()),
+            };
+            let words = column![
+                text(drawable(&name).into_owned())
+                    .size(14)
+                    .wrapping(text::Wrapping::Word)
+                    .style(move |t| text::Style {
+                        color: Some(match on {
+                            true => arkui::theme::of(t).primary.base.text,
+                            false => style::entry_text(t, false),
+                        }),
+                    }),
+                text(under).size(12).wrapping(text::Wrapping::Word).style(move |t| match on {
+                    true => text::Style {
+                        color: Some(arkui::theme::of(t).primary.base.text),
+                    },
+                    false => style::faint(0.6)(t),
+                }),
             ]
             .spacing(2)
             .width(Length::Fill);
-            if !s.error.is_empty() {
-                said = said.push(
-                    text(format!("Could not read it: {}", s.error))
-                        .size(12)
-                        .style(style::faint(0.6))
-                        .wrapping(text::Wrapping::Word),
-                );
-            }
-            let unfollow = button(text("Unfollow").size(12))
-                .style(button::text)
-                .padding([4, 10])
-                .on_press(Message::Unfollow(s.url.clone()));
-            feeds = feeds.push(row![said, unfollow].spacing(12).align_y(Alignment::Center));
+            let action: Element<'_, Message> = match followed {
+                // On the cursor's fill, in the colour paired with it.
+                true => {
+                    let tick = match on {
+                        true => icon::tinted(glyphs::TICK, 13.0, |p| p.primary.base.text),
+                        false => icon::tinted(glyphs::TICK, 13.0, |p| p.background.base.text),
+                    };
+                    let words = text("Following").size(12).style(move |t| text::Style {
+                        color: Some(match on {
+                            true => arkui::theme::of(t).primary.base.text,
+                            false => arkui::theme::of(t).background.base.text,
+                        }),
+                    });
+                    row![tick, words].spacing(5).align_y(Alignment::Center).into()
+                }
+                false => button(text("Follow").size(12))
+                    .style(style::action)
+                    .padding([4, 12])
+                    .on_press(Message::FollowFeed(f.feed.clone()))
+                    .into(),
+            };
+            let line = row![art::picture(&f.title, self.covers.handle(&f.art), 56.0, 6.0), words, action]
+                .spacing(14)
+                .align_y(Alignment::Center);
+            let line = container(line)
+                .padding([6, 8])
+                .width(Length::Fill)
+                .style(move |t| style::row(t, on, true, false));
+            found = found.push(mouse_area(line).on_enter(Message::HoverAt(i)));
         }
-        feeds.into()
+        page.push(found).into()
+    }
+
+    /// A feed followed that is no show yet: its address, whether the server
+    /// has read it or why it could not, and its Unfollow.
+    fn view_unread<'a>(&self, l: &Layout, k: usize, s: &crate::rows::Subscription) -> Element<'a, Message> {
+        let name = match s.title.is_empty() {
+            true => s.url.clone(),
+            false => s.title.clone(),
+        };
+        let about = match s.error.is_empty() {
+            true => "Following \u{b7} not read yet".to_string(),
+            false => format!("Could not read it: {}", s.error),
+        };
+        let words = column![
+            text(name).size(14).wrapping(text::Wrapping::Word),
+            text(about).size(12).style(style::faint(0.6)).wrapping(text::Wrapping::Word),
+        ]
+        .spacing(2)
+        .width(Length::Fill);
+        let unfollow = self.ringed(l, Mark::Unfollow(k), text("Unfollow").size(12).into(), false);
+        row![words, unfollow].spacing(12).align_y(Alignment::Center).into()
+    }
+
+    /// A button that does what `mark`'s cell does, ringed under the cursor:
+    /// in the accent, as Play is, or plain. The button is pressed itself —
+    /// it takes the click, so a press around it would never hear one.
+    fn ringed<'a>(&self, l: &Layout, mark: Mark, body: Element<'a, Message>, accent: bool) -> Element<'a, Message> {
+        let on = self.on(l, mark);
+        let look = if accent { style::action } else { button::text };
+        let cell = l.cell(mark);
+        let go = cell.and_then(|c| l.message(c)).cloned();
+        let ring = container(button(body).style(look).padding([5, 12]).on_press_maybe(go))
+            .padding(2)
+            .style(move |t| container::Style {
+                border: iced::border::rounded(8.0)
+                    .width(if on { 2.0 } else { 0.0 })
+                    .color(arkui::theme::of(t).background.base.text),
+                ..container::Style::default()
+            });
+        match cell {
+            Some(cell) => mouse_area(ring).on_enter(Message::HoverAt(cell)).into(),
+            None => ring.into(),
+        }
     }
 
     /// How far everybody has got in an episode, the signed-in person first
@@ -680,19 +770,10 @@ impl App {
     /// A Play, in the accent, that does what `mark`'s cell does — ringed
     /// under the cursor, as the button is already the accent.
     fn play_button<'a>(&self, l: &Layout, mark: Mark) -> Element<'a, Message> {
-        let on = self.on(l, mark);
         let play = row![icon::tinted(glyphs::PLAY, 12.0, |p| p.primary.base.text), text("Play").size(13),]
             .spacing(6)
             .align_y(Alignment::Center);
-        let ring = container(button(play).style(style::action).padding([5, 14]).on_press(Message::Swallow))
-            .padding(2)
-            .style(move |t| container::Style {
-                border: iced::border::rounded(8.0)
-                    .width(if on { 2.0 } else { 0.0 })
-                    .color(arkui::theme::of(t).background.base.text),
-                ..container::Style::default()
-            });
-        self.opens(l, mark, ring)
+        self.ringed(l, mark, play.into(), true)
     }
 
     /// One thing set apart at the head of a section, the one to start with
@@ -988,36 +1069,37 @@ impl App {
         if let Some(about) = about(&said) {
             top = top.push(about);
         }
-        if let Some(more) = self.view_more(id, rows) {
+        if let Some(more) = self.view_more(&l, id, rows) {
             top = top.push(more);
         }
         let body = column![top, self.view_list()].spacing(12).into();
         padded(with_header(header, body))
     }
 
-    /// Under a followed show's header: how many of its episodes are not on
-    /// the server yet, and its older episodes fetched — twenty more, or
-    /// every one — while the feed has more than the library keeps.
-    fn view_more(&self, id: &str, rows: &[crate::rows::Item]) -> Option<Element<'_, Message>> {
+    /// Under a followed show's header: its older episodes fetched — twenty
+    /// more, or every one — while the feed has more than the library keeps,
+    /// its Unfollow, how many of its episodes are not on the server yet,
+    /// and why its last read failed.
+    fn view_more(&self, l: &Layout, id: &str, rows: &[crate::rows::Item]) -> Option<Element<'_, Message>> {
         let sub = self.peer.subscription_of(id);
         let downloads: Vec<_> = rows.iter().filter_map(|r| self.peer.download_of(r.id)).collect();
-        let older = sub.filter(|s| s.has_older());
-        if downloads.is_empty() && older.is_none() {
+        if downloads.is_empty() && sub.is_none() {
             return None;
         }
         let mut line = row![].spacing(10).align_y(Alignment::Center);
-        if let Some(s) = older {
-            let more = |label: String, n: i64| {
-                button(text(label).size(12))
-                    .style(style::action)
-                    .padding([4, 12])
-                    .on_press(Message::FetchOlder(s.url.clone(), n))
-            };
+        if let Some(s) = sub.filter(|s| s.has_older()) {
             let left = s.items - s.keep;
-            line = line.push(more(format!("Fetch {} older", left.min(20)), 20));
+            let label = |words: String| text(words).size(12).into();
+            line = line.push(self.ringed(l, Mark::Older(false), label(format!("Fetch {} older", left.min(20))), true));
             if left > 20 {
-                line = line.push(more(format!("Fetch all {}", s.items), 0));
+                line = line.push(self.ringed(l, Mark::Older(true), label(format!("Fetch all {}", s.items)), true));
             }
+        }
+        if let Some(k) = sub.and_then(|s| self.peer.subscriptions().iter().position(|t| t.url == s.url)) {
+            line = line.push(self.ringed(l, Mark::Unfollow(k), text("Unfollow").size(12).into(), false));
+        }
+        if let Some(why) = sub.map(|s| &s.error).filter(|e| !e.is_empty()) {
+            line = line.push(text(format!("Could not read it: {why}")).size(12).style(style::faint(0.6)));
         }
         if !downloads.is_empty() {
             let failed = downloads.iter().filter(|d| d.state == "failed").count();

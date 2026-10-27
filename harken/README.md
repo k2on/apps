@@ -102,9 +102,11 @@ They come from two places:
 
 - **A feed** — any RSS with audio enclosures: a podcast host's, a
   church's, an Audiobookshelf library's. Which feeds is the library's, in
-  its log: a `subscription` each (`library.subscribe`), followed from a
-  client's Settings by an account holding the `library` role
-  (`services.harken.roles`). The server reads each at boot, at every
+  its log: a `subscription` each (`library.subscribe`), followed by an
+  account holding the `library` role (`services.harken.roles`) — on the
+  desktop and in a browser from the + on Podcasts or Sermons, which
+  searches Apple's podcast directory or takes a feed's address
+  (`iced/src/directory.rs`); on a phone from Settings. The server reads each at boot, at every
   rescan, every hour and whenever one is followed, and puts its newest
   twenty episodes in the library; a show's page fetches older ones
   (`library.fetch_older`, twenty more or every one), and Unfollow takes
