@@ -54,7 +54,7 @@ slowed() {
 record() {
   local id=$1 taken=$2 to=$3
   slowed "$taken"
-  xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
+  xcrun simctl launch --terminate-running-process --stdout="$tmp/$id.app.log" booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
   sleep $((4 + taken))
   xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
   local rec=$!
@@ -64,6 +64,7 @@ record() {
   kill -INT "$rec"
   wait "$rec" || true
   xcrun simctl terminate booted "$bundle" 2>/dev/null || true
+  sed 's/^/  /' "$tmp/$id.app.log" 2>/dev/null || true
   slowed 1
   bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$taken" "$fps"
 }

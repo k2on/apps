@@ -53,12 +53,48 @@ final class Go: ObservableObject {
             { _, me, _, _, _ in
                 guard let me else { return }
                 let go = Unmanaged<Go>.fromOpaque(me).takeUnretainedValue()
-                DispatchQueue.main.async { go.told = true }
+                DispatchQueue.main.async {
+                    go.told = true
+                    Frames.shared.count()
+                }
             },
             Go.name as CFString,
             nil,
             .deliverImmediately
         )
+    }
+}
+
+/// How many frames the app draws a second once told to go, said on its
+/// standard output (`simctl launch --stdout`), beside what the recording
+/// caught: which of the two keeps a recording short of frames.
+final class Frames: NSObject {
+    static let shared = Frames()
+    private var link: CADisplayLink?
+    private var second: CFTimeInterval = 0
+    private var frames = 0
+    private var longest: CFTimeInterval = 0
+    private var last: CFTimeInterval = 0
+
+    func count() {
+        guard link == nil else { return }
+        setvbuf(stdout, nil, _IOLBF, 0)
+        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = link.timestamp
+        if last > 0 { longest = max(longest, now - last) }
+        last = now
+        if second == 0 { second = now }
+        frames += 1
+        if now - second >= 1 {
+            print("app drew \(frames) frames in \(String(format: "%.2f", now - second))s, longest gap \(Int(longest * 1000)) ms")
+            (second, frames, longest) = (now, 0, 0)
+        }
     }
 }
 
