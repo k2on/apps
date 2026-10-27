@@ -27,21 +27,31 @@ mkdir -p "$out"
 
 shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
 
-# Record shot `id` for `seconds` to `to`: opened and left to settle, so
-# its launch is never in it, then told to move (the Darwin notification the
-# showcase listens for), then made a page's MP4 (encode.sh).
+# How many times slower than life a shot the showcase moves itself is
+# taken (`-slow`, ShowcaseApp.swift), sped back up after (encode.sh), so its
+# motion has $fps frames a second whatever the simulator composes. The
+# expanding card's zoom is the system's, on a clock nothing slows from
+# outside (window layer speed slows Core Animation's alone, and the
+# simulator's Slow Animations stops its screen), so it is taken at life's
+# speed, after the showcase has warmed it up once.
+slow=${IOS_SLOW:-10}
+taken_for() { [ "$1" = expanding-card ] && echo 1 || echo "$slow"; }
+
+# Record shot `id`, `taken` times slower than life, to `to`: opened and left
+# to settle, so its launch is never in it, then told to move (the Darwin
+# notification the showcase listens for), then made a page's MP4.
 record() {
-  local id=$1 seconds=$2 to=$3
-  xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
-  sleep 4
-  "$tmp/record" "$udid" "$seconds" 540 "$tmp/$id.mov" | sed 's/^/  /' &
+  local id=$1 taken=$2 to=$3
+  xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
+  sleep 5
+  "$tmp/record" "$udid" $((3 * taken + 2)) 540 "$tmp/$id.mov" | sed 's/^/  /' &
   local rec=$!
   sleep 1
   xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
   wait "$rec"
   xcrun simctl terminate booted "$bundle" 2>/dev/null || true
   sed 's/^/  /' "$(xcrun simctl get_app_container booted "$bundle" data)/Documents/frames.log" 2>/dev/null || true
-  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" 1 "$fps"
+  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$taken" "$fps"
 }
 
 # The simulator in `theme`, as it says back: just after a first boot it
@@ -70,7 +80,7 @@ capture() {
     echo "ios $theme $id ($kind)"
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
     if [ "$kind" = recording ]; then
-      record "$id" 6 "$out/$theme/$id.mp4"
+      record "$id" "$(taken_for "$id")" "$out/$theme/$id.mp4"
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4

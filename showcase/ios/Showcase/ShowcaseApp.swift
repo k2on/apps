@@ -8,7 +8,8 @@
 // notification (`notifyutil -p dev.arkui.showcase.go`, sent through
 // `simctl spawn`), so the launch is never in the recording, which
 // .github/screens/record.swift takes from the simulator's framebuffer,
-// every frame the app draws, at life's speed.
+// every frame it composes. What the showcase moves itself it moves `-slow`
+// times slower than life, and the workflow speeds it back up.
 import ArkUI
 import QuartzCore
 import SwiftUI
@@ -32,9 +33,19 @@ struct ShowcaseApp: App {
     }
 }
 
-/// `then`, `seconds` from now.
-func later(_ seconds: Double, _ then: @escaping () -> Void) {
+/// How many times slower than life the showcase moves what it moves itself
+/// (`-slow`), its pauses too: the workflow takes such a shot slowed and
+/// speeds the recording back up, for every frame of its motion.
+let slow = ShowcaseApp.argument("-slow").flatMap(Double.init) ?? 1
+
+/// `then`, `seconds` from now, at life's speed.
+func after(_ seconds: Double, _ then: @escaping () -> Void) {
     DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: then)
+}
+
+/// `then`, `seconds` of life from now, slowed.
+func later(_ seconds: Double, _ then: @escaping () -> Void) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds * slow, execute: then)
 }
 
 /// Whether the workflow has said to move: Android's `--ez go true`.
@@ -50,13 +61,6 @@ final class Go: ObservableObject {
                 guard let me else { return }
                 let go = Unmanaged<Go>.fromOpaque(me).takeUnretainedValue()
                 DispatchQueue.main.async {
-                    // A probe's (probe.yaml): the windows' layer speed, as
-                    // told to go, for every shot.
-                    if let speed = ShowcaseApp.argument("-layerSpeed").flatMap(Float.init) {
-                        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
-                            for window in scene.windows { window.layer.speed = speed }
-                        }
-                    }
                     go.told = true
                     Frames.shared.count()
                 }
@@ -142,8 +146,6 @@ struct Screen: View {
             if #available(iOS 26.0, *) { ExpandingCardShot() } else { Text("Needs iOS 26") }
         case "scroll-to-top":
             ScrollToTopShot()
-        case "clocks":
-            ClocksShot()
         default:
             Text("No showcase for \(shot)")
         }
@@ -204,10 +206,15 @@ private struct ExpandingCardShot: View {
             }
             .padding(Space.xl)
         }
-        // The zoom is the system's: the bar opens, holds, and closes.
+        // The zoom is the system's and runs on its own clock, so the card is
+        // taken at life's speed whatever `-slow` says. It is opened and
+        // closed once as it appears, off the recording: the first zoom in a
+        // fresh simulator pays for setting itself up and draws half the
+        // frames of the next.
+        .onAppear { after(0.5) { open = true }; after(1.8) { open = false } }
         .onChange(of: go.told) {
-            later(0.4) { open = true }
-            later(2.2) { open = false }
+            after(0.4) { open = true }
+            after(2.2) { open = false }
         }
     }
 }
@@ -247,11 +254,12 @@ private struct ScrollToTopShot: View {
             }
         }
 
-        /// From `a` to `b` on the spring, a step each tick.
+        /// From `a` to `b` on the spring, a step each tick, in life's time
+        /// (the clock divided by `slow`).
         private func glide(from a: CGFloat, to b: CGFloat) {
             let start = CACurrentMediaTime()
             Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
-                let t = CACurrentMediaTime() - start
+                let t = (CACurrentMediaTime() - start) / slow
                 let done = t >= 0.6
                 position.scrollTo(y: a + (b - a) * CGFloat(done ? 1 : sprung(t)))
                 if done { timer.invalidate() }
@@ -268,61 +276,4 @@ func sprung(_ t: Double) -> Double {
     let omega = Springs.stiffness.squareRoot()
     let damped = omega * (1 - zeta * zeta).squareRoot()
     return 1 - exp(-zeta * omega * t) * (cos(damped * t) + zeta * omega / damped * sin(damped * t))
-}
-
-/// A probe (.github/workflows/probe.yaml), not a shot of the docs: three
-/// squares each crossing the screen in one second once told to go, moved by
-/// three clocks: UIKit's (UIView.animate), SwiftUI's (withAnimation), and
-/// the render server's (a CABasicAnimation). Recorded with each way of
-/// slowing a simulator's animations, it says which clock each slows.
-private struct ClocksShot: View {
-    @EnvironmentObject private var go: Go
-    @State private var across = false
-
-    var body: some View {
-        GeometryReader { g in
-            VStack(alignment: .leading, spacing: 120) {
-                Moved(by: .uikit, go: go.told).frame(height: 80)
-                Color.green.frame(width: 80, height: 80).offset(x: across ? g.size.width - 80 : 0)
-                Moved(by: .coreAnimation, go: go.told).frame(height: 80)
-            }
-            .padding(.top, 160)
-        }
-        .onChange(of: go.told) {
-            withAnimation(.linear(duration: 1)) { across = true }
-        }
-    }
-
-    private struct Moved: UIViewRepresentable {
-        enum Clock { case uikit, coreAnimation }
-        let by: Clock
-        let go: Bool
-
-        func makeUIView(context: Context) -> UIView {
-            let row = UIView()
-            let square = UIView(frame: CGRect(x: 0, y: 0, width: 80, height: 80))
-            square.backgroundColor = by == .uikit ? .systemRed : .systemBlue
-            square.tag = 1
-            row.addSubview(square)
-            return row
-        }
-
-        func updateUIView(_ row: UIView, context: Context) {
-            guard go, let square = row.viewWithTag(1), square.frame.minX == 0, square.layer.animationKeys() == nil else { return }
-            let to = row.bounds.width - 80
-            switch by {
-            case .uikit:
-                UIView.animate(withDuration: 1, delay: 0, options: .curveLinear) { square.frame.origin.x = to }
-            case .coreAnimation:
-                let move = CABasicAnimation(keyPath: "position.x")
-                move.fromValue = square.layer.position.x
-                move.toValue = to + 40
-                move.duration = 1
-                move.timingFunction = CAMediaTimingFunction(name: .linear)
-                move.fillMode = .forwards
-                move.isRemovedOnCompletion = false
-                square.layer.add(move, forKey: "across")
-            }
-        }
-    }
 }
