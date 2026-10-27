@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The docs' Android captures, from a booted emulator: every shot
-# rust/docs/catalogue.json says Android has, in light and in dark, from the
-# debug build's showcase (ShowcaseActivity). A screenshot is a PNG a few
-# seconds after the shot opens; a recording is the screen recorded while it
-# moves by itself, cut into JPEG frames.
+# docs/site/catalogue.json says Android has, in light and in dark, from the
+# showcase app (showcase/android, ShowcaseActivity). A screenshot is a PNG a few
+# seconds after the shot opens; a recording is the screen recorded while the
+# open shot moves, once told to, cut into JPEG frames.
 #
 #   android.sh <out> <apk>
 #
@@ -12,7 +12,7 @@ set -euo pipefail
 out=$1
 apk=$2
 fps=${FPS:-10}
-pkg=dev.harken.android
+pkg=dev.arkui.showcase
 tmp=$(mktemp -d)
 
 adb install -r "$apk" >/dev/null
@@ -29,7 +29,7 @@ demo battery -e level 100 -e plugged false
 demo network -e wifi show -e level 4
 demo notifications -e visible false
 
-shots=$(jq -r '.components[].shots[] | select(.phones | index("android")) | "\(.id) \(.kind)"' rust/docs/catalogue.json)
+shots=$(jq -r '.components[].shots[] | select(.phones | index("android")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
 
 for theme in light dark; do
   if [ "$theme" = dark ]; then adb shell cmd uimode night yes >/dev/null; else adb shell cmd uimode night no >/dev/null; fi
@@ -40,11 +40,15 @@ for theme in light dark; do
     echo "android $theme $id ($kind)"
     adb shell am force-stop "$pkg"
     if [ "$kind" = recording ]; then
-      adb shell rm -f /sdcard/shot.mp4
-      adb shell screenrecord --time-limit 6 /sdcard/shot.mp4 &
-      rec=$!
-      sleep 1
+      # Opened and settled first, so the launch is never recorded; then
+      # told to move, by the same shot asked again with `go`.
       adb shell am start -W -n "$pkg/.ShowcaseActivity" --es shot "$id" >/dev/null
+      sleep 4
+      adb shell rm -f /sdcard/shot.mp4
+      adb shell screenrecord --time-limit 4 /sdcard/shot.mp4 &
+      rec=$!
+      sleep 0.5
+      adb shell am start -n "$pkg/.ShowcaseActivity" --es shot "$id" --ez go true >/dev/null
       wait "$rec" || true
       sleep 1
       adb pull /sdcard/shot.mp4 "$tmp/$id.mp4" >/dev/null

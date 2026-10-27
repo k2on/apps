@@ -7,6 +7,7 @@
 // back to the front said, which is when a sign-in that came back empty may
 // go again (Onboarding.swift).
 import AuthenticationServices
+import ArkUI
 import SwiftUI
 import UIKit
 
@@ -26,21 +27,12 @@ struct HarkenApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                #if DEBUG
-                // The docs' captures: one screen of the demo library, not the app.
-                if let shot = Showcase.shot {
-                    Showcase.Screen(shot: shot)
-                } else {
-                    Root()
-                }
-                #else
-                Root()
-                #endif
-            }
-            .environmentObject(model)
-            .tint(.gold)
-            .onOpenURL { model.open(url: $0) }
+            Root()
+                .environmentObject(model)
+                .tint(.gold)
+                // The derived square in harken's colours (ArkUI's are neutral).
+                .environment(\.squares, .harken)
+                .onOpenURL { model.open(url: $0) }
         }
         .onChange(of: phase) { _, now in
             if now == .background { wasAway = true }

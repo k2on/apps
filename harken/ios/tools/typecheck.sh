@@ -22,6 +22,9 @@ APP="$HERE/../Harken"
 TESTS="$HERE/../HarkenTests"
 BINDINGS="$1"
 TYPED="${TYPED:-$HERE/../../../rust/ark-ffi/swift/Typed.swift}"
+# ArkUI's Foundation half (swift/ArkUI), which the rows import: built first
+# as a module of its own, as Xcode builds the package.
+CORE="${ARKUI_CORE:-$HERE/../../../swift/ArkUI/Sources/ArkUICore}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
@@ -77,6 +80,8 @@ cat "$BINDINGS"/*.modulemap > "$OUT/ffi/module.modulemap"
 SWIFTC="${SWIFT_EXEC:-swiftc}"
 "$SWIFTC" -emit-library -static -emit-module -module-name Combine -parse-as-library "$OUT/Combine.swift" \
   -emit-module-path "$OUT/Combine.swiftmodule" -o "$OUT/libCombine.a"
+"$SWIFTC" -emit-library -static -emit-module -module-name ArkUICore -parse-as-library "$CORE"/*.swift \
+  -emit-module-path "$OUT/ArkUICore.swiftmodule" -o "$OUT/libArkUICore.a"
 "$SWIFTC" -typecheck -parse-as-library -module-name Harken -I "$OUT" -I "$OUT/ffi" \
   "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}"
 echo "harken/ios: $(for f in "${SOURCES[@]}"; do printf '%s ' "${f#$APP/}"; done)type-check against harken's library"
@@ -108,6 +113,6 @@ if [ -z "${HARKEN_FFI_LIB:-}" ]; then
 else
   "$SWIFTC" -parse-as-library -module-name Harken -I "$OUT" -I "$OUT/ffi" \
     "$BINDINGS"/*.swift "$TYPED" "${SOURCES[@]}" "$OUT"/tests/*.swift "$OUT/XCTest.swift" \
-    -L "$OUT" -lCombine -L "$(dirname "$HARKEN_FFI_LIB")" -lharken_ffi -Xlinker -rpath -Xlinker "$(dirname "$HARKEN_FFI_LIB")" -o "$OUT/tests/run"
+    -L "$OUT" -lCombine -lArkUICore -L "$(dirname "$HARKEN_FFI_LIB")" -lharken_ffi -Xlinker -rpath -Xlinker "$(dirname "$HARKEN_FFI_LIB")" -o "$OUT/tests/run"
   "$OUT/tests/run"
 fi

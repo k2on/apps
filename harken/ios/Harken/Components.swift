@@ -5,6 +5,7 @@
 // and `ui/Components.kt`. And the two things every screen can ask of the
 // frame around it (Shell.swift), handed down the environment: open a page on
 // this tab's stack, and raise a sheet.
+import ArkUI
 import SwiftUI
 
 /// What rises over a page.
@@ -396,10 +397,11 @@ struct Avatar: View {
     let picture: String
     var side: CGFloat = 32
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.squares) private var squares
     @State private var image: UIImage? = nil
 
     var body: some View {
-        let set = scheme == .dark ? Squares.dark : Squares.light
+        let set = squares.of(dark: scheme == .dark)
         let rgb = set[Art.pick(set.count, name)]
         ZStack {
             Circle().fill(Color(uiColor: UIColor(rgb: rgb)))

@@ -140,7 +140,8 @@ jobs:
             .#checks.x86_64-linux.rust .#checks.x86_64-linux.ffi \
             .#checks.x86_64-linux.traces .#checks.x86_64-linux.vectors \
             .#checks.x86_64-linux.fuzz-smoke .#checks.x86_64-linux.versions \
-            .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module
+            .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module \
+            .#checks.x86_64-linux.docs
 
   apk:
     needs: plan

@@ -11,6 +11,7 @@
 // launch and its reason dropped — a cover is decoration, and the derived
 // square under it is already right. `/media` needs no token, which is also
 // what lets the lock screen draw the same URL.
+import ArkUI
 import SwiftUI
 import UIKit
 import ImageIO

@@ -5,6 +5,7 @@
 // needle, so the three groups answer one question. With nothing typed it
 // offers the last few searches, which live on this phone and nowhere else.
 // What it last found is the model's, so leaving the tab keeps it.
+import ArkUI
 import SwiftUI
 
 /// How many songs a search lists.

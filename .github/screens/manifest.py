@@ -6,7 +6,7 @@
 device.json and, per theme, `<id>.png` for a screenshot and `<id>/NNN.jpg`
 for a recording's frames. A phone whose capture failed this run keeps the
 directory it had, so it is listed as it was. The docs read this
-(rust/docs/src/screens.rs).
+(docs/site/src/screens.rs).
 """
 import datetime
 import json

@@ -10,6 +10,7 @@
 // which Android's `Tabs.kt` built by hand); the pages they open zooming out
 // of the cover that was tapped; and the sheets a song's menu raises. This
 // file wires; what each screen draws is the screen's.
+import ArkUI
 import SwiftUI
 
 struct Shell: View {

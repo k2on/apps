@@ -1390,20 +1390,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "docs"
-version = "0.1.0"
-dependencies = [
- "arkui",
- "iced",
- "serde",
- "serde_json",
- "ureq",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

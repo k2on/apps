@@ -5,6 +5,7 @@
 // sees here is a cursor, a hash or a count of pending intents: those are the
 // diagnostics, behind the version — tapped seven times, the way a phone's
 // build number unlocks its developer options — and remembered once found.
+import ArkUI
 import SwiftUI
 
 struct SettingsView: View {

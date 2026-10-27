@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The docs' iOS captures, from a booted simulator: every shot
-# rust/docs/catalogue.json says iOS has, in light and in dark, from the Debug
+# docs/site/catalogue.json says iOS has, in light and in dark, from the Debug
 # build's showcase (`-showcase <id>`, Showcase.swift).
 #
 #   ios.sh <out> <app> <bundle id> <device name>
@@ -18,7 +18,7 @@ xcrun simctl install booted "$app"
 xcrun simctl status_bar booted override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
 mkdir -p "$out"
 
-shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' rust/docs/catalogue.json)
+shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
 
 for theme in light dark; do
   xcrun simctl ui booted appearance "$theme"

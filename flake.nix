@@ -262,7 +262,7 @@
           # The pages' dependencies for wasm32, once for both.
           wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
           wasmBuilds = lib.concatMapStringsSep "\n" wasmBuild [
-            "-p harken-iced" "-p harken-iced --features demo" "-p docs"
+            "-p harken-iced" "-p harken-iced --features demo"
           ];
           wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
             pname = "arkdb-wasm";
@@ -309,13 +309,61 @@
           harken-web = icedWeb { pname = "harken-web"; demo = true; };
           # What harken-server serves as its web directory.
           harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
-          # arkui's documentation, drawn by arkui (rust/docs), with the
-          # catalogue beside it as JSON for any other site to read.
-          docs = wasmPage {
+          # The docs (docs/site): a Cargo workspace of its own, built on a
+          # chain of its own — its dependencies for wasm32, then the page —
+          # from a source that is only the docs and the crates they name by
+          # path: arkui, and rust/Cargo.toml for what arkui inherits from its
+          # workspace. So the docs and ArkDB's kernel never rebuild each
+          # other: an edit to the docs is no input to the kernel, the kernel
+          # is no input to the docs, and arkui is an input to both. ArkDB's
+          # docs, when they join, add its crates here. The wasm-bindgen it
+          # locks has to be the apps' (the CLI below is built for that one).
+          docsWasmBindgen =
+            let lock = builtins.fromTOML (builtins.readFile ./docs/site/Cargo.lock);
+            in (lib.findFirst (p: p.name == "wasm-bindgen") (throw "docs/site/Cargo.lock has no wasm-bindgen") lock.package).version;
+          docsCommon = {
             pname = "docs";
-            crate = "docs";
-            files = "../rust/docs/web/index.html ../rust/docs/web/favicon.svg ../rust/docs/catalogue.json";
+            version = "0.1.0";
+            src = only [ "docs/site" "rust/arkui" "rust/Cargo.toml" ];
+            sourceRoot = "source/docs/site";
+            cargoVendorDir = craneLib.vendorCargoDeps { cargoLock = ./docs/site/Cargo.lock; };
           };
+          docsDepsArgs = docsCommon // {
+            extraDummyScript = "cp ${./docs/site/Cargo.lock} $out/docs/site/Cargo.lock";
+          };
+          docsWasm = "cargoWithProfile build --locked --target wasm32-unknown-unknown";
+          docsWasmDeps = wasmCrane.buildDepsOnly (docsDepsArgs // {
+            pname = "docs-wasm-deps";
+            doCheck = false;
+            buildPhaseCargoCommand = docsWasm;
+          });
+          docs =
+            assert lib.assertMsg (docsWasmBindgen == wasmBindgenVersion)
+              "docs/site locks wasm-bindgen ${docsWasmBindgen} and rust/ ${wasmBindgenVersion}: they have to be one";
+            wasmCrane.mkCargoDerivation (docsCommon // {
+              cargoArtifacts = docsWasmDeps;
+              doInstallCargoArtifacts = false;
+              nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ];
+              buildPhaseCargoCommand = ''
+                ${docsWasm}
+                wasm-bindgen --target web --no-typescript --out-dir pkg \
+                  target/wasm32-unknown-unknown/release/docs.wasm
+                wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+                  --enable-sign-ext --enable-mutable-globals --enable-reference-types \
+                  -o pkg/docs_bg.wasm pkg/docs_bg.wasm
+              '';
+              # The page names the module and the wasm with `?v=dev`; this
+              # output's own hash replaces it, as `wasmPage`'s does.
+              installPhaseCommand = ''
+                mkdir -p $out
+                cp -r pkg $out/
+                cp web/index.html web/favicon.svg catalogue.json $out/
+                substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
+              '';
+            });
+          # …and on the host, for its checks: formatted, lint-clean, and its
+          # tests (the catalogue held to arkui and to catalogue.json).
+          docsHostDeps = craneLib.buildDepsOnly (docsDepsArgs // { pname = "docs-deps"; });
 
           # The server (harken/server: the server and harken-peer), on a
           # chain of its own as the APK's host part is below — dependencies,
@@ -653,21 +701,8 @@
                   ${pkgs.python3}/bin/python3 ${./nix/screens-index.py} $out ${lib.escapeShellArg title} ${lib.escapeShellArg note} > $out/index.html
                 '';
               });
-              # The debug build, which has the showcase the docs' captures are
-              # taken from (`app/src/debug`, .github/workflows/screens.yaml):
-              # no version, so it moves only with what it is built from. The
-              # recorded graph already covers `assembleDebug`.
-              showcase = apk.overrideAttrs (old: {
-                pname = "${name}-apk-showcase";
-                gradleBuildTask = ":app:assembleDebug";
-                versionFlags = [ ];
-                installPhase = ''
-                  mkdir -p $out
-                  cp app/build/outputs/apk/debug/app-debug.apk $out/${name}-showcase.apk
-                '';
-              });
             in
-            { inherit apk screens showcase; deps = apk.mitmCache.updateScript; };
+            { inherit apk screens; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
@@ -682,7 +717,6 @@
           };
           harken-apk = harken.apk;
           harken-android-screens = harken.screens;
-          harken-apk-showcase = harken.showcase;
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
           # docs/plan-bible.md): plain Kotlin, no native library and none of
@@ -839,7 +873,7 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced docs;
             default = ark;
-            inherit harken-apk harken-android-screens harken-apk-showcase;
+            inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
             revelation-android-screens = revelation.screens;
@@ -946,6 +980,17 @@
               installPhase = "touch $out";
             });
             # The workspace formatted as rust/rustfmt.toml says.
+            docs = craneLib.cargoTest (docsCommon // {
+              pname = "docs-checks";
+              cargoArtifacts = docsHostDeps;
+              cargoExtraArgs = "--locked";
+              preBuild = ''
+                cargo fmt --check
+                cargoWithProfile clippy --locked --all-targets -- -D warnings
+              '';
+              doInstallCargoArtifacts = false;
+              installPhase = "touch $out";
+            });
             fmt = craneLib.cargoFmt (common // {
               pname = "arkdb";
               cargoExtraArgs = "--all";
@@ -986,7 +1031,7 @@
             # SwiftUI. The views are SwiftUI's and are not checked here.
             harken-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "harken-ios-typecheck";
-              src = only [ "harken/ios" "rust/ark-ffi/swift" ];
+              src = only [ "harken/ios" "rust/ark-ffi/swift" "swift/ArkUI" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               # nixpkgs' Swift 5.8 on Linux reports x86_64-pc-linux-gnu where

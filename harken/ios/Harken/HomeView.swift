@@ -5,6 +5,7 @@
 // account's, not the phone's: the listening session's track while there is
 // a session to be part of, else the newest play in the log, the same on
 // every device and there offline.
+import ArkUI
 import SwiftUI
 
 /// How many of the newest songs Home's shelf shows.

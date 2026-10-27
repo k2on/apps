@@ -92,7 +92,7 @@ fn overview<'a>(app: &App) -> Element<'a, Message> {
     let captured: usize = COMPONENTS.iter().map(|c| c.shots.len()).sum();
     let intro = prose([
         "The ui every app here shares, by component. Each page says how to use it on the desktop, where every example is the arkui component itself, drawn by the renderer the apps use, and on a phone, Android or iOS, with the latest capture from a real emulator and simulator in a frame of that device.".to_string(),
-        "This is the one place the components are described. An agent working on an app reads the page for the part it needs; one that changes a component changes its entry in rust/docs/src/components.rs (and the module's in catalogue.rs, its example in examples.rs) in the same commit, and the tests fail until it does. Other sites pull catalogue.json, published beside this page.".to_string(),
+        "This is the one place the components are described. An agent working on an app reads the page for the part it needs; one that changes a component changes its entry in docs/site/src/components.rs (and the module's in catalogue.rs, its example in examples.rs) in the same commit, and the tests fail until it does. Other sites pull catalogue.json, published beside this page.".to_string(),
         format!(
             "{} components over {} arkui modules, and {captured} captures from the phones. j and k walk the sidebar.",
             COMPONENTS.len(),

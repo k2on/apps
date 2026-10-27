@@ -1,0 +1,33 @@
+# The shared components' showcase for iOS: an app of its own over ArkUI for
+# SwiftUI (swift/ArkUI) and nothing else — no app's code, no kernel. The
+# docs' captures are taken from it (.github/workflows/screens.yaml), launched
+# at one shot by name: `-showcase art`. `xcodegen generate` here writes
+# Showcase.xcodeproj; nothing under it is committed.
+name: Showcase
+options:
+  bundleIdPrefix: dev.arkui
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  ArkUI:
+    path: ../../swift/ArkUI
+targets:
+  Showcase:
+    type: application
+    platform: iOS
+    sources:
+      - path: Showcase
+    dependencies:
+      - package: ArkUI
+        product: ArkUI
+    info:
+      path: Showcase/Info.plist
+      properties:
+        CFBundleDisplayName: Showcase
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.arkui.showcase
+        SWIFT_VERSION: "5.0"
+        CODE_SIGNING_ALLOWED: "NO"

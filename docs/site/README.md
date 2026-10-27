@@ -4,7 +4,7 @@ The documentation site: for now arkui's, and ArkDB's can join it.
 
 An iced app that is a page in a browser (`nix build .#docs`, published at
 https://k2on.github.io/apps/docs/) and a window on the desktop
-(`cargo run -p docs`). It is organised by component — a menu, cards, a
+(`cargo run` here). It is organised by component — a menu, cards, a
 list — and each page says how to use it:
 
 - **Desktop**: arkui's modules for it, a working example drawn by arkui
@@ -17,6 +17,16 @@ list — and each page says how to use it:
 It works at a phone's width: below 760 pixels the sidebar becomes a dropdown
 in the top bar, examples wrap, and a finger scrolls the page.
 
+## A workspace of its own
+
+`docs/site` is a Cargo workspace on its own, with its own `Cargo.lock`, and
+not a member of `rust/`'s. So the docs and the apps never share a build: an
+edit here is no input to ArkDB's kernel or to any app, and the kernel moving
+does not rebuild the docs. The docs reach the rest by path — `arkui` now,
+and ArkDB's crates when their docs join — so they rebuild exactly when
+something they name changes. Its checks are `nix build .#checks.<system>.docs`
+(format, clippy, tests); the page is `nix build .#docs`.
+
 ## The one place the components are described
 
 `src/components.rs` lists the components: each one's desktop modules, its
@@ -28,9 +38,9 @@ running anything (it is published beside the page).
 **If you change a component, change its entry here in the same commit**, then
 regenerate the JSON:
 
-    cargo run -p docs -- --json > rust/docs/catalogue.json
+    cargo run -- --json > catalogue.json        # in docs/site
 
-`cargo test -p docs` fails until you have. It checks that:
+`cargo test` here fails until you have. It checks that:
 
 - every `pub mod` of arkui has an entry, and every entry is a module;
 - every module is in exactly one component;

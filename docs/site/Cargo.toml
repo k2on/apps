@@ -2,19 +2,26 @@
 name = "docs"
 version = "0.1.0"
 description = "arkui's documentation as an iced app: every component drawn by arkui itself, and the catalogue of what harken draws with it."
-edition.workspace = true
-license.workspace = true
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# A workspace of its own, with its own lockfile, so that the docs and the
+# apps never share a build: an edit here moves no input of ArkDB's kernel or
+# of harken's, and an edit there moves the docs only through the crates they
+# name (arkui now; ArkDB's when its docs join). The wasm-bindgen it locks is
+# the apps' (flake.nix holds the two to one version).
+[workspace]
 
 # An iced app rather than a page of HTML, so every component on it is the
 # component, drawn by the renderer the apps use: a picture of a menu in a web
 # page could drift from the menu, and this cannot. In a browser it is one wasm
 # module on one canvas (`web/`, `nix build .#docs`); natively a window
-# (`cargo run -p docs`), and `--json` prints the catalogue instead.
+# (`cargo run` in docs/site), and `--json` prints the catalogue instead.
 
 [dependencies]
-arkui = { path = "../arkui" }
-serde = { workspace = true }
-serde_json = { workspace = true }
+arkui = { path = "../../rust/arkui" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }

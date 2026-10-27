@@ -1,16 +1,18 @@
-// The shared components the docs show, on a real device: an activity a debug
-// build has and a release does not, opened at one shot by name
-// (`--es shot cards`). It draws `ui/` — the half of this app that is any
-// app's, with nothing of this one in it — on its own: placeholder content,
-// and ark-ui's neutral theme rather than this app's.
+// The shared components the docs show, on a real device: one activity,
+// opened at one shot by name (`--es shot cards`), drawing ark-ui on its own —
+// placeholder content, and ark-ui's neutral theme.
 //
-// The shots are the docs' (`rust/docs/src/components.rs`), and the screens
+// The shots are the docs' (`docs/site/src/components.rs`), and the screens
 // workflow (.github/workflows/screens.yaml) captures each from an emulator:
-// a still a few seconds after it opens, or a recording, for which the shot
-// moves by itself once it has been up a beat. The theme is the system's,
-// which the workflow sets before each capture.
-package dev.harken.android
+// a still a few seconds after it opens, or a recording: the shot opened and
+// left to settle, the recording started, then the shot asked again with
+// `--ez go true`, which reaches the activity already up (it is singleTop)
+// and sets it moving — so what is recorded is the motion, and never the
+// launch. The theme is the system's, which the workflow sets before each
+// capture.
+package dev.arkui.showcase
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -44,6 +46,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,11 +78,20 @@ import dev.harken.android.ui.rememberExpandingCard
 import kotlinx.coroutines.delay
 
 class ShowcaseActivity : ComponentActivity() {
+    /** Whether a recording's shot has been told to move. */
+    private val go = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val shot = intent.getStringExtra("shot") ?: "cards"
-        setContent { Neutral { Showcase(shot) } }
+        go.value = intent.getBooleanExtra("go", false)
+        setContent { Neutral { Showcase(shot, go.value) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("go", false)) go.value = true
     }
 }
 
@@ -101,9 +113,9 @@ private val places = listOf("Harbour", "Orchard", "Meadow", "Summit", "Delta", "
 @Composable
 private fun Screen(content: @Composable () -> Unit) = Box(Modifier.fillMaxSize().safeDrawingPadding()) { content() }
 
-/** One shot, by the id the docs give it. */
+/** One shot, by the id the docs give it; a recording's moves once `go`. */
 @Composable
-fun Showcase(shot: String) {
+fun Showcase(shot: String, go: Boolean) {
     when (shot) {
         "cards" -> Screen {
             Column(Modifier.padding(Space.page), verticalArrangement = Arrangement.spacedBy(Space.l)) {
@@ -159,8 +171,9 @@ fun Showcase(shot: String) {
         // A bar at the foot rising to the whole screen on its own springs, held, and falling back.
         "expanding-card" -> {
             val card = rememberExpandingCard()
-            LaunchedEffect(card) {
-                delay(1_200)
+            LaunchedEffect(card, go) {
+                if (!go) return@LaunchedEffect
+                delay(400)
                 card.open()
                 delay(1_500)
                 card.close()
@@ -193,10 +206,11 @@ fun Showcase(shot: String) {
         "scroll-to-top" -> {
             val reselect = remember { Reselect() }
             val list = rememberLazyListState()
-            LaunchedEffect(Unit) {
+            LaunchedEffect(go) {
+                if (!go) return@LaunchedEffect
+                delay(400)
+                list.animateScrollToItem(30)
                 delay(800)
-                list.scrollToItem(30)
-                delay(1_200)
                 reselect.ask()
             }
             CompositionLocalProvider(LocalReselect provides reselect) {

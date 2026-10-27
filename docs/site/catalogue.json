@@ -19,11 +19,11 @@
       },
       "ios": {
         "at": [
-          "Theme.swift: Space, Squares"
+          "swift/ArkUI: Space, Squares, \\.squares, Color(light:dark:)"
         ],
         "how": [
-          "Space.xs … Space.xxl and Space.page for spacing.",
-          "Squares holds the derived square's pairs."
+          "import ArkUI. Space.xs … Space.xxl, Space.page, Space.corner: the spacing, Android's.",
+          "Set the derived square's colours once at the root: .environment(\\.squares, Squares(light:dark:)); Squares.neutral until an app does."
         ]
       },
       "shots": []
@@ -97,10 +97,11 @@
       },
       "ios": {
         "at": [
-          "Theme.swift: Square"
+          "swift/ArkUI: Square, Art (ArkUICore)"
         ],
         "how": [
-          "Square(seed:): the same square for the same name as Android's and the desktop's."
+          "Square(seed:): the same square for the same name as Android's and the desktop's.",
+          "Art.hash and Art.pick are in ArkUICore, which needs only Foundation."
         ]
       },
       "shots": [
@@ -423,10 +424,10 @@
       },
       "ios": {
         "at": [
-          "Theme.swift: Springs"
+          "swift/ArkUI: Springs"
         ],
         "how": [
-          "The same springs as Android's, converted exactly (docs/plan-arkui-swift.md)."
+          "Springs.move, Springs.size, Springs.fade: Android's springs converted exactly (docs/plan-arkui-swift.md)."
         ]
       },
       "shots": []

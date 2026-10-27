@@ -1,5 +1,5 @@
 # The docs' phone captures (https://k2on.github.io/apps/docs/): every shot
-# rust/docs/src/components.rs names, taken from a real Android emulator and a
+# docs/site/src/components.rs names, taken from a real Android emulator and a
 # real iOS simulator, in light and dark, and committed to the `screens`
 # branch with a manifest.json saying what is there and on which device.
 #
@@ -9,19 +9,20 @@
 # on the branch. Pushed from a claude/** branch it captures and uploads, and
 # publishes nothing.
 #
-# The shots come from each app's debug-only showcase, which draws the shared
-# components on their own with placeholder content
-# (harken/android/app/src/debug/.../Showcase.kt, harken/ios/Harken/Showcase.swift).
+# The shots come from the showcase apps (showcase/), one per phone: the
+# shared components and a screen that draws one shot of them by name, with
+# placeholder content — no app's code and no kernel, so neither needs Rust
+# or nix to build.
 name: screens
 
 on:
   push:
     branches: [main, "claude/**"]
     paths:
-      - "harken/android/app/src/debug/**"
+      - "showcase/**"
+      - "swift/ArkUI/**"
       - "harken/android/app/src/main/kotlin/dev/harken/android/ui/**"
-      - "harken/ios/Harken/**"
-      - "rust/docs/src/components.rs"
+      - "docs/site/src/components.rs"
       - ".github/screens/**"
       - ".github/workflows/screens.yaml"
   workflow_dispatch:
@@ -56,31 +57,20 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           df -h /
 
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - if: vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
+      - uses: actions/setup-java@v4
         with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          # Google's SDK stays out of a public cache (build.yaml says why).
-          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
+          distribution: temurin
+          java-version: "21"
 
-      - uses: nix-community/cache-nix-action@v6
+      # The Gradle the showcase's plugins want; the runner's Android SDK.
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          primary-key: nix-showcase-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'rust/Cargo.lock', 'harken/android/deps.json') }}
-          restore-prefixes-first-match: nix-showcase-${{ runner.os }}-
-          gc-max-store-size-linux: 6G
-          purge: true
-          purge-prefixes: nix-showcase-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
+          gradle-version: "8.11.1"
 
-      # The debug build, with the showcase in it.
       - name: Build the showcase
         run: |
-          nix build .#harken-apk-showcase --print-build-logs
-          cp result/harken-showcase.apk "$RUNNER_TEMP/showcase.apk"
+          gradle -p showcase/android :app:assembleDebug
+          cp showcase/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/showcase.apk"
 
       - name: Install ffmpeg
         run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
@@ -106,12 +96,10 @@ jobs:
   ios:
     runs-on: macos-15
     timeout-minutes: 90
-    env:
-      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'us.koon.harken' }}
     steps:
       - uses: actions/checkout@v4
 
-      # The newest Xcode 26 on the image, as ios.yaml: the app needs the iOS 26 SDK.
+      # The newest Xcode 26 on the image, as ios.yaml.
       - name: Select Xcode
         run: |
           xcode=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
@@ -121,45 +109,15 @@ jobs:
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios-sim
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust
-
-      # The kernel for the simulator alone, bound as ios.yaml binds it.
-      - name: Build the kernel for the simulator
-        working-directory: rust
-        env:
-          IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-        run: |
-          cargo build --locked --release -p harken-ffi --lib --target aarch64-apple-ios-sim
-          cargo build --locked --release -p harken-ffi --lib
-          cargo run --locked --release -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
-            generate --library target/release/libharken_ffi.dylib \
-            --language swift --no-format --out-dir "$RUNNER_TEMP/bindings"
-          mkdir -p "$RUNNER_TEMP/headers"
-          cp "$RUNNER_TEMP"/bindings/*.h "$RUNNER_TEMP/headers/"
-          cat "$RUNNER_TEMP"/bindings/*.modulemap > "$RUNNER_TEMP/headers/module.modulemap"
-          out=../harken/ffi/ios
-          rm -rf "$out" && mkdir -p "$out/swift"
-          xcodebuild -create-xcframework \
-            -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers "$RUNNER_TEMP/headers" \
-            -output "$out/HarkenFFI.xcframework"
-          cp "$RUNNER_TEMP"/bindings/*.swift ark-ffi/swift/Typed.swift "$out/swift/"
-
-      - name: Build the app for the simulator
-        working-directory: harken/ios
+      - name: Build the showcase for the simulator
+        working-directory: showcase/ios
         run: |
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           xcodegen generate
           xcodebuild build \
-            -project Harken.xcodeproj -scheme Harken -configuration Debug \
+            -project Showcase.xcodeproj -scheme Showcase -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$RUNNER_TEMP/derived" \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" CODE_SIGNING_ALLOWED=NO
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO
 
       # The newest iPhone Pro the newest iOS runtime has.
       - name: Boot a simulator
@@ -176,8 +134,8 @@ jobs:
       - name: Capture
         run: |
           bash .github/screens/ios.sh "$RUNNER_TEMP/out/ios" \
-            "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Harken.app" \
-            "$BUNDLE_ID" "${{ steps.sim.outputs.device }}"
+            "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app" \
+            dev.arkui.showcase "${{ steps.sim.outputs.device }}"
 
       - uses: actions/upload-artifact@v4
         with:

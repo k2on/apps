@@ -30,6 +30,14 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   the domain linked in, one native library) under `android/` (Compose)
   and `ios/` (SwiftUI), each over the types `arkdb gen` writes.
   `harken/README.md` says how to run them together.
+- `docs/site` — the documentation site, its own Cargo workspace so that it
+  and the apps never rebuild each other: arkui's components by component,
+  each for the desktop and both phones (https://k2on.github.io/apps/docs/).
+- `swift/ArkUI` — ArkUI for SwiftUI, any Ark app's on iOS: the spacing,
+  the springs, the derived square (`ArkUICore`, Foundation alone, and
+  `ArkUI`, the views). harken's iOS app is over it.
+- `showcase/` — the shared components on their own, an app per phone, which
+  the docs' captures are taken from (`.github/workflows/screens.yaml`).
 - `docs/plan-v5.md` — the design, how it landed and what it measures
   (Part 3); `docs/arkdb.md` is the history it superseded.
 

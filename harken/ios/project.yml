@@ -27,6 +27,11 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
+# ArkUI for SwiftUI, any Ark app's (swift/ArkUI): the spacing, the springs,
+# the derived square.
+packages:
+  ArkUI:
+    path: ../../swift/ArkUI
 targets:
   Harken:
     type: application
@@ -35,6 +40,8 @@ targets:
       - path: Harken
       - path: ../ffi/ios/swift
     dependencies:
+      - package: ArkUI
+        product: ArkUI
       - framework: ../ffi/ios/HarkenFFI.xcframework
         embed: false
       # What the Rust standard library and its random numbers reach for on iOS.

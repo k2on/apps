@@ -1,6 +1,7 @@
 // Where a track's bytes are, how a length is said, a page's place, and the
 // derived square's hash — pinned to the desktop's and the Android app's.
 @testable import Harken
+import ArkUICore
 import Foundation
 import XCTest
 

@@ -7,6 +7,7 @@
 // bar's bottom; the playlists list is where a new one is made, and the
 // domain's own checks decide whether a name will do; the + on Podcasts and
 // Sermons finds a show to follow (`FollowSheet`).
+import ArkUI
 import SwiftUI
 
 enum LibraryTab: String, CaseIterable, Identifiable {

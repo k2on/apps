@@ -4,10 +4,10 @@
 //! A component is the thing an app is made of — a menu, a card, a list —
 //! whatever each platform calls it. Only what is shared: on the desktop it
 //! is arkui's, and its page draws the live example; on a phone it is the
-//! shared Compose (`ui/`, ark-ui for Android) or SwiftUI (what ArkUI for
-//! SwiftUI starts from), and its page says where and how, with the latest
-//! capture from a real emulator
-//! and simulator: `shots` names them, the `screens` workflow takes them
+//! shared Compose (`ui/`, ark-ui for Android) or SwiftUI (ArkUI for SwiftUI,
+//! `swift/ArkUI`), and its page says where and how, with the latest capture
+//! from a real emulator and simulator: `shots` names them, the showcase apps
+//! draw them (`showcase/`), the `screens` workflow takes them
 //! (`.github/workflows/screens.yaml`), and the page fetches what it last
 //! published.
 use arkui::glyphs;
@@ -72,7 +72,7 @@ pub enum Kind {
 #[derive(Debug, Clone, Serialize)]
 pub struct Shot {
     /// The file it is published as, and the id each phone's showcase answers
-    /// to (Showcase.kt on Android, Showcase.swift on iOS).
+    /// to (showcase/android's Showcase.kt, showcase/ios's ShowcaseApp.swift).
     pub id: &'static str,
     pub kind: Kind,
     /// What it shows.
@@ -145,8 +145,11 @@ pub const COMPONENTS: &[Component] = &[
             ],
         }),
         ios: Some(Mobile {
-            at: &["Theme.swift: Space, Squares"],
-            how: &["Space.xs … Space.xxl and Space.page for spacing.", "Squares holds the derived square's pairs."],
+            at: &["swift/ArkUI: Space, Squares, \\.squares, Color(light:dark:)"],
+            how: &[
+                "import ArkUI. Space.xs … Space.xxl, Space.page, Space.corner: the spacing, Android's.",
+                "Set the derived square's colours once at the root: .environment(\\.squares, Squares(light:dark:)); Squares.neutral until an app does.",
+            ],
         }),
         shots: &[],
     },
@@ -198,8 +201,8 @@ pub const COMPONENTS: &[Component] = &[
             how: &["Square(seed, modifier)", "Cover(seed, art, side, modifier, round = false, corner = Space.corner): the square until the picture loads.", "Art.hash is FNV-1a over UTF-16, the desktop's."],
         }),
         ios: Some(Mobile {
-            at: &["Theme.swift: Square"],
-            how: &["Square(seed:): the same square for the same name as Android's and the desktop's."],
+            at: &["swift/ArkUI: Square, Art (ArkUICore)"],
+            how: &["Square(seed:): the same square for the same name as Android's and the desktop's.", "Art.hash and Art.pick are in ArkUICore, which needs only Foundation."],
         }),
         shots: &[shot("art", "Squares derived from twelve names.", BOTH)],
     },
@@ -383,8 +386,8 @@ pub const COMPONENTS: &[Component] = &[
             how: &["Springs.settle() and the rest: spring specs with a cap on how long any move takes."],
         }),
         ios: Some(Mobile {
-            at: &["Theme.swift: Springs"],
-            how: &["The same springs as Android's, converted exactly (docs/plan-arkui-swift.md)."],
+            at: &["swift/ArkUI: Springs"],
+            how: &["Springs.move, Springs.size, Springs.fade: Android's springs converted exactly (docs/plan-arkui-swift.md)."],
         }),
         shots: &[],
     },

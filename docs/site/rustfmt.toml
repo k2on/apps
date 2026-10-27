@@ -1,0 +1,3 @@
+# The apps' rules (rust/rustfmt.toml), which a workspace of its own does not
+# reach.
+max_width = 150

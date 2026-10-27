@@ -9,6 +9,7 @@
 // it; the full player says where the sound is and opens the picker, draws
 // the volume of whatever plays, and draws shuffle and repeat only alone,
 // since the session has neither.
+import ArkUI
 import SwiftUI
 
 /// The bar: the cover, the title and who made it — or where it plays — play

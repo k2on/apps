@@ -9,6 +9,7 @@
 // stands can be asked later. Where a page is, how a track's file and a
 // length are said. The twin of `harken/android/.../Phone.kt`, `Library.kt`'s
 // `Page` and `Media.kt`; type-checked on Linux (`tools/typecheck.sh`).
+import ArkUICore
 import Foundation
 
 // MARK: rows
@@ -507,22 +508,8 @@ enum Spell {
     }
 }
 
-/// FNV-1a over UTF-16 code units: `arkui::art::hash`, which every client
-/// pins, so one album is one derived square on every screen — and the name
-/// a cover is kept under on the disk.
-enum Art {
-    static func hash(_ text: String) -> UInt32 {
-        var h: UInt32 = 0x811c_9dc5
-        for unit in text.utf16 {
-            h ^= UInt32(unit)
-            h = h &* 0x0100_0193
-        }
-        return h
-    }
-
-    /// Which of `count` gradients `seed` draws as.
-    static func pick(_ count: Int, _ seed: String) -> Int { Int(hash(seed) % UInt32(max(count, 1))) }
-}
+// `Art` (FNV-1a over UTF-16: one album one derived square on every screen,
+// and the name a cover is kept under on the disk) is ArkUICore's.
 
 /// What a search found, in three groups: the songs the domain's `search`
 /// answered, and the held albums and artists whose names hold the needle.

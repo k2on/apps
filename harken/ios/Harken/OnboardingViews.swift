@@ -5,6 +5,7 @@
 // `webAuthenticationSession`), and this page says what it is waiting for —
 // or, once a sign-in came back without a login, why, and how to try again
 // (leave and come back, the web's reload), never by going round by itself.
+import ArkUI
 import SwiftUI
 
 /// One onboarding page: the mark in the gold, a title, a sentence, and what to do.

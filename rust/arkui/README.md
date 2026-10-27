@@ -16,7 +16,7 @@ browser draws no text at all.
 
 ## What is in it
 
-`rust/docs` is these modules drawn, each with a working example, and
+`docs/site` is these modules drawn, each with a working example, and
 its `catalogue.json` the same as data; change a module and change its entry
 there.
 
