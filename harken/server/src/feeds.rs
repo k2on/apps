@@ -20,11 +20,9 @@ use std::time::Duration;
 
 use ark::format::Encode;
 
-use crate::captions;
 use crate::domain::keys::show_key;
 use crate::domain::{
-    AddEpisode, AddShow, ChapterAt, FeedRead, PersonOn, SetChapters, SetPeople, SetTranscript,
-    Subscription,
+    AddEpisode, AddShow, ChapterAt, FeedRead, PersonOn, SetChapters, SetPeople, Subscription,
 };
 use crate::sync::{self, Call, Plan, Source, Want};
 
@@ -38,7 +36,8 @@ const ITUNES: &str = "http://www.itunes.com/dtds/podcast-1.0.dtd";
 
 /// Podcasting 2.0's namespace: `<podcast:chapters url type>`, a JSON file
 /// of chapters beside the audio; `<podcast:person role href img>`,
-/// somebody on it; `<podcast:transcript url type>`, what is said in it.
+/// somebody on it. (Its `<podcast:transcript>` is not read: timed to the
+/// host's file, it is not to this one; `transcribe.rs` hears this one.)
 const PODCAST: &str = "https://podcastindex.org/namespace/1.0";
 
 /// Podlove Simple Chapters: `<psc:chapter start title href image>` in the
@@ -201,18 +200,6 @@ pub fn plan(
             };
             calls.push(call("library.set_people", &episode.title, &set));
         }
-        let cues = item
-            .transcript
-            .as_ref()
-            .map(|(url, kind)| transcript_at(agent, url, kind, dir, failed))
-            .unwrap_or_default();
-        if !cues.is_empty() {
-            let set = SetTranscript {
-                file: want.file.clone(),
-                cues,
-            };
-            calls.push(call("library.set_transcript", &episode.title, &set));
-        }
         files.push(want);
     }
     Ok(Plan {
@@ -256,9 +243,6 @@ pub struct Item {
     /// Who is on it, their pictures where the feed has them (not yet
     /// downloaded).
     pub people: Vec<PersonOn>,
-    /// Its best timed transcript, and its type: none when it has only
-    /// text with no times.
-    pub transcript: Option<(String, String)>,
 }
 
 /// Read a feed's RSS. Its items newest first, those with no audio left out.
@@ -325,7 +309,6 @@ pub fn parse(xml: &str) -> Result<Channel, String> {
                     .map(|u| u.trim().to_string())
                     .unwrap_or_default(),
                 people: people(i),
-                transcript: transcript(i),
                 url,
             })
         })
@@ -378,20 +361,6 @@ fn capitalised(s: &str) -> String {
         .unwrap_or_default()
 }
 
-/// An item's best timed transcript (`captions::rank`), its URL and type.
-fn transcript(item: roxmltree::Node) -> Option<(String, String)> {
-    item.children()
-        .filter(|c| c.has_tag_name((PODCAST, "transcript")))
-        .filter_map(|c| {
-            let url = c.attribute("url")?.trim().to_string();
-            let kind = c.attribute("type").unwrap_or("").trim().to_string();
-            let rank = captions::rank(&kind)?;
-            (!url.is_empty()).then_some((rank, url, kind))
-        })
-        .max_by_key(|(rank, _, _)| *rank)
-        .map(|(_, url, kind)| (url, kind))
-}
-
 /// An item's Podlove Simple Chapters, in order.
 fn psc(item: roxmltree::Node) -> Vec<ChapterAt> {
     let Some(list) = item.children().find(|c| c.has_tag_name((PSC, "chapters"))) else {
@@ -432,29 +401,6 @@ fn json_chapters(agent: &ureq::Agent, url: &str, dir: &Path, failed: &mut usize)
     }
     std::fs::read_to_string(&want.path)
         .map(|j| chapters_of(&j))
-        .unwrap_or_default()
-}
-
-/// An episode's timed transcript at `url`, kept in `dir` as its JSON
-/// chapters are, and read as its type says: none when it cannot be had
-/// (counted in `failed`).
-fn transcript_at(
-    agent: &ureq::Agent,
-    url: &str,
-    kind: &str,
-    dir: &Path,
-    failed: &mut usize,
-) -> Vec<crate::domain::CueAt> {
-    let want = Want::of(url, DIR, dir);
-    if !want.here() {
-        if let Err(e) = sync::download(agent, url, &want.path, |_, _| {}) {
-            *failed += 1;
-            eprintln!("harken-server: feeds: transcript: {e}");
-            return vec![];
-        }
-    }
-    std::fs::read_to_string(&want.path)
-        .map(|t| captions::read(kind, &t))
         .unwrap_or_default()
 }
 
@@ -707,19 +653,18 @@ mod tests {
         assert!(chapters_of("not json").is_empty());
     }
 
-    /// An item's people are its own, or else its channel's; its transcript
-    /// is its best timed one. Full Time Nix's, cut down.
+    /// An item's people are its own, or else its channel's. Full Time
+    /// Nix's, cut down.
     #[test]
-    fn an_items_people_and_transcript_are_read() {
+    fn an_items_people_are_read() {
         let rss = r#"<rss xmlns:podcast="https://podcastindex.org/namespace/1.0"><channel><title>T</title>
             <podcast:person href="https://h">Shahar "Dawn" Or</podcast:person>
             <item><title>A</title><enclosure url="https://m/a.mp3" type="audio/mpeg"/>
               <podcast:person role="host" href="https://h" img="https://i/h.jpg">Shahar "Dawn" Or</podcast:person>
               <podcast:person role="Guest" href="https://galowicz.de">Jacek Galowicz</podcast:person>
-              <podcast:transcript url="https://t/a.txt" type="text/plain"/>
-              <podcast:transcript url="https://t/a.srt" type="application/x-subrip" rel="captions"/></item>
+              </item>
             <item><title>B</title><enclosure url="https://m/b.mp3" type="audio/mpeg"/>
-              <podcast:transcript url="https://t/b.txt" type="text/plain"/></item>
+              </item>
         </channel></rss>"#;
         let c = parse(rss).unwrap();
         let who = |people: &[PersonOn]| -> Vec<(String, String, String)> {
@@ -744,12 +689,8 @@ mod tests {
                 ("Jacek Galowicz".into(), "Guest".into(), "".into())
             ]
         );
-        assert_eq!(
-            a.transcript,
-            Some(("https://t/a.srt".into(), "application/x-subrip".into()))
-        );
         let b = c.items.iter().find(|i| i.title == "B").unwrap();
-        assert!(b.people.is_empty() && b.transcript.is_none());
+        assert!(b.people.is_empty());
     }
 
     /// Falsified by adding the offset rather than taking it away.

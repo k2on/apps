@@ -418,8 +418,8 @@ pub fn appearances(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<Librar
         }))
 }
 
-/// An episode's transcript, by its file: what its feed's captions say
-/// now, in place of what they said before. Said again the same, it
+/// An episode's transcript, by its file: what the server heard in it
+/// (`server/src/transcribe.rs`), in place of what it had. Said again the same, it
 /// writes nothing.
 #[mutator("library.set_transcript")]
 pub fn set_transcript(ctx: &Ctx, db: &mut Db<Harken>, input: SetTranscript) -> Result<(), Refusal> {
@@ -526,8 +526,7 @@ pub struct ShelfEpisode {
     pub number: i64,
     /// Who is on it, as its feed's `<podcast:person>` names them.
     pub people: Vec<PersonOn>,
-    /// What is said in it, line by line, as its feed's timed transcript
-    /// has it.
+    /// What is said in it, line by line, as it was heard.
     pub transcript: Vec<CueAt>,
 }
 

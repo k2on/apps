@@ -209,6 +209,7 @@ impl Scanner {
         data: PathBuf,
         login: Login,
         catalogue: Option<String>,
+        transcriber: Option<PathBuf>,
     ) -> Result<Scanner> {
         // `docs/plan-auth.md` The scanner is the library, by construction: it
         // holds the library's role whatever else its login holds, and its
@@ -252,6 +253,13 @@ impl Scanner {
             crate::sync::start(crate::catalogue::Import { url, dir }, said.clone())
         });
         let subscriptions = Arc::new(Mutex::new(Vec::new()));
+        let transcribe = transcriber.map(|program| {
+            crate::transcribe::Transcriber::start(
+                program,
+                crate::transcribe::dir(&data),
+                said.clone(),
+            )
+        });
         let follow = crate::sync::start(
             crate::feeds::Follow {
                 subscriptions: subscriptions.clone(),
@@ -270,6 +278,9 @@ impl Scanner {
                 follow,
                 subscriptions,
                 followed: None,
+                feeds: crate::feeds::dir(&data),
+                transcribe,
+                listed: None,
             };
             std::thread::Builder::new()
                 .name("harken-scanner".into())
@@ -471,6 +482,12 @@ struct Scan {
     subscriptions: Arc<Mutex<Vec<Subscription>>>,
     /// What of them the reader was last asked to read with.
     followed: Option<Vec<(String, String, i64)>>,
+    /// Where a feed's episodes are on disk.
+    feeds: PathBuf,
+    /// Who hears the episodes here, when anybody does, and the replica's
+    /// head when it was last told which they are.
+    transcribe: Option<crate::transcribe::Transcriber>,
+    listed: Option<ark::log::Seq>,
 }
 
 impl Scan {
@@ -498,6 +515,46 @@ impl Scan {
         if !first {
             self.follow.read();
         }
+    }
+}
+
+impl Scan {
+    /// The episodes whose files are here, newest first, told to the
+    /// transcriber whenever the replica moved: a download finished is an
+    /// entry, and one not finished is a `.part` beside its name, not yet
+    /// here.
+    fn transcribe(&mut self, peer: &ark_peer::Peer) {
+        let Some(transcribe) = &self.transcribe else {
+            return;
+        };
+        let head = peer.log.store.log().head().0;
+        if self.listed == Some(head) {
+            return;
+        }
+        self.listed = Some(head);
+        let mut here: Vec<(i64, i64, crate::transcribe::Job)> =
+            ark::db::read::<Harken, _>(&peer.log.store, |db| {
+                db.episode
+                    .scan()
+                    .into_iter()
+                    .filter_map(|e| {
+                        let m = db.media.get(e.media_id)?;
+                        let path = match m.file.strip_prefix(&format!("{}/", crate::feeds::DIR)) {
+                            Some(name) => self.feeds.join(name),
+                            None => self.root.join(&m.file),
+                        };
+                        let job = crate::transcribe::Job {
+                            file: m.file.clone(),
+                            path,
+                            title: m.title.clone(),
+                        };
+                        Some((e.published_ms, m.pos, job))
+                    })
+                    .collect()
+            });
+        here.retain(|(_, _, j)| j.path.is_file());
+        here.sort_by_key(|(published, pos, _)| std::cmp::Reverse((*published, *pos)));
+        transcribe.want(here.into_iter().map(|(_, _, j)| j).collect());
     }
 }
 
@@ -591,6 +648,7 @@ fn run(
         pump(&mut peer);
         if let Ok(mut scan) = watch.lock() {
             scan.follow(&peer);
+            scan.transcribe(&peer);
         }
     }
     // Off the hub, with what is pending written down for the next start (the

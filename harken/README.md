@@ -116,11 +116,16 @@ They come from two places:
   (`library.set_chapters`), who is on it — Podcasting 2.0's
   `<podcast:person>`, each a `person` row with an `appearance` on the
   episode, so a guest's page lists the episodes they are on
-  (`library.set_people`, `library.appearances`) — and its transcript, the
-  feed's best timed one (SubRip, WebVTT or Podcast Index JSON;
-  `server/src/captions.rs`) as a `cue` per line (`library.set_transcript`),
-  so a phone has it offline with the episode. Plain-text transcripts have
-  no times and are not read.
+  (`library.set_people`, `library.appearances`). Its transcript is not
+  the feed's: that is timed to the host's file, and a host that stitches
+  an advertisement into each download moves every line of it.
+- **What is said in an episode** is heard on the server, from its own
+  copy (`server/src/transcribe.rs`): a program run on each episode here,
+  newest first — whisper.cpp, with `services.harken.transcripts.enable` —
+  writing WebVTT, read into a `cue` per line (`library.set_transcript`),
+  so it keeps time with what plays and a phone has it offline with the
+  episode. What it wrote is kept in the state directory, so an episode is
+  heard once.
 - **A folder** — `podcasts/<show>/` or `sermons/<show>/` beside `music/`
   in the media directory: the show is the folder's name and the cover in
   it, each audio file an episode.
@@ -221,8 +226,8 @@ position itself and nothing heartbeats.
   among what plays after the track playing; the button beside the
   device picker's on the bar opens it too, and a row's menu has **Play
   next** and **Add to queue**.
-- **`t`** is the transcript of the episode playing, when its feed has a
-  timed one (the button beside the queue's on the bar, there only then):
+- **`t`** is the transcript of the episode playing, once the server has
+  heard it (the button beside the queue's on the bar, there only then):
   the line being said lit and kept in the middle, what was said dimmed,
   whoever says it over their lines. `j` and `k` walk it and `<Enter>` or a
   click plays from a line; a cursor moved or a page scrolled by hand stays

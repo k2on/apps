@@ -373,7 +373,7 @@ pub struct Appearance {
     pub pos: i64,
 }
 
-/// One line of an episode's transcript, as its feed's captions time it:
+/// One line of an episode's transcript, as the server heard it in its copy:
 /// when it is said, until when, by whom where they say, and what.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Cue {

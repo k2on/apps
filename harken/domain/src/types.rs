@@ -354,7 +354,7 @@ pub struct SetPeople {
     pub people: Vec<PersonOn>,
 }
 
-/// One line of a transcript as a feed's captions time it.
+/// One line of a transcript as it was heard: timed to the file it was heard in.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
 pub struct CueAt {
     pub start_ms: i64,
