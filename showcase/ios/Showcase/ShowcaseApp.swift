@@ -12,7 +12,6 @@
 // the simulator could draw.
 import ArkUI
 import SwiftUI
-import UIKit
 
 @main
 struct ShowcaseApp: App {
@@ -39,14 +38,6 @@ let slow = ShowcaseApp.argument("-slow").flatMap(Double.init) ?? 1
 /// `seconds` of life, slowed.
 func later(_ seconds: Double, _ then: @escaping () -> Void) {
     DispatchQueue.main.asyncAfter(deadline: .now() + seconds * slow, execute: then)
-}
-
-/// The system's own animations, the zoom of a transition included, slowed
-/// as SwiftUI's are by `.speed`: Core Animation's clock for the whole window.
-func slowTheWindow() {
-    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
-        for window in scene.windows { window.layer.speed = Float(1 / slow) }
-    }
 }
 
 /// Whether the workflow has said to move: Android's `--ez go true`.
@@ -157,17 +148,19 @@ private struct ExpandingCardShot: View {
             }
             .padding(Space.xl)
         }
+        // At life's speed, pauses too, whatever `-slow` says: the zoom is
+        // the system's and slows for nothing an app can set (a window's
+        // layer speed only breaks it), so ios.sh takes this one as it is.
         .onChange(of: go.told) {
-            slowTheWindow()
-            later(0.4) { open = true }
-            later(2.2) { open = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { open = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { open = false }
         }
     }
 }
 
 /// A long list scrolled down, then taken back to its top: what the shown
-/// tab, tapped again, does on iOS. A ScrollView, as `scrollTo` animates
-/// there and not in a List.
+/// tab, tapped again, does on iOS. A ScrollView over a plain stack: a List's
+/// `scrollTo` jumps, and so does a lazy stack's to a row not yet built.
 private struct ScrollToTopShot: View {
     @EnvironmentObject private var go: Go
     private let rows = (1...60).map { "\(places[$0 % places.count]) \($0)" }
@@ -176,7 +169,7 @@ private struct ScrollToTopShot: View {
         NavigationStack {
             ScrollViewReader { list in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Space.m) {
+                    VStack(alignment: .leading, spacing: Space.m) {
                         ForEach(rows, id: \.self) { Row(name: $0) }
                     }
                     .padding(.horizontal, Space.page)

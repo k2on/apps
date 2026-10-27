@@ -35,19 +35,22 @@ for theme in light dark; do
     echo "ios $theme $id ($kind)"
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
     if [ "$kind" = recording ]; then
-      command -v ffmpeg >/dev/null || brew install ffmpeg
       # Opened and settled first, so the launch is never recorded; then
       # told to move, by the Darwin notification the showcase listens for.
-      xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$slow" >/dev/null
+      # The expanding card is the system's zoom, which nothing an app can
+      # set slows: it is taken at life's speed, with what the simulator draws.
+      taken=$slow
+      [ "$id" = expanding-card ] && taken=1
+      xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
       sleep 4
       xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
       rec=$!
       sleep 1
       xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
-      sleep $((4 * slow))
+      sleep $((4 * taken + 1))
       kill -INT "$rec"
       wait "$rec" || true
-      bash .github/screens/encode.sh "$tmp/$id.mov" "$out/$theme/$id.mp4" "$slow" "$fps"
+      bash .github/screens/encode.sh "$tmp/$id.mov" "$out/$theme/$id.mp4" "$taken" "$fps"
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4

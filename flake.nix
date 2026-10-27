@@ -338,6 +338,32 @@
             installPhaseCommand = "target/release/docs $out";
           });
 
+          # The ffmpeg the screens workflow cuts the phones' recordings with
+          # (.github/screens/encode.sh), and nothing else: H.264 out through
+          # x264, the native decoders and the MP4 and MOV containers, the
+          # filters (setpts, fps, scale, format, mpdecimate) and ffprobe. No
+          # other codec, no network, no device, no docs — a tenth of what
+          # Homebrew's ffmpeg builds and pulls in on the macOS runner.
+          screens-ffmpeg = pkgs.ffmpeg-headless.override {
+            withHeadlessDeps = false;
+            withGPL = true;
+            withX264 = true;
+            withZlib = true;
+            # Its own tests build against it.
+            withPixelutils = true;
+            withMultithread = true;
+            buildFfmpeg = true;
+            buildFfprobe = true;
+            buildAvcodec = true;
+            buildAvformat = true;
+            buildAvfilter = true;
+            buildAvutil = true;
+            buildSwscale = true;
+            buildSwresample = true;
+            # Empty with no device on, but nixpkgs links its tools against it.
+            buildAvdevice = true;
+          };
+
           # The server (harken/server: the server and harken-peer), on a
           # chain of its own as the APK's host part is below — dependencies,
           # kernel, the crate — and not over the workspace's layers: their
@@ -844,7 +870,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced docs;
+            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;
