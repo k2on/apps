@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One activity, opened at a shot by name from adb (`--es shot cards`);
-     singleTop, so a recording's `--ez go true` reaches the one already up. -->
+<!-- One activity, opened at a shot by name from adb (the extra "shot");
+     singleTop, so a recording's second start, with the extra "go", reaches
+     the one already up. (A comment cannot hold two hyphens in a row.) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:label="Showcase"
