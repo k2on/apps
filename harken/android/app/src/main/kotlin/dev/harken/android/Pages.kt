@@ -13,7 +13,6 @@ package dev.harken.android
 import uniffi.harken_domain.Playlist
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -70,6 +69,7 @@ import dev.harken.android.ui.Space
 import dev.harken.android.ui.UnderStatusBar
 import dev.harken.android.ui.quiet
 import dev.harken.android.ui.rememberDestinationListState
+import dev.harken.android.ui.rememberDestinationScrollState
 
 private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
 
@@ -607,7 +607,7 @@ private fun ShowMenu(title: String, feed: Subscription, onUnfollow: (Subscriptio
 @Composable
 private fun Hosts(hosts: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
     Box(Modifier.fillMaxWidth().padding(horizontal = Space.page), contentAlignment = Alignment.Center) {
-        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.horizontalScroll(rememberDestinationScrollState("hosts")), verticalAlignment = Alignment.CenterVertically) {
             Text("Hosted by", style = quiet(MaterialTheme.typography.labelLarge), maxLines = 1)
             for (h in hosts) {
                 Row(
