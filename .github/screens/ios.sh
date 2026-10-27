@@ -14,17 +14,42 @@ app=$2
 bundle=$3
 device=$4
 fps=${FPS:-60}
-# How many times slower than life the shot moves while a recording is
-# taken (`-slow`, ShowcaseApp.swift), sped back up after (encode.sh), so the
-# motion has $fps frames a second whatever the simulator could draw.
-slow=${SLOW:-8}
+# How many times slower than life a recording is taken, then sped back up
+# (encode.sh), so its motion has $fps frames a second whatever the
+# simulator can draw: the simulator's own Slow Animations, which slows the
+# system's motion (a transition's zoom, a bar's collapse) by this much
+# (slow-animations.swift), and the showcase's own clock set to match
+# (`-slow`, ShowcaseApp.swift).
+slow=${IOS_SLOW:-10}
 tmp=$(mktemp -d)
+
+xcrun swiftc -O .github/screens/slow-animations.swift -o "$tmp/slow-animations"
+udid=$(xcrun simctl list devices booted -j | jq -r '[.devices[][] | select(.state == "Booted")][0].udid')
 
 xcrun simctl install booted "$app"
 xcrun simctl status_bar booted override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
 mkdir -p "$out"
 
 shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
+
+# Record shot `id`, `taken` times slower than life, to `to`: opened and
+# settled first, so the launch is never in it; then slowed and told to move
+# (the Darwin notification the showcase listens for); then sped back up.
+record() {
+  local id=$1 taken=$2 to=$3
+  xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
+  sleep 4
+  xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
+  local rec=$!
+  sleep 1
+  [ "$taken" = 1 ] || "$tmp/slow-animations" "$udid" on
+  xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
+  sleep $((4 * taken + 1))
+  [ "$taken" = 1 ] || "$tmp/slow-animations" "$udid" off
+  kill -INT "$rec"
+  wait "$rec" || true
+  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$taken" "$fps"
+}
 
 # The simulator in `theme`, as it says back: just after a first boot it
 # can take the setting and not yet show it.
@@ -52,22 +77,14 @@ capture() {
     echo "ios $theme $id ($kind)"
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
     if [ "$kind" = recording ]; then
-      # Opened and settled first, so the launch is never recorded; then
-      # told to move, by the Darwin notification the showcase listens for.
-      # The expanding card is the system's zoom, which nothing an app can
-      # set slows: it is taken at life's speed, with what the simulator draws.
-      taken=$slow
-      [ "$id" = expanding-card ] && taken=1
-      xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
-      sleep 4
-      xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
-      rec=$!
-      sleep 1
-      xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
-      sleep $((4 * taken + 1))
-      kill -INT "$rec"
-      wait "$rec" || true
-      bash .github/screens/encode.sh "$tmp/$id.mov" "$out/$theme/$id.mp4" "$taken" "$fps"
+      record "$id" "$slow" "$out/$theme/$id.mp4"
+      # Once, to measure the simulator's factor against: the card at life's
+      # speed (CALIBRATE, a branch's run only; not published).
+      if [ -n "${CALIBRATE:-}" ] && [ "$id" = expanding-card ]; then
+        xcrun simctl terminate booted "$bundle" 2>/dev/null || true
+        mkdir -p "$out/calibrate"
+        record "$id" 1 "$out/calibrate/$theme-$id-life.mp4"
+      fi
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4

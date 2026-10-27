@@ -153,8 +153,8 @@ private struct ExpandingCardShot: View {
         // the system's and slows for nothing an app can set (a window's
         // layer speed only breaks it), so ios.sh takes this one as it is.
         .onChange(of: go.told) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { open = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { open = false }
+            later(0.4) { open = true }
+            later(2.2) { open = false }
         }
     }
 }

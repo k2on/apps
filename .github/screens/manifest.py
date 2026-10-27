@@ -19,7 +19,7 @@ FPS = int(os.environ.get("FPS", "60"))
 def platform(path):
     device = json.load(open(os.path.join(path, "device.json")))
     shots = {}
-    for theme in sorted(os.listdir(path)):
+    for theme in ("light", "dark"):
         at = os.path.join(path, theme)
         if not os.path.isdir(at):
             continue
