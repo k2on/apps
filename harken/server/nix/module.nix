@@ -202,13 +202,15 @@ in
       model = lib.mkOption {
         type = lib.types.path;
         default = pkgs.fetchurl {
-          url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q5_1.bin";
-          sha256 = "0c5dg3jgh6sahks7d4b6y4im8r4n5bm66qnm8zvbnxnb9n4z9pxz";
+          url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin";
+          sha256 = "1qm7zxamlvac564c3270wqqqks5wc7532q3fqi01zbfmkiq22hir";
         };
-        defaultText = lib.literalMD "whisper's `small.en`, quantised (q5_1, 190 MB)";
+        defaultText = lib.literalMD "whisper's `large-v3-turbo`, quantised (q5_0, 550 MB)";
         description = ''
-          The ggml model to hear with. `small.en` names people and places
-          far better than `base.en` at about three times the time.
+          The ggml model to hear with. `large-v3-turbo` hears names, and
+          where a line starts, far better than `small.en`, at about four
+          times the time: an hour of speech is hours of a small host's
+          cores, newest episode first.
         '';
       };
 
