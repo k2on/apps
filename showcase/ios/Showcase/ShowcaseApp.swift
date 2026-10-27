@@ -6,10 +6,9 @@
 // few seconds after launch, in the theme it set. A recording's shot is
 // opened and left to settle first, then told to move by a Darwin
 // notification (`notifyutil -p dev.arkui.showcase.go`, sent through
-// `simctl spawn`), so the launch is never in the recording. With `-slow 8`
-// it moves eight times slower than life, its pauses too, and the workflow
-// speeds the recording back up: life's timing, with eight times the frames
-// the simulator could draw.
+// `simctl spawn`), so the launch is never in the recording, which
+// .github/screens/record.swift takes from the simulator's framebuffer,
+// every frame the app draws, at life's speed.
 import ArkUI
 import QuartzCore
 import SwiftUI
@@ -32,13 +31,9 @@ struct ShowcaseApp: App {
     }
 }
 
-/// How many times slower than life a recording's shot moves (`-slow`): its
-/// animations and its pauses alike.
-let slow = ShowcaseApp.argument("-slow").flatMap(Double.init) ?? 1
-
-/// `seconds` of life, slowed.
+/// `then`, `seconds` from now.
 func later(_ seconds: Double, _ then: @escaping () -> Void) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + seconds * slow, execute: then)
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: then)
 }
 
 /// Whether the workflow has said to move: Android's `--ez go true`.
@@ -199,9 +194,7 @@ private struct ExpandingCardShot: View {
             }
             .padding(Space.xl)
         }
-        // At life's speed, pauses too, whatever `-slow` says: the zoom is
-        // the system's and slows for nothing an app can set (a window's
-        // layer speed only breaks it), so ios.sh takes this one as it is.
+        // The zoom is the system's: the bar opens, holds, and closes.
         .onChange(of: go.told) {
             later(0.4) { open = true }
             later(2.2) { open = false }
@@ -244,12 +237,11 @@ private struct ScrollToTopShot: View {
             }
         }
 
-        /// From `a` to `b` on the spring, a step each tick, in life's time
-        /// (the clock divided by `slow`).
+        /// From `a` to `b` on the spring, a step each tick.
         private func glide(from a: CGFloat, to b: CGFloat) {
             let start = CACurrentMediaTime()
             Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
-                let t = (CACurrentMediaTime() - start) / slow
+                let t = CACurrentMediaTime() - start
                 let done = t >= 0.6
                 position.scrollTo(y: a + (b - a) * CGFloat(done ? 1 : sprung(t)))
                 if done { timer.invalidate() }

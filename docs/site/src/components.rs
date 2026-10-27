@@ -403,7 +403,7 @@ pub const COMPONENTS: &[Component] = &[
             at: &["The system's: TabView with a NavigationStack per tab"],
             how: &[
                 "Nothing to add: the shown tab, tapped again, takes its stack back to its root and then its list to the top.",
-                "To do it from code, ScrollViewReader's scrollTo(first, anchor: .top) inside withAnimation(Springs.move); the recording is that.",
+                "To do it from code, ScrollViewReader's scrollTo(first, anchor: .top) inside withAnimation(Springs.move). The recording sets a ScrollPosition a frame at a time along Springs.move's curve, which plays the same.",
             ],
         }),
         shots: &[recording("scroll-to-top", "A long list scrolled down, then asked to go to its top.", BOTH)],

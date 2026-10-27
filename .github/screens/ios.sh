@@ -14,15 +14,11 @@ app=$2
 bundle=$3
 device=$4
 fps=${FPS:-60}
-# How many times slower than life a recording is taken, then sped back up
-# (encode.sh), so its motion has $fps frames a second whatever the
-# simulator can draw: the device's animations slowed as the simulator's
-# own Slow Animations slows them (`slowed`), and the showcase's own clock
-# set to match (`-slow`, ShowcaseApp.swift).
-slow=${IOS_SLOW:-10}
 tmp=$(mktemp -d)
 
-xcrun swiftc -O .github/screens/slow-animations.swift -o "$tmp/slow-animations"
+# The recorder (record.swift): every frame the simulator composes, from its
+# framebuffer, in place of simctl's recordVideo, which keeps a sixth of them.
+xcrun swiftc -O .github/screens/record.swift -o "$tmp/record"
 udid=$(xcrun simctl list devices booted -j | jq -r '[.devices[][] | select(.state == "Booted")][0].udid')
 
 xcrun simctl install booted "$app"
@@ -31,42 +27,21 @@ mkdir -p "$out"
 
 shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
 
-# The device's animations `factor` times slower, or back to life's with 1,
-# both ways the simulator's own Slow Animations slows them: UIKit's drag
-# coefficient (its com.apple.UIKit preference, read as an app launches),
-# for what UIKit drives in the app, a transition's zoom among it; and the
-# render server's clock (slow-animations.swift), for Core Animation's own.
-slowed() {
-  if [ "$1" = 1 ]; then
-    xcrun simctl spawn booted defaults delete com.apple.UIKit UIAnimationDragCoefficient 2>/dev/null || true
-    "$tmp/slow-animations" "$udid" off
-  else
-    xcrun simctl spawn booted defaults write com.apple.UIKit UIAnimationDragCoefficient -float "$1"
-    echo "  UIKit drag coefficient: $(xcrun simctl spawn booted defaults read com.apple.UIKit UIAnimationDragCoefficient)"
-    "$tmp/slow-animations" "$udid" on
-  fi
-}
-
-# Record shot `id`, `taken` times slower than life, to `to`: slowed, then
-# opened and left to settle, so its launch (slowed too) is never in it;
-# then told to move (the Darwin notification the showcase listens for);
-# then sped back up.
+# Record shot `id` for `seconds` to `to`: opened and left to settle, so
+# its launch is never in it, then told to move (the Darwin notification the
+# showcase listens for), then made a page's MP4 (encode.sh).
 record() {
-  local id=$1 taken=$2 to=$3
-  slowed "$taken"
-  xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$taken" >/dev/null
-  sleep $((4 + taken))
-  xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
+  local id=$1 seconds=$2 to=$3
+  xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
+  sleep 4
+  "$tmp/record" "$udid" "$seconds" 540 "$tmp/$id.mov" | sed 's/^/  /' &
   local rec=$!
   sleep 1
   xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
-  sleep $((4 * taken + 1))
-  kill -INT "$rec"
-  wait "$rec" || true
+  wait "$rec"
   xcrun simctl terminate booted "$bundle" 2>/dev/null || true
-  sed 's/^/  /' "$(xcrun simctl get_app_container booted "$bundle" data)/Documents/frames.log" 2>/dev/null || echo "  (the app said nothing of its frames)"
-  slowed 1
-  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$taken" "$fps"
+  sed 's/^/  /' "$(xcrun simctl get_app_container booted "$bundle" data)/Documents/frames.log" 2>/dev/null || true
+  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" 1 "$fps"
 }
 
 # The simulator in `theme`, as it says back: just after a first boot it
@@ -95,14 +70,7 @@ capture() {
     echo "ios $theme $id ($kind)"
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
     if [ "$kind" = recording ]; then
-      record "$id" "$slow" "$out/$theme/$id.mp4"
-      # Once, to measure the simulator's factor against: the card at life's
-      # speed (CALIBRATE, a branch's run only; not published).
-      if [ -n "${CALIBRATE:-}" ] && [ "$id" = expanding-card ]; then
-        xcrun simctl terminate booted "$bundle" 2>/dev/null || true
-        mkdir -p "$out/calibrate"
-        record "$id" 1 "$out/calibrate/$theme-$id-life.mp4"
-      fi
+      record "$id" 6 "$out/$theme/$id.mp4"
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4

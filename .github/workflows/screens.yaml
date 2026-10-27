@@ -41,8 +41,8 @@ concurrency:
 env:
   FPS: "60"
   # How many times slower than life an Android recording is taken, then sped
-  # back up (.github/screens/encode.sh): the CI devices draw too few frames
-  # to keep up. iOS's is the simulator's own Slow Animations (ios.sh).
+  # back up (.github/screens/encode.sh): the emulator draws too few frames to
+  # keep up. iOS records at life's speed (record.swift keeps every frame).
   SLOW: "8"
 
 jobs:
@@ -200,10 +200,6 @@ jobs:
         run: bash .github/screens/meanwhile.sh wait boot
 
       - name: Capture
-        env:
-          # Once, on a branch: the card at life's speed too, to measure the
-          # simulator's Slow Animations factor against.
-          CALIBRATE: "1"
         run: |
           bash .github/screens/ios.sh "$RUNNER_TEMP/out/ios" \
             "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app" \
