@@ -15,7 +15,7 @@ use it:
 - **Mobile**, with a switch between **Android** and **iOS**: where the
   Compose or SwiftUI version is and how to call it, and the latest capture
   from a real emulator or simulator — a screenshot, or a recording as an
-  animated WebP — inside a frame of that device at its own dimensions.
+  MP4 at 60 frames a second — inside a frame of that device at its own dimensions.
 
 Below 700 pixels wide the sidebar becomes a dropdown in the top bar and the
 pictures are the ones drawn at a phone's width. The theme follows the

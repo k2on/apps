@@ -29,12 +29,26 @@
     if (to) location.href = to.href;
   });
 
-  // The captures: a still, or a recording as an animated WebP, in each
-  // theme the page can be in, and the device's own shape round them.
+  // The captures: a still, or a recording as an MP4, in each theme the page
+  // can be in, and the device's own shape round them. A recording is fetched
+  // only in the theme shown, and plays only while it is on screen.
   const figures = document.querySelectorAll(".capture");
   if (!figures.length) return;
   const base = document.querySelector("meta[name=screens]").content;
   const say = (f, words) => (f.querySelector(".screen p").textContent = words);
+  const videos = [];
+  const seen = new IntersectionObserver((all) => all.forEach((e) => (e.target.inView = e.isIntersecting)) || play());
+  const play = () =>
+    videos.forEach((v) => {
+      const shown = v.inView && v.offsetParent !== null;
+      if (shown && v.paused) {
+        v.preload = "auto";
+        v.play().catch(() => {});
+      } else if (!shown && !v.paused) v.pause();
+    });
+  tone.addEventListener("change", play);
+  document.querySelectorAll("input[name=phone]").forEach((r) => r.addEventListener("change", play));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", play);
   fetch(base + "manifest.json", { cache: "no-cache" })
     .then((r) => (r.ok ? r.json() : Promise.reject()))
     .then((m) => {
@@ -49,14 +63,22 @@
         }
         if (!shot) return say(f, `Not captured yet${p ? " on " + p.device.name : ""}.`);
         const screen = f.querySelector(".screen");
-        const ext = shot.kind === "recording" ? "webp" : "png";
+        const about = f.querySelector("figcaption").textContent;
         for (const theme of ["light", "dark"]) {
-          const img = new Image();
-          img.className = theme;
-          img.loading = "lazy";
-          img.alt = f.querySelector("figcaption").textContent;
-          img.src = `${base}${f.dataset.phone}/${shot.themes.includes(theme) ? theme : shot.themes[0]}/${shot.id}.${ext}?v=${m.version}`;
-          screen.append(img);
+          const at = `${base}${f.dataset.phone}/${shot.themes.includes(theme) ? theme : shot.themes[0]}/${shot.id}`;
+          let shown;
+          if (shot.kind === "recording") {
+            shown = document.createElement("video");
+            Object.assign(shown, { muted: true, loop: true, playsInline: true, preload: "none", src: `${at}.mp4?v=${m.version}` });
+            shown.setAttribute("aria-label", about);
+            videos.push(shown);
+            seen.observe(shown);
+          } else {
+            shown = new Image();
+            Object.assign(shown, { loading: "lazy", alt: about, src: `${at}.png?v=${m.version}` });
+          }
+          shown.className = theme;
+          screen.append(shown);
         }
         f.querySelector("small").textContent = `${p.device.name} · ${m.commit.slice(0, 7)} · ${m.made}`;
       });

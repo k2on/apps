@@ -3,15 +3,16 @@
 # docs/site/catalogue.json says Android has, in light and in dark, from the
 # showcase app (showcase/android, ShowcaseActivity). A screenshot is a PNG a few
 # seconds after the shot opens; a recording is the screen recorded while the
-# open shot moves, once told to, as an animated WebP, which a page plays in an <img>.
+# open shot moves, once told to, as an H.264 MP4 at $fps frames a second,
+# which a page plays in a <video>.
 #
 #   android.sh <out> <apk>
 #
-# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>.webp.
+# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>.mp4.
 set -euo pipefail
 out=$1
 apk=$2
-fps=${FPS:-10}
+fps=${FPS:-60}
 pkg=dev.arkui.showcase
 tmp=$(mktemp -d)
 
@@ -51,14 +52,17 @@ for theme in light dark; do
       adb shell am start -W -n "$pkg/.ShowcaseActivity" --es shot "$id" >/dev/null
       sleep 4
       adb shell rm -f /sdcard/shot.mp4
-      adb shell screenrecord --time-limit 4 /sdcard/shot.mp4 &
+      adb shell screenrecord --time-limit 4 --bit-rate 20000000 /sdcard/shot.mp4 &
       rec=$!
       sleep 0.5
       adb shell am start -n "$pkg/.ShowcaseActivity" --es shot "$id" --ez go true >/dev/null
       wait "$rec" || true
       sleep 1
       adb pull /sdcard/shot.mp4 "$tmp/$id.mp4" >/dev/null
-      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mp4" -vf "fps=$fps,scale=540:-2" -an -c:v libwebp -lossless 0 -q:v 70 -loop 0 "$out/$theme/$id.webp"
+      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mp4" -vf "fps=$fps,scale=540:-2:flags=lanczos,format=yuv420p" -an -c:v libx264 -preset slow -crf 24 -profile:v high -movflags +faststart "$out/$theme/$id.mp4"
+      # What the device itself drew: the MP4 is $fps a second, a frame held
+      # where the device drew none.
+      echo "  recorded $(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$tmp/$id.mp4") frames in $(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp/$id.mp4")s"
     else
       adb shell am start -W -n "$pkg/.ShowcaseActivity" --es shot "$id" >/dev/null
       sleep 3

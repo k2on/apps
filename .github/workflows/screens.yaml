@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FPS: "10"
+  FPS: "60"
 
 jobs:
   android:

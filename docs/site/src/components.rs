@@ -348,8 +348,14 @@ pub const COMPONENTS: &[Component] = &[
                 "state.open() and state.close() move it on its springs; ExpandingCardState.held(p, density) holds it at p for a screenshot.",
             ],
         }),
-        ios: None,
-        shots: &[recording("expanding-card", "The bar rising to the screen, and falling back.", ANDROID)],
+        ios: Some(Mobile {
+            at: &["swift/ArkUI: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"],
+            how: &[
+                "On a TabView: tabView.expandingCard(isPresented: $open) { bar } expanded: { screen }. The bar sits on glass above the tab bar (tabViewBottomAccessory) and zooms into the screen and back (navigationTransition(.zoom)).",
+                "The system does the motion, a swipe down on the screen included; `isPresented` going false zooms it back into the bar.",
+            ],
+        }),
+        shots: &[recording("expanding-card", "The bar rising to the screen, and falling back.", BOTH)],
     },
     Component {
         id: "pages",
@@ -393,8 +399,14 @@ pub const COMPONENTS: &[Component] = &[
             at: &["ui/Tabs.kt: ScrollsToTop"],
             how: &["ScrollsToTop(listState) or ScrollsToTop(gridState) inside a tab's page: a Reselect scrolls it home."],
         }),
-        ios: None,
-        shots: &[recording("scroll-to-top", "A long list scrolled down, then asked to go to its top.", ANDROID)],
+        ios: Some(Mobile {
+            at: &["The system's: TabView with a NavigationStack per tab"],
+            how: &[
+                "Nothing to add: the shown tab, tapped again, takes its stack back to its root and then its list to the top.",
+                "To do it from code, ScrollViewReader's scrollTo(first, anchor: .top) inside withAnimation(Springs.move); the recording is that.",
+            ],
+        }),
+        shots: &[recording("scroll-to-top", "A long list scrolled down, then asked to go to its top.", BOTH)],
     },
     // Behaviour.
     Component {

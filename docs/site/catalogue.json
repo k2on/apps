@@ -376,14 +376,23 @@
           "state.open() and state.close() move it on its springs; ExpandingCardState.held(p, density) holds it at p for a screenshot."
         ]
       },
-      "ios": null,
+      "ios": {
+        "at": [
+          "swift/ArkUI: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"
+        ],
+        "how": [
+          "On a TabView: tabView.expandingCard(isPresented: $open) { bar } expanded: { screen }. The bar sits on glass above the tab bar (tabViewBottomAccessory) and zooms into the screen and back (navigationTransition(.zoom)).",
+          "The system does the motion, a swipe down on the screen included; `isPresented` going false zooms it back into the bar."
+        ]
+      },
       "shots": [
         {
           "id": "expanding-card",
           "kind": "recording",
           "what": "The bar rising to the screen, and falling back.",
           "phones": [
-            "android"
+            "android",
+            "ios"
           ]
         }
       ]
@@ -448,14 +457,23 @@
           "ScrollsToTop(listState) or ScrollsToTop(gridState) inside a tab's page: a Reselect scrolls it home."
         ]
       },
-      "ios": null,
+      "ios": {
+        "at": [
+          "The system's: TabView with a NavigationStack per tab"
+        ],
+        "how": [
+          "Nothing to add: the shown tab, tapped again, takes its stack back to its root and then its list to the top.",
+          "To do it from code, ScrollViewReader's scrollTo(first, anchor: .top) inside withAnimation(Springs.move); the recording is that."
+        ]
+      },
       "shots": [
         {
           "id": "scroll-to-top",
           "kind": "recording",
           "what": "A long list scrolled down, then asked to go to its top.",
           "phones": [
-            "android"
+            "android",
+            "ios"
           ]
         }
       ]

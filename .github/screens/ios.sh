@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # The docs' iOS captures, from a booted simulator: every shot
 # docs/site/catalogue.json says iOS has, in light and in dark, from the Debug
-# build's showcase (`-showcase <id>`, Showcase.swift).
+# showcase app (showcase/ios, `-showcase <id>`, ShowcaseApp.swift). A
+# recording is the screen recorded while the open shot moves, once told to,
+# as an H.264 MP4 at $fps frames a second.
 #
 #   ios.sh <out> <app> <bundle id> <device name>
 #
-# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>.webp.
+# Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>.mp4.
 set -euo pipefail
 out=$1
 app=$2
 bundle=$3
 device=$4
-fps=${FPS:-10}
+fps=${FPS:-60}
 tmp=$(mktemp -d)
 
 xcrun simctl install booted "$app"
@@ -30,14 +32,21 @@ for theme in light dark; do
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
     if [ "$kind" = recording ]; then
       command -v ffmpeg >/dev/null || brew install ffmpeg
+      # Opened and settled first, so the launch is never recorded; then
+      # told to move, by the Darwin notification the showcase listens for.
+      xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
+      sleep 4
       xcrun simctl io booted recordVideo --codec=h264 --force "$tmp/$id.mov" &
       rec=$!
       sleep 1
-      xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
-      sleep 6
+      xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
+      sleep 4
       kill -INT "$rec"
       wait "$rec" || true
-      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mov" -vf "fps=$fps,scale=540:-2" -an -c:v libwebp -lossless 0 -q:v 70 -loop 0 "$out/$theme/$id.webp"
+      ffmpeg -nostdin -loglevel error -y -i "$tmp/$id.mov" -vf "fps=$fps,scale=540:-2:flags=lanczos,format=yuv420p" -an -c:v libx264 -preset slow -crf 24 -profile:v high -movflags +faststart "$out/$theme/$id.mp4"
+      # What the device itself drew: the MP4 is $fps a second, a frame held
+      # where the device drew none.
+      echo "  recorded $(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$tmp/$id.mov") frames in $(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp/$id.mov")s"
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4
