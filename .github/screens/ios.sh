@@ -34,12 +34,13 @@ shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) 
 # in the showcase for the frameworks that animate (timewarp.c, loaded by
 # SIMCTL_CHILD_DYLD_INSERT_LIBRARIES), from when the showcase says a move
 # begins to when it says it ends; the stills between take life's time.
-# The simulator composes a scrolled list at some fifty-five frames a
-# second, so a scroll needs little slowing; the system's zoom, at ten to
-# twenty, needs thirty times. $IOS_SLOW, if set, is every shot's.
+# The simulator composes a scrolled list at some fifteen to fifty-five
+# frames a second, as busy as the runner is, so a scroll needs ten times;
+# the system's zoom, at ten to twenty, needs thirty. $IOS_SLOW, if set, is
+# every shot's.
 slowness() {
   case $1 in
-    scroll-to-top) echo "${IOS_SLOW:-5}" ;;
+    scroll-to-top) echo "${IOS_SLOW:-10}" ;;
     *) echo "${IOS_SLOW:-30}" ;;
   esac
 }
