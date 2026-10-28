@@ -88,6 +88,9 @@ pub struct Domain {
     pub version: String,
     pub schema: Arc<Schema>,
     pub fns: BTreeMap<String, Function>,
+    /// The steps that read rows of a schema before this one, oldest first
+    /// ([`crate::migrate`]).
+    pub migrations: Vec<crate::migrate::Migration>,
 }
 
 fn check_of<I: Input>() -> Check {
@@ -161,7 +164,15 @@ impl Domain {
             version: version.into(),
             schema: Arc::new(S::schema()),
             fns: BTreeMap::new(),
+            migrations: vec![],
         }
+    }
+
+    /// A step that reads rows of a schema before this one, after those
+    /// already given ([`crate::migrate`]).
+    pub fn migration(mut self, m: crate::migrate::Migration) -> Domain {
+        self.migrations.push(m);
+        self
     }
 
     fn add(mut self, f: Function) -> Domain {

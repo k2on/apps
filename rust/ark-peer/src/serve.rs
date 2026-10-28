@@ -27,7 +27,6 @@ use axum::routing::get;
 use axum::Router;
 use tokio::sync::oneshot;
 
-use crate::disk::SCHEMA;
 use crate::handle::{dev, Authenticate, Handle};
 use crate::{now_ms, web, Config, Disk, Files, Memory, Peer};
 
@@ -88,8 +87,12 @@ impl Server {
                 let mut f = Files::new(d.join("log"))?;
                 f.sync = true;
                 // Its schema beside it, so the log can be read by what does
-                // not compile its domain (`arkdb rows`).
-                f.put(SCHEMA, &serde_json::to_vec_pretty(&*self.config.log.schema)?)?;
+                // not compile its domain (`arkdb rows`); rows of one this
+                // does not grow from migrated (`crate::migrate`).
+                let log = &self.config.log;
+                if crate::migrate::migrate(&mut f, &log.schema, log.migrations())? {
+                    tracing::info!("the log was migrated to schema {}", log.schema.hash().hex());
+                }
                 Box::new(f)
             }
             None => Box::new(Memory::default()),

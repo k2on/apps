@@ -35,6 +35,7 @@ is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 | 1.1 | `json.rs` | a value without a Rust type: JSON under a `Type`, written as the Rust type it describes would be (`Typed`) and read back from those bytes (`Seed`) |
 | 1.1 | `hash.rs` | the hash spaces, each its own type: `StateHash`, `EntryHash`, `SchemaHash` |
 | 1.2 | `schema.rs` | tables, columns, keys, indexes, references, spaces; append-only growth (`compat`); a row as another schema of its table wrote it read under this one, completed or cut to its prefix (`Table::fit`) |
+| 1.2 | `migrate.rs` | rows of a schema the domain's does not grow from read through its migrations: steps, each naming the schema it reads, over every row as JSON, written under the next step's schema or the domain's |
 | 1.3 | `store.rs` | one ordered map per table, rows by key and index entries; every write judged (the row's one encoding, unique indexes, references at both ends) and a `Change` that inverts exactly; the state hash, `sha256(schema_hash ‖ per-table sums of sha256(table ‖ row))` over one space, kept per write; the log as the `_log` table, its invariant the chain |
 | 1.6 | `log.rs` | `Entry`, `Logged`, the chain `sha256(prev ‖ enc(seq, entry, facts, state))`; ids from `(origin, local)`, row ids the entry's draws; `Snapshot`; what a peer makes durable (`Record`, `Durable`) |
 | 1.7–1.9 | `peer.rs` | the one sans-io machine, replica or authority (alone is an authority with a fork): sequencing, dedupe, judging, the rebase, compaction (in either role, up to the head: a replica's pending intents are rebased by their own changes, so it folds as an authority does), going alone and joining (the chain made alone pushed as intents), a held intent, opening a log (each entry read once; a grown schema keeps it); partial sync (`Feed`, `scoped`); the volatile space (its authority keeping the verdicts of each origin's last 64 `local`s, a push below them overtaken) |
@@ -78,3 +79,12 @@ and its sign-in. **A change to the on-disk format comes with a migration
 that opens the fixtures as they are, or with a new fixture beside them
 and a note here of what moved and what reads the old one**; a fixture is
 never written over.
+
+Every disk keeps the schema its rows were written under beside them,
+`schema.json` (`rust/ark-peer/src/migrate.rs`). Opened under a schema
+that does not grow from it, an authority's rows are migrated by its
+domain's steps (`migrate.rs` above) and written as a snapshot one past
+its head, what it stood on kept as `kv.<hash>` and `log.<hash>`; with no
+step that reads them it does not open. A replica's start empty, its
+pending intents and origin kept, and are sent again. The fixture's
+replica predates `schema.json`, so it now opens empty, its origin kept.

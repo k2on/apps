@@ -66,6 +66,7 @@ pub mod instance;
 mod jobs;
 pub mod link;
 pub mod local;
+pub mod migrate;
 pub mod observe;
 pub mod signed;
 pub mod watched;
@@ -82,9 +83,10 @@ pub mod web;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use ark::format::Encode;
 use ark::frames::Frame;
 use ark::hash::EntryHash;
-use ark::log::{Durable, Entry, EntryId, Origin, Seq, Span};
+use ark::log::{Durable, Entry, EntryId, Origin, Record, Seq, Span};
 use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::{Schema, Space};
@@ -115,6 +117,12 @@ pub struct Module {
 }
 
 impl Module {
+    /// The steps that read rows of a schema before this one
+    /// ([`ark::migrate`]): its domain's.
+    pub fn migrations(&self) -> &[ark::migrate::Migration] {
+        self.domain.as_ref().map_or(&[], |d| &d.migrations)
+    }
+
     /// A domain as a peer holds it (§1.16).
     pub fn of(d: &Domain) -> Module {
         Module {
@@ -433,6 +441,23 @@ impl Peer {
         }
         let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
         let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
+        let mut disk = disk;
+        // Rows of a schema this one does not grow from: an authority's
+        // migrated, a replica's sent again from empty (`migrate`).
+        let read = match r.fork {
+            Some(_) => migrate::migrate(&mut *disk, &config.log.schema, config.log.migrations()).map(|_| true),
+            None => migrate::kept(&mut *disk, &config.log.schema),
+        };
+        match read {
+            Ok(true) => {}
+            Ok(false) => {
+                let empty = Record::Rows(log.confirmed_rows()).to_bytes();
+                if let Err(e) = disk.record(&empty) {
+                    log.failure = Some(e.to_string());
+                }
+            }
+            Err(e) => log.failure = Some(e.to_string()),
+        }
         log.disk = Some(disk);
         let mut p = Peer::with(config, log, live, local);
         (p.record, p.link) = (record, link);

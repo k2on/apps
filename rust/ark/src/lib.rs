@@ -31,6 +31,7 @@ pub mod frames;
 pub mod hash;
 pub mod json;
 pub mod log;
+pub mod migrate;
 pub mod peer;
 pub mod plan;
 pub mod row;
