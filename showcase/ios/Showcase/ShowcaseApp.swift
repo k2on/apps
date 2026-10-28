@@ -146,6 +146,8 @@ struct Screen: View {
             if #available(iOS 26.0, *) { ExpandingCardShot() } else { Text("Needs iOS 26") }
         case "scroll-to-top":
             ScrollToTopShot()
+        case "clocks":
+            ClocksShot()
         default:
             Text("No showcase for \(shot)")
         }
@@ -213,8 +215,8 @@ private struct ExpandingCardShot: View {
         // frames of the next.
         .onAppear { after(0.5) { open = true }; after(1.8) { open = false } }
         .onChange(of: go.told) {
-            after(0.4) { open = true }
-            after(2.2) { open = false }
+            later(0.4) { open = true }
+            later(2.2) { open = false }
         }
     }
 }
@@ -254,12 +256,12 @@ private struct ScrollToTopShot: View {
             }
         }
 
-        /// From `a` to `b` on the spring, a step each tick, in life's time
-        /// (the clock divided by `slow`).
+        /// From `a` to `b` on the spring, a step each tick, by Core
+        /// Animation's clock (which a recording slows, timewarp.c).
         private func glide(from a: CGFloat, to b: CGFloat) {
             let start = CACurrentMediaTime()
             Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
-                let t = (CACurrentMediaTime() - start) / slow
+                let t = CACurrentMediaTime() - start
                 let done = t >= 0.6
                 position.scrollTo(y: a + (b - a) * CGFloat(done ? 1 : sprung(t)))
                 if done { timer.invalidate() }
@@ -276,4 +278,61 @@ func sprung(_ t: Double) -> Double {
     let omega = Springs.stiffness.squareRoot()
     let damped = omega * (1 - zeta * zeta).squareRoot()
     return 1 - exp(-zeta * omega * t) * (cos(damped * t) + zeta * omega / damped * sin(damped * t))
+}
+
+/// A probe (.github/workflows/probe.yaml), not a shot of the docs: three
+/// squares each crossing the screen in one second once told to go, moved by
+/// three clocks: UIKit's (UIView.animate), SwiftUI's (withAnimation), and
+/// the render server's (a CABasicAnimation). Recorded with each way of
+/// slowing a simulator's animations, it says which clock each slows.
+private struct ClocksShot: View {
+    @EnvironmentObject private var go: Go
+    @State private var across = false
+
+    var body: some View {
+        GeometryReader { g in
+            VStack(alignment: .leading, spacing: 120) {
+                Moved(by: .uikit, go: go.told).frame(height: 80)
+                Color.green.frame(width: 80, height: 80).offset(x: across ? g.size.width - 80 : 0)
+                Moved(by: .coreAnimation, go: go.told).frame(height: 80)
+            }
+            .padding(.top, 160)
+        }
+        .onChange(of: go.told) {
+            withAnimation(.linear(duration: 1)) { across = true }
+        }
+    }
+
+    private struct Moved: UIViewRepresentable {
+        enum Clock { case uikit, coreAnimation }
+        let by: Clock
+        let go: Bool
+
+        func makeUIView(context: Context) -> UIView {
+            let row = UIView()
+            let square = UIView(frame: CGRect(x: 0, y: 0, width: 80, height: 80))
+            square.backgroundColor = by == .uikit ? .systemRed : .systemBlue
+            square.tag = 1
+            row.addSubview(square)
+            return row
+        }
+
+        func updateUIView(_ row: UIView, context: Context) {
+            guard go, let square = row.viewWithTag(1), square.frame.minX == 0, square.layer.animationKeys() == nil else { return }
+            let to = row.bounds.width - 80
+            switch by {
+            case .uikit:
+                UIView.animate(withDuration: 1, delay: 0, options: .curveLinear) { square.frame.origin.x = to }
+            case .coreAnimation:
+                let move = CABasicAnimation(keyPath: "position.x")
+                move.fromValue = square.layer.position.x
+                move.toValue = to + 40
+                move.duration = 1
+                move.timingFunction = CAMediaTimingFunction(name: .linear)
+                move.fillMode = .forwards
+                move.isRemovedOnCompletion = false
+                square.layer.add(move, forKey: "across")
+            }
+        }
+    }
 }
