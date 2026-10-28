@@ -33,7 +33,7 @@ shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) 
 # in the showcase for the frameworks that animate (timewarp.c, loaded by
 # SIMCTL_CHILD_DYLD_INSERT_LIBRARIES, from the moment it is told to go),
 # and its own pauses stretched to match (`-slow`, ShowcaseApp.swift).
-slow=${IOS_SLOW:-10}
+slow=${IOS_SLOW:-20}
 xcrun -sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=17.0 -O2 -Wall \
   -dynamiclib -o "$tmp/timewarp.dylib" .github/screens/timewarp.c
 codesign --force --sign - "$tmp/timewarp.dylib"
