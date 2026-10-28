@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # The docs' iOS captures, from a booted simulator: every shot
-# docs/site/catalogue.json says iOS has, in light and in dark, from the Debug
+# docs/site/catalogue.json says iOS has, in each of $THEMES (light and dark
+# unless it says otherwise; the workflow takes each on a runner of its
+# own), from the Debug
 # showcase app (showcase/ios, `-showcase <id>`, ShowcaseApp.swift). A
 # recording is the screen recorded while the open shot moves, once told to,
 # as an H.264 MP4 at $fps frames a second, with the recorder and the time
@@ -32,7 +34,15 @@ shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) 
 # in the showcase for the frameworks that animate (timewarp.c, loaded by
 # SIMCTL_CHILD_DYLD_INSERT_LIBRARIES), from when the showcase says a move
 # begins to when it says it ends; the stills between take life's time.
-slow=${IOS_SLOW:-30}
+# The simulator composes a scrolled list at some fifty-five frames a
+# second, so a scroll needs little slowing; the system's zoom, at ten to
+# twenty, needs thirty times. $IOS_SLOW, if set, is every shot's.
+slowness() {
+  case $1 in
+    scroll-to-top) echo "${IOS_SLOW:-5}" ;;
+    *) echo "${IOS_SLOW:-30}" ;;
+  esac
+}
 
 # The showcase saying `name` (dev.arkui.showcase.<name>, a Darwin
 # notification): `listen` before what makes it say so, then `heard` waits
@@ -55,7 +65,8 @@ heard() {
 # never in it, then told to move (dev.arkui.showcase.go), recorded until it
 # says it is done, then made a page's MP4.
 record() {
-  local id=$1 to=$2
+  local id=$1 to=$2 slow
+  slow=$(slowness "$id")
   listen ready
   SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="$tools/timewarp.dylib" SIMCTL_CHILD_TIMEWARP="$slow" \
     xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$slow" >/dev/null
@@ -136,7 +147,7 @@ capture() {
   done 3<<< "$shots"
 }
 
-for theme in light dark; do
+for theme in ${THEMES:-light dark}; do
   appearance "$theme"
   if ! capture "$theme"; then
     echo "::warning::the simulator was not yet $theme; setting it again and taking $theme again"
@@ -147,5 +158,5 @@ for theme in light dark; do
 done
 
 # The device, from what it drew.
-read -r w h < <(sips -g pixelWidth -g pixelHeight "$(ls "$out"/light/*.png | head -1)" | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}')
+read -r w h < <(sips -g pixelWidth -g pixelHeight "$(ls "$out"/*/*.png | head -1)" | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}')
 printf '{"name":"%s","width":%s,"height":%s,"corner":165,"cutout":"island"}\n' "$device" "$w" "$h" > "$out/device.json"

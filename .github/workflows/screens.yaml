@@ -141,7 +141,14 @@ jobs:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: bash .github/screens/tools.sh push
 
+  # A runner for each theme, side by side: each boots its own simulator,
+  # which takes as long as it does, and records half as much.
   ios:
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [light, dark]
+    name: ios (${{ matrix.theme }})
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -228,6 +235,8 @@ jobs:
         run: bash .github/screens/meanwhile.sh wait boot
 
       - name: Capture
+        env:
+          THEMES: ${{ matrix.theme }}
         run: |
           bash .github/screens/ios.sh "$RUNNER_TEMP/out/ios" \
             "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app" \
@@ -235,7 +244,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: screens-ios
+          name: screens-ios-${{ matrix.theme }}
           path: ${{ runner.temp }}/out/ios
           if-no-files-found: error
 
@@ -245,11 +254,11 @@ jobs:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: bash .github/screens/tools.sh push
 
-  # The branch, one commit: what it had, each phone that captured this run
-  # replaced, and the manifest written over all of it.
+  # The branch, one commit: what it had, each phone's theme that captured
+  # this run replaced, and the manifest written over all of it.
   publish:
     needs: [android, ios]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.android.result == 'success' || needs.ios.result == 'success') }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -266,11 +275,19 @@ jobs:
           if git fetch --depth 1 origin screens; then
             git --work-tree="$branch" checkout FETCH_HEAD -- .
           fi
-          for p in android ios; do
-            if [ -d "$RUNNER_TEMP/new/screens-$p" ]; then
-              rm -rf "${branch:?}/$p"
-              cp -r "$RUNNER_TEMP/new/screens-$p" "$branch/$p"
-            fi
+          # screens-<phone>, or screens-<phone>-<theme> for a phone taken a
+          # theme to a runner: its device, and each theme it has.
+          for new in "$RUNNER_TEMP"/new/screens-*; do
+            p=${new##*/screens-}
+            p=${p%%-*}
+            mkdir -p "$branch/$p"
+            cp "$new/device.json" "$branch/$p/"
+            for theme in light dark; do
+              if [ -d "$new/$theme" ]; then
+                rm -rf "${branch:?}/$p/$theme"
+                cp -r "$new/$theme" "$branch/$p/$theme"
+              fi
+            done
           done
           python3 -I .github/screens/manifest.py "$branch" "${{ github.run_id }}" "${{ github.sha }}"
           cat "$branch/manifest.json"
