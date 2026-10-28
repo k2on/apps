@@ -210,7 +210,8 @@ func stop() {
     guard !stopped else { return }
     stopped = true
     for display in displays { (display as AnyObject).unregisterScreenCallbacks(uuid: id) }
-    recorder.take()
+    // The screen as it ends, so a still at the end lasts until then.
+    recorder.take(anyway: true)
     recorder.finish { exit(0) }
 }
 recorder.queue.asyncAfter(deadline: .now() + seconds, execute: stop)
