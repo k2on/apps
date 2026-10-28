@@ -74,7 +74,25 @@ record() {
   local documents
   documents="$(xcrun simctl get_app_container booted "$bundle" data)/Documents"
   sed 's/^/  /' "$documents/frames.log" 2>/dev/null || true
-  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$documents/timewarp.log" "$fps"
+  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$documents/timewarp.log" "$fps" | tee "$tmp/$id.encoded"
+}
+
+# How many distinct frames a recording must have: a good one of a shot here
+# has some forty to sixty, and one taken while a just-booted simulator is
+# still busy with itself (which can last minutes) a dozen or two.
+least=${IOS_DISTINCT:-30}
+
+# `record`, taken again while it has fewer than $least distinct frames, up
+# to three times.
+recording() {
+  local id=$1 to=$2 distinct
+  for try in 1 2 3; do
+    record "$id" "$to"
+    distinct=$(grep -o '[0-9]* distinct' "$tmp/$id.encoded" | tr -dc 0-9)
+    [ "$distinct" -ge "$least" ] && return 0
+    echo "::warning::$id had $distinct distinct frames (try $try); taking it again"
+    xcrun simctl terminate booted "$bundle" 2>/dev/null || true
+  done
 }
 
 # The simulator in `theme`, as it says back: just after a first boot it
@@ -103,7 +121,7 @@ capture() {
     echo "ios $theme $id ($kind)"
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
     if [ "$kind" = recording ]; then
-      record "$id" "$out/$theme/$id.mp4"
+      recording "$id" "$out/$theme/$id.mp4"
     else
       xcrun simctl launch booted "$bundle" -showcase "$id" >/dev/null
       sleep 4
