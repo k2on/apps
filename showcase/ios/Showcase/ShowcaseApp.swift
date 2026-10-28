@@ -8,9 +8,11 @@
 // notification (`notifyutil -p dev.arkui.showcase.go`, sent through
 // `simctl spawn`), so the launch is never in the recording, which
 // .github/screens/record.swift takes from the simulator's framebuffer,
-// every frame it composes, with time slowed `-slow` times for the
-// frameworks that animate (.github/screens/timewarp.c) and its pauses here
-// stretched to match; the workflow speeds it back up.
+// every frame it composes. Each move is taken with time slowed `-slow`
+// times for the frameworks that animate (`move`, .github/screens/timewarp.c),
+// and the workflow speeds it back up. A shot says when it has settled
+// (dev.arkui.showcase.ready) and when it is done (.done), which the
+// workflow waits for.
 import ArkUI
 import QuartzCore
 import SwiftUI
@@ -34,8 +36,8 @@ struct ShowcaseApp: App {
     }
 }
 
-/// How many times slower than life a recording's shot is taken (`-slow`):
-/// its animations by timewarp.c, its pauses by `later`.
+/// How many times slower than life a recording's moves are taken (`-slow`),
+/// by timewarp.c when it is loaded.
 let slow = ShowcaseApp.argument("-slow").flatMap(Double.init) ?? 1
 
 /// `then`, `seconds` from now, at life's speed.
@@ -43,9 +45,25 @@ func after(_ seconds: Double, _ then: @escaping () -> Void) {
     DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: then)
 }
 
-/// `then`, `seconds` of life from now, slowed.
-func later(_ seconds: Double, _ then: @escaping () -> Void) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + seconds * slow, execute: then)
+/// A Darwin notification, which the workflow (through `simctl spawn
+/// notifyutil`) and timewarp.c hear.
+func say(_ name: String) {
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName("dev.arkui.showcase.\(name)" as CFString),
+        nil, nil, true)
+}
+
+/// `change`, given `seconds` of life to play out in, with time slowed for
+/// it alone (timewarp.c, told just before); then `then`, at life's speed.
+func move(for seconds: Double, _ change: @escaping () -> Void, then: @escaping () -> Void = {}) {
+    say("slow")
+    after(0.05) {
+        change()
+        after(seconds * slow) {
+            say("fast")
+            after(0.05, then)
+        }
+    }
 }
 
 /// Whether the workflow has said to move: Android's `--ez go true`.
@@ -210,12 +228,20 @@ private struct ExpandingCardShot: View {
         // speed: the first zoom in a fresh simulator pays for setting itself
         // up and draws half the frames of the next, and is slow enough that
         // a close sent too soon after it is ignored. The zoom is the system's,
-        // slowed for a recording with the rest (timewarp.c); its pauses here
-        // by `-slow`.
-        .onAppear { after(0.5) { open = true }; after(3) { open = false } }
+        // slowed for a recording with the rest (timewarp.c).
+        .onAppear {
+            after(0.5) { open = true }
+            after(3) { open = false }
+            after(4.5) { say("ready") }
+        }
         .onChange(of: go.told) {
-            later(0.4) { open = true }
-            later(2.2) { open = false }
+            after(0.4) {
+                move(for: 0.9, { open = true }) {
+                    after(0.9) {
+                        move(for: 0.8, { open = false }) { after(0.4) { say("done") } }
+                    }
+                }
+            }
         }
     }
 }
@@ -246,11 +272,17 @@ private struct ScrollToTopShot: View {
                 }
                 .scrollPosition($position)
                 .navigationTitle("A page")
+                .onAppear { after(1.5) { say("ready") } }
                 .onChange(of: go.told) {
                     // Thirty rows down: a row is its picture and the gap under it.
                     let down = 30 * (Space.thumb + Space.m)
-                    later(0.4) { glide(from: 0, to: down) }
-                    later(1.6) { glide(from: down, to: 0) }
+                    after(0.4) {
+                        move(for: 0.6, { glide(from: 0, to: down) }) {
+                            after(0.6) {
+                                move(for: 0.6, { glide(from: down, to: 0) }) { after(0.4) { say("done") } }
+                            }
+                        }
+                    }
                 }
             }
         }

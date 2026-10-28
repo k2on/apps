@@ -3,9 +3,10 @@
 # docs/site/catalogue.json says iOS has, in light and in dark, from the Debug
 # showcase app (showcase/ios, `-showcase <id>`, ShowcaseApp.swift). A
 # recording is the screen recorded while the open shot moves, once told to,
-# as an H.264 MP4 at $fps frames a second.
+# as an H.264 MP4 at $fps frames a second, with the recorder and the time
+# warp ios-tools.sh built into <tools>.
 #
-#   ios.sh <out> <app> <bundle id> <device name>
+#   ios.sh <out> <app> <bundle id> <device name> <tools>
 #
 # Writes <out>/device.json, <out>/<theme>/<id>.png and <out>/<theme>/<id>.mp4.
 set -euo pipefail
@@ -13,12 +14,10 @@ out=$1
 app=$2
 bundle=$3
 device=$4
+tools=$5
 fps=${FPS:-60}
 tmp=$(mktemp -d)
 
-# The recorder (record.swift): every frame the simulator composes, from its
-# framebuffer, in place of simctl's recordVideo, which keeps a sixth of them.
-xcrun swiftc -O .github/screens/record.swift -o "$tmp/record"
 udid=$(xcrun simctl list devices booted -j | jq -r '[.devices[][] | select(.state == "Booted")][0].udid')
 
 xcrun simctl install booted "$app"
@@ -27,33 +26,53 @@ mkdir -p "$out"
 
 shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) \(.kind)"' docs/site/catalogue.json)
 
-# How many times slower than life a shot is taken, then sped back up
-# (encode.sh), so its motion has $fps frames a second whatever the
+# How many times slower than life a shot's moves are taken, then sped back
+# up (encode.sh), so its motion has $fps frames a second whatever the
 # simulator composes (a tenth of that, for the system's zoom): time slowed
 # in the showcase for the frameworks that animate (timewarp.c, loaded by
-# SIMCTL_CHILD_DYLD_INSERT_LIBRARIES, from the moment it is told to go),
-# and its own pauses stretched to match (`-slow`, ShowcaseApp.swift).
+# SIMCTL_CHILD_DYLD_INSERT_LIBRARIES), from when the showcase says a move
+# begins to when it says it ends; the stills between take life's time.
 slow=${IOS_SLOW:-30}
-xcrun -sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=17.0 -O2 -Wall \
-  -dynamiclib -o "$tmp/timewarp.dylib" .github/screens/timewarp.c
-codesign --force --sign - "$tmp/timewarp.dylib"
+
+# The showcase saying `name` (dev.arkui.showcase.<name>, a Darwin
+# notification): `listen` before what makes it say so, then `heard` waits
+# for it, up to `seconds`.
+listen() {
+  xcrun simctl spawn booted notifyutil -1 "dev.arkui.showcase.$1" >/dev/null &
+  listening=$!
+}
+heard() {
+  local seconds=$1
+  for _ in $(seq 1 $((seconds * 2))); do
+    kill -0 "$listening" 2>/dev/null || { wait "$listening" || true; return 0; }
+    sleep 0.5
+  done
+  kill "$listening" 2>/dev/null || true
+  return 1
+}
 
 # Record shot `id` to `to`: opened and left to settle, so its launch is
-# never in it, then told to move (the Darwin notification the showcase and
-# timewarp listen for), then made a page's MP4.
+# never in it, then told to move (dev.arkui.showcase.go), recorded until it
+# says it is done, then made a page's MP4.
 record() {
   local id=$1 to=$2
-  SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="$tmp/timewarp.dylib" SIMCTL_CHILD_TIMEWARP="$slow" \
+  listen ready
+  SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="$tools/timewarp.dylib" SIMCTL_CHILD_TIMEWARP="$slow" \
     xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$slow" >/dev/null
-  sleep 7
-  "$tmp/record" "$udid" $((3 * slow + 2)) 540 "$tmp/$id.mov" | sed 's/^/  /' &
+  heard 30 || echo "::warning::$id did not say it was ready"
+  listen done
+  "$tools/record" "$udid" $((10 * slow)) 540 "$tmp/$id.mov" > >(sed 's/^/  /') &
   local rec=$!
   sleep 1
   xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
+  heard $((10 * slow)) || echo "::warning::$id did not say it was done"
+  kill -INT "$rec" 2>/dev/null || true
   wait "$rec"
   xcrun simctl terminate booted "$bundle" 2>/dev/null || true
-  sed 's/^/  /' "$(xcrun simctl get_app_container booted "$bundle" data)/Documents/frames.log" 2>/dev/null || true
-  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$slow" "$fps"
+  local documents
+  documents="$(xcrun simctl get_app_container booted "$bundle" data)/Documents"
+  sed 's/^/  /' "$documents/frames.log" 2>/dev/null || true
+  bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$documents/timewarp.log" "$fps"
 }
 
 # The simulator in `theme`, as it says back: just after a first boot it

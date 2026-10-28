@@ -172,6 +172,10 @@ jobs:
             echo "$device" > "$RUNNER_TEMP/device"
             xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
 
+      # The recorder and the time warp (ios-tools.sh) build under the boot too.
+      - name: Start building the recorder
+        run: bash .github/screens/meanwhile.sh start recorder bash .github/screens/ios-tools.sh "$RUNNER_TEMP/recorder"
+
       # The tools as one folder needing no Nix (bundle.sh), from GitHub's
       # cache while the flake is unchanged: Nix's install on macOS (its
       # volume, then the store) takes three minutes or more. Only when the
@@ -217,6 +221,9 @@ jobs:
       - name: The showcase, built
         run: bash .github/screens/meanwhile.sh wait showcase
 
+      - name: The recorder, built
+        run: bash .github/screens/meanwhile.sh wait recorder
+
       - name: The simulator, booted
         run: bash .github/screens/meanwhile.sh wait boot
 
@@ -224,7 +231,7 @@ jobs:
         run: |
           bash .github/screens/ios.sh "$RUNNER_TEMP/out/ios" \
             "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app" \
-            dev.arkui.showcase "$(cat "$RUNNER_TEMP/device")"
+            dev.arkui.showcase "$(cat "$RUNNER_TEMP/device")" "$RUNNER_TEMP/recorder"
 
       - uses: actions/upload-artifact@v4
         with:

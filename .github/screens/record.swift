@@ -8,6 +8,10 @@
 // CoreSimulator and SimulatorKit are private, so they are reached through
 // the Objective-C runtime.
 //
+// It stops after `seconds`, or sooner when sent SIGINT or SIGTERM, and
+// writes beside the file (<out.mov>.start) the host's time of its first
+// frame (CACurrentMediaTime's), from which the file's own times count.
+//
 //   xcrun swift record.swift <udid> <seconds> <width> <out.mov>
 import AVFoundation
 import Foundation
@@ -178,6 +182,7 @@ final class Recorder {
         input.markAsFinished()
         writer.finishWriting {
             if writer.status != .completed { fail("writing failed: \(writer.error.map { "\($0)" } ?? "?")") }
+            try? "\(self.first)\n".write(toFile: self.out.path + ".start", atomically: true, encoding: .utf8)
             print("recorded \(self.frames) frames over \(String(format: "%.2f", self.last - self.first))s (\(self.dropped) dropped)")
             done()
         }
@@ -196,9 +201,20 @@ for display in displays {
 }
 // The screen as it is when the recording starts, still or not.
 recorder.queue.async { recorder.take() }
-recorder.queue.asyncAfter(deadline: .now() + seconds) {
+var stopped = false
+func stop() {
+    guard !stopped else { return }
+    stopped = true
     for display in displays { (display as AnyObject).unregisterScreenCallbacks(uuid: id) }
     recorder.take()
     recorder.finish { exit(0) }
+}
+recorder.queue.asyncAfter(deadline: .now() + seconds, execute: stop)
+let signals = [SIGINT, SIGTERM].map { number in
+    signal(number, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: number, queue: recorder.queue)
+    source.setEventHandler(handler: stop)
+    source.resume()
+    return source
 }
 dispatchMain()
