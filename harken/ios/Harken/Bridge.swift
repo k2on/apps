@@ -547,6 +547,14 @@ final class Bridge {
         onPeer { h in self.record(Phone.markPlayed(h, track.id, finished), "mark \(track.title) \(finished ? "played" : "unplayed")", "Couldn't mark it") }
     }
 
+    /// Who one of an episode's voices is; nobody, to take the name back. `done` once it is written.
+    func nameVoice(_ media: Id, _ voice: String, _ name: String, done: @escaping () -> Void) {
+        onPeer { h in
+            self.record(Phone.nameVoice(h, media, voice, name), "name \(voice) \(name)", "Couldn't name them")
+            self.main(done)
+        }
+    }
+
     /// Which of the person's playlists `track` is on.
     func playlistsOf(_ track: LibraryEntry, done: @escaping (Set<Id>) -> Void) {
         ask([], { Set(Phone.playlistsOf($0, media: track.id).map { $0.id }) }, done)

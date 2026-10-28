@@ -1342,6 +1342,14 @@ impl App {
             let before = i.checked_sub(1).map(|b| cues[b].speaker.as_str());
             if !c.speaker.is_empty() && before != Some(c.speaker.as_str()) {
                 let who = text(c.speaker.to_uppercase()).size(11).style(style::faint(0.55));
+                // A voice told apart is named by a click on its name.
+                let who: Element<'_, Message> = match c.voice.is_empty() {
+                    true => who.into(),
+                    false => mouse_area(who)
+                        .on_press(Message::NameVoice(i))
+                        .interaction(iced::mouse::Interaction::Pointer)
+                        .into(),
+                };
                 lines = lines.push(container(who).padding(Padding {
                     top: if i == 0 { 0.0 } else { 14.0 },
                     bottom: 2.0,

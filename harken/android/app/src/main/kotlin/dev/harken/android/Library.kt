@@ -597,6 +597,11 @@ class Library(private val session: ArkSession) {
         record(Phone.markPlayed(h, track.id, finished), "mark ${track.title} ${if (finished) "played" else "unplayed"}", "Couldn't mark it")
     }
 
+    /** Who one of an episode's voices is; nobody, to take the name back. */
+    fun nameVoice(media: Id, voice: String, name: String) = write { h ->
+        record(Phone.nameVoice(h, media, voice, name.trim()), "name $voice ${name.trim()}", "Couldn't name them")
+    }
+
     /** `more` of a followed feed's older episodes, or 0 for every one. */
     fun fetchOlder(feed: Subscription, more: Long) = write { h ->
         record(Phone.fetchOlder(h, feed.url, more), "fetch older episodes of ${feed.title.ifEmpty { feed.url }}", "Couldn't fetch them")

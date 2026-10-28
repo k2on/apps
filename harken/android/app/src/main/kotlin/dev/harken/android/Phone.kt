@@ -41,6 +41,7 @@ import dev.harken.android.gen.ShowPeopleEntry
 import dev.harken.android.gen.ShowsEntry
 import dev.harken.android.gen.Subscribe
 import dev.harken.android.gen.SubscriptionsEntry
+import dev.harken.android.gen.NameVoice
 import dev.harken.android.gen.Unsubscribe
 import dev.harken.android.gen.TrackDetailsEntry
 import dev.harken.android.gen.TranscriptEntry
@@ -315,9 +316,10 @@ data class Appearing(val media: Id, val person: OnEpisode) {
 }
 
 /** One line of an episode's transcript (`transcript`): when it is said, by whom (often nobody says), and what. */
-data class Cue(val startMs: Long, val endMs: Long, val speaker: String, val text: String) {
+/** One line of a transcript; [voice] the voice told apart that says it, which can be named, or empty. */
+data class Cue(val startMs: Long, val endMs: Long, val speaker: String, val text: String, val voice: String = "") {
     companion object {
-        fun of(e: TranscriptEntry): Cue = Cue(e.startMs, e.endMs, e.speaker, e.text)
+        fun of(e: TranscriptEntry): Cue = Cue(e.startMs, e.endMs, e.speaker, e.text, e.voice)
 
         /** The line being said `ms` in, by its place: the last that starts at or before it; -1 before the first. */
         fun at(lines: List<Cue>, ms: Long): Int = lines.indexOfLast { it.startMs <= ms }
@@ -446,6 +448,9 @@ object Phone {
 
     /** An episode said played, or not, by the signed-in person. */
     fun markPlayed(h: Harken, media: Id, finished: Boolean): Wrote = wrote { h.markPlayed(MarkPlayed(media, finished, "")) }
+
+    /** Who one of an episode's voices is, here and wherever else it is heard; an empty name takes it back. */
+    fun nameVoice(h: Harken, media: Id, voice: String, name: String): Wrote = wrote { h.nameVoice(NameVoice(media, voice, name)) }
 
     fun showProgress(h: Harken, show: String): View<ProgressEntry> = h.showProgress(ShowInput(NO_PLAYLIST, show))
 

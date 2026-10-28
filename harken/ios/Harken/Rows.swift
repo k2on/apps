@@ -319,6 +319,11 @@ enum Phone {
         wrote { try h.markPlayed(MarkPlayed(mediaId: media, finished: finished, name: "")) }
     }
 
+    /// Who one of an episode's voices is, here and wherever else it is heard; an empty name takes it back.
+    static func nameVoice(_ h: Harken, _ media: Id, _ voice: String, _ name: String) -> Wrote {
+        wrote { try h.nameVoice(NameVoice(mediaId: media, voice: voice, name: name)) }
+    }
+
     /// `more` of a followed feed's older episodes, or 0 for every one.
     static func fetchOlder(_ h: Harken, _ url: String, _ more: Int64) -> Wrote {
         wrote { try h.fetchOlder(FetchOlder(url: url, more: more)) }
