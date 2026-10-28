@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # The docs' iOS captures, from a booted simulator: every shot
-# docs/site/catalogue.json says iOS has, in each of $THEMES (light and dark
-# unless it says otherwise; the workflow takes each on a runner of its
-# own), from the Debug
+# docs/site/catalogue.json says iOS has, in light and in dark, from the Debug
 # showcase app (showcase/ios, `-showcase <id>`, ShowcaseApp.swift). A
 # recording is the screen recorded while the open shot moves, once told to,
 # as an H.264 MP4 at $fps frames a second, with the recorder and the time
@@ -34,16 +32,11 @@ shots=$(jq -r '.components[].shots[] | select(.phones | index("ios")) | "\(.id) 
 # in the showcase for the frameworks that animate (timewarp.c, loaded by
 # SIMCTL_CHILD_DYLD_INSERT_LIBRARIES), from when the showcase says a move
 # begins to when it says it ends; the stills between take life's time.
-# The simulator composes a scrolled list at some fifteen to fifty-five
-# frames a second, as busy as the runner is, so a scroll needs ten times;
-# the system's zoom, at ten to twenty, needs thirty. $IOS_SLOW, if set, is
-# every shot's.
-slowness() {
-  case $1 in
-    scroll-to-top) echo "${IOS_SLOW:-10}" ;;
-    *) echo "${IOS_SLOW:-30}" ;;
-  esac
-}
+# Thirty for every shot: a scrolled list, which the simulator composes at
+# fifteen to fifty-five frames a second as busy as the runner is, came out
+# short of frames at five and at ten; the system's zoom, at ten to twenty,
+# needs thirty.
+slow=${IOS_SLOW:-30}
 
 # The showcase saying `name` (dev.arkui.showcase.<name>, a Darwin
 # notification): `listen` before what makes it say so, then `heard` waits
@@ -66,8 +59,7 @@ heard() {
 # never in it, then told to move (dev.arkui.showcase.go), recorded until it
 # says it is done, then made a page's MP4.
 record() {
-  local id=$1 to=$2 slow
-  slow=$(slowness "$id")
+  local id=$1 to=$2
   listen ready
   SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="$tools/timewarp.dylib" SIMCTL_CHILD_TIMEWARP="$slow" \
     xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$slow" >/dev/null
@@ -108,17 +100,20 @@ least() {
 }
 
 # `record`, taken again while it has fewer distinct frames than it should,
-# up to three times.
+# up to four times; then the capture fails, so the screens branch keeps the
+# recording it had rather than a stuttering one.
 recording() {
   local id=$1 to=$2 distinct least
   least=$(least "$id")
-  for try in 1 2 3; do
+  for try in 1 2 3 4; do
     record "$id" "$to"
     distinct=$(grep -o '[0-9]* distinct' "$tmp/$id.encoded" | tr -dc 0-9)
     [ "${distinct:-0}" -ge "$least" ] && return 0
     echo "::warning::$id had $distinct distinct frames (try $try); taking it again"
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
   done
+  echo "::error::$id had too few distinct frames in four takes"
+  exit 1
 }
 
 # The simulator in `theme`, as it says back: just after a first boot it
@@ -162,7 +157,7 @@ capture() {
   done 3<<< "$shots"
 }
 
-for theme in ${THEMES:-light dark}; do
+for theme in light dark; do
   appearance "$theme"
   if ! capture "$theme"; then
     echo "::warning::the simulator was not yet $theme; setting it again and taking $theme again"

@@ -141,14 +141,11 @@ jobs:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: bash .github/screens/tools.sh push
 
-  # A runner for each theme, side by side: each boots its own simulator,
-  # which takes as long as it does, and records half as much.
+  # One runner for both themes: a runner for each paid its own boot and its
+  # own cold first take, and waited on a second macOS runner, which saved
+  # little and failed more often; dark is taken on the simulator light has
+  # warmed.
   ios:
-    strategy:
-      fail-fast: false
-      matrix:
-        theme: [light, dark]
-    name: ios (${{ matrix.theme }})
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -235,8 +232,6 @@ jobs:
         run: bash .github/screens/meanwhile.sh wait boot
 
       - name: Capture
-        env:
-          THEMES: ${{ matrix.theme }}
         run: |
           bash .github/screens/ios.sh "$RUNNER_TEMP/out/ios" \
             "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/Showcase.app" \
@@ -244,7 +239,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: screens-ios-${{ matrix.theme }}
+          name: screens-ios
           path: ${{ runner.temp }}/out/ios
           if-no-files-found: error
 
