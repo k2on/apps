@@ -576,6 +576,8 @@ impl Scan {
                         let job = crate::transcribe::Job {
                             path: self.path_of(&m.file),
                             title: m.title.clone(),
+                            // A sermon is its preacher's.
+                            one_voice: m.kind == "sermon",
                         };
                         Some((e.published_ms, m.pos, job))
                     })

@@ -31,12 +31,14 @@ pub fn captions_of(audio: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// An episode here to be heard: where its file is, and what to call it in
-/// what the server prints.
+/// An episode here to be heard: where its file is, what to call it in
+/// what the server prints, and whether it is one voice throughout — a
+/// sermon — so there are no voices to tell apart in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Job {
     pub path: PathBuf,
     pub title: String,
+    pub one_voice: bool,
 }
 
 /// The transcriber's thread, as the scanner holds it.
@@ -47,7 +49,8 @@ pub struct Transcriber {
 
 impl Transcriber {
     /// `program` run as `program <audio> <captions.vtt>` on each episode
-    /// wanted, its captions written beside it.
+    /// wanted, its captions written beside it; `HARKEN_ONE_VOICE=1` in its
+    /// environment for one that is one voice throughout.
     pub fn start(program: PathBuf) -> Transcriber {
         let wanted = Arc::new(Mutex::new(Vec::new()));
         let (wake, woken) = channel();
@@ -106,6 +109,7 @@ fn hear(program: &Path, job: &Job) -> Result<(), String> {
     let status = Command::new(program)
         .arg(&job.path)
         .arg(&part)
+        .env("HARKEN_ONE_VOICE", if job.one_voice { "1" } else { "0" })
         .stdin(Stdio::null())
         .status()
         .map_err(|e| format!("{}: {e}", program.display()))?;

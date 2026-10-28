@@ -133,7 +133,9 @@ They come from two places:
   a description keeps its lines, a list item each begun `• ` — and
   `tiling` (TextTiling) cuts where the words said change, each part titled
   by the words most its own.
-- **Who says each line** is told apart as it is heard (`server/voices`,
+- **Who says each line** — but a sermon's, which is one voice throughout,
+  as `arkdb rows media kind=sermon` tells another machine — is told apart
+  as it is heard (`server/voices`,
   `services.harken.transcripts.voices`; sherpa-onnx with 3D-Speaker's
   ERes2Net): each line `Speaker 1`, `Speaker 2`…, and what each voice
   sounds like — its print — in a `NOTE voice` of the captions, read into

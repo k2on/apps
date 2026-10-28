@@ -40,8 +40,13 @@ let
     run ${lib.getExe cfg.transcripts.package} -np -l en -t ${toString cfg.transcripts.threads} \
       -m ${cfg.transcripts.model} -f "$tmp/in.wav" -ovtt -of "$tmp/out" >/dev/null
   '' + (if cfg.transcripts.voices then ''
-    HARKEN_VOICES_THREADS=${toString cfg.transcripts.threads} \
-      run ${lib.getExe (pkgs.callPackage ./voices.nix { })} "$tmp/in.wav" "$tmp/out.vtt" "$2"
+    # A sermon is one voice throughout: nothing to tell apart.
+    if [ "''${HARKEN_ONE_VOICE:-0}" = 1 ]; then
+      mv "$tmp/out.vtt" "$2"
+    else
+      HARKEN_VOICES_THREADS=${toString cfg.transcripts.threads} \
+        run ${lib.getExe (pkgs.callPackage ./voices.nix { })} "$tmp/in.wav" "$tmp/out.vtt" "$2"
+    fi
   '' else ''
     mv "$tmp/out.vtt" "$2"
   '');
@@ -229,7 +234,8 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          Whether who says each line is told apart too (`harken/server/voices`):
+          Whether who says each line is told apart too (`harken/server/voices`),
+          but in a sermon, which is one voice throughout:
           a voice named in one episode is that person in every episode it is
           heard in. A few minutes of the host's cores an hour of speech, after
           whisper.cpp's hours.

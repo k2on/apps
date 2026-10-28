@@ -5,7 +5,9 @@
 # beside the episode's file, where the server reads an episode's transcript
 # from as soon as it is there (src/library.rs) and its own transcriber
 # leaves alone (src/transcribe.rs). Who says each line is told apart here
-# too (voices), and captions heard before that are told apart again.
+# too (voices), and captions heard before that are told apart again — but
+# in a sermon, which is one voice throughout, as the server's own rows say
+# (`arkdb rows`).
 #
 # The first downloads first — a feed followed is its newest episodes,
 # and older ones are asked for later — each episode not heard yet, until
@@ -34,12 +36,15 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 ssh "$host" "sudo ls -tr $data/feeds" >"$tmp/list"
-# Captions with no voices told apart in them.
+# Captions with no voices told apart in them, and the sermons.
 ssh "$host" "sudo sh -c 'cd $data/feeds && grep -L \"^NOTE voice\" -- *.vtt'" >"$tmp/unvoiced" || true
+ssh "$host" "sudo arkdb rows media kind=sermon --from $data" </dev/null |
+  grep -o '"file":"[^"]*"' | sed 's|.*/||; s|"$||' >"$tmp/sermons"
 grep -Ei '\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$' "$tmp/list" | while read -r file; do
   name=$file.vtt
   heard=$(grep -cxF "$name" "$tmp/list" || true)
-  [ "$heard" = 1 ] && ! grep -qxF "$name" "$tmp/unvoiced" && continue
+  one_voice=$(grep -cxF "$file" "$tmp/sermons" || true)
+  [ "$heard" = 1 ] && { [ "$one_voice" = 1 ] || ! grep -qxF "$name" "$tmp/unvoiced"; } && continue
   echo "hear-here: $file" >&2
   started=$(date +%s)
   ssh "$host" "sudo cat $data/feeds/$file" </dev/null >"$tmp/audio"
@@ -49,7 +54,11 @@ grep -Ei '\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$' "$tmp/list" | while read -r fi
   else
     whisper-cli -l en -m "$model" -f "$tmp/in.wav" -ovtt -of "$tmp/out" </dev/null >/dev/null 2>&1
   fi
-  "$voices/bin/harken-voices" "$tmp/in.wav" "$tmp/out.vtt" "$tmp/voices.vtt" </dev/null 2>/dev/null
+  if [ "$one_voice" = 1 ]; then
+    mv "$tmp/out.vtt" "$tmp/voices.vtt"
+  else
+    "$voices/bin/harken-voices" "$tmp/in.wav" "$tmp/out.vtt" "$tmp/voices.vtt" </dev/null 2>/dev/null
+  fi
   # Whole or not at all: the server reads only a file that is there.
   ssh "$host" "sudo sh -c 'cat > $data/feeds/$name.part && mv $data/feeds/$name.part $data/feeds/$name'" <"$tmp/voices.vtt"
   echo "hear-here: heard in $(($(date +%s) - started))s" >&2
