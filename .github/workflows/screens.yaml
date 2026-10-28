@@ -97,6 +97,21 @@ jobs:
       - name: The showcase, built
         run: bash .github/screens/meanwhile.sh wait showcase
 
+      # The emulator's system image, with retries: Google's server now and
+      # then sends a broken archive ("Error on ZipFile unknown archive"),
+      # which fails the emulator's action outright. Installed here, the
+      # action finds it and downloads nothing.
+      - name: The system image
+        run: |
+          for try in 1 2 3 4; do
+            yes | sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null 2>&1 &&
+              [ -f "$ANDROID_HOME/system-images/android-34/google_apis/x86_64/system.img" ] && exit 0
+            echo "::warning::system image, try $try failed"
+            sdkmanager --uninstall 'system-images;android-34;google_apis;x86_64' > /dev/null 2>&1 || true
+            sleep $((try * 10))
+          done
+          exit 1
+
       - name: Capture
         uses: reactivecircus/android-emulator-runner@v2
         with:
