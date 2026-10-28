@@ -1,15 +1,38 @@
 //! Captions read into timed lines: WebVTT, which the transcriber writes
 //! (`transcribe.rs`), and SubRip, which reads the same way.
 
-use crate::domain::CueAt;
+use crate::domain::{CueAt, VoiceAt};
+
+/// What captions say: the lines, and the voices told apart in them.
+#[derive(Debug, Default, PartialEq)]
+pub struct Captions {
+    pub cues: Vec<CueAt>,
+    pub voices: Vec<VoiceAt>,
+}
 
 /// SubRip or WebVTT: blocks apart by a blank line, each a line of
 /// `start --> end` and the lines said. WebVTT's header, notes and styles
-/// have no `-->`, and are passed over; its `<v Speaker>` names who says it.
-pub fn captions(text: &str) -> Vec<CueAt> {
+/// have no `-->`, and are passed over; its `<v Speaker>` names who says
+/// it, and a `NOTE voice Speaker` what that voice sounds like: its print,
+/// numbers apart by spaces (`server/voices`).
+pub fn captions(text: &str) -> Captions {
     let text = text.replace("\r\n", "\n");
-    let mut out = vec![];
+    let mut out = Captions::default();
     for block in text.split("\n\n") {
+        if let Some((name, print)) = block
+            .trim_start()
+            .strip_prefix("NOTE voice ")
+            .and_then(|b| b.split_once('\n'))
+        {
+            out.voices.push(VoiceAt {
+                name: name.trim().to_string(),
+                print: print
+                    .split_whitespace()
+                    .map_while(|n| n.parse().ok())
+                    .collect(),
+            });
+            continue;
+        }
         let mut lines = block.lines().skip_while(|l| !l.contains("-->"));
         let Some(times) = lines.next() else { continue };
         let (Some(start), Some(end)) = times.split_once("-->").map_or((None, None), |(a, b)| {
@@ -33,14 +56,14 @@ pub fn captions(text: &str) -> Vec<CueAt> {
         if said.is_empty() {
             continue;
         }
-        out.push(CueAt {
+        out.cues.push(CueAt {
             start_ms: start,
             end_ms: end,
             speaker,
             text: said.join(" "),
         });
     }
-    out.sort_by_key(|c| c.start_ms);
+    out.cues.sort_by_key(|c| c.start_ms);
     out
 }
 
@@ -91,7 +114,7 @@ mod tests {
     fn subrip_is_read() {
         let srt = "1\r\n00:00:03,096 --> 00:00:06,476\r\nHello and welcome to Full Time Nix.\r\n\r\n2\r\n00:00:06,736 --> 00:00:18,520\r\nThis is an episode about release notes of\r\nNix 2.23.0 with Jacek Galowicz.\r\n\r\n3\r\n00:00:18,520 --> 01:00:19,612\r\nHi, <i>Jacek</i>.\r\n";
         assert_eq!(
-            said(&captions(srt)),
+            said(&captions(srt).cues),
             [
                 (3_096, 6_476, "", "Hello and welcome to Full Time Nix."),
                 (
@@ -109,10 +132,30 @@ mod tests {
     fn webvtt_is_read_with_its_speakers() {
         let vtt = "WEBVTT\n\nNOTE made by hand\n\nintro\n00:01.000 --> 00:04.5 align:start\n<v Shahar>Hello &amp; welcome.</v>\n\n00:00:05.000 --> 00:00:07.000\n<v.loud Jacek Galowicz>Hi!\n";
         assert_eq!(
-            said(&captions(vtt)),
+            said(&captions(vtt).cues),
             [
                 (1_000, 4_500, "Shahar", "Hello & welcome."),
                 (5_000, 7_000, "Jacek Galowicz", "Hi!")
+            ]
+        );
+    }
+
+    #[test]
+    fn webvtt_says_what_its_voices_sound_like() {
+        let vtt = "WEBVTT\n\nNOTE voice Speaker 1\n12 -40\n7\n\nNOTE voice Speaker 2\n-3 0 5\n\n00:01.000 --> 00:02.000\n<v Speaker 1>Hello.\n";
+        let read = captions(vtt);
+        assert_eq!(said(&read.cues), [(1_000, 2_000, "Speaker 1", "Hello.")]);
+        assert_eq!(
+            read.voices,
+            [
+                VoiceAt {
+                    name: "Speaker 1".into(),
+                    print: vec![12, -40, 7]
+                },
+                VoiceAt {
+                    name: "Speaker 2".into(),
+                    print: vec![-3, 0, 5]
+                },
             ]
         );
     }

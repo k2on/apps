@@ -632,7 +632,7 @@ impl Scan {
         let Some((title, description, chaptered)) = episode else {
             return 0;
         };
-        let cues = match std::fs::read_to_string(path) {
+        let crate::captions::Captions { cues, voices } = match std::fs::read_to_string(path) {
             Ok(text) => crate::captions::captions(&text),
             Err(e) => {
                 eprintln!("harken-server: library: {}: {e}", path.display());
@@ -662,6 +662,7 @@ impl Scan {
             SetTranscript {
                 file: file.clone(),
                 cues,
+                voices,
             }
             .to_bytes(),
         ));

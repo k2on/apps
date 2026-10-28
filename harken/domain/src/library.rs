@@ -496,6 +496,12 @@ pub fn take_out(db: &mut Db<Harken>, id: Id<Media>) -> Result<(), Refusal> {
     for c in db.cue.scan().into_iter().filter(|c| c.media_id == id) {
         db.cue.remove(&c)?;
     }
+    for v in db.voice.scan().into_iter().filter(|v| v.media_id == id) {
+        db.voice.remove(&v)?;
+    }
+    for n in db.voice_name.scan().into_iter().filter(|n| n.media_id == id) {
+        db.voice_name.remove(&n)?;
+    }
     db.media.delete(id)
 }
 

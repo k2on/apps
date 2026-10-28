@@ -133,6 +133,15 @@ They come from two places:
   a description keeps its lines, a list item each begun `• ` — and
   `tiling` (TextTiling) cuts where the words said change, each part titled
   by the words most its own.
+- **Who says each line** is told apart as it is heard (`server/voices`,
+  `services.harken.transcripts.voices`; sherpa-onnx with 3D-Speaker's
+  ERes2Net): each line `Speaker 1`, `Speaker 2`…, and what each voice
+  sounds like — its print — in a `NOTE voice` of the captions, read into
+  a `voice` row. A voice named by hand (`library.name_voice`, from a
+  line of the transcript in any client) is that person in every other
+  episode whose voice is like it — a cosine of 0.7 and over, each person
+  one voice there and the likest first — until somebody says otherwise
+  there (`library.transcript`).
 - **A folder** — `podcasts/<show>/` or `sermons/<show>/` beside `music/`
   in the media directory: the show is the folder's name and the cover in
   it, each audio file an episode.
@@ -236,7 +245,8 @@ position itself and nothing heartbeats.
 - **`t`** is the transcript of the episode playing, once the server has
   heard it (the button beside the queue's on the bar, there only then):
   the line being said lit and kept in the middle, what was said dimmed,
-  whoever says it over their lines. `j` and `k` walk it and `<Enter>` or a
+  whoever says it over their lines — a click on a voice's name asks who
+  it is. `j` and `k` walk it and `<Enter>` or a
   click plays from a line; a cursor moved or a page scrolled by hand stays
   put until playback reaches the line it was left on, or **Follow** (`f`).
 - **`d`** is the picker — every device, the one away drawn and not a target,

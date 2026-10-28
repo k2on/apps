@@ -28,8 +28,9 @@ let
   # is the opposite of what it means in a URL.
   # `transcriber <audio> <out.vtt>`, as the server runs it
   # (`harken/server/src/transcribe.rs`): the audio as whisper.cpp reads it,
-  # 16 kHz mono, heard at the lowest priority the host has, its captions
-  # written only once they are whole.
+  # 16 kHz mono, heard at the lowest priority the host has, its voices told
+  # apart (`harken/server/voices`), its captions written only once they are
+  # whole.
   transcriber = pkgs.writeShellScript "harken-transcriber" ''
     set -eu
     tmp=$(mktemp -d)
@@ -38,8 +39,12 @@ let
     run ${lib.getExe pkgs.ffmpeg-headless} -nostdin -loglevel error -i "$1" -ar 16000 -ac 1 -c:a pcm_s16le "$tmp/in.wav"
     run ${lib.getExe cfg.transcripts.package} -np -l en -t ${toString cfg.transcripts.threads} \
       -m ${cfg.transcripts.model} -f "$tmp/in.wav" -ovtt -of "$tmp/out" >/dev/null
+  '' + (if cfg.transcripts.voices then ''
+    HARKEN_VOICES_THREADS=${toString cfg.transcripts.threads} \
+      run ${lib.getExe (pkgs.callPackage ./voices.nix { })} "$tmp/in.wav" "$tmp/out.vtt" "$2"
+  '' else ''
     mv "$tmp/out.vtt" "$2"
-  '';
+  '');
 
   loopbackOnly = lib.elem cfg.address [
     "127.0.0.1"
@@ -218,6 +223,17 @@ in
         type = lib.types.ints.positive;
         default = 2;
         description = "How many of the host's cores whisper.cpp hears with.";
+      };
+
+      voices = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Whether who says each line is told apart too (`harken/server/voices`):
+          a voice named in one episode is that person in every episode it is
+          heard in. A few minutes of the host's cores an hour of speech, after
+          whisper.cpp's hours.
+        '';
       };
 
       chapters = lib.mkOption {

@@ -1142,6 +1142,22 @@ public struct Movement: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id), "\"work_id\":" + J.q(workId), "\"no\":" + String(no), "\"title\":" + J.q(title), "\"part\":" + J.q(part), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId)]) }
 }
 
+/// The record `NameVoice`.
+public struct NameVoice: Equatable {
+    public var mediaId: Id
+    public var voice: String
+    public var name: String
+
+    public init(mediaId: Id, voice: String, name: String) { self.mediaId = mediaId; self.voice = voice; self.name = name; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), voice: J.text(o["voice"]), name: J.text(o["name"]))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"voice\":" + J.q(voice), "\"name\":" + J.q(name)]) }
+}
+
 /// The record `NudgeVolume`.
 public struct NudgeVolume: Equatable {
     public var delta: Int64
@@ -1735,15 +1751,16 @@ public struct SetPeople: Equatable {
 public struct SetTranscript: Equatable {
     public var file: String
     public var cues: [CueAt]
+    public var voices: [VoiceAt]
 
-    public init(file: String, cues: [CueAt]) { self.file = file; self.cues = cues; }
+    public init(file: String, cues: [CueAt], voices: [VoiceAt]) { self.file = file; self.cues = cues; self.voices = voices; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(file: J.text(o["file"]), cues: J.list(o["cues"]) { v0 in CueAt(json: v0) })
+        self.init(file: J.text(o["file"]), cues: J.list(o["cues"]) { v0 in CueAt(json: v0) }, voices: J.list(o["voices"]) { v0 in VoiceAt(json: v0) })
     }
 
-    public var json: String { J.obj(["\"file\":" + J.q(file), "\"cues\":" + J.wlist(cues) { v0 in v0.json }]) }
+    public var json: String { J.obj(["\"file\":" + J.q(file), "\"cues\":" + J.wlist(cues) { v0 in v0.json }, "\"voices\":" + J.wlist(voices) { v0 in v0.json }]) }
 }
 
 /// The record `SetVolume`.
@@ -2021,15 +2038,16 @@ public struct TranscriptEntry: Equatable {
     public var speaker: String
     public var startMs: Int64
     public var text: String
+    public var voice: String
 
-    public init(endMs: Int64, speaker: String, startMs: Int64, text: String) { self.endMs = endMs; self.speaker = speaker; self.startMs = startMs; self.text = text; }
+    public init(endMs: Int64, speaker: String, startMs: Int64, text: String, voice: String) { self.endMs = endMs; self.speaker = speaker; self.startMs = startMs; self.text = text; self.voice = voice; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(endMs: J.int(o["end_ms"]), speaker: J.text(o["speaker"]), startMs: J.int(o["start_ms"]), text: J.text(o["text"]))
+        self.init(endMs: J.int(o["end_ms"]), speaker: J.text(o["speaker"]), startMs: J.int(o["start_ms"]), text: J.text(o["text"]), voice: J.text(o["voice"]))
     }
 
-    public var json: String { J.obj(["\"end_ms\":" + String(endMs), "\"speaker\":" + J.q(speaker), "\"start_ms\":" + String(startMs), "\"text\":" + J.q(text)]) }
+    public var json: String { J.obj(["\"end_ms\":" + String(endMs), "\"speaker\":" + J.q(speaker), "\"start_ms\":" + String(startMs), "\"text\":" + J.q(text), "\"voice\":" + J.q(voice)]) }
 }
 
 /// The record `Transfer`.
@@ -2058,6 +2076,53 @@ public struct Unsubscribe: Equatable {
     }
 
     public var json: String { J.obj(["\"url\":" + J.q(url)]) }
+}
+
+/// The record `Voice`.
+public struct Voice: Equatable {
+    public var mediaId: Id
+    public var name: String
+    public var print: [Int64]
+
+    public init(mediaId: Id, name: String, print: [Int64]) { self.mediaId = mediaId; self.name = name; self.print = print; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), name: J.text(o["name"]), print: J.list(o["print"]) { v0 in J.int(v0) })
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"name\":" + J.q(name), "\"print\":" + J.wlist(print) { v0 in String(v0) }]) }
+}
+
+/// The record `VoiceAt`.
+public struct VoiceAt: Equatable {
+    public var name: String
+    public var print: [Int64]
+
+    public init(name: String, print: [Int64]) { self.name = name; self.print = print; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(name: J.text(o["name"]), print: J.list(o["print"]) { v0 in J.int(v0) })
+    }
+
+    public var json: String { J.obj(["\"name\":" + J.q(name), "\"print\":" + J.wlist(print) { v0 in String(v0) }]) }
+}
+
+/// The record `VoiceName`.
+public struct VoiceName: Equatable {
+    public var mediaId: Id
+    public var voice: String
+    public var personName: String
+
+    public init(mediaId: Id, voice: String, personName: String) { self.mediaId = mediaId; self.voice = voice; self.personName = personName; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(mediaId: Id(J.text(o["media_id"])), voice: J.text(o["voice"]), personName: J.text(o["person_name"]))
+    }
+
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"voice\":" + J.q(voice), "\"person_name\":" + J.q(personName)]) }
 }
 
 /// The record `Welcome`.
@@ -2235,6 +2300,9 @@ public struct Harken {
 
     /// `library.my_progress`, kept.
     public func myProgress() throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.my_progress", input: "null")) { j in ProgressEntry(json: j) } }
+
+    /// `library.name_voice`: its intent's id.
+    @discardableResult public func nameVoice(_ input: NameVoice) throws -> String { try peer.mutate(name: "library.name_voice", input: input.json) }
 
     /// `library.people`, kept.
     public func people(_ input: EpisodeInput) throws -> LiveView<PeopleEntry> { LiveView(try peer.view(name: "library.people", input: input.json)) { j in PeopleEntry(json: j) } }

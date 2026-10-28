@@ -559,6 +559,7 @@ fn an_episodes_transcript_is_its_feeds() {
     let set = |cues: Vec<CueAt>| SetTranscript {
         file: ".feeds/51.mp3".into(),
         cues,
+        voices: vec![],
     };
     c.mutate(
         "library",
@@ -619,4 +620,76 @@ fn a_shows_people_are_read_at_once() {
         },
     );
     assert_eq!(each(&read, |p| p.name.clone()), ["Shahar", "Kiara", "Shahar", "Jacek"]);
+}
+
+/// A voice named in one episode is that person in another it sounds like
+/// them in: each person one voice there, the likest, and a name given by
+/// hand there over it. Falsified by naming every voice its likest person:
+/// both of the second episode's alike voices were Shahar.
+#[test]
+fn a_voice_named_once_is_known_by_its_print() {
+    let mut c = Lib::new();
+    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    let ftn = keys::show_key("podcast", "Full Time Nix");
+    c.mutate("library", "add_episode", &episode(&ftn, "One", ".feeds/1.mp3", 1)).unwrap();
+    c.mutate("library", "add_episode", &episode(&ftn, "Two", ".feeds/2.mp3", 2)).unwrap();
+    let id = |c: &Lib, file: &str| c.rows::<Media>("media").into_iter().find(|m| m.file == file).unwrap().id;
+    let (one, two) = (id(&c, ".feeds/1.mp3"), id(&c, ".feeds/2.mp3"));
+    let heard = |file: &str, voices: &[(&str, [i64; 3])]| SetTranscript {
+        file: file.into(),
+        cues: voices
+            .iter()
+            .enumerate()
+            .map(|(i, (v, _))| CueAt {
+                start_ms: i as i64 * 1_000,
+                end_ms: i as i64 * 1_000 + 900,
+                speaker: v.to_string(),
+                text: format!("Line {i}."),
+            })
+            .collect(),
+        voices: voices
+            .iter()
+            .map(|(v, p)| VoiceAt {
+                name: v.to_string(),
+                print: p.to_vec(),
+            })
+            .collect(),
+    };
+    let both = [("Speaker 1", [100, 0, 0]), ("Speaker 2", [0, 100, 0])];
+    c.mutate("library", "set_transcript", &heard(".feeds/1.mp3", &both)).unwrap();
+    let alike = [("Speaker 1", [0, 0, 100]), ("Speaker 2", [80, 50, 0]), ("Speaker 3", [95, 10, 0])];
+    c.mutate("library", "set_transcript", &heard(".feeds/2.mp3", &alike)).unwrap();
+    let name = |c: &mut Lib, media_id, voice: &str, name: &str| {
+        c.mutate(
+            "library",
+            "name_voice",
+            &NameVoice {
+                media_id,
+                voice: voice.into(),
+                name: name.into(),
+            },
+        )
+    };
+    let said = |c: &Lib, media_id| {
+        each(&c.list::<TranscriptEntry>("transcript", &EpisodeInput { media_id }), |e| {
+            format!("{}={}", e.voice, e.speaker)
+        })
+    };
+    assert_eq!(said(&c, two), ["Speaker 1=Speaker 1", "Speaker 2=Speaker 2", "Speaker 3=Speaker 3"]);
+    name(&mut c, one, "Speaker 1", "Shahar").unwrap();
+    name(&mut c, one, "Speaker 2", "Jacek").unwrap();
+    assert_eq!(said(&c, one), ["Speaker 1=Shahar", "Speaker 2=Jacek"]);
+    assert_eq!(said(&c, two), ["Speaker 1=Speaker 1", "Speaker 2=Speaker 2", "Speaker 3=Shahar"]);
+    name(&mut c, two, "Speaker 1", "Shahar").unwrap();
+    assert_eq!(said(&c, two), ["Speaker 1=Shahar", "Speaker 2=Speaker 2", "Speaker 3=Speaker 3"]);
+    name(&mut c, two, "Speaker 1", "").unwrap();
+    assert_eq!(said(&c, two), ["Speaker 1=Speaker 1", "Speaker 2=Speaker 2", "Speaker 3=Shahar"]);
+    assert!(name(&mut c, two, "Speaker 9", "Shahar").is_err());
+
+    // Heard again without its second voice, the name given it goes too.
+    c.mutate("library", "set_transcript", &heard(".feeds/1.mp3", &both[..1])).unwrap();
+    assert_eq!(each(&c.rows::<VoiceName>("voice_name"), |n| n.person_name.clone()), ["Shahar"]);
+    c.mutate("library", "remove_media", &RemoveMedia { id: one }).unwrap();
+    assert_eq!(c.rows::<Voice>("voice").len(), 3);
+    assert!(c.rows::<VoiceName>("voice_name").is_empty());
 }

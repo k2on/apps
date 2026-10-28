@@ -1517,6 +1517,70 @@
         }
       ],
       "space": "durable"
+    },
+    {
+      "name": "voice",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "print",
+          "ty": {
+            "List": "Int"
+          },
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "voice_name",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "voice",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "person_name",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [
+        {
+          "column": 0,
+          "table": "media"
+        }
+      ],
+      "space": "durable"
     }
   ]
 }
