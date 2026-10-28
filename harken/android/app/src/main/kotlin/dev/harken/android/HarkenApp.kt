@@ -809,7 +809,16 @@ fun HarkenApp(
             // All the way up, the lines want the room; gone with the last line, at a song.
             if (transcript && nowLines.isNotEmpty()) {
                 ModalBottomSheet(onDismissRequest = { transcript = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-                    TranscriptSheet(player.now?.title.orEmpty(), nowLines, playback.position, onSeek = playback::seek)
+                    val media = playing?.let { Id(it) }
+                    val people = media?.let { m -> heldWhile(library, peopleKey(m)) { it.people(m) }.value }.orEmpty()
+                    TranscriptSheet(
+                        player.now?.title.orEmpty(),
+                        nowLines,
+                        playback.position,
+                        onSeek = playback::seek,
+                        people = people,
+                        onName = { voice, name -> media?.let { library.nameVoice(it, voice, name) } },
+                    )
                 }
             }
             finding?.let { kind ->

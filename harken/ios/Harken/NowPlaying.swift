@@ -11,7 +11,14 @@
 // at all (PARITY.md); and iOS has no way for an app to hand the hardware
 // volume buttons to another device (Android's remote `DeviceInfo`), so they
 // stay the phone's own.
+//
+// The picture is always one: the cover, from the same cache the screens draw
+// from, or — for a track with none, or one that cannot be fetched — the
+// derived square the screens draw under it, rendered to an image, as
+// Android's notification and car get it (`CoverProvider`). Never an empty tile.
+import ArkUI
 import MediaPlayer
+import SwiftUI
 import UIKit
 
 @MainActor
@@ -83,18 +90,39 @@ final class NowPlaying {
         ]
         if let a = artwork, shownArt == now.art { info[MPMediaItemPropertyArtwork] = a }
         center.nowPlayingInfo = info
-        if shownArt != now.art { fetch(now.art) }
+        if shownArt != now.art { fetch(now.art, seed: now.seed) }
     }
 
-    // The cover, from the same cache the screens draw from, then the card again.
-    private func fetch(_ url: String) {
+    // The cover, from the same cache the screens draw from, then the card again; with none, or
+    // none to be had, the derived square at once.
+    private func fetch(_ url: String, seed: String) {
         shownArt = url
         artwork = nil
-        guard !url.isEmpty else { return }
+        guard !url.isEmpty else {
+            artwork = NowPlaying.square(seed)
+            return
+        }
         Task {
-            guard let image = await Covers.shared.load(url, side: 512), self.shownArt == url else { return }
-            self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            let image = await Covers.shared.load(url, side: 512)
+            guard self.shownArt == url else { return }
+            self.artwork = image.map { i in MPMediaItemArtwork(boundsSize: i.size) { _ in i } } ?? NowPlaying.square(seed)
             if let s = self.model?.player { self.show(s) }
         }
+    }
+
+    /// How many pixels across the square is drawn: the lock screen's cover, as Android's `CarArt.PLAYING`.
+    static let squarePx: CGFloat = 512
+
+    /// The derived square of `seed` as the lock screen's artwork: harken's colours, the dark side's,
+    /// as the card is drawn over a dimmed wallpaper. Nil only if SwiftUI cannot render it.
+    static func square(_ seed: String) -> MPMediaItemArtwork? {
+        let renderer = ImageRenderer(
+            content: Square(seed: seed)
+                .frame(width: squarePx, height: squarePx)
+                .environment(\.squares, .harken)
+                .environment(\.colorScheme, .dark))
+        renderer.scale = 1
+        guard let image = renderer.uiImage else { return nil }
+        return MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
 }

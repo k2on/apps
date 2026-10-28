@@ -119,13 +119,31 @@ They come from two places:
   (`library.set_people`, `library.appearances`). Its transcript is not
   the feed's: that is timed to the host's file, and a host that stitches
   an advertisement into each download moves every line of it.
-- **What is said in an episode** is heard on the server, from its own
-  copy (`server/src/transcribe.rs`): a program run on each episode here,
-  newest first — whisper.cpp, with `services.harken.transcripts.enable` —
-  writing WebVTT, read into a `cue` per line (`library.set_transcript`),
-  so it keeps time with what plays and a phone has it offline with the
-  episode. What it wrote is kept in the state directory, so an episode is
-  heard once.
+- **What is said in an episode** is the WebVTT beside its file
+  (`<file>.vtt`), read as it is written into a `cue` per line
+  (`library.set_transcript`), so a phone has it offline with the episode.
+  Whoever writes it: the server hears each episode here without one,
+  newest first, from its own copy so it keeps time with what plays
+  (`server/src/transcribe.rs`; whisper.cpp, with
+  `services.harken.transcripts.enable`), and a faster machine can write
+  them for it (`server/hear-here`, a laptop's GPU), or a hand. An episode its feed gave no chapters is given some from
+  it, by counting words (`server/src/chapters.rs`, whichever of them
+  `services.harken.transcripts.chapters` names, in turn): `outline` finds
+  where each topic its description lists is said, in the list's order —
+  a description keeps its lines, a list item each begun `• ` — and
+  `tiling` (TextTiling) cuts where the words said change, each part titled
+  by the words most its own.
+- **Who says each line** — but a sermon's, which is one voice throughout,
+  as `arkdb rows media kind=sermon` tells another machine — is told apart
+  as it is heard (`server/voices`,
+  `services.harken.transcripts.voices`; sherpa-onnx with 3D-Speaker's
+  ERes2Net): each line `Speaker 1`, `Speaker 2`…, and what each voice
+  sounds like — its print — in a `NOTE voice` of the captions, read into
+  a `voice` row. A voice named by hand (`library.name_voice`, from a
+  line of the transcript in any client) is that person in every other
+  episode whose voice is like it — a cosine of 0.7 and over, each person
+  one voice there and the likest first — until somebody says otherwise
+  there (`library.transcript`).
 - **A folder** — `podcasts/<show>/` or `sermons/<show>/` beside `music/`
   in the media directory: the show is the folder's name and the cover in
   it, each audio file an episode.
@@ -229,7 +247,8 @@ position itself and nothing heartbeats.
 - **`t`** is the transcript of the episode playing, once the server has
   heard it (the button beside the queue's on the bar, there only then):
   the line being said lit and kept in the middle, what was said dimmed,
-  whoever says it over their lines. `j` and `k` walk it and `<Enter>` or a
+  whoever says it over their lines — a click on a voice's name asks who
+  it is. `j` and `k` walk it and `<Enter>` or a
   click plays from a line; a cursor moved or a page scrolled by hand stays
   put until playback reaches the line it was left on, or **Follow** (`f`).
 - **`d`** is the picker — every device, the one away drawn and not a target,

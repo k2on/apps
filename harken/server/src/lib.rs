@@ -34,6 +34,7 @@
 pub mod assistant;
 pub mod captions;
 pub mod catalogue;
+pub mod chapters;
 pub mod covers;
 pub mod domain;
 pub mod feeds;
@@ -60,6 +61,9 @@ pub const PHONE_SCHEME: &str = "harken://";
 
 pub use ark_peer::{Keepalive, Retention, SignIn};
 
+/// The chapterers tried when the server is told none.
+pub const DEFAULT_CHAPTERS: &str = "outline,tiling";
+
 /// Everything the server is told, from the environment or a test: any
 /// server's (`ark_peer::Serve`, read under `HARKEN_`, which it derefs to)
 /// and harken's own beside it.
@@ -74,6 +78,9 @@ pub struct Config {
     /// What hears the episodes here (`transcribe.rs`): a program run as
     /// `program <audio> <captions.vtt>`.
     pub transcriber: Option<PathBuf>,
+    /// Who makes chapters of what was heard in an episode with none
+    /// (`chapters.rs`), in the order to try them: `outline,tiling`.
+    pub chapters: String,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
 }
@@ -99,6 +106,7 @@ impl Config {
             media: None,
             catalogue: None,
             transcriber: None,
+            chapters: DEFAULT_CHAPTERS.into(),
             house: None,
         }
     }
@@ -115,6 +123,9 @@ impl Config {
     /// HARKEN_TRANSCRIBER            a program writing an episode's captions,
     ///                               `program <audio> <out.vtt>` (with
     ///                               HARKEN_MEDIA)
+    /// HARKEN_CHAPTERS               the chapterers to try on an episode
+    ///                               with none, in order (`outline,tiling`;
+    ///                               `none`)
     /// HARKEN_HA_URL, HARKEN_HA_TOKEN_FILE, HARKEN_HA_PLAYERS
     ///                               all three, or none; HARKEN_HA_MEDIA
     /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
@@ -133,6 +144,7 @@ impl Config {
             media: env("HARKEN_MEDIA").map(PathBuf::from),
             catalogue: env("HARKEN_CATALOGUE"),
             transcriber: env("HARKEN_TRANSCRIBER").map(PathBuf::from),
+            chapters: env("HARKEN_CHAPTERS").unwrap_or_else(|| DEFAULT_CHAPTERS.into()),
             house: house(&env)?,
         })
     }
@@ -481,6 +493,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 login,
                 config.catalogue.clone(),
                 config.transcriber.clone(),
+                chapters::chain(&config.chapters),
             )?)
         }
         None => None,

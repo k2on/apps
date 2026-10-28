@@ -164,6 +164,7 @@ fn a_directory_of_audio_becomes_songs_and_a_rescan_adds_none() {
         login,
         None,
         None,
+        Vec::new(),
     )
     .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1_200));
@@ -1103,6 +1104,29 @@ fn a_feed_followed_is_downloaded_and_a_show() {
         ],
         "what was heard in it, on its episode"
     );
+    // Captions written beside an episode's file by anybody — another
+    // machine that heard it faster, a hand — are its transcript as soon as
+    // they are there.
+    let heard = hub_rows::<Media>(&server, "media")
+        .into_iter()
+        .find(|m| m.id == grace.media_id)
+        .unwrap()
+        .file;
+    let beside = data
+        .join("feeds")
+        .join(format!("{}.vtt", heard.strip_prefix(".feeds/").unwrap()));
+    std::fs::write(
+        &beside,
+        "WEBVTT\n\n00:00:02.000 --> 00:00:03.000\n Heard elsewhere.\n",
+    )
+    .unwrap();
+    eventually(10, || {
+        let cues = hub_rows::<harken_server::domain::Cue>(&server, "cue");
+        cues.iter()
+            .any(|c| c.media_id == grace.media_id && c.text == "Heard elsewhere.")
+            .then_some(())
+    })
+    .expect("captions written beside the file read without a restart");
     let file = &found.iter().find(|(t, _)| t == "Living Grace").unwrap().1;
     let media_rows = hub_rows::<Media>(&server, "media");
     assert_eq!(

@@ -115,9 +115,12 @@ class CarTests {
     /**
      * Every picture a car is given is a `content://` URI the provider answers: an album with a
      * cover is that cover, cropped square, the size the car asked for; one with none is the derived
-     * square, in the name's tint — never an empty tile.
+     * square, in the name's tint — never an empty tile. The playing track's is one too, whether or
+     * not it has a cover: a car draws it beside a map from the URI alone, and an `http` one it will
+     * not load.
      *
-     * Falsified by the provider ignoring the size asked for: a 96-pixel ask came back 120 across.
+     * Falsified by the provider ignoring the size asked for: a 96-pixel ask came back 120 across;
+     * and by the playing track carrying its cover's `http` URL, which Android Auto's card left blank.
      */
     @Test
     fun aCoverIsAContentUriTheProviderAnswers() {
@@ -165,6 +168,17 @@ class CarTests {
             assertEquals(CarArt.AUTHORITY, water.mediaMetadata.artworkUri!!.authority)
             assertEquals("Water Music", CarArt.parse(water.mediaMetadata.artworkUri!!)!!.seed)
             peer.peer.close()
+
+            // And the playing track's: its cover behind the provider, never the server's URL.
+            val playing = Items.of(queuedTrack("Alla Hornpipe", 1), server, "covers/water.png", "#album/Water%20Music").mediaMetadata.artworkUri!!
+            assertEquals("content", playing.scheme)
+            val named = CarArt.parse(playing)!!
+            assertEquals("$server/media/covers/water.png", named.url)
+            assertEquals("Water Music", named.seed)
+            assertEquals(CarArt.PLAYING, named.px)
+            val bare = CarArt.parse(Items.of(queuedTrack("Alla Hornpipe", 1), server, "", "#library").mediaMetadata.artworkUri!!)!!
+            assertNull("no cover: the derived square", bare.url)
+            assertEquals("Water Music", bare.seed)
         } finally {
             file.delete()
             File(context.cacheDir, "car-art").deleteRecursively()

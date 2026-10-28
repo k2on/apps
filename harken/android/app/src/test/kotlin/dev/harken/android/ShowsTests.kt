@@ -177,6 +177,7 @@ class ShowsTests {
                     CueAt(2_000, 4_000, "Shahar", "Today, Jacek."),
                     CueAt(6_000, 9_000, "", "Applause."),
                 ),
+                emptyList(),
             ),
         )
         val lines = Phone.once({ Phone.transcript(h, bump.id) }, Cue::of)

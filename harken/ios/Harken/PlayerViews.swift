@@ -382,7 +382,8 @@ struct QueueSheet: View {
 /// dimmed, and who speaks named where that changes. A line tapped plays from
 /// it. Scrolled by hand, it stops following the sound — until Follow Along
 /// is pressed, or the line playing comes down to the middle of what shows.
-/// The position is the player's, counted as the scrubber counts it.
+/// The position is the player's, counted as the scrubber counts it. A line
+/// held asks who its voice is, where voices were told apart.
 struct TranscriptSheet: View {
     @EnvironmentObject private var model: Model
     /// The list keeps the line playing in its middle.
@@ -391,6 +392,9 @@ struct TranscriptSheet: View {
     @State private var handled = false
     /// The lines that show, by their place.
     @State private var showing = [Int]()
+    /// The line whose voice is being named, and the name typed.
+    @State private var naming: TranscriptEntry?
+    @State private var typed = ""
 
     var body: some View {
         let s = model.player
@@ -415,6 +419,14 @@ struct TranscriptSheet: View {
                                         }
                                         .buttonStyle(.plain)
                                         .accessibilityHint("Plays from here")
+                                        .contextMenu {
+                                            if !cues[i].voice.isEmpty {
+                                                Button("Who Is This?", systemImage: "person.crop.circle") {
+                                                    typed = cues[i].speaker == cues[i].voice ? "" : cues[i].speaker
+                                                    naming = cues[i]
+                                                }
+                                            }
+                                        }
                                         .id(i)
                                     }
                                 }
@@ -466,8 +478,26 @@ struct TranscriptSheet: View {
             }
             .navigationTitle("Transcript")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Who Is This?", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }), presenting: naming) { line in
+                let media = s.now.map { Id($0.id) }
+                let name = { (who: String) in if let m = media { model.nameVoice(m, line.voice, who) } }
+                ForEach(media.flatMap { model.people[$0] } ?? [], id: \.name) { p in
+                    Button(p.name) { name(p.name) }
+                }
+                TextField("Name", text: $typed)
+                Button("Name") { name(typed) }.disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Nobody", role: .destructive) { name("") }
+                Button("Cancel", role: .cancel) {}
+            } message: { line in
+                Text("\u{201C}\(line.text)\u{201D} Named once, it is them in every episode they are heard in.")
+            }
         }
-        .task(id: s.now?.id) { if let n = s.now { model.loadTranscript(Id(n.id)) } }
+        .task(id: s.now?.id) {
+            if let n = s.now {
+                model.loadTranscript(Id(n.id))
+                model.loadPeople([Id(n.id)])
+            }
+        }
     }
 }
 

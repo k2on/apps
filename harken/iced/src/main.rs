@@ -63,7 +63,7 @@ use arkui::route::Router;
 use arkui::vim;
 use iced::{Point, Size, Subscription, Task};
 
-use crate::domain::{AddToPlaylist, CreatePlaylist, RemoveFromPlaylist};
+use crate::domain::{AddToPlaylist, CreatePlaylist, NameVoice, RemoveFromPlaylist};
 #[cfg(not(feature = "demo"))]
 use client::Replica;
 use peer::{key, Peer};
@@ -275,6 +275,9 @@ pub enum Message {
     /// The playlist picker over the track the menu is about, or the one under
     /// the cursor.
     OpenPicker,
+    /// Who the voice saying a line of the transcript is: a picker of the
+    /// episode's people, and a name typed.
+    NameVoice(usize),
     PickerAt(usize),
     MenuAt(usize),
     MenuActivate,
@@ -630,6 +633,16 @@ pub const QUEUE_WIDTH: f32 = 336.0;
 pub const QUEUE_ROWS: usize = 12;
 /// The last row of the playlist picker, which is a row and not a key.
 pub const NEW_PLAYLIST: &str = "New playlist\u{2026}";
+/// …and of the voice picker.
+pub const SOMEBODY_ELSE: &str = "Somebody else\u{2026}";
+
+/// What a picker's row stands for: a playlist the track is on or off, or
+/// who a voice is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pick {
+    Playlist(Id),
+    Person(String),
+}
 /// About how tall a transcript's header is, over its lines, which scroll
 /// under it; and one of its lines, a line of words and its padding — what
 /// keeps the line being said in the middle of the room left.
@@ -664,13 +677,15 @@ pub struct App {
     /// The line being said, as the transcript last followed it.
     pub said: Option<usize>,
     /// A row's menu, and the playlist picker that is its submenu — or the one
-    /// `a` opens alone. arkui holds the rules; the playlists are the values.
-    pub ctx: Context<Message, Id>,
+    /// `a` opens alone, or who a voice is. arkui holds the rules.
+    pub ctx: Context<Message, Pick>,
     /// The track the menu is about. Held by id rather than index: the list
     /// under it can move while it is up.
     pub menu_about: Option<Id>,
     /// …and the track the picker is about.
     pub picker_about: Option<Id>,
+    /// …or the episode and the voice in it.
+    pub voice_about: Option<(Id, String)>,
     /// The device picker, when it is up; the last row is "nowhere".
     pub devices: Option<usize>,
     /// The queue panel, when it is up: where its cursor is, from the top.
@@ -777,6 +792,7 @@ impl App {
             ctx: Context::new(),
             menu_about: None,
             picker_about: None,
+            voice_about: None,
             devices: None,
             queue_panel: None,
             window: Size::new(860.0, 600.0),
@@ -1922,14 +1938,61 @@ impl App {
             .iter()
             .map(|p| Choice {
                 on: on.contains(&p.id),
-                value: p.id,
+                value: Pick::Playlist(p.id),
                 name: p.name.clone(),
             })
             .collect();
         self.picker_about = Some(item.id);
+        self.voice_about = None;
         self.ctx
             .open_picker(Picker::new(item.title, choices, Some(NEW_PLAYLIST.into())), self.window);
         Task::none()
+    }
+
+    /// Who the voice saying line `at` of the transcript is: the episode's
+    /// people, whoever it is ticked, and anybody else by name.
+    fn open_voice_picker(&mut self, at: usize) -> Task<Message> {
+        let (Some(now), Some(line)) = (self.now().map(|n| n.track().id.0), self.cues().into_iter().nth(at)) else {
+            return Task::none();
+        };
+        if line.voice.is_empty() {
+            return Task::none();
+        }
+        let mut names: Vec<String> = self.peer.people_of(now).into_iter().map(|p| p.name).collect();
+        if line.speaker != line.voice && !names.contains(&line.speaker) {
+            names.push(line.speaker.clone());
+        }
+        let choices = names
+            .into_iter()
+            .map(|name| Choice {
+                on: name == line.speaker,
+                value: Pick::Person(name.clone()),
+                name,
+            })
+            .collect();
+        self.picker_about = None;
+        self.voice_about = Some((now, line.voice.clone()));
+        let title = format!("Who is {}?", line.speaker);
+        self.ctx.open_picker(Picker::new(title, choices, Some(SOMEBODY_ELSE.into())), self.window);
+        Task::none()
+    }
+
+    /// The voice the picker is about named; nobody, to take it back.
+    fn name_voice(&mut self, name: String) {
+        let Some((media, voice)) = self.voice_about.take() else {
+            return;
+        };
+        let what = match name.trim().is_empty() {
+            true => format!("forget who {voice} is"),
+            false => format!("say {voice} is {}", name.trim()),
+        };
+        let input = NameVoice {
+            media_id: key(media),
+            voice,
+            name,
+        };
+        let _ = self.author(what, "name_voice", &input);
+        self.ctx.close_picker();
     }
 
     /// Open what the cursor is on.
@@ -2506,6 +2569,7 @@ impl App {
                 }
             }
             Message::OpenPicker => return self.open_picker(),
+            Message::NameVoice(at) => return self.open_voice_picker(at),
             Message::ClosePicker => self.ctx.close_picker(),
             Message::PickerAt(at) => self.ctx.picker_at(at),
             Message::PickerName(name) => {
@@ -2514,7 +2578,15 @@ impl App {
                 }
             }
             Message::PickerActivate => match self.ctx.activate_picker() {
-                Some(Picked::Toggled { value, on }) => {
+                // A person ticked is who the voice is; unticked, nobody.
+                Some(Picked::Toggled {
+                    value: Pick::Person(name),
+                    on,
+                }) => self.name_voice(if on { name } else { String::new() }),
+                Some(Picked::Toggled {
+                    value: Pick::Playlist(value),
+                    on,
+                }) => {
                     let Some(media) = self.picker_about else {
                         return Task::none();
                     };
@@ -2544,6 +2616,7 @@ impl App {
                     };
                     // Refused at once: the tick the panel shows is not true.
                     if !done {
+                        let value = Pick::Playlist(value);
                         if let Some(choice) = self.ctx.picker.as_mut().and_then(|p| p.choices.iter_mut().find(|c| c.value == value)) {
                             choice.on = !on;
                         }
@@ -2558,6 +2631,12 @@ impl App {
                 let Some(name) = self.ctx.picker.as_ref().map(|p| p.naming.clone().unwrap_or_default()) else {
                     return Task::none();
                 };
+                if self.voice_about.is_some() {
+                    if !name.trim().is_empty() {
+                        self.name_voice(name);
+                    }
+                    return Task::none();
+                }
                 // Rebuilt from the playlists view rather than guessing the new
                 // row: its id is chosen inside the mutation, and the refresh
                 // has just spliced it in. The track is not added to it here —

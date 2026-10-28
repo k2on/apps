@@ -393,6 +393,8 @@ pub struct Cue {
     /// Who says it; empty where the transcript does not say.
     pub speaker: String,
     pub text: String,
+    /// The voice told apart that says it, which can be named; empty for none.
+    pub voice: String,
 }
 
 impl From<TranscriptEntry> for Cue {
@@ -402,6 +404,7 @@ impl From<TranscriptEntry> for Cue {
             end_ms: e.end_ms,
             speaker: e.speaker,
             text: e.text,
+            voice: e.voice,
         }
     }
 }

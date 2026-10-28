@@ -25,7 +25,7 @@ use std::sync::Arc;
 use ark::db::{Db, Tables, Writes};
 use ark::log::Durable;
 use ark::peer::{Functions, Input, Output, Peer as Machine, Who};
-use ark::schema::Space;
+use ark::schema::{Schema, Space};
 use ark::store::{Change, LOG};
 use ark::Refusal;
 
@@ -110,7 +110,13 @@ impl Instance {
     /// `S`'s tables as `disk` last kept them, on an unwired machine; empty,
     /// saying why in [`Instance::failure`], when it does not read.
     pub fn open<S: Tables>(disk: Box<dyn Disk>) -> Instance {
-        let mut i = Instance::unwired::<S>(Space::Durable, Some(disk));
+        Instance::open_under(Arc::new(S::schema()), disk)
+    }
+
+    /// The tables of a schema known only at run time — a server's, as it
+    /// keeps it beside its log — as `disk` last kept them.
+    pub fn open_under(schema: Arc<Schema>, disk: Box<dyn Disk>) -> Instance {
+        let mut i = Instance::unwired(schema, Space::Durable, Some(disk));
         i.fold = Some(Fold {
             keep: 0,
             slack: 64,
@@ -123,11 +129,10 @@ impl Instance {
 
     /// `S`'s volatile tables, empty, kept nowhere.
     pub fn ephemeral<S: Tables>() -> Instance {
-        Instance::unwired::<S>(Space::Volatile, None)
+        Instance::unwired(Arc::new(S::schema()), Space::Volatile, None)
     }
 
-    fn unwired<S: Tables>(space: Space, disk: Option<Box<dyn Disk>>) -> Instance {
-        let schema = Arc::new(S::schema());
+    fn unwired(schema: Arc<Schema>, space: Space, disk: Option<Box<dyn Disk>>) -> Instance {
         let mut machine = Machine::new(schema, Functions::default(), alone_at(None), Who::default()).in_space(space);
         // Its own ids, drawn afresh at each open: the log it folds keeps none.
         machine.origin = draw_origin();

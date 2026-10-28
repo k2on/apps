@@ -60,16 +60,20 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -499,14 +503,24 @@ fun QueueSheet(state: PlayerState, controls: Controls) {
  * was left. The position is read here, and only for which line it is in: a tick that stays in the
  * line recomposes nothing.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TranscriptSheet(title: String, lines: List<Cue>, position: StateFlow<Long> = Start, onSeek: (Long) -> Unit = {}) {
+fun TranscriptSheet(
+    title: String,
+    lines: List<Cue>,
+    position: StateFlow<Long> = Start,
+    onSeek: (Long) -> Unit = {},
+    people: List<OnEpisode> = emptyList(),
+    onName: (voice: String, name: String) -> Unit = { _, _ -> },
+) {
     val ms = position.collectAsStateWithLifecycle()
     // Which line is being said moves a few times a minute, not at every tick.
     val at by remember(lines) { derivedStateOf { Cue.at(lines, ms.value) } }
     val speakers = remember(lines) { Cue.speakers(lines) }
     val list = rememberTransientListState()
     var following by remember { mutableStateOf(true) }
+    // The voice being named, by the line whose name was tapped.
+    var naming by remember { mutableStateOf<Cue?>(null) }
     val dragged by list.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(dragged) { if (dragged) following = false }
     // Following, the line being said is brought to the middle: at once as the sheet opens, gliding after.
@@ -542,10 +556,55 @@ fun TranscriptSheet(title: String, lines: List<Cue>, position: StateFlow<Long> =
                             onSeek(line.startMs)
                             following = true
                         },
+                        onSpeaker = { naming = line },
                     )
                 }
             }
             FollowAlong(!following, { following = true }, Modifier.align(Alignment.BottomCenter).padding(bottom = Space.xl))
+        }
+    }
+    naming?.let { line ->
+        BasicAlertDialog(onDismissRequest = { naming = null }) {
+            NameVoiceCard(line, people, onName = { name ->
+                onName(line.voice, name)
+                naming = null
+            }, onCancel = { naming = null })
+        }
+    }
+}
+
+/**
+ * Who a voice is: one of the episode's people, a name typed, or nobody — which leaves it to whoever
+ * it sounds like. Named once, it is that person in every episode it is heard in.
+ */
+@Composable
+fun NameVoiceCard(line: Cue, people: List<OnEpisode>, onName: (String) -> Unit, onCancel: () -> Unit) {
+    var name by remember { mutableStateOf(if (line.speaker == line.voice) "" else line.speaker) }
+    Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 6.dp) {
+        Column(Modifier.padding(Space.xl)) {
+            Text("Who is this?", style = MaterialTheme.typography.headlineSmall)
+            Text("\u201c${line.text}\u201d", style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Space.s))
+            Spacer(Modifier.height(Space.l))
+            for (p in people.distinctBy { it.name }) {
+                Text(
+                    p.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (p.name == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Space.corner)).clickable { onName(p.name) }.padding(vertical = Space.m, horizontal = Space.s),
+                )
+            }
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = Space.s),
+            )
+            Row(Modifier.fillMaxWidth().padding(top = Space.m), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { onName("") }) { Text("Nobody") }
+                TextButton(onClick = onCancel) { Text("Cancel") }
+                TextButton(onClick = { onName(name) }, enabled = name.isNotBlank()) { Text("Name") }
+            }
         }
     }
 }
@@ -568,7 +627,7 @@ private val LINE_HALF = 24.dp
 // One line of a transcript: the speaker's name over it where the speaker changes, and the line, lit
 // while it is said and dimmed once it has been, fading between.
 @Composable
-private fun TranscriptLine(line: Cue, speaker: String, said: Boolean, now: Boolean, onClick: () -> Unit) {
+private fun TranscriptLine(line: Cue, speaker: String, said: Boolean, now: Boolean, onClick: () -> Unit, onSpeaker: () -> Unit) {
     val ink = MaterialTheme.colorScheme.onSurface
     val colour by animateColorAsState(
         when {
@@ -580,7 +639,9 @@ private fun TranscriptLine(line: Cue, speaker: String, said: Boolean, now: Boole
     )
     Column(Modifier.fillMaxWidth().padding(horizontal = Space.s).clip(RoundedCornerShape(Space.corner)).clickable(onClick = onClick).padding(horizontal = Space.l, vertical = Space.s)) {
         if (speaker.isNotEmpty()) {
-            Text(speaker.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs))
+            // A voice told apart is named by tapping its name.
+            val named = if (line.voice.isEmpty()) Modifier else Modifier.clickable(onClick = onSpeaker)
+            Text(speaker.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs).then(named))
         }
         Text(line.text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = colour)
     }

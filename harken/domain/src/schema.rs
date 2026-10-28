@@ -386,6 +386,30 @@ pub struct Cue {
     pub text: String,
 }
 
+/// One voice heard in an episode: who a cue's `speaker` is, as the server
+/// told voices apart (`server/voices`) — `Speaker 1`, `Speaker 2`, in the
+/// order they first speak — and its print, what it sounds like: a
+/// direction in a speaker model's space, as whole numbers. A voice named
+/// in one episode is known by its print in the next.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct Voice {
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    #[ark(key)]
+    pub name: String,
+    pub print: Vec<i64>,
+}
+
+/// Who one of an episode's voices is, as somebody said it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct VoiceName {
+    #[ark(key, refs(Media))]
+    pub media_id: Id<Media>,
+    #[ark(key)]
+    pub voice: String,
+    pub person_name: String,
+}
+
 /// harken's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Harken {
@@ -414,6 +438,8 @@ pub struct Harken {
     pub chapter: Chapter,
     pub appearance: Appearance,
     pub cue: Cue,
+    pub voice: Voice,
+    pub voice_name: VoiceName,
 }
 
 ark_auth::install!(Harken);

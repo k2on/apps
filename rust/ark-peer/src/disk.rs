@@ -21,6 +21,9 @@
 //!   again as it opens, from each entry's facts, each entry linking onto
 //!   the one before it, and writes `kv` whole when one does not.
 //!
+//! A server keeps its schema beside them, as JSON ([`SCHEMA`]): what reads
+//! the rows without its domain compiled in reads them under it.
+//!
 //! What a peer keeps beside its log is the rows of its local instance
 //! (`local`), in this same format under the names `local.kv` and
 //! `local.log` ([`crate::Shared`]).
@@ -37,6 +40,9 @@ use std::path::PathBuf;
 
 use ark::format::Encode;
 use ark::log::{Logged, Record, Rows};
+
+/// The blob a server's schema is in, beside its log.
+pub const SCHEMA: &str = "schema.json";
 
 /// The store made durable, read back: its rows as last written whole, and
 /// the log's rows appended since.

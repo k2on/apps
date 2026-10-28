@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2029 # $data and the names are this side's on purpose
+# Hear a server's episodes on this machine — whisper.cpp on its GPU, many
+# times what a small server's cores can — and leave each one's captions
+# beside the episode's file, where the server reads an episode's transcript
+# from as soon as it is there (src/library.rs) and its own transcriber
+# leaves alone (src/transcribe.rs). Who says each line is told apart here
+# too (voices), and captions heard before that are told apart again — but
+# in a sermon, which is one voice throughout, as the server's own rows say
+# (`arkdb rows`).
+#
+# The first downloads first — a feed followed is its newest episodes,
+# and older ones are asked for later — each episode not heard yet, until
+# there are none or this is stopped; run it again to carry on. With
+# whisper.cpp and ffmpeg about, a nixpkgs with sherpa-onnx as `nixpkgs`, and
+# the server an ssh host whose sudo needs no password:
+#
+#   nix shell nixpkgs#whisper-cpp-vulkan nixpkgs#ffmpeg-headless \
+#     -c harken/server/hear-here ark
+#
+# The models are the NixOS module's (services.harken.transcripts), so a
+# line heard here is the line the server would have heard.
+set -euo pipefail
+
+host=${1:?the server, as ssh names it}
+data=${HARKEN_DATA_DIR:-/var/lib/harken}
+here=$(dirname "$(realpath "$0")")
+model=$(nix-prefetch-url --print-path \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin \
+  1qm7zxamlvac564c3270wqqqks5wc7532q3fqi01zbfmkiq22hir 2>/dev/null | tail -1)
+voices=$(nix build --no-link --print-out-paths --impure --expr \
+  "(builtins.getFlake \"nixpkgs\").legacyPackages.\${builtins.currentSystem}.callPackage $here/nix/voices.nix { }")
+export HARKEN_VOICES_THREADS=${HARKEN_VOICES_THREADS:-8}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+ssh "$host" "sudo ls -tr $data/feeds" >"$tmp/list"
+# Captions with no voices told apart in them, and the sermons.
+ssh "$host" "sudo sh -c 'cd $data/feeds && grep -L \"^NOTE voice\" -- *.vtt'" >"$tmp/unvoiced" || true
+ssh "$host" "sudo arkdb rows media kind=sermon --from $data" </dev/null |
+  grep -o '"file":"[^"]*"' | sed 's|.*/||; s|"$||' >"$tmp/sermons"
+grep -Ei '\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$' "$tmp/list" | while read -r file; do
+  name=$file.vtt
+  heard=$(grep -cxF "$name" "$tmp/list" || true)
+  one_voice=$(grep -cxF "$file" "$tmp/sermons" || true)
+  [ "$heard" = 1 ] && { [ "$one_voice" = 1 ] || ! grep -qxF "$name" "$tmp/unvoiced"; } && continue
+  echo "hear-here: $file" >&2
+  started=$(date +%s)
+  ssh "$host" "sudo cat $data/feeds/$file" </dev/null >"$tmp/audio"
+  ffmpeg -nostdin -loglevel error -y -i "$tmp/audio" -ar 16000 -ac 1 -c:a pcm_s16le "$tmp/in.wav"
+  if [ "$heard" = 1 ]; then
+    ssh "$host" "sudo cat $data/feeds/$name" </dev/null >"$tmp/out.vtt"
+  else
+    whisper-cli -l en -m "$model" -f "$tmp/in.wav" -ovtt -of "$tmp/out" </dev/null >/dev/null 2>&1
+  fi
+  if [ "$one_voice" = 1 ]; then
+    mv "$tmp/out.vtt" "$tmp/voices.vtt"
+  else
+    "$voices/bin/harken-voices" "$tmp/in.wav" "$tmp/out.vtt" "$tmp/voices.vtt" </dev/null 2>/dev/null
+  fi
+  # Whole or not at all: the server reads only a file that is there.
+  ssh "$host" "sudo sh -c 'cat > $data/feeds/$name.part && mv $data/feeds/$name.part $data/feeds/$name'" <"$tmp/voices.vtt"
+  echo "hear-here: heard in $(($(date +%s) - started))s" >&2
+done

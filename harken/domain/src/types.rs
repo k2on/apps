@@ -363,12 +363,33 @@ pub struct CueAt {
     pub text: String,
 }
 
-/// An episode's transcript, by its file: it replaces whatever it had.
+/// One voice heard in a transcript: the `speaker` its lines say, and what
+/// it sounds like (`schema::Voice`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+pub struct VoiceAt {
+    pub name: String,
+    pub print: Vec<i64>,
+}
+
+/// An episode's transcript, by its file: it replaces whatever it had, and
+/// the voices told apart in it theirs.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct SetTranscript {
     #[ark(trim, non_empty, why = "a transcript needs its episode's file")]
     pub file: String,
     pub cues: Vec<CueAt>,
+    #[serde(default)]
+    pub voices: Vec<VoiceAt>,
+}
+
+/// Who one of an episode's voices is; nobody, to take a name back.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct NameVoice {
+    pub media_id: Id<Media>,
+    #[ark(trim, non_empty, why = "a voice is named by the speaker its lines say")]
+    pub voice: String,
+    #[ark(trim)]
+    pub name: String,
 }
 
 /// One episode, by its media id.
@@ -572,9 +593,13 @@ pub struct ShowPeopleEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
 pub struct TranscriptEntry {
     pub end_ms: i64,
+    /// Who says it: the person its voice is, or as the transcript says.
     pub speaker: String,
     pub start_ms: i64,
     pub text: String,
+    /// The voice told apart that says it, which `library.name_voice`
+    /// names; empty where none was.
+    pub voice: String,
 }
 
 /// What is true of a media row as an episode.

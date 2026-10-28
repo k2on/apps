@@ -295,6 +295,13 @@ final class Model: ObservableObject {
         bridge?.transcript(media) { read in self.transcripts[media] = read }
     }
 
+    /// Who one of an episode's voices is, and its transcript read again to say so.
+    func nameVoice(_ media: Id, _ voice: String, _ name: String) {
+        bridge?.nameVoice(media, voice, name.trimmingCharacters(in: .whitespaces)) {
+            self.bridge?.transcript(media) { read in self.transcripts[media] = read }
+        }
+    }
+
     /// Somebody as the episodes read so far name them — their picture and
     /// their link — the first with either, else the first at all.
     func face(_ name: String) -> PeopleEntry? {

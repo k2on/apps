@@ -10,6 +10,7 @@ pub mod events;
 pub mod fuzz;
 pub mod gen;
 pub mod library;
+pub mod rows;
 pub mod sim;
 pub mod trace;
 pub mod vectors;

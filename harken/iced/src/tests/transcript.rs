@@ -6,7 +6,7 @@ use arkui::vim::{Action, Motion};
 use super::now_playing::{carry, dial, hub, phone_who};
 use super::who;
 use crate::client::Replica;
-use crate::domain::{AddEpisode, AddShow, CueAt, SetTranscript};
+use crate::domain::{AddEpisode, AddShow, CueAt, SetTranscript, VoiceAt};
 use crate::places::{Pane, Source};
 use crate::{App, Message};
 
@@ -49,7 +49,15 @@ fn episode(p: &mut Replica) {
             text: text.into(),
         })
         .collect();
-    p.mutate("set_transcript", &SetTranscript { file: FILE.into(), cues }).unwrap();
+    p.mutate(
+        "set_transcript",
+        &SetTranscript {
+            file: FILE.into(),
+            cues,
+            voices: vec![],
+        },
+    )
+    .unwrap();
 }
 
 /// A window that cannot play, joined to the hub, and the phone playing the
@@ -147,4 +155,51 @@ fn a_cursor_moved_by_hand_stays_until_playback_reaches_it() {
     let _ = app.act(Action::Key('f'));
     carry(&hub, &mut app, &mut phone);
     assert_eq!((app.at(Pane::Tracks), app.following), (3, true), "`f` is back on the line being said");
+}
+
+/// A voice's name clicked asks who it is, and a name typed is who says
+/// that voice's lines from then on — every one of them, and only those.
+/// Falsified by naming the line's speaker rather than its voice: the
+/// typed name was not the voice's, and the lines stayed `Speaker 2`'s.
+#[test]
+fn a_voice_named_from_its_line_says_all_its_lines() {
+    let hub = hub();
+    let (mut app, _phone) = playing_on_the_phone(&hub);
+    let voices = ["Speaker 1", "Speaker 1", "Speaker 1", "Speaker 2", "Speaker 1"];
+    let cues = STARTS
+        .iter()
+        .zip(voices)
+        .map(|(&start_ms, v)| CueAt {
+            start_ms,
+            end_ms: start_ms + 2_000,
+            speaker: v.into(),
+            text: format!("Said at {start_ms}."),
+        })
+        .collect();
+    let voices = ["Speaker 1", "Speaker 2"]
+        .map(|v| VoiceAt {
+            name: v.into(),
+            print: vec![1, 2, 3],
+        })
+        .to_vec();
+    app.peer
+        .client
+        .mutate(
+            "set_transcript",
+            &SetTranscript {
+                file: FILE.into(),
+                cues,
+                voices,
+            },
+        )
+        .unwrap();
+    app.peer.refresh();
+
+    let _ = app.update(Message::NameVoice(3));
+    assert_eq!(app.ctx.picker.as_ref().map(|p| p.title.as_str()), Some("Who is Speaker 2?"));
+    let _ = app.update(Message::PickerName("Jacek Galowicz".into()));
+    let _ = app.update(Message::PickerCreate);
+    assert!(app.ctx.picker.is_none(), "named, the picker is down");
+    let said: Vec<String> = app.cues().into_iter().map(|c| c.speaker).collect();
+    assert_eq!(said, ["Speaker 1", "Speaker 1", "Speaker 1", "Jacek Galowicz", "Speaker 1"]);
 }

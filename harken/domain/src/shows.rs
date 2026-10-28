@@ -22,6 +22,7 @@ use crate::keys;
 use crate::library::{is_library, library_entry, playlist_pos, take_out};
 use crate::schema::*;
 use crate::types::*;
+use std::collections::BTreeMap;
 
 /// What a show can be.
 pub const KINDS: &[&str] = &["podcast", "sermon"];
@@ -447,21 +448,125 @@ pub fn set_transcript(ctx: &Ctx, db: &mut Db<Harken>, input: SetTranscript) -> R
     for c in next {
         db.cue.put(c)?;
     }
+    // Its voices: as they were told apart this time. A name somebody gave
+    // a voice not heard now goes with it.
+    let voices: Vec<Voice> = input
+        .voices
+        .into_iter()
+        .map(|v| Voice {
+            media_id: id,
+            name: v.name.trim().to_string(),
+            print: v.print,
+        })
+        .filter(|v| !v.name.is_empty())
+        .collect();
+    for was in db.voice.scan().into_iter().filter(|v| v.media_id == id) {
+        if !voices.iter().any(|v| v.name == was.name) {
+            db.voice.remove(&was)?;
+        }
+    }
+    for named in db.voice_name.scan().into_iter().filter(|n| n.media_id == id) {
+        if !voices.iter().any(|v| v.name == named.voice) {
+            db.voice_name.remove(&named)?;
+        }
+    }
+    for v in voices {
+        db.voice.put(v)?;
+    }
     Ok(())
 }
 
-/// An episode's transcript, line by line in the order it is said.
+/// Who one of an episode's voices is, as somebody says it: the name its
+/// lines are said by, here and in every episode it is heard in that
+/// nobody has named otherwise ([`transcript`]). Named nobody, it is again
+/// whoever it sounds like.
+#[mutator("library.name_voice")]
+pub fn name_voice(ctx: &Ctx, db: &mut Db<Harken>, input: NameVoice) -> Result<(), Refusal> {
+    is_library(ctx)?;
+    if !db.voice.has((input.media_id, input.voice.clone())) {
+        return Err(Refusal::new("no such voice in that episode"));
+    }
+    let row = VoiceName {
+        media_id: input.media_id,
+        voice: input.voice,
+        person_name: input.name,
+    };
+    match row.person_name.is_empty() {
+        true => match db.voice_name.get((row.media_id, row.voice.clone())) {
+            Some(was) => db.voice_name.remove(&was),
+            None => Ok(()),
+        },
+        false => db.voice_name.put(row),
+    }
+}
+
+/// How alike two prints must sound to be one person: their cosine. The
+/// same person across episodes is 0.85 and over, two people under 0.6.
+const ALIKE: f64 = 0.7;
+
+/// Who each of an episode's voices is: whom somebody named it, or else
+/// whom it sounds like — a person named by hand in another episode whose
+/// voice is like it, each person one voice and each voice one person, the
+/// likest first — or else nobody yet, and it is called what it was heard as.
+fn voices_of(db: &Db<Harken>, id: Id<Media>) -> BTreeMap<String, String> {
+    let named: BTreeMap<(Id<Media>, String), String> = db.voice_name.scan().into_iter().map(|n| ((n.media_id, n.voice), n.person_name)).collect();
+    let (here, elsewhere): (Vec<Voice>, Vec<Voice>) = db.voice.scan().into_iter().partition(|v| v.media_id == id);
+    let mut out: BTreeMap<String, String> = here
+        .iter()
+        .filter_map(|v| Some((v.name.clone(), named.get(&(id, v.name.clone()))?.clone())))
+        .collect();
+    let known: Vec<(&String, &[i64])> = elsewhere
+        .iter()
+        .filter_map(|v| Some((named.get(&(v.media_id, v.name.clone()))?, v.print.as_slice())))
+        .collect();
+    let mut alike: Vec<(f64, &String, &String)> = vec![];
+    for v in here.iter().filter(|v| !out.contains_key(&v.name)) {
+        for (person, print) in &known {
+            let c = cosine(&v.print, print);
+            if c >= ALIKE {
+                alike.push((c, &v.name, person));
+            }
+        }
+    }
+    alike.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (_, voice, person) in alike {
+        if !out.contains_key(voice) && !out.values().any(|p| p == person) {
+            out.insert(voice.clone(), person.clone());
+        }
+    }
+    for v in here {
+        out.entry(v.name.clone()).or_insert(v.name);
+    }
+    out
+}
+
+fn cosine(a: &[i64], b: &[i64]) -> f64 {
+    let dot = |x: &[i64], y: &[i64]| x.iter().zip(y).map(|(p, q)| *p as f64 * *q as f64).sum::<f64>();
+    let (ab, aa, bb) = (dot(a, b), dot(a, a), dot(b, b));
+    match a.len() == b.len() && aa > 0.0 && bb > 0.0 {
+        true => ab / (aa * bb).sqrt(),
+        false => 0.0,
+    }
+}
+
+/// An episode's transcript, line by line in the order it is said, each by
+/// whom its voice is ([`voices_of`]) where it was told apart.
 #[view("library.transcript")]
-pub fn transcript(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<TranscriptEntry>, Refusal> {
+pub fn transcript(_: &Ctx, db: &Db<Harken>, input: EpisodeInput) -> Result<Plan<TranscriptEntry>, Refusal> {
     let id = input.media_id;
+    let voices = voices_of(db, id);
     Ok(scan::<Harken, Cue>()
         .filter(move |c| c.media_id == id)
         .sort(|c| c.start_ms)
-        .map(|c| TranscriptEntry {
+        .map(move |c| TranscriptEntry {
             end_ms: c.end_ms,
-            speaker: c.speaker.clone(),
+            speaker: voices.get(&c.speaker).unwrap_or(&c.speaker).clone(),
             start_ms: c.start_ms,
             text: c.text.clone(),
+            voice: match voices.contains_key(&c.speaker) {
+                true => c.speaker.clone(),
+                false => String::new(),
+            },
         }))
 }
 
@@ -590,6 +695,7 @@ impl Shelf {
             .map(|e| SetTranscript {
                 file: e.file.clone(),
                 cues: e.transcript.clone(),
+                voices: vec![],
             })
             .collect();
         (people, transcripts)

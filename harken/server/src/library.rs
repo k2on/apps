@@ -53,7 +53,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::{
     AddEpisode, AddShow, AddSong, DownloadProgress, Downloaded, Harken, Look, LookAt, Looked,
-    QueueDownload, Subscription,
+    QueueDownload, SetChapters, SetTranscript, Subscription,
 };
 use anyhow::{Context, Result};
 use ark::format::Encode;
@@ -202,6 +202,12 @@ impl Scanner {
     ///
     /// Returns at once: the walk happens on a thread of its own, so a
     /// library of ten thousand files does not hold up anything.
+    ///
+    /// Captions beside an episode's file (`<file>.vtt`) are its transcript,
+    /// read at boot and as they are written, its chapters made from them
+    /// by `chapters` when it has none; with `transcriber`, the episodes
+    /// here without any are heard (`transcribe.rs`).
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         root: PathBuf,
         hosted: Hosted,
@@ -210,6 +216,7 @@ impl Scanner {
         login: Login,
         catalogue: Option<String>,
         transcriber: Option<PathBuf>,
+        chapters: Vec<Box<dyn crate::chapters::Chapterer>>,
     ) -> Result<Scanner> {
         // `docs/plan-auth.md` The scanner is the library, by construction: it
         // holds the library's role whatever else its login holds, and its
@@ -253,13 +260,7 @@ impl Scanner {
             crate::sync::start(crate::catalogue::Import { url, dir }, said.clone())
         });
         let subscriptions = Arc::new(Mutex::new(Vec::new()));
-        let transcribe = transcriber.map(|program| {
-            crate::transcribe::Transcriber::start(
-                program,
-                crate::transcribe::dir(&data),
-                said.clone(),
-            )
-        });
+        let transcribe = transcriber.map(crate::transcribe::Transcriber::start);
         let follow = crate::sync::start(
             crate::feeds::Follow {
                 subscriptions: subscriptions.clone(),
@@ -280,6 +281,7 @@ impl Scanner {
                 followed: None,
                 feeds: crate::feeds::dir(&data),
                 transcribe,
+                chapters,
                 listed: None,
             };
             std::thread::Builder::new()
@@ -293,6 +295,8 @@ impl Scanner {
         // The watch is best-effort: a directory that cannot be watched is
         // still scanned at boot, and saying so is better than refusing to
         // start over it.
+        let feeds = crate::feeds::dir(&data);
+        let _ = std::fs::create_dir_all(&feeds);
         let events = tx.clone();
         let watcher =
             match notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
@@ -319,7 +323,17 @@ impl Scanner {
                 }
             }) {
                 Ok(mut w) => match w.watch(&root, RecursiveMode::Recursive) {
-                    Ok(()) => Some(w),
+                    Ok(()) => {
+                        // A feed's episodes are in the data directory, and so
+                        // are their captions: read as they are written.
+                        if let Err(e) = w.watch(&feeds, RecursiveMode::NonRecursive) {
+                            eprintln!(
+                                "harken-server: library: cannot watch {}: {e}",
+                                feeds.display()
+                            );
+                        }
+                        Some(w)
+                    }
                     Err(e) => {
                         eprintln!(
                             "harken-server: library: cannot watch {}: {e}",
@@ -488,6 +502,9 @@ struct Scan {
     /// head when it was last told which they are.
     transcribe: Option<crate::transcribe::Transcriber>,
     listed: Option<ark::log::Seq>,
+    /// Who makes chapters of an episode's captions when it has none, in
+    /// the order to try them.
+    chapters: Vec<Box<dyn crate::chapters::Chapterer>>,
 }
 
 impl Scan {
@@ -519,10 +536,27 @@ impl Scan {
 }
 
 impl Scan {
-    /// The episodes whose files are here, newest first, told to the
-    /// transcriber whenever the replica moved: a download finished is an
-    /// entry, and one not finished is a `.part` beside its name, not yet
-    /// here.
+    /// Where an episode's file is on disk: a feed's under the data
+    /// directory's feeds, anything else under the media root.
+    fn path_of(&self, file: &str) -> PathBuf {
+        match file.strip_prefix(&format!("{}/", crate::feeds::DIR)) {
+            Some(name) => self.feeds.join(name),
+            None => self.root.join(file),
+        }
+    }
+
+    /// The file an episode's path on disk is, as its row says it.
+    fn file_of(&self, path: &Path) -> Option<String> {
+        match path.strip_prefix(&self.feeds) {
+            Ok(name) => Some(format!("{}/{}", crate::feeds::DIR, name.to_str()?)),
+            Err(_) => relative(&self.root, path),
+        }
+    }
+
+    /// The episodes whose files are here and have no captions beside them,
+    /// newest first, told to the transcriber whenever the replica moved: a
+    /// download finished is an entry, and one not finished is a `.part`
+    /// beside its name, not yet here.
     fn transcribe(&mut self, peer: &ark_peer::Peer) {
         let Some(transcribe) = &self.transcribe else {
             return;
@@ -539,22 +573,118 @@ impl Scan {
                     .into_iter()
                     .filter_map(|e| {
                         let m = db.media.get(e.media_id)?;
-                        let path = match m.file.strip_prefix(&format!("{}/", crate::feeds::DIR)) {
-                            Some(name) => self.feeds.join(name),
-                            None => self.root.join(&m.file),
-                        };
                         let job = crate::transcribe::Job {
-                            file: m.file.clone(),
-                            path,
+                            path: self.path_of(&m.file),
                             title: m.title.clone(),
+                            // A sermon is its preacher's.
+                            one_voice: m.kind == "sermon",
                         };
                         Some((e.published_ms, m.pos, job))
                     })
                     .collect()
             });
-        here.retain(|(_, _, j)| j.path.is_file());
+        here.retain(|(_, _, j)| {
+            j.path.is_file() && !crate::transcribe::captions_of(&j.path).exists()
+        });
         here.sort_by_key(|(published, pos, _)| std::cmp::Reverse((*published, *pos)));
         transcribe.want(here.into_iter().map(|(_, _, j)| j).collect());
+    }
+
+    /// Every episode's captions here read, as [`Scan::captions`] reads one:
+    /// at boot, for whatever was written while the server was down.
+    fn sweep(&self, peer: &mut ark_peer::Peer) {
+        let files: Vec<String> = ark::db::read::<Harken, _>(&peer.log.store, |db| {
+            db.episode
+                .scan()
+                .into_iter()
+                .filter_map(|e| db.media.get(e.media_id).map(|m| m.file))
+                .collect()
+        });
+        for file in files {
+            let captions = crate::transcribe::captions_of(&self.path_of(&file));
+            if captions.is_file() {
+                self.captions(peer, &captions);
+            }
+        }
+    }
+
+    /// The captions beside an episode's file (`<file>.vtt`, whoever wrote
+    /// them: the transcriber, another machine that heard it, a hand)
+    /// authored as its transcript, and its chapters made from them when it
+    /// has none (`chapters.rs`). Said again the same, it writes nothing.
+    fn captions(&self, peer: &mut ark_peer::Peer, path: &Path) -> usize {
+        let Some(file) = path
+            .to_str()
+            .and_then(|p| p.strip_suffix(".vtt"))
+            .and_then(|audio| self.file_of(Path::new(audio)))
+        else {
+            return 0;
+        };
+        let episode = ark::db::read::<Harken, _>(&peer.log.store, |db| {
+            let m = db
+                .media
+                .by(crate::domain::Media::FILE)
+                .from(&file)
+                .first()
+                .filter(|m| m.file == file)?;
+            let e = db.episode.get(m.id)?;
+            let chaptered = db.chapter.scan().iter().any(|c| c.media_id == m.id);
+            Some((m.title, e.description, chaptered))
+        });
+        let Some((title, description, chaptered)) = episode else {
+            return 0;
+        };
+        let crate::captions::Captions { cues, voices } = match std::fs::read_to_string(path) {
+            Ok(text) => crate::captions::captions(&text),
+            Err(e) => {
+                eprintln!("harken-server: library: {}: {e}", path.display());
+                return 0;
+            }
+        };
+        if cues.is_empty() {
+            return 0;
+        }
+        let call = |name: &'static str, input: Vec<u8>| crate::sync::Call {
+            name,
+            what: title.clone(),
+            input,
+            if_there: false,
+        };
+        let mut calls = vec![];
+        let about = crate::chapters::About {
+            title: &title,
+            description: &description,
+        };
+        let made = match chaptered {
+            true => vec![],
+            false => crate::chapters::first(&self.chapters, &about, &cues),
+        };
+        calls.push(call(
+            "library.set_transcript",
+            SetTranscript {
+                file: file.clone(),
+                cues,
+                voices,
+            }
+            .to_bytes(),
+        ));
+        if !made.is_empty() {
+            calls.push(call(
+                "library.set_chapters",
+                SetChapters {
+                    file,
+                    chapters: made,
+                }
+                .to_bytes(),
+            ));
+        }
+        let plan = crate::sync::Plan {
+            what: title.clone(),
+            calls,
+            gate: false,
+            files: vec![],
+        };
+        hear(peer, Said::Plan(Box::new(plan), channel().0))
     }
 }
 
@@ -584,6 +714,7 @@ fn run(
     let root = scan.root.clone();
     let synced = counts.clone();
     scan.follow(&peer);
+    scan.sweep(&mut peer);
     // The look's handler and the loop both have the scan: the handler runs
     // inside the loop's pump, one at a time.
     let watch = Arc::new(Mutex::new(scan));
@@ -635,6 +766,18 @@ fn run(
                 std::thread::sleep(SETTLE);
             }
             nudges.extend(rx.try_iter());
+            // Captions are read here; anything else is a look.
+            let (captions, nudges): (Vec<Nudge>, Vec<Nudge>) = nudges.into_iter().partition(
+                |n| matches!(n, Nudge::One(p) if p.extension().is_some_and(|e| e == "vtt")),
+            );
+            if let Ok(scan) = watch.lock() {
+                for n in captions {
+                    if let Nudge::One(p) = n {
+                        let authored = scan.captions(&mut peer, &p);
+                        synced.authored.fetch_add(authored, Ordering::Relaxed);
+                    }
+                }
+            }
             ask(&mut peer, &root, nudges);
         }
         // What the sources read and how their downloads go, authored.
