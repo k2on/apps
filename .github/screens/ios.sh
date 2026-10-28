@@ -88,15 +88,23 @@ record() {
   bash .github/screens/encode.sh "$tmp/$id.mov" "$to" "$documents/timewarp.log" "$fps" | tee "$tmp/$id.encoded"
 }
 
-# How many distinct frames a recording must have: a good one of a shot here
-# has some forty to sixty, and one taken while a just-booted simulator is
-# still busy with itself (which can last minutes) a dozen or two.
-least=${IOS_DISTINCT:-30}
+# How many distinct frames a recording of shot `id` must have: a good one
+# of the card has some forty-five to sixty, of the scroll thirty-five to
+# forty, and one taken while a just-booted simulator is still busy with
+# itself (which can last minutes) far fewer, or holds frames a tenth of a
+# second at a time.
+least() {
+  case $1 in
+    expanding-card) echo 45 ;;
+    *) echo 30 ;;
+  esac
+}
 
-# `record`, taken again while it has fewer than $least distinct frames, up
-# to three times.
+# `record`, taken again while it has fewer distinct frames than it should,
+# up to three times.
 recording() {
-  local id=$1 to=$2 distinct
+  local id=$1 to=$2 distinct least
+  least=$(least "$id")
   for try in 1 2 3; do
     record "$id" "$to"
     distinct=$(grep -o '[0-9]* distinct' "$tmp/$id.encoded" | tr -dc 0-9)
