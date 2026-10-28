@@ -73,9 +73,15 @@ record() {
     xcrun simctl launch booted "$bundle" -showcase "$id" -slow "$slow" >/dev/null
   heard 30 || echo "::warning::$id did not say it was ready"
   listen done
+  rm -f "$tmp/$id.mov.ready"
   "$tools/record" "$udid" $((10 * slow)) 540 "$tmp/$id.mov" > >(sed 's/^/  /') &
   local rec=$!
-  sleep 1
+  # Signalled only once it says it is listening: before, a signal ends it.
+  for _ in $(seq 1 120); do
+    [ -f "$tmp/$id.mov.ready" ] && break
+    kill -0 "$rec" 2>/dev/null || break
+    sleep 0.25
+  done
   xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
   # The screen as the shot is told to go, which it opens on.
   kill -USR1 "$rec"
@@ -109,7 +115,7 @@ recording() {
   for try in 1 2 3; do
     record "$id" "$to"
     distinct=$(grep -o '[0-9]* distinct' "$tmp/$id.encoded" | tr -dc 0-9)
-    [ "$distinct" -ge "$least" ] && return 0
+    [ "${distinct:-0}" -ge "$least" ] && return 0
     echo "::warning::$id had $distinct distinct frames (try $try); taking it again"
     xcrun simctl terminate booted "$bundle" 2>/dev/null || true
   done

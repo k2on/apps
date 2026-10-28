@@ -11,9 +11,10 @@
 // A frame is taken only when the screen changes, and on SIGUSR1 whether it
 // has or not: the screen at a moment ios.sh marks, which a recording that
 // starts there must open on. It stops after `seconds`, or sooner when sent
-// SIGINT or SIGTERM, and
-// writes beside the file (<out.mov>.start) the host's time of its first
-// frame (CACurrentMediaTime's), from which the file's own times count.
+// SIGINT or SIGTERM. Once it is taking frames and listening for all three
+// it writes <out.mov>.ready, which is when to signal it (before, a signal
+// ends it). As it ends it writes <out.mov>.start, the host's time of its
+// first frame (CACurrentMediaTime's), from which the file's own times count.
 //
 //   xcrun swift record.swift <udid> <seconds> <width> <out.mov>
 import AVFoundation
@@ -222,5 +223,8 @@ let signals = handlers.map { number, handler in
     source.setEventHandler(handler: handler)
     source.resume()
     return source
+}
+recorder.queue.async {
+    FileManager.default.createFile(atPath: out.path + ".ready", contents: nil)
 }
 dispatchMain()
