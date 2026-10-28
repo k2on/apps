@@ -5,9 +5,11 @@
 # keeps them by. Its own transcriber, reaching an episode heard here, reads
 # what is there rather than hearing it again.
 #
-# Newest download first, each episode not heard yet, until there are none
-# or this is stopped; run it again to carry on. With whisper.cpp and ffmpeg
-# about, and the server an ssh host whose sudo needs no password:
+# The first downloads first — a feed followed is its newest episodes,
+# and older ones are asked for later — each episode not heard yet, until
+# there are none or this is stopped; run it again to carry on. With
+# whisper.cpp and ffmpeg about, and the server an ssh host whose sudo needs
+# no password:
 #
 #   nix shell nixpkgs#whisper-cpp-vulkan nixpkgs#ffmpeg-headless \
 #     -c harken/server/hear-here ark
@@ -31,7 +33,7 @@ trap 'rm -rf "$tmp"' EXIT
 kept() { printf '%s.%s.vtt' "$(printf '%s' ".feeds/$1" | sha256sum | cut -c1-32)" "${1##*.}"; }
 
 # shellcheck disable=SC2029 # $data is this side's on purpose
-ssh "$host" "sudo sh -c 'cd $data/feeds && ls -t; echo ---; ls $data/transcripts 2>/dev/null'" >"$tmp/list"
+ssh "$host" "sudo sh -c 'cd $data/feeds && ls -tr; echo ---; ls $data/transcripts 2>/dev/null'" >"$tmp/list"
 heard=$(sed '1,/^---$/d' "$tmp/list")
 sed '/^---$/q' "$tmp/list" | grep -Ei '\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$' | while read -r file; do
   name=$(kept "$file")
