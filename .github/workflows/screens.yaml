@@ -103,11 +103,17 @@ jobs:
       # action finds it and downloads nothing.
       - name: The system image
         run: |
+          # The runner's own sdkmanager, which the emulator's action puts on
+          # its PATH and a step's shell does not have.
+          sdk=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+          image='system-images;android-34;google_apis;x86_64'
           for try in 1 2 3 4; do
-            yes | sdkmanager --install 'system-images;android-34;google_apis;x86_64' --channel=0 > /dev/null 2>&1 &&
-              [ -f "$ANDROID_HOME/system-images/android-34/google_apis/x86_64/system.img" ] && exit 0
+            if yes 2>/dev/null | "$sdk" --install "$image" --channel=0 > /dev/null &&
+              [ -f "$ANDROID_HOME/system-images/android-34/google_apis/x86_64/system.img" ]; then
+              exit 0
+            fi
             echo "::warning::system image, try $try failed"
-            sdkmanager --uninstall 'system-images;android-34;google_apis;x86_64' > /dev/null 2>&1 || true
+            "$sdk" --uninstall "$image" > /dev/null || true
             sleep $((try * 10))
           done
           exit 1
