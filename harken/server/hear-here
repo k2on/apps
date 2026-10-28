@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Hear a server's episodes on this machine — whisper.cpp on its GPU, many
 # times what a small server's cores can — and leave each one's captions
-# where the server keeps what it heard (src/transcribe.rs), by the name it
-# keeps them by. Its own transcriber, reaching an episode heard here, reads
-# what is there rather than hearing it again.
+# beside the episode's file, where the server reads an episode's transcript
+# from as soon as it is there (src/library.rs) and its own transcriber
+# leaves alone (src/transcribe.rs).
 #
 # The first downloads first — a feed followed is its newest episodes,
 # and older ones are asked for later — each episode not heard yet, until
@@ -27,23 +27,17 @@ model=$(nix-prefetch-url --print-path \
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# A feed's episode is kept as `.feeds/<name>` (src/feeds.rs) and what was
-# heard in it as the first 32 of that path's SHA-256 and its extension
-# (src/sync.rs, name_of), `.vtt` after.
-kept() { printf '%s.%s.vtt' "$(printf '%s' ".feeds/$1" | sha256sum | cut -c1-32)" "${1##*.}"; }
-
 # shellcheck disable=SC2029 # $data is this side's on purpose
-ssh "$host" "sudo sh -c 'cd $data/feeds && ls -tr; echo ---; ls $data/transcripts 2>/dev/null'" >"$tmp/list"
-heard=$(sed '1,/^---$/d' "$tmp/list")
-sed '/^---$/q' "$tmp/list" | grep -Ei '\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$' | while read -r file; do
-  name=$(kept "$file")
-  grep -qxF "$name" <<<"$heard" && continue
+ssh "$host" "sudo ls -tr $data/feeds" >"$tmp/list"
+grep -Ei '\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$' "$tmp/list" | while read -r file; do
+  name=$file.vtt
+  grep -qxF "$name" "$tmp/list" && continue
   echo "hear-here: $file" >&2
   started=$(date +%s)
   ssh "$host" "sudo cat $data/feeds/$file" </dev/null >"$tmp/audio"
   ffmpeg -nostdin -loglevel error -y -i "$tmp/audio" -ar 16000 -ac 1 -c:a pcm_s16le "$tmp/in.wav"
   whisper-cli -l en -m "$model" -f "$tmp/in.wav" -ovtt -of "$tmp/out" </dev/null >/dev/null 2>&1
   # Whole or not at all: the server reads only a file that is there.
-  ssh "$host" "sudo sh -c 'cat > $data/transcripts/$name.part && mv $data/transcripts/$name.part $data/transcripts/$name'" <"$tmp/out.vtt"
+  ssh "$host" "sudo sh -c 'cat > $data/feeds/$name.part && mv $data/feeds/$name.part $data/feeds/$name'" <"$tmp/out.vtt"
   echo "hear-here: heard in $(($(date +%s) - started))s" >&2
 done

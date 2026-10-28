@@ -492,13 +492,8 @@ pub async fn start(config: Config) -> Result<Server> {
                 config.data.clone(),
                 login,
                 config.catalogue.clone(),
-                config
-                    .transcriber
-                    .clone()
-                    .map(|program| transcribe::Hearing {
-                        program,
-                        chapters: chapters::chain(&config.chapters),
-                    }),
+                config.transcriber.clone(),
+                chapters::chain(&config.chapters),
             )?)
         }
         None => None,

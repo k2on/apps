@@ -119,13 +119,14 @@ They come from two places:
   (`library.set_people`, `library.appearances`). Its transcript is not
   the feed's: that is timed to the host's file, and a host that stitches
   an advertisement into each download moves every line of it.
-- **What is said in an episode** is heard on the server, from its own
-  copy (`server/src/transcribe.rs`): a program run on each episode here,
-  newest first — whisper.cpp, with `services.harken.transcripts.enable` —
-  writing WebVTT, read into a `cue` per line (`library.set_transcript`),
-  so it keeps time with what plays and a phone has it offline with the
-  episode. What it wrote is kept in the state directory, so an episode is
-  heard once. An episode its feed gave no chapters is given some from
+- **What is said in an episode** is the WebVTT beside its file
+  (`<file>.vtt`), read as it is written into a `cue` per line
+  (`library.set_transcript`), so a phone has it offline with the episode.
+  Whoever writes it: the server hears each episode here without one,
+  newest first, from its own copy so it keeps time with what plays
+  (`server/src/transcribe.rs`; whisper.cpp, with
+  `services.harken.transcripts.enable`), and a faster machine can write
+  them for it (`server/hear-here`, a laptop's GPU), or a hand. An episode its feed gave no chapters is given some from
   it, by counting words (`server/src/chapters.rs`, whichever of them
   `services.harken.transcripts.chapters` names, in turn): `outline` finds
   where each topic its description lists is said, in the list's order —
