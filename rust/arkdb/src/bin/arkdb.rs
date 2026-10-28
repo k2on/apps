@@ -6,13 +6,16 @@
 //! arkdb tail [--from DIR] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 //! arkdb trace ID [--from DIR]                       what a tap or an entry caused, everywhere
 //! arkdb peer P [--from DIR]                         one peer's events
+//! arkdb rows TABLE [COLUMN=VALUE]... [--sort [-]COLUMN] [-n N] [--from DIR]
+//!                                                   a server's rows, a JSON object a line
 //! ```
 
 const USAGE: &str = "arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]
 arkdb fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]
 arkdb tail [--from DIR|FILE|-] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 arkdb trace ID [--from DIR|FILE|-]
-arkdb peer P [--from DIR|FILE|-]";
+arkdb peer P [--from DIR|FILE|-]
+arkdb rows TABLE [COLUMN=VALUE]... [--sort [-]COLUMN] [-n N] [--from DIR]";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -22,6 +25,10 @@ fn main() {
     };
     match args.split_first() {
         Some((cmd, rest)) if cmd == "gen" => match arkdb::gen::main(rest) {
+            Ok(s) => print!("{s}"),
+            Err(e) => fail(e),
+        },
+        Some((cmd, rest)) if cmd == "rows" => match arkdb::rows::main(rest) {
             Ok(s) => print!("{s}"),
             Err(e) => fail(e),
         },

@@ -27,6 +27,7 @@ use axum::routing::get;
 use axum::Router;
 use tokio::sync::oneshot;
 
+use crate::disk::SCHEMA;
 use crate::handle::{dev, Authenticate, Handle};
 use crate::{now_ms, web, Config, Disk, Files, Memory, Peer};
 
@@ -86,6 +87,9 @@ impl Server {
             Some(d) => {
                 let mut f = Files::new(d.join("log"))?;
                 f.sync = true;
+                // Its schema beside it, so the log can be read by what does
+                // not compile its domain (`arkdb rows`).
+                f.put(SCHEMA, &serde_json::to_vec_pretty(&*self.config.log.schema)?)?;
                 Box::new(f)
             }
             None => Box::new(Memory::default()),
