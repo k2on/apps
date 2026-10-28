@@ -65,6 +65,8 @@ record() {
   local rec=$!
   sleep 1
   xcrun simctl spawn booted notifyutil -p dev.arkui.showcase.go
+  # The screen as the shot is told to go, which it opens on.
+  kill -USR1 "$rec"
   heard $((10 * slow)) || echo "::warning::$id did not say it was done"
   kill -INT "$rec" 2>/dev/null || true
   wait "$rec"

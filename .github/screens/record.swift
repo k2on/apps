@@ -8,7 +8,10 @@
 // CoreSimulator and SimulatorKit are private, so they are reached through
 // the Objective-C runtime.
 //
-// It stops after `seconds`, or sooner when sent SIGINT or SIGTERM, and
+// A frame is taken only when the screen changes, and on SIGUSR1 whether it
+// has or not: the screen at a moment ios.sh marks, which a recording that
+// starts there must open on. It stops after `seconds`, or sooner when sent
+// SIGINT or SIGTERM, and
 // writes beside the file (<out.mov>.start) the host's time of its first
 // frame (CACurrentMediaTime's), from which the file's own times count.
 //
@@ -153,12 +156,13 @@ final class Recorder {
         print("recording \(w)x\(h) as \(width)x\(height)")
     }
 
-    /// The screen as it is now, if it has changed since the last frame.
-    func take() {
+    /// The screen as it is now, if it has changed since the last frame or
+    /// `anyway`.
+    func take(anyway: Bool = false) {
         let now = CACurrentMediaTime()
         guard let source = screen() else { return }
         let (seed, id) = (IOSurfaceGetSeed(source), IOSurfaceGetID(source))
-        if started, seed == lastSeed, id == lastSurface { return }
+        if started, !anyway, seed == lastSeed, id == lastSurface { return }
         (lastSeed, lastSurface) = (seed, id)
         if writer == nil { open(for: source) }
         guard let writer, let input, let adaptor, let transfer, let pool = adaptor.pixelBufferPool else { return }
@@ -210,10 +214,11 @@ func stop() {
     recorder.finish { exit(0) }
 }
 recorder.queue.asyncAfter(deadline: .now() + seconds, execute: stop)
-let signals = [SIGINT, SIGTERM].map { number in
+let handlers: [(Int32, () -> Void)] = [(SIGINT, stop), (SIGTERM, stop), (SIGUSR1, { recorder.take(anyway: true) })]
+let signals = handlers.map { number, handler in
     signal(number, SIG_IGN)
     let source = DispatchSource.makeSignalSource(signal: number, queue: recorder.queue)
-    source.setEventHandler(handler: stop)
+    source.setEventHandler(handler: handler)
     source.resume()
     return source
 }
