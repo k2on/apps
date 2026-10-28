@@ -16,7 +16,8 @@
 // The showcase says when a move begins and ends (the Darwin notifications
 // dev.arkui.showcase.slow and .fast), so a still screen between moves takes
 // life's time to record, not thirty times it. When the shot is told to go
-// (.go), and each change after, is written to
+// (.go), each change after, and when it says it is done (.done, as
+// `<seconds> end`) are written to
 // Documents/timewarp.log in the app's container, as `<seconds> <factor>`
 // by the host's clock (CACurrentMediaTime's), which is how encode.sh puts
 // the recording back into life's time.
@@ -141,6 +142,17 @@ static void change(double factor) {
     }
 }
 
+// When the shot says it is done, which a recording ends at.
+static void end(void) {
+    mach_timebase_info_data_t base;
+    mach_timebase_info(&base);
+    FILE *log = fopen(log_path, "a");
+    if (log) {
+        fprintf(log, "%.9f end\n", (double)mach_absolute_time() * base.numer / base.denom / 1e9);
+        fclose(log);
+    }
+}
+
 // Each move is slowed from when the showcase says it begins to when it says
 // it ends; a launch, and the stills between, run at life's speed.
 __attribute__((constructor)) static void timewarp(void) {
@@ -155,4 +167,5 @@ __attribute__((constructor)) static void timewarp(void) {
     notify_register_dispatch("dev.arkui.showcase.go", &token, queue, ^(int t) { (void)t; change(1); });
     notify_register_dispatch("dev.arkui.showcase.slow", &token, queue, ^(int t) { (void)t; change(slower); });
     notify_register_dispatch("dev.arkui.showcase.fast", &token, queue, ^(int t) { (void)t; change(1); });
+    notify_register_dispatch("dev.arkui.showcase.done", &token, queue, ^(int t) { (void)t; end(); });
 }

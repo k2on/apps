@@ -11,7 +11,7 @@
 # (`<seconds> <factor>` by the host's clock), with the recording's first
 # frame at the time record.swift wrote beside it (<recording>.start): each
 # stretch sped up by its own, from the go, which ios.sh had the recorder
-# take a frame at.
+# take a frame at, to when the shot said it was done (`<seconds> end`).
 #
 # Says how many of its frames are distinct: a frame the device did not
 # draw in time is the last one held, and this is how to see it.
@@ -25,9 +25,9 @@ if [ -f "$slow" ]; then
   # a piece for each stretch, from the change that began it, chosen by
   # if(lt(T,change),before,after) from the last change back.
   retime=$(awk -v start="$(cat "$in.start")" '
-    { real[NR - 1] = $1 - start; factor[NR - 1] = $2 }
+    $2 == "end" { done = $1 - start; next }
+    { real[n + 0] = $1 - start; factor[n + 0] = $2; n++ }
     END {
-      n = NR
       # Life at each change, from the go.
       for (i = 0; i < n; i++) at[i] = i ? at[i - 1] + (real[i] - real[i - 1]) / factor[i - 1] : 0
       expr = ""
@@ -37,17 +37,25 @@ if [ -f "$slow" ]; then
       }
       # Before the go, a time before 0, which the output does not start from.
       print sprintf("if(lt(T,%.9f),T-(%.9f),%s)", real[0], real[0], expr)
+      # Then how long it is: to the done, in life.
+      if (done) {
+        for (i = 0; i < n && real[i] <= done; i++) last = i
+        printf "%.9f\n", at[last] + (done - real[last]) / factor[last]
+      }
     }' "$slow")
+  length=$(sed -n 2p <<< "$retime")
+  retime=$(head -1 <<< "$retime")
   start=":start_time=0"
-  slowest=$(awk 'BEGIN { m = 1 } $2 > m { m = $2 } END { print m }' "$slow")
+  slowest=$(awk 'BEGIN { m = 1 } $2 != "end" && $2 + 0 > m { m = $2 + 0 } END { print m }' "$slow")
 else
   retime="T/$slow"
   slowest=$slow
   start=
+  length=
 fi
 ffmpeg -nostdin -loglevel error -y -i "$in" \
   -vf "setpts='($retime)/TB',fps=$fps$start,scale=540:-2:flags=lanczos,format=yuv420p" \
-  -an -c:v libx264 -preset slow -crf 22 -profile:v high -movflags +faststart "$out"
+  ${length:+-t "$length"} -an -c:v libx264 -preset slow -crf 22 -profile:v high -movflags +faststart "$out"
 frames=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of csv=p=0 "$out")
 seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")
 distinct=$(ffmpeg -nostdin -i "$out" -vf mpdecimate -f null - 2>&1 | grep -o 'frame= *[0-9]*' | tail -1 | tr -dc 0-9)

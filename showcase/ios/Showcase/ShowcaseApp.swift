@@ -192,6 +192,7 @@ private struct Row: View {
 private struct ExpandingCardShot: View {
     @EnvironmentObject private var go: Go
     @State private var open = false
+    @State private var warm = false
 
     var body: some View {
         TabView {
@@ -223,17 +224,22 @@ private struct ExpandingCardShot: View {
                 Spacer()
             }
             .padding(Space.xl)
+            .onAppear { if !warm { after(1.5) { open = false } } }
+            .onDisappear {
+                if !warm {
+                    warm = true
+                    after(1) { say("ready") }
+                }
+            }
         }
         // Opened and closed once as it appears, off the recording, at life's
         // speed: the first zoom in a fresh simulator pays for setting itself
         // up and draws half the frames of the next, and is slow enough that
-        // a close sent too soon after it is ignored. The zoom is the system's,
-        // slowed for a recording with the rest (timewarp.c).
-        .onAppear {
-            after(0.5) { open = true }
-            after(3) { open = false }
-            after(4.5) { say("ready") }
-        }
+        // a close sent too soon after it is ignored, so each step waits for
+        // the one before it to be seen (above), however slow the runner.
+        // The zoom is the system's, slowed for a recording with the rest
+        // (timewarp.c).
+        .onAppear { after(0.5) { open = true } }
         .onChange(of: go.told) {
             after(0.4) {
                 move(for: 0.9, { open = true }) {
