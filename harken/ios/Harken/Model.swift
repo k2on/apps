@@ -62,6 +62,8 @@ final class Model: ObservableObject {
     let deviceName: String
     let sound: SoundCore
     private var bridge: Bridge? = nil
+    private var albumsById = [String: AlbumsEntry]()
+    // What plays carries its album's name and no more: its cover is found by that.
     private var albumsByName = [String: AlbumsEntry]()
     private var asked: Task<Void, Never>? = nil
     private lazy var drag = Drag(clock: { nowMs() }, later: { ms, f in
@@ -204,9 +206,14 @@ final class Model: ObservableObject {
 
     private func took(_ s: Snapshot) {
         if s.albums.count != snapshot.albums.count || s.albums != snapshot.albums {
-            var m = [String: AlbumsEntry](minimumCapacity: s.albums.count)
-            for a in s.albums { m[a.name] = a }
-            albumsByName = m
+            var byId = [String: AlbumsEntry](minimumCapacity: s.albums.count)
+            var byName = [String: AlbumsEntry](minimumCapacity: s.albums.count)
+            for a in s.albums {
+                byId[a.id] = a
+                byName[a.name] = a
+            }
+            albumsById = byId
+            albumsByName = byName
         }
         snapshot = s
         redraw()
@@ -240,8 +247,14 @@ final class Model: ObservableObject {
     var heard: Heard { snapshot.heard }
 
     /// The album a track is on.
-    func album(of t: LibraryEntry) -> AlbumsEntry? { AlbumsEntry.of(t, details: snapshot.details, byName: albumsByName) }
-    func album(named n: String) -> AlbumsEntry? { albumsByName[n] }
+    func album(of t: LibraryEntry) -> AlbumsEntry? { AlbumsEntry.of(t, details: snapshot.details, byId: albumsById) }
+    func album(id: String) -> AlbumsEntry? { albumsById[id] }
+    /// The album of what plays: its track's, when the library has the track;
+    /// else the one of its name.
+    func album(playing p: Playing) -> AlbumsEntry? {
+        if let t = snapshot.tracks.first(where: { $0.id.hex == p.id }), let a = album(of: t) { return a }
+        return p.album.isEmpty ? nil : albumsByName[p.album]
+    }
     func artist(named n: String) -> ArtistsEntry? { snapshot.artists.first { $0.name == n } }
     func detail(_ t: LibraryEntry) -> TrackDetailsEntry? { snapshot.details[t.id] }
     func playlist(_ id: Id) -> Playlist? { snapshot.playlists.first { $0.id == id } }
@@ -328,8 +341,8 @@ final class Model: ObservableObject {
         var seen = Set<String>()
         var out = [AlbumsEntry]()
         for t in tracks {
-            guard let n = snapshot.details[t.id]?.album, !n.isEmpty, !seen.contains(n), let a = albumsByName[n] else { continue }
-            seen.insert(n)
+            guard let k = snapshot.details[t.id]?.albumId, !k.isEmpty, !seen.contains(k), let a = albumsById[k] else { continue }
+            seen.insert(k)
             out.append(a)
         }
         return out

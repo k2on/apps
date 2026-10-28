@@ -234,7 +234,7 @@ fn going_somewhere_from_a_menu_closes_it() {
     let _ = app.update(Message::MenuActivate);
     assert!(app.ctx.menu.is_none() && app.ctx.picker.is_none(), "the menu and its submenu went");
     assert!(
-        matches!(app.peer.source, Source::Album(_) | Source::Artist(_)),
+        matches!(app.peer.source, Source::Album(..) | Source::Artist(_)),
         "…and the page went where it said"
     );
 
@@ -345,9 +345,9 @@ fn a_submenu_is_as_wide_as_its_longest_name() {
 fn enter_opens_a_card_and_h_leaves_a_grid() {
     let mut app = app();
     let _ = app.update(Message::Select(Source::Albums));
-    let first = app.peer.albums()[0].name.clone();
+    let first = app.peer.albums()[0].clone();
     let _ = app.act(vim::Action::Activate);
-    assert_eq!(app.peer.source, Source::Album(first), "a card is a place");
+    assert_eq!(app.peer.source, Source::Album(first.id, first.name), "a card is a place");
     let _ = app.update(Message::Select(Source::Albums));
     let _ = app.act(vim::Action::Move(vim::Motion::Right(1)));
     assert_eq!(app.at(Pane::Tracks), 1, "`l` walks along a shelf");

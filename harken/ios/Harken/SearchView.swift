@@ -76,9 +76,9 @@ struct SearchView: View {
         if !r.albums.isEmpty {
             Section("Albums") {
                 CoverShelf(items: r.albums) { a in
-                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: 128, opens: .page(.album(a.name))) {
+                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: 128, opens: .page(.album(a.id))) {
                         model.searched(model.needle)
-                        open(.page(.album(a.name)))
+                        open(.page(.album(a.id)))
                     }
                 }
                 .listRowInsets(EdgeInsets())

@@ -95,7 +95,7 @@ object Demo {
         // A track in a part is a movement of the work its album names, as `add_song` keys it.
         rows.mapIndexed { i, r ->
             val work = if (r.part.isNotEmpty()) r.album else ""
-            id(i) to TrackDetail(id(i), r.album, r.part, r.track, r.performer, r.licence, if (work.isEmpty()) "" else r.composer, work)
+            id(i) to TrackDetail(id(i), r.album, key(r.album), r.part, r.track, r.performer, r.licence, if (work.isEmpty()) "" else r.composer, work)
         }.toMap()
 
     val albums: List<Album> =
@@ -103,7 +103,7 @@ object Demo {
             .map { (name, rs) ->
                 // Who is credited on the most of it, as `albums` says.
                 val performer = rs.filter { it.performer.isNotEmpty() }.groupingBy { it.performer }.eachCount().maxByOrNull { it.value }?.key ?: ""
-                Album(name, rs.first().composer, "", rs.size.toLong(), performer = performer, label = if (name == "Messiah") "Westminster" else "", released = if (name == "Messiah") 1959 else 0)
+                Album(key(name), name, rs.first().composer, "", rs.size.toLong(), performer = performer, label = if (name == "Messiah") "Westminster" else "", released = if (name == "Messiah") 1959 else 0)
             }
             .sortedBy { it.name }
 
@@ -147,9 +147,13 @@ object Demo {
     /** What is on "Sunday morning". */
     val sunday: List<Track> = listOf(0, 16, 28, 33, 12, 4).map { tracks[it] }
 
-    fun albumOf(t: Track): Album? = details[t.id]?.album?.let { a -> albums.firstOrNull { it.name == a } }
+    fun albumOf(t: Track): Album? = details[t.id]?.albumId?.let { a -> albums.firstOrNull { it.id == a } }
 
-    fun album(name: String): List<Track> = tracks.filter { details[it.id]?.album == name }
+    /** An album's key, as `keys::album_id` makes it of the folder its tracks are in and its name. */
+    fun key(album: String): String = "music/$album/" + album.map { if (it.isLetterOrDigit()) it.lowercaseChar() else ' ' }.joinToString("").trim().replace(' ', '-')
+
+    /** The songs of the album called `name`. */
+    fun album(name: String): List<Track> = tracks.filter { details[it.id]?.albumId == key(name) }
 
     fun artist(name: String): List<Track> = tracks.filter { it.creator == name }
 

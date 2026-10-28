@@ -136,7 +136,7 @@ struct FullPlayer: View {
             // the desktop's bar and Android's player do; opening one closes
             // the player (`Shell`).
             VStack(alignment: .leading, spacing: 2) {
-                Button { if let a = s.now?.album, !a.isEmpty { open(.page(.album(a))) } } label: {
+                Button { if let n = s.now, let a = model.album(playing: n) { open(.page(.album(a.id))) } } label: {
                     Text(s.now?.title ?? "Nothing playing").font(.title2.bold()).lineLimit(2).multilineTextAlignment(.leading)
                 }
                 .buttonStyle(.plain)

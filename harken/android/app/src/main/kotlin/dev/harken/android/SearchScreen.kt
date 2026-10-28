@@ -143,10 +143,10 @@ fun SearchScreen(
                 if (found.albums.isNotEmpty()) {
                     item { Heading("Albums") }
                     item {
-                        Shelf("albums", found.albums, key = { it.name }) { a ->
+                        Shelf("albums", found.albums, key = { it.id }) { a ->
                             CoverCard(a.name, a.art, a.name, a.creator, SEARCH_ALBUM, opens = true, onClick = {
                                 onSearched(needle)
-                                act.open(Page.ForAlbum(a.name))
+                                act.open(Page.ForAlbum(a.id))
                             })
                         }
                     }

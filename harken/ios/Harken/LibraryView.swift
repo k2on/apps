@@ -125,7 +125,7 @@ private struct AlbumsGrid: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Space.l)], spacing: Space.xl) {
                     ForEach(model.albums) { a in
-                        let r = Route.page(.album(a.name))
+                        let r = Route.page(.album(a.id))
                         Button { open(r) } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 CoverView(seed: a.name, url: RowCover.url(model, a.art), side: 180)

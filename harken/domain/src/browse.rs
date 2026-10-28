@@ -44,7 +44,7 @@ pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refus
                 .song
                 .scan()
                 .into_iter()
-                .filter(|s| s.album_name.as_ref() == Some(&a.name))
+                .filter(|s| s.album_id.as_ref() == Some(&a.id))
                 .map(|s| {
                     let creator = db.media.get(s.media_id).map(|m| m.creator).unwrap_or_default();
                     (creator, performers(&credits_of(db, &s.recording_id), &s.recording_id))
@@ -56,6 +56,7 @@ pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refus
         .map(|(a, tracks)| AlbumsEntry {
             art: a.art.clone(),
             creator: tracks[0].0.clone(),
+            id: a.id.clone(),
             label: a.label.clone(),
             name: a.name.clone(),
             performer: most(tracks.iter().map(|(_, p)| p.as_str())),
@@ -92,8 +93,10 @@ pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetails
         let movement = movement_of(db, song);
         let work = movement.as_ref().and_then(|m| db.work.get(&m.work_id));
         let recording = db.recording.get(&song.recording_id);
+        let album = song.album_id.as_ref().and_then(|id| db.album.get(id));
         TrackDetailsEntry {
-            album: song.album_name.clone().unwrap_or_default(),
+            album: album.map(|a| a.name).unwrap_or_default(),
+            album_id: song.album_id.clone().unwrap_or_default(),
             bpm: song.bpm,
             catalogue: work.as_ref().map(|w| w.catalogue.clone()).unwrap_or_default(),
             composer: work.as_ref().map(|w| w.composer.clone()).unwrap_or_default(),
@@ -112,9 +115,9 @@ pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetails
 /// untagged one, 0, last in its part), then title, then the key.
 #[view("library.album")]
 pub fn album(_: &Ctx, _: &Db<Harken>, input: AlbumInput) -> Result<Plan<LibraryEntry>, Refusal> {
-    let (on, name) = (input.playlist_id, input.name);
+    let (on, id) = (input.playlist_id, input.id);
     Ok(scan::<Harken, Song>()
-        .filter_with(move |db, s| s.album_name.as_ref() == Some(&name) && db.media.has(s.media_id))
+        .filter_with(move |db, s| s.album_id.as_ref() == Some(&id) && db.media.has(s.media_id))
         .sort_with(|db, s| {
             let part = movement_of(db, s).map(|m| m.part).unwrap_or_default();
             let title = db.media.get(s.media_id).map(|m| m.title).unwrap_or_default();
@@ -193,7 +196,7 @@ pub fn recordings(_: &Ctx, _: &Db<Harken>, input: Recordings) -> Result<Plan<Rec
                     .scan()
                     .into_iter()
                     .filter(|s| s.recording_id == r.id)
-                    .filter_map(|s| s.album_name.and_then(|n| db.album.get(&n)))
+                    .filter_map(|s| s.album_id.and_then(|id| db.album.get(&id)))
                     .map(|a| a.art)
                     .find(|art| !art.is_empty())
                     .unwrap_or_default(),
@@ -244,7 +247,7 @@ pub fn recording(_: &Ctx, _: &Db<Harken>, input: RecordingInput) -> Result<Plan<
 /// each once — their roles together — in billing order.
 #[view("library.album_credits")]
 pub fn album_credits(_: &Ctx, _: &Db<Harken>, input: AlbumCredits) -> Result<Plan<CreditsEntry>, Refusal> {
-    let name = input.name;
+    let id = input.id;
     Ok(scan::<Harken, Credit>()
         .filter(|c| c.role != "composer")
         .filter_with(move |db, c| {
@@ -252,7 +255,7 @@ pub fn album_credits(_: &Ctx, _: &Db<Harken>, input: AlbumCredits) -> Result<Pla
                 .song
                 .scan()
                 .into_iter()
-                .any(|s| s.recording_id == c.recording_id && s.album_name.as_ref() == Some(&name));
+                .any(|s| s.recording_id == c.recording_id && s.album_id.as_ref() == Some(&id));
             on && credited(&credits_of(db, &c.recording_id)).contains(c)
         })
         .group(

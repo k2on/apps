@@ -141,6 +141,9 @@ interface Controls {
     /** Open a page — what plays' album or its person's — closing the player for it. */
     fun goTo(page: Page) {}
 
+    /** The page of the album `now` is on, found by its track — a name is not one album's; null for none. */
+    fun albumOf(now: Playing): Page? = null
+
     /** Open the device picker. */
     fun devices() {}
 
@@ -300,14 +303,14 @@ fun FullFace(
         Spacer(Modifier.weight(0.5f))
         // The title opens its album and the name its person's page, as the desktop's bar and the
         // iPhone's player do.
-        val album = now?.album.orEmpty()
+        val album = now?.let(controls::albumOf)
         val artist = now?.artist.orEmpty()
         Text(
             now?.title ?: "Nothing playing",
             style = MaterialTheme.typography.headlineSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = if (album.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForAlbum(album)) },
+            modifier = if (album == null) Modifier else Modifier.clickable { controls.goTo(album) },
         )
         Text(
             artist,

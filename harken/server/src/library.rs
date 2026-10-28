@@ -1205,6 +1205,8 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         movement_no: track.movement_no,
         artist_banner,
         released: track.year,
+        // Its album is the folder it is in, as a library's files are.
+        folder: String::new(),
     }
     .to_bytes();
     if !would_change(peer, ADD_SONG, &call) {

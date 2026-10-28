@@ -51,9 +51,10 @@ sealed class Page {
     /** What the navigation calls it: names as the hex of their UTF-8, so no character is special. */
     abstract val route: String
 
-    data class ForAlbum(val name: String) : Page() {
+    /** One album, by its key (`music/Vivaldi/The Four Seasons/the-four-seasons`): two of one name are two pages. */
+    data class ForAlbum(val id: String) : Page() {
         override val route: String
-            get() = "album/" + Hex.encode(name.toByteArray(Charsets.UTF_8))
+            get() = "album/" + Hex.encode(id.toByteArray(Charsets.UTF_8))
     }
 
     data class ForArtist(val name: String) : Page() {
@@ -93,11 +94,12 @@ sealed class Page {
      * Where a track was played from, as the listening session and the plays carry it — the
      * desktop's address-bar spelling (`rust/arkui`'s route: `#album/Water%20Music`), so a page
      * named on one device is the same page on another. A playlist by its name, as there; one this
-     * phone cannot name is nowhere in particular.
+     * phone cannot name is nowhere in particular. An album by its key, as a work is: its name is
+     * not one album's.
      */
     fun place(playlists: List<Playlist>): String =
         when (this) {
-            is ForAlbum -> "#album/" + Places.encode(name)
+            is ForAlbum -> "#album/" + Places.encode(id)
             is ForArtist -> "#artist/" + Places.encode(name)
             is ForPlaylist -> playlists.firstOrNull { it.id == id }?.let { "#playlist/" + Places.encode(it.name) } ?: ""
             is ForWork -> "#work/" + Places.encode(id)
@@ -433,7 +435,7 @@ class Library(private val session: ArkSession) {
     // A page's tracks; none for a page that is not a list of them (a work's).
     private fun pageView(page: Page): Held<*, Track>? =
         when (page) {
-            is Page.ForAlbum -> Held({ Phone.album(it, page.name) }, Track::of)
+            is Page.ForAlbum -> Held({ Phone.album(it, page.id) }, Track::of)
             is Page.ForArtist -> Held({ Phone.artist(it, page.name) }, Track::of)
             is Page.ForPlaylist -> Held({ Phone.playlist(it, page.id) }, Track::of)
             is Page.ForRecording -> Held({ Phone.recording(it, page.id) }, Track::of)
@@ -508,7 +510,7 @@ class Library(private val session: ArkSession) {
     suspend fun read(page: Page): List<Track> =
         when (page) {
             is Page.Songs -> tracks.value
-            is Page.ForAlbum -> session.run { h -> Phone.once({ Phone.album(h, page.name) }, Track::of) }
+            is Page.ForAlbum -> session.run { h -> Phone.once({ Phone.album(h, page.id) }, Track::of) }
             // Their songs; somebody with none, the episodes they are on, which their page plays.
             is Page.ForArtist -> session.run { h -> Phone.once({ Phone.artist(h, page.name) }, Track::of).ifEmpty { Phone.once({ Phone.appearances(h, page.name) }, Track::of) } }
             is Page.ForPlaylist -> session.run { h -> Phone.once({ Phone.playlist(h, page.id) }, Track::of) }

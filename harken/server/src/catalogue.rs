@@ -16,8 +16,9 @@ use crate::sync::{self, Plan, Source, Want};
 
 pub use crate::sync::name_of;
 
-/// Where under `/media` the downloads are served.
-pub const DIR: &str = ".catalogue";
+/// Where under `/media` the downloads are served: the folder the domain
+/// says a catalogue's albums are in.
+pub const DIR: &str = harken_domain::catalogue::DIR;
 
 pub fn dir(data: &Path) -> PathBuf {
     data.join("catalogue")

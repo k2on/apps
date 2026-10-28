@@ -169,8 +169,13 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
         added_ms: was.as_ref().map_or(now, |m| m.added_ms),
         user_id: was.as_ref().map_or(user.clone(), |m| m.user_id.clone()),
     })?;
-    if !input.album.is_empty() {
-        let album = db.album.get(&input.album);
+    let folder = match input.folder.is_empty() {
+        true => keys::folder_of(&input.file),
+        false => &input.folder,
+    };
+    let album_id = (!input.album.is_empty()).then(|| keys::album_id(folder, &input.album));
+    if let Some(album_id) = &album_id {
+        let album = db.album.get(album_id);
         // A picture or a year the track says and the album has not; what it
         // does not say, the album keeps.
         let stale = album
@@ -178,6 +183,7 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
             .is_none_or(|a| (!input.album_art.is_empty() && a.art != input.album_art) || (input.released > 0 && a.released != input.released));
         if stale {
             db.album.put(Album {
+                id: album_id.clone(),
                 name: input.album.clone(),
                 label: album.as_ref().map_or(String::new(), |a| a.label.clone()),
                 released: match input.released {
@@ -293,7 +299,7 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
     let previous = db.song.get(id);
     db.song.put(Song {
         media_id: id,
-        album_name: (!input.album.is_empty()).then(|| input.album.clone()),
+        album_id,
         disc: if input.disc > 0 { input.disc.min(99) } else { 1 },
         track: input.track.clamp(0, 999),
         recording_id: recording_id.clone(),

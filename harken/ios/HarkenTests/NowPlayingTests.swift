@@ -81,6 +81,13 @@ final class NowPlayingTests: XCTestCase {
         XCTAssertEqual(logged?.track.id, Fx.id(4).hex)
         XCTAssertEqual(logged?.from, .songs)
         XCTAssertEqual(logged?.saying([]), "From your library")
+        // From an album: its name, found by its key.
+        let water = AlbumsEntry(art: "", creator: "Handel", id: ".catalogue/water-music", label: "", name: "Water Music", performer: "", released: 0, tracks: 3)
+        var fromAlbum = play
+        fromAlbum.from = "#album/.catalogue%2Fwater-music"
+        let onAlbum = LastPlayed.of(Heard(), played: fromAlbum, playlists: [], art: art, server: "https://h", here: "x")
+        XCTAssertEqual(onAlbum?.saying([], albums: [water]), "From Water Music")
+        XCTAssertEqual(onAlbum?.saying([]), "From an album")
         XCTAssertNil(LastPlayed.of(Heard(), played: nil, playlists: [], art: art, server: "h", here: "x"))
     }
 

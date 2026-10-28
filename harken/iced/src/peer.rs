@@ -706,11 +706,22 @@ impl Peer {
         self.client.answer(browse::credits, input).unwrap_or_default()
     }
 
+    /// The key of the first album of that name the albums page lists.
     #[cfg(test)]
-    pub fn album_rows(&self, name: &str) -> Vec<Item> {
+    pub fn album_id(&self, name: &str) -> String {
+        self.albums()
+            .iter()
+            .find(|a| a.name == name)
+            .unwrap_or_else(|| panic!("no album {name}"))
+            .id
+            .clone()
+    }
+
+    #[cfg(test)]
+    pub fn album_rows(&self, id: &str) -> Vec<Item> {
         let input = AlbumInput {
             playlist_id: key(self.playlist),
-            name: name.into(),
+            id: id.into(),
         };
         Peer::rows_of(self.client.answer(browse::album, input))
     }
@@ -788,12 +799,12 @@ impl Peer {
                 Some(("recordings", Recordings { work_id: id.clone() }.to_bytes())),
             ),
             Source::Playlist(id, _) => (Some(("playlist", PlaylistInput { playlist_id: key(*id) }.to_bytes())), None, None),
-            Source::Album(name) => (
+            Source::Album(id, _) => (
                 Some((
                     "album",
                     AlbumInput {
                         playlist_id: pl,
-                        name: name.clone(),
+                        id: id.clone(),
                     }
                     .to_bytes(),
                 )),
@@ -842,7 +853,7 @@ impl Peer {
         let recordings = want(c, &mut v.recordings, recordings, Recording::from_bytes);
         let credits = match &self.source {
             Source::Recording(id, _) => Some(("credits", Credits { recording_id: id.clone() }.to_bytes())),
-            Source::Album(name) => Some(("album_credits", AlbumCredits { name: name.clone() }.to_bytes())),
+            Source::Album(id, _) => Some(("album_credits", AlbumCredits { id: id.clone() }.to_bytes())),
             _ => None,
         };
         want(c, &mut v.credits, credits, Credit::from_bytes);
@@ -915,9 +926,9 @@ impl Peer {
     /// the library — a page, rather than a heading with nothing under it.
     pub fn source_of(&self, place: &Place) -> Source {
         match place {
-            Place::Album(name) => match self.albums().iter().any(|a| a.name == *name) {
-                true => Source::Album(name.clone()),
-                false => Source::Library,
+            Place::Album(id) => match self.albums().iter().find(|a| a.id == *id) {
+                Some(a) => Source::Album(a.id.clone(), a.name.clone()),
+                None => Source::Library,
             },
             // A person, whichever list they are on, or on an episode; an old
             // `#composer/…` link is their page too.
@@ -1170,7 +1181,7 @@ mod tests {
         peer.client.mutate("add_to_playlist", &on(other, air)).unwrap();
         peer.refresh();
         assert!(!peer.items()[0].on_playlist(), "on Other, not on Mine");
-        peer.source = Source::Album("Suites".into());
+        peer.source = Source::Album(peer.album_id("Suites"), "Suites".into());
         peer.open_page();
 
         let reject = Frame::Verdict {

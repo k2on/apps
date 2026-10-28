@@ -250,8 +250,8 @@ struct TrackActions: View {
         Button { model.playNext(track) } label: { Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward") }
         Button { model.addToQueue(track) } label: { Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward") }
         Button { present(.addTo(track)) } label: { Label("Add to Playlist…", systemImage: "text.badge.plus") }
-        if let a = model.album(of: track), from != .album(a.name) {
-            Button { open(.page(.album(a.name))) } label: { Label("Go to Album", systemImage: "square.stack") }
+        if let a = model.album(of: track), from != .album(a.id) {
+            Button { open(.page(.album(a.id))) } label: { Label("Go to Album", systemImage: "square.stack") }
         }
         // An episode goes to its show, whose title is its creator, and to nobody's page.
         if let s = model.show(of: track), from != .show(s.id) {

@@ -67,11 +67,13 @@ data class Track(
 }
 
 /**
- * A row of `albums`: every album some song is on, with whoever made its first track, who played the
- * most of it (`performer`, empty where nobody is credited), whose label put it out, and the year it
- * came out (0 for nobody said).
+ * A row of `albums`: every album some song is on, by its key (its folder and its name, so two
+ * records of one title are two albums), with whoever made its first track, who played the most of
+ * it (`performer`, empty where nobody is credited), whose label put it out, and the year it came out
+ * (0 for nobody said).
  */
 data class Album(
+    val id: String,
     val name: String,
     val creator: String,
     val art: String,
@@ -85,16 +87,16 @@ data class Album(
         get() = performer.ifEmpty { creator }
 
     companion object {
-        fun of(e: AlbumsEntry): Album = Album(e.name, e.creator, e.art, e.tracks, e.performer, e.label, e.released)
+        fun of(e: AlbumsEntry): Album = Album(e.id, e.name, e.creator, e.art, e.tracks, e.performer, e.label, e.released)
 
         /**
-         * The album `track` is on, by its details: the album's own row, found by its name — or,
-         * while the albums have not caught up with a song that names a new one, an album made of
-         * the name.
+         * The album `track` is on, by its details: the album's own row, found by its key — or,
+         * while the albums have not caught up with a song on a new one, an album made of the key
+         * and the name its details give.
          */
-        fun ofTrack(track: Track, details: Map<Id, TrackDetail>, byName: Map<String, Album>): Album? {
-            val name = details[track.id]?.album?.takeIf { it.isNotEmpty() } ?: return null
-            return byName[name] ?: Album(name, track.creator, "", 0)
+        fun ofTrack(track: Track, details: Map<Id, TrackDetail>, byId: Map<String, Album>): Album? {
+            val d = details[track.id]?.takeIf { it.albumId.isNotEmpty() } ?: return null
+            return byId[d.albumId] ?: Album(d.albumId, d.album, track.creator, "", 0)
         }
     }
 }
@@ -339,7 +341,9 @@ object Shows {
 /** A row of `track_details`: what only a song has — its album, its part of a work, its number on the release. */
 data class TrackDetail(
     val mediaId: Id,
+    /** The album's name, as it is shown, and its key (`Album.id`), what it is found by; empty for none. */
     val album: String,
+    val albumId: String,
     val part: String,
     val track: Long,
     val performer: String,
@@ -349,7 +353,7 @@ data class TrackDetail(
     val work: String = "",
 ) {
     companion object {
-        fun of(e: TrackDetailsEntry): TrackDetail = TrackDetail(e.mediaId, e.album, e.part, e.track, e.performer, e.licence, e.composer, e.work)
+        fun of(e: TrackDetailsEntry): TrackDetail = TrackDetail(e.mediaId, e.album, e.albumId, e.part, e.track, e.performer, e.licence, e.composer, e.work)
     }
 }
 
@@ -394,8 +398,8 @@ object Phone {
     /** The library, read against a playlist. */
     fun library(h: Harken, against: Id?): View<LibraryEntry> = h.library(LibraryInput(against ?: NO_PLAYLIST))
 
-    /** A page's songs: an album's or an artist's by name, read against no playlist, or a playlist's. */
-    fun album(h: Harken, name: String): View<LibraryEntry> = h.album(AlbumInput(NO_PLAYLIST, name))
+    /** A page's songs: an album's by its key or an artist's by name, read against no playlist, or a playlist's. */
+    fun album(h: Harken, id: String): View<LibraryEntry> = h.album(AlbumInput(NO_PLAYLIST, id))
 
     fun artist(h: Harken, name: String): View<LibraryEntry> = h.artist(ArtistInput(NO_PLAYLIST, name))
 

@@ -88,6 +88,8 @@ impl Playlist {
 /// A record, as the albums page lists it (`albums`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Album {
+    /// Its key (`keys::album_id`): its folder and its name.
+    pub id: String,
     pub name: String,
     /// Whoever made its first track.
     pub creator: String,
@@ -104,6 +106,7 @@ pub struct Album {
 impl From<AlbumsEntry> for Album {
     fn from(e: AlbumsEntry) -> Album {
         Album {
+            id: e.id,
             name: e.name,
             creator: e.creator,
             tracks: e.tracks,
@@ -563,6 +566,8 @@ impl Recording {
 pub struct TrackDetail {
     pub media_id: Id,
     pub album: String,
+    /// That album's key, the page it opens; empty for none.
+    pub album_id: String,
     /// Where it sits on the release; 0 is "nobody said".
     pub track: i64,
     /// The division of the work it belongs to.
@@ -582,6 +587,7 @@ impl From<TrackDetailsEntry> for TrackDetail {
         TrackDetail {
             media_id: e.media_id.0,
             album: e.album,
+            album_id: e.album_id,
             track: e.track,
             part: e.part,
             catalogue: e.catalogue,
@@ -638,6 +644,7 @@ mod tests {
         let good = AlbumsEntry {
             art: String::new(),
             creator: "Handel".into(),
+            id: "music/water-music".into(),
             label: String::new(),
             name: "Water Music".into(),
             performer: String::new(),

@@ -24,7 +24,7 @@ fn bench_queries() {
     let nobody = Library { playlist_id: key([0; 16]) };
     let album = AlbumInput {
         playlist_id: key([0; 16]),
-        name: "Water Music".into(),
+        id: app.peer.album_id("Water Music"),
     };
     let bach = Works {
         composer: "Johann Sebastian Bach".into(),
@@ -74,9 +74,10 @@ fn views_at(copies: usize) {
 
     let favorites: Id = client.query::<Vec<crate::domain::Playlist>>("playlists", &()).unwrap()[0].id.0;
     let handel = "George Frideric Handel";
+    let albums = client.query::<Vec<crate::domain::AlbumsEntry>>("albums", &()).unwrap();
     let album = AlbumInput {
         playlist_id: key(favorites),
-        name: "Water Music".into(),
+        id: albums.into_iter().find(|a| a.name == "Water Music").unwrap().id,
     };
     let track = client
         .query::<Vec<LibraryEntry>>("album", &album)

@@ -242,9 +242,9 @@ private fun Albums(albums: List<Album>, act: Do) {
         verticalArrangement = Arrangement.spacedBy(Space.xl),
         modifier = Modifier.fillMaxSize(),
     ) {
-        items(albums, key = { it.name }) { a ->
+        items(albums, key = { it.id }) { a ->
             val hero = rememberHero(Space.corner)
-            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForAlbum(a.name)) })) {
+            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForAlbum(a.id)) })) {
                 Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(a.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

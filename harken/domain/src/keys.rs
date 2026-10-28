@@ -66,6 +66,18 @@ pub fn key_part(name: &str) -> String {
     }
 }
 
+/// The folder a file is in: its path up to its last slash, empty for none.
+pub fn folder_of(file: &str) -> &str {
+    file.rsplit_once('/').map_or("", |(folder, _)| folder)
+}
+
+/// The key of an album: the folder it is in, and its name. Two recordings
+/// of one title, in two folders, are two albums; the tracks of one folder
+/// named one album are one, whoever plays each.
+pub fn album_id(folder: &str, album: &str) -> String {
+    format!("{folder}/{}", key_part(album))
+}
+
 /// The key of a work: its composer, and its catalogue number or its title.
 pub fn work_key(composer: &str, catalogue: &str, title: &str) -> String {
     let of = if catalogue.is_empty() { title } else { catalogue };

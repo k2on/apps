@@ -99,24 +99,24 @@ class ListenTests {
         val hall = Hall()
         val phone = hall.device("phone", true)
         val laptop = hall.device("laptop", true, "computer")
-        val air = Played(queue[0].id, "Air", "Handel", "Water Music", 100_000, "music/air.mp3", 1, "#album/Water%20Music")
+        val air = Played(queue[0].id, "Air", "Handel", "Water Music", 100_000, "music/air.mp3", 1, "#album/music%2FWater%20Music%2Fwater-music")
         val r = Presser("phone")
         val heard = { Heard(me = "phone", joined = r.joined(phone), listening = r.session(phone)) }
         val noArt: (String) -> String = { "" }
 
         val fromLog = lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!
         assertEquals("an idle session: the log's", "Air", fromLog.track.title)
-        assertEquals(Page.ForAlbum("Water Music"), fromLog.from)
+        assertEquals(Page.ForAlbum(Demo.key("Water Music")), fromLog.from)
         assertFalse(fromLog.live)
 
         val lr = Presser("laptop")
-        assertNull(lr.press(laptop, Press.Start(queue, 1, 0, "#album/Water%20Music")))
+        assertNull(lr.press(laptop, Press.Start(queue, 1, 0, "#album/music%2FWater%20Music%2Fwater-music")))
         hall.carry()
         val live = lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!
         assertEquals("the session's track", "b", live.track.title)
         assertTrue(live.live)
         assertEquals("and where it plays", "Playing on laptop", live.on)
-        assertEquals(Page.ForAlbum("Water Music"), live.from)
+        assertEquals(Page.ForAlbum(Demo.key("Water Music")), live.from)
 
         assertNull(lr.press(laptop, Press.Pause))
         hall.carry()
@@ -185,7 +185,7 @@ class ListenTests {
         assertEquals("nothing queued: empty, so no notification", 0, player.mediaItemCount)
         assertEquals(androidx.media3.common.Player.STATE_IDLE, player.playbackState)
 
-        assertNull(laptop.press(laptopPeer, Press.Start(queue, 0, 30_000, "#album/Water%20Music")))
+        assertNull(laptop.press(laptopPeer, Press.Start(queue, 0, 30_000, "#album/music%2FWater%20Music%2Fwater-music")))
         hall.carry()
         phone.poke()
         player.show(phone.heard.value)

@@ -32,7 +32,9 @@ pub enum Source {
     /// draws no such line.
     Composers,
     Playlist(Id, String),
-    Album(String),
+    /// An album by its key (`keys::album_id`), and its name: two records
+    /// of one title are two albums.
+    Album(String, String),
     /// One person's page, whatever they did: a composer's lists their
     /// works, and anybody else's their songs. Reached from a card on
     /// `Artists` or on `Composers`, and from whoever a work is by.
@@ -68,7 +70,7 @@ impl Source {
             Source::Artists => Place::Artists,
             Source::Composers => Place::Composers,
             Source::Playlist(_, name) => Place::Playlist(name.clone()),
-            Source::Album(name) => Place::Album(name.clone()),
+            Source::Album(id, _) => Place::Album(id.clone()),
             Source::Artist(name) => Place::Artist(name.clone()),
             // The key, not the title — and still a name in the sense the
             // route means: `#work/johann-sebastian-bach/bwv-988` is built out
@@ -93,7 +95,7 @@ impl Source {
             Source::Library | Source::Albums | Source::Artists | Source::Composers => Some("Music"),
             Source::Podcasts | Source::Sermons => Some("Shows"),
             Source::Playlist(..) => Some("Playlists"),
-            Source::Album(_)
+            Source::Album(..)
             | Source::Artist(_)
             | Source::Work(..)
             | Source::Recording(..)
@@ -110,7 +112,7 @@ impl Source {
     pub fn glyph(&self) -> &'static [u8] {
         match self {
             Source::Library => glyphs::NOTE,
-            Source::Albums | Source::Album(_) => glyphs::ALBUM,
+            Source::Albums | Source::Album(..) => glyphs::ALBUM,
             Source::Artists | Source::Artist(_) => glyphs::ARTIST,
             Source::Composers => glyphs::COMPOSER,
             Source::Work(..) | Source::Recording(..) | Source::Settings => glyphs::LIBRARY,
@@ -133,7 +135,7 @@ impl Source {
             Source::Settings => "Settings",
             Source::Transcript => "Transcript",
             Source::Playlist(_, name)
-            | Source::Album(name)
+            | Source::Album(_, name)
             | Source::Artist(name)
             | Source::Work(_, name)
             | Source::Recording(_, name)
@@ -146,7 +148,7 @@ impl Source {
     /// name alone.
     pub fn kind(&self) -> &'static str {
         match self {
-            Source::Album(_) => "Album",
+            Source::Album(..) => "Album",
             Source::Artist(_) => "Artist",
             Source::Work(..) => "Work",
             Source::Recording(..) => "Recording",
@@ -171,6 +173,7 @@ pub enum Place {
     Artists,
     Composers,
     Playlist(String),
+    /// An album by its key, which has slashes of its own, as a work's does.
     Album(String),
     Artist(String),
     /// A composer's page as a link once named it, `#composer/…`: kept so an

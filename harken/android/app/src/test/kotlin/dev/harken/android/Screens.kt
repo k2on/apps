@@ -90,7 +90,7 @@ class Screens {
             upNext = Demo.tracks.subList(1, 9).map(Demo::playing),
         )
     private val at = still(82_000)
-    private val last = LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum("The Four Seasons"))
+    private val last = LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum(Demo.key("The Four Seasons")))
 
     @Composable
     // Below the status bar, or under it for a page that says so, as the app's navigation draws each destination.
@@ -221,10 +221,10 @@ class Screens {
     fun c1_album() {
         val name = "Water Music"
         shot("water-music") {
-            tab(Tab.Library) { AlbumPage(name, Demo.albums.first { it.name == name }, Demo.album(name), Demo.details, hornpipe.id.hex, Idle) }
+            tab(Tab.Library) { AlbumPage(Demo.key(name), Demo.albums.first { it.id == Demo.key(name) }, Demo.album(name), Demo.details, hornpipe.id.hex, Idle) }
         }
         val seasons = "The Four Seasons"
-        shot("four-seasons") { tab(Tab.Library) { AlbumPage(seasons, Demo.albums.first { it.name == seasons }, Demo.album(seasons), Demo.details, null, Idle) } }
+        shot("four-seasons") { tab(Tab.Library) { AlbumPage(Demo.key(seasons), Demo.albums.first { it.id == Demo.key(seasons) }, Demo.album(seasons), Demo.details, null, Idle) } }
     }
 
     @Test
@@ -259,7 +259,7 @@ class Screens {
         val tracks = Demo.album("Water Music").filter { Demo.details[it.id]?.performer == take.performers }
         val people = listOf(OnRecording("George Frideric Handel", "Composer", "", Page.ForArtist("George Frideric Handel")), OnRecording(take.performers, "performer", "", null))
         shot("marine-band") {
-            tab(Tab.Library) { RecordingPage(take.id, work, take, tracks, Demo.details, Demo.albums.filter { it.name == "Water Music" }, people, hornpipe.id.hex, Idle) }
+            tab(Tab.Library) { RecordingPage(take.id, work, take, tracks, Demo.details, Demo.albums.filter { it.id == Demo.key("Water Music") }, people, hornpipe.id.hex, Idle) }
         }
     }
 
@@ -395,7 +395,7 @@ class Screens {
     private fun session(output: Output, playing: Boolean): Active {
         val queue = Demo.album("Water Music").take(8).map { t -> Queued("Water Music", t.creator, t.durationMs, t.file, t.id, t.title) }
         val clock = if (playing) Clock.Playing(82_000, System.currentTimeMillis()) else Clock.Paused(82_000)
-        return Active(0, clock, "#album/Water%20Music", output, queue)
+        return Active(0, clock, "#album/music%2FWater%20Music%2Fwater-music", output, queue)
     }
 
     private fun heard(s: Active?, scrub: Map<String, Long> = emptyMap()): Heard =

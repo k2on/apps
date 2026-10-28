@@ -35,8 +35,8 @@ fn check(peer: &Peer, what: &str) {
     );
     let details: HashMap<_, _> = peer.track_details().into_iter().map(|t| (t.media_id, t)).collect();
     assert_eq!(peer.details, details, "track_details, {what}");
-    let Source::Album(name) = &peer.source else { unreachable!() };
-    assert_eq!(peer.shown(), peer.album_rows(name), "the album page, {what}");
+    let Source::Album(id, _) = &peer.source else { unreachable!() };
+    assert_eq!(peer.shown(), peer.album_rows(id), "the album page, {what}");
     assert_eq!(
         peer.choices[0].count,
         Some(peer.items().len() as i64),
@@ -68,7 +68,7 @@ fn patched(peer: &Peer) -> BTreeSet<&str> {
 #[test]
 fn every_list_on_screen_is_its_query_after_every_change() {
     let mut peer = super::demo_app().peer;
-    peer.source = Source::Album("Water Music".into());
+    peer.source = Source::Album(peer.album_id("Water Music"), "Water Music".into());
     peer.open_page();
     check(&peer, "opened");
     let favorites = peer.playlist;
@@ -95,6 +95,8 @@ fn every_list_on_screen_is_its_query_after_every_change() {
 
     let mut song = super::song("Hornpipe again", "George Frideric Handel", "Water Music", "again.mp3");
     song.track = 30;
+    // On the catalogue's Water Music, the page open, by being in its folder.
+    song.folder = crate::domain::catalogue::DIR.into();
     peer.client.mutate("add_song", &song).unwrap();
     peer.refresh();
     check(&peer, "a song added");

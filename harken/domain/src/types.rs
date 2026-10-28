@@ -42,6 +42,13 @@ pub struct AddSong {
     /// keeps it when a track says none. Defaulted, as it was added after.
     #[serde(default)]
     pub released: i64,
+    /// The folder its album is in, which with the album's name is the album
+    /// (`keys::album_id`): empty for the folder `file` is in, as a
+    /// library's files are; the catalogue's for its own. Defaulted, as it
+    /// was added after.
+    #[serde(default)]
+    #[ark(trim)]
+    pub folder: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -140,7 +147,8 @@ pub struct Search {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct AlbumInput {
     pub playlist_id: Id<Playlist>,
-    pub name: String,
+    /// The album's key (`keys::album_id`).
+    pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -172,7 +180,8 @@ pub struct Credits {
 /// One album, by name, for who is on it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct AlbumCredits {
-    pub name: String,
+    /// The album's key (`keys::album_id`).
+    pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -429,6 +438,8 @@ pub struct LibraryEntry {
 pub struct AlbumsEntry {
     pub art: String,
     pub creator: String,
+    /// Its key (`keys::album_id`), what its page is opened by.
+    pub id: String,
     /// Who put it out, empty where nobody said.
     pub label: String,
     pub name: String,
@@ -457,6 +468,8 @@ pub struct ArtistsEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
 pub struct TrackDetailsEntry {
     pub album: String,
+    /// That album's key, the page it opens; empty for none.
+    pub album_id: String,
     pub bpm: i64,
     pub catalogue: String,
     /// Whoever the work it is a movement of is by; empty for none.

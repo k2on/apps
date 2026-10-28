@@ -26,16 +26,18 @@ extension LibraryEntry: Identifiable {
 
 extension Playlist: Identifiable {}
 
+/// An album is known by its key — its folder and its slugged name
+/// (`music/Vivaldi/The Four Seasons/the-four-seasons`) — so two records of
+/// one title are two albums; its name is only what is drawn.
 extension AlbumsEntry: Identifiable, Hashable {
-    public var id: String { name }
-    public func hash(into h: inout Hasher) { h.combine(name) }
+    public func hash(into h: inout Hasher) { h.combine(id) }
 
     /// The album `track` is on, by its details: the album's own row, found by
-    /// its name — or, while the albums have not caught up with a song that
-    /// names a new one, an album made of the name. None for a track on no album.
-    static func of(_ track: LibraryEntry, details: [Id: TrackDetailsEntry], byName: [String: AlbumsEntry]) -> AlbumsEntry? {
-        guard let name = details[track.id]?.album, !name.isEmpty else { return nil }
-        return byName[name] ?? AlbumsEntry(art: "", creator: track.creator, label: "", name: name, performer: "", released: 0, tracks: 0)
+    /// its key — or, while the albums have not caught up with a song on a new
+    /// one, an album made of the key and the name. None for a track on no album.
+    static func of(_ track: LibraryEntry, details: [Id: TrackDetailsEntry], byId: [String: AlbumsEntry]) -> AlbumsEntry? {
+        guard let d = details[track.id], !d.albumId.isEmpty else { return nil }
+        return byId[d.albumId] ?? AlbumsEntry(art: "", creator: track.creator, id: d.albumId, label: "", name: d.album, performer: "", released: 0, tracks: 0)
     }
 }
 
@@ -238,8 +240,8 @@ enum Phone {
 
     static func library(_ h: Harken) throws -> LiveView<LibraryEntry> { try h.library(Library(playlistId: noPlaylist)) }
 
-    /// A page's songs: an album's or an artist's by name, or a playlist's.
-    static func album(_ h: Harken, _ name: String) throws -> LiveView<LibraryEntry> { try h.album(AlbumInput(playlistId: noPlaylist, name: name)) }
+    /// A page's songs: an album's by its key, an artist's by name, or a playlist's.
+    static func album(_ h: Harken, _ id: String) throws -> LiveView<LibraryEntry> { try h.album(AlbumInput(playlistId: noPlaylist, id: id)) }
 
     static func artist(_ h: Harken, _ name: String) throws -> LiveView<LibraryEntry> { try h.artist(Artist(playlistId: noPlaylist, name: name)) }
 
@@ -259,7 +261,7 @@ enum Phone {
     /// ([Page.listings]).
     static func view(_ h: Harken, _ page: Page) throws -> LiveView<LibraryEntry>? {
         switch page {
-        case let .album(name): return try album(h, name)
+        case let .album(id): return try album(h, id)
         case let .artist(name): return try artist(h, name)
         case let .playlist(id): return try playlist(h, id)
         case let .recording(id): return try recording(h, id)
@@ -366,6 +368,8 @@ enum Phone {
 
 /// Somewhere a screen goes, and a list it plays from.
 enum Page: Hashable {
+    /// One album, by its key (`.catalogue/water-music`): not by its name,
+    /// which two records may share.
     case album(String)
     case artist(String)
     case playlist(Id)
@@ -413,7 +417,7 @@ enum Page: Hashable {
     /// by its name; one this phone cannot name is nowhere in particular.
     func place(_ playlists: [Playlist]) -> String {
         switch self {
-        case let .album(name): return "#album/" + Places.encode(name)
+        case let .album(id): return "#album/" + Places.encode(id)
         case let .artist(name): return "#artist/" + Places.encode(name)
         case let .playlist(id):
             guard let p = playlists.first(where: { $0.id == id }) else { return "" }

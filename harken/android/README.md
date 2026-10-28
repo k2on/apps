@@ -163,7 +163,7 @@ one of the domain's functions, typed:
 
 ```kotlin
 h.addToPlaylist(AddToPlaylist(playlistId, mediaId))           // its intent's id
-h.album(AlbumInput(Id.nil, "Water Music")).rows()               // List<LibraryEntry>
+h.album(AlbumInput(Id.nil, album.id)).rows()                   // List<LibraryEntry>, by its key
 ```
 
 and the input the phone records is the JSON the domain's serde writes, the

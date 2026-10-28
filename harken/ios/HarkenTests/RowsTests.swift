@@ -55,11 +55,12 @@ final class RowsTests: XCTestCase {
 
     func testAPlaceIsTheDesktopsSpelling() {
         let p = Playlist(id: Fx.id(7), name: "Road trip", pos: 0, createdMs: 0, userId: "ana")
-        XCTAssertEqual(Page.album("Water Music").place([]), "#album/Water%20Music")
+        // An album's place is its key, as a work's is: two records of one title are two albums.
+        XCTAssertEqual(Page.album("music/Handel/Water Music/water-music").place([]), "#album/music%2FHandel%2FWater%20Music%2Fwater-music")
         XCTAssertEqual(Page.playlist(p.id).place([p]), "#playlist/Road%20trip")
         XCTAssertEqual(Page.playlist(Fx.id(8)).place([p]), "")
         XCTAssertEqual(Page.songs.place([]), "#library")
-        XCTAssertEqual(Page.of(place: "#album/Bourr%C3%A9e", playlists: []), .album("Bourrée"))
+        XCTAssertEqual(Page.of(place: "#album/.catalogue%2Fbourr%C3%A9e", playlists: []), .album(".catalogue/bourrée"))
         XCTAssertEqual(Page.of(place: "#playlist/Road%20trip", playlists: [p]), .playlist(p.id))
         XCTAssertEqual(Page.of(place: "#artist/", playlists: []), nil)
         XCTAssertEqual(Page.of(place: "", playlists: []), nil)
@@ -81,7 +82,7 @@ final class RowsTests: XCTestCase {
         XCTAssertFalse(Page.work("bach/bwv-988").listsTracks)
         XCTAssertEqual(Page.recording("bach/bwv-988@k").listings, [.credits("bach/bwv-988@k"), .work("bach/bwv-988"), .recordings("bach/bwv-988")])
         XCTAssertEqual(Page.recording("loose").listings, [.credits("loose")])
-        XCTAssertEqual(Page.album("Water Music").listings, [])
+        XCTAssertEqual(Page.album(".catalogue/water-music").listings, [])
         XCTAssertEqual(Page.show("podcast/nix").listings, [.progress("podcast/nix"), .episodes("podcast/nix")])
     }
 
@@ -171,7 +172,7 @@ final class RowsTests: XCTestCase {
     }
 
     func testASearchFindsAlbumsAndArtistsByName() {
-        let albums = [AlbumsEntry(art: "", creator: "Handel", label: "", name: "Water Music", performer: "", released: 0, tracks: 3), AlbumsEntry(art: "", creator: "Bach", label: "", name: "Goldberg", performer: "", released: 0, tracks: 1)]
+        let albums = [AlbumsEntry(art: "", creator: "Handel", id: ".catalogue/water-music", label: "", name: "Water Music", performer: "", released: 0, tracks: 3), AlbumsEntry(art: "", creator: "Bach", id: ".catalogue/goldberg", label: "", name: "Goldberg", performer: "", released: 0, tracks: 1)]
         let artists = [ArtistsEntry(art: "", banner: "", born: 0, description: "", died: 0, name: "Handel", tracks: 3)]
         let r = Results.of(" handel", songs: [], albums: albums, artists: artists)
         XCTAssertEqual(r.albums.map { $0.name }, ["Water Music"])

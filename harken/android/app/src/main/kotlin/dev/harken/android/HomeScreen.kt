@@ -134,7 +134,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                     item { Heading("Last played") }
                     val from =
                         when (val f = last.from) {
-                            is Page.ForAlbum -> "From ${f.name}"
+                            is Page.ForAlbum -> data.albums.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From an album"
                             is Page.ForArtist -> "From ${f.name}"
                             is Page.ForPlaylist -> data.playlists.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From a playlist"
                             is Page.ForRecording -> "From a recording"
@@ -170,8 +170,8 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                 if (data.albums.isNotEmpty()) {
                     item { Heading("Albums", action = "See all", onAction = { act.library(LibraryTab.Albums) }) }
                     item {
-                        Shelf("albums", data.albums, key = { it.name }) { a ->
-                            CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
+                        Shelf("albums", data.albums, key = { it.id }) { a ->
+                            CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
                         }
                     }
                 }

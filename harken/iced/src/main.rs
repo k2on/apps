@@ -1795,7 +1795,8 @@ impl App {
     /// runs them.
     pub fn row_entries(&self, id: Id) -> Option<(String, Vec<Entry<Message>>)> {
         let item = self.peer.row(id)?;
-        let album = self.peer.detail_of(id).album;
+        let detail = self.peer.detail_of(id);
+        let album = Source::Album(detail.album_id, detail.album);
         let mine = self.peer.mine_of(id);
         let play = match mine.filter(|l| !l.finished && l.position_ms > 0) {
             Some(l) => format!("Resume from {}", arkui::format::clock(l.resume_ms() as f64 / 1000.0)),
@@ -1813,7 +1814,7 @@ impl App {
         // An episode goes to its show, whose title is its creator, and to
         // everybody on it.
         let places = match item.kind.as_str() {
-            "song" => vec![Source::Album(album), Source::Artist(item.creator.clone())],
+            "song" => vec![album, Source::Artist(item.creator.clone())],
             kind => {
                 let people = self.peer.people_of(id).into_iter().map(|p| Source::Artist(p.name));
                 self.peer.show_named(kind, &item.creator).into_iter().chain(people).collect()
@@ -2102,7 +2103,7 @@ impl App {
     pub fn card_under_cursor(&self, at: usize) -> Option<Source> {
         let p = &self.peer;
         match &p.source {
-            Source::Albums => p.albums().get(at).map(|a| Source::Album(a.name.clone())),
+            Source::Albums => p.albums().get(at).map(|a| Source::Album(a.id.clone(), a.name.clone())),
             Source::Artists => p.artists().get(at).map(|a| Source::Artist(a.name.clone())),
             Source::Composers => p.composers().get(at).map(|c| Source::Artist(c.name.clone())),
             Source::Podcasts => p.shows_of("podcast").get(at).map(|s| Source::Show(s.id.clone(), s.title.clone())),

@@ -97,15 +97,16 @@ public struct AddSong: Equatable {
     public var movementNo: Int64
     public var artistBanner: String
     public var released: Int64
+    public var folder: String
 
-    public init(title: String, artist: String, album: String, durationMs: Int64, file: String, track: Int64, part: String, catalogue: String, performer: String, bpm: Int64, albumArt: String, artistArt: String, disc: Int64, workTitle: String, movementNo: Int64, artistBanner: String, released: Int64) { self.title = title; self.artist = artist; self.album = album; self.durationMs = durationMs; self.file = file; self.track = track; self.part = part; self.catalogue = catalogue; self.performer = performer; self.bpm = bpm; self.albumArt = albumArt; self.artistArt = artistArt; self.disc = disc; self.workTitle = workTitle; self.movementNo = movementNo; self.artistBanner = artistBanner; self.released = released; }
+    public init(title: String, artist: String, album: String, durationMs: Int64, file: String, track: Int64, part: String, catalogue: String, performer: String, bpm: Int64, albumArt: String, artistArt: String, disc: Int64, workTitle: String, movementNo: Int64, artistBanner: String, released: Int64, folder: String) { self.title = title; self.artist = artist; self.album = album; self.durationMs = durationMs; self.file = file; self.track = track; self.part = part; self.catalogue = catalogue; self.performer = performer; self.bpm = bpm; self.albumArt = albumArt; self.artistArt = artistArt; self.disc = disc; self.workTitle = workTitle; self.movementNo = movementNo; self.artistBanner = artistBanner; self.released = released; self.folder = folder; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(title: J.text(o["title"]), artist: J.text(o["artist"]), album: J.text(o["album"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), track: J.int(o["track"]), part: J.text(o["part"]), catalogue: J.text(o["catalogue"]), performer: J.text(o["performer"]), bpm: J.int(o["bpm"]), albumArt: J.text(o["album_art"]), artistArt: J.text(o["artist_art"]), disc: J.int(o["disc"]), workTitle: J.text(o["work_title"]), movementNo: J.int(o["movement_no"]), artistBanner: J.text(o["artist_banner"]), released: J.int(o["released"]))
+        self.init(title: J.text(o["title"]), artist: J.text(o["artist"]), album: J.text(o["album"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), track: J.int(o["track"]), part: J.text(o["part"]), catalogue: J.text(o["catalogue"]), performer: J.text(o["performer"]), bpm: J.int(o["bpm"]), albumArt: J.text(o["album_art"]), artistArt: J.text(o["artist_art"]), disc: J.int(o["disc"]), workTitle: J.text(o["work_title"]), movementNo: J.int(o["movement_no"]), artistBanner: J.text(o["artist_banner"]), released: J.int(o["released"]), folder: J.text(o["folder"]))
     }
 
-    public var json: String { J.obj(["\"title\":" + J.q(title), "\"artist\":" + J.q(artist), "\"album\":" + J.q(album), "\"duration_ms\":" + String(durationMs), "\"file\":" + J.q(file), "\"track\":" + String(track), "\"part\":" + J.q(part), "\"catalogue\":" + J.q(catalogue), "\"performer\":" + J.q(performer), "\"bpm\":" + String(bpm), "\"album_art\":" + J.q(albumArt), "\"artist_art\":" + J.q(artistArt), "\"disc\":" + String(disc), "\"work_title\":" + J.q(workTitle), "\"movement_no\":" + String(movementNo), "\"artist_banner\":" + J.q(artistBanner), "\"released\":" + String(released)]) }
+    public var json: String { J.obj(["\"title\":" + J.q(title), "\"artist\":" + J.q(artist), "\"album\":" + J.q(album), "\"duration_ms\":" + String(durationMs), "\"file\":" + J.q(file), "\"track\":" + String(track), "\"part\":" + J.q(part), "\"catalogue\":" + J.q(catalogue), "\"performer\":" + J.q(performer), "\"bpm\":" + String(bpm), "\"album_art\":" + J.q(albumArt), "\"artist_art\":" + J.q(artistArt), "\"disc\":" + String(disc), "\"work_title\":" + J.q(workTitle), "\"movement_no\":" + String(movementNo), "\"artist_banner\":" + J.q(artistBanner), "\"released\":" + String(released), "\"folder\":" + J.q(folder)]) }
 }
 
 /// The record `AddToPlaylist`.
@@ -139,6 +140,7 @@ public struct Advance: Equatable {
 
 /// The record `Album`.
 public struct Album: Equatable {
+    public var id: String
     public var name: String
     public var label: String
     public var released: Int64
@@ -146,63 +148,64 @@ public struct Album: Equatable {
     public var addedMs: Int64
     public var userId: String
 
-    public init(name: String, label: String, released: Int64, art: String, addedMs: Int64, userId: String) { self.name = name; self.label = label; self.released = released; self.art = art; self.addedMs = addedMs; self.userId = userId; }
+    public init(id: String, name: String, label: String, released: Int64, art: String, addedMs: Int64, userId: String) { self.id = id; self.name = name; self.label = label; self.released = released; self.art = art; self.addedMs = addedMs; self.userId = userId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(name: J.text(o["name"]), label: J.text(o["label"]), released: J.int(o["released"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
+        self.init(id: J.text(o["id"]), name: J.text(o["name"]), label: J.text(o["label"]), released: J.int(o["released"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
     }
 
-    public var json: String { J.obj(["\"name\":" + J.q(name), "\"label\":" + J.q(label), "\"released\":" + String(released), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id), "\"name\":" + J.q(name), "\"label\":" + J.q(label), "\"released\":" + String(released), "\"art\":" + J.q(art), "\"added_ms\":" + String(addedMs), "\"user_id\":" + J.q(userId)]) }
 }
 
 /// The record `AlbumCredits`.
 public struct AlbumCredits: Equatable {
-    public var name: String
+    public var id: String
 
-    public init(name: String) { self.name = name; }
+    public init(id: String) { self.id = id; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(name: J.text(o["name"]))
+        self.init(id: J.text(o["id"]))
     }
 
-    public var json: String { J.obj(["\"name\":" + J.q(name)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id)]) }
 }
 
 /// The record `AlbumInput`.
 public struct AlbumInput: Equatable {
     public var playlistId: Id
-    public var name: String
+    public var id: String
 
-    public init(playlistId: Id, name: String) { self.playlistId = playlistId; self.name = name; }
+    public init(playlistId: Id, id: String) { self.playlistId = playlistId; self.id = id; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(playlistId: Id(J.text(o["playlist_id"])), name: J.text(o["name"]))
+        self.init(playlistId: Id(J.text(o["playlist_id"])), id: J.text(o["id"]))
     }
 
-    public var json: String { J.obj(["\"playlist_id\":" + J.q(playlistId.hex), "\"name\":" + J.q(name)]) }
+    public var json: String { J.obj(["\"playlist_id\":" + J.q(playlistId.hex), "\"id\":" + J.q(id)]) }
 }
 
 /// The record `AlbumsEntry`.
 public struct AlbumsEntry: Equatable {
     public var art: String
     public var creator: String
+    public var id: String
     public var label: String
     public var name: String
     public var performer: String
     public var released: Int64
     public var tracks: Int64
 
-    public init(art: String, creator: String, label: String, name: String, performer: String, released: Int64, tracks: Int64) { self.art = art; self.creator = creator; self.label = label; self.name = name; self.performer = performer; self.released = released; self.tracks = tracks; }
+    public init(art: String, creator: String, id: String, label: String, name: String, performer: String, released: Int64, tracks: Int64) { self.art = art; self.creator = creator; self.id = id; self.label = label; self.name = name; self.performer = performer; self.released = released; self.tracks = tracks; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(art: J.text(o["art"]), creator: J.text(o["creator"]), label: J.text(o["label"]), name: J.text(o["name"]), performer: J.text(o["performer"]), released: J.int(o["released"]), tracks: J.int(o["tracks"]))
+        self.init(art: J.text(o["art"]), creator: J.text(o["creator"]), id: J.text(o["id"]), label: J.text(o["label"]), name: J.text(o["name"]), performer: J.text(o["performer"]), released: J.int(o["released"]), tracks: J.int(o["tracks"]))
     }
 
-    public var json: String { J.obj(["\"art\":" + J.q(art), "\"creator\":" + J.q(creator), "\"label\":" + J.q(label), "\"name\":" + J.q(name), "\"performer\":" + J.q(performer), "\"released\":" + String(released), "\"tracks\":" + String(tracks)]) }
+    public var json: String { J.obj(["\"art\":" + J.q(art), "\"creator\":" + J.q(creator), "\"id\":" + J.q(id), "\"label\":" + J.q(label), "\"name\":" + J.q(name), "\"performer\":" + J.q(performer), "\"released\":" + String(released), "\"tracks\":" + String(tracks)]) }
 }
 
 /// The record `Appearance`.
@@ -1897,21 +1900,21 @@ public struct Skip: Equatable {
 /// The record `Song`.
 public struct Song: Equatable {
     public var mediaId: Id
-    public var albumName: String?
+    public var albumId: String?
     public var disc: Int64
     public var track: Int64
     public var recordingId: String
     public var movementId: String?
     public var bpm: Int64
 
-    public init(mediaId: Id, albumName: String?, disc: Int64, track: Int64, recordingId: String, movementId: String?, bpm: Int64) { self.mediaId = mediaId; self.albumName = albumName; self.disc = disc; self.track = track; self.recordingId = recordingId; self.movementId = movementId; self.bpm = bpm; }
+    public init(mediaId: Id, albumId: String?, disc: Int64, track: Int64, recordingId: String, movementId: String?, bpm: Int64) { self.mediaId = mediaId; self.albumId = albumId; self.disc = disc; self.track = track; self.recordingId = recordingId; self.movementId = movementId; self.bpm = bpm; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(mediaId: Id(J.text(o["media_id"])), albumName: J.opt(o["album_name"]) { v0 in J.text(v0) }, disc: J.int(o["disc"]), track: J.int(o["track"]), recordingId: J.text(o["recording_id"]), movementId: J.opt(o["movement_id"]) { v0 in J.text(v0) }, bpm: J.int(o["bpm"]))
+        self.init(mediaId: Id(J.text(o["media_id"])), albumId: J.opt(o["album_id"]) { v0 in J.text(v0) }, disc: J.int(o["disc"]), track: J.int(o["track"]), recordingId: J.text(o["recording_id"]), movementId: J.opt(o["movement_id"]) { v0 in J.text(v0) }, bpm: J.int(o["bpm"]))
     }
 
-    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"album_name\":" + J.wopt(albumName) { v0 in J.q(v0) }, "\"disc\":" + String(disc), "\"track\":" + String(track), "\"recording_id\":" + J.q(recordingId), "\"movement_id\":" + J.wopt(movementId) { v0 in J.q(v0) }, "\"bpm\":" + String(bpm)]) }
+    public var json: String { J.obj(["\"media_id\":" + J.q(mediaId.hex), "\"album_id\":" + J.wopt(albumId) { v0 in J.q(v0) }, "\"disc\":" + String(disc), "\"track\":" + String(track), "\"recording_id\":" + J.q(recordingId), "\"movement_id\":" + J.wopt(movementId) { v0 in J.q(v0) }, "\"bpm\":" + String(bpm)]) }
 }
 
 /// The record `Start`.
@@ -2011,6 +2014,7 @@ public struct Track: Equatable {
 /// The record `TrackDetailsEntry`.
 public struct TrackDetailsEntry: Equatable {
     public var album: String
+    public var albumId: String
     public var bpm: Int64
     public var catalogue: String
     public var composer: String
@@ -2022,14 +2026,14 @@ public struct TrackDetailsEntry: Equatable {
     public var work: String
     public var workId: String
 
-    public init(album: String, bpm: Int64, catalogue: String, composer: String, licence: String, mediaId: Id, part: String, performer: String, track: Int64, work: String, workId: String) { self.album = album; self.bpm = bpm; self.catalogue = catalogue; self.composer = composer; self.licence = licence; self.mediaId = mediaId; self.part = part; self.performer = performer; self.track = track; self.work = work; self.workId = workId; }
+    public init(album: String, albumId: String, bpm: Int64, catalogue: String, composer: String, licence: String, mediaId: Id, part: String, performer: String, track: Int64, work: String, workId: String) { self.album = album; self.albumId = albumId; self.bpm = bpm; self.catalogue = catalogue; self.composer = composer; self.licence = licence; self.mediaId = mediaId; self.part = part; self.performer = performer; self.track = track; self.work = work; self.workId = workId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(album: J.text(o["album"]), bpm: J.int(o["bpm"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), licence: J.text(o["licence"]), mediaId: Id(J.text(o["media_id"])), part: J.text(o["part"]), performer: J.text(o["performer"]), track: J.int(o["track"]), work: J.text(o["work"]), workId: J.text(o["work_id"]))
+        self.init(album: J.text(o["album"]), albumId: J.text(o["album_id"]), bpm: J.int(o["bpm"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), licence: J.text(o["licence"]), mediaId: Id(J.text(o["media_id"])), part: J.text(o["part"]), performer: J.text(o["performer"]), track: J.int(o["track"]), work: J.text(o["work"]), workId: J.text(o["work_id"]))
     }
 
-    public var json: String { J.obj(["\"album\":" + J.q(album), "\"bpm\":" + String(bpm), "\"catalogue\":" + J.q(catalogue), "\"composer\":" + J.q(composer), "\"licence\":" + J.q(licence), "\"media_id\":" + J.q(mediaId.hex), "\"part\":" + J.q(part), "\"performer\":" + J.q(performer), "\"track\":" + String(track), "\"work\":" + J.q(work), "\"work_id\":" + J.q(workId)]) }
+    public var json: String { J.obj(["\"album\":" + J.q(album), "\"album_id\":" + J.q(albumId), "\"bpm\":" + String(bpm), "\"catalogue\":" + J.q(catalogue), "\"composer\":" + J.q(composer), "\"licence\":" + J.q(licence), "\"media_id\":" + J.q(mediaId.hex), "\"part\":" + J.q(part), "\"performer\":" + J.q(performer), "\"track\":" + String(track), "\"work\":" + J.q(work), "\"work_id\":" + J.q(workId)]) }
 }
 
 /// The record `TranscriptEntry`.

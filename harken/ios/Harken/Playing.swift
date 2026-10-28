@@ -184,11 +184,12 @@ struct LastPlayed: Equatable {
         return LastPlayed(track: track, from: Page.of(place: p.from, playlists: playlists))
     }
 
-    /// Where it was played from, in words.
-    func saying(_ playlists: [Playlist]) -> String {
+    /// Where it was played from, in words: an album by its name, found by its
+    /// key — or by the name a place from before keys carried.
+    func saying(_ playlists: [Playlist], albums: [AlbumsEntry] = []) -> String {
         if let on = on { return on }
         switch from {
-        case let .album(n)?: return "From \(n)"
+        case let .album(k)?: return (albums.first { $0.id == k } ?? albums.first { $0.name == k }).map { "From \($0.name)" } ?? "From an album"
         case let .artist(n)?: return "From \(n)"
         case .some(.recording), .some(.work): return "From a recording"
         case .some(.show): return "From a show"

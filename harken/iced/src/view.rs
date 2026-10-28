@@ -305,7 +305,7 @@ impl App {
                             true => format!("{who}  \u{b7}  {}", a.released),
                             false => who.clone(),
                         };
-                        self.card(&a.name, under, a.tracks, Source::Album(a.name.clone()), false, &a.art)
+                        self.card(&a.name, under, a.tracks, Source::Album(a.id.clone(), a.name.clone()), false, &a.art)
                     })
                     .collect(),
                 "No albums yet.",
@@ -336,10 +336,10 @@ impl App {
             Source::Transcript if !(self.help || self.debug) => self.view_transcript(),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
-            Source::Album(name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
+            Source::Album(_, name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
                 padded(with_header(self.view_record(name, "", None, None, ""), self.view_list()))
             }
-            Source::Album(name) => self.view_album(name),
+            Source::Album(id, name) => self.view_album(id, name),
             Source::Playlist(_, name) => self.view_playlist(name),
             Source::Artist(name) => self.view_artist(name),
             // One composer's page, as a catalogue opens one: their banner, then
@@ -998,15 +998,15 @@ impl App {
     /// over its title, its length at its right — the small print, and
     /// everybody on it. A record of no works (a pop record) is the same page
     /// with no work headings, and its track numbers instead.
-    fn view_album(&self, name: &str) -> Element<'_, Message> {
+    fn view_album(&self, id: &str, name: &str) -> Element<'_, Message> {
         let p = &self.peer;
         let l = self.layout();
-        let album = p.albums().iter().find(|a| a.name == name);
+        let album = p.albums().iter().find(|a| a.id == id);
         let creator = album.map(|a| a.creator.clone()).unwrap_or_default();
         let year = album.map_or(0, |a| a.released);
         let small = if year > 0 { year.to_string() } else { String::new() };
         let art = self.picture(name, album.map(|a| a.art.as_str()).unwrap_or_default(), self.cover_side(), 8.0);
-        let header = self.view_cover(&l, name, art, None, name, "", &self.album_by(name), small);
+        let header = self.view_cover(&l, name, art, None, name, "", &self.album_by(id), small);
         let label = album.map(|a| a.label.as_str()).unwrap_or_default();
         let people = self.people(&self.composers_here());
         let page = column![
@@ -1417,8 +1417,8 @@ impl App {
         let p = &self.peer;
         let mut arts: Vec<String> = vec![];
         for i in p.rows() {
-            let album = p.detail_of(i.id).album;
-            if let Some(a) = p.albums().iter().find(|a| a.name == album && !a.art.is_empty()) {
+            let album = p.detail_of(i.id).album_id;
+            if let Some(a) = p.albums().iter().find(|a| a.id == album && !a.art.is_empty()) {
                 if !arts.contains(&a.art) {
                     arts.push(a.art.clone());
                 }
@@ -1581,7 +1581,7 @@ impl App {
             .map(|(i, a)| {
                 let under = if a.released > 0 { a.released.to_string() } else { String::new() };
                 (
-                    self.card(&a.name, under, a.tracks, Source::Album(a.name.clone()), false, &a.art),
+                    self.card(&a.name, under, a.tracks, Source::Album(a.id.clone(), a.name.clone()), false, &a.art),
                     l.cell(Mark::Album(i)),
                 )
             })
@@ -1767,7 +1767,7 @@ impl App {
         let cursor = focused.then_some(self.at(Pane::Tracks));
         // An album is the one place a track number means anything, and where
         // the performer replaces the album column that every row would repeat.
-        let album_page = matches!(p.source, Source::Album(_));
+        let album_page = matches!(p.source, Source::Album(..));
         // A show's page has no albums: its column says how far everybody
         // has listened instead.
         let show_page = matches!(p.source, Source::Show(..));
@@ -1873,7 +1873,7 @@ impl App {
         // everywhere else this *is* the title.
         let titled = !matches!(
             p.source,
-            Source::Album(_) | Source::Artist(_) | Source::Recording(..) | Source::Playlist(..) | Source::Show(..)
+            Source::Album(..) | Source::Artist(_) | Source::Recording(..) | Source::Playlist(..) | Source::Show(..)
         );
         let mut main = column![].spacing(10).width(Length::Fill);
         if titled {
@@ -2403,9 +2403,10 @@ impl App {
             true => self.peer.shows().iter().find(|s| s.title == track.creator),
             false => None,
         };
+        let album = self.peer.detail_of(track.id.0);
         let art = match show {
             Some(s) => s.art.as_str(),
-            None => self.peer.albums().iter().find(|a| a.name == track.album).map_or("", |a| a.art.as_str()),
+            None => self.peer.albums().iter().find(|a| a.id == album.album_id).map_or("", |a| a.art.as_str()),
         };
         let playing = row![
             self.picture(&track.album, art, BAR_ART, 4.0),
@@ -2414,7 +2415,7 @@ impl App {
             column![
                 linked(
                     Line::new(track.title.as_str(), 13.0, Cut::End, |t| arkui::theme::of(t).background.base.text).into(),
-                    (!track.album.is_empty()).then(|| Source::Album(track.album.clone())),
+                    (!album.album_id.is_empty()).then(|| Source::Album(album.album_id.clone(), track.album.clone())),
                 ),
                 linked(
                     Line::new(self.creator_line(track, position), 12.0, Cut::End, |t| style::dim(t)

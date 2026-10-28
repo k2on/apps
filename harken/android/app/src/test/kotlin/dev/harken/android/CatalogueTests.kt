@@ -103,7 +103,7 @@ class CatalogueTests {
     /** A page's terms, for its foot: the licence alone, or each beside whoever gave it; none where nothing is reserved. */
     @Test
     fun theTermsAreSaidOnceAtTheFoot() {
-        fun d(n: Int, performer: String, licence: String) = TrackDetail(Id("%032x".format(n)), "Brandenburg Concertos", "", n.toLong(), performer, licence)
+        fun d(n: Int, performer: String, licence: String) = TrackDetail(Id("%032x".format(n)), "Brandenburg Concertos", Demo.key("Brandenburg Concertos"), "", n.toLong(), performer, licence)
         val busch = d(1, "Busch Chamber Players", "CC BY 3.0")
         val advent = d(2, "Advent Chamber Orchestra", "CC BY-SA 3.0")
         val free = d(3, "Kevin MacLeod", "")
@@ -139,13 +139,13 @@ class CatalogueTests {
     /** Who played a record, as its page says it; nobody credited, and it is whose it is. */
     @Test
     fun anAlbumIsByWhoPlayedIt() {
-        val by = Album("Goldberg", "Johann Sebastian Bach", "", 10, performer = "Kimiko Ishizaka", released = 2016)
+        val by = Album("goldberg", "Goldberg", "Johann Sebastian Bach", "", 10, performer = "Kimiko Ishizaka", released = 2016)
         assertEquals("Kimiko Ishizaka" to "JOHANN SEBASTIAN BACH · 2016", Catalogue.albumBy(by, by.creator))
         assertEquals("Kimiko Ishizaka", by.by)
-        val pop = Album("Songs", "A Band", "", 3, performer = "A Band")
+        val pop = Album("songs", "Songs", "A Band", "", 3, performer = "A Band")
         assertEquals("a pop record does not name its artist twice", "A Band" to "", Catalogue.albumBy(pop, pop.creator))
         assertEquals("Nobody" to "", Catalogue.albumBy(null, "Nobody"))
-        assertEquals("Bach", Album("X", "Bach", "", 1).by)
+        assertEquals("Bach", Album("x", "X", "Bach", "", 1).by)
     }
 
     @Test

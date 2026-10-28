@@ -399,7 +399,7 @@ fn album() {
         "album",
         &AlbumInput {
             playlist_id: s.favs,
-            name: "Goldberg Variations".into(),
+            id: keys::album_id("", "Goldberg Variations"),
         },
     );
     assert!(t.inserts + t.removes > 0 && t.updates > 0, "{t:?}");

@@ -58,29 +58,32 @@ private struct AlbumShelf: View {
 
     var body: some View {
         CoverShelf(items: albums) { a in
-            CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: 136, opens: .page(.album(a.name))) {
-                open(.page(.album(a.name)))
+            CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: 136, opens: .page(.album(a.id))) {
+                open(.page(.album(a.id)))
             }
         }
         .padding(.top, Space.xs)
     }
 }
 
+/// An album's page, by its key; titled with its name — the album's row's,
+/// or its first track's until the albums have it.
 struct AlbumPage: View {
-    let name: String
+    let id: String
     @StateObject private var holding: Holding
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
 
-    init(model: Model, name: String) {
-        self.name = name
-        _holding = StateObject(wrappedValue: Holding(model, .album(name)))
+    init(model: Model, id: String) {
+        self.id = id
+        _holding = StateObject(wrappedValue: Holding(model, .album(id)))
     }
 
     var body: some View {
-        let page = Page.album(name)
+        let page = Page.album(id)
         let tracks = model.rows(page) ?? []
-        let album = model.album(named: name)
+        let album = model.album(id: id)
+        let name = album?.name ?? tracks.first.flatMap { model.detail($0)?.album } ?? ""
         let creator = album?.creator ?? tracks.first?.creator ?? ""
         // Who played it, in the gold: whoever is credited on the most of it,
         // which on a record by one orchestra is the orchestra; whose it is

@@ -104,7 +104,7 @@ class KeptTests {
         }
 
         // The phone plays: a track pressed in the app, the session hands it the sound.
-        kept.listen.press(Press.Start(queue, 0, 0, "#album/Water%20Music"))
+        kept.listen.press(Press.Start(queue, 0, 0, "#album/music%2FWater%20Music%2Fwater-music"))
         hall.carry()
         kept.listen.poke()
         hall.carry()

@@ -718,7 +718,7 @@ class MotionTests {
                     // phone, which layoutlib's preferences cannot hold).
                     more(view).config[SemanticsActions.OnClick].action!!.invoke()
                     frames(300)
-                    menu!!.goTo(Page.ForAlbum("Brandenburg Concertos"))
+                    menu!!.goTo(Page.ForAlbum(Demo.key("Brandenburg Concertos")))
                     frames(700)
                     opened = has(view, "ALBUM")
                     back = backTo(view, b, results)
@@ -799,7 +799,7 @@ class MotionTests {
                     shots.meta = { motion.drawnAt }
                     shots.series = "menu-album"
                     // The sheet is a window of its own, which layoutlib does not raise: its entry, by hand.
-                    menu!!.goTo(Page.ForAlbum("Water Music"))
+                    menu!!.goTo(Page.ForAlbum(Demo.key("Water Music")))
                     frames(500)
                     shots.series = null
                     album = motion.taken
