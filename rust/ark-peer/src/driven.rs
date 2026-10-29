@@ -37,6 +37,11 @@ pub const WAIT_BUDGET_MS: u64 = 4;
 /// the rest for the next: half a frame, the other half the page's.
 pub const PAGE_BUDGET_MS: u64 = 8;
 
+/// How many bytes of rows a page asks each part of a fill carry: what it
+/// takes in, rows parsed, held and their views moved, in a millisecond or
+/// two — a part being the least a pump takes in.
+pub const PAGE_PART: usize = 16 << 10;
+
 struct Inner {
     peer: Mutex<Peer>,
     /// What the driver's pumps did since the app last asked.
@@ -159,10 +164,12 @@ impl Driven {
 
     /// `peer`, pumped by whoever pumps it: a browser has no thread. A pump
     /// there takes in what it can in [`PAGE_BUDGET_MS`] and leaves the rest
-    /// for the next, so the page draws between them.
+    /// for the next, so the page draws between them; and a fill comes in
+    /// parts of [`PAGE_PART`] bytes, each well inside one pump.
     #[cfg(target_arch = "wasm32")]
     pub fn new(mut peer: Peer) -> Driven {
         peer.link.budget = Some(PAGE_BUDGET_MS);
+        peer.log.machine.part = Some(PAGE_PART);
         Driven {
             inner: Arc::new(Inner {
                 peer: Mutex::new(peer),

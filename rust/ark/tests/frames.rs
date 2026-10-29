@@ -6,7 +6,7 @@ mod demo;
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::{EntryHash, SchemaHash, StateHash};
-use ark::log::{Entry, EntryId, Logged, Origin, Record, Snapshot, Span, TraceId};
+use ark::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Snapshot, Span, TraceId};
 use ark::schema::Space;
 use ark::store::Change;
 
@@ -105,6 +105,17 @@ fn every_frame() -> Vec<Frame> {
         Frame::Snapshot {
             space: Space::Durable,
             snapshot,
+        },
+        Frame::More {
+            space: Space::Durable,
+            from: Cursor {
+                table: "item".into(),
+                key: vec![0, 1],
+            },
+        },
+        Frame::Parts {
+            space: Space::Durable,
+            most: 16 << 10,
         },
     ]
 }

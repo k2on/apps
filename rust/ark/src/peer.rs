@@ -478,6 +478,11 @@ pub struct Peer {
     pub fill: Option<Fill>,
     /// The part a replica filling has asked for and not been sent.
     more: Option<Cursor>,
+    /// How many bytes of rows a replica would have each part of a fill
+    /// carry, at most (`Frame::Parts`), said as it connects; none: [`PART`].
+    pub part: Option<usize>,
+    /// What each connection asked so of an authority, by session.
+    parts: BTreeMap<String, usize>,
 }
 
 /// A replica's fill as it stands (§1.7): where the next part begins, and
@@ -494,10 +499,14 @@ pub struct Fill {
 pub const FILL: &str = "_fill";
 
 /// How many bytes of rows a fill's part carries, about: past it, the
-/// part ends at the row after; a row is never cut. Small enough that a
-/// device taking one, on whatever thread it draws on, is not held up by
-/// it for a frame.
+/// part ends at the row after; a row is never cut. What a device taking
+/// parts on a thread of its own is sent; one taking them on the thread it
+/// draws on asks for less (`Frame::Parts`, [`Peer::part`]).
 pub const PART: usize = 256 << 10;
+
+/// The least a replica may ask a part be (`Frame::Parts`): below it a
+/// fill is more asking than rows.
+pub const MIN_PART: usize = 4 << 10;
 
 /// Facts as some schema wrote them, read under `schema`: rows completed or
 /// cut to their prefix, changes to tables it lacks dropped; and whether any
@@ -577,6 +586,8 @@ impl Peer {
             later: vec![],
             fill: None,
             more: None,
+            part: None,
+            parts: BTreeMap::new(),
         }
     }
 
@@ -854,16 +865,21 @@ impl Peer {
             return;
         }
         let scoped = from.as_ref().filter(|w| self.served.contains_key(&w.session)).map(|w| w.session.clone());
+        let most = from.as_ref().and_then(|w| self.parts.get(&w.session)).copied().unwrap_or(PART);
         match (f, self.is_authority(), from) {
             (Frame::Hello { cursor, hash, .. }, true, _) if scoped.is_some() => self.serve_scoped(&scoped.unwrap(), cursor, hash, o),
-            (Frame::Hello { cursor, hash, .. }, true, _) => self.serve(cursor, hash, o),
+            (Frame::Hello { cursor, hash, .. }, true, _) => self.serve(cursor, hash, most, o),
+            // Never past [`PART`], nor so small a fill is mostly asking.
+            (Frame::Parts { most, .. }, true, Some(who)) => {
+                self.parts.insert(who.session, (most as usize).clamp(MIN_PART, PART));
+            }
             // A peer's intents, each a push.
             (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
             (Frame::Snapshot { snapshot, .. }, false, _) => self.reset(snapshot, o),
             (Frame::More { from, .. }, true, _) if scoped.is_none() => o.send(Frame::Part {
                 space: self.space,
-                part: self.part(Some(from)),
+                part: self.part(Some(from), most),
             }),
             (Frame::Part { part, .. }, false, _) => self.take(part, o),
             (Frame::Verdict { id, verdict, .. }, false, _) => match verdict {
@@ -878,8 +894,9 @@ impl Peer {
     }
 
     /// A `Hello` at `(cursor, hash)`: the pages from there when this log has
-    /// that hash there, the snapshot at the head when it does not.
-    fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
+    /// that hash there, the snapshot at the head when it does not — a fill's
+    /// first part, of about `most` bytes, for the durable space.
+    fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, most: usize, o: &mut Out) {
         let has = self.foreign.is_none_or(|f| cursor >= f)
             && match hash {
                 Some(h) => self.log().has(cursor, &h),
@@ -888,7 +905,7 @@ impl Peer {
         if !has && self.space == Space::Durable {
             return o.send(Frame::Part {
                 space: self.space,
-                part: self.part(None),
+                part: self.part(None, most),
             });
         }
         if !has {
@@ -920,10 +937,10 @@ impl Peer {
 
     /// The part of a fill from `from` (none: the first, from the rows'
     /// start), of the rows as they stand at the head: ranges in
-    /// [`Peer::fill_order`], each table's in key order, until about
-    /// [`PART`] bytes of rows; and where the next begins, unless none is
-    /// left. A cursor at a table this peer lacks begins the fill again.
-    fn part(&self, from: Option<Cursor>) -> Part {
+    /// [`Peer::fill_order`], each table's in key order, until about `most`
+    /// bytes of rows; and where the next begins, unless none is left. A
+    /// cursor at a table this peer lacks begins the fill again.
+    fn part(&self, from: Option<Cursor>, most: usize) -> Part {
         let order = self.fill_order();
         let at = from.as_ref().and_then(|c| order.iter().position(|t| *t == c.table));
         let (start, key) = match (at, from) {
@@ -935,7 +952,7 @@ impl Peer {
             let from = if i == start { key.clone() } else { vec![] };
             let (mut rows, mut to) = (vec![], None);
             for (k, r) in self.store.keyed_from(table, &from) {
-                if size >= PART {
+                if size >= most {
                     to = Some(k.to_vec());
                     break;
                 }
@@ -950,7 +967,7 @@ impl Peer {
             });
             next = match (to, order.get(i + 1)) {
                 (Some(key), _) => Some(Cursor { table: table.clone(), key }),
-                (None, Some(t)) if size >= PART => Some(Cursor {
+                (None, Some(t)) if size >= most => Some(Cursor {
                     table: t.clone(),
                     key: vec![],
                 }),
@@ -1416,6 +1433,12 @@ impl Peer {
             return;
         }
         self.asked = None;
+        if let Some(most) = self.part {
+            o.send(Frame::Parts {
+                space: self.space,
+                most: most as u64,
+            });
+        }
         self.ask(o);
         self.repush(o);
         // What was asked on the connection before is not coming.

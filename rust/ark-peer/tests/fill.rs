@@ -171,6 +171,50 @@ fn a_fill_comes_in_parts_the_later_tables_last() {
     same(&alice, &server);
 }
 
+/// A replica that asks for small parts (`Frame::Parts`) is sent them: the
+/// demo's 40 KB playlists one a part where it would be sent several, each
+/// part's rows past the size only by its last; filled, it is the
+/// authority's store all the same. Falsified by the authority sending
+/// every replica parts of `PART`: a page took in a part of 256 KB at once.
+#[test]
+fn a_replica_is_sent_parts_as_small_as_it_asks() {
+    let fill = |part: Option<usize>| {
+        let mut server = server();
+        library(&mut server);
+        let mut alice = alice();
+        alice.machine.part = part;
+        let mut wire = connect(&mut alice);
+        let mut biggest = 0;
+        // The frames carried by hand, each part weighed on its way down.
+        loop {
+            if let Some(f) = wire.down.pop_front() {
+                if let Frame::Part { part, .. } = &f {
+                    let rows = part.ranges.iter().flat_map(|r| &r.rows);
+                    let (sizes, last) = (rows.clone().map(Vec::len).sum::<usize>(), rows.last().map_or(0, Vec::len));
+                    biggest = biggest.max(sizes - last);
+                    wire.parts += 1;
+                }
+                wire.up.extend(frames(&alice.step(Input::Frame { from: None, bytes: f.enc() })));
+            } else if let Some(f) = wire.up.pop_front() {
+                let o = server.step(Input::Frame {
+                    from: Some(who("alice")),
+                    bytes: f.enc(),
+                });
+                wire.down.extend(frames(&o));
+            } else {
+                break;
+            }
+        }
+        same(&alice.machine, &server);
+        (wire.parts, biggest)
+    };
+    let (unasked, _) = fill(None);
+    let (asked, biggest) = fill(Some(16 << 10));
+    assert!(asked >= 80, "a playlist a part: {asked}");
+    assert!(asked > 3 * unasked, "more parts than unasked: {asked} to {unasked}");
+    assert!(biggest < 16 << 10, "each under the size but for its last row: {biggest}");
+}
+
 /// What the authority logs while a replica fills is taken as it comes:
 /// a playlist renamed that was sent, one renamed that was not, one made,
 /// an item removed. Filled, the replica is the authority's store, its log

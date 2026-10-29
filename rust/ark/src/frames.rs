@@ -10,6 +10,7 @@
 //! Telemetry { events: [Event] }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
 //! More    { space, from: { table, key } }
+//! Parts   { space, most }
 //! ```
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
@@ -22,7 +23,10 @@
 //! `Hello` its log cannot page — the first, from its rows' start — and to
 //! each `More`, the part from where it says, of rows as they stand when
 //! the authority answers. A replica asks for each part once it holds the
-//! one before.
+//! one before. `Parts` is how big a replica would have them: at most
+//! `most` bytes of rows each, from its next `Hello` on — one that takes a
+//! part on the thread it draws on asks for small ones, and is sent more of
+//! them. Unasked, a part is about [`crate::peer::PART`].
 //!
 //! `Telemetry` is no machine's: what a device says of itself
 //! (docs/plan-observe.md), sent to its server beside the frames, which a
@@ -85,6 +89,10 @@ pub enum Frame {
         space: Space,
         from: Cursor,
     },
+    Parts {
+        space: Space,
+        most: u64,
+    },
 }
 
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
@@ -117,7 +125,8 @@ impl Frame {
             | Frame::Snapshot { space, .. }
             | Frame::Verdict { space, .. }
             | Frame::Part { space, .. }
-            | Frame::More { space, .. } => *space,
+            | Frame::More { space, .. }
+            | Frame::Parts { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
             Frame::Telemetry { .. } => Space::Durable,
         }
