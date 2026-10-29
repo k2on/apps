@@ -202,10 +202,11 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
     assert_eq!(each(&c.list::<ArtistsEntry>("artists", &()), |a| a.name.clone()), ["Beethoven"]);
 }
 
-/// An album comes back in the work's order. Falsified by dropping `s.track
-/// == 0` from `album`'s keys: "Air", untagged, came first in its part.
+/// An album comes back in the order it plays, not the library's: by track,
+/// an untagged one after the rest. Falsified by dropping `s.track == 0`
+/// from `album`'s keys: "Air", untagged, came first.
 #[test]
-fn an_album_is_in_the_works_order_and_not_the_librarys() {
+fn an_album_is_in_the_order_it_plays_and_not_the_librarys() {
     let mut c = Lib::new();
     let favs = c.playlist("alice", "Favorites");
     for (title, part, t) in [
@@ -233,8 +234,8 @@ fn an_album_is_in_the_works_order_and_not_the_librarys() {
     );
     assert_eq!(
         titles(&water),
-        ["Overture", "Alla Hornpipe", "Air", "Bourree", "Gigue"],
-        "part first, then track, and an untagged track last in its part"
+        ["Overture", "Alla Hornpipe", "Bourree", "Gigue", "Air"],
+        "by track, and an untagged track after the rest"
     );
     assert_eq!(titles(&c.library(&favs)), ["Gigue", "Alla Hornpipe", "Bourree", "Overture", "Air"]);
 }
@@ -988,4 +989,55 @@ fn a_recording_wears_its_albums_cover() {
         },
     );
     assert_eq!(each(&takes, |r| r.art.clone()), ["covers/goldberg.jpg"]);
+}
+
+/// Two concertos on one record, the first's movements naming their part
+/// and the second's not, play in track order: Spring, then Summer. And a
+/// track whose tags name no part leaves its movement the part another
+/// said. Falsified by sorting an album by part first: Summer, its part
+/// empty, came first; and by a track's empty part written over the
+/// movement's: Summer's part was lost.
+#[test]
+fn a_record_of_two_works_plays_in_track_order() {
+    let mut c = Lib::new();
+    let favs = c.playlist("alice", "Favorites");
+    let seasons = |part: &str, title: &str, cat: &str, no: i64, t: i64| AddSong {
+        part: part.into(),
+        ..track(
+            title,
+            "Antonio Vivaldi",
+            "The Four Seasons",
+            cat,
+            "Bernstein",
+            &format!("music/v/{t}.mp3"),
+            t,
+            "",
+            no,
+        )
+    };
+    for (part, title, cat, no, t) in [
+        ("Concerto No. 1 (Spring)", "Spring I", "RV 269", 1, 1),
+        ("Concerto No. 1 (Spring)", "Spring II", "RV 269", 2, 2),
+        ("", "Summer I", "RV 315", 1, 3),
+        ("", "Summer II", "RV 315", 2, 4),
+    ] {
+        c.add(seasons(part, title, cat, no, t));
+    }
+    let album = AlbumInput {
+        playlist_id: favs,
+        id: c.album_id("The Four Seasons"),
+    };
+    let order = |c: &Lib| titles(&c.list::<LibraryEntry>("album", &album));
+    assert_eq!(order(&c), ["Spring I", "Spring II", "Summer I", "Summer II"]);
+    // The catalogue says Summer's part, and the file, read again, says none.
+    c.add(AddSong {
+        file: "elsewhere/summer-1.mp3".into(),
+        ..seasons("Concerto No. 2 (Summer)", "Summer I", "RV 315", 1, 3)
+    });
+    c.add(seasons("", "Summer I", "RV 315", 1, 3));
+    let first = c
+        .rows::<Movement>("movement")
+        .into_iter()
+        .find(|m| m.work_id.ends_with("rv-315") && m.no == 1);
+    assert_eq!(first.map(|m| m.part).as_deref(), Some("Concerto No. 2 (Summer)"));
 }

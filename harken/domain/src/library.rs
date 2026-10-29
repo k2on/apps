@@ -247,12 +247,19 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
             description: work.as_ref().map_or(String::new(), |w| w.description.clone()),
         })?;
         let movement = db.movement.get(&movement_key);
+        // A part is what somebody said of the movement: a track whose tags
+        // name none says nothing, and the movement keeps the one it had —
+        // the catalogue's, beside a file's of the same work.
+        let part = match input.part.is_empty() {
+            true => movement.as_ref().map_or(String::new(), |m| m.part.clone()),
+            false => input.part.clone(),
+        };
         db.movement.put(Movement {
             id: movement_key,
             work_id: key,
             no,
             title: input.title.clone(),
-            part: input.part.clone(),
+            part,
             added_ms: movement.as_ref().map_or(now, |m| m.added_ms),
             user_id: movement.as_ref().map_or(user.clone(), |m| m.user_id.clone()),
         })?;
