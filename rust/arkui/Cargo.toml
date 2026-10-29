@@ -27,6 +27,11 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # runtime on the desktop and one picture is not a reason to start one.
 ureq = { version = "2", default-features = false, features = ["tls"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# A window driven by hand in a test: a click at a point, and the messages
+# it gave.
+iced_test = "0.14"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach. Without it wgpu finds no backend and
 # the software fallback cannot have the canvas WebGL already claimed.

@@ -11,9 +11,11 @@
 //! [`dimmed`], and stops drawing it once it is [`Shown::gone`].
 //!
 //! A click on the dimmed page closes it and the wheel there is swallowed, as
-//! [`crate::layer::dimmed`] does for a picker.
+//! [`crate::layer::dimmed`] does for a picker. A click on the dialog itself,
+//! anywhere on it, is the dialog's: it is opaque to the pointer, so a click
+//! between its controls does not fall through to the page under it.
 use iced::time::{Duration, Instant};
-use iced::widget::{column, container, mouse_area, row, text, Space};
+use iced::widget::{column, container, mouse_area, opaque, row, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Vector};
 
 use crate::motion::{self, Shown, Timing, EASE};
@@ -107,7 +109,9 @@ pub fn view<'a, M: Clone + 'a>(title: String, close: Element<'a, M>, body: Eleme
     } else {
         panel.into()
     };
-    container(drawn).center_x(Length::Fill).center_y(Length::Fill).into()
+    // The dialog takes every click over it: a container lets one through,
+    // and under it is the page, whose click closes.
+    container(opaque(drawn)).center_x(Length::Fill).center_y(Length::Fill).into()
 }
 
 #[cfg(test)]
@@ -118,6 +122,33 @@ mod tests {
     /// 150 ms, and is still once open; closed, it goes back the same way and
     /// is then gone. Falsified by the page dimming at the dialog's pace: at
     /// 150 ms it was not yet all the way dimmed.
+    /// A click on the dialog, between its controls, stays on it; a click on
+    /// the dimmed page beside it closes it. Falsified by the panel without
+    /// `opaque`: the click in its middle fell through to the page and closed
+    /// it.
+    #[test]
+    fn a_click_on_it_does_not_close_it() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum M {
+            Close,
+            Swallow,
+        }
+        let clicked = |at: iced::Point| {
+            let close = text("×");
+            let body = text("words, and nothing to press").into();
+            let page = iced::widget::stack![
+                backdrop(M::Close, M::Swallow, 1.0),
+                view("A dialog".into(), close.into(), body, 400.0, 300.0, 1.0)
+            ];
+            let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), (800.0, 600.0), page);
+            ui.point_at(at);
+            let _ = ui.simulate(iced_test::simulator::click());
+            ui.into_messages().collect::<Vec<_>>()
+        };
+        assert_eq!(clicked(iced::Point::new(400.0, 300.0)), []);
+        assert_eq!(clicked(iced::Point::new(20.0, 20.0)), [M::Close]);
+    }
+
     #[test]
     fn it_opens_and_closes_as_shadcn_s_does() {
         let at = Instant::now();

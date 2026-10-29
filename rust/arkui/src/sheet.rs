@@ -8,9 +8,11 @@
 //! its 300 ms, along Tailwind's `ease-in-out`, as the page dims and clears
 //! as a dialog's does ([`crate::dialog::DIMMING`]). Its width is theirs: three
 //! quarters of the window, and never more than [`MAX_WIDTH`]. An app holds
-//! a [`Shown`] for it as for a dialog ([`crate::dialog`]).
+//! a [`Shown`] for it as for a dialog ([`crate::dialog`]). As a dialog is,
+//! it is opaque to the pointer: a click anywhere on it is its own, and only
+//! one on the dimmed page beside it closes it.
 use iced::time::{Duration, Instant};
-use iced::widget::{column, container, row, text, Space};
+use iced::widget::{column, container, opaque, row, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Vector};
 
 use crate::motion::{self, Shown, Timing, EASE_IN_OUT};
@@ -103,7 +105,9 @@ pub fn view<'a, M: 'a>(
     } else {
         panel.into()
     };
-    container(drawn).align_right(Length::Fill).height(Length::Fill).into()
+    // Every click over it is its own: a container lets one through to the
+    // page, whose click closes.
+    container(opaque(drawn)).align_right(Length::Fill).height(Length::Fill).into()
 }
 
 #[cfg(test)]
@@ -113,6 +117,30 @@ mod tests {
     /// Three quarters of a narrow window, and no wider than 384 in a wide
     /// one. Falsified by a sheet the panel's own width: it overran a window
     /// of 400.
+    /// A click on the sheet, below its rows, stays on it; a click on the
+    /// dimmed page beside it closes it. Falsified by the panel without
+    /// `opaque`: the click fell through to the page and closed it.
+    #[test]
+    fn a_click_on_it_does_not_close_it() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum M {
+            Close,
+            Swallow,
+        }
+        let clicked = |at: iced::Point| {
+            let page = iced::widget::stack![
+                crate::dialog::backdrop(M::Close, M::Swallow, 1.0),
+                view("A sheet".into(), None, text("×").into(), text("a row").into(), width(800.0), 1.0),
+            ];
+            let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), (800.0, 600.0), page);
+            ui.point_at(at);
+            let _ = ui.simulate(iced_test::simulator::click());
+            ui.into_messages().collect::<Vec<_>>()
+        };
+        assert_eq!(clicked(iced::Point::new(700.0, 500.0)), []);
+        assert_eq!(clicked(iced::Point::new(100.0, 300.0)), [M::Close]);
+    }
+
     #[test]
     fn it_is_three_quarters_of_the_window_and_no_wider_than_384() {
         assert_eq!(width(400.0), 300.0);
