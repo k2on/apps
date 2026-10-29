@@ -3282,9 +3282,10 @@ impl App {
     }
 
     /// The one timer this window may need for something that has not
-    /// happened: the peer's redial.
+    /// happened: the peer's redial, when the window pumps it by hand — a
+    /// driven peer keeps its own.
     pub fn deadline(&self) -> Option<u64> {
-        self.peer.client.lock().deadline()
+        self.peer.client.deadline()
     }
 
     /// How often the window needs a clock, if at all: only while something on

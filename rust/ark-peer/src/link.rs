@@ -21,6 +21,8 @@
 //! Each rings the peer's [`Wake`] whenever it has something to say, and
 //! [`Peer::pump`] takes it in.
 
+use ark::schema::Space;
+
 use crate::Peer;
 
 /// What a connection says.
@@ -133,6 +135,12 @@ pub struct Pumped {
     pub opened: bool,
     /// Anything arrived.
     pub moved: bool,
+    /// Anything a reader of the peer could see moved: a view, the link, a
+    /// verdict, the log or the live session, a fill ended. A part of a
+    /// fill under way is rows only, seen through the views it moves, so
+    /// one that moves none is not — what lets an app take a library in
+    /// without drawing again for every part.
+    pub shown: bool,
     /// Frames that arrived, by space: the log's, the live space's.
     pub frames: [usize; 2],
     /// Why connections closed.
@@ -257,14 +265,19 @@ impl Peer {
             p.moved = true;
             match e {
                 Event::Open => {
-                    p.opened = true;
+                    (p.opened, p.shown) = (true, true);
                     crate::observe::link(&self.label(), "up", None);
                     self.connected();
                 }
                 Event::Frame(b) => {
-                    let space = ark::frames::Frame::dec(&b).map_or(0, |f| f.space() as usize);
-                    p.frames[space] += 1;
+                    let (space, part) = match ark::frames::Frame::dec(&b) {
+                        Ok(f) => (f.space(), matches!(f, ark::frames::Frame::Part { .. })),
+                        Err(_) => (Space::Durable, false),
+                    };
+                    p.frames[space as usize] += 1;
                     self.receive(b);
+                    let filling = self.machine(space).is_some_and(|m| m.fill.is_some());
+                    p.shown |= !(part && filling);
                 }
                 Event::Closed(why) => {
                     crate::observe::link(&self.label(), "down", Some(&why));
@@ -289,6 +302,7 @@ impl Peer {
                         None => {}
                     }
                     p.closed.push(why);
+                    p.shown = true;
                 }
             }
             if ends.is_some_and(|e| crate::monotonic_ms() >= e) {
@@ -301,6 +315,7 @@ impl Peer {
         self.tick(crate::now_ms());
         self.jobs(crate::now_ms());
         self.flush();
+        p.shown |= !self.told.updates.is_empty();
         p
     }
 

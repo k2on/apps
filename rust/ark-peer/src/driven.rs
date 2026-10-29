@@ -10,8 +10,11 @@
 //! is sent — and tells the app (its waker, [`Driven::set_waker`]) when
 //! anything came in; the app then reads what moved, as it did after its
 //! own pump ([`Driven::pump`]: what the driver's pumps did since it last
-//! asked). In a browser there is no thread: the app pumps, as it did, and
-//! a pump there is the peer's own.
+//! asked). The app is told only when a pump moved what it can see
+//! ([`crate::link::Pumped::shown`]), so a library coming in part by part
+//! is taken in without the app drawing again for each. In a browser there
+//! is no thread: the driver is the page's, a pump at a time between the
+//! page's own tasks ([`page`]).
 //!
 //! **Work off the thread an app draws on is still work.** A pump that
 //! takes longer than [`PUMP_BUDGET_MS`], and an app's wait for the peer
@@ -50,11 +53,16 @@ struct Inner {
     told: Mutex<Option<Wake>>,
     /// The driver's own: rung by the connection, and by an app done with
     /// the peer.
-    #[cfg(not(target_arch = "wasm32"))]
     ring: Wake,
     /// Pumped by the app ([`Driven::pump`]) from now on, and not by the
     /// driver: a test that says when what arrived is taken in.
     by_hand: std::sync::atomic::AtomicBool,
+    /// A run of the page's driver asked for and not yet made.
+    #[cfg(target_arch = "wasm32")]
+    asked: std::sync::atomic::AtomicBool,
+    /// The deadline the page's driver has a timer set for.
+    #[cfg(target_arch = "wasm32")]
+    armed: Mutex<Option<u64>>,
 }
 
 impl Inner {
@@ -124,12 +132,9 @@ impl Drop for Locked<'_> {
     fn drop(&mut self) {
         HELD.with(|h| h.borrow_mut().retain(|p| *p != self.held));
         // Pumped by hand, what the app had it say goes with its next pump.
-        #[cfg(not(target_arch = "wasm32"))]
         if !self.inner.by_hand.load(std::sync::atomic::Ordering::Relaxed) {
             (self.inner.ring)();
         }
-        #[cfg(target_arch = "wasm32")]
-        let _ = self.inner;
     }
 }
 
@@ -162,22 +167,28 @@ impl Driven {
         Driven { inner }
     }
 
-    /// `peer`, pumped by whoever pumps it: a browser has no thread. A pump
-    /// there takes in what it can in [`PAGE_BUDGET_MS`] and leaves the rest
-    /// for the next, so the page draws between them; and a fill comes in
-    /// parts of [`PAGE_PART`] bytes, each well inside one pump.
+    /// `peer`, driven by the page ([`page`]): a browser has no thread. A
+    /// pump there takes in what it can in [`PAGE_BUDGET_MS`] and leaves the
+    /// rest for the next, so the page draws between them; and a fill comes
+    /// in parts of [`PAGE_PART`] bytes, each well inside one pump.
     #[cfg(target_arch = "wasm32")]
     pub fn new(mut peer: Peer) -> Driven {
         peer.link.budget = Some(PAGE_BUDGET_MS);
         peer.log.machine.part = Some(PAGE_PART);
-        Driven {
-            inner: Arc::new(Inner {
+        let inner = Arc::new_cyclic(|me| {
+            let ring = page::ring(me.clone());
+            peer.set_waker(ring.clone());
+            Inner {
                 peer: Mutex::new(peer),
                 said: Mutex::default(),
                 told: Mutex::new(None),
-                by_hand: std::sync::atomic::AtomicBool::new(true),
-            }),
-        }
+                ring,
+                by_hand: Default::default(),
+                asked: Default::default(),
+                armed: Mutex::new(None),
+            }
+        });
+        Driven { inner }
     }
 
     /// The peer, held until the guard is let go: the driver waits for it,
@@ -203,12 +214,20 @@ impl Driven {
         }
     }
 
-    /// `w` rung whenever the driver took something in. In a browser, the
-    /// connection's own waker: the app pumps when it rings.
+    /// `w` rung whenever a pump of the driver's moved what the app can see
+    /// ([`crate::link::Pumped::shown`]); pumped by hand, whenever the
+    /// connection rang.
     pub fn set_waker(&self, w: Wake) {
-        #[cfg(target_arch = "wasm32")]
-        self.inner.lock().set_waker(w.clone());
         *self.inner.told.lock().unwrap_or_else(|e| e.into_inner()) = Some(w);
+    }
+
+    /// When the app must pump: pumped by hand, at the peer's deadline;
+    /// driven, never — the driver keeps the peer's deadlines itself.
+    pub fn deadline(&self) -> Option<u64> {
+        match self.inner.by_hand.load(std::sync::atomic::Ordering::Relaxed) {
+            true => self.inner.lock().deadline(),
+            false => None,
+        }
     }
 
     /// Pumped by [`Driven::pump`] from now on, never by the driver.
@@ -251,11 +270,74 @@ fn drive(inner: std::sync::Weak<Inner>, rx: std::sync::mpsc::Receiver<()>) {
         // Pumped by hand, the app is told what rang, and pumps itself; its
         // own clock is its deadlines.
         let by_hand = i.by_hand.load(std::sync::atomic::Ordering::Relaxed);
-        if by_hand && rang || !by_hand && i.pump().moved {
-            let told = i.told.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            if let Some(w) = told {
-                w();
+        if by_hand && rang || !by_hand && i.pump().shown {
+            tell(&i);
+        }
+    }
+}
+
+/// The app's waker rung.
+fn tell(inner: &Inner) {
+    let told = inner.told.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some(w) = told {
+        w();
+    }
+}
+
+/// The driver in a browser: a pump as soon as the page is free whenever
+/// the connection or the app rings and while what arrived is not all
+/// taken in, one task each so the page draws between them, and a timer for
+/// the peer's next deadline — the app told when a pump moved what it can
+/// see.
+#[cfg(target_arch = "wasm32")]
+mod page {
+    use std::sync::atomic::Ordering;
+    use std::sync::Weak;
+
+    use wasm_bindgen::JsCast;
+
+    use super::{tell, Inner};
+
+    /// The driver's bell: a run as soon as the page is free.
+    pub fn ring(inner: Weak<Inner>) -> crate::link::Wake {
+        std::rc::Rc::new(move || soon(&inner))
+    }
+
+    fn soon(inner: &Weak<Inner>) {
+        let Some(i) = inner.upgrade() else { return };
+        if !i.asked.swap(true, Ordering::Relaxed) {
+            after(inner.clone(), 0);
+        }
+    }
+
+    /// A task of the page's, in `ms`.
+    fn after(inner: Weak<Inner>, ms: u64) {
+        let run = wasm_bindgen::closure::Closure::once_into_js(move || drive(&inner));
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(run.unchecked_ref(), ms.min(i32::MAX as u64) as i32);
+        }
+    }
+
+    fn drive(inner: &Weak<Inner>) {
+        let Some(i) = inner.upgrade() else { return };
+        i.asked.store(false, Ordering::Relaxed);
+        if i.by_hand.load(Ordering::Relaxed) {
+            return tell(&i);
+        }
+        if i.pump().shown {
+            tell(&i);
+        }
+        let (now, due) = (crate::monotonic_ms(), i.lock().deadline());
+        match due {
+            Some(d) if d <= now => soon(inner),
+            Some(d) => {
+                let mut armed = i.armed.lock().unwrap_or_else(|e| e.into_inner());
+                if *armed != Some(d) {
+                    *armed = Some(d);
+                    after(inner.clone(), d - now);
+                }
             }
+            None => {}
         }
     }
 }

@@ -66,3 +66,35 @@ fn a_peer_held_twice_on_one_thread_is_said() {
     let _held = d.lock();
     let _again = d.lock();
 }
+
+/// A fill's parts are taken in without the app being told of each: only
+/// of what it can see move — the link, the fill's end — and not of rows
+/// no view of its shows. Eighty playlists of 40 KB, a part each, and the
+/// app told a handful of times. Falsified by telling the app whenever
+/// anything arrived (`Pumped::moved`): it was told once a part.
+#[test]
+fn a_fill_is_taken_in_without_telling_the_app_of_every_part() {
+    let hub = hub();
+    hub.with(|p| {
+        for i in 0..80 {
+            let name = format!("{i:02}{}", "x".repeat(40_000));
+            p.author(Space::Durable, "demo.create_playlist", named(&name), 1).unwrap();
+        }
+        let head = p.log.machine.log().head().0;
+        p.log.machine.step(ark::peer::Input::Compact(head));
+    })
+    .unwrap();
+    let mut p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()), false);
+    p.log.machine.part = Some(16 << 10);
+    p.set_token(Some("alice@laptop".into()));
+    p.connect_with("", hub.dialer(Arc::new(dev)));
+    let alice = Driven::new(p);
+    let (told, rang) = bell();
+    alice.set_waker(told);
+    until(&alice, "alice filled", |p| {
+        p.linked && p.log.machine.fill.is_none() && p.log.log().head().0 >= 80
+    });
+    let told = rang.try_iter().count();
+    assert!(told >= 1, "told the fill was in");
+    assert!(told < 20, "told {told} times for eighty parts");
+}
