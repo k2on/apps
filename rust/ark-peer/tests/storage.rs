@@ -65,6 +65,7 @@ fn the_rows_fold_every_write_before() {
         let want = Stored {
             rows: Some(rows),
             logged: (3..5).map(row).collect(),
+            parts: vec![],
         };
         assert_eq!(d.load().unwrap(), want);
         d.put("blob", b"\x00\x01").unwrap();

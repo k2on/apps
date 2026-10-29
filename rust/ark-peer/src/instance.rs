@@ -151,6 +151,7 @@ impl Instance {
         Durable {
             rows,
             logged: s.logged,
+            parts: s.parts,
             ..Durable::default()
         }
     }

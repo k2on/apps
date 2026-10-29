@@ -91,6 +91,9 @@ pub struct Domain {
     /// The steps that read rows of a schema before this one, oldest first
     /// ([`crate::migrate`]).
     pub migrations: Vec<crate::migrate::Migration>,
+    /// The tables a server sends a device last when it fills it
+    /// ([`crate::peer::Peer::later`]): what it can be without for a while.
+    pub later: Vec<String>,
 }
 
 fn check_of<I: Input>() -> Check {
@@ -165,6 +168,7 @@ impl Domain {
             schema: Arc::new(S::schema()),
             fns: BTreeMap::new(),
             migrations: vec![],
+            later: vec![],
         }
     }
 
@@ -172,6 +176,13 @@ impl Domain {
     /// already given ([`crate::migrate`]).
     pub fn migration(mut self, m: crate::migrate::Migration) -> Domain {
         self.migrations.push(m);
+        self
+    }
+
+    /// `table` sent after every other in a fill, after those already given.
+    pub fn later(mut self, table: &str) -> Domain {
+        assert!(self.schema.table(table).is_some(), "no table {table}");
+        self.later.push(table.into());
         self
     }
 

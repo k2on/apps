@@ -8,6 +8,8 @@
 //! Snapshot{ space, snapshot }
 //! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } }
 //! Telemetry { events: [Event] }
+//! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
+//! More    { space, from: { table, key } }
 //! ```
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
@@ -15,6 +17,12 @@
 //! zero hashes ([`Logged::intent`]) — a push being a page of one; a chain
 //! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers one intent: sequenced at `seq`, refused, or
 //! `Held` — a function the authority does not run.
+//!
+//! A `Part` is a part of a fill (§1.7): the authority's answer to a
+//! `Hello` its log cannot page — the first, from its rows' start — and to
+//! each `More`, the part from where it says, of rows as they stand when
+//! the authority answers. A replica asks for each part once it holds the
+//! one before.
 //!
 //! `Telemetry` is no machine's: what a device says of itself
 //! (docs/plan-observe.md), sent to its server beside the frames, which a
@@ -38,7 +46,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
 use crate::hash::{EntryHash, SchemaHash};
-use crate::log::{Entry, EntryId, Logged, Seq, Snapshot};
+use crate::log::{Cursor, Entry, EntryId, Logged, Part, Seq, Snapshot};
 use crate::schema::Space;
 use crate::Refusal;
 
@@ -69,6 +77,14 @@ pub enum Frame {
     Telemetry {
         events: Vec<Event>,
     },
+    Part {
+        space: Space,
+        part: Part,
+    },
+    More {
+        space: Space,
+        from: Cursor,
+    },
 }
 
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
@@ -96,7 +112,12 @@ impl Frame {
     /// The space whose log the frame is about.
     pub fn space(&self) -> Space {
         match self {
-            Frame::Hello { space, .. } | Frame::Page { space, .. } | Frame::Snapshot { space, .. } | Frame::Verdict { space, .. } => *space,
+            Frame::Hello { space, .. }
+            | Frame::Page { space, .. }
+            | Frame::Snapshot { space, .. }
+            | Frame::Verdict { space, .. }
+            | Frame::Part { space, .. }
+            | Frame::More { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
             Frame::Telemetry { .. } => Space::Durable,
         }

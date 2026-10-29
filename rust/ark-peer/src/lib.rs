@@ -123,6 +123,12 @@ impl Module {
         self.domain.as_ref().map_or(&[], |d| &d.migrations)
     }
 
+    /// The tables a fill sends last ([`ark::peer::Peer::later`]): its
+    /// domain's.
+    pub fn later(&self) -> &[String] {
+        self.domain.as_ref().map_or(&[], |d| &d.later)
+    }
+
     /// A domain as a peer holds it (§1.16).
     pub fn of(d: &Domain) -> Module {
         Module {
@@ -320,6 +326,7 @@ pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
 
 fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
     let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone()).in_space(space);
+    p.later = m.later().to_vec();
     if let Some(o) = origin {
         p.origin = o;
     }
@@ -838,6 +845,7 @@ impl Peer {
         let durable = Durable {
             rows: self.log.confirmed_rows(),
             logged: vec![],
+            parts: vec![],
             local: if other { pending.len() as i64 } else { self.log.local },
             pending,
         };

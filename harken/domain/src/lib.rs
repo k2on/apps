@@ -77,6 +77,9 @@ pub fn domain() -> Domain {
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
     .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
+    // Nearly every row is a transcript's line: a device filling is sent
+    // the library first, and the lines after.
+    .later("cue")
 }
 
 /// What a connection fed by scope holds (§1.8): every durable table whole
