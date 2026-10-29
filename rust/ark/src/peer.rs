@@ -60,10 +60,12 @@
 //! before that head was sent before it, so a replica at that head takes
 //! the ranges whole and is right there. Entries come as they are logged,
 //! their facts put as they are over rows not all sent yet; nothing is
-//! judged until the last part, when the store is judged whole and its
-//! state checked, as a snapshot's is. A filling replica makes each part
-//! durable as it is taken ([`Record::Part`]) and its place beside its rows
-//! ([`FILL`]), so one reopened goes on where it was; its own intents are
+//! judged. With the last part the store's state is checked: the
+//! authority's says every row is the authority's, judged where it was
+//! written, so the store is not judged again (one of rows another schema
+//! wrote is, whole). A filling replica makes each part durable as it is
+//! taken ([`Record::Part`]), the last the fill's end, and its place
+//! beside its rows ([`FILL`]), so one reopened goes on where it was; its own intents are
 //! the authority's to judge, one its store refuses pending unrun.
 //!
 //! **Partial sync is a view** (§1.8). A connection the driver says is fed
@@ -492,8 +494,10 @@ pub struct Fill {
 pub const FILL: &str = "_fill";
 
 /// How many bytes of rows a fill's part carries, about: past it, the
-/// part ends at the row after; a row is never cut.
-pub const PART: usize = 1 << 20;
+/// part ends at the row after; a row is never cut. Small enough that a
+/// device taking one, on whatever thread it draws on, is not held up by
+/// it for a frame.
+pub const PART: usize = 256 << 10;
 
 /// Facts as some schema wrote them, read under `schema`: rows completed or
 /// cut to their prefix, changes to tables it lacks dropped; and whether any
@@ -1279,8 +1283,8 @@ impl Peer {
     /// again, and the part. Its ranges replace what the store held in
     /// them, judging nothing (a row may name one not sent yet); it is made
     /// durable, appended, and the next asked for. The last is the fill
-    /// done: every row the authority's at the head, the store judged whole
-    /// and its state checked, as a snapshot's is. The pending intents run
+    /// done: every row the authority's at the head, its state checked
+    /// ([`Peer::close_fill`]). The pending intents run
     /// again on top of each.
     fn take(&mut self, p: Part, o: &mut Out) {
         let (n, h) = self.log().head();
@@ -1340,7 +1344,7 @@ impl Peer {
                 self.ask_more(o);
                 Ok(())
             }
-            None => self.filled(p.seq, p.state, o),
+            None => self.filled(&p, o),
         };
         self.redo_pending(o);
         if p.first {
@@ -1352,23 +1356,39 @@ impl Peer {
         }
     }
 
-    /// A fill's last part taken, the pending intents undone: the store
-    /// judged whole, which a part does not, and its state the authority's
-    /// at `seq` — or, its rows another schema's, taken as the part says it
-    /// (§1.2) — and made durable whole. Or not: the fill begun again.
-    fn filled(&mut self, seq: Seq, state: crate::hash::StateHash, o: &mut Out) -> Result<(), ()> {
+    /// A fill's last part taken, the pending intents undone, and the fill
+    /// closed ([`Peer::close_fill`]): made durable by the part appended —
+    /// the end of the fill, which an open reads as it does — or, the rows
+    /// judged again, whole.
+    fn filled(&mut self, last: &Part, o: &mut Out) -> Result<(), ()> {
+        match self.close_fill(last.seq, last.state)? {
+            false => o.persist(Record::Part(last.clone())),
+            true => o.persist(Record::Rows(self.store.kv_rows())),
+        }
+        Ok(())
+    }
+
+    /// A fill done: its state the authority's at `seq`, which says every
+    /// row is the authority's — judged there as it was written — so there
+    /// is nothing to judge here; or, the rows another schema's (§1.2), the
+    /// store judged whole and taken as the part says. Whether it was built
+    /// again; or not done: the state is another, and the fill begins again.
+    fn close_fill(&mut self, seq: Seq, state: crate::hash::StateHash) -> Result<bool, ()> {
         let other = self.fill.take().is_some_and(|f| f.other);
-        let (log, rows): (Rows, Rows) = self.store.kv_rows().into_iter().partition(|(t, _)| t == LOG);
-        let judged = self.on_fit(&rows, log.into_iter().flat_map(|(_, rs)| rs));
-        let Ok((store, _)) = judged else { return Err(()) };
-        let same = store.state_hash() == state;
-        if !same && !other {
+        if self.store.state_hash() == state {
+            (self.faith, self.foreign) = (false, None);
+            return Ok(false);
+        }
+        if !other {
             return Err(());
         }
-        (self.faith, self.foreign) = (!same, (!same).then_some(seq));
+        let (log, rows): (Rows, Rows) = self.store.kv_rows().into_iter().partition(|(t, _)| t == LOG);
+        let Ok((store, _)) = self.on_fit(&rows, log.into_iter().flat_map(|(_, rs)| rs)) else {
+            return Err(());
+        };
+        (self.faith, self.foreign) = (true, Some(seq));
         self.store = store;
-        o.persist(Record::Rows(self.store.kv_rows()));
-        Ok(())
+        Ok(true)
     }
 
     /// The next part of a fill asked for, unless one is asked already.
@@ -1531,7 +1551,7 @@ impl Peer {
     /// and what was appended since in the order it was taken — each entry
     /// put as it is, each part at its sequence, after the entries at or
     /// below it — up to the first that does not read; the fill on from the
-    /// last part's next.
+    /// last part's next, or done where the last closed it.
     fn refill(&mut self, mut fill: Fill, rows: &Rows, log: impl IntoIterator<Item = Vec<u8>>, logged: Vec<Logged>, parts: Vec<Part>, o: &mut Out) {
         let Ok((mut store, _)) = Store::of_rows(self.store.schema_arc().clone(), self.space, rows, false) else {
             return;
@@ -1539,21 +1559,26 @@ impl Peer {
         if store.start_log(log).is_err() {
             return;
         }
-        fn take(store: &mut Store, p: Part, fill: &mut Fill) -> Result<(), Refusal> {
+        // A part taken. The last closes the fill where its state is the
+        // store's then — the part appended once it was, the state its
+        // fill was done at — or begins it again.
+        fn take(store: &mut Store, p: Part, fill: &mut Fill, closed: &mut bool) -> Result<(), Refusal> {
             if p.seq != store.log().head().0 {
                 return Err(Refusal::new("a part not at the head"));
             }
             for r in &p.ranges {
                 fill.other |= store.replace(&r.table, &r.from, r.to.as_deref(), &r.rows)?.1;
             }
+            *closed = p.next.is_none() && store.state_hash() == p.state;
             fill.next = p.next.unwrap_or_default();
             Ok(())
         }
+        let mut closed = false;
         let (all, mut read) = (logged.len() + parts.len(), 0);
         let mut parts = parts.into_iter().peekable();
         'read: for l in logged {
             while let Some(p) = parts.next_if(|p| p.seq < l.seq) {
-                if take(&mut store, p, &mut fill).is_err() {
+                if take(&mut store, p, &mut fill, &mut closed).is_err() {
                     break 'read;
                 }
                 read += 1;
@@ -1569,14 +1594,17 @@ impl Peer {
         }
         if read == all - parts.len() {
             for p in parts.by_ref() {
-                if take(&mut store, p, &mut fill).is_err() {
+                if take(&mut store, p, &mut fill, &mut closed).is_err() {
                     break;
                 }
                 read += 1;
             }
         }
         o.tell(None, self.store.diff(&store));
-        (self.store, self.fill) = (store, Some(fill));
+        (self.store, self.fill) = (store, (!closed).then_some(fill));
+        if closed {
+            (self.faith, self.foreign) = (false, None);
+        }
         // What did not read is cut, so nothing is appended after it.
         if read < all {
             o.persist(Record::Rows(self.kv(&self.store)));

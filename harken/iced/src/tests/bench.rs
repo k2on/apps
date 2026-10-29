@@ -359,3 +359,96 @@ fn bench_real() {
         .collect();
     row("songs to transcript", &transcript);
 }
+
+/// What each wake of a window filling costs on its own thread: a fresh
+/// replica, through a pair of queues, filled from a server's log at
+/// `HARKEN_BENCH_LOG`, every update timed. Run as [`bench_real`] is, named
+/// `bench_fill`.
+#[test]
+#[ignore]
+fn bench_fill() {
+    use ark::frames::Frame;
+    use ark::peer::{Input, Output, Role};
+    let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
+        return eprintln!("HARKEN_BENCH_LOG names no log");
+    };
+    let m = ark_peer::Module::of(crate::client::domain());
+    let mut server = ark_peer::Instance::open_under(m.schema.clone(), Box::new(ark_peer::Files::new(&dir).unwrap()));
+    server.machine.role = Role::Authority { journal: Default::default() };
+    server.machine.functions = m.functions.clone();
+    server.machine.later = m.later().to_vec();
+    let me = super::who("max");
+    let mut app = crate::App::with_peer(super::signed_in("max"), "http://127.0.0.1:9".into(), None);
+    let made: std::sync::Arc<std::sync::Mutex<Vec<super::Queues>>> = Default::default();
+    app.peer.client.connect_with("ws://queues", super::Queues::dialer(made.clone()));
+    let _ = app.update(crate::Message::Due);
+    let q = made.lock().unwrap()[0].clone();
+    q.push(ark_peer::Event::Open);
+    let (mut worst, mut total, mut wakes) = (Duration::ZERO, Duration::ZERO, 0);
+    let t0 = Instant::now();
+    for _ in 0..10_000 {
+        let t = Instant::now();
+        let _ = app.update(crate::Message::Wake);
+        let took = t.elapsed();
+        (worst, total, wakes) = (worst.max(took), total + took, wakes + 1);
+        if took > Duration::from_millis(8) {
+            eprintln!("wake {wakes}: {took:.1?}");
+        }
+        let sent: Vec<Vec<u8>> = std::mem::take(&mut *q.sent.lock().unwrap());
+        if sent.is_empty() && q.said.lock().unwrap().is_empty() {
+            break;
+        }
+        for b in sent {
+            let Ok(f) = Frame::dec(&b) else { continue };
+            if f.space() != ark::schema::Space::Durable || matches!(f, Frame::Telemetry { .. }) {
+                continue;
+            }
+            for o in server.machine.step(Input::Frame {
+                from: Some(me.clone()),
+                bytes: b,
+            }) {
+                if let Output::Send(b) | Output::Fanout(b) = o {
+                    q.push(ark_peer::Event::Frame(b));
+                }
+            }
+        }
+    }
+    let filled = app.peer.client.log.fill.is_none() && app.peer.client.log.log().head() == server.log().head();
+    eprintln!(
+        "{wakes} wakes in {:.1?}: worst {worst:.1?}, busy {total:.1?}; filled {filled}, {} songs",
+        t0.elapsed(),
+        app.peer.rows().len()
+    );
+}
+
+/// What a fold of the replica of a real library costs, where it is made:
+/// the store written whole, as a device does every few dozen entries.
+#[test]
+#[ignore]
+fn bench_fold() {
+    let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
+        return eprintln!("HARKEN_BENCH_LOG names no log");
+    };
+    let tmp = tempfile_dir();
+    for n in ["kv", "log", "schema.json"] {
+        let _ = std::fs::copy(std::path::Path::new(&dir).join(n), tmp.join(n));
+    }
+    let mut replica = crate::client::open(Box::new(ark_peer::Files::new(&tmp).unwrap()), None, crate::listening::device());
+    let head = replica.log.log().head().0;
+    let t = Instant::now();
+    let _ = replica.log.step(ark::peer::Input::Compact(head));
+    eprintln!("a fold at {head}: {:.1?}", t.elapsed());
+    let t = Instant::now();
+    let rows = replica.log.confirmed_rows();
+    eprintln!("  its rows: {:.1?}", t.elapsed());
+    let t = Instant::now();
+    let bytes = ark::log::Record::Rows(rows).enc();
+    eprintln!("  encoded, {} bytes: {:.1?}", bytes.len(), t.elapsed());
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+fn tempfile_dir() -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("harken-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}

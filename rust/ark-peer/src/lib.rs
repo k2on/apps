@@ -622,9 +622,12 @@ impl Peer {
             Space::Volatile => &self.live.as_ref().expect("a machine that spoke").store,
         };
         let domain = self.config.domain_of(space);
+        // Read once for every view, each table's rows only when a view's
+        // plan asks for them.
+        let p = ark::plan::Pushed::of(store, cs);
         for (i, w) in self.views.iter_mut().enumerate() {
             let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
-            let pushed = w.view.as_mut().map(|v| v.push(cs, store));
+            let pushed = w.view.as_mut().map(|v| v.pushed(&p));
             match pushed {
                 Some(Ok(patches)) => {
                     if let (false, Some(f), Some(v)) = (patches.is_empty(), self.reconcilers.get_mut(&i), &w.view) {

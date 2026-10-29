@@ -64,8 +64,6 @@ fn prune<T: PartialEq>(mut d: Delta<T>) -> Delta<T> {
 
 /// A row before and after, as its bytes.
 type Moved = (Option<Vec<u8>>, Option<Vec<u8>>);
-/// Per table, per key, how a row moved.
-type Net = BTreeMap<String, BTreeMap<Vec<u8>, Moved>>;
 /// Per prefix, the elements whose reads covered it.
 type ByPrefix = BTreeMap<Vec<u8>, BTreeSet<Okey>>;
 /// A closure over an element, reading the store.
@@ -79,46 +77,78 @@ impl<T: Clone + PartialEq + Send + 'static> Elem for T {}
 
 /// One settle's changes, as every operator reads them: per table, per key,
 /// the row before and after; and every key and index entry a changed row
-/// had or has, which is what a recorded read is hit by.
-pub struct Pushed {
-    net: Net,
-    touched: BTreeMap<(String, Option<usize>), BTreeSet<Vec<u8>>>,
+/// had or has, which is what a recorded read is hit by. A table's are
+/// worked out the first time an operator asks for them, and once: one
+/// `Pushed` serves every view a settle moves, and a view reading no table
+/// a change is to reads none of its rows.
+pub struct Pushed<'a> {
+    store: &'a Store,
+    by: BTreeMap<&'a str, (Vec<&'a Change>, std::cell::OnceCell<Moves>)>,
 }
 
-impl Pushed {
-    pub fn of(store: &Store, changes: &[Change]) -> Pushed {
-        let mut net = Net::new();
-        let mut touched: BTreeMap<(String, Option<usize>), BTreeSet<Vec<u8>>> = BTreeMap::new();
+/// One table's part of a settle: its net moves by key, and the keys and
+/// index entries (`None`: the key) its moved rows had or have.
+#[derive(Default)]
+struct Moves {
+    net: BTreeMap<Vec<u8>, Moved>,
+    touched: BTreeMap<Option<usize>, BTreeSet<Vec<u8>>>,
+}
+
+impl<'a> Pushed<'a> {
+    pub fn of(store: &'a Store, changes: &'a [Change]) -> Pushed<'a> {
+        let mut by: BTreeMap<&str, (Vec<&Change>, std::cell::OnceCell<Moves>)> = BTreeMap::new();
         for c in changes {
-            let (old, new) = match c {
-                Change::Add { row, .. } => (None, Some(row)),
-                Change::Remove { row, .. } => (Some(row), None),
-                Change::Edit { old, new, .. } => (Some(old), Some(new)),
-            };
-            let t = c.table();
-            for r in [old, new].into_iter().flatten() {
-                let Ok((key, entries)) = store.paths_of(t, r) else { continue };
-                touched.entry((t.into(), None)).or_default().insert(key);
-                for (i, e) in entries.into_iter().enumerate() {
-                    touched.entry((t.into(), Some(i))).or_default().insert(e);
+            by.entry(c.table()).or_default().0.push(c);
+        }
+        Pushed { store, by }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by.is_empty()
+    }
+
+    fn moves(&self, table: &str) -> Option<&Moves> {
+        let (cs, moves) = self.by.get(table)?;
+        Some(moves.get_or_init(|| {
+            let mut m = Moves::default();
+            for c in cs {
+                let (old, new) = match c {
+                    Change::Add { row, .. } => (None, Some(row)),
+                    Change::Remove { row, .. } => (Some(row), None),
+                    Change::Edit { old, new, .. } => (Some(old), Some(new)),
+                };
+                for r in [old, new].into_iter().flatten() {
+                    let Ok((key, entries)) = self.store.paths_of(table, r) else { continue };
+                    m.touched.entry(None).or_default().insert(key);
+                    for (i, e) in entries.into_iter().enumerate() {
+                        m.touched.entry(Some(i)).or_default().insert(e);
+                    }
                 }
+                let r = new.or(old).unwrap();
+                let Ok(key) = self.store.key_of(table, r) else { continue };
+                let e = m.net.entry(key).or_insert((old.cloned(), None));
+                e.1 = new.cloned();
             }
-            let r = new.or(old).unwrap();
-            let Ok(key) = store.key_of(t, r) else { continue };
-            let e = net.entry(t.into()).or_default().entry(key).or_insert((old.cloned(), None));
-            e.1 = new.cloned();
-        }
-        for t in net.values_mut() {
-            t.retain(|_, (a, b)| a != b);
-        }
-        Pushed { net, touched }
+            m.net.retain(|_, (a, b)| a != b);
+            m
+        }))
+    }
+
+    /// `table`'s rows that moved, by key.
+    fn net(&self, table: &str) -> Option<&BTreeMap<Vec<u8>, Moved>> {
+        self.moves(table).map(|m| &m.net)
+    }
+
+    /// The keys (`index` none) or an index's entries `table`'s moved rows
+    /// had or have.
+    fn touched(&self, table: &str, index: Option<usize>) -> Option<&BTreeSet<Vec<u8>>> {
+        self.moves(table)?.touched.get(&index)
     }
 
     /// Whether anything a read in `deps` covered moved.
     fn hits(&self, deps: &[Dep]) -> bool {
         deps.iter().any(|(t, i, p)| {
-            self.touched
-                .get(&((*t).to_string(), *i))
+            self.touched(t, *i)
                 .is_some_and(|es| es.range::<Vec<u8>, _>(p..).next().is_some_and(|e| e.starts_with(p)))
         })
     }
@@ -167,7 +197,7 @@ impl Deps {
     fn hit(&self, p: &Pushed) -> BTreeSet<Okey> {
         let mut out = BTreeSet::new();
         for ((t, i), m) in &self.by {
-            let Some(es) = p.touched.get(&((*t).to_string(), *i)) else { continue };
+            let Some(es) = p.touched(t, *i) else { continue };
             for e in es {
                 for n in 0..=e.len() {
                     if let Some(ks) = m.get(&e[..n]) {
@@ -234,8 +264,7 @@ impl<S: Tables, T: Elem> Op<S, T> for ScanOp<T> {
 
     fn push(&mut self, cx: &Cx, p: &Pushed) -> Delta<T> {
         let dec = |b: &Option<Vec<u8>>| b.as_ref().map(|b| (self.decode)(cx.store, b));
-        p.net
-            .get(&self.table)
+        p.net(&self.table)
             .map(|t| {
                 t.range::<[u8], _>((std::ops::Bound::Included(&self.prefix[..]), std::ops::Bound::Unbounded))
                     .take_while(|(k, _)| k.starts_with(&self.prefix))
@@ -786,10 +815,15 @@ impl<S: Tables, T: Elem> View<S, T> {
     /// list to the new answer. A view whose plan cannot be built again any
     /// more refuses, and is stale.
     pub fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<T>>, Refusal> {
-        if changes.is_empty() {
+        self.pushed(&Pushed::of(store, changes))
+    }
+
+    /// [`View::push`], of a settle read once for every view it moves.
+    pub fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<T>>, Refusal> {
+        if p.is_empty() {
             return Ok(vec![]);
         }
-        let p = Pushed::of(store, changes);
+        let store = p.store;
         let d = if p.hits(&self.built) {
             let (plan, built) = recorded::<S, _>(store, |db| (self.make)(&self.ctx, db));
             (self.plan, self.built) = (plan?, built);
@@ -803,7 +837,7 @@ impl<S: Tables, T: Elem> View<S, T> {
             }
             prune(d)
         } else {
-            self.plan.op.push(&Cx { store, ctx: &self.ctx }, &p)
+            self.plan.op.push(&Cx { store, ctx: &self.ctx }, p)
         };
         Ok(self.patch(d))
     }
@@ -836,13 +870,17 @@ impl<S: Tables, T: Elem> View<S, T> {
 /// A view as a peer keeps it whatever it answers: its rows and patches as
 /// their encodings.
 pub trait Maintained: Send {
-    fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<Vec<u8>>>, Refusal>;
+    /// A settle read once for every view it moves ([`Pushed`]).
+    fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<Vec<u8>>>, Refusal>;
+    fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<Vec<u8>>>, Refusal> {
+        self.pushed(&Pushed::of(store, changes))
+    }
     fn rows(&self) -> Vec<Vec<u8>>;
 }
 
 impl<S: Tables, T: Value> Maintained for View<S, T> {
-    fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<Vec<u8>>>, Refusal> {
-        Ok(View::push(self, changes, store)?.into_iter().map(|p| p.map(|t| t.encode())).collect())
+    fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<Vec<u8>>>, Refusal> {
+        Ok(View::pushed(self, p)?.into_iter().map(|p| p.map(|t| t.encode())).collect())
     }
     fn rows(&self) -> Vec<Vec<u8>> {
         self.list.values().map(Value::encode).collect()

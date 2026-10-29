@@ -223,8 +223,10 @@ fn what_is_logged_during_a_fill_is_taken() {
 }
 
 /// A replica reopened during its fill holds what it had taken and goes on
-/// from where it was: no part is sent it twice. Falsified by a part not
-/// made durable: the reopened replica began the fill again.
+/// from where it was: no part is sent it twice; reopened once it is done,
+/// it is done, the authority's store, and asks for nothing. Falsified by a
+/// part not made durable: the reopened replica began the fill again; and
+/// by the last part not made durable: the done replica was filling.
 #[test]
 fn a_fill_reopened_goes_on_where_it_was() {
     let mut server = server();
@@ -248,6 +250,13 @@ fn a_fill_reopened_goes_on_where_it_was() {
         w.parts
     };
     assert_eq!(taken + wire.parts, total, "no part sent twice");
+    let mut alice = Instance::new(replica(), Some(alice.into_disk()));
+    let stored = alice.stored();
+    alice.step(Input::Open(stored));
+    same(&alice, &server);
+    let mut wire = connect(&mut alice);
+    wire.run(&mut server, &mut alice, None);
+    assert_eq!(wire.parts, 0, "nothing asked for");
 }
 
 fn server_with_library() -> Machine {
