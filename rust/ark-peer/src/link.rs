@@ -363,7 +363,12 @@ pub fn socket(url: &str, token: &str, wake: Option<Wake>) -> Box<dyn Wire> {
             ok
         };
         let closed = |why: String| _ = said(Event::Closed(why));
-        let mut ws = match tungstenite::connect(&url) {
+        // A snapshot is one frame, which a library outgrows tungstenite's
+        // 16 MiB for frames long before its 64 MiB for messages: the message
+        // is what is bounded, then, and a frame is any part of it.
+        let mut config = tungstenite::protocol::WebSocketConfig::default();
+        config.max_frame_size = None;
+        let mut ws = match tungstenite::client::connect_with_config(&url, Some(config), 3) {
             Ok((ws, _)) => ws,
             Err(e) => return closed(e.to_string()),
         };
