@@ -285,15 +285,12 @@ pub fn set_chapters(ctx: &Ctx, db: &mut Db<Harken>, input: SetChapters) -> Resul
 #[view("library.chapters")]
 pub fn chapters(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<ChaptersEntry>, Refusal> {
     let id = input.media_id;
-    Ok(scan::<Harken, Chapter>()
-        .filter(move |c| c.media_id == id)
-        .sort(|c| c.start_ms)
-        .map(|c| ChaptersEntry {
-            image: c.image.clone(),
-            start_ms: c.start_ms,
-            title: c.title.clone(),
-            url: c.url.clone(),
-        }))
+    Ok(scan_from::<Harken, Chapter, _, _>(id).map(|c| ChaptersEntry {
+        image: c.image.clone(),
+        start_ms: c.start_ms,
+        title: c.title.clone(),
+        url: c.url.clone(),
+    }))
 }
 
 /// The episode a file is, for what its feed says of it beside it.
@@ -361,18 +358,15 @@ pub fn set_people(ctx: &Ctx, db: &mut Db<Harken>, input: SetPeople) -> Result<()
 #[view("library.people")]
 pub fn people(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<PeopleEntry>, Refusal> {
     let id = input.media_id;
-    Ok(scan::<Harken, Appearance>()
-        .filter(move |a| a.media_id == id)
-        .sort(|a| a.pos)
-        .map_with(|db, a| {
-            let p = db.person.get(&a.person_name).unwrap_or_default();
-            PeopleEntry {
-                art: p.art,
-                link: p.link,
-                name: a.person_name.clone(),
-                role: a.role.clone(),
-            }
-        }))
+    Ok(scan_from::<Harken, Appearance, _, _>(id).sort(|a| a.pos).map_with(|db, a| {
+        let p = db.person.get(&a.person_name).unwrap_or_default();
+        PeopleEntry {
+            art: p.art,
+            link: p.link,
+            name: a.person_name.clone(),
+            role: a.role.clone(),
+        }
+    }))
 }
 
 /// Who is on each of a show's episodes, in the order `show` lists them and
@@ -550,24 +544,23 @@ fn cosine(a: &[i64], b: &[i64]) -> f64 {
 }
 
 /// An episode's transcript, line by line in the order it is said, each by
-/// whom its voice is ([`voices_of`]) where it was told apart.
+/// whom its voice is ([`voices_of`]) where it was told apart: its own
+/// lines read, by the key's leading column, not every episode's — a key
+/// orders them by when they begin.
 #[view("library.transcript")]
 pub fn transcript(_: &Ctx, db: &Db<Harken>, input: EpisodeInput) -> Result<Plan<TranscriptEntry>, Refusal> {
     let id = input.media_id;
     let voices = voices_of(db, id);
-    Ok(scan::<Harken, Cue>()
-        .filter(move |c| c.media_id == id)
-        .sort(|c| c.start_ms)
-        .map(move |c| TranscriptEntry {
-            end_ms: c.end_ms,
-            speaker: voices.get(&c.speaker).unwrap_or(&c.speaker).clone(),
-            start_ms: c.start_ms,
-            text: c.text.clone(),
-            voice: match voices.contains_key(&c.speaker) {
-                true => c.speaker.clone(),
-                false => String::new(),
-            },
-        }))
+    Ok(scan_from::<Harken, Cue, _, _>(id).map(move |c| TranscriptEntry {
+        end_ms: c.end_ms,
+        speaker: voices.get(&c.speaker).unwrap_or(&c.speaker).clone(),
+        start_ms: c.start_ms,
+        text: c.text.clone(),
+        voice: match voices.contains_key(&c.speaker) {
+            true => c.speaker.clone(),
+            false => String::new(),
+        },
+    }))
 }
 
 /// One show's episodes with the columns only an episode has — what it is

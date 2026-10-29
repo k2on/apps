@@ -171,7 +171,7 @@ pub fn works(_: &Ctx, _: &Db<Harken>, input: Works) -> Result<Plan<WorkSummary>,
 /// One work by its key: none or one.
 #[view("library.work")]
 pub fn work(_: &Ctx, _: &Db<Harken>, input: WorkInput) -> Result<Plan<WorkSummary>, Refusal> {
-    Ok(scan::<Harken, Work>().filter(move |w| w.id == input.id).map_with(summary))
+    Ok(scan_from::<Harken, Work, _, _>(input.id).map_with(summary))
 }
 
 /// Every performance of one work, with how long its tracks run: the most
@@ -244,20 +244,18 @@ pub fn recording(_: &Ctx, _: &Db<Harken>, input: RecordingInput) -> Result<Plan<
 
 /// Who plays on one album: everybody credited on a recording any of its
 /// songs are of, the composers left out (an album's composers are its works'),
-/// each once — their roles together — in billing order.
+/// each once — their roles together — in billing order. The credits are
+/// joined to the album's songs by recording, so a credit costs a probe of
+/// them rather than a read of every song, and a song moved touches its own.
 #[view("library.album_credits")]
 pub fn album_credits(_: &Ctx, _: &Db<Harken>, input: AlbumCredits) -> Result<Plan<CreditsEntry>, Refusal> {
     let id = input.id;
+    let songs = scan::<Harken, Song>().filter(move |s| s.album_id.as_ref() == Some(&id));
     Ok(scan::<Harken, Credit>()
         .filter(|c| c.role != "composer")
-        .filter_with(move |db, c| {
-            let on = db
-                .song
-                .scan()
-                .into_iter()
-                .any(|s| s.recording_id == c.recording_id && s.album_id.as_ref() == Some(&id));
-            on && credited(&credits_of(db, &c.recording_id)).contains(c)
-        })
+        .filter_with(|db, c| credited(&credits_of(db, &c.recording_id)).contains(c))
+        .join(songs, |c| c.recording_id.clone(), |s| s.recording_id.clone())
+        .map(|(c, _)| c.clone())
         .group(
             |c| c.person_name.clone(),
             |_, name, credits| {

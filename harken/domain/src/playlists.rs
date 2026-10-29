@@ -174,8 +174,8 @@ pub fn playlists_of(ctx: &Ctx, _: &Db<Harken>, input: PlaylistsOf) -> Result<Pla
 #[view("playlists.playlist")]
 pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<LibraryEntry>, Refusal> {
     let playlist = owned(ctx, db, input.playlist_id)?;
-    Ok(scan::<Harken, PlaylistItem>()
-        .filter_with(move |db, i| i.playlist_id == playlist.id && db.media.has(i.media_id))
+    Ok(scan_from::<Harken, PlaylistItem, _, _>(playlist.id)
+        .filter_with(|db, i| db.media.has(i.media_id))
         .sort(|i| i.pos)
         .map_with(|db, i| library_entry(&db.media.get(i.media_id).expect("an item's media"), Some(i.pos))))
 }

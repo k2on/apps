@@ -61,10 +61,10 @@ fn median(xs: &[Duration]) -> Duration {
 }
 
 /// Every query the window holds open, over the demo library `copies` times
-/// over: its hydrate, and then the cost of one change — a playlist toggle,
+/// over: its hydrate, and then the cost of one change â a playlist toggle,
 /// and a `describe_person` (what the composer and artist views read beyond
-/// the songs) — each a mutation whose changes the client pushes through
-/// every view held (§1.10), timed together, since the client pushes them in
+/// the songs) â each a mutation whose changes the client pushes through
+/// every view held (Â§1.10), timed together, since the client pushes them in
 /// the one step. Flat in the library size is the claim: a change costs the
 /// entries it touches.
 fn views_at(copies: usize) {
@@ -190,4 +190,172 @@ fn bench_views() {
     if std::env::var_os("BENCH_16").is_some() {
         views_at(16);
     }
+}
+
+/// One message as the runtime takes it: the update, the view built again,
+/// the tree diffed, laid out and drawn â what a frame costs.
+struct Frame {
+    tree: iced::advanced::widget::Tree,
+    renderer: iced::Renderer,
+    size: iced::Size,
+}
+
+impl Frame {
+    fn new(app: &crate::App) -> Frame {
+        let renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0)));
+        let el = app.view();
+        Frame {
+            tree: iced::advanced::widget::Tree::new(el.as_widget()),
+            renderer,
+            size: iced::Size::new(1440.0, 900.0),
+        }
+    }
+
+    /// `m` taken and a frame made of it: the time each part took.
+    fn take(&mut self, app: &mut crate::App, m: Option<crate::Message>) -> [Duration; 4] {
+        use iced::advanced::{layout, renderer, Layout};
+        let t = Instant::now();
+        if let Some(m) = m {
+            let _ = app.update(m);
+        }
+        let updated = t.elapsed();
+        let t = Instant::now();
+        let mut el = app.view();
+        let viewed = t.elapsed();
+        let t = Instant::now();
+        self.tree.diff(el.as_widget());
+        let node = el
+            .as_widget_mut()
+            .layout(&mut self.tree, &self.renderer, &layout::Limits::new(iced::Size::ZERO, self.size));
+        let laid = t.elapsed();
+        let t = Instant::now();
+        let at = iced::Point::new(600.0, 400.0);
+        let viewport = iced::Rectangle::with_size(self.size);
+        el.as_widget().draw(
+            &self.tree,
+            &mut self.renderer,
+            &iced::Theme::Dark,
+            &renderer::Style::default(),
+            Layout::new(&node),
+            iced::mouse::Cursor::Available(at),
+            &viewport,
+        );
+        [updated, viewed, laid, t.elapsed()]
+    }
+}
+
+fn row(name: &str, ts: &[[Duration; 4]]) {
+    let part = |i: usize| median(&ts.iter().map(|t| t[i]).collect::<Vec<_>>());
+    let total = median(&ts.iter().map(|t| t.iter().sum()).collect::<Vec<_>>());
+    eprintln!(
+        "{name:>22} {:>9.1?} {:>9.1?} {:>9.1?} {:>9.1?} {:>9.1?}",
+        part(0),
+        part(1),
+        part(2),
+        part(3),
+        total
+    );
+}
+
+/// A frame of each thing the person does on a real library â a server's
+/// log at `HARKEN_BENCH_LOG`, copied in: the page opened, a row hovered,
+/// the cursor moved, the clock ticked; and the pages a click on the bar
+/// opens. Run with
+/// `HARKEN_BENCH_LOG=<dir> cargo test -p harken-iced --release -- --ignored --nocapture bench_real`.
+#[test]
+#[ignore]
+fn bench_real() {
+    let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
+        return eprintln!("HARKEN_BENCH_LOG names no log");
+    };
+    let mut disk = ark_peer::Memory::default();
+    for n in ["kv", "log", "schema.json"] {
+        if let Ok(b) = std::fs::read(std::path::Path::new(&dir).join(n)) {
+            ark_peer::Disk::put(&mut disk, n, &b).unwrap();
+        }
+    }
+    let t = Instant::now();
+    let replica = crate::client::open(Box::new(disk), None, crate::listening::device());
+    let mut app = crate::App::with_peer(crate::peer::Peer::open(replica), String::new(), None);
+    eprintln!("opened in {:.1?}: {} songs", t.elapsed(), app.peer.rows().len());
+    let mut frame = Frame::new(&app);
+    eprintln!("{:>22} {:>9} {:>9} {:>9} {:>9} {:>9}", "", "update", "view", "layout", "draw", "frame");
+    let n = 15;
+    let songs: Vec<_> = (0..n)
+        .map(|_| frame.take(&mut app, Some(crate::Message::Select(crate::places::Source::Library))))
+        .collect();
+    row("songs opened", &songs);
+    let hovers: Vec<_> = (0..n).map(|i| frame.take(&mut app, Some(crate::Message::HoverAt(i % 12)))).collect();
+    row("a row hovered", &hovers);
+    let moves: Vec<_> = (0..n)
+        .map(|i| frame.take(&mut app, Some(crate::Message::Hover(iced::Point::new(600.0 + i as f32, 400.0)))))
+        .collect();
+    row("the cursor moved", &moves);
+    let ticks: Vec<_> = (0..n).map(|_| frame.take(&mut app, Some(crate::Message::Tick))).collect();
+    row("a tick", &ticks);
+    let ids: Vec<_> = app.peer.rows().iter().map(|r| r.id).take(40).collect();
+    let plays: Vec<_> = ids.iter().map(|id| frame.take(&mut app, Some(crate::Message::PlayItem(*id)))).collect();
+    row("a song played", &plays);
+    let playing: Vec<_> = (0..n).map(|i| frame.take(&mut app, Some(crate::Message::HoverAt(i % 12)))).collect();
+    row("hovered, playing", &playing);
+    let ticking: Vec<_> = (0..n).map(|_| frame.take(&mut app, Some(crate::Message::Tick))).collect();
+    row("a tick, playing", &ticking);
+    let idle: Vec<_> = (0..n).map(|_| frame.take(&mut app, None)).collect();
+    row("a frame, playing", &idle);
+    let queue: Vec<_> = (0..n)
+        .map(|i| {
+            frame.take(
+                &mut app,
+                Some(if i % 2 == 0 {
+                    crate::Message::OpenQueue
+                } else {
+                    crate::Message::CloseQueue
+                }),
+            )
+        })
+        .collect();
+    row("the queue toggled", &queue);
+    let _ = frame.take(&mut app, Some(crate::Message::OpenQueue));
+    let open: Vec<_> = (0..n).map(|i| frame.take(&mut app, Some(crate::Message::QueueAt(i % 10)))).collect();
+    row("hovered, queue open", &open);
+    let _ = frame.take(&mut app, Some(crate::Message::CloseQueue));
+    let album = app.peer.rows()[0].clone();
+    let detail = app.peer.detail_of(album.id);
+    let to = crate::places::Source::Album(detail.album_id.clone(), detail.album.clone());
+    let albums: Vec<_> = (0..n)
+        .map(|i| {
+            frame.take(
+                &mut app,
+                Some(crate::Message::Select(if i % 2 == 0 {
+                    to.clone()
+                } else {
+                    crate::places::Source::Library
+                })),
+            )
+        })
+        .collect();
+    row("songs to album", &albums);
+    let longest = ark::db::read::<crate::domain::schema::Harken, _>(&app.peer.client.log.store, |db| {
+        let mut n = std::collections::BTreeMap::<_, usize>::new();
+        for c in db.cue.scan() {
+            *n.entry(c.media_id).or_default() += 1;
+        }
+        n.into_iter().max_by_key(|(_, n)| *n)
+    });
+    if let Some((episode, lines)) = longest {
+        let played = frame.take(&mut app, Some(crate::Message::PlayItem(episode.0)));
+        row("an episode played", &[played]);
+        eprintln!("{:>22} {lines} lines", "its transcript");
+    }
+    let transcript: Vec<_> = (0..n)
+        .map(|i| {
+            let to = if i % 2 == 0 {
+                crate::places::Source::Transcript
+            } else {
+                crate::places::Source::Library
+            };
+            frame.take(&mut app, Some(crate::Message::Select(to)))
+        })
+        .collect();
+    row("songs to transcript", &transcript);
 }

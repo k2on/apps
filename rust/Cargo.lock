@@ -2161,6 +2161,7 @@ dependencies = [
  "harken-domain",
  "harken-player",
  "iced",
+ "iced_tiny_skia",
  "js-sys",
  "serde",
  "serde_json",
