@@ -784,7 +784,7 @@ impl Store {
                     (r, p)
                 }
             };
-            sent.insert(p.key, row);
+            sent.insert(p.key.clone(), (row, p));
         }
         let hi = to.map_or(Bound::Unbounded, Bound::Excluded);
         let held: Vec<Vec<u8>> = self.tables[t]
@@ -816,23 +816,24 @@ impl Store {
                 Change::Add { row, .. } | Change::Edit { new: row, .. } => (row, false),
                 Change::Remove { row, .. } => (row, true),
             };
-            let key = tab.parse(row)?.key;
-            out.extend(self.force(t, &key, (!gone).then(|| row.clone()))?);
+            let p = tab.parse(row)?;
+            let key = p.key.clone();
+            out.extend(self.force(t, &key, (!gone).then(|| (row.clone(), p)))?);
         }
         Ok(out)
     }
 
-    // A key's row written as `row` (none: gone), judging nothing; the
-    // change, when one was made.
-    fn force(&mut self, t: usize, key: &[u8], row: Option<Vec<u8>>) -> Result<Option<Change>, Refusal> {
+    // A key's row written as `row`, parsed already (none: gone), judging
+    // nothing; the change, when one was made.
+    fn force(&mut self, t: usize, key: &[u8], new: Option<(Vec<u8>, Parsed)>) -> Result<Option<Change>, Refusal> {
         let schema = self.schema.clone();
         let tab = &schema.tables[t];
         let old = self.tables[t].rows.get(key).cloned();
-        if old == row {
+        if old.as_ref() == new.as_ref().map(|(r, _)| r) {
             return Ok(None);
         }
         let po = old.as_ref().map(|o| tab.parse_held(o)).transpose()?;
-        let pn = row.as_ref().map(|r| tab.parse(r)).transpose()?;
+        let (row, pn) = new.unzip();
         self.write(t, key, old.as_deref().zip(po.as_ref()), row.as_deref().zip(pn.as_ref()));
         let table = tab.name.clone();
         Ok(Some(match (old, row) {

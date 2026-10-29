@@ -206,6 +206,7 @@ dependencies = [
  "tracing-subscriber",
  "tungstenite",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -2169,6 +2170,7 @@ dependencies = [
  "tungstenite",
  "ureq",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

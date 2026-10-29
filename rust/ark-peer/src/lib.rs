@@ -60,6 +60,8 @@
 //! the trace player (`arkdb`) holds it to.
 
 pub mod app;
+#[cfg(target_arch = "wasm32")]
+mod browser;
 pub mod disk;
 pub mod driven;
 mod hub;

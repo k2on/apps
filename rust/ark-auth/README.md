@@ -70,7 +70,7 @@ them in with two fields, one line and one registration.
   crate's (`Remembered`: the `login` table, one row per server — its
   account, session and token) and `recall`/`remember`/`forget` over it;
   `ark_peer::Logins::new("app")` opens it as a local instance, under
-  `~/.config/app/logins/` or the page's `localStorage` under `app.logins`
+  `~/.config/app/logins/` or the page's IndexedDB under `app.logins`
   (`Logins::at(dir)` for a device of its own directory).
 - **everywhere**: `Login { token, session, user: Account, expires_ms }`,
   `login_url`, `socket_url` (the sync socket from the server's base URL,

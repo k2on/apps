@@ -188,7 +188,7 @@ fn edit(disk: &mut dyn Disk, f: impl for<'t> FnOnce(&mut Db<'t, Local>) -> Resul
 /// Where one app's logins are remembered, one per server: `ark-auth`'s
 /// [`ark_auth::remember::Remembered`], a local instance of the app's own —
 /// natively under its configuration directory (or a directory of the
-/// caller's, [`Logins::at`]), in a browser its page's `localStorage`.
+/// caller's, [`Logins::at`]), in a browser its page's IndexedDB.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Logins {
     /// The directory natively, the key prefix in a browser.
@@ -217,7 +217,7 @@ impl Logins {
         #[cfg(not(target_arch = "wasm32"))]
         let disk: Box<dyn Disk> = Box::new(crate::Files::new(at).ok()?);
         #[cfg(target_arch = "wasm32")]
-        let disk: Box<dyn Disk> = Box::new(crate::disk::Local(at));
+        let disk: Box<dyn Disk> = Box::new(crate::disk::Browser(at));
         Some(Instance::open::<Remembered>(disk))
     }
 

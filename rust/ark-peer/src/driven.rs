@@ -33,6 +33,10 @@ pub const PUMP_BUDGET_MS: u64 = 16;
 /// thread it draws on held up by the driver.
 pub const WAIT_BUDGET_MS: u64 = 4;
 
+/// How long one pump in a browser takes things in, in ms, before it leaves
+/// the rest for the next: half a frame, the other half the page's.
+pub const PAGE_BUDGET_MS: u64 = 8;
+
 struct Inner {
     peer: Mutex<Peer>,
     /// What the driver's pumps did since the app last asked.
@@ -153,9 +157,12 @@ impl Driven {
         Driven { inner }
     }
 
-    /// `peer`, pumped by whoever pumps it: a browser has no thread.
+    /// `peer`, pumped by whoever pumps it: a browser has no thread. A pump
+    /// there takes in what it can in [`PAGE_BUDGET_MS`] and leaves the rest
+    /// for the next, so the page draws between them.
     #[cfg(target_arch = "wasm32")]
-    pub fn new(peer: Peer) -> Driven {
+    pub fn new(mut peer: Peer) -> Driven {
+        peer.link.budget = Some(PAGE_BUDGET_MS);
         Driven {
             inner: Arc::new(Inner {
                 peer: Mutex::new(peer),

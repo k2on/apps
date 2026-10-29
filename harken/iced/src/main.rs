@@ -3444,7 +3444,26 @@ pub fn main() -> iced::Result {
     arkui::theme::install(palette::HARKEN);
     // What this device does goes to its server (docs/plan-observe.md).
     ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
+    // In a browser the replica is in the page's IndexedDB, which answers
+    // only later: it is read before the window opens. One that will not
+    // open is said by the window, which works in memory.
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_bindgen_futures::spawn_local(async {
+            if let Err(e) = ark_peer::disk::open_browser().await {
+                web_sys::console::error_1(&format!("the page's database: {e}").into());
+            }
+            if let Err(e) = run() {
+                web_sys::console::error_1(&e.to_string().into());
+            }
+        });
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    run()
+}
 
+fn run() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)

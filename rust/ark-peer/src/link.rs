@@ -81,12 +81,16 @@ impl Wire for Closed {
 /// `backoff.0` milliseconds after a dial that fails, doubling to
 /// `backoff.1`, back to the first once one opens; and how many of what the
 /// connection said one pump takes in (`chunk`), the rest kept for the next,
-/// so a driver answers between them.
+/// so a driver answers between them; and how long, in ms, one pump takes
+/// things in before it leaves the rest for the next (`budget`): what a
+/// page whose one thread also draws asks, so a fill is taken in between
+/// frames — the next pump is then due at once ([`Peer::deadline`]).
 pub struct Link {
     pub url: Option<String>,
     pub token: Option<String>,
     pub backoff: (u64, u64),
     pub chunk: usize,
+    pub budget: Option<u64>,
     backlog: std::collections::VecDeque<Event>,
     pub(crate) dial: Option<Box<dyn Dial>>,
     pub(crate) wire: Option<Box<dyn Wire>>,
@@ -108,6 +112,7 @@ impl Default for Link {
             token: None,
             backoff: (250, 30_000),
             chunk: usize::MAX,
+            budget: None,
             backlog: Default::default(),
             dial: None,
             wire: None,
@@ -188,14 +193,16 @@ impl Peer {
     }
 
     /// The one timer the peer needs: the next dial, a handler's next job,
-    /// and the relay's next send while it holds a call.
+    /// the relay's next send while it holds a call, and now when what the
+    /// connection said is not all taken in.
     pub fn deadline(&self) -> Option<u64> {
         let every = self.config.live.as_ref().map_or(0, |l| l.every_ms);
         let relay = (!self.relay.is_empty()).then(|| {
             let wait = self.relayed.map_or(0, |t| t + every - crate::now_ms()).max(0);
             crate::monotonic_ms() + wait as u64
         });
-        self.link.due.into_iter().chain(self.due()).chain(relay).min()
+        let backlog = (!self.link.backlog.is_empty()).then(crate::monotonic_ms);
+        self.link.due.into_iter().chain(self.due()).chain(relay).chain(backlog).min()
     }
 
     /// Whether a connection is being made.
@@ -243,8 +250,10 @@ impl Peer {
         self.dial_if_due(now);
         let l = &mut self.link;
         l.backlog.extend(l.wire.as_mut().map(|w| w.events()).unwrap_or_default());
-        let events: Vec<Event> = l.backlog.drain(..l.chunk.min(l.backlog.len())).collect();
-        for e in events {
+        let (mut left, ends) = (l.chunk, l.budget.map(|b| now + b));
+        while left > 0 {
+            let Some(e) = self.link.backlog.pop_front() else { break };
+            left -= 1;
             p.moved = true;
             match e {
                 Event::Open => {
@@ -281,6 +290,9 @@ impl Peer {
                     }
                     p.closed.push(why);
                 }
+            }
+            if ends.is_some_and(|e| crate::monotonic_ms() >= e) {
+                break;
             }
         }
         // A dial due at once is made before this pump ends, so nobody is shown a link waiting

@@ -2,7 +2,7 @@
 //! of the `login` table of a local schema of this crate's own
 //! ([`Remembered`]), which every app's peer opens as a local instance
 //! (`ark_peer::Logins`: natively under `$XDG_CONFIG_HOME/<app>/logins/`, or
-//! `~/.config/…`; in a browser `localStorage`, under `<app>.logins`). The
+//! `~/.config/…`; in a browser the page's IndexedDB, under `<app>.logins`). The
 //! token is the user's own secret, on the user's own disk; a server's
 //! secrets stay in its configuration.
 
