@@ -429,6 +429,8 @@ fun HarkenApp(
 
             override fun skipAhead(n: Int) = playback.skipAhead(n)
 
+            override fun moveUpNext(from: Int, to: Int) = playback.moveUpNext(from, to)
+
             override fun devices() {
                 devices = true
             }

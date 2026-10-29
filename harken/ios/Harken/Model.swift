@@ -521,6 +521,14 @@ final class Model: ObservableObject {
         }
     }
 
+    /// The `from`th up-next row dragged to be the `to`th: one `move` of the
+    /// queue, or none where it was.
+    func moveUpNext(from: Int, to: Int) {
+        guard let at = player.now?.index, from != to else { return }
+        let (f, t) = (at + 1 + from, at + 1 + to)
+        press(.move(from: f, to: t)) { [sound] in sound.move(from: f, to: t) }
+    }
+
     /// Alone, what is still to come shuffled; the session has no shuffle.
     func toggleShuffle() { if !joined { sound.shuffle() } }
 

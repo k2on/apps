@@ -132,3 +132,56 @@ fn q_opens_the_queue_and_the_row_menu_puts_a_track_next_or_last() {
     let _ = app.act(vim::Action::Cancel);
     assert_eq!(app.queue_panel, None);
 }
+
+/// A row of what plays next dragged down past the next one lands after it:
+/// the list is drawn in that order at once, ahead of the session saying so,
+/// and the cursor goes with the row. A press let go where it was is a
+/// click, which plays the row and moves nothing.
+///
+/// Falsified by a drop that waited for the session: up next was still drawn
+/// `[c, d]`, so the row jumped back before it moved. (`step`, not `update`:
+/// the session here is set by hand, and `update` reconciles it with the
+/// room, which has none.)
+#[test]
+fn a_row_dragged_past_the_next_lands_after_it() {
+    let mut app = app();
+    let _ = app.step(Message::OpenQueue);
+    let titles = |app: &App| app.upcoming_drawn().into_iter().map(|(_, t)| t.title).collect::<Vec<_>>();
+    assert_eq!(titles(&app), ["c", "d"]);
+
+    app.cursor = iced::Point::new(500.0, 100.0);
+    let _ = app.step(Message::QueueGrab(0));
+    let _ = app.step(Message::QueueDrag(iced::Point::new(500.0, 100.0 + 1.6 * arkui::panel::ENTRY)));
+    assert!(app.queue_drag.as_ref().is_some_and(|d| d.dragging() && d.to() == 1));
+    let _ = app.step(Message::QueueDrop);
+    assert!(app.queue_drag.is_none());
+    assert_eq!(titles(&app), ["d", "c"], "drawn moved before the session answers");
+    assert_eq!(app.queue_panel, Some(2), "the cursor on the row moved");
+
+    // A press that hardly moves is a click: nothing settles.
+    app.queue_settle = None;
+    app.cursor = iced::Point::new(500.0, 100.0);
+    let _ = app.step(Message::QueueGrab(1));
+    let _ = app.step(Message::QueueDrag(iced::Point::new(500.0, 101.0)));
+    let _ = app.step(Message::QueueDrop);
+    assert!(app.queue_drag.is_none() && app.queue_settle.is_none());
+}
+
+/// Closed, the queue lets go of the keyboard at once but its sheet stays
+/// drawn, sliding out; opened again on its way out, it slides back in from
+/// where it got to.
+///
+/// Falsified by a close that dropped the sheet: there was nothing left to
+/// slide out.
+#[test]
+fn the_queue_sheet_slides_out_when_closed() {
+    let mut app = app();
+    let _ = app.step(Message::OpenQueue);
+    assert!(app.queue_sheet.is_some_and(|s| s.is_shown()));
+    let _ = app.step(Message::CloseQueue);
+    assert_eq!(app.queue_panel, None);
+    assert_ne!(app.focus(), Focus::Queue);
+    assert!(app.queue_sheet.is_some_and(|s| !s.is_shown()), "still drawn, on its way out");
+    let _ = app.step(Message::OpenQueue);
+    assert!(app.queue_sheet.is_some_and(|s| s.is_shown()));
+}

@@ -227,6 +227,29 @@ pub const COMPONENTS: &[Component] = &[
         shots: &[shot("lists", "Rows with a picture and a line under each.", ANDROID)],
     },
     Component {
+        id: "reorder",
+        name: "Reorderable list",
+        section: Section::Components,
+        glyph: glyphs::PLAYLIST,
+        summary: "Rows dragged into a new order, the rest sliding out of the way: what a queue is rearranged with.",
+        desktop: &["reorder"],
+        android: Some(Mobile {
+            at: &["ui/Reorder.kt: rememberReorder, ReorderableItem"],
+            how: &[
+                "A LazyColumn drawn in reorder.order(items, key), each row in ReorderableItem(reorder, key, keys): a long press lifts it, and onMove(from, to) is told on the drop.",
+                "The rows that make way are the list's own animateItem on Springs.MOVE; a tap still does what a tap did.",
+            ],
+        }),
+        ios: Some(Mobile {
+            at: &["swift/ArkUI: Reorderable, ReorderHandle"],
+            how: &[
+                "Reorderable(items, key:, onMove:) { item, handle in … }: the row places the handle it is given, and is dragged by it, as the Music app's queue is.",
+                "The rows that make way move on Springs.move; the row keeps its tap and its context menu.",
+            ],
+        }),
+        shots: &[],
+    },
+    Component {
         id: "cards",
         name: "Cards",
         section: Section::Components,
@@ -327,8 +350,8 @@ pub const COMPONENTS: &[Component] = &[
         name: "Dialog",
         section: Section::Overlays,
         glyph: glyphs::CLOSE,
-        summary: "A window over the page as the page dims, and what goes under every overlay.",
-        desktop: &["dialog", "layer"],
+        summary: "A window over the page as the page dims, a sheet along its edge, and what goes under every overlay.",
+        desktop: &["dialog", "sheet", "layer"],
         android: None,
         ios: None,
         shots: &[],
@@ -376,8 +399,8 @@ pub const COMPONENTS: &[Component] = &[
         name: "Springs",
         section: Section::Motion,
         glyph: glyphs::SHUFFLE,
-        summary: "The numbers everything moves by, the same on both phones.",
-        desktop: &[],
+        summary: "The numbers and curves everything moves by, the same on both phones; on the desktop, the curves and what moves along them.",
+        desktop: &["motion"],
         android: Some(Mobile {
             at: &["ui/Springs.kt: Springs"],
             how: &["Springs.settle() and the rest: spring specs with a cap on how long any move takes."],

@@ -1351,6 +1351,13 @@ class Playback(
         press(Press.Jump(to)) { controller?.takeIf { to < it.mediaItemCount }?.seekTo(to, 0) }
     }
 
+    /** The `from`th of [PlayerState.upNext] moved to be the `to`th: the session's `move`, or alone the player's own. */
+    fun moveUpNext(from: Int, to: Int) {
+        val a = heard.active ?: return
+        val (f, t) = a.at.toInt() + 1 + from to a.at.toInt() + 1 + to
+        press(Press.Move(f, t)) { controller?.takeIf { maxOf(f, t) < it.mediaItemCount }?.moveMediaItem(f, t) }
+    }
+
     // This phone's own stream as the slider draws it, alone.
     private fun local(): Volume? = stream?.read()?.let { (level, muted) -> Volume(Level.Here, level, muted, remote = false) }
 

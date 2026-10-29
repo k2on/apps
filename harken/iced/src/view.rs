@@ -18,10 +18,7 @@ use crate::nav::{Layout, Mark};
 use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
 use crate::rows::{Item, Person};
-use crate::{
-    licences, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, QUEUE_ROWS, QUEUE_WIDTH, SHELF, SIDEBAR, SIDEBAR_WIDTH,
-    TRACKS,
-};
+use crate::{licences, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
 
 // The table's columns. Portions rather than pixels, so the text columns share
 // whatever is left after the fixed ones and none can push another off a
@@ -136,9 +133,11 @@ impl App {
         let mut layers = stack![mouse_area(base).on_move(Message::Hover)];
         let focus = self.focus();
 
-        // Following a show: the dialog rising over the page as it dims.
-        if let Some(a) = &self.adding {
-            let open = arkui::dialog::opened(a.opened, iced::time::Instant::now());
+        // Following a show: the dialog fading in over the page as it dims,
+        // and out again once closed.
+        let now = iced::time::Instant::now();
+        if let Some(a) = self.adding.as_ref().or(self.adding_leaving.as_ref()) {
+            let (open, dim) = (arkui::dialog::open(&a.shown, now), arkui::dialog::dimmed(&a.shown, now));
             let title = match a.kind {
                 "sermon" => "Follow sermons",
                 _ => "Follow a podcast",
@@ -149,7 +148,7 @@ impl App {
                 .on_press(Message::Adding(false));
             let height = (self.window.height - 2.0 * BAR_HEIGHT).max(240.0);
             layers = layers
-                .push(arkui::dialog::backdrop(Message::Adding(false), Message::Swallow, open))
+                .push(arkui::dialog::backdrop(Message::Adding(false), Message::Swallow, dim))
                 .push(arkui::dialog::view(title.into(), close.into(), self.view_adding(a), 560.0, height, open));
         }
 
@@ -184,11 +183,22 @@ impl App {
             };
         }
 
-        if let Some(at) = self.queue_panel {
-            let origin = App::queue_origin(self.window, self.queue_rows().len());
+        // The queue: a sheet sliding in from the right as the page dims, and
+        // out once closed. While a row of it is held, one layer over all
+        // of it follows the pointer and hears it let go, wherever that is.
+        if let Some(sheet) = self.queue_sheet.filter(|s| !s.gone(now)) {
+            let dim = sheet.at_pace(arkui::dialog::DIMMING, now);
             layers = layers
-                .push(layer::backdrop(Message::CloseQueue, Message::Swallow))
-                .push(layer::pinned(self.view_queue(at), origin));
+                .push(arkui::dialog::backdrop(Message::CloseQueue, Message::Swallow, dim))
+                .push(self.view_queue(self.queue_panel, arkui::sheet::open(&sheet, now)));
+            if self.queue_drag.is_some() {
+                layers = layers.push(
+                    mouse_area(container(text("")).width(Length::Fill).height(Length::Fill))
+                        .on_move(Message::QueueDrag)
+                        .on_release(Message::QueueDrop)
+                        .on_scroll(|_| Message::Swallow),
+                );
+            }
         }
 
         if let Some(at) = self.devices {
@@ -2264,46 +2274,73 @@ impl App {
             .into()
     }
 
-    /// The queue: the track playing, then what plays after it, in the order
-    /// it will — the session's, or this device's own. A click or `<Enter>`
-    /// plays a row; `x` takes it out, `J` and `K` move it.
-    fn view_queue(&self, at: usize) -> Element<'_, Message> {
+    /// The queue, in a sheet `open` of the way in: the track playing, then
+    /// what plays after it, in the order it will — the session's, or this
+    /// device's own. A click or `<Enter>` plays a row; a row of what plays
+    /// next dragged moves it there, the rest sliding out of its way
+    /// (`arkui::reorder`); `x` takes it out, `J` and `K` move it. `at` is
+    /// the cursor, none while the sheet slides out.
+    fn view_queue(&self, at: Option<usize>, open: f32) -> Element<'_, Message> {
+        let now = iced::time::Instant::now();
         let rows_ = self.queue_rows();
-        let width = QUEUE_WIDTH;
-        let chars = panel::chars(width, panel::ENTRY_CHROME);
-        let row_of = |i: usize, index: usize, track: &crate::listening::Track| -> Element<'_, Message> {
-            let on_cursor = at == i;
+        let width = arkui::sheet::width(self.window.width);
+        // The sheet's padding in place of a panel's.
+        let chars = panel::chars(width - 2.0 * (arkui::sheet::PADDING - panel::PADDING), panel::ENTRY_CHROME);
+        let entry_of = |i: usize, track: &crate::listening::Track| {
+            let on_cursor = at == Some(i);
             let mark = (i == 0).then(|| Element::from(icon::line(glyphs::PLAYING, on_cursor)));
             let label = format!("{} \u{2014} {}", track.title, track.creator);
-            let entry =
-                panel::entry(mark, panel::label(fit::tail(&label, chars), on_cursor), None).style(move |theme| style::entry(theme, on_cursor, true));
-            mouse_area(entry)
-                .on_enter(Message::QueueAt(i))
-                .on_press(Message::QueueAt(i))
-                .on_release(Message::QueueJump(index))
-                .into()
+            panel::entry(mark, panel::label(fit::tail(&label, chars), on_cursor), None).style(move |theme| style::entry(theme, on_cursor, true))
         };
         let mut body = column![panel::title("Now playing".into())].spacing(0);
-        let mut upcoming = column![].spacing(0);
         match rows_.first() {
-            Some((index, track)) => body = body.push(row_of(0, *index, track)),
+            Some((index, track)) => {
+                body = body.push(
+                    mouse_area(entry_of(0, track))
+                        .on_enter(Message::QueueAt(0))
+                        .on_press(Message::QueueAt(0))
+                        .on_release(Message::QueueJump(*index)),
+                )
+            }
             None => body = body.push(panel::entry(None, panel::label("nothing queued".into(), false), None)),
-        }
-        for (i, (index, track)) in rows_.iter().enumerate().skip(1) {
-            upcoming = upcoming.push(row_of(i, *index, track));
         }
         body = body.push(panel::title(match rows_.len() {
             0 | 1 => "Up next \u{2014} nothing after this one".into(),
             n => format!("Up next \u{2014} {}", plural((n - 1) as i64, "track")),
         }));
-        let visible = rows_.len().saturating_sub(1).min(QUEUE_ROWS - 1);
-        body = body.push(
-            scrollable(upcoming)
-                .id(QUEUE)
-                .style(style::bars)
-                .height(Length::Fixed(panel::ENTRY * visible as f32)),
+        // What plays next: a press is a click or the start of a drag, which
+        // the layer over the sheet then follows (`view`).
+        let upcoming: Vec<Element<'_, Message>> = self
+            .upcoming_drawn()
+            .iter()
+            .enumerate()
+            .map(|(j, (_, track))| {
+                mouse_area(entry_of(j + 1, track))
+                    .on_enter(Message::QueueAt(j + 1))
+                    .on_press(Message::QueueGrab(j))
+                    .into()
+            })
+            .collect();
+        let list = arkui::reorder::list(
+            upcoming,
+            panel::ENTRY,
+            self.queue_drag.as_ref(),
+            self.queue_settle.as_ref().map(|s| &s.settle),
+            now,
         );
-        panel::panel(body, width).into()
+        body = body.push(scrollable(list).id(QUEUE).style(style::bars).height(Length::Fill));
+        let close = button(icon::tinted(glyphs::CLOSE, 14.0, |p| p.background.base.text))
+            .style(style::quiet)
+            .padding(6)
+            .on_press(Message::CloseQueue);
+        arkui::sheet::view(
+            "Queue".into(),
+            Some("Drag a track to move it; x takes it out.".into()),
+            close.into(),
+            body.into(),
+            width,
+            open,
+        )
     }
 
     /// Where a slider for `level` draws: where it is being dragged, or

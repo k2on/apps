@@ -347,31 +347,65 @@ struct VolumeSlider: View {
 }
 
 /// The queue: what is playing, and what plays after it in the order it will
-/// — swiped away, dragged into another order, or tapped to play from.
+/// — dragged into another order by a row's handle, the rest sliding out of
+/// its way (ArkUI's Reorderable), taken out from a row's menu, or tapped to
+/// play from.
 struct QueueSheet: View {
     @EnvironmentObject private var model: Model
 
     var body: some View {
         let s = model.player
         NavigationStack {
-            List {
-                if let now = s.now {
-                    Section("Now Playing") { QueueRow(p: now, current: true) }
-                }
-                Section(s.shuffle ? "Up Next, Shuffled" : "Up Next") {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    if let now = s.now {
+                        heading("Now Playing")
+                        QueueRow(p: now, current: true).padding(.horizontal, Space.l)
+                    }
+                    heading(s.shuffle ? "Up Next, Shuffled" : "Up Next").padding(.top, Space.m)
                     if s.upNext.isEmpty {
-                        Text("Nothing after this one.").foregroundStyle(.secondary)
+                        Text("Nothing after this one.").foregroundStyle(.secondary).padding(.horizontal, Space.l)
                     }
-                    ForEach(s.upNext) { p in
-                        QueueRow(p: p, current: false).contentShape(Rectangle()).onTapGesture { model.jump(p.index) }
+                    Reorderable(Self.keyed(s.upNext), key: \.key, onMove: { model.moveUpNext(from: $0, to: $1) }) { row, handle in
+                        HStack(spacing: Space.s) {
+                            QueueRow(p: row.p, current: false)
+                                .contentShape(Rectangle())
+                                .onTapGesture { model.jump(row.p.index) }
+                            handle
+                        }
+                        .padding(.leading, Space.l)
+                        .padding(.vertical, Space.xs)
+                        .contextMenu {
+                            Button("Remove from Queue", systemImage: "minus.circle", role: .destructive) {
+                                if let i = s.upNext.firstIndex(where: { $0.index == row.p.index }) { model.removeUpNext([i]) }
+                            }
+                        }
                     }
-                    .onDelete { model.removeUpNext(Array($0)) }
-                    .onMove { model.moveUpNext(Array($0), to: $1) }
                 }
+                .padding(.vertical, Space.m)
             }
             .navigationTitle("Queue")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { EditButton() } }
+        }
+    }
+
+    private func heading(_ title: String) -> some View {
+        Text(title).font(.headline).padding(.horizontal, Space.l)
+    }
+
+    /// A row of what plays next and its key: its track, and how many times
+    /// that track is queued before it, so a track queued twice is two rows and
+    /// a row keeps its key as it moves.
+    struct Keyed {
+        let key: String
+        let p: Playing
+    }
+
+    static func keyed(_ upNext: [Playing]) -> [Keyed] {
+        var seen: [String: Int] = [:]
+        return upNext.map { p in
+            seen[p.id, default: 0] += 1
+            return Keyed(key: "\(p.id)#\(seen[p.id]!)", p: p)
         }
     }
 }

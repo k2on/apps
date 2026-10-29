@@ -195,6 +195,17 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["A submenu draws no header: the menu it hangs off is still up with the title."],
     },
     Entry {
+        module: "reorder",
+        name: "Reorder",
+        summary: "A list whose rows are dragged into a new order: the row lifts and follows the pointer, and the rows it passes slide out of its way.",
+        api: &["Reorder::press(from, rows, row, y, now)", "drag(y, now), drop(now) -> Drop::{Click, Moved { from, to, settle }}", "list(rows, row, drag, settle, now)", "moved(items, from, to)", "THRESHOLD, SLIDING, SETTLING, EASE_OUT"],
+        rules: &[
+            "Under THRESHOLD pixels a press is a click, so a row still does what a click on it did.",
+            "Where a row lands is arithmetic on how far the pointer moved, the rows being one height: nothing laid out is measured.",
+            "The app owns the order: it moves its row on a drop, and draws the new order with the Settle until its own order says so.",
+        ],
+    },
+    Entry {
         module: "context",
         name: "Context",
         summary: "A menu, its submenu, or a picker alone, and the rules for them together: which one has the keys, the dwell, `l` in and `h` out, `<Esc>`.",
@@ -211,9 +222,29 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "dialog",
         name: "Dialog",
-        summary: "A titled window rising over a page as the page dims.",
-        api: &["view(title, close, body, width, height, open)", "backdrop(close, swallow, open)", "opened(since, now) -> 0..=1", "opening(since, now)", "OPENING, RISE"],
-        rules: &["`open` is eased; ask `opening` whether to keep a clock running."],
+        summary: "A titled window fading in and growing from 95% over a page as the page dims, as shadcn/ui's does without the blur.",
+        api: &["shown(now) -> Shown", "open(&shown, now), dimmed(&shown, now) -> 0..=1", "view(title, close, body, width, height, open)", "backdrop(close, swallow, dim)", "TIMING (200 ms, ease), DIMMING (150 ms), FROM (0.95)"],
+        rules: &[
+            "Closed, it fades and shrinks back the way it came: the app keeps its Shown, hidden, and draws it until Shown::gone.",
+            "Keep a clock running while Shown::moving.",
+        ],
+    },
+    Entry {
+        module: "sheet",
+        name: "Sheet",
+        summary: "A panel the window's height sliding in from its right-hand edge over the page dimmed, as shadcn/ui's sheet does without the blur.",
+        api: &["shown(now) -> Shown", "open(&shown, now) -> 0..=1", "view(title, description, close, body, width, open)", "width(window) -> three quarters, at most MAX_WIDTH", "body_height(window, described)", "TIMING (500 ms in, 300 ms out, ease-in-out)"],
+        rules: &["The page under it dims at the dialog's pace (dialog::backdrop with Shown::at_pace(dialog::DIMMING, now))."],
+    },
+    Entry {
+        module: "motion",
+        name: "Motion",
+        summary: "What moves a while and stops: something shown and hidden with a move each way, a slide, the curves they go along, and a widget that draws what it holds moved, scaled and veiled.",
+        api: &["Ease(x1, y1, x2, y2).at(t)", "EASE, EASE_IN_OUT", "Timing { opening, closing, ease }", "Shown::new(timing, now), at(now), hide(now), show(now), moving(now), gone(now)", "Slide::new(from, to, now, taking, ease), at(now), toward(...)", "transformed(content, by, scale, veil, radius)"],
+        rules: &[
+            "Nothing ticks at rest: how far along a move is, is worked out from the time whenever it is drawn.",
+            "iced has no opacity for a group of widgets, so a fade is a veil of the ground over what fades, thinning.",
+        ],
     },
     // Behaviour.
     Entry {

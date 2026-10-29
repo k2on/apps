@@ -93,9 +93,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.harken.android.ui.Cover
 import dev.harken.android.ui.Glyph
 import dev.harken.android.ui.Recompositions
+import dev.harken.android.ui.ReorderableItem
 import dev.harken.android.ui.Space
 import dev.harken.android.ui.VolumeSlider
 import dev.harken.android.ui.quiet
+import dev.harken.android.ui.rememberReorder
 import dev.harken.android.ui.rememberTransientListState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -135,6 +137,9 @@ interface Controls {
     fun queue() {}
 
     fun skipAhead(n: Int) {}
+
+    /** The `from`th of [PlayerState.upNext] moved to be the `to`th, what is playing playing on. */
+    fun moveUpNext(from: Int, to: Int) {}
 
     fun more() {}
 
@@ -469,10 +474,20 @@ private fun Toggle(icon: androidx.compose.ui.graphics.vector.ImageVector, descri
     }
 }
 
-/** The queue: what is playing, and what plays after it in the order it will. */
+/**
+ * The queue: what is playing, and what plays after it in the order it will. A row of what plays next
+ * held and dragged moves it there, the rest gliding out of its way (`ui/Reorder.kt`).
+ */
 @Composable
 fun QueueSheet(state: PlayerState, controls: Controls) {
-    LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.xl), state = rememberTransientListState()) {
+    val list = rememberTransientListState()
+    val reorder = rememberReorder(list) { from, to -> controls.moveUpNext(from, to) }
+    // Each row of what plays next by the track and which time it is queued, so a track queued twice
+    // is two rows, and a row keeps its key as it moves.
+    val keyed = remember(state.upNext) { upNextKeys(state.upNext).zip(state.upNext) }
+    val keys = remember(keyed) { keyed.map { it.first } }
+    val drawn = reorder.order(keyed) { it.first }
+    LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.xl), state = list) {
         item { Text("Now playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s)) }
         state.now?.let { now -> item { QueueRow(now, current = true, onClick = {}) } }
         item {
@@ -491,7 +506,21 @@ fun QueueSheet(state: PlayerState, controls: Controls) {
                 )
             }
         }
-        itemsIndexed(state.upNext) { i, p -> QueueRow(p, current = false, onClick = { controls.skipAhead(i) }) }
+        itemsIndexed(drawn, key = { _, (key, _) -> key }) { _, (key, p) ->
+            ReorderableItem(reorder, key, keys) {
+                // A tap plays the row where the app has it, whatever the drawing shows.
+                QueueRow(p, current = false, onClick = { keys.indexOf(key).takeIf { it >= 0 }?.let(controls::skipAhead) })
+            }
+        }
+    }
+}
+
+/** A key for each of `upNext`: its id, and how many times it is queued before this one. */
+internal fun upNextKeys(upNext: List<Playing>): List<String> {
+    val seen = HashMap<String, Int>()
+    return upNext.map { p ->
+        val n = seen.merge(p.id, 1, Int::plus)!!
+        "${p.id}#$n"
     }
 }
 

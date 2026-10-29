@@ -140,8 +140,9 @@ pub struct Adding {
     /// found, why it failed; or why a follow was refused.
     pub said: Option<String>,
     pub at: usize,
-    /// When it opened, for its rise (`arkui::dialog`).
-    pub opened: iced::time::Instant,
+    /// How far open it is, and whether it is on its way out
+    /// (`arkui::dialog`).
+    pub shown: arkui::motion::Shown,
 }
 
 impl Adding {
@@ -152,7 +153,7 @@ impl Adding {
             found: vec![],
             said: None,
             at: 0,
-            opened: iced::time::Instant::now(),
+            shown: arkui::dialog::shown(iced::time::Instant::now()),
         }
     }
 
@@ -301,6 +302,13 @@ pub enum Message {
     /// The queue: open it, or close it — `q`, and the button on the bar.
     OpenQueue,
     CloseQueue,
+    /// A row of what plays next pressed, from the top of them: perhaps a
+    /// click, perhaps the start of a drag (`arkui::reorder`).
+    QueueGrab(usize),
+    /// The pointer, while one is held down on the queue.
+    QueueDrag(Point),
+    /// …and let go.
+    QueueDrop,
     /// The cursor onto a row of it, from the top: the track playing, then
     /// what plays after it.
     QueueAt(usize),
@@ -624,13 +632,25 @@ pub const ACCOUNT_BOTTOM: f32 = PAGE_PADDING + arkui::account::HEIGHT;
 /// The two scrollables a cursor keeps itself inside of.
 pub const SIDEBAR: &str = "sidebar";
 pub const TRACKS: &str = "tracks";
-/// The queue panel's list, for keeping its cursor on screen.
+/// The queue sheet's list of what plays next, for keeping its cursor on
+/// screen.
 pub const QUEUE: &str = "queue";
-/// How wide the queue panel is: the device picker's width, beside which it
-/// opens.
-pub const QUEUE_WIDTH: f32 = 336.0;
-/// How many of the queue's rows the panel shows before it scrolls.
-pub const QUEUE_ROWS: usize = 12;
+/// A row of the queue let go somewhere new, still settling into its place
+/// ([`arkui::reorder::Settle`]); and until the queue says it has moved —
+/// the session's answer comes back from the room — the order it moved
+/// from, so the list is drawn in the new order in the meantime.
+#[derive(Clone, Debug)]
+pub struct QueueSettle {
+    pub settle: arkui::reorder::Settle,
+    pub from: usize,
+    pub to: usize,
+    pub before: Vec<crate::domain::Id<crate::domain::Media>>,
+    pub since: iced::time::Instant,
+}
+
+/// How long a move of the queue is drawn ahead of the queue saying so.
+pub const QUEUE_PENDING: Duration = Duration::from_secs(2);
+
 /// The last row of the playlist picker, which is a row and not a key.
 pub const NEW_PLAYLIST: &str = "New playlist\u{2026}";
 /// …and of the voice picker.
@@ -664,6 +684,8 @@ pub struct App {
     pub resync: Option<String>,
     /// The search for a show to follow, while a shows page has it open.
     pub adding: Option<Adding>,
+    /// …and the one closed, drawn until it has faded out.
+    pub adding_leaving: Option<Adding>,
     /// `D` — every number the session holds.
     pub debug: bool,
     /// A composer's page lists every work, not only the best known: its
@@ -690,6 +712,13 @@ pub struct App {
     pub devices: Option<usize>,
     /// The queue panel, when it is up: where its cursor is, from the top.
     pub queue_panel: Option<usize>,
+    /// The queue's sheet sliding in, in, or sliding out: drawn while this
+    /// is `Some` and not gone (`arkui::sheet`).
+    pub queue_sheet: Option<arkui::motion::Shown>,
+    /// A row of what plays next held down, and perhaps being dragged.
+    pub queue_drag: Option<arkui::reorder::Reorder>,
+    /// A row let go into a new place, settling into it.
+    pub queue_settle: Option<QueueSettle>,
     /// How big the window is, so a panel near an edge opens the other way.
     pub window: Size,
     /// The address bar, reconciled after every update.
@@ -785,6 +814,7 @@ impl App {
             help: false,
             resync: None,
             adding: None,
+            adding_leaving: None,
             debug: false,
             all_works: false,
             following: true,
@@ -795,6 +825,9 @@ impl App {
             voice_about: None,
             devices: None,
             queue_panel: None,
+            queue_sheet: None,
+            queue_drag: None,
+            queue_settle: None,
             window: Size::new(860.0, 600.0),
             router: Router::new(),
             swipe: Default::default(),
@@ -1620,22 +1653,96 @@ impl App {
         }
     }
 
-    /// Where the queue panel goes: hanging off the bar at its right-hand end,
-    /// as the device picker does, a row per track up to [`QUEUE_ROWS`] and
-    /// two title lines.
-    pub fn queue_origin(window: Size, rows: usize) -> Point {
-        arkui::panel::hang_above(
-            window.width - PAGE_PADDING,
-            window.height - BAR_HEIGHT,
-            QUEUE_WIDTH,
-            Self::queue_height(rows),
-        )
+    /// The queue closed: its sheet slides out, and a drag of one of its
+    /// rows is let go of where it was.
+    fn close_queue(&mut self) {
+        self.queue_panel = None;
+        self.queue_drag = None;
+        if let Some(sheet) = self.queue_sheet.as_mut() {
+            sheet.hide(iced::time::Instant::now());
+        }
     }
 
-    /// The queue panel's height: its padding, the "Now playing" and "Up
-    /// next" lines, and a row per track up to [`QUEUE_ROWS`].
-    pub fn queue_height(rows: usize) -> f32 {
-        arkui::panel::titled_height(rows.clamp(1, QUEUE_ROWS)) + arkui::panel::TITLE
+    /// The ids of what plays next, in order.
+    pub fn upcoming_ids(&self) -> Vec<crate::domain::Id<crate::domain::Media>> {
+        self.queue_rows().into_iter().skip(1).map(|(_, t)| t.id).collect()
+    }
+
+    /// What plays next as it is drawn: in the order a row was just dropped
+    /// into, until the queue says so itself.
+    pub fn upcoming_drawn(&self) -> Vec<(usize, listening::Track)> {
+        let rows: Vec<_> = self.queue_rows().into_iter().skip(1).collect();
+        match &self.queue_settle {
+            Some(s) if self.upcoming_ids() == s.before => arkui::reorder::moved(&rows, s.from, s.to),
+            _ => rows,
+        }
+    }
+
+    /// The row held on the queue let go: a click plays it, as a click on
+    /// any row does; a drag moves it there and lets it settle. (`step`: the
+    /// update this is part of reacts once, after.)
+    fn drop_queue_row(&mut self) -> Task<Message> {
+        let Some(drag) = self.queue_drag.take() else {
+            return Task::none();
+        };
+        let now = iced::time::Instant::now();
+        let rows = self.queue_rows();
+        match drag.drop(now) {
+            arkui::reorder::Drop::Click(row) => match rows.get(row + 1) {
+                Some((index, _)) => self.step(Message::QueueJump(*index)),
+                None => Task::none(),
+            },
+            arkui::reorder::Drop::Moved { from, to, settle } => {
+                let before = self.upcoming_ids();
+                if from != to {
+                    if let (Some((a, _)), Some((b, _))) = (rows.get(from + 1), rows.get(to + 1)) {
+                        let (a, b) = (*a, *b);
+                        let _ = self.step(Message::QueueMove(a, b));
+                    }
+                }
+                self.queue_panel = Some(to + 1);
+                self.queue_settle = Some(QueueSettle {
+                    settle,
+                    from,
+                    to,
+                    before,
+                    since: now,
+                });
+                Task::none()
+            }
+        }
+    }
+
+    /// Whether anything is on its way at `now`: what the frame clock runs
+    /// for.
+    fn moving(&self, now: iced::time::Instant) -> bool {
+        self.adding.iter().chain(self.adding_leaving.iter()).any(|a| a.shown.moving(now))
+            || self.queue_sheet.is_some_and(|s| s.moving(now))
+            || self.queue_drag.as_ref().is_some_and(|d| d.moving(now))
+            || self.queue_settle.as_ref().is_some_and(|s| {
+                // …and while the queue has yet to say a row moved, so the
+                // move drawn ahead of it is let go of in time if it never does.
+                s.settle.moving(now) || (s.from != s.to && self.upcoming_ids() == s.before)
+            })
+    }
+
+    /// What has finished moving by `now`, dropped: a dialog faded out, a
+    /// sheet slid away, and a row settled once the queue has it where it
+    /// was dropped (or has not said so in [`QUEUE_PENDING`]).
+    fn settle_motion(&mut self, now: iced::time::Instant) {
+        if self.adding_leaving.as_ref().is_some_and(|a| a.shown.gone(now)) {
+            self.adding_leaving = None;
+        }
+        if self.queue_sheet.is_some_and(|s| s.gone(now)) {
+            self.queue_sheet = None;
+        }
+        let ids = self.upcoming_ids();
+        if let Some(s) = &self.queue_settle {
+            let arrived = ids != s.before || s.from == s.to;
+            if !s.settle.moving(now) && (arrived || now.saturating_duration_since(s.since) > QUEUE_PENDING) {
+                self.queue_settle = None;
+            }
+        }
     }
 
     /// The device picker's rows: every device of this account standing in the
@@ -2378,11 +2485,18 @@ impl App {
                     false => self.note.clone(),
                 });
             }
-            Message::Adding(open) => {
-                self.adding = open.then(|| Adding::new(self.shows_kind()));
+            Message::Adding(true) => {
+                self.adding = Some(Adding::new(self.shows_kind()));
+                self.adding_leaving = None;
                 // The keys go in the box: what opening it was for is typing.
-                if open {
-                    return iced::widget::operation::focus(QUERY);
+                return iced::widget::operation::focus(QUERY);
+            }
+            // Closed, it fades out as it came, drawn but no longer the
+            // keyboard's.
+            Message::Adding(false) => {
+                if let Some(mut leaving) = self.adding.take() {
+                    leaving.shown.hide(iced::time::Instant::now());
+                    self.adding_leaving = Some(leaving);
                 }
             }
             Message::Query(query) => {
@@ -2731,13 +2845,41 @@ impl App {
                 self.all_works = all;
                 self.cursors[Pane::Tracks as usize] = 0;
             }
-            Message::OpenQueue if self.queue_panel.is_some() => self.queue_panel = None,
+            Message::OpenQueue if self.queue_panel.is_some() => self.close_queue(),
             Message::OpenQueue => {
                 self.devices = None;
                 self.queue_panel = Some(0);
+                let now = iced::time::Instant::now();
+                match self.queue_sheet.as_mut() {
+                    Some(sheet) => sheet.show(now),
+                    None => self.queue_sheet = Some(arkui::sheet::shown(now)),
+                }
             }
-            Message::CloseQueue => self.queue_panel = None,
+            Message::CloseQueue => self.close_queue(),
+            // A row passed under a row being dragged is not the cursor's.
+            Message::QueueAt(_) if self.queue_drag.as_ref().is_some_and(|d| d.dragging()) => {}
             Message::QueueAt(at) => self.queue_panel = Some(at),
+            Message::QueueGrab(row) => {
+                let upcoming = self.queue_rows().len().saturating_sub(1);
+                if row < upcoming {
+                    self.queue_panel = Some(row + 1);
+                    self.queue_settle = None;
+                    self.queue_drag = Some(arkui::reorder::Reorder::press(
+                        row,
+                        upcoming,
+                        arkui::panel::ENTRY,
+                        self.cursor.y,
+                        iced::time::Instant::now(),
+                    ));
+                }
+            }
+            Message::QueueDrag(at) => {
+                self.cursor = at;
+                if let Some(drag) = self.queue_drag.as_mut() {
+                    drag.drag(at.y, iced::time::Instant::now());
+                }
+            }
+            Message::QueueDrop => return self.drop_queue_row(),
             Message::QueueJump(_) | Message::QueueRemove(_) => {
                 self.edit_queue(&message);
                 // The cursor stays on a row there is.
@@ -2756,7 +2898,7 @@ impl App {
             Message::PlayNext(id) => self.enqueue(id, true),
             Message::AddToQueue(id) => self.enqueue(id, false),
             Message::OpenDevices => {
-                self.queue_panel = None;
+                self.close_queue();
                 // The cursor starts on the device that has the sound — or,
                 // while it is nowhere, on this one — so `<Enter>` straight
                 // away changes nothing.
@@ -2840,6 +2982,7 @@ impl App {
                 if let Some(by) = self.swipe.tick(iced::time::Instant::now()) {
                     self.router.go(by);
                 }
+                self.settle_motion(iced::time::Instant::now());
                 if let Some(m) = self.ctx.tick() {
                     return self.update(m);
                 }
@@ -2952,12 +3095,9 @@ impl App {
         if self.swipe.active() {
             return Some(Duration::from_millis(16));
         }
-        // …and so does a dialog rising into place.
-        if self
-            .adding
-            .as_ref()
-            .is_some_and(|a| arkui::dialog::opening(a.opened, iced::time::Instant::now()))
-        {
+        // …and so does a dialog or a sheet coming or going, and a row of
+        // the queue sliding out of the way of one dragged, or settling.
+        if self.moving(iced::time::Instant::now()) {
             return Some(Duration::from_millis(16));
         }
         if self.ctx.dwelling() || self.volume_held.is_some() {

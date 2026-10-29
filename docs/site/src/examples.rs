@@ -196,7 +196,21 @@ const PICTURES: &[(&str, &[Example])] = &[
         ],
     ),
     ("picker", &[ex("picker", "A picker on its own, centred over the dimmed page.", picker_)]),
-    ("dialog", &[ex("dialog", "A dialog risen over the page as it dims.", dialog_)]),
+    (
+        "dialog",
+        &[
+            ex("dialog", "A dialog faded in over the page as it dims.", dialog_),
+            ex("sheet", "A sheet slid in along the window's right-hand edge.", sheet_),
+        ],
+    ),
+    (
+        "reorder",
+        &[ex(
+            "reorder",
+            "A row dragged down past two others, which have slid up out of its way.",
+            reorder_,
+        )],
+    ),
 ];
 
 /// What a component's functions answer, as a table: the call, then what it
@@ -260,7 +274,11 @@ pub fn notes(component: &str) -> &'static [&'static str] {
             "Resting on an entry with a submenu shows it beside the entry; j, k, l, h and <Esc> walk the menu and its submenu.",
         ],
         "picker" => &["Off a menu, a picker is that menu's submenu, pinned beside its entry (layer::pinned); on its own it is centred over a dimmed page (layer::dimmed, layer::centred)."],
-        "dialog" => &["It rises as the page dims, eased over dialog::OPENING; a click on the dimmed page, its ×, or <Esc> closes it."],
+        "dialog" => &[
+            "A dialog fades in and grows from 95% over 200 ms as the page dims over 150 ms, and goes back the same way; a click on the dimmed page, its ×, or <Esc> closes it.",
+            "A sheet slides in from beyond the window's edge over 500 ms and out over 300 ms, on ease-in-out.",
+        ],
+        "reorder" => &["A press that moves less than reorder::THRESHOLD is a click; past it the row lifts, and the rows it passes slide a row's height out of its way over reorder::SLIDING."],
         "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe). In a browser the browser's own back does it."],
         "scroll" => &["scroll::reveal keeps the cursor on screen as j and k walk past the edge of a list."],
         "keys" => &["A count before a motion repeats it; a Move walks whatever grid the pane with the keys has (vim::Grid, vim::Page)."],
@@ -757,6 +775,68 @@ fn picker_(c: Canvas) -> Picture {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+    )
+}
+
+fn sheet_(c: Canvas) -> Picture {
+    let close = button(icon::tinted(glyphs::CLOSE, 14.0, |p| p.background.base.text))
+        .style(style::quiet)
+        .padding(6)
+        .on_press(());
+    let entry = |name: &str, lit: bool| {
+        panel::entry(None, panel::label(name.to_string(), lit), None)
+            .height(panel::ENTRY)
+            .style(move |t| style::entry(t, lit, true))
+    };
+    let body = column![
+        panel::title("Up next".into()),
+        entry("Harbour", true),
+        entry("Orchard", false),
+        entry("Meadow", false),
+    ];
+    let narrow = narrow(c.width);
+    let width = arkui::sheet::width(c.width);
+    c.window(
+        WINDOW,
+        stack![
+            rows(None, narrow),
+            arkui::dialog::backdrop((), (), 1.0),
+            arkui::sheet::view(
+                "A sheet".into(),
+                Some("Along the edge, the page dimmed.".into()),
+                close.into(),
+                body.into(),
+                width,
+                1.0
+            ),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into(),
+    )
+}
+
+fn reorder_(c: Canvas) -> Picture {
+    use arkui::reorder::{list, Reorder, SLIDING};
+    let entry = |name: &str, lit: bool| -> El<'static> {
+        panel::entry(None, panel::label(name.to_string(), lit), None)
+            .height(panel::ENTRY)
+            .style(move |t| style::entry(t, lit, true))
+            .into()
+    };
+    // The second row pressed and pulled down a row and three quarters: it
+    // would land two places down, and the two it passed have slid up.
+    let at = iced::time::Instant::now();
+    let mut drag = Reorder::press(1, 5, panel::ENTRY, 0.0, at);
+    drag.drag(1.75 * panel::ENTRY, at);
+    let names = ["Harbour", "Orchard", "Meadow", "Summit", "Delta"];
+    let rows = names.iter().enumerate().map(|(i, n)| entry(n, i == 1)).collect();
+    c.paint(
+        panel::panel(
+            column![panel::title("Up next".into()), list(rows, panel::ENTRY, Some(&drag), None, at + SLIDING)],
+            240.0,
+        )
+        .into(),
     )
 }
 
