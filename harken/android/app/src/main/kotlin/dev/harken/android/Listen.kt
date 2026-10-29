@@ -81,8 +81,8 @@ class Listen(private val session: ArkSession, val name: String) {
     /** The server a track's file is joined to. */
     val server: String = session.server
 
-    /** An album's cover, by its name, as the library has it: the app's to say, and "" for none. */
-    @Volatile var art: (String) -> String = { "" }
+    /** A track's cover by its album and its creator — a show's, for an episode — as the library has it: the app's to say, and "" for none. */
+    @Volatile var art: (String, String) -> String = { _, _ -> "" }
 
     // The session's thread only.
     private var player: Reconciled? = null

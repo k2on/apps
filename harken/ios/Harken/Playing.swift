@@ -53,6 +53,42 @@ struct Where: Equatable {
     }
 }
 
+/// Where this phone's hand put the position, held until the session's clock
+/// agrees. A seek is a press of the session, previewed and drawn back a
+/// moment later, while the clock already drawn still says where the track
+/// was; let go of, the scrubber jumped back and then forward. So the hand is
+/// shown instead, running on while the track plays, until the clock comes
+/// within `agreeMs` of it, the track changes, or `forgetMs` pass without
+/// agreement: a seek refused, or lost. Android's `Sought`.
+struct Sought: Equatable {
+    /// How close the clock comes to the hand before it is the clock's again.
+    static let agreeMs: Int64 = 1_500
+    /// How long the hand is believed with no clock agreeing.
+    static let forgetMs: Int64 = 5_000
+
+    private var ms: Int64 = 0
+    private var at: Int64 = 0
+    private var track: String? = nil
+
+    /// The hand put `track` at `ms`, at `now` (this phone's ms).
+    mutating func hold(_ ms: Int64, track: String, now: Int64) {
+        self.ms = ms
+        at = now
+        self.track = track
+    }
+
+    /// What to show at `now`: the session's `clock` for `track`, or the hand's position while the clock has not caught up with it.
+    mutating func shown(clock: Int64, track: String, counting: Bool, now: Int64) -> Int64 {
+        guard let held = self.track else { return clock }
+        let expect = counting ? ms + max(now - at, 0) : ms
+        if held != track || now - at > Sought.forgetMs || abs(clock - expect) <= Sought.agreeMs {
+            self.track = nil
+            return clock
+        }
+        return expect
+    }
+}
+
 /// The player as the screens see it — all of it but the position, which is
 /// counted from [clock] when it is drawn.
 struct PlayerState: Equatable {
@@ -90,15 +126,15 @@ struct PlayerState: Equatable {
     /// How much of what is to come the queue shows.
     static let upNextMost = 100
 
-    /// One view of what plays, drawn. `art` is an album's cover path by its
-    /// name ("" for none), `server` what a path is joined to, `name` what this
+    /// One view of what plays, drawn. `art` is a track's cover path by its
+    /// album and its creator ("" for none), `server` what a path is joined to, `name` what this
     /// phone is called; `local` this phone's own player's volume, and
     /// `shuffle`, `repeatMode` and `buffering` what only it has — all three
     /// drawn alone, never joined.
-    static func of(_ h: Heard, server: String, name: String, art: (String) -> String, local: Volume?,
+    static func of(_ h: Heard, server: String, name: String, art: (String, String) -> String, local: Volume?,
                    shuffle: Bool, repeatMode: Repeat, buffering: Bool, now: Int64) -> PlayerState {
         func playing(_ t: Track, _ i: Int) -> Playing {
-            let a = art(t.album)
+            let a = art(t.album, t.creator)
             return Playing(id: t.id.hex, title: t.title, artist: t.creator, album: t.album, art: a.isEmpty ? "" : Files.url(server, a), index: i)
         }
         let volume = h.joined ? h.listening?.volume(h.me) : local
@@ -164,11 +200,11 @@ struct LastPlayed: Equatable {
     var on: String? = nil
 
     /// Home's last played: the session's track while this phone is part of a
-    /// session that has one, else the newest play in the log. `art` is an
-    /// album's cover by its name; `here` what this phone is called.
-    static func of(_ h: Heard, played: Play?, playlists: [Playlist], art: (String) -> String, server: String, here: String) -> LastPlayed? {
-        func cover(_ album: String) -> String {
-            let a = art(album)
+    /// session that has one, else the newest play in the log. `art` is a
+    /// track's cover by its album and its creator; `here` what this phone is called.
+    static func of(_ h: Heard, played: Play?, playlists: [Playlist], art: (String, String) -> String, server: String, here: String) -> LastPlayed? {
+        func cover(_ album: String, _ creator: String) -> String {
+            let a = art(album, creator)
             return a.isEmpty ? "" : Files.url(server, a)
         }
         if h.joined, let s = h.listening, let a = s.active, let t = a.now {
@@ -176,11 +212,11 @@ struct LastPlayed: Equatable {
             if s.sounding, let id = a.output.here {
                 on = id == h.me ? "Playing on \(here)" : "Playing on \(s.devices[id]?.name ?? "another device")"
             }
-            let p = Playing(id: t.id.hex, title: t.title, artist: t.creator, album: t.album, art: cover(t.album))
+            let p = Playing(id: t.id.hex, title: t.title, artist: t.creator, album: t.album, art: cover(t.album, t.creator))
             return LastPlayed(track: p, from: Page.of(place: a.from, playlists: playlists), live: true, on: on)
         }
         guard let p = played else { return nil }
-        let track = Playing(id: p.trackId?.hex ?? "", title: p.title, artist: p.creator, album: p.album, art: cover(p.album))
+        let track = Playing(id: p.trackId?.hex ?? "", title: p.title, artist: p.creator, album: p.album, art: cover(p.album, p.creator))
         return LastPlayed(track: track, from: Page.of(place: p.from, playlists: playlists))
     }
 

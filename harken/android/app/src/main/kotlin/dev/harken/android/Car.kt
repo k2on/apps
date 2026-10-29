@@ -162,7 +162,7 @@ class Car(
                             .setTitle(t.title)
                             .setArtist(t.creator)
                             .setAlbumTitle(t.album)
-                            .setArtworkUri(art(library.artOf(t.album), t.album.ifEmpty { t.title }))
+                            .setArtworkUri(art(library.artOf(t.album, t.creator), t.album.ifEmpty { t.title }))
                             .setDurationMs(t.durationMs.takeIf { it > 0 })
                             .setIsBrowsable(false)
                             .setIsPlayable(true)

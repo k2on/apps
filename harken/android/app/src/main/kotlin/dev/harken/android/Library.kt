@@ -282,23 +282,32 @@ class Library(private val session: ArkSession) {
     val mine: StateFlow<Map<Id, Listened>> = mineFlow.asStateFlow()
 
     /**
-     * An album's cover by its name, "" for none: the albums by name, made again only when the list
-     * is another one. What the listening session's tracks — which name an album, not a row — are
-     * drawn with, and asked from any thread.
+     * A queued track's cover by what it names — its album, else its show, since an episode names no
+     * album and its show as its creator — "" for none: the albums by name and the shows by title,
+     * made again only when a list is another one. What the listening session's tracks — which name
+     * a record, not a row — are drawn with, and asked from any thread.
      */
-    val artOf: (String) -> String =
-        object : (String) -> String {
-            private var of: List<Album>? = null
+    val artOf: (String, String) -> String =
+        object : (String, String) -> String {
+            private var albums: List<Album>? = null
             private var byName: Map<String, String> = emptyMap()
+            private var shows: List<Show>? = null
+            private var byTitle: Map<String, String> = emptyMap()
 
             @Synchronized
-            override fun invoke(name: String): String {
-                val now = albumsFlow.value
-                if (now !== of) {
-                    of = now
-                    byName = now.associate { it.name to it.art }
+            override fun invoke(album: String, creator: String): String {
+                val a = albumsFlow.value
+                if (a !== albums) {
+                    albums = a
+                    byName = a.associate { it.name to it.art }
                 }
-                return byName[name] ?: ""
+                byName[album]?.let { return it }
+                val s = showsFlow.value
+                if (s !== shows) {
+                    shows = s
+                    byTitle = s.associate { it.title to it.art }
+                }
+                return byTitle[creator] ?: ""
             }
         }
 

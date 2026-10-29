@@ -1,5 +1,9 @@
 //! The link (§1.11's transport): a device's connection to its server,
-//! dialled again with backoff whenever it closes.
+//! dialled again whenever it closes: at once when the connection had been
+//! up — a server restarting, a network that came back — and with backoff
+//! from a dial that fails, so "waiting to dial" is only ever said of a
+//! server that was tried and not reached. Whoever drives the peer may also
+//! have it dialled now ([`Peer::dial_now`]): the app came to the front.
 //!
 //! A connection's first message is the login's token, which the server
 //! resolves to who the connection is; every message after is one frame.
@@ -73,10 +77,11 @@ impl Wire for Closed {
 }
 
 /// The link's state: where and as whom it dials, the connection, and when
-/// it is dialled again — from `backoff.0` milliseconds after a close,
-/// doubling to `backoff.1`, back to the first once one opens; and how many
-/// of what the connection said one pump takes in (`chunk`), the rest kept
-/// for the next, so a driver answers between them.
+/// it is dialled again — at once after a connection that had opened closes;
+/// `backoff.0` milliseconds after a dial that fails, doubling to
+/// `backoff.1`, back to the first once one opens; and how many of what the
+/// connection said one pump takes in (`chunk`), the rest kept for the next,
+/// so a driver answers between them.
 pub struct Link {
     pub url: Option<String>,
     pub token: Option<String>,
@@ -87,6 +92,9 @@ pub struct Link {
     pub(crate) wire: Option<Box<dyn Wire>>,
     due: Option<u64>,
     pub(crate) wait: u64,
+    /// Whether the connection last dialled opened: its close is a drop, dialled again at once,
+    /// where a dial that never opened failed, and waits.
+    pub(crate) opened: bool,
     pub(crate) offline: bool,
     waker: Option<Wake>,
     /// How many connections have opened.
@@ -105,6 +113,7 @@ impl Default for Link {
             wire: None,
             due: None,
             wait: 250,
+            opened: false,
             offline: false,
             waker: None,
             epoch: 0,
@@ -188,6 +197,33 @@ impl Peer {
         self.link.wire.is_some()
     }
 
+    /// Dial now, whatever the backoff says: the person is looking — the app
+    /// came to the front — so a server that is there is reached before the
+    /// screens say it is not, and the backoff starts over for them. Nothing
+    /// while a connection is up or being made, offline on purpose, or signed
+    /// out.
+    pub fn dial_now(&mut self) {
+        if self.link.wire.is_some() || self.link.offline || self.link.token.is_none() || self.link.url.is_none() {
+            return;
+        }
+        self.link.wait = self.link.backoff.0;
+        self.link.due = Some(crate::monotonic_ms());
+    }
+
+    // The dial that is due, made.
+    fn dial_if_due(&mut self, now: u64) {
+        if !self.link.due.is_some_and(|d| now >= d) {
+            return;
+        }
+        self.link.due = None;
+        let label = self.label();
+        if let (Some(url), Some(token), false) = (&self.link.url, &self.link.token, self.link.offline) {
+            let dial = self.link.dial.get_or_insert_with(|| Box::new(socket));
+            crate::observe::link(&label, "dial", Some(url));
+            self.link.wire = Some(dial.dial(url, token, self.link.waker.clone()));
+        }
+    }
+
     /// How much of what the connection said waits for the next pump.
     pub fn backlog(&self) -> usize {
         self.link.backlog.len()
@@ -198,15 +234,7 @@ impl Peer {
     pub fn pump(&mut self) -> Pumped {
         let now = crate::monotonic_ms();
         let mut p = Pumped::default();
-        if self.link.due.is_some_and(|d| now >= d) {
-            self.link.due = None;
-            let label = self.label();
-            if let (Some(url), Some(token), false) = (&self.link.url, &self.link.token, self.link.offline) {
-                let dial = self.link.dial.get_or_insert_with(|| Box::new(socket));
-                crate::observe::link(&label, "dial", Some(url));
-                self.link.wire = Some(dial.dial(url, token, self.link.waker.clone()));
-            }
-        }
+        self.dial_if_due(now);
         let l = &mut self.link;
         l.backlog.extend(l.wire.as_mut().map(|w| w.events()).unwrap_or_default());
         let events: Vec<Event> = l.backlog.drain(..l.chunk.min(l.backlog.len())).collect();
@@ -232,9 +260,16 @@ impl Peer {
                             p.denied = Some(reason.to_string());
                             self.link.token = None;
                         }
+                        // A connection that had opened is dialled again at once; a dial that
+                        // failed waits, and the next waits twice as long.
                         None if self.link.token.is_some() && !self.link.offline => {
-                            self.link.due = Some(now + self.link.wait);
-                            self.link.wait = (self.link.wait * 2).min(self.link.backoff.1);
+                            if self.link.opened {
+                                self.link.due = Some(now);
+                            } else {
+                                self.link.due = Some(now + self.link.wait);
+                                self.link.wait = (self.link.wait * 2).min(self.link.backoff.1);
+                            }
+                            self.link.opened = false;
                         }
                         None => {}
                     }
@@ -242,6 +277,9 @@ impl Peer {
                 }
             }
         }
+        // A dial due at once is made before this pump ends, so nobody is shown a link waiting
+        // that is about to be dialled.
+        self.dial_if_due(crate::monotonic_ms());
         self.tick(crate::now_ms());
         self.jobs(crate::now_ms());
         self.flush();

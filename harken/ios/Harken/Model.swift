@@ -65,6 +65,9 @@ final class Model: ObservableObject {
     private var albumsById = [String: AlbumsEntry]()
     // What plays carries its album's name and no more: its cover is found by that.
     private var albumsByName = [String: AlbumsEntry]()
+    private var showsByTitle = [String: ShowsEntry]()
+    /// Where this phone's hand put the position, until the session's clock agrees.
+    private var sought = Sought()
     private var asked: Task<Void, Never>? = nil
     private lazy var drag = Drag(clock: { nowMs() }, later: { ms, f in
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(ms)), execute: f)
@@ -89,6 +92,9 @@ final class Model: ObservableObject {
 
     /// An event from a screen, the browser sheet, a link or the app's phase.
     func send(_ e: Event) {
+        // Back in front: the server dialled now rather than when the link's backoff says, so one
+        // that is there is reached before a screen says it is not.
+        if case .foreground = e { bridge?.dialNow() }
         let effects = machine.next(e)
         step = machine.step
         run(effects)
@@ -215,6 +221,11 @@ final class Model: ObservableObject {
             albumsById = byId
             albumsByName = byName
         }
+        if s.shows.count != snapshot.shows.count || s.shows != snapshot.shows {
+            var m = [String: ShowsEntry](minimumCapacity: s.shows.count)
+            for sh in s.shows { m[sh.title] = sh }
+            showsByTitle = m
+        }
         snapshot = s
         redraw()
         // Signed in just now: opening, until the replica has what the server had —
@@ -224,12 +235,24 @@ final class Model: ObservableObject {
         }
     }
 
-    // What plays, drawn again: from the reconciler's one view, and what only this phone's player has.
+    /// A queued track's cover path: its album's, else — an episode names no album, and its show as
+    /// its creator — its show's; "" for none.
+    private func cover(_ album: String, _ creator: String) -> String {
+        albumsByName[album]?.art ?? showsByTitle[creator]?.art ?? ""
+    }
+
+    // What plays, drawn again: from the reconciler's one view, and what only this phone's player has
+    // — and the position where this phone's hand put it, while the clock has not caught up (Sought).
     private func redraw() {
         let h = snapshot.heard
         let local = sound.volume().map { Volume(of: .here, level: Int($0.level), muted: $0.muted, remote: false) }
-        let next = PlayerState.of(h, server: server, name: deviceName, art: { [albumsByName] in albumsByName[$0]?.art ?? "" }, local: local,
-                                  shuffle: sound.shuffled, repeatMode: sound.repeatMode, buffering: sound.state().buffering, now: nowMs())
+        let now = nowMs()
+        var next = PlayerState.of(h, server: server, name: deviceName, art: cover, local: local,
+                                  shuffle: sound.shuffled, repeatMode: sound.repeatMode, buffering: sound.state().buffering, now: now)
+        if let n = next.now {
+            let shown = sought.shown(clock: next.clockMs, track: n.id, counting: next.counting, now: now)
+            if shown != next.clockMs { (next.clockMs, next.clockAt) = (shown, now) }
+        }
         if next != player {
             player = next
             onPlayer?(next)
@@ -362,7 +385,7 @@ final class Model: ObservableObject {
 
     /// What Home says was played last: the session's track, else the log's newest play.
     var lastPlayed: LastPlayed? {
-        LastPlayed.of(snapshot.heard, played: snapshot.lastPlayed, playlists: snapshot.playlists, art: { [albumsByName] in albumsByName[$0]?.art ?? "" },
+        LastPlayed.of(snapshot.heard, played: snapshot.lastPlayed, playlists: snapshot.playlists, art: cover,
                       server: server, here: deviceName)
     }
 
@@ -505,8 +528,11 @@ final class Model: ObservableObject {
 
     /// Seek, on release; while joined the scrubber's slot is emptied with it.
     func seek(_ ms: Int64) {
+        // Shown where the finger left it at once, not after the press's round trip (Sought).
+        if let n = player.now { sought.hold(ms, track: n.id, now: nowMs()) }
         press(.seek(ms)) { [sound] in sound.seek(ms: ms) }
         if joined { bridge?.press(.scrub(nil)) }
+        redraw()
     }
 
     /// Where this phone's scrubber is being dragged to: said to the session's other devices; nothing alone.

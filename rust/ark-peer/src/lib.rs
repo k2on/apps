@@ -754,7 +754,7 @@ impl Peer {
     /// A connection to its server is up — a new sight of it: a `Hello` in
     /// each space, and its pending intents pushed again.
     pub fn connected(&mut self) {
-        (self.link.epoch, self.link.wait) = (self.link.epoch + 1, self.link.backoff.0);
+        (self.link.epoch, self.link.wait, self.link.opened) = (self.link.epoch + 1, self.link.backoff.0, true);
         self.linked = true;
         self.frames.clear();
         self.step(Space::Durable, Input::Connected);

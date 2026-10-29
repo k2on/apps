@@ -308,7 +308,7 @@ fun HarkenApp(
     // What the search last found: the app's, not the tab's, so leaving the tab keeps it.
     val searched = remember(session) { Searched() }
     // What Home says was played last: the session's track, else the log's newest play.
-    val last = remember(heard, played, albumsByName, playlists) { lastPlayed(heard, played, playlists, { albumsByName[it]?.art ?: "" }, session.server, listen.name) }
+    val last = remember(heard, played, albumsByName, playlists) { lastPlayed(heard, played, playlists, library.artOf, session.server, listen.name) }
 
     LaunchedEffect(notice) {
         val n = notice ?: return@LaunchedEffect

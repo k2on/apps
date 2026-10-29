@@ -39,8 +39,9 @@ signing, bundle id `us.koon.harken`) over
 `../ffi/ios/HarkenFFI.xcframework` and `../ffi/ios/swift`, and the
 `HarkenTests` unit tests, in the one scheme `Harken`. `Harken.xcodeproj`
 and `Harken/Info.plist` are outputs; regenerate rather than edit. The icon
-is `tools/icon.py`'s (standard-library Python: a gold waveform on a dark
-ground, 1024 × 1024, opaque).
+is `tools/icon.py`'s (standard-library Python: harken's trumpet, the
+Android launcher's and the favicon's, in gold on the dark ground, 1024 ×
+1024, opaque).
 
 ## How the pieces meet
 
