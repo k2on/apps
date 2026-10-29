@@ -436,7 +436,7 @@ class Screens {
         }
         // Home, while the browser is playing: last played is the session's track, and where.
         shot("home-last-played") {
-            val live = lastPlayed(playing, null, Demo.playlists, { "" }, server, "Pixel 7")
+            val live = lastPlayed(playing, null, Demo.playlists, { _, _ -> "" }, server, "Pixel 7")
             tab(Tab.Home, desktop) { HomeScreen(HomeData(true, live, Demo.tracks, Demo.playlists, Demo.albums, null), Demo::albumOf, Idle) }
         }
     }
