@@ -165,3 +165,26 @@ fn a_replica_keeps_rows_of_a_schema_it_grows_from() {
     assert!(kept(&mut d, &demo).unwrap(), "rows of this schema");
     assert!(!kept(&mut d, &new).unwrap(), "rows of a schema not grown from");
 }
+
+/// A device that synced before a migration goes on writing after it: its
+/// next intent is the one after its last, as the journal keeps it, not one
+/// past a gap. Falsified by `migrate` not keeping the journal: Psalms was
+/// never confirmed.
+#[test]
+fn a_migrated_server_takes_new_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let (data, phone) = (dir.path().join("server"), dir.path().join("phone"));
+    let hub = server(support::config(), &data).unwrap();
+    drop(synced(support::config(), &phone, &hub, &["Hymns"], |p| {
+        p.log.pending.is_empty() && p.log.log().head().0 >= 1
+    }));
+    hub.stop();
+    let hub = server(retitled(true), &data).unwrap();
+    let at = hub.with(|p| p.log.log().head().0).unwrap();
+    drop(synced(retitled(true), &phone, &hub, &["Psalms"], |p| {
+        p.log.pending.is_empty() && p.log.log().head().0 > at
+    }));
+    let store = hub.with(|p| p.log.store.clone()).unwrap();
+    assert_eq!(titles(&store), ["Hymns", "Psalms"]);
+    hub.stop();
+}

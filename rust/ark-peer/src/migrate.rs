@@ -8,7 +8,8 @@
 //! schema it was written under, the rows read through the domain's
 //! migrations ([`ark::migrate`]), and written whole as a snapshot one past
 //! the head, so every replica, wherever it stands, is behind it and is sent
-//! it whole. What it stood on before is kept beside it, named by that
+//! it whole; each origin's last `local` among the entries it folds is its
+//! journal's, as a horizon moving keeps it. What it stood on before is kept beside it, named by that
 //! schema's hash (`kv.<hash>`, `log.<hash>`). A replica's rows are its
 //! authority's to send again: it starts empty instead ([`kept`]), its
 //! pending intents and its origin kept. A disk with rows and no schema
@@ -89,6 +90,11 @@ pub fn migrate(disk: &mut dyn Disk, to: &Arc<Schema>, steps: &[Migration]) -> io
         state: store.state_hash(),
         rows,
     };
+    // The journal rebuilt each origin's last from the entries; the snapshot
+    // holds none, so the journal keeps them, or every device's next intent
+    // is past a gap.
+    let last = old.log().entries().into_iter().map(|l| (l.entry.origin, l.entry.actor, l.entry.local));
+    crate::local::passed(disk, last)?;
     let before = &was.hash().hex()[..12];
     for (name, bytes) in [("kv", kv), ("log", log)] {
         let name = format!("{name}.{before}");
