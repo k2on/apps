@@ -166,12 +166,20 @@ impl Catalogue {
         let mut takes: BTreeMap<String, (&str, &str)> = BTreeMap::new();
         let mut work_ids: BTreeMap<&str, String> = BTreeMap::new();
         for album in &self.albums {
-            for t in &album.tracks {
-                let Some(file) = local(&t.file) else { continue };
+            // A movement's number is its place in its work, not on the
+            // album: Summer's first movement is its first, track 4 or not.
+            let mut tracks: Vec<&Track> = album.tracks.iter().collect();
+            tracks.sort_by_key(|t| t.track);
+            let mut nth: BTreeMap<String, i64> = BTreeMap::new();
+            for t in tracks {
                 // The work's own name where the catalogue has one, and the
                 // album's where it does not.
                 let work = work_of(&t.catalogue);
                 let work_title = work.map_or(album.name.clone(), |w| w.title.clone());
+                let n = nth.entry(work_key(&t.composer, &t.catalogue, &work_title)).or_default();
+                *n += 1;
+                let movement_no = *n;
+                let Some(file) = local(&t.file) else { continue };
                 let song = AddSong {
                     title: t.title.clone(),
                     artist: t.composer.clone(),
@@ -187,7 +195,7 @@ impl Catalogue {
                     artist_art: art_of(&t.composer),
                     disc: 1,
                     work_title: work_title.clone(),
-                    movement_no: t.track,
+                    movement_no,
                     artist_banner: String::new(),
                     released: album.year,
                     folder: DIR.into(),
@@ -279,5 +287,28 @@ mod tests {
         let tagged = crate::host::work_key("Georg Philipp Telemann", "TWV 55:e1", "Tafelmusik I: Ouverture-Suite in E minor");
         let spring = crate::host::work_key("Antonio Vivaldi", "RV 269", "Spring");
         assert_eq!(describes, [(tagged, true), (spring, false)]);
+    }
+
+    /// A movement is numbered by its place in its work: two concertos on one
+    /// record, three movements each, are 1, 2, 3 and 1, 2, 3, not 1 to 6.
+    /// Falsified by numbering by the track: Summer's were 4, 5, 6.
+    #[test]
+    fn a_movement_is_numbered_in_its_work() {
+        let track = |t: i64, cat: &str| {
+            format!(r#"{{ "title": "{t}", "composer": "Antonio Vivaldi", "catalogue": "{cat}", "track": {t}, "ms": 1, "file": "{t}.mp3" }}"#)
+        };
+        let tracks: Vec<String> = (1..=6).map(|t| track(t, if t <= 3 { "RV 269" } else { "RV 315" })).collect();
+        let json = format!(
+            r#"{{ "works": [], "albums": [{{ "name": "The Four Seasons", "tracks": [{}] }}] }}"#,
+            tracks.join(",")
+        );
+        let numbers: Vec<i64> = Catalogue::parse(&json)
+            .unwrap()
+            .calls(|u| Some(u.to_string()))
+            .into_iter()
+            .filter(|c| c.name == "library.add_song")
+            .map(|c| AddSong::from_bytes(&c.input).unwrap().movement_no)
+            .collect();
+        assert_eq!(numbers, [1, 2, 3, 1, 2, 3]);
     }
 }

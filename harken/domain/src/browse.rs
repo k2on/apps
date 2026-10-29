@@ -111,17 +111,20 @@ pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetails
     }))
 }
 
-/// One album's tracks in the order the work goes: part, then track (an
-/// untagged one, 0, last in its part), then title, then the key.
+/// One album's tracks in the order it plays: disc, then track; an untagged
+/// track (0) after the rest, by its part, then title, then the key.
 #[view("library.album")]
 pub fn album(_: &Ctx, _: &Db<Harken>, input: AlbumInput) -> Result<Plan<LibraryEntry>, Refusal> {
     let (on, id) = (input.playlist_id, input.id);
     Ok(scan::<Harken, Song>()
         .filter_with(move |db, s| s.album_id.as_ref() == Some(&id) && db.media.has(s.media_id))
+        // The order it plays in: its disc, its track. A part's name is no
+        // order — "No. 10" sorts before "No. 2", and a part the tags left
+        // out before every named one — so it only gathers what is untagged.
         .sort_with(|db, s| {
             let part = movement_of(db, s).map(|m| m.part).unwrap_or_default();
             let title = db.media.get(s.media_id).map(|m| m.title).unwrap_or_default();
-            (part, s.track == 0, s.track, title)
+            (s.disc, s.track == 0, s.track, part, title)
         })
         .map_with(move |db, s| library_entry(&db.media.get(s.media_id).expect("a song's media"), playlist_pos(db, on, s.media_id))))
 }
