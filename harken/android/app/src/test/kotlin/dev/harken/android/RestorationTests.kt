@@ -148,6 +148,7 @@ object Fixture {
             movementNo = 0,
             artistBanner = "",
             released = 0,
+            folder = "",
         )
 
     fun peer(): Harken {

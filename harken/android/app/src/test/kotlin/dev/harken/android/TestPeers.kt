@@ -73,6 +73,7 @@ fun song(i: Int, album: String = "Album ${i / 7}", artist: String = "Artist ${i 
         movementNo = 0,
         artistBanner = "",
         released = 0,
+        folder = "",
     )
 
 /**

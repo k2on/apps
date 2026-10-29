@@ -180,6 +180,7 @@ class CatalogueTests {
             movementNo = no,
             artistBanner = "",
             released = 0,
+            folder = "",
         )
 
     /**
