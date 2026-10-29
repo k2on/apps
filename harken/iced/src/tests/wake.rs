@@ -70,11 +70,13 @@ fn a_window_at_rest_is_never_updated() {
 
 /// A frame on the socket is a wake, through the replica's waker to the
 /// window's bell to the subscription; the window answering it pumps once,
-/// and is then at rest again with no timer. A close arms the redial as the
-/// one timer, and it fires. Falsified by not handing the replica the bell
-/// (`set_waker` out of `with_peer`): the open reaches nobody.
+/// and is then at rest again with no timer. A connection that had opened is
+/// dialled again the moment it closes, in that same pump, with nothing to
+/// time; a dial that fails arms the redial as the one timer, and it fires.
+/// Falsified by not handing the replica the bell (`set_waker` out of
+/// `with_peer`): the open reaches nobody.
 #[test]
-fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
+fn a_frame_on_the_socket_is_one_wake_and_a_failed_dial_one_timer() {
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), None);
     let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
     app.peer.client.connect_with("ws://queues", Queues::dialer(made.clone()));
@@ -101,11 +103,20 @@ fn a_frame_on_the_socket_is_one_wake_and_a_close_one_timer() {
     let heard = heard_within(&app, Duration::from_millis(200));
     assert_eq!(names(&heard), ["wake"], "the close, once");
     let _ = app.update(Message::Wake);
-    let at = app.deadline().expect("the close armed the redial");
+    assert_eq!(made.lock().unwrap().len(), 2, "dropped: dialled again at once");
+    assert_eq!(app.deadline(), None, "dialling: nothing to time");
+
+    // That dial never opens: its close arms the redial, the one timer.
+    let q = made.lock().unwrap()[1].clone();
+    q.push(Event::Closed("refused".into()));
+    let heard = heard_within(&app, Duration::from_millis(200));
+    assert_eq!(names(&heard), ["wake"], "the refusal, once");
+    let _ = app.update(Message::Wake);
+    let at = app.deadline().expect("the failed dial armed the redial");
     let heard = heard_within(&app, Duration::from_millis(1_000));
     assert_eq!(names(&heard), ["due"], "the redial, once, at {at}");
     let _ = app.update(Message::Due);
-    assert_eq!(made.lock().unwrap().len(), 2, "dialled again at the deadline");
+    assert_eq!(made.lock().unwrap().len(), 3, "dialled again at the deadline");
 }
 
 /// A submenu's dwell runs the clock while it can still open the submenu,
