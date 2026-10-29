@@ -89,25 +89,37 @@ pub fn view<'a, M: Clone + 'a>(title: String, close: Element<'a, M>, body: Eleme
         .width(Length::Fixed(width))
         .max_height(height)
         .padding(PADDING)
-        .style(move |theme| {
-            let palette = of(theme);
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.strong.color,
-                    width: 1.0,
-                    radius: RADIUS.into(),
-                },
-                ..container::Style::default()
-            }
-        });
+        .style(style);
+    present(panel, open)
+}
+
+/// A dialog's ground and edge: what a panel in its place is drawn on.
+pub fn style(theme: &iced::Theme) -> container::Style {
+    let palette = of(theme);
+    container::Style {
+        background: Some(Background::Color(palette.background.weak.color)),
+        border: Border {
+            color: palette.background.strong.color,
+            width: 1.0,
+            radius: RADIUS.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// `panel` where a dialog goes, as a dialog moves, `open` of the way in:
+/// in the middle of the window, grown from 95% and faded in, taking every
+/// click over it. What a panel that is not titled as [`view`] is, but
+/// stands where a dialog does — [`crate::command`]'s — is drawn by.
+pub fn present<'a, M: 'a>(panel: impl Into<Element<'a, M>>, open: f32) -> Element<'a, M> {
+    let panel = panel.into();
     // Faded in under a veil of the page's ground, thinning as it opens
     // (`motion`: iced has no opacity for a group of widgets).
     let open = open.clamp(0.0, 1.0);
     let drawn: Element<'a, M> = if open < 1.0 {
         motion::transformed(panel, Vector::ZERO, FROM + (1.0 - FROM) * open, 1.0 - open, RADIUS)
     } else {
-        panel.into()
+        panel
     };
     // The dialog takes every click over it: a container lets one through,
     // and under it is the page, whose click closes.
@@ -118,10 +130,6 @@ pub fn view<'a, M: Clone + 'a>(title: String, close: Element<'a, M>, body: Eleme
 mod tests {
     use super::*;
 
-    /// It fades in and grows from 95% over 200 ms, the page dimming over
-    /// 150 ms, and is still once open; closed, it goes back the same way and
-    /// is then gone. Falsified by the page dimming at the dialog's pace: at
-    /// 150 ms it was not yet all the way dimmed.
     /// A click on the dialog, between its controls, stays on it; a click on
     /// the dimmed page beside it closes it. Falsified by the panel without
     /// `opaque`: the click in its middle fell through to the page and closed
@@ -149,6 +157,10 @@ mod tests {
         assert_eq!(clicked(iced::Point::new(20.0, 20.0)), [M::Close]);
     }
 
+    /// It fades in and grows from 95% over 200 ms, the page dimming over
+    /// 150 ms, and is still once open; closed, it goes back the same way and
+    /// is then gone. Falsified by the page dimming at the dialog's pace: at
+    /// 150 ms it was not yet all the way dimmed.
     #[test]
     fn it_opens_and_closes_as_shadcn_s_does() {
         let at = Instant::now();

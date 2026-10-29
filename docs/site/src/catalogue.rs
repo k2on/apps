@@ -230,6 +230,17 @@ pub const ENTRIES: &[Entry] = &[
         ],
     },
     Entry {
+        module: "command",
+        name: "Command box",
+        summary: "One search box over everything, opened by Ctrl+K, as shadcn/ui's command dialog: what it finds in groups under it, the keys walking it.",
+        api: &["Command::new(now), typed(query, list), step(down, groups, list), land(at), scrolled(y), chosen(groups)", "view(command, placeholder, groups, messages, open)", "Group { heading, items }, Item { glyph, label, detail, choose }", "keys(open) -> Subscription<Press>, press(key, mods, open), opens(key, mods)", "WIDTH, LIST_HEIGHT, ROW, HEADING"],
+        rules: &[
+            "The app searches and the box draws: it is handed the groups for what is typed.",
+            "Its keys are heard whatever has the keyboard (keys): a text box takes <Esc> for itself.",
+            "Its rows are declared heights, so the list scrolls to the keys by arithmetic.",
+        ],
+    },
+    Entry {
         module: "sheet",
         name: "Sheet",
         summary: "A panel the window's height sliding in from its right-hand edge over the page dimmed, as shadcn/ui's sheet does without the blur.",

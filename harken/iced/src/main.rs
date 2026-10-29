@@ -171,6 +171,14 @@ impl Adding {
     }
 }
 
+/// The command box's own box and list, for its keys and its scrolling.
+pub const COMMAND_INPUT: &str = "harken-command";
+pub const COMMAND_LIST: &str = "harken-command-list";
+
+/// How many of each kind the command box shows.
+pub const COMMAND_SONGS: usize = 8;
+pub const COMMAND_EACH: usize = 5;
+
 /// The search box's id, for putting the keys in it; and what it found's,
 /// for keeping the cursor's row in sight.
 pub const QUERY: &str = "harken-show-search";
@@ -299,6 +307,19 @@ pub enum Message {
     Resized(Size),
     /// The wheel moved mostly sideways: perhaps a swipe back or forward.
     Wheel(iced::mouse::ScrollDelta),
+    /// A key the command box answers (`arkui::command`): Ctrl+K, or with
+    /// it up `<Esc>` and the arrows, whatever has the keyboard.
+    CommandKey(arkui::command::Press),
+    /// What is typed in it.
+    CommandQuery(String),
+    /// The keys onto one of its rows, from the top: the pointer over it.
+    CommandAt(usize),
+    /// Its list scrolled to here.
+    CommandScrolled(f32),
+    /// One of its rows chosen: the box closes, and this is done.
+    Command(Box<Message>),
+    /// A song found by it: played from its album.
+    CommandSong(Id),
     /// The queue: open it, or close it — `q`, and the button on the bar.
     OpenQueue,
     CloseQueue,
@@ -682,6 +703,10 @@ pub struct App {
     pub help: bool,
     /// What Settings' Resync last came to, to say under it.
     pub resync: Option<String>,
+    /// The command box, Ctrl+K, while it is up; and the one closed, drawn
+    /// until it has faded out.
+    pub command: Option<arkui::command::Command>,
+    pub command_leaving: Option<arkui::command::Command>,
     /// The search for a show to follow, while a shows page has it open.
     pub adding: Option<Adding>,
     /// …and the one closed, drawn until it has faded out.
@@ -813,6 +838,8 @@ impl App {
             search: String::new(),
             help: false,
             resync: None,
+            command: None,
+            command_leaving: None,
             adding: None,
             adding_leaving: None,
             debug: false,
@@ -1653,6 +1680,131 @@ impl App {
         }
     }
 
+    /// A key for the command box: Ctrl+K opens it, the keys in its box, or
+    /// closes it; `<Esc>` closes it; the arrows walk what it found.
+    fn command_key(&mut self, press: arkui::command::Press) -> Task<Message> {
+        use arkui::command::Press;
+        let now = iced::time::Instant::now();
+        match press {
+            Press::Toggle if self.command.is_some() => self.close_command(),
+            Press::Toggle => {
+                // Over everything else, which it closes: one thing up at once.
+                self.close_queue();
+                self.devices = None;
+                self.ctx.cancel();
+                self.command = Some(arkui::command::Command::new(now));
+                self.command_leaving = None;
+                return iced::widget::operation::focus(COMMAND_INPUT);
+            }
+            Press::Close => self.close_command(),
+            Press::Up | Press::Down => {
+                let groups = self.command_groups();
+                if let Some(c) = self.command.as_mut() {
+                    return c.step(press == Press::Down, &groups, COMMAND_LIST);
+                }
+            }
+        }
+        Task::none()
+    }
+
+    /// The command box closed: it fades out as it came.
+    fn close_command(&mut self) {
+        if let Some(mut c) = self.command.take() {
+            c.shown.hide(iced::time::Instant::now());
+            self.command_leaving = Some(c);
+        }
+    }
+
+    /// What the command box finds for what is typed in it: the library's
+    /// songs, albums, artists and composers whose names have it in them —
+    /// those that start with it first — a few of each. A song is played
+    /// from its album; the rest open their page. Nothing typed, nothing
+    /// found.
+    pub fn command_groups(&self) -> Vec<arkui::command::Group<Message>> {
+        use arkui::command::{Group, Item};
+        let Some(query) = self
+            .command
+            .as_ref()
+            .or(self.command_leaving.as_ref())
+            .map(|c| c.query.trim().to_lowercase())
+        else {
+            return vec![];
+        };
+        if query.is_empty() {
+            return vec![];
+        }
+        let has = |s: &str| s.to_lowercase().contains(&query);
+        let starts = |s: &str| !s.to_lowercase().starts_with(&query);
+        let chosen = |m: Message| Message::Command(Box::new(m));
+        let mut songs: Vec<_> = self
+            .peer
+            .items()
+            .iter()
+            .filter(|i| i.kind == "song" && (has(&i.title) || has(&i.creator)))
+            .collect();
+        songs.sort_by_key(|i| (starts(&i.title), i.title.to_lowercase()));
+        let mut albums: Vec<_> = self.peer.albums().iter().filter(|a| has(&a.name) || has(&a.creator)).collect();
+        albums.sort_by_key(|a| (starts(&a.name), a.name.to_lowercase()));
+        let mut artists: Vec<_> = self.peer.artists().iter().filter(|a| has(&a.name)).collect();
+        artists.sort_by_key(|a| (starts(&a.name), a.name.to_lowercase()));
+        let mut composers: Vec<_> = self.peer.composers().iter().filter(|c| has(&c.name)).collect();
+        composers.sort_by_key(|c| (starts(&c.name), c.name.to_lowercase()));
+        vec![
+            Group {
+                heading: "Songs".into(),
+                items: songs
+                    .into_iter()
+                    .take(COMMAND_SONGS)
+                    .map(|i| Item {
+                        glyph: arkui::glyphs::NOTE,
+                        label: i.title.clone(),
+                        detail: Some(i.creator.clone()),
+                        choose: chosen(Message::CommandSong(i.id)),
+                    })
+                    .collect(),
+            },
+            Group {
+                heading: "Albums".into(),
+                items: albums
+                    .into_iter()
+                    .take(COMMAND_EACH)
+                    .map(|a| Item {
+                        glyph: arkui::glyphs::ALBUM,
+                        label: a.name.clone(),
+                        detail: Some(a.creator.clone()),
+                        choose: chosen(Message::Select(Source::Album(a.id.clone(), a.name.clone()))),
+                    })
+                    .collect(),
+            },
+            Group {
+                heading: "Artists".into(),
+                items: artists
+                    .into_iter()
+                    .take(COMMAND_EACH)
+                    .map(|a| Item {
+                        glyph: arkui::glyphs::ARTIST,
+                        label: a.name.clone(),
+                        detail: None,
+                        choose: chosen(Message::Select(Source::Artist(a.name.clone()))),
+                    })
+                    .collect(),
+            },
+            Group {
+                heading: "Composers".into(),
+                items: composers
+                    .into_iter()
+                    .take(COMMAND_EACH)
+                    .map(|c| Item {
+                        glyph: arkui::glyphs::COMPOSER,
+                        label: c.name.clone(),
+                        detail: None,
+                        choose: chosen(Message::Select(Source::Artist(c.name.clone()))),
+                    })
+                    .collect(),
+            },
+        ]
+    }
+
     /// The queue closed: its sheet slides out, and a drag of one of its
     /// rows is let go of where it was.
     fn close_queue(&mut self) {
@@ -1717,6 +1869,7 @@ impl App {
     /// for.
     fn moving(&self, now: iced::time::Instant) -> bool {
         self.adding.iter().chain(self.adding_leaving.iter()).any(|a| a.shown.moving(now))
+            || self.command.iter().chain(self.command_leaving.iter()).any(|c| c.shown.moving(now))
             || self.queue_sheet.is_some_and(|s| s.moving(now))
             || self.queue_drag.as_ref().is_some_and(|d| d.moving(now))
             || self.queue_settle.as_ref().is_some_and(|s| {
@@ -1732,6 +1885,9 @@ impl App {
     fn settle_motion(&mut self, now: iced::time::Instant) {
         if self.adding_leaving.as_ref().is_some_and(|a| a.shown.gone(now)) {
             self.adding_leaving = None;
+        }
+        if self.command_leaving.as_ref().is_some_and(|c| c.shown.gone(now)) {
+            self.command_leaving = None;
         }
         if self.queue_sheet.is_some_and(|s| s.gone(now)) {
             self.queue_sheet = None;
@@ -2605,6 +2761,50 @@ impl App {
                     self.menu_about = None;
                 }
             }
+            // With the command box up the keys are its: what it does not
+            // answer itself (`CommandKey`) goes into its box. Ctrl+K is
+            // always its.
+            Message::Key(..) if self.command.is_some() => {}
+            Message::Key(key, mods) if arkui::command::opens(&key, mods) => {}
+            Message::CommandKey(press) => return self.command_key(press),
+            Message::CommandQuery(query) => {
+                if let Some(c) = self.command.as_mut() {
+                    return c.typed(query, COMMAND_LIST);
+                }
+            }
+            Message::CommandAt(at) => {
+                if let Some(c) = self.command.as_mut() {
+                    c.land(at);
+                }
+            }
+            Message::CommandScrolled(y) => {
+                if let Some(c) = self.command.as_mut() {
+                    c.scrolled(y);
+                }
+            }
+            Message::Command(chosen) => {
+                self.close_command();
+                return self.step(*chosen);
+            }
+            Message::CommandSong(id) => {
+                // Its album's songs, in the library's order; a song on no
+                // album alone.
+                let album = self.peer.detail_of(id).album;
+                let mut rows: Vec<_> = match album.is_empty() {
+                    true => vec![],
+                    false => self
+                        .peer
+                        .items()
+                        .iter()
+                        .filter(|i| i.kind == "song" && self.peer.detail_of(i.id).album == album)
+                        .cloned()
+                        .collect(),
+                };
+                if !rows.iter().any(|r| r.id == id) {
+                    rows = self.peer.row(id).cloned().into_iter().collect();
+                }
+                return self.play_rows(&rows, Some(id), self.from());
+            }
             Message::Key(key, mods) => {
                 self.keyed = Some(self.cursor);
                 // `None` is still typing: a count, a `g`, a search — drawn in
@@ -2635,7 +2835,7 @@ impl App {
                 // and a wheel, but a hover is published by the row itself and
                 // falls through every layer — so the cursor the menu is about
                 // would creep away under it.
-                if !matches!(self.focus(), Focus::Pane(_)) {
+                if !matches!(self.focus(), Focus::Pane(_)) || self.command.is_some() {
                     return Task::none();
                 }
                 // Nor while the keys are driving and the pointer has not moved.
@@ -3154,6 +3354,9 @@ impl App {
             // Only the presses no widget took: a focused text box consumes its
             // own, so typing a playlist's name cannot walk the cursor.
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),
+            // Ctrl+K, and the command box's own keys while it is up, whatever
+            // has the keyboard: its box takes `<Esc>` for itself.
+            arkui::command::keys(self.command.is_some()).map(Message::CommandKey),
             // The wheel, when it moves mostly sideways — whichever widget
             // took it, since a list scrolls down and a swipe is sideways.
             iced::event::listen_with(|event, _, _| match event {

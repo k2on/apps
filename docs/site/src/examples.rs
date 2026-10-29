@@ -204,6 +204,10 @@ const PICTURES: &[(&str, &[Example])] = &[
         ],
     ),
     (
+        "command",
+        &[ex("command", "The command box, with what it found for what was typed.", command_)],
+    ),
+    (
         "reorder",
         &[ex(
             "reorder",
@@ -278,6 +282,7 @@ pub fn notes(component: &str) -> &'static [&'static str] {
             "A dialog fades in and grows from 95% over 200 ms as the page dims over 150 ms, and goes back the same way; a click on the dimmed page, its ×, or <Esc> closes it.",
             "A sheet slides in from beyond the window's edge over 500 ms and out over 300 ms, on ease-in-out.",
         ],
+        "command" => &["Ctrl+K opens it from anywhere; ↑ and ↓ walk what it found, ⏎ chooses, <Esc> or a click on the dimmed page closes it."],
         "reorder" => &["A press that moves less than reorder::THRESHOLD is a click; past it the row lifts, and the rows it passes slide a row's height out of its way over reorder::SLIDING."],
         "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe). In a browser the browser's own back does it."],
         "scroll" => &["scroll::reveal keeps the cursor on screen as j and k walk past the edge of a list."],
@@ -809,6 +814,51 @@ fn sheet_(c: Canvas) -> Picture {
                 width,
                 1.0
             ),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into(),
+    )
+}
+
+fn command_(c: Canvas) -> Picture {
+    use arkui::command::{view, Command, Group, Item, Messages};
+    let item = |glyph, label: &str, detail: Option<&str>| Item {
+        glyph,
+        label: label.into(),
+        detail: detail.map(Into::into),
+        choose: (),
+    };
+    let groups = vec![
+        Group {
+            heading: "Songs".into(),
+            items: vec![
+                item(glyphs::NOTE, "Harbour", Some("Meadow")),
+                item(glyphs::NOTE, "Harbour lights", Some("Delta")),
+            ],
+        },
+        Group {
+            heading: "Albums".into(),
+            items: vec![item(glyphs::ALBUM, "Harbours", Some("Summit"))],
+        },
+    ];
+    let mut command = Command::new(iced::time::Instant::now());
+    command.query = "harb".into();
+    command.land(1);
+    let messages = Messages {
+        input: "command",
+        list: "command-list",
+        typed: Box::new(|_| ()),
+        at: Box::new(|_| ()),
+        scrolled: Box::new(|_| ()),
+    };
+    let narrow = narrow(c.width);
+    c.window(
+        WINDOW,
+        stack![
+            rows(None, narrow),
+            arkui::dialog::backdrop((), (), 1.0),
+            view(&command, "Search\u{2026}", groups, messages, 1.0)
         ]
         .width(Length::Fill)
         .height(Length::Fill)

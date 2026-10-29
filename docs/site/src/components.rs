@@ -335,6 +335,17 @@ pub const COMPONENTS: &[Component] = &[
         shots: &[shot("sheet", "A sheet's entries.", ANDROID)],
     },
     Component {
+        id: "command",
+        name: "Command box",
+        section: Section::Overlays,
+        glyph: glyphs::SEARCH,
+        summary: "One search box over everything, opened by Ctrl+K from anywhere.",
+        desktop: &["command"],
+        android: None,
+        ios: None,
+        shots: &[],
+    },
+    Component {
         id: "picker",
         name: "Picker",
         section: Section::Overlays,

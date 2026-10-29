@@ -209,6 +209,32 @@ impl App {
                 .push(layer::pinned(self.view_devices(at), origin));
         }
 
+        // The command box, Ctrl+K, over everything: fading in over the page
+        // as it dims, and out once closed.
+        if let Some(c) = self.command.as_ref().or(self.command_leaving.as_ref()) {
+            let (open, dim) = (arkui::dialog::open(&c.shown, now), arkui::dialog::dimmed(&c.shown, now));
+            let messages = arkui::command::Messages {
+                input: crate::COMMAND_INPUT,
+                list: crate::COMMAND_LIST,
+                typed: Box::new(Message::CommandQuery),
+                at: Box::new(Message::CommandAt),
+                scrolled: Box::new(Message::CommandScrolled),
+            };
+            layers = layers
+                .push(arkui::dialog::backdrop(
+                    Message::CommandKey(arkui::command::Press::Close),
+                    Message::Swallow,
+                    dim,
+                ))
+                .push(arkui::command::view(
+                    c,
+                    "Search songs, albums, artists and composers\u{2026}",
+                    self.command_groups(),
+                    messages,
+                    open,
+                ));
+        }
+
         layers.into()
     }
 

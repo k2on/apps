@@ -3,6 +3,7 @@
 //! like, only that the arithmetic and the rules behind it hold.
 
 mod account;
+mod command;
 mod geometry;
 mod now_playing;
 mod queue;
