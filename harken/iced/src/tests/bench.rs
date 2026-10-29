@@ -20,7 +20,7 @@ fn bench_queries() {
     let t0 = Instant::now();
     let app = super::demo_app();
     eprintln!("demo seeded and first read in {:.1?}", t0.elapsed());
-    let client = &app.peer.client;
+    let client = &app.peer.client.lock();
     let nobody = Library { playlist_id: key([0; 16]) };
     let album = AlbumInput {
         playlist_id: key([0; 16]),
@@ -276,7 +276,7 @@ fn bench_real() {
     }
     let t = Instant::now();
     let replica = crate::client::open(Box::new(disk), None, crate::listening::device());
-    let mut app = crate::App::with_peer(crate::peer::Peer::open(replica), String::new(), None);
+    let mut app = crate::App::with_peer(super::hand(crate::peer::Peer::open(replica)), String::new(), None);
     eprintln!("opened in {:.1?}: {} songs", t.elapsed(), app.peer.rows().len());
     let mut frame = Frame::new(&app);
     eprintln!("{:>22} {:>9} {:>9} {:>9} {:>9} {:>9}", "", "update", "view", "layout", "draw", "frame");
@@ -335,7 +335,7 @@ fn bench_real() {
         })
         .collect();
     row("songs to album", &albums);
-    let longest = ark::db::read::<crate::domain::schema::Harken, _>(&app.peer.client.log.store, |db| {
+    let longest = ark::db::read::<crate::domain::schema::Harken, _>(&app.peer.client.lock().log.store, |db| {
         let mut n = std::collections::BTreeMap::<_, usize>::new();
         for c in db.cue.scan() {
             *n.entry(c.media_id).or_default() += 1;
@@ -360,13 +360,24 @@ fn bench_real() {
     row("songs to transcript", &transcript);
 }
 
-/// What each wake of a window filling costs on its own thread: a fresh
-/// replica, through a pair of queues, filled from a server's log at
-/// `HARKEN_BENCH_LOG`, every update timed. Run as [`bench_real`] is, named
-/// `bench_fill`.
+/// What each wake of a window filling costs on the thread it draws on: a
+/// fresh replica, through a pair of queues, filled from a server's log at
+/// `HARKEN_BENCH_LOG`, every update timed — pumped by the window's updates
+/// (`bench_fill`: the work there is), and by its driver (`bench_fill_driven`:
+/// what is left to the window). Run as [`bench_real`] is.
 #[test]
 #[ignore]
 fn bench_fill() {
+    fill(false);
+}
+
+#[test]
+#[ignore]
+fn bench_fill_driven() {
+    fill(true);
+}
+
+fn fill(driven: bool) {
     use ark::frames::Frame;
     use ark::peer::{Input, Output, Role};
     let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
@@ -378,15 +389,32 @@ fn bench_fill() {
     server.machine.functions = m.functions.clone();
     server.machine.later = m.later().to_vec();
     let me = super::who("max");
-    let mut app = crate::App::with_peer(super::signed_in("max"), "http://127.0.0.1:9".into(), None);
+    let peer = match driven {
+        true => crate::peer::Peer::open(crate::client::memory(me.clone(), Some("dev"))),
+        false => super::signed_in("max"),
+    };
+    let mut app = crate::App::with_peer(peer, "http://127.0.0.1:9".into(), None);
     let made: std::sync::Arc<std::sync::Mutex<Vec<super::Queues>>> = Default::default();
-    app.peer.client.connect_with("ws://queues", super::Queues::dialer(made.clone()));
+    app.peer.client.lock().connect_with("ws://queues", super::Queues::dialer(made.clone()));
     let _ = app.update(crate::Message::Due);
+    // Driven, the dial is the driver's, made on its thread.
+    let _ = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(1), || !made.lock().unwrap().is_empty());
     let q = made.lock().unwrap()[0].clone();
     q.push(ark_peer::Event::Open);
     let (mut worst, mut total, mut wakes) = (Duration::ZERO, Duration::ZERO, 0);
     let t0 = Instant::now();
     for _ in 0..10_000 {
+        // Driven, the window wakes once its driver took in what came.
+        if driven {
+            let head = server.log().head();
+            let done = || {
+                let c = app.peer.client.lock();
+                c.log.fill.is_none() && c.log.log().head() == head
+            };
+            let _ = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(1), || {
+                !q.sent.lock().unwrap().is_empty() || done()
+            });
+        }
         let t = Instant::now();
         let _ = app.update(crate::Message::Wake);
         let took = t.elapsed();
@@ -413,7 +441,10 @@ fn bench_fill() {
             }
         }
     }
-    let filled = app.peer.client.log.fill.is_none() && app.peer.client.log.log().head() == server.log().head();
+    let filled = {
+        let c = app.peer.client.lock();
+        c.log.fill.is_none() && c.log.log().head() == server.log().head()
+    };
     eprintln!(
         "{wakes} wakes in {:.1?}: worst {worst:.1?}, busy {total:.1?}; filled {filled}, {} songs",
         t0.elapsed(),

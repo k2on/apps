@@ -773,7 +773,7 @@ pub struct App {
 
 impl App {
     /// A window over `peer`, with everything else at rest.
-    pub fn with_peer(mut peer: Peer, server: String, login: Option<Login>) -> App {
+    pub fn with_peer(peer: Peer, server: String, login: Option<Login>) -> App {
         let bell = arkui::wake::Bell::new();
         peer.client.set_waker(wake::waker(&bell));
         wake::page(&bell);
@@ -888,7 +888,7 @@ impl App {
         if let Err(e) = auth::remember_joined(&server) {
             self.note = format!("connected, but this device will not remember it: {e}");
         }
-        let pending = self.peer.client.pending_len();
+        let pending = self.peer.client.lock().pending_len();
         self.server = server;
         self.login = self.logins.as_ref().and_then(|l| l.recall(&self.server));
         if let Some(login) = self.login.clone() {
@@ -980,8 +980,8 @@ impl App {
             // intent carries: a library write is then refused on this device
             // as the server would (`docs/plan-guards.md` D1), and shown as
             // any refusal is — `auth::open` gave the replica the login's.
-            let mut peer = Peer::open(client);
-            peer.client.connect(&ark_auth::socket_url(&server));
+            let peer = Peer::open(client);
+            peer.client.lock().connect(&ark_auth::socket_url(&server));
             // No Favorites made here: the server makes a person's at their
             // first sign-in (`playlists.welcome`), and a device that made its
             // own before hearing the log would leave them two.
@@ -1084,8 +1084,8 @@ impl App {
         }
         // The roles the sign-in said this login holds, which every intent
         // carries (`docs/plan-guards.md` D1).
-        self.peer.client.login(auth::who_of(&login), login.token.clone());
-        let pending = self.peer.client.pending_len();
+        self.peer.client.lock().login(auth::who_of(&login), login.token.clone());
+        let pending = self.peer.client.lock().pending_len();
         self.note = match pending {
             0 => format!("signed in as {}", auth::who(&login)),
             n => format!(
@@ -1106,7 +1106,7 @@ impl App {
     /// domain's own verdict — a guard, a check — and is said at once; one the
     /// server reaches later is matched back to this by its id.
     pub fn author(&mut self, what: String, name: &str, input: &impl ark::format::Encode) -> bool {
-        match self.peer.client.mutate(name, input) {
+        match self.peer.client.lock().mutate(name, input) {
             Ok(id) => {
                 self.edits.push(Edit { id, what });
                 true
@@ -1561,7 +1561,7 @@ impl App {
     /// starts a session with nothing queued.
     fn enqueue(&mut self, id: Id, next: bool) {
         let Some(track) = self.queued(id) else { return };
-        if self.listening.session(&self.peer.client).is_some() {
+        if self.listening.session(&self.peer.client.lock()).is_some() {
             let tracks = vec![track];
             self.call(&match next {
                 true => harken_player::Press::Next { tracks },
@@ -1599,7 +1599,7 @@ impl App {
     /// An edit of the queue: the session's transition, part of it; this
     /// device's own queue otherwise.
     fn edit_queue(&mut self, message: &Message) {
-        if self.listening.session(&self.peer.client).is_some() {
+        if self.listening.session(&self.peer.client.lock()).is_some() {
             if let Some(press) = Self::queue_call(message) {
                 self.call(&press);
             }
@@ -1848,7 +1848,7 @@ impl App {
         if cfg!(feature = "demo") {
             return Some(Account::alone("A demo \u{2014} what you do stays on this device"));
         }
-        if self.peer.client.is_alone() {
+        if self.peer.client.lock().is_alone() {
             return Some(Account::alone("Alone \u{2014} what you do is kept on this device"));
         }
         let login = self.login.as_ref()?;
@@ -2159,7 +2159,7 @@ impl App {
                 from: self.from(),
             },
         };
-        if self.listening.session(&self.peer.client).is_none() {
+        if self.listening.session(&self.peer.client.lock()).is_none() {
             self.obey(press);
         } else {
             self.call(&p);
@@ -2181,7 +2181,7 @@ impl App {
             ..
         } = self;
         let local = Sounding::new(player, server, queue, queued_from);
-        if let Err(why) = listening.call(&mut peer.client, press, Some(&local)) {
+        if let Err(why) = listening.call(&mut peer.client.lock(), press, Some(&local)) {
             *note = why;
         }
     }
@@ -2474,7 +2474,7 @@ impl App {
                 // authoring as that person, offline: what they do now is
                 // theirs when they sign in again.
                 if self.login.take().is_some() {
-                    let _ = self.peer.client.sign_out();
+                    let _ = self.peer.client.lock().sign_out();
                 }
                 if let Some(logins) = &self.logins {
                     logins.forget(&self.server);
@@ -2658,14 +2658,14 @@ impl App {
             // as the ephemeral `scrub` — and the seek when it is let go.
             Message::Seek(secs) => {
                 self.scrubbing = Some(secs);
-                if self.listening.joined(&self.peer.client) {
+                if self.listening.joined(&self.peer.client.lock()) {
                     let at_ms = Some((secs as f64 * 1000.0) as i64);
                     self.call(&harken_player::Press::Scrub { at_ms });
                 }
             }
             Message::SeekDone => {
                 if let Some(secs) = self.scrubbing.take() {
-                    if self.listening.joined(&self.peer.client) {
+                    if self.listening.joined(&self.peer.client.lock()) {
                         self.call(&harken_player::Press::Scrub { at_ms: None });
                     }
                     return self.press(Press::Seek((secs as f64 * 1000.0) as i64));
@@ -2888,7 +2888,7 @@ impl App {
         // The listening session. A track that ran out moves on through the
         // queue, as a phone's player does — its own session, or the output,
         // whose move the reconciler says — and never on a silent device.
-        let s = self.listening.session(&self.peer.client);
+        let s = self.listening.session(&self.peer.client.lock());
         if self.player.ended() && s.is_none_or(|s| self.listening.outputs_here(&s)) {
             self.skip(1);
         }
@@ -2902,10 +2902,10 @@ impl App {
             ..
         } = self;
         let mut sound = Sounding::new(player, server, queue, queued_from);
-        if let Some(why) = listening.reconcile(&mut peer.client, &mut sound).pop() {
+        if let Some(why) = listening.reconcile(&mut peer.client.lock(), &mut sound).pop() {
             self.note = format!("the session refused that: {why}");
         }
-        self.session = self.listening.session(&self.peer.client);
+        self.session = self.listening.session(&self.peer.client.lock());
         // The back button, and a link somebody was sent — consumed only once
         // the sidebar has something to resolve it against, which is why it is
         // asked after every update and not only when the bar moved.
@@ -2935,7 +2935,7 @@ impl App {
     /// The one timer this window may need for something that has not
     /// happened: the peer's redial.
     pub fn deadline(&self) -> Option<u64> {
-        self.peer.client.deadline()
+        self.peer.client.lock().deadline()
     }
 
     /// How often the window needs a clock, if at all: only while something on
@@ -2990,7 +2990,7 @@ impl App {
             }
             turned_away = self.sign_in_unasked();
         }
-        for (id, reason) in self.peer.client.take_rejections() {
+        for (id, reason) in self.peer.client.lock().take_rejections() {
             let what = self
                 .edits
                 .iter()

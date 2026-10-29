@@ -15,22 +15,22 @@ fn check(peer: &Peer, what: &str) {
     assert_eq!(peer.items(), peer.library_now(), "library, {what}");
     assert_eq!(
         peer.playlists(),
-        Peer::rows_of::<_, Playlist>(peer.client.answer(crate::domain::playlists::playlists, ())),
+        Peer::rows_of::<_, Playlist>(peer.client.lock().answer(crate::domain::playlists::playlists, ())),
         "playlists, {what}"
     );
     assert_eq!(
         peer.albums(),
-        Peer::rows_of::<_, Album>(peer.client.answer(crate::domain::browse::albums, ())),
+        Peer::rows_of::<_, Album>(peer.client.lock().answer(crate::domain::browse::albums, ())),
         "albums, {what}"
     );
     assert_eq!(
         peer.artists(),
-        Peer::rows_of::<_, Artist>(peer.client.answer(crate::domain::browse::artists, ())),
+        Peer::rows_of::<_, Artist>(peer.client.lock().answer(crate::domain::browse::artists, ())),
         "artists, {what}"
     );
     assert_eq!(
         peer.composers(),
-        Peer::rows_of::<_, Composer>(peer.client.answer(crate::domain::browse::composers, ())),
+        Peer::rows_of::<_, Composer>(peer.client.lock().answer(crate::domain::browse::composers, ())),
         "composers, {what}"
     );
     let details: HashMap<_, _> = peer.track_details().into_iter().map(|t| (t.media_id, t)).collect();
@@ -78,7 +78,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
         media_id: key(off),
     };
 
-    peer.client.mutate("add_to_playlist", &on).unwrap();
+    peer.client.lock().mutate("add_to_playlist", &on).unwrap();
     assert!(peer.refresh());
     check(&peer, "a toggle");
     assert_eq!(patched(&peer), BTreeSet::from(["library", "album"]));
@@ -88,7 +88,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
         art: "handel.jpg".into(),
         ..DescribePerson::default()
     };
-    peer.client.mutate("describe_person", &person).unwrap();
+    peer.client.lock().mutate("describe_person", &person).unwrap();
     assert!(peer.refresh());
     check(&peer, "a person described");
     assert_eq!(patched(&peer), BTreeSet::from(["artists", "composers"]));
@@ -97,7 +97,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
     song.track = 30;
     // On the catalogue's Water Music, the page open, by being in its folder.
     song.folder = crate::domain::catalogue::DIR.into();
-    peer.client.mutate("add_song", &song).unwrap();
+    peer.client.lock().mutate("add_song", &song).unwrap();
     peer.refresh();
     check(&peer, "a song added");
     assert!(peer.shown().iter().any(|i| i.title == "Hornpipe again"), "on the open page");
@@ -106,12 +106,12 @@ fn every_list_on_screen_is_its_query_after_every_change() {
         playlist_id: key(favorites),
         media_id: key(off),
     };
-    peer.client.mutate("remove_from_playlist", &off_it).unwrap();
+    peer.client.lock().mutate("remove_from_playlist", &off_it).unwrap();
     peer.refresh();
     check(&peer, "the toggle undone");
 
     let gone = peer.items()[3].id;
-    peer.client.mutate("remove_media", &RemoveMedia { id: key(gone) }).unwrap();
+    peer.client.lock().mutate("remove_media", &RemoveMedia { id: key(gone) }).unwrap();
     peer.refresh();
     check(&peer, "a song removed");
     assert!(!peer.details.contains_key(&gone));
@@ -144,7 +144,7 @@ fn the_search_box_drives_a_view() {
             playlist_id: key(app.peer.playlist),
             needle: needle.into(),
         };
-        Peer::rows_of::<_, Item>(app.peer.client.answer(crate::domain::browse::search, input))
+        Peer::rows_of::<_, Item>(app.peer.client.lock().answer(crate::domain::browse::search, input))
     };
     let all = app.peer.rows().len();
     press(&mut app, Key::Character("/".into()));
@@ -167,6 +167,7 @@ fn the_search_box_drives_a_view() {
 
     app.peer
         .client
+        .lock()
         .mutate(
             "add_song",
             &super::song("Hornpipe again", "George Frideric Handel", "", "music/hornpipe.mp3"),

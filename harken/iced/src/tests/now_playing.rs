@@ -85,7 +85,7 @@ fn joined(can_play: bool, hub: &ark_peer::Handle) -> App {
     client.set_roles([crate::domain::LIBRARY]);
     library(&mut client);
     client.connect_with("hub", dial(hub));
-    let mut app = App::with_peer(crate::peer::Peer::open(client), String::new(), None);
+    let mut app = App::with_peer(super::hand(crate::peer::Peer::open(client)), String::new(), None);
     app.listening.open("me-device");
     app
 }
@@ -98,7 +98,7 @@ fn joined(can_play: bool, hub: &ark_peer::Handle) -> App {
 #[test]
 fn alone_the_bar_the_row_and_the_title_are_one_track() {
     let mut p = super::alone("me");
-    library(&mut p.client);
+    library(&mut p.client.lock());
     p.refresh();
     let mut app = App::with_peer(p, String::new(), None);
     play_first(&mut app);
@@ -116,10 +116,10 @@ fn joined_and_playing_here_the_bar_the_row_and_the_title_are_one_track() {
     let hub = hub();
     let mut app = joined(true, &hub);
     carry(&hub, &mut app, &mut None);
-    assert!(app.listening.joined(&app.peer.client), "joined");
+    assert!(app.listening.joined(&app.peer.client.lock()), "joined");
     play_first(&mut app);
     carry(&hub, &mut app, &mut None);
-    let s = app.listening.session(&app.peer.client).unwrap();
+    let s = app.listening.session(&app.peer.client.lock()).unwrap();
     assert!(app.listening.outputs_here(&s), "this window plays");
     assert_eq!(app.player.track().map(|t| t.title.as_str()), Some("a"), "and its player has it");
     on(&app, "a");
@@ -145,7 +145,7 @@ fn joined_while_another_device_plays_the_bar_the_row_and_the_title_are_one_track
     phone.connect_with("hub", dial(&hub));
     let mut phone = Some(phone);
     carry(&hub, &mut app, &mut phone);
-    assert!(app.listening.joined(&app.peer.client), "joined");
+    assert!(app.listening.joined(&app.peer.client.lock()), "joined");
     // The phone presses the window's queue: the session's, its output the
     // phone.
     let queue: Vec<_> = ["a", "b", "c"]
@@ -171,7 +171,7 @@ fn joined_while_another_device_plays_the_bar_the_row_and_the_title_are_one_track
     };
     assert_eq!(player.press(phone.as_mut().unwrap(), &press, None), None);
     carry(&hub, &mut app, &mut phone);
-    let s = app.listening.session(&app.peer.client).unwrap();
+    let s = app.listening.session(&app.peer.client.lock()).unwrap();
     assert!(!app.listening.outputs_here(&s) && app.listening.elsewhere(&s), "the phone plays");
     on(&app, "a");
     let _ = app.act(vim::Action::Key('}'));

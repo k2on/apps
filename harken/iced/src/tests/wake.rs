@@ -79,7 +79,7 @@ fn a_window_at_rest_is_never_updated() {
 fn a_frame_on_the_socket_is_one_wake_and_a_failed_dial_one_timer() {
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), None);
     let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
-    app.peer.client.connect_with("ws://queues", Queues::dialer(made.clone()));
+    app.peer.client.lock().connect_with("ws://queues", Queues::dialer(made.clone()));
     assert!(app.deadline().is_some(), "a new link is due at once");
     let _ = app.update(Message::Due);
     assert_eq!(app.deadline(), None, "dialled: nothing to time");
@@ -95,7 +95,7 @@ fn a_frame_on_the_socket_is_one_wake_and_a_failed_dial_one_timer() {
     pushed.join().unwrap();
     assert_eq!(names(&heard), ["wake"], "the open, once");
     let _ = app.update(Message::Wake);
-    assert!(app.peer.client.linked);
+    assert!(app.peer.client.lock().linked);
     assert_eq!((app.clock(), app.deadline()), (None, None));
     assert!(heard_within(&app, Duration::from_millis(500)).is_empty(), "linked and idle");
 
@@ -139,4 +139,21 @@ fn a_dwell_runs_the_clock_until_the_submenu_opens() {
     }
     assert!(app.ctx.picker.is_some(), "the rest opened it");
     assert_eq!(app.clock(), None, "and the clock stopped");
+}
+
+/// Every page the window draws reads the peer through its lock and lets it
+/// go: drawn with every overlay on, no guard is held while another is
+/// asked for, which the lock says in a debug build. Falsified by the debug
+/// table asking the peer again while it held it: "held already".
+#[test]
+fn every_page_draws_without_holding_the_peer_twice() {
+    let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), None);
+    app.peer.ensure_playlist();
+    let name = crate::domain::CreatePlaylist { name: "Hymns".into() };
+    assert!(app.author("make a playlist".into(), "create_playlist", &name));
+    let _ = app.update(Message::Wake);
+    for (help, debug) in [(false, false), (true, false), (false, true)] {
+        (app.help, app.debug) = (help, debug);
+        let _ = app.view();
+    }
 }

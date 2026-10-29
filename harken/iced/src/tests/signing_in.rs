@@ -36,27 +36,37 @@ fn login(who: &str) -> Login {
 #[test]
 fn signing_in_moves_the_same_replica_on() {
     let mut p = signed_out();
-    assert!(p.client.is_signed_out());
+    assert!(p.client.lock().is_signed_out());
     let id = p
         .client
+        .lock()
         .mutate("add_song", &song("Air", "Bach", "Suites", "music/air.mp3"))
         .expect("a window holding the library role takes a song signed out");
     p.refresh();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), None);
     assert_eq!(app.peer.items().len(), 1, "what was done signed out is on screen");
-    assert_eq!(app.peer.client.standing(&id), Standing::Pending);
-    let pending = |app: &App| app.peer.client.log.pending.iter().map(|p| p.entry.actor.clone()).collect::<Vec<_>>();
+    assert_eq!(app.peer.client.lock().standing(&id), Standing::Pending);
+    let pending = |app: &App| {
+        app.peer
+            .client
+            .lock()
+            .log
+            .pending
+            .iter()
+            .map(|p| p.entry.actor.clone())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(pending(&app), [""], "authored as nobody");
 
     let _ = app.update(Message::SignedIn(Ok(login("alice"))));
-    assert!(!app.peer.client.is_signed_out());
+    assert!(!app.peer.client.lock().is_signed_out());
     assert_eq!(app.login.as_ref().map(|l| l.user.id.as_str()), Some("alice"));
     assert_eq!(app.peer.items().len(), 1, "the same replica, not a new one");
-    assert_eq!(app.peer.client.pending_len(), 1);
+    assert_eq!(app.peer.client.lock().pending_len(), 1);
     assert_eq!(pending(&app), ["alice"], "…and the work is hers now");
-    let now = app.peer.client.log.pending[0].entry.id;
+    let now = app.peer.client.lock().log.pending[0].entry.id;
     assert_eq!(now, id, "its id kept");
-    assert_eq!(app.peer.client.standing(&id), Standing::Pending);
+    assert_eq!(app.peer.client.lock().standing(&id), Standing::Pending);
     assert!(app.note.contains("1 change from before"), "{}", app.note);
 
     // Signing out revokes the session through the domain, keeps the
@@ -64,8 +74,8 @@ fn signing_in_moves_the_same_replica_on() {
     // dropping the token: no `session.revoke` was authored.
     let _ = app.update(Message::SignOut);
     assert!(app.login.is_none());
-    assert!(app.peer.client.is_signed_out());
-    let funcs: Vec<String> = app.peer.client.log.pending.iter().map(|p| p.entry.func.clone()).collect();
+    assert!(app.peer.client.lock().is_signed_out());
+    let funcs: Vec<String> = app.peer.client.lock().log.pending.iter().map(|p| p.entry.func.clone()).collect();
     assert_eq!(funcs.last().map(String::as_str), Some("session.revoke"), "{funcs:?}");
     assert_eq!(app.peer.items().len(), 1);
 }
@@ -78,7 +88,10 @@ fn signing_in_moves_the_same_replica_on() {
 #[test]
 fn a_refusal_names_what_was_refused() {
     let mut p = signed_in("alice");
-    p.client.mutate("add_song", &song("Air", "Bach", "Suites", "music/air.mp3")).unwrap();
+    p.client
+        .lock()
+        .mutate("add_song", &song("Air", "Bach", "Suites", "music/air.mp3"))
+        .unwrap();
     p.refresh();
     p.ensure_playlist();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), Some(login("alice")));
@@ -90,7 +103,7 @@ fn a_refusal_names_what_was_refused() {
     let _ = app.update(Message::PickerActivate);
     let edit = app.edits.last().cloned().expect("the toggle was authored");
     assert_eq!(edit.what, "put Air on Favorites");
-    assert_eq!(app.peer.client.standing(&edit.id), Standing::Pending);
+    assert_eq!(app.peer.client.lock().standing(&edit.id), Standing::Pending);
 
     let reject = Frame::Verdict {
         space: Space::Durable,
@@ -99,14 +112,14 @@ fn a_refusal_names_what_was_refused() {
             why: "not your playlist".into(),
         },
     };
-    app.peer.client.receive(reject.enc());
+    app.peer.client.lock().receive(reject.enc());
     let _ = app.update(Message::Wake);
     assert_eq!(app.note, "the server refused to put Air on Favorites: not your playlist");
     assert_eq!(
         app.refused.last(),
         Some(&("put Air on Favorites".to_string(), "not your playlist".to_string()))
     );
-    assert!(matches!(app.peer.client.standing(&edit.id), Standing::Rejected(why) if why == "not your playlist"));
+    assert!(matches!(app.peer.client.lock().standing(&edit.id), Standing::Rejected(why) if why == "not your playlist"));
     assert!(!app.peer.items()[0].on_playlist(), "the rebase took the optimistic row back");
 }
 
@@ -122,7 +135,7 @@ fn a_window_on_a_server_makes_no_favorites() {
     use ark_peer::Event;
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
     let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
-    app.peer.client.connect_with("ws://queues", Queues::dialer(made.clone()));
+    app.peer.client.lock().connect_with("ws://queues", Queues::dialer(made.clone()));
     let _ = app.update(Message::Due);
     let q = made.lock().unwrap()[0].clone();
     q.push(Event::Open);

@@ -187,9 +187,15 @@ impl Peer {
         self.link.waker = Some(w);
     }
 
-    /// The one timer the link needs: the next dial.
+    /// The one timer the peer needs: the next dial, a handler's next job,
+    /// and the relay's next send while it holds a call.
     pub fn deadline(&self) -> Option<u64> {
-        self.link.due.into_iter().chain(self.due()).min()
+        let every = self.config.live.as_ref().map_or(0, |l| l.every_ms);
+        let relay = (!self.relay.is_empty()).then(|| {
+            let wait = self.relayed.map_or(0, |t| t + every - crate::now_ms()).max(0);
+            crate::monotonic_ms() + wait as u64
+        });
+        self.link.due.into_iter().chain(self.due()).chain(relay).min()
     }
 
     /// Whether a connection is being made.

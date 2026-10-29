@@ -26,7 +26,7 @@ use crate::domain::{
 use ark::format::Encode;
 use ark_peer::{Patch, Watched};
 
-use crate::client::{Replica, Update};
+use crate::client::{Driven, Replica, Update};
 use crate::places::{Place, Source};
 use crate::rows::{
     Album, Artist, Chapter, Composer, Credit, Cue, Download, EpisodeDetail, Id, Item, Listened, Person, Playlist, Recording, Show, Subscription,
@@ -155,7 +155,9 @@ fn rows<T>(slot: &Option<Watched<T>>) -> &[T] {
 
 /// A replica, and the lists a window draws from it.
 pub struct Peer {
-    pub client: Replica,
+    /// The replica, on a thread of its own (`ark_peer::driven`): what it
+    /// takes in from its server is never taken in on the window's.
+    pub client: Driven,
     views: Views,
     /// The playlist the library is read against, which is what gives every
     /// row its `on_playlist`. The domain has no favorites of its own — a
@@ -251,7 +253,7 @@ impl Peer {
         let seen = client.state();
         let details = views.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
         let mut peer = Peer {
-            client,
+            client: Driven::new(client),
             views,
             playlist,
             source: Source::Library,
@@ -363,7 +365,7 @@ impl Peer {
                 return c.clone();
             }
         }
-        let read: Vec<Chapter> = Peer::rows_of(self.client.answer(shows::chapters, EpisodeInput { media_id: key(media) }));
+        let read: Vec<Chapter> = Peer::rows_of(self.client.lock().answer(shows::chapters, EpisodeInput { media_id: key(media) }));
         *kept = Some((media, self.seen, read.clone()));
         read
     }
@@ -388,7 +390,7 @@ impl Peer {
         let mut kept = self.kept();
         kept.people
             .entry(media)
-            .or_insert_with(|| Peer::rows_of(self.client.answer(shows::people, input)))
+            .or_insert_with(|| Peer::rows_of(self.client.lock().answer(shows::people, input)))
             .clone()
     }
 
@@ -401,7 +403,7 @@ impl Peer {
                 return cues.clone();
             }
         }
-        let read: Vec<Cue> = Peer::rows_of(self.client.answer(shows::transcript, EpisodeInput { media_id: key(media) }));
+        let read: Vec<Cue> = Peer::rows_of(self.client.lock().answer(shows::transcript, EpisodeInput { media_id: key(media) }));
         kept.transcript = Some((media, read.clone()));
         read
     }
@@ -418,7 +420,7 @@ impl Peer {
             playlist_id: key(self.playlist),
             name: name.into(),
         };
-        !Peer::rows_of::<_, Item>(self.client.answer(shows::appearances, input)).is_empty()
+        !Peer::rows_of::<_, Item>(self.client.lock().answer(shows::appearances, input)).is_empty()
     }
 
     /// Somebody as the newest episode they are on names them — their
@@ -444,7 +446,7 @@ impl Peer {
         let details = kept
             .details
             .entry(show.id.clone())
-            .or_insert_with(|| Peer::rows_of(self.client.answer(shows::episode_details, input)));
+            .or_insert_with(|| Peer::rows_of(self.client.lock().answer(shows::episode_details, input)));
         details.iter().find(|e| e.media_id == item.id).cloned()
     }
 
@@ -493,7 +495,7 @@ impl Peer {
     /// no playlist yet.
     pub fn ensure_playlist(&mut self) {
         let made = CreatePlaylist { name: "Favorites".into() };
-        if self.playlists().is_empty() && self.client.mutate("create_playlist", &made).is_ok() {
+        if self.playlists().is_empty() && self.client.lock().mutate("create_playlist", &made).is_ok() {
             self.refresh();
         }
     }
@@ -505,8 +507,8 @@ impl Peer {
     /// login the history stays nobody's until a sign-in makes it the
     /// signer's.
     pub fn join(&mut self, url: &str) {
-        self.client.join();
-        self.client.connect(url);
+        self.client.lock().join();
+        self.client.lock().connect(url);
         self.refresh();
     }
 
@@ -519,12 +521,13 @@ impl Peer {
     /// undid, what landed, what it re-applied. A view the client dropped,
     /// or one opened for somebody else, is read whole again.
     pub fn refresh(&mut self) -> bool {
-        let state = self.client.state();
+        let state = self.client.lock().state();
         let moved = state != self.seen;
         if moved {
             self.seen = state;
         }
-        let (c, v) = (&mut self.client, &mut self.views);
+        let mut guard = self.client.lock();
+        let (c, v) = (&mut *guard, &mut self.views);
         let mut changed = Vec::new();
         let mut note = |name: &str, u: Update| match Moved::of(&u) {
             Some(m) => {
@@ -561,6 +564,7 @@ impl Peer {
         let listened = slot(settle(c, &mut v.listened, moved));
         let episodes = slot(settle(c, &mut v.episodes, moved));
         let appearances = slot(settle(c, &mut v.appearances, moved));
+        drop(guard);
         self.moved = changed;
 
         // The playlist the library is read against can stop existing, and
@@ -572,8 +576,8 @@ impl Peer {
         let repointed = !self.playlists().iter().any(|p| p.id == self.playlist) && self.playlist != first;
         if repointed {
             self.playlist = first;
-            let library = Watched::open(&mut self.client, "library", library_of(first), Item::from_bytes);
-            std::mem::replace(&mut self.views.library, library).close(&mut self.client);
+            let library = Watched::open(&mut self.client.lock(), "library", library_of(first), Item::from_bytes);
+            std::mem::replace(&mut self.views.library, library).close(&mut self.client.lock());
             self.open_page();
         }
         if lists || library || albums || artists || composers || shows || repointed {
@@ -661,7 +665,7 @@ impl Peer {
     /// after it made a playlist — reads nothing.
     pub fn playlists_of(&mut self, media: Id) -> Vec<Playlist> {
         let wanted = Some(("playlists_of", PlaylistsOf { media_id: key(media) }.to_bytes()));
-        want(&mut self.client, &mut self.views.on, wanted, Playlist::from_bytes);
+        want(&mut self.client.lock(), &mut self.views.on, wanted, Playlist::from_bytes);
         rows(&self.views.on).to_vec()
     }
 
@@ -674,19 +678,19 @@ impl Peer {
     }
 
     pub fn work(&self, id: &str) -> Vec<Work> {
-        Peer::rows_of(self.client.answer(browse::work, WorkInput { id: id.into() }))
+        Peer::rows_of(self.client.lock().answer(browse::work, WorkInput { id: id.into() }))
     }
 
     /// What a page's query answers, read once. The page holds views; these
     /// are what the tests compare them with.
     #[cfg(test)]
     pub fn works_of(&self, composer: &str) -> Vec<Work> {
-        Peer::rows_of(self.client.answer(browse::works, Works { composer: composer.into() }))
+        Peer::rows_of(self.client.lock().answer(browse::works, Works { composer: composer.into() }))
     }
 
     /// A work's performances, read once: the most complete first.
     pub fn recordings_of(&self, work: &str) -> Vec<Recording> {
-        Peer::rows_of(self.client.answer(browse::recordings, Recordings { work_id: work.into() }))
+        Peer::rows_of(self.client.lock().answer(browse::recordings, Recordings { work_id: work.into() }))
     }
 
     /// One performance's tracks, read once, in the order the work goes.
@@ -695,7 +699,7 @@ impl Peer {
             playlist_id: key(self.playlist),
             id: id.into(),
         };
-        Peer::rows_of(self.client.answer(browse::recording, input))
+        Peer::rows_of(self.client.lock().answer(browse::recording, input))
     }
 
     #[cfg(test)]
@@ -703,7 +707,7 @@ impl Peer {
         let input = crate::domain::Credits {
             recording_id: recording.into(),
         };
-        self.client.answer(browse::credits, input).unwrap_or_default()
+        self.client.lock().answer(browse::credits, input).unwrap_or_default()
     }
 
     /// The key of the first album of that name the albums page lists.
@@ -723,19 +727,19 @@ impl Peer {
             playlist_id: key(self.playlist),
             id: id.into(),
         };
-        Peer::rows_of(self.client.answer(browse::album, input))
+        Peer::rows_of(self.client.lock().answer(browse::album, input))
     }
 
     #[cfg(test)]
     pub fn track_details(&self) -> Vec<TrackDetail> {
-        Peer::rows_of(self.client.answer(browse::track_details, ()))
+        Peer::rows_of(self.client.lock().answer(browse::track_details, ()))
     }
 
     /// The library as its query answers it now, against the playlist it is
     /// read against.
     #[cfg(test)]
     pub fn library_now(&self) -> Vec<Item> {
-        Peer::rows_of(self.client.answer(
+        Peer::rows_of(self.client.lock().answer(
             browse::library,
             Library {
                 playlist_id: key(self.playlist),
@@ -847,7 +851,8 @@ impl Peer {
                 }
             }
         };
-        let (c, v) = (&mut self.client, &mut self.views);
+        let mut guard = self.client.lock();
+        let (c, v) = (&mut *guard, &mut self.views);
         let tracks = want(c, &mut v.shown, shown, Item::from_bytes);
         let works = want(c, &mut v.works, works, Work::from_bytes);
         let recordings = want(c, &mut v.recordings, recordings, Recording::from_bytes);
@@ -896,6 +901,7 @@ impl Peer {
             _ => None,
         };
         let appearances = want(c, &mut v.appearances, appearances, Item::from_bytes);
+        drop(guard);
         if tracks || works || recordings || appearances {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
@@ -1053,18 +1059,18 @@ mod tests {
         peer.ensure_playlist();
         assert_ne!(peer.playlist, [0; 16], "Favorites was made");
 
-        peer.client.mutate("add_song", &song("Air", "Bach", "Suites", "a")).unwrap();
+        peer.client.lock().mutate("add_song", &song("Air", "Bach", "Suites", "a")).unwrap();
         assert!(peer.refresh());
         assert_eq!(peer.items(), peer.library_now());
 
         for (t, f) in [("Glue", "b"), ("Opal", "c"), ("Gosh", "d")] {
-            peer.client.mutate("add_song", &song(t, "X", "Y", f)).unwrap();
+            peer.client.lock().mutate("add_song", &song(t, "X", "Y", f)).unwrap();
         }
         peer.refresh();
         assert_eq!(peer.items(), peer.library_now(), "a batch, each change pushed in turn");
 
         let id = peer.items()[2].id;
-        peer.client.mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
+        peer.client.lock().mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
         assert_eq!(peer.items(), peer.library_now());
         assert!(peer.items()[2].on_playlist());
@@ -1072,9 +1078,9 @@ mod tests {
 
         // A song and its place on the playlist before the next refresh: the
         // song's entry is patched in, then its place.
-        peer.client.mutate("add_song", &song("Late", "Z", "", "e")).unwrap();
+        peer.client.lock().mutate("add_song", &song("Late", "Z", "", "e")).unwrap();
         let late = peer.library_now().last().unwrap().id;
-        peer.client.mutate("add_to_playlist", &on(peer.playlist, late)).unwrap();
+        peer.client.lock().mutate("add_to_playlist", &on(peer.playlist, late)).unwrap();
         peer.refresh();
         assert_eq!(peer.items(), peer.library_now(), "a song and its playlist entry in one refresh");
     }
@@ -1102,22 +1108,23 @@ mod tests {
         client.alone();
         client.set_roles([crate::domain::LIBRARY]);
         let mut peer = Peer::open(client);
+        peer.client.by_hand();
         peer.ensure_playlist();
         for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
-            peer.client.mutate("add_song", &song(t, "Bach", "Suites", f)).unwrap();
+            peer.client.lock().mutate("add_song", &song(t, "Bach", "Suites", f)).unwrap();
         }
         peer.refresh();
         let id = peer.items()[1].id;
-        peer.client.mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
+        peer.client.lock().mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
-        assert_eq!(peer.client.status().link, "alone");
+        assert_eq!(peer.client.lock().status().link, "alone");
         let before = peer.items().to_vec();
 
         peer.join("ws://hub/sync");
         assert!(peer.moved.is_empty(), "nothing moved: {:?}", peer.moved);
         assert_eq!(peer.items(), before, "the library does not blink");
         assert_eq!(peer.items(), peer.library_now());
-        assert_eq!(peer.client.pending_len(), 5);
+        assert_eq!(peer.client.lock().pending_len(), 5);
 
         let d = crate::client::domain();
         let mut hub = Hub::serve(Config::new(Module::of(d)), Box::new(ark_peer::Memory::default()), 0);
@@ -1128,12 +1135,12 @@ mod tests {
             session: "alice@desktop".into(),
             roles: vec![crate::domain::LIBRARY.into()],
         };
-        peer.client.login(alice.clone(), "alice@desktop:library".into());
+        peer.client.lock().login(alice.clone(), "alice@desktop:library".into());
         peer.refresh();
         let c = hub.accept(alice);
-        peer.client.connected();
+        peer.client.lock().connected();
         loop {
-            let up = peer.client.take_frames();
+            let up = peer.client.lock().take_frames();
             let mut down = vec![];
             for f in up.iter().cloned() {
                 down.extend(hub.frame(c, f, crate::client::now_ms()));
@@ -1142,17 +1149,17 @@ mod tests {
                 break;
             }
             for (_, f) in down {
-                peer.client.receive(f);
+                peer.client.lock().receive(f);
             }
         }
         peer.refresh();
-        assert_eq!(peer.client.pending_len(), 0);
+        assert_eq!(peer.client.lock().pending_len(), 0);
         assert_eq!(peer.items(), peer.library_now());
         // An intent's id is its origin's (§1.6), whoever signs in: the
         // playlist made alone keeps its id through the sign-in, and the item
         // put on it names it still.
         assert_eq!(hub.log.log().head().0, 5, "the playlist, the three songs and the add");
-        assert!(peer.client.take_rejections().is_empty());
+        assert!(peer.client.lock().take_rejections().is_empty());
         assert!(peer.items()[1].on_playlist());
     }
 
@@ -1170,15 +1177,18 @@ mod tests {
     #[test]
     fn a_playlist_that_goes_repoints_the_library() {
         let mut peer = signed_in("me");
-        peer.client.mutate("add_song", &song("Air", "Bach", "Suites", "a")).unwrap();
+        peer.client.lock().mutate("add_song", &song("Air", "Bach", "Suites", "a")).unwrap();
         let mine = CreatePlaylist { name: "Mine".into() };
-        let made = peer.client.mutate("create_playlist", &mine).unwrap();
-        peer.client.mutate("create_playlist", &CreatePlaylist { name: "Other".into() }).unwrap();
+        let made = peer.client.lock().mutate("create_playlist", &mine).unwrap();
+        peer.client
+            .lock()
+            .mutate("create_playlist", &CreatePlaylist { name: "Other".into() })
+            .unwrap();
         peer.refresh();
         let [mine, other] = [0, 1].map(|i| peer.playlists()[i].id);
         assert_eq!(peer.playlist, mine, "the first is read against");
         let air = peer.items()[0].id;
-        peer.client.mutate("add_to_playlist", &on(other, air)).unwrap();
+        peer.client.lock().mutate("add_to_playlist", &on(other, air)).unwrap();
         peer.refresh();
         assert!(!peer.items()[0].on_playlist(), "on Other, not on Mine");
         peer.source = Source::Album(peer.album_id("Suites"), "Suites".into());
@@ -1189,7 +1199,7 @@ mod tests {
             id: made,
             verdict: Verdict::Refused { why: "no".into() },
         };
-        peer.client.receive(reject.enc());
+        peer.client.lock().receive(reject.enc());
         peer.refresh();
         assert_eq!(peer.playlist, other, "re-pointed at what is left");
         assert!(peer.items()[0].on_playlist(), "the library is read against Other now");

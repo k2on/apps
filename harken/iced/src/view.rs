@@ -106,7 +106,8 @@ impl App {
             bottom: 0.0,
             left: GUTTER,
         });
-        let paged: Element<'_, Message> = match !cfg!(feature = "demo") && self.peer.client.is_alone() {
+        let alone = self.peer.client.lock().is_alone();
+        let paged: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             true => column![top, self.view_page()].spacing(10).into(),
             false => stack![self.view_page(), top].into(),
         };
@@ -567,7 +568,7 @@ impl App {
     /// How far everybody has got in an episode, the signed-in person first
     /// as "you": `you 40%  ·  Ada played`.
     pub(crate) fn listened(&self, media: crate::rows::Id) -> String {
-        let me = self.peer.client.me().actor.clone();
+        let me = self.peer.client.lock().me().actor.clone();
         let mut all = self.peer.listened_to(media);
         all.sort_by_key(|l| l.user_id != me);
         let said: Vec<String> = all
@@ -1095,7 +1096,7 @@ impl App {
         // the page leaves it: iced does not end a text at a line.
         let room = (self.pane_width() - 2.0 * GUTTER - SCROLLBAR - 48.0).max(200.0);
         let chars = (room / 6.6) as usize * 3;
-        let me = p.client.me().actor.clone();
+        let me = p.client.lock().me().actor.clone();
         let mut list = column![].spacing(0);
         for (i, item) in items.iter().enumerate() {
             let on = cursor.is_some() && cell(i) == cursor;
@@ -1928,7 +1929,8 @@ impl App {
     /// Exactly [`arkui::account::HEIGHT`] tall, because the menu hangs off
     /// its bottom before anything is laid out.
     fn view_top(&self) -> Element<'_, Message> {
-        let left: Element<'_, Message> = match !cfg!(feature = "demo") && self.peer.client.is_alone() {
+        let alone = self.peer.client.lock().is_alone();
+        let left: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             // Alone: everything works here, and this is how it starts
             // syncing — a server, then its sign-in (`docs/plan-alone.md` §4).
             true => row![
@@ -1972,17 +1974,16 @@ impl App {
         if !self.says_status() {
             return iced::widget::Space::new().height(Length::Fixed(0.0)).into();
         }
-        let mut line = format!(
-            "{} songs \u{b7} cursor {} \u{b7} {} pending",
-            p.items().len(),
-            p.client.cursor(),
-            p.client.pending_len()
-        );
-        if !cfg!(feature = "demo") && p.client.is_alone() {
+        let (cursor, pending) = {
+            let c = p.client.lock();
+            (c.cursor(), c.pending_len())
+        };
+        let mut line = format!("{} songs \u{b7} cursor {cursor} \u{b7} {pending} pending", p.items().len());
+        if !cfg!(feature = "demo") && p.client.lock().is_alone() {
             line = format!("alone \u{b7} {line}");
         } else if !cfg!(feature = "demo") {
             // Who the replica's session row says, once it has synced.
-            let who = match (&self.login, p.client.current()) {
+            let who = match (&self.login, p.client.lock().current()) {
                 (Some(_), Some(s)) if !s.name.is_empty() => s.name,
                 (Some(_), Some(s)) => s.user,
                 (Some(l), None) => crate::auth::who(l),
@@ -1990,7 +1991,7 @@ impl App {
             };
             // Nobody yet is a sign-in on its way, or one the note says
             // came back refused: there is no one to name.
-            let link = match (&self.login, p.client.linked) {
+            let link = match (&self.login, p.client.lock().linked) {
                 (None, _) => None,
                 (Some(_), true) => Some("online"),
                 (Some(_), false) => Some("offline"),
@@ -2040,7 +2041,7 @@ impl App {
     fn view_debug(&self) -> Element<'_, Message> {
         let l = &self.listening;
         let stats = l.stats();
-        let client = &self.peer.client;
+        let client = &self.peer.client.lock();
         let status = client.status();
         let live = crate::client::live_status(client);
         let session = self.session.as_ref();
@@ -2193,7 +2194,7 @@ impl App {
         // What this window did, and what became of each: pending, in the log,
         // or refused and why — the sentence every replica reaches.
         for e in self.edits.iter().rev().take(12) {
-            let standing = match self.peer.client.standing(&e.id) {
+            let standing = match client.standing(&e.id) {
                 crate::client::Standing::Pending => "pending".to_string(),
                 crate::client::Standing::Confirmed => "in the log".to_string(),
                 crate::client::Standing::Rejected(why) => format!("refused: {why}"),

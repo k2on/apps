@@ -61,6 +61,7 @@
 
 pub mod app;
 pub mod disk;
+pub mod driven;
 mod hub;
 pub mod instance;
 mod jobs;

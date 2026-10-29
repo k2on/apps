@@ -120,8 +120,8 @@ fn the_menu_signs_out() {
     key(&mut app, Key::Character("j".into()));
     key(&mut app, Key::Named(Named::Enter));
     assert!(app.login.is_none(), "still signed in");
-    assert!(app.peer.client.is_signed_out());
-    let funcs: Vec<String> = app.peer.client.log.pending.iter().map(|p| p.entry.func.clone()).collect();
+    assert!(app.peer.client.lock().is_signed_out());
+    let funcs: Vec<String> = app.peer.client.lock().log.pending.iter().map(|p| p.entry.func.clone()).collect();
     assert_eq!(funcs.last().map(String::as_str), Some("session.revoke"), "{funcs:?}");
     assert!(app.ctx.menu.is_none());
     let _ = app.update(Message::AccountMenu);
@@ -146,7 +146,7 @@ fn a_sign_in_goes_by_itself_once_a_load() {
     // Turned away by the server: straight back to sign in.
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
     let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
-    app.peer.client.connect_with("ws://queues", Queues::dialer(made.clone()));
+    app.peer.client.lock().connect_with("ws://queues", Queues::dialer(made.clone()));
     let _ = app.update(Message::Due);
     let q = made.lock().unwrap()[0].clone();
     q.push(Event::Open);
@@ -210,7 +210,7 @@ fn settings_resyncs_the_library_for_the_library_alone() {
     assert!(app.resync.as_deref().unwrap_or("").starts_with("Asked"), "{:?}", app.resync);
 
     // Somebody without the library's role.
-    let plain = crate::peer::Peer::open(crate::client::memory(super::who("bob"), Some("dev")));
+    let plain = super::hand(crate::peer::Peer::open(crate::client::memory(super::who("bob"), Some("dev"))));
     let mut app = App::with_peer(plain, "http://127.0.0.1:9".into(), Some(login("bob")));
     let _ = app.update(Message::Select(Source::Settings));
     let _ = app.update(Message::Resync);
