@@ -27,7 +27,11 @@ pub struct Media {
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct Album {
+    /// The folder its tracks are in and its name (`keys::album_id`): two
+    /// recordings of one title are two albums, and one folder's tracks one
+    /// album whoever plays each.
     #[ark(key)]
+    pub id: String,
     pub name: String,
     pub label: String,
     pub released: i64,
@@ -129,7 +133,7 @@ pub struct Song {
     #[ark(key, refs(Media))]
     pub media_id: Id<Media>,
     #[ark(refs(Album))]
-    pub album_name: Option<String>,
+    pub album_id: Option<String>,
     pub disc: i64,
     pub track: i64,
     #[ark(refs(Recording))]

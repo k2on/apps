@@ -168,7 +168,7 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
             "album",
             &AlbumInput {
                 playlist_id: favs,
-                name: name.into(),
+                id: c.album_id(name),
             },
         )
     };
@@ -182,7 +182,11 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
         },
     );
     assert_eq!(beethoven.len(), 3);
-    assert!(album(&c, "Nocturnes").is_empty());
+    let nocturnes = AlbumInput {
+        playlist_id: favs,
+        id: "/nocturnes".into(),
+    };
+    assert!(c.list::<LibraryEntry>("album", &nocturnes).is_empty());
 
     c.mutate("alice", "add_to_playlist", &on(&favs, &symphony[0].id)).unwrap();
     let symphony = album(&c, "Symphony No. 5");
@@ -224,7 +228,7 @@ fn an_album_is_in_the_works_order_and_not_the_librarys() {
         "album",
         &AlbumInput {
             playlist_id: favs,
-            name: "Water Music".into(),
+            id: c.album_id("Water Music"),
         },
     );
     assert_eq!(
@@ -353,7 +357,7 @@ fn a_file_moved_to_another_album_takes_nothing_with_it_that_is_still_used() {
             "album",
             &AlbumInput {
                 playlist_id: favs,
-                name: name.into(),
+                id: c.album_id(name),
             },
         ))
     };
@@ -572,7 +576,7 @@ fn a_pop_track_has_a_recording_and_no_work() {
             "album",
             &AlbumInput {
                 playlist_id: favs,
-                name: "Northerly".into()
+                id: c.album_id("Northerly")
             }
         )
         .len(),
@@ -616,7 +620,7 @@ fn a_track_number_is_not_a_movement_number() {
         "album",
         &AlbumInput {
             playlist_id: favs,
-            name: "Piano Favourites".into(),
+            id: c.album_id("Piano Favourites"),
         },
     );
     assert_eq!(titles(&record), ["III. Presto", "I. Adagio"], "an album page is in the release's order");
@@ -913,9 +917,9 @@ fn a_song_keeps_its_own_facts_in_bounds() {
         disc: 250,
         ..song("Fine", "X", "")
     });
-    let mut got = each(&c.rows::<Song>("song"), |s| (s.album_name.clone(), s.track, s.bpm, s.disc));
+    let mut got = each(&c.rows::<Song>("song"), |s| (s.album_id.clone(), s.track, s.bpm, s.disc));
     got.sort_by_key(|g| g.1);
-    assert_eq!(got, [(None, 0, 120, 99), (Some("Y".into()), 999, 0, 1)]);
+    assert_eq!(got, [(None, 0, 120, 99), (Some("/y".into()), 999, 0, 1)]);
 }
 
 /// Everything onto a playlist in one entry, in library order, skipping what

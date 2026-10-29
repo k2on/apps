@@ -110,11 +110,16 @@ public fun ArkApp(
         onDispose { activity?.removeOnNewIntentListener(listener) }
     }
 
-    // Back from the tab with no code: the person closed it.
+    // Back from the tab with no code: the person closed it. And back in front at all: the server
+    // dialled now rather than when the link's backoff says, so one that is there is reached
+    // before a screen says it is not.
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
         val o = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_RESUME) host.send(Event.Returned)
+            if (e == Lifecycle.Event.ON_RESUME) {
+                host.send(Event.Returned)
+                host.session.value?.dialNow()
+            }
         }
         owner.lifecycle.addObserver(o)
         onDispose { owner.lifecycle.removeObserver(o) }

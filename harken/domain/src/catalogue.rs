@@ -19,6 +19,11 @@ use serde::Deserialize;
 use crate::host::{recording_key, work_key};
 use crate::types::{AddSong, CreditRecording, DescribePerson, DescribeRecording, DescribeWork};
 
+/// The folder a catalogue's albums are in, whatever its files' addresses:
+/// where a server keeps them (under `/media`), and with its name what an
+/// album of it is (`keys::album_id`).
+pub const DIR: &str = ".catalogue";
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Catalogue {
@@ -185,6 +190,7 @@ impl Catalogue {
                     movement_no: t.track,
                     artist_banner: String::new(),
                     released: album.year,
+                    folder: DIR.into(),
                 };
                 calls.push(Call::of("library.add_song", &t.title, &song));
                 let work_id = work_key(&t.composer, &t.catalogue, &work_title);

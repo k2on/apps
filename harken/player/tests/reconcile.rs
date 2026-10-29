@@ -654,3 +654,28 @@ fn coming_back_playing_offers_only_to_a_session_no_other_device_has() {
     };
     assert!(back(gone), "the phone has gone: the kitchen's own queue is offered");
 }
+
+/// A track pressed is loaded from its start, not the few milliseconds the
+/// session's clock ran before the look: a player starting a file is not
+/// sought within it — which a browser fetches the file again for — while
+/// where it starts is inside [`harken_player::SYNC_MS`] of the clock. A
+/// place further in is where it loads; and the session's confirming the
+/// press, the player still buffering, is no seek. Falsified by loading at
+/// the clock's position: the press loaded at 40.
+#[test]
+fn a_track_pressed_is_loaded_from_its_start() {
+    let mut rig = Rig::new();
+    let pressed = session(2, 0, playing(0, NOW), ME, false);
+    rig.look(&pressed, NOW + 40);
+    assert_eq!(rig.sound.take_did(), ["load 0 0 true"]);
+    rig.sound.place = Some(Place::Believed(0));
+    let confirmed = session(2, 0, playing(0, NOW + 300), ME, false);
+    rig.look(&confirmed, NOW + 900);
+    assert_eq!(rig.sound.take_did(), Vec::<String>::new(), "the confirmed press is no seek");
+    rig.look(&session(2, 1, playing(0, NOW + 8_000), ME, false), NOW + 8_040);
+    assert_eq!(rig.sound.take_did(), ["jump 1 0"]);
+
+    let mut rig = Rig::new();
+    rig.look(&session(2, 0, playing(30_000, NOW), ME, false), NOW + 40);
+    assert_eq!(rig.sound.take_did(), ["load 0 30040 true"], "a place in the track is where it loads");
+}

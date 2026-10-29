@@ -77,6 +77,12 @@ fn frame(peer: &str, sp: Space, dir: &str, conn: Option<ConnId>, bytes: &[u8]) {
         Frame::Snapshot { snapshot, .. } => {
             debug!(target: "ark", peer, space = space(sp), dir, conn, seq = snapshot.seq, "snapshot")
         }
+        Frame::Part { part, .. } => {
+            let rows: usize = part.ranges.iter().map(|r| r.rows.len()).sum();
+            let first = part.first;
+            debug!(target: "ark", peer, space = space(sp), dir, conn, seq = part.seq, rows, first, last = part.next.is_none(), "part")
+        }
+        Frame::More { from, .. } => debug!(target: "ark", peer, space = space(sp), dir, conn, table = %from.table, "more"),
         Frame::Verdict { id: e, verdict, .. } => verdict_of(peer, sp, dir, conn, &e, &verdict),
         Frame::Telemetry { events } => debug!(target: "ark", peer, dir, conn, events = events.len(), "telemetry"),
     }

@@ -67,7 +67,7 @@ fn playing_on_the_phone(hub: &ark_peer::Handle) -> (App, Option<Replica>) {
     client.set_roles([crate::domain::LIBRARY]);
     episode(&mut client);
     client.connect_with("hub", dial(hub));
-    let mut app = App::with_peer(crate::peer::Peer::open(client), String::new(), None);
+    let mut app = App::with_peer(super::hand(crate::peer::Peer::open(client)), String::new(), None);
     app.listening.open("me-device");
     let mut phone = crate::client::memory_as(phone_who(), Some("phone"), crate::client::device(true, "Phone"));
     phone.connect_with("hub", dial(hub));
@@ -184,6 +184,7 @@ fn a_voice_named_from_its_line_says_all_its_lines() {
         .to_vec();
     app.peer
         .client
+        .lock()
         .mutate(
             "set_transcript",
             &SetTranscript {

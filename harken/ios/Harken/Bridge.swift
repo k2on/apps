@@ -229,6 +229,11 @@ final class Bridge {
     private func main(_ f: @escaping () -> Void) { DispatchQueue.main.async(execute: f) }
 
     // On `queue`: the peer opened and dialling, Home's views read and shown, then the rest.
+    /// Dial the server now, whatever the link's backoff says: the app came to the front.
+    /// On `queue`, as every call into the peer is: the peer's lock is held while
+    /// it takes what the server sent, and the main thread must not wait on it.
+    func dialNow() { queue.async { self.harken?.peer.dialNow() } }
+
     private func open() {
         let dir = Bridge.directory(root, server)
         let h: Harken

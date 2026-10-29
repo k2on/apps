@@ -129,7 +129,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
         },
     )));
     assert!(
-        matches!(&s[..], [Frame::Snapshot { snapshot, .. }] if snapshot.seq == 3 && snapshot.state == wide.store.state_hash()),
+        matches!(&s[..], [Frame::Part { part, .. }] if part.first && part.seq == 3 && part.state == wide.store.state_hash() && part.next.is_none()),
         "{s:?}"
     );
 

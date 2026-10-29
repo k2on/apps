@@ -434,6 +434,13 @@ impl Peer {
         self.shared.act(|s| if online { s.peer.reconnect() } else { s.peer.disconnect() });
     }
 
+    /// Dial the server now, whatever the link's backoff says: the app came
+    /// to the front, so a server that is there is reached before the screens
+    /// say it is not. Nothing while connected, offline on purpose or signed out.
+    pub fn dial_now(&self) {
+        self.shared.act(|s| s.peer.dial_now());
+    }
+
     /// An intent of the function `name` on its input's JSON: its id, or why
     /// its preview — or, alone, its sequencing — refused it.
     pub fn mutate(&self, name: String, input: String) -> Result<String, Refusal> {

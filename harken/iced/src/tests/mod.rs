@@ -42,7 +42,14 @@ fn who(me: &str) -> Who {
 /// scanner holds it.
 fn lists(mut client: Replica) -> crate::peer::Peer {
     client.set_roles([crate::domain::LIBRARY]);
-    crate::peer::Peer::open(client)
+    hand(crate::peer::Peer::open(client))
+}
+
+/// A window's peer pumped by the window's own updates, not its driver's
+/// thread: a test says when what arrived is taken in.
+pub fn hand(p: crate::peer::Peer) -> crate::peer::Peer {
+    p.client.by_hand();
+    p
 }
 
 /// A replica in memory, its own authority, as `me`.
@@ -144,5 +151,5 @@ pub fn demo_app() -> crate::App {
 
     static TEMPLATE: OnceLock<ark_peer::Memory> = OnceLock::new();
     let disk = TEMPLATE.get_or_init(|| crate::seed::seeded_disk(1)).clone();
-    crate::App::with_peer(crate::peer::Peer::open(crate::seed::open(disk)), String::new(), None)
+    crate::App::with_peer(hand(crate::peer::Peer::open(crate::seed::open(disk))), String::new(), None)
 }

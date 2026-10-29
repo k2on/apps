@@ -142,7 +142,7 @@ object Catalogue {
 
     /** The records a list of tracks is on, each once, in the order they first come. */
     fun albumsOf(tracks: List<Track>, detail: (Track) -> TrackDetail?, albums: Map<String, Album>): List<Album> =
-        tracks.mapNotNull { t -> detail(t)?.album?.let(albums::get) }.distinctBy { it.name }
+        tracks.mapNotNull { t -> detail(t)?.albumId?.let(albums::get) }.distinctBy { it.id }
 
     /**
      * Who an album is by, as its page says it: who played it in the accent — whoever is credited

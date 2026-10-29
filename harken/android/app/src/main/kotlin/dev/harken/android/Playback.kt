@@ -116,6 +116,7 @@ import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.ArkSessions
 import dev.harken.android.onboarding.Hold
 import dev.harken.android.onboarding.Sessions
+import dev.harken.android.gen.Active
 import dev.harken.android.gen.Output
 import dev.harken.android.gen.Track as Queued
 import dev.harken.ffi.Loudness
@@ -341,7 +342,7 @@ class PlaybackService : MediaLibraryService() {
     // and the page it came from.
     private fun items(s: ArkSession, p: Pick): MediaSession.MediaItemsWithStartPosition {
         val art = Kept.of(s, Device.name(this)).library.artOf
-        return MediaSession.MediaItemsWithStartPosition(p.queue.map { Items.of(it, s.server, art(it.album), p.from) }, p.at, p.positionMs)
+        return MediaSession.MediaItemsWithStartPosition(p.queue.map { Items.of(it, s.server, art(it.album, it.creator), p.from) }, p.at, p.positionMs)
     }
 
     /**
@@ -654,7 +655,7 @@ class ExoSound(private val exo: ExoPlayer, private val main: Handler) : PhoneSou
         val l = listen
         val server = l?.server ?: return
         val tracks = JSONArray(queue).let { a -> List(a.length()) { Queued.of(a.get(it)) } }
-        val items = tracks.map { Items.of(it, server, l.art(it.album), from) }
+        val items = tracks.map { Items.of(it, server, l.art(it.album, it.creator), from) }
         val index = at.toInt()
         said = said.copy(queue = tracks, index = index, playing = playing, positionMs = positionMs, readAt = now(), moving = false, ended = false, from = from, buffering = true)
         command {
@@ -801,12 +802,12 @@ class RemotePlayer(looper: Looper) : SimpleBasePlayer(looper) {
                 .setIsDeviceMuted(loud?.muted ?: false)
         val shown = Forward.shown(heard) ?: return b.setPlaybackState(Player.STATE_IDLE).setPlaylist(emptyList()).build()
         val server = listen?.server ?: ""
-        val art = listen?.art ?: { "" }
+        val art = listen?.art ?: { _, _ -> "" }
         return b
             .setPlaylist(
                 shown.queue.mapIndexed { i, t ->
                     MediaItemData.Builder("$i:${t.id.hex}")
-                        .setMediaItem(Items.of(t, server, art(t.album), shown.from).let { m -> if (i == shown.at && shown.on != null) Items.on(m, shown.on) else m })
+                        .setMediaItem(Items.of(t, server, art(t.album, t.creator), shown.from).let { m -> if (i == shown.at && shown.on != null) Items.on(m, shown.on) else m })
                         .setDurationUs(t.durationMs * 1000)
                         .setIsSeekable(true)
                         .build()
@@ -1031,6 +1032,47 @@ data class Where(
     val moving: Boolean = false,
 )
 
+/**
+ * Where this phone's hand put the position, held until the session's clock agrees. A seek is a
+ * press of the session: previewed on the session's thread and drawn back here a moment later, while
+ * the clock already drawn — its ticks, and the echo of the scrub that went before it — still says
+ * where the track was; let go of, the scrubber jumped back and then forward. So the hand is shown
+ * instead, running on while the track plays, until the clock comes within [AGREE_MS] of it, the
+ * track changes, or [FORGET_MS] pass without agreement: a seek refused, or lost.
+ */
+internal class Sought(private val now: () -> Long = SystemClock::uptimeMillis) {
+    private var ms = 0L
+    private var at = 0L
+    private var track: String? = null
+
+    /** The hand put `track` at `ms`. */
+    fun hold(ms: Long, track: String) {
+        this.ms = ms
+        at = now()
+        this.track = track
+    }
+
+    /** What to show: the session's `clock` for `track`, or the hand's position while the clock has not caught up with it. */
+    fun shown(clock: Long, track: String, counting: Boolean): Long {
+        val held = this.track ?: return clock
+        val t = now()
+        val expect = if (counting) ms + (t - at) else ms
+        if (held != track || t - at > FORGET_MS || kotlin.math.abs(clock - expect) <= AGREE_MS) {
+            this.track = null
+            return clock
+        }
+        return expect
+    }
+
+    companion object {
+        /** How close the clock comes to the hand before it is the clock's again. */
+        const val AGREE_MS = 1_500L
+
+        /** How long the hand is believed with no clock agreeing. */
+        const val FORGET_MS = 5_000L
+    }
+}
+
 /** The player as the screens see it — all of it but the position, which is [Playback.position]. */
 data class PlayerState(
     val now: Playing? = null,
@@ -1076,6 +1118,9 @@ class Playback(
 
     private var controller: MediaController? = null
     private var ticking: Job? = null
+
+    /** Where this phone's hand put the position, until the session's clock agrees. */
+    private val sought = Sought()
 
     /** The phone's own media stream: the volume the slider moves while this phone is its own session. */
     private val stream: StreamLevel?
@@ -1190,7 +1235,7 @@ class Playback(
                 on = on,
                 volume = volume,
             )
-        _position.value = a.position(h.serverNow())
+        _position.value = shownPosition(a, h)
         if (!a.counting) stopTicking()
         else if (ticking?.isActive != true)
             ticking =
@@ -1199,10 +1244,14 @@ class Playback(
                         delay(TICK_MS)
                         val active = heard.active ?: break
                         if (!active.counting) break
-                        _position.value = active.position(heard.serverNow())
+                        _position.value = shownPosition(active, heard)
                     }
                 }
     }
+
+    // The position to show: the session's clock, or where the hand put it while the clock has not
+    // caught up with it (Sought).
+    private fun shownPosition(a: Active, h: Heard): Long = sought.shown(a.position(h.serverNow()), a.now.id.hex, a.counting)
 
     private fun stopTicking() {
         ticking?.cancel()
@@ -1210,7 +1259,7 @@ class Playback(
     }
 
     private fun playing(t: Queued, l: Listen): Playing =
-        Playing(t.id.hex, t.title, t.creator, t.album, l.art(t.album).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) } ?: "")
+        Playing(t.id.hex, t.title, t.creator, t.album, l.art(t.album, t.creator).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) } ?: "")
 
     // The device button: the output, or — with the sound nowhere — this phone, lit.
     private fun where(h: Heard): Where {
@@ -1242,6 +1291,9 @@ class Playback(
     /** A library row as the session carries it. */
     private fun queued(t: Track, albumOf: (Track) -> Album?): Queued = Queued(albumOf(t)?.name ?: "", t.creator, t.durationMs, t.file, t.id, t.title)
 
+    /** A queued track's cover path as the library has it — its album's, or its show's for an episode — else `orElse`: the album the screen knew. */
+    private fun cover(q: Queued, orElse: String): String = listen?.art?.invoke(q.album, q.creator)?.takeIf { it.isNotEmpty() } ?: orElse
+
     /**
      * Play `queue` from `at`: the list the track was started from, with each track's album, and the
      * page it was on (`from`, a route as `Page.place` spells it). Shuffled is a queue in another
@@ -1256,7 +1308,7 @@ class Playback(
         press(Press.Start(list.map { queued(it, albumOf) }, first, positionMs, from)) {
             val c = controller ?: return@press
             this.shuffled = shuffled
-            c.setMediaItems(list.map { t -> Items.of(queued(t, albumOf), server, albumOf(t)?.art ?: "", from) }, first, positionMs)
+            c.setMediaItems(list.map { t -> queued(t, albumOf).let { q -> Items.of(q, server, cover(q, albumOf(t)?.art ?: ""), from) } }, first, positionMs)
             c.prepare()
             c.play()
         }
@@ -1268,7 +1320,7 @@ class Playback(
         press(Press.Next(q)) {
             val c = controller ?: return@press
             if (c.mediaItemCount == 0) return@press play(listOf(track), 0, { album })
-            c.addMediaItem(c.currentMediaItemIndex + 1, Items.of(q, server, album?.art ?: "", Items.from(c.currentMediaItem)))
+            c.addMediaItem(c.currentMediaItemIndex + 1, Items.of(q, server, cover(q, album?.art ?: ""), Items.from(c.currentMediaItem)))
         }
     }
 
@@ -1278,7 +1330,7 @@ class Playback(
         press(Press.Append(listOf(q))) {
             val c = controller ?: return@press
             if (c.mediaItemCount == 0) return@press play(listOf(track), 0, { album })
-            c.addMediaItem(Items.of(q, server, album?.art ?: "", Items.from(c.currentMediaItem)))
+            c.addMediaItem(Items.of(q, server, cover(q, album?.art ?: ""), Items.from(c.currentMediaItem)))
         }
     }
 
@@ -1301,8 +1353,9 @@ class Playback(
         seek((position.value + deltaMs).coerceIn(0, end))
     }
 
-    /** Seek, on release; while joined the scrubber's slot is emptied with it. */
+    /** Seek, on release: shown there at once (Sought); while joined the scrubber's slot is emptied with it. */
     fun seek(ms: Long) {
+        state.value.now?.let { sought.hold(ms, it.id) }
         _position.value = ms
         press(Press.Seek(ms)) { controller?.seekTo(ms) }
         if (joined) listen?.press(Press.Scrub(null))

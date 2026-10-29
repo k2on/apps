@@ -131,6 +131,11 @@ private constructor(
     val isClosed: Boolean
         get() = closed || closing
 
+    /** Dial the server now, whatever the link's backoff says: the app came to the front. */
+    fun dialNow() {
+        thread.execute { if (!closed) harken?.let { it.peer.dialNow() } }
+    }
+
     private fun start(h: Harken) {
         harken = h
         h.peer.setListener(

@@ -153,6 +153,7 @@ fn views() -> Vec<(&'static str, Box<dyn Check>)> {
                     .take(2)
             }),
         ),
+        kept("items-of-one-from-its-key", make(|_| scan_from::<V, Item, _, _>(one(1)))),
         kept(
             "group-source",
             make(|_| scan::<V, Song>().group(|s| s.creator.clone(), |_, name, xs| (name.clone(), xs.len() as i64))),
@@ -358,4 +359,32 @@ fn a_refused_run_writes_nothing() {
     });
     assert!(r.is_err());
     assert_eq!(store.state_hash(), before);
+}
+
+/// A scan from a key's leading columns is the whole table's scan filtered
+/// by them, after every batch of churn, and no change to another key moves
+/// it. Falsified by `scan_from` taking every key's changes: the second
+/// playlist's items came into the first's view.
+#[test]
+fn a_scan_from_a_key_is_the_scan_filtered() {
+    let mut store = Store::new(Arc::new(<V as Tables>::schema()), ark::schema::Space::Durable);
+    let from = make(|_| scan_from::<V, Item, _, _>(one(1)));
+    let filtered = make(|_| scan::<V, Item>().filter(|i| i.playlist_id == one(1)));
+    let mut view = View::new(from.clone(), ctx(), &store).unwrap();
+    let mut r = Rng(5);
+    for step in 0..400 {
+        let changes = churn(&mut r, &mut store);
+        let patches = view.push(&changes, &store).unwrap();
+        let want = ark::plan::answer(&filtered, &ctx(), &store).unwrap();
+        assert_eq!(view.rows(), want, "step {step}");
+        let first = |c: &ark::store::Change| {
+            let row = match c {
+                ark::store::Change::Add { row, .. } | ark::store::Change::Remove { row, .. } | ark::store::Change::Edit { new: row, .. } => row,
+            };
+            c.table() == "item" && <Item as ark::row::Value>::decode(row).is_ok_and(|i| i.playlist_id == one(1))
+        };
+        if !changes.iter().any(first) {
+            assert!(patches.is_empty(), "step {step}: moved by another key's change");
+        }
+    }
 }

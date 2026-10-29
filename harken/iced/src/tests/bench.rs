@@ -20,11 +20,11 @@ fn bench_queries() {
     let t0 = Instant::now();
     let app = super::demo_app();
     eprintln!("demo seeded and first read in {:.1?}", t0.elapsed());
-    let client = &app.peer.client;
+    let client = &app.peer.client.lock();
     let nobody = Library { playlist_id: key([0; 16]) };
     let album = AlbumInput {
         playlist_id: key([0; 16]),
-        name: "Water Music".into(),
+        id: app.peer.album_id("Water Music"),
     };
     let bach = Works {
         composer: "Johann Sebastian Bach".into(),
@@ -61,10 +61,10 @@ fn median(xs: &[Duration]) -> Duration {
 }
 
 /// Every query the window holds open, over the demo library `copies` times
-/// over: its hydrate, and then the cost of one change — a playlist toggle,
+/// over: its hydrate, and then the cost of one change â a playlist toggle,
 /// and a `describe_person` (what the composer and artist views read beyond
-/// the songs) — each a mutation whose changes the client pushes through
-/// every view held (§1.10), timed together, since the client pushes them in
+/// the songs) â each a mutation whose changes the client pushes through
+/// every view held (Â§1.10), timed together, since the client pushes them in
 /// the one step. Flat in the library size is the claim: a change costs the
 /// entries it touches.
 fn views_at(copies: usize) {
@@ -74,9 +74,10 @@ fn views_at(copies: usize) {
 
     let favorites: Id = client.query::<Vec<crate::domain::Playlist>>("playlists", &()).unwrap()[0].id.0;
     let handel = "George Frideric Handel";
+    let albums = client.query::<Vec<crate::domain::AlbumsEntry>>("albums", &()).unwrap();
     let album = AlbumInput {
         playlist_id: key(favorites),
-        name: "Water Music".into(),
+        id: albums.into_iter().find(|a| a.name == "Water Music").unwrap().id,
     };
     let track = client
         .query::<Vec<LibraryEntry>>("album", &album)
@@ -189,4 +190,296 @@ fn bench_views() {
     if std::env::var_os("BENCH_16").is_some() {
         views_at(16);
     }
+}
+
+/// One message as the runtime takes it: the update, the view built again,
+/// the tree diffed, laid out and drawn â what a frame costs.
+struct Frame {
+    tree: iced::advanced::widget::Tree,
+    renderer: iced::Renderer,
+    size: iced::Size,
+}
+
+impl Frame {
+    fn new(app: &crate::App) -> Frame {
+        let renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0)));
+        let el = app.view();
+        Frame {
+            tree: iced::advanced::widget::Tree::new(el.as_widget()),
+            renderer,
+            size: iced::Size::new(1440.0, 900.0),
+        }
+    }
+
+    /// `m` taken and a frame made of it: the time each part took.
+    fn take(&mut self, app: &mut crate::App, m: Option<crate::Message>) -> [Duration; 4] {
+        use iced::advanced::{layout, renderer, Layout};
+        let t = Instant::now();
+        if let Some(m) = m {
+            let _ = app.update(m);
+        }
+        let updated = t.elapsed();
+        let t = Instant::now();
+        let mut el = app.view();
+        let viewed = t.elapsed();
+        let t = Instant::now();
+        self.tree.diff(el.as_widget());
+        let node = el
+            .as_widget_mut()
+            .layout(&mut self.tree, &self.renderer, &layout::Limits::new(iced::Size::ZERO, self.size));
+        let laid = t.elapsed();
+        let t = Instant::now();
+        let at = iced::Point::new(600.0, 400.0);
+        let viewport = iced::Rectangle::with_size(self.size);
+        el.as_widget().draw(
+            &self.tree,
+            &mut self.renderer,
+            &iced::Theme::Dark,
+            &renderer::Style::default(),
+            Layout::new(&node),
+            iced::mouse::Cursor::Available(at),
+            &viewport,
+        );
+        [updated, viewed, laid, t.elapsed()]
+    }
+}
+
+fn row(name: &str, ts: &[[Duration; 4]]) {
+    let part = |i: usize| median(&ts.iter().map(|t| t[i]).collect::<Vec<_>>());
+    let total = median(&ts.iter().map(|t| t.iter().sum()).collect::<Vec<_>>());
+    eprintln!(
+        "{name:>22} {:>9.1?} {:>9.1?} {:>9.1?} {:>9.1?} {:>9.1?}",
+        part(0),
+        part(1),
+        part(2),
+        part(3),
+        total
+    );
+}
+
+/// A frame of each thing the person does on a real library â a server's
+/// log at `HARKEN_BENCH_LOG`, copied in: the page opened, a row hovered,
+/// the cursor moved, the clock ticked; and the pages a click on the bar
+/// opens. Run with
+/// `HARKEN_BENCH_LOG=<dir> cargo test -p harken-iced --release -- --ignored --nocapture bench_real`.
+#[test]
+#[ignore]
+fn bench_real() {
+    let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
+        return eprintln!("HARKEN_BENCH_LOG names no log");
+    };
+    let mut disk = ark_peer::Memory::default();
+    for n in ["kv", "log", "schema.json"] {
+        if let Ok(b) = std::fs::read(std::path::Path::new(&dir).join(n)) {
+            ark_peer::Disk::put(&mut disk, n, &b).unwrap();
+        }
+    }
+    let t = Instant::now();
+    let replica = crate::client::open(Box::new(disk), None, crate::listening::device());
+    let mut app = crate::App::with_peer(super::hand(crate::peer::Peer::open(replica)), String::new(), None);
+    eprintln!("opened in {:.1?}: {} songs", t.elapsed(), app.peer.rows().len());
+    let mut frame = Frame::new(&app);
+    eprintln!("{:>22} {:>9} {:>9} {:>9} {:>9} {:>9}", "", "update", "view", "layout", "draw", "frame");
+    let n = 15;
+    let songs: Vec<_> = (0..n)
+        .map(|_| frame.take(&mut app, Some(crate::Message::Select(crate::places::Source::Library))))
+        .collect();
+    row("songs opened", &songs);
+    let hovers: Vec<_> = (0..n).map(|i| frame.take(&mut app, Some(crate::Message::HoverAt(i % 12)))).collect();
+    row("a row hovered", &hovers);
+    let moves: Vec<_> = (0..n)
+        .map(|i| frame.take(&mut app, Some(crate::Message::Hover(iced::Point::new(600.0 + i as f32, 400.0)))))
+        .collect();
+    row("the cursor moved", &moves);
+    let ticks: Vec<_> = (0..n).map(|_| frame.take(&mut app, Some(crate::Message::Tick))).collect();
+    row("a tick", &ticks);
+    let ids: Vec<_> = app.peer.rows().iter().map(|r| r.id).take(40).collect();
+    let plays: Vec<_> = ids.iter().map(|id| frame.take(&mut app, Some(crate::Message::PlayItem(*id)))).collect();
+    row("a song played", &plays);
+    let playing: Vec<_> = (0..n).map(|i| frame.take(&mut app, Some(crate::Message::HoverAt(i % 12)))).collect();
+    row("hovered, playing", &playing);
+    let ticking: Vec<_> = (0..n).map(|_| frame.take(&mut app, Some(crate::Message::Tick))).collect();
+    row("a tick, playing", &ticking);
+    let idle: Vec<_> = (0..n).map(|_| frame.take(&mut app, None)).collect();
+    row("a frame, playing", &idle);
+    let queue: Vec<_> = (0..n)
+        .map(|i| {
+            frame.take(
+                &mut app,
+                Some(if i % 2 == 0 {
+                    crate::Message::OpenQueue
+                } else {
+                    crate::Message::CloseQueue
+                }),
+            )
+        })
+        .collect();
+    row("the queue toggled", &queue);
+    let _ = frame.take(&mut app, Some(crate::Message::OpenQueue));
+    let open: Vec<_> = (0..n).map(|i| frame.take(&mut app, Some(crate::Message::QueueAt(i % 10)))).collect();
+    row("hovered, queue open", &open);
+    let _ = frame.take(&mut app, Some(crate::Message::CloseQueue));
+    let album = app.peer.rows()[0].clone();
+    let detail = app.peer.detail_of(album.id);
+    let to = crate::places::Source::Album(detail.album_id.clone(), detail.album.clone());
+    let albums: Vec<_> = (0..n)
+        .map(|i| {
+            frame.take(
+                &mut app,
+                Some(crate::Message::Select(if i % 2 == 0 {
+                    to.clone()
+                } else {
+                    crate::places::Source::Library
+                })),
+            )
+        })
+        .collect();
+    row("songs to album", &albums);
+    let longest = ark::db::read::<crate::domain::schema::Harken, _>(&app.peer.client.lock().log.store, |db| {
+        let mut n = std::collections::BTreeMap::<_, usize>::new();
+        for c in db.cue.scan() {
+            *n.entry(c.media_id).or_default() += 1;
+        }
+        n.into_iter().max_by_key(|(_, n)| *n)
+    });
+    if let Some((episode, lines)) = longest {
+        let played = frame.take(&mut app, Some(crate::Message::PlayItem(episode.0)));
+        row("an episode played", &[played]);
+        eprintln!("{:>22} {lines} lines", "its transcript");
+    }
+    let transcript: Vec<_> = (0..n)
+        .map(|i| {
+            let to = if i % 2 == 0 {
+                crate::places::Source::Transcript
+            } else {
+                crate::places::Source::Library
+            };
+            frame.take(&mut app, Some(crate::Message::Select(to)))
+        })
+        .collect();
+    row("songs to transcript", &transcript);
+}
+
+/// What each wake of a window filling costs on the thread it draws on: a
+/// fresh replica, through a pair of queues, filled from a server's log at
+/// `HARKEN_BENCH_LOG`, every update timed — pumped by the window's updates
+/// (`bench_fill`: the work there is), and by its driver (`bench_fill_driven`:
+/// what is left to the window). Run as [`bench_real`] is.
+#[test]
+#[ignore]
+fn bench_fill() {
+    fill(false);
+}
+
+#[test]
+#[ignore]
+fn bench_fill_driven() {
+    fill(true);
+}
+
+fn fill(driven: bool) {
+    use ark::frames::Frame;
+    use ark::peer::{Input, Output, Role};
+    let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
+        return eprintln!("HARKEN_BENCH_LOG names no log");
+    };
+    let m = ark_peer::Module::of(crate::client::domain());
+    let mut server = ark_peer::Instance::open_under(m.schema.clone(), Box::new(ark_peer::Files::new(&dir).unwrap()));
+    server.machine.role = Role::Authority { journal: Default::default() };
+    server.machine.functions = m.functions.clone();
+    server.machine.later = m.later().to_vec();
+    let me = super::who("max");
+    let peer = match driven {
+        true => crate::peer::Peer::open(crate::client::memory(me.clone(), Some("dev"))),
+        false => super::signed_in("max"),
+    };
+    let mut app = crate::App::with_peer(peer, "http://127.0.0.1:9".into(), None);
+    let made: std::sync::Arc<std::sync::Mutex<Vec<super::Queues>>> = Default::default();
+    app.peer.client.lock().connect_with("ws://queues", super::Queues::dialer(made.clone()));
+    let _ = app.update(crate::Message::Due);
+    // Driven, the dial is the driver's, made on its thread.
+    let _ = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(1), || !made.lock().unwrap().is_empty());
+    let q = made.lock().unwrap()[0].clone();
+    q.push(ark_peer::Event::Open);
+    let (mut worst, mut total, mut wakes) = (Duration::ZERO, Duration::ZERO, 0);
+    let t0 = Instant::now();
+    for _ in 0..10_000 {
+        // Driven, the window wakes once its driver took in what came.
+        if driven {
+            let head = server.log().head();
+            let done = || {
+                let c = app.peer.client.lock();
+                c.log.fill.is_none() && c.log.log().head() == head
+            };
+            let _ = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(1), || {
+                !q.sent.lock().unwrap().is_empty() || done()
+            });
+        }
+        let t = Instant::now();
+        let _ = app.update(crate::Message::Wake);
+        let took = t.elapsed();
+        (worst, total, wakes) = (worst.max(took), total + took, wakes + 1);
+        if took > Duration::from_millis(8) {
+            eprintln!("wake {wakes}: {took:.1?}");
+        }
+        let sent: Vec<Vec<u8>> = std::mem::take(&mut *q.sent.lock().unwrap());
+        if sent.is_empty() && q.said.lock().unwrap().is_empty() {
+            break;
+        }
+        for b in sent {
+            let Ok(f) = Frame::dec(&b) else { continue };
+            if f.space() != ark::schema::Space::Durable || matches!(f, Frame::Telemetry { .. }) {
+                continue;
+            }
+            for o in server.machine.step(Input::Frame {
+                from: Some(me.clone()),
+                bytes: b,
+            }) {
+                if let Output::Send(b) | Output::Fanout(b) = o {
+                    q.push(ark_peer::Event::Frame(b));
+                }
+            }
+        }
+    }
+    let filled = {
+        let c = app.peer.client.lock();
+        c.log.fill.is_none() && c.log.log().head() == server.log().head()
+    };
+    eprintln!(
+        "{wakes} wakes in {:.1?}: worst {worst:.1?}, busy {total:.1?}; filled {filled}, {} songs",
+        t0.elapsed(),
+        app.peer.rows().len()
+    );
+}
+
+/// What a fold of the replica of a real library costs, where it is made:
+/// the store written whole, as a device does every few dozen entries.
+#[test]
+#[ignore]
+fn bench_fold() {
+    let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
+        return eprintln!("HARKEN_BENCH_LOG names no log");
+    };
+    let tmp = tempfile_dir();
+    for n in ["kv", "log", "schema.json"] {
+        let _ = std::fs::copy(std::path::Path::new(&dir).join(n), tmp.join(n));
+    }
+    let mut replica = crate::client::open(Box::new(ark_peer::Files::new(&tmp).unwrap()), None, crate::listening::device());
+    let head = replica.log.log().head().0;
+    let t = Instant::now();
+    let _ = replica.log.step(ark::peer::Input::Compact(head));
+    eprintln!("a fold at {head}: {:.1?}", t.elapsed());
+    let t = Instant::now();
+    let rows = replica.log.confirmed_rows();
+    eprintln!("  its rows: {:.1?}", t.elapsed());
+    let t = Instant::now();
+    let bytes = ark::log::Record::Rows(rows).enc();
+    eprintln!("  encoded, {} bytes: {:.1?}", bytes.len(), t.elapsed());
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+fn tempfile_dir() -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("harken-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
 }

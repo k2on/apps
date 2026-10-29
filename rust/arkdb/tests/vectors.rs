@@ -126,7 +126,7 @@ fn protocol() {
         "client-page-durable",
         "server-verdict-ok-volatile",
         "server-page-volatile",
-        "server-snapshot-durable",
+        "server-part-durable",
     ] {
         assert!(written.contains(&format!("{name}.json")), "{name}");
     }

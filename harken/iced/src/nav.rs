@@ -225,7 +225,7 @@ impl App {
     fn shelf<'a>(&self, l: &mut Layout, albums: impl Iterator<Item = &'a crate::rows::Album>, columns: usize) {
         let ids = albums
             .enumerate()
-            .map(|(i, a)| l.mark(Mark::Album(i), Message::Select(Source::Album(a.name.clone()))))
+            .map(|(i, a)| l.mark(Mark::Album(i), Message::Select(Source::Album(a.id.clone(), a.name.clone()))))
             .collect();
         l.block(ids, columns);
     }
@@ -325,9 +325,9 @@ impl App {
         let p = &self.peer;
         let mut on: Vec<&crate::rows::Album> = vec![];
         for i in p.rows() {
-            let named = p.detail_of(i.id).album;
-            if let Some(a) = p.albums().iter().find(|a| a.name == named) {
-                if !on.iter().any(|o| o.name == a.name) {
+            let on_album = p.detail_of(i.id).album_id;
+            if let Some(a) = p.albums().iter().find(|a| a.id == on_album) {
+                if !on.iter().any(|o| o.id == a.id) {
                     on.push(a);
                 }
             }
@@ -349,10 +349,10 @@ impl App {
         };
         let detailed = !(self.help || self.debug);
         match &p.source {
-            Source::Album(name) if detailed => {
-                let album = p.albums().iter().find(|a| a.name == *name);
+            Source::Album(id, _) if detailed => {
+                let album = p.albums().iter().find(|a| a.id == *id);
                 let creator = album.map(|a| a.creator.clone()).unwrap_or_default();
-                self.by(&mut l, &self.album_by(name));
+                self.by(&mut l, &self.album_by(id));
                 self.play(&mut l);
                 self.tracks(&mut l, &creator, true);
                 let people = self.people(&self.composers_here());
@@ -475,8 +475,8 @@ impl App {
 
     /// Who an album's header names in the accent: whoever is credited on
     /// the most of it (`albums`), or whoever made it.
-    pub fn album_by(&self, name: &str) -> String {
-        let album = self.peer.albums().iter().find(|a| a.name == name);
+    pub fn album_by(&self, id: &str) -> String {
+        let album = self.peer.albums().iter().find(|a| a.id == id);
         match album.filter(|a| !a.performer.is_empty()) {
             Some(a) => a.performer.clone(),
             None => album.map(|a| a.creator.clone()).unwrap_or_default(),

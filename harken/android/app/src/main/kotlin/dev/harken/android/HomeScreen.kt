@@ -62,8 +62,8 @@ data class LastPlayed(val track: Playing, val from: Page?, val live: Boolean = f
  * else the newest play in the log. `art` is an album's cover by its name; `server` what it is
  * joined to.
  */
-fun lastPlayed(h: Heard, played: Played?, playlists: List<Playlist>, art: (String) -> String, server: String, here: String): LastPlayed? {
-    fun cover(album: String): String = art(album).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) } ?: ""
+fun lastPlayed(h: Heard, played: Played?, playlists: List<Playlist>, art: (String, String) -> String, server: String, here: String): LastPlayed? {
+    fun cover(album: String, creator: String): String = art(album, creator).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) } ?: ""
     val a = if (h.joined) h.listening?.active else null
     if (a != null) {
         val t = a.now
@@ -73,10 +73,10 @@ fun lastPlayed(h: Heard, played: Played?, playlists: List<Playlist>, art: (Strin
             else (a.output as? dev.harken.android.gen.Output.Device)?.id?.let { id ->
                 if (id == h.me) "Playing on $here" else "Playing on ${s.devices[id]?.name ?: "another device"}"
             }
-        return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album)), Page.ofPlace(a.from, playlists), live = true, on = on)
+        return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album, t.creator)), Page.ofPlace(a.from, playlists), live = true, on = on)
     }
     val p = played ?: return null
-    return LastPlayed(Playing(p.track?.hex ?: "", p.title, p.creator, p.album, cover(p.album)), Page.ofPlace(p.from, playlists))
+    return LastPlayed(Playing(p.track?.hex ?: "", p.title, p.creator, p.album, cover(p.album, p.creator)), Page.ofPlace(p.from, playlists))
 }
 
 /** What Home draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */
@@ -134,7 +134,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                     item { Heading("Last played") }
                     val from =
                         when (val f = last.from) {
-                            is Page.ForAlbum -> "From ${f.name}"
+                            is Page.ForAlbum -> data.albums.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From an album"
                             is Page.ForArtist -> "From ${f.name}"
                             is Page.ForPlaylist -> data.playlists.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From a playlist"
                             is Page.ForRecording -> "From a recording"
@@ -170,8 +170,8 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                 if (data.albums.isNotEmpty()) {
                     item { Heading("Albums", action = "See all", onAction = { act.library(LibraryTab.Albums) }) }
                     item {
-                        Shelf("albums", data.albums, key = { it.name }) { a ->
-                            CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
+                        Shelf("albums", data.albums, key = { it.id }) { a ->
+                            CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
                         }
                     }
                 }

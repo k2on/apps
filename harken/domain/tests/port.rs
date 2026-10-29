@@ -90,6 +90,7 @@ fn step(r: &mut Rng, s: &Store) -> Step {
                 movement_no: n(r, 3),
                 artist_banner: String::new(),
                 released: 0,
+                folder: String::new(),
             }
             .to_bytes(),
         ),
@@ -328,70 +329,70 @@ fn step(r: &mut Rng, s: &Store) -> Step {
 
 /// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
 /// a build could write values as JSON).
-const SCHEMA: &str = "255210298a19db43b6d3af65de1fb5b70c1fa3315352988acff4a0247bc972b9";
+const SCHEMA: &str = "b0f869fb912d16806b2340366f5b5f865e1ebfa4b6fd852050f1c0c35602249c";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
 /// value format writes them (postcard, N4).
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,
-        "61006279b903448907ad632cb92a93331dfb5abeff7f3a118f974d7f6e21d6f8",
-        "f9d0c4acc874f8ae8806096b1b049e055066c2cac62abae9d0d5ec617f16c608",
+        "ddb40130e6bb64f67f83ed19045e1ae429bc1be6adacb4522d8f1934ac868957",
+        "995333e50012f205de5a9fb993d880b2ff6ed8472a12352887a84bd6363d8355",
     ),
     (
         2,
-        "c19cb3432c54a4aa67cab7390f97268bbc0816ac7df03fe24626f83783d9d50e",
-        "cf2bd3a15437e61da25a7cf1ad98a99ce9126e68ea4597d29f2ebc7c6f74aa6b",
+        "fb0cae3eb3e23fbe05e24a665b926715a63a2ac71bc13c60d44d9d49816c710d",
+        "f349a611188a595e0c8d4b5589ca58103ff126b4333cc7a2cbc8d61068c90038",
     ),
     (
         3,
-        "a1f8644a7a30eb745a4b6c0d5a59e1fc207e5c83efcedbcb978e724761702f32",
-        "c69f593cd48adacec40546d8881734b7c050b61d5ca364d1fcc4c5d4eebedfff",
+        "9ab57014d03333c09065ee49f231afa429df6683bb283d1fa186fe25d035c9fb",
+        "97651a07b7a4f069180fc5c377165b9dc2ba211151a498d50e57f9d6ba4ce8cf",
     ),
     (
         4,
-        "a5ea39afd8bf3974f81c7a194c8b34a7324fff4f5ab2cc62929f46a0089c8a1b",
-        "20b1bf8256ed7824e7edfbc882d12ea8c9214936a35630d78e75c8573b609577",
+        "3215a8336650a0c51b3ed28229ce7fabb6162e1e3847b334b22252e5c38a4e0a",
+        "207e8f2303a5746689352f40bb03d0b2944db746e4a95aaae68ce2c5395ec013",
     ),
     (
         5,
-        "6da9508dcc855c5ec0d67e205821d55f1adfc02eeb36abeb18c8280e0bf7a229",
-        "3ecba02dfe7ba187b910314b9ecf600e2ef724429544e806acb267951f93ff72",
+        "e8c3d5ed130384c3e42c515cab76e78b5b6cd9a18b1ff5d00be7bfcd7d3be1a8",
+        "252829a7f5a3ae7ec8ec63138accbd4281fd12b4d3019dbac746978367d5d3a8",
     ),
     (
         6,
-        "9874902275f493c0d9ced701311377fc3e35c5f158a8ddf587b86dbf36eeb873",
-        "83486c7854bd957e664eeb8c29bd9453f237cc2373accf68fec28c20f8b5991e",
+        "e7dbf908e08ea732474cfc4204818f17820695eb0f33d4fe465e7e57325f8c9c",
+        "bd34d50788eb3ab7620d068db0443ae76d4f6358d36ad29c6e6e5f710d980591",
     ),
     (
         7,
-        "5e5f56ea58f73de8510a0e1c4f782d8d288dbbe9ef23e46582cbeae8137aa9ba",
-        "962781bd4b826d6c87412748289ff535298dcc9f24f09bf0ba56646a6984b44f",
+        "642b50a654b9468c232651f439ed9371ed24cfce82d8e84ffe9ed41f1ac478b4",
+        "5d79d8dd3f88d0e0ee51ad8c332a2ddc3fea079dfaef8b684ad1b451c265cfb4",
     ),
     (
         8,
-        "fe00fa9dd8fec74e22a9dc8b5bea8235612bfbdeeb0e6674bb07a8e9a17217f5",
-        "d98142488b351b2ae8e367e81cf5e2af11b89faefbc10d5703de97b58e1fbed5",
+        "20971f16633bc12c5eeb2d78ee532b233162f3248eec3c2c8d469571d7d0a169",
+        "6129819c80ee3c933e69fffc2e85087666098e0b53bd0ae47b4378b1b1e6da74",
     ),
     (
         9,
-        "2a562680fcd5c9eed9097b2efdfd39e8cbedba92b5f9656c5562b2b66f58442c",
-        "43c07c7f9d5d30f6159096cc41988d8d7b87cf0897fd348cf4c143b6c443c6fa",
+        "fc7289984c604b1f59fbc464175dcca0ac2bb389add8eb1c3a73232844ff6a5a",
+        "34d0fb8ae67fef6daa42d720ba5ad46882913df373671398125742c3fd4bcbd0",
     ),
     (
         10,
-        "b0438ac33dbb1c1eaf203d8e1ed05c067ebe34f50d9d23b35d89451f7d574a73",
-        "8dce697c91fae597a59ee30ccedbd0c716cce8242d502f75976c03135b526bd3",
+        "04d16261e621af38a4147036efedbd64f21f6dc1f9d4f492bc98fd974b86a9e4",
+        "c2a07ef344bc190bf42f83ff0ef98649a8baf41f5ef78515feff837db0ba0108",
     ),
     (
         11,
-        "531ee324a7b6036e361a59d84923d5f45a165b691f08e5881e1ecf80b42f0105",
-        "cf6a6f9e6e60e9f2cea34d93c90438159aa88a0b54061a3ef5710aa04bad26b8",
+        "e9c8a413014eabb09b0eea6eff72824efaeeab92572425c261e3602fb13a578a",
+        "08919aefbe158a075957ca0380c8c3ae4df1304f9f1e1f8e9a666117ceee3fef",
     ),
     (
         12,
-        "235fb53962c97f5d2d8f64baf78aa64321462b906de566b13de13d8e645b9adf",
-        "1890298e0f01a86bd7b2d17b8d69d4e84a7d05286f24353be73aa588cd437c15",
+        "dcd4714f86d627b57204d3b5c07a904ecbba6147340597c3219685a852407cd3",
+        "d7b0645d53bf5277e5d3f02100a03391e1f9e3b69b406dec719ddec409978fec",
     ),
 ];
 
@@ -403,11 +404,11 @@ fn the_schema_hash_is_pinned() {
 }
 
 /// The schema reads every row the one a server last stood on wrote
-/// (`tests/schema.json`, `ark::schema::compat`). A column appended with
-/// neither an `Option` type nor a default is a log that does not open: the
-/// server opens what it can read of it and carries on from there, and what
-/// it could not read is gone. `ARK_WRITE_GEN=1` writes this schema there,
-/// once it is the one the server runs.
+/// (`tests/schema.json`): as they are (`ark::schema::compat`), or through
+/// the domain's migrations (`src/migrations.rs`). A column appended with
+/// neither an `Option` type nor a default, and no step that reads the rows
+/// before it, is a server that does not start. `ARK_WRITE_GEN=1` writes
+/// this schema there, once it is the one the server runs.
 ///
 /// Falsified by taking `#[serde(default)]` off `person.banner`: "banner is
 /// appended with neither an Option type nor a default".
@@ -420,7 +421,8 @@ fn the_schema_reads_what_the_last_one_wrote() {
     }
     let was = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}; ARK_WRITE_GEN=1 writes it"));
     let was: ark::schema::Schema = serde_json::from_str(&was).unwrap();
-    assert_eq!(ark::schema::compat(&was, &now), Ok(()));
+    let read = ark::migrate::migrate(&was, &vec![], &now, &domain().migrations);
+    assert!(read.is_ok(), "{read:?}");
 }
 
 /// One seed's script run: the state it ends at, and its transcript's hash;
@@ -492,7 +494,7 @@ fn view_input(a: &Store, v: &str) -> Vec<u8> {
         .to_bytes(),
         "library.album" => AlbumInput {
             playlist_id: on,
-            name: "Air".into(),
+            id: "/air".into(),
         }
         .to_bytes(),
         "library.artist" => Artist {
@@ -500,7 +502,7 @@ fn view_input(a: &Store, v: &str) -> Vec<u8> {
             name: "Bach".into(),
         }
         .to_bytes(),
-        "library.album_credits" => AlbumCredits { name: "Air".into() }.to_bytes(),
+        "library.album_credits" => AlbumCredits { id: "/air".into() }.to_bytes(),
         "library.works" => Works { composer: "Bach".into() }.to_bytes(),
         "library.work" | "library.recordings" => {
             let w = a.rows("work").next().map(|b| Work::from_bytes(b).unwrap().id).unwrap_or_default();

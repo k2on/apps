@@ -146,7 +146,7 @@ class Car(
                     .build())
             .build()
 
-    fun album(a: Album, group: String? = null): MediaItem = pageItem(Page.ForAlbum(a.name), a.name, a.creator, art(a.art, a.name), MediaMetadata.MEDIA_TYPE_ALBUM, group)
+    fun album(a: Album, group: String? = null): MediaItem = pageItem(Page.ForAlbum(a.id), a.name, a.creator, art(a.art, a.name), MediaMetadata.MEDIA_TYPE_ALBUM, group)
 
     fun artist(a: Artist, group: String? = null): MediaItem = pageItem(Page.ForArtist(a.name), a.name, null, art(a.art, a.name), MediaMetadata.MEDIA_TYPE_ARTIST, group)
 
@@ -162,7 +162,7 @@ class Car(
                             .setTitle(t.title)
                             .setArtist(t.creator)
                             .setAlbumTitle(t.album)
-                            .setArtworkUri(art(library.artOf(t.album), t.album.ifEmpty { t.title }))
+                            .setArtworkUri(art(library.artOf(t.album, t.creator), t.album.ifEmpty { t.title }))
                             .setDurationMs(t.durationMs.takeIf { it > 0 })
                             .setIsBrowsable(false)
                             .setIsPlayable(true)
@@ -175,14 +175,14 @@ class Car(
 
     /** A library row as the session carries it: with its album's name. */
     fun queued(t: Track): Queued {
-        val byName = library.albums.value.associateBy { it.name }
-        return Queued(Album.ofTrack(t, library.details.value, byName)?.name ?: "", t.creator, t.durationMs, t.file, t.id, t.title)
+        val byId = library.albums.value.associateBy { it.id }
+        return Queued(Album.ofTrack(t, library.details.value, byId)?.name ?: "", t.creator, t.durationMs, t.file, t.id, t.title)
     }
 
     private fun queued(list: List<Track>): List<Queued> {
-        val byName = library.albums.value.associateBy { it.name }
+        val byId = library.albums.value.associateBy { it.id }
         val details = library.details.value
-        return list.map { t -> Queued(Album.ofTrack(t, details, byName)?.name ?: "", t.creator, t.durationMs, t.file, t.id, t.title) }
+        return list.map { t -> Queued(Album.ofTrack(t, details, byId)?.name ?: "", t.creator, t.durationMs, t.file, t.id, t.title) }
     }
 
     private fun played(p: Played): Queued = Queued(p.album, p.creator, p.durationMs, p.file, p.track ?: Id.nil, p.title)
@@ -261,7 +261,7 @@ class Car(
             return track(id.split('|')[1], p.at, p.queue[p.at])
         }
         return when (val p = Page.parse(id)) {
-            is Page.ForAlbum -> library.albums.value.firstOrNull { it.name == p.name }?.let { album(it) }
+            is Page.ForAlbum -> library.albums.value.firstOrNull { it.id == p.id }?.let { album(it) }
             is Page.ForArtist -> library.artists.value.firstOrNull { it.name == p.name }?.let { artist(it) }
             is Page.ForPlaylist -> library.playlists.value.firstOrNull { it.id == p.id }?.let(::playlist)
             else -> null
@@ -375,7 +375,7 @@ class Car(
 
     private suspend fun albumNamed(q: String, exact: Boolean): Pick? {
         val a = library.albums.value.firstOrNull { matches(it.name, q, exact) } ?: return null
-        val page = Page.ForAlbum(a.name)
+        val page = Page.ForAlbum(a.id)
         return Pick(queued(library.read(page)), 0, 0, page.place(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
     }
 

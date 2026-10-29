@@ -156,7 +156,7 @@ fn one_release_can_carry_four_works() {
         assert_eq!(w.tracks, 3, "{}", w.catalogue);
         assert_eq!(w.recordings, 1);
     }
-    let names: Vec<String> = peer.album_rows("The Four Seasons").into_iter().map(|i| i.title).collect();
+    let names: Vec<String> = peer.album_rows(&peer.album_id("The Four Seasons")).into_iter().map(|i| i.title).collect();
     assert_eq!(
         names,
         [
@@ -182,7 +182,7 @@ fn one_release_can_carry_four_works() {
 #[test]
 fn a_compilation_carries_six_works_and_two_performers() {
     let peer = fresh();
-    let album = peer.album_rows("Concertos");
+    let album = peer.album_rows(&peer.album_id("Concertos"));
     assert_eq!(album.len(), 16);
     let files: BTreeSet<_> = album.iter().map(|i| i.file.clone()).collect();
     let works = peer.works_of("Antonio Vivaldi");
@@ -340,8 +340,13 @@ fn a_work_link_resolves_by_its_key() {
     assert!(id.contains('/'), "{id}");
     assert_eq!(peer.source_of(&Place::Work(id.clone())), Source::Work(id, "Goldberg Variations".into()));
     assert_eq!(peer.source_of(&Place::Work("nobody/nothing".into())), Source::Library);
-    assert_eq!(peer.source_of(&Place::Album("Water Music".into())), Source::Album("Water Music".into()));
-    assert_eq!(peer.source_of(&Place::Album("Not a Record".into())), Source::Library);
+    let water = peer.album_id("Water Music");
+    assert_eq!(peer.source_of(&Place::Album(water.clone())), Source::Album(water, "Water Music".into()));
+    assert_eq!(
+        peer.source_of(&Place::Album("Water Music".into())),
+        Source::Library,
+        "an album by its key, not its name"
+    );
 }
 
 /// A track names its work by catalogue number alone, so two works sharing

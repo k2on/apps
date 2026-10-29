@@ -14,7 +14,8 @@ fn press(app: &mut App, c: &str) {
 
 fn album(name: &str) -> App {
     let mut app = super::demo_app();
-    let _ = app.update(Message::Select(Source::Album(name.into())));
+    let id = app.peer.album_id(name);
+    let _ = app.update(Message::Select(Source::Album(id, name.into())));
     app.pane = Pane::Tracks;
     app
 }
@@ -80,7 +81,7 @@ fn ctrl_o_and_ctrl_i_go_back_and_forward() {
     let mut app = album("The Four Seasons");
     let _ = app.update(Message::Select(Source::Albums));
     let _ = app.update(Message::Key(Key::Character("o".into()), Modifiers::CTRL));
-    assert_eq!(app.peer.source, Source::Album("The Four Seasons".into()));
+    assert_eq!(app.peer.source.title(), "The Four Seasons");
     let _ = app.update(Message::Key(Key::Character("i".into()), Modifiers::CTRL));
     assert_eq!(app.peer.source, Source::Albums);
 }

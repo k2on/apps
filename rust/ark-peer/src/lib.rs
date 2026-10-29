@@ -61,11 +61,13 @@
 
 pub mod app;
 pub mod disk;
+pub mod driven;
 mod hub;
 pub mod instance;
 mod jobs;
 pub mod link;
 pub mod local;
+pub mod migrate;
 pub mod observe;
 pub mod signed;
 pub mod watched;
@@ -82,9 +84,10 @@ pub mod web;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use ark::format::Encode;
 use ark::frames::Frame;
 use ark::hash::EntryHash;
-use ark::log::{Durable, Entry, EntryId, Origin, Seq, Span};
+use ark::log::{Durable, Entry, EntryId, Origin, Record, Seq, Span};
 use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::{Schema, Space};
@@ -115,6 +118,18 @@ pub struct Module {
 }
 
 impl Module {
+    /// The steps that read rows of a schema before this one
+    /// ([`ark::migrate`]): its domain's.
+    pub fn migrations(&self) -> &[ark::migrate::Migration] {
+        self.domain.as_ref().map_or(&[], |d| &d.migrations)
+    }
+
+    /// The tables a fill sends last ([`ark::peer::Peer::later`]): its
+    /// domain's.
+    pub fn later(&self) -> &[String] {
+        self.domain.as_ref().map_or(&[], |d| &d.later)
+    }
+
     /// A domain as a peer holds it (§1.16).
     pub fn of(d: &Domain) -> Module {
         Module {
@@ -312,6 +327,7 @@ pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
 
 fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
     let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone()).in_space(space);
+    p.later = m.later().to_vec();
     if let Some(o) = origin {
         p.origin = o;
     }
@@ -433,6 +449,23 @@ impl Peer {
         }
         let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
         let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
+        let mut disk = disk;
+        // Rows of a schema this one does not grow from: an authority's
+        // migrated, a replica's sent again from empty (`migrate`).
+        let read = match r.fork {
+            Some(_) => migrate::migrate(&mut *disk, &config.log.schema, config.log.migrations()).map(|_| true),
+            None => migrate::kept(&mut *disk, &config.log.schema),
+        };
+        match read {
+            Ok(true) => {}
+            Ok(false) => {
+                let empty = Record::Rows(log.confirmed_rows()).to_bytes();
+                if let Err(e) = disk.record(&empty) {
+                    log.failure = Some(e.to_string());
+                }
+            }
+            Err(e) => log.failure = Some(e.to_string()),
+        }
         log.disk = Some(disk);
         let mut p = Peer::with(config, log, live, local);
         (p.record, p.link) = (record, link);
@@ -590,9 +623,12 @@ impl Peer {
             Space::Volatile => &self.live.as_ref().expect("a machine that spoke").store,
         };
         let domain = self.config.domain_of(space);
+        // Read once for every view, each table's rows only when a view's
+        // plan asks for them.
+        let p = ark::plan::Pushed::of(store, cs);
         for (i, w) in self.views.iter_mut().enumerate() {
             let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
-            let pushed = w.view.as_mut().map(|v| v.push(cs, store));
+            let pushed = w.view.as_mut().map(|v| v.pushed(&p));
             match pushed {
                 Some(Ok(patches)) => {
                     if let (false, Some(f), Some(v)) = (patches.is_empty(), self.reconcilers.get_mut(&i), &w.view) {
@@ -729,7 +765,7 @@ impl Peer {
     /// A connection to its server is up — a new sight of it: a `Hello` in
     /// each space, and its pending intents pushed again.
     pub fn connected(&mut self) {
-        (self.link.epoch, self.link.wait) = (self.link.epoch + 1, self.link.backoff.0);
+        (self.link.epoch, self.link.wait, self.link.opened) = (self.link.epoch + 1, self.link.backoff.0, true);
         self.linked = true;
         self.frames.clear();
         self.step(Space::Durable, Input::Connected);
@@ -813,6 +849,7 @@ impl Peer {
         let durable = Durable {
             rows: self.log.confirmed_rows(),
             logged: vec![],
+            parts: vec![],
             local: if other { pending.len() as i64 } else { self.log.local },
             pending,
         };

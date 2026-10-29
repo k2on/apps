@@ -82,10 +82,10 @@ class CarTests {
             val albums = car.children(Car.ALBUMS, 0, 1000, Car.TABS)!!
             assertEquals(Phone.once({ peer.albums() }) { it.name }, titles(albums))
             val water = albums.first { it.mediaMetadata.title == "Water Music" }
-            assertEquals(Page.ForAlbum("Water Music").route, water.mediaId)
+            assertEquals(Page.ForAlbum(Demo.key("Water Music")).route, water.mediaId)
 
             // An album's tracks: the domain's `album` query, in its order, playable.
-            val want = tracks { Phone.album(peer, "Water Music") }
+            val want = tracks { Phone.album(peer, Demo.key("Water Music")) }
             val all = car.children(water.mediaId, 0, 1000, Car.TABS)!!
             assertEquals(want.map { it.title }, titles(all))
             assertTrue(all.all { it.mediaMetadata.isPlayable == true && it.mediaMetadata.isBrowsable == false })
@@ -106,7 +106,7 @@ class CarTests {
             val pick = car.resolve(all[2].mediaId)!!
             assertEquals(want.map { it.id }, pick.queue.map { it.id })
             assertEquals(2, pick.at)
-            assertEquals("#album/Water%20Music", pick.from)
+            assertEquals("#album/music%2FWater%20Music%2Fwater-music", pick.from)
             assertNull("an id that is not one of ours is nothing", car.children("nowhere", 0, 10, Car.TABS))
         }
         peer.peer.close()
@@ -170,7 +170,7 @@ class CarTests {
             peer.peer.close()
 
             // And the playing track's: its cover behind the provider, never the server's URL.
-            val playing = Items.of(queuedTrack("Alla Hornpipe", 1), server, "covers/water.png", "#album/Water%20Music").mediaMetadata.artworkUri!!
+            val playing = Items.of(queuedTrack("Alla Hornpipe", 1), server, "covers/water.png", "#album/music%2FWater%20Music%2Fwater-music").mediaMetadata.artworkUri!!
             assertEquals("content", playing.scheme)
             val named = CarArt.parse(playing)!!
             assertEquals("$server/media/covers/water.png", named.url)
@@ -205,9 +205,9 @@ class CarTests {
             assertTrue(found.first().mediaMetadata.title == "Water Music")
 
             val album = car.voice("Water Music", null)!!
-            assertEquals("play <album>: that album, in its order", tracks { Phone.album(peer, "Water Music") }.map { it.id }, album.queue.map { it.id })
+            assertEquals("play <album>: that album, in its order", tracks { Phone.album(peer, Demo.key("Water Music")) }.map { it.id }, album.queue.map { it.id })
             assertEquals(0, album.at)
-            assertEquals("#album/Water%20Music", album.from)
+            assertEquals("#album/music%2FWater%20Music%2Fwater-music", album.from)
 
             val vivaldi = tracks { Phone.artist(peer, "Antonio Vivaldi") }
             val artist = car.voice("antonio vivaldi", null)!!

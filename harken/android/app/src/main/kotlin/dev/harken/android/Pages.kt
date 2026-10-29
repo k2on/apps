@@ -137,9 +137,11 @@ private fun songUnder(t: Track, d: TrackDetail?, creator: String): String =
  * work headings, and its track numbers instead.
  */
 @Composable
-fun AlbumPage(name: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do) {
+fun AlbumPage(id: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do) {
     Recompositions.hit("AlbumPage")
-    val page = Page.ForAlbum(name)
+    val page = Page.ForAlbum(id)
+    // Its name: its row's, or — the albums not caught up — what its tracks call it.
+    val name = album?.name ?: tracks.firstNotNullOfOrNull { details[it.id]?.album } ?: ""
     val creator = album?.creator ?: tracks.firstOrNull()?.creator ?: ""
     val (by, small) = Catalogue.albumBy(album, creator)
     LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("album")) {
@@ -275,8 +277,8 @@ fun ArtistPage(
         if (albums.isNotEmpty()) {
             item { SectionHeading("Albums") }
             item {
-                Shelf("albums", albums, key = { it.name }) { a ->
-                    CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "track"), 136.dp, onClick = { act.open(Page.ForAlbum(a.name)) }, opens = true)
+                Shelf("albums", albums, key = { it.id }) { a ->
+                    CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "track"), 136.dp, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
                 }
             }
         }
@@ -448,8 +450,8 @@ fun RecordingPage(
         item { Foot(tracks, year, take?.label ?: "", Catalogue.licences(tracks.map { details[it.id] })) }
         if (on.isNotEmpty()) {
             item { SectionHeading(if (on.size == 1) "From the Album" else "From the Albums") }
-            items(on, key = { "album:" + it.name }) { a ->
-                Entry(a.name, "", a.by, "", onOpen = { act.open(Page.ForAlbum(a.name)) }) { m ->
+            items(on, key = { "album:" + it.id }) { a ->
+                Entry(a.name, "", a.by, "", onOpen = { act.open(Page.ForAlbum(a.id)) }) { m ->
                     Cover(a.name, a.art, 64.dp, Modifier.size(64.dp).then(m), corner = 4.dp)
                 }
             }

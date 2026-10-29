@@ -110,7 +110,7 @@ fun TrackMenu(
         SheetRow(Glyphs.PlayNext, "Play next", actions::playNext)
         SheetRow(Glyphs.Queue, "Add to queue", actions::addToQueue)
         SheetRow(Glyphs.AddTo, "Add to playlist", actions::addTo, trailing = { Icon(Glyphs.Chevron, null, Modifier.size(18.dp)) })
-        if (album != null && from != Page.ForAlbum(album.name)) SheetRow(Glyphs.Album, "Go to album", { actions.goTo(Page.ForAlbum(album.name)) })
+        if (album != null && from != Page.ForAlbum(album.id)) SheetRow(Glyphs.Album, "Go to album", { actions.goTo(Page.ForAlbum(album.id)) })
         if (show != null && from != Page.ForShow(show.id)) SheetRow(Glyphs.Show, "Go to show", { actions.goTo(Page.ForShow(show.id)) })
         if (track.kind == "song" && track.creator.isNotEmpty() && from != Page.ForArtist(track.creator))
             SheetRow(Glyphs.Artist, "Go to artist", { actions.goTo(Page.ForArtist(track.creator)) })

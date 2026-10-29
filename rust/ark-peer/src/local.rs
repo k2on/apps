@@ -148,18 +148,36 @@ pub fn replica(db: &Db<Local>) -> Option<Replica> {
 /// what a simulator seeds, or a demo: the rest of what the disk's local
 /// instance holds is kept.
 pub fn preset(disk: &mut dyn Disk, f: impl FnOnce(&mut Replica)) -> io::Result<()> {
+    edit(disk, |db| {
+        let mut r = replica(db).unwrap_or_default();
+        f(&mut r);
+        db.replica.put(r)
+    })
+}
+
+/// A server's journal on `disk` told each origin's last `local` and actor
+/// in `last`, where it is past what the journal says: what a log about to
+/// lose its entries keeps of them, as a horizon moving does.
+pub fn passed(disk: &mut dyn Disk, last: impl IntoIterator<Item = (Origin, String, i64)>) -> io::Result<()> {
+    edit(disk, |db| {
+        for (origin, actor, local) in last {
+            if db.origin.get(&origin).is_none_or(|l| l.last < local) {
+                db.origin.put(Last { origin, actor, last: local })?;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// The local instance on `disk`, as `f` changes it.
+fn edit(disk: &mut dyn Disk, f: impl for<'t> FnOnce(&mut Db<'t, Local>) -> Result<(), ark::prelude::Refusal>) -> io::Result<()> {
     let names = [format!("{LOCAL}kv"), format!("{LOCAL}log")];
     let mut held = crate::Memory::default();
     for n in &names {
         disk.get(n)?.map_or(Ok(()), |b| held.put(n, &b))?;
     }
     let mut local = Instance::open::<Local>(Box::new(Shared::new(Box::new(held)).under(LOCAL)));
-    let write = local.write::<Local, Run, _>(|db| {
-        let mut r = replica(db).unwrap_or_default();
-        f(&mut r);
-        db.replica.put(r)
-    });
-    write.map_err(|r| io::Error::other(r.0))?;
+    local.write::<Local, Run, _>(f).map_err(|r| io::Error::other(r.0))?;
     let mut held = local.into_disk();
     for n in ["kv", "log"] {
         held.get(n)?.map_or(Ok(()), |b| disk.put(&format!("{LOCAL}{n}"), &b))?;

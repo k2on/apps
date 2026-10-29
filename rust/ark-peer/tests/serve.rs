@@ -335,3 +335,27 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     let l = hub.live.as_ref().unwrap();
     assert_eq!(l.log().head().0, l.log().base_seq() + 1, "on_restore, the one entry since the open");
 }
+
+/// A device over a WebSocket is sent a frame past 16 MiB — a library's
+/// snapshot, after a migration every device is sent whole. Falsified by
+/// the link's tungstenite defaults: bob's link closed, "Message too long",
+/// and dialled again for ever.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_frame_past_16_mib_is_taken() {
+    let running = Server::new(config()).listen("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/sync", running.addr);
+    let big = "x".repeat(17 << 20);
+    let name = big.clone();
+    running
+        .hub
+        .with(move |p| p.author(Space::Durable, "demo.create_playlist", named(&name), 1))
+        .unwrap()
+        .unwrap();
+    tokio::task::spawn_blocking(move || {
+        let mut bob = linked("bob@phone", &url, socket);
+        until(&mut bob, "bob has the playlist", |c, _| c.log.log().head().0 == 1);
+    })
+    .await
+    .unwrap();
+    running.stop().await;
+}

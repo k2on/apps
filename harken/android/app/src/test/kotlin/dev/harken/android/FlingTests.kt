@@ -92,6 +92,7 @@ class FlingTests {
             movementNo = 0,
             artistBanner = "",
             released = 0,
+            folder = "",
         )
 
     private val counts = ConcurrentHashMap<String, Int>()

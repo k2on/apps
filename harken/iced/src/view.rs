@@ -103,7 +103,8 @@ impl App {
             bottom: 0.0,
             left: GUTTER,
         });
-        let paged: Element<'_, Message> = match !cfg!(feature = "demo") && self.peer.client.is_alone() {
+        let alone = self.peer.client.lock().is_alone();
+        let paged: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             true => column![top, self.view_page()].spacing(10).into(),
             false => stack![self.view_page(), top].into(),
         };
@@ -315,7 +316,7 @@ impl App {
                             true => format!("{who}  \u{b7}  {}", a.released),
                             false => who.clone(),
                         };
-                        self.card(&a.name, under, a.tracks, Source::Album(a.name.clone()), false, &a.art)
+                        self.card(&a.name, under, a.tracks, Source::Album(a.id.clone(), a.name.clone()), false, &a.art)
                     })
                     .collect(),
                 "No albums yet.",
@@ -346,10 +347,10 @@ impl App {
             Source::Transcript if !(self.help || self.debug) => self.view_transcript(),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
-            Source::Album(name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
+            Source::Album(_, name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
                 padded(with_header(self.view_record(name, "", None, None, ""), self.view_list()))
             }
-            Source::Album(name) => self.view_album(name),
+            Source::Album(id, name) => self.view_album(id, name),
             Source::Playlist(_, name) => self.view_playlist(name),
             Source::Artist(name) => self.view_artist(name),
             // One composer's page, as a catalogue opens one: their banner, then
@@ -577,7 +578,7 @@ impl App {
     /// How far everybody has got in an episode, the signed-in person first
     /// as "you": `you 40%  ·  Ada played`.
     pub(crate) fn listened(&self, media: crate::rows::Id) -> String {
-        let me = self.peer.client.me().actor.clone();
+        let me = self.peer.client.lock().me().actor.clone();
         let mut all = self.peer.listened_to(media);
         all.sort_by_key(|l| l.user_id != me);
         let said: Vec<String> = all
@@ -1008,15 +1009,15 @@ impl App {
     /// over its title, its length at its right — the small print, and
     /// everybody on it. A record of no works (a pop record) is the same page
     /// with no work headings, and its track numbers instead.
-    fn view_album(&self, name: &str) -> Element<'_, Message> {
+    fn view_album(&self, id: &str, name: &str) -> Element<'_, Message> {
         let p = &self.peer;
         let l = self.layout();
-        let album = p.albums().iter().find(|a| a.name == name);
+        let album = p.albums().iter().find(|a| a.id == id);
         let creator = album.map(|a| a.creator.clone()).unwrap_or_default();
         let year = album.map_or(0, |a| a.released);
         let small = if year > 0 { year.to_string() } else { String::new() };
         let art = self.picture(name, album.map(|a| a.art.as_str()).unwrap_or_default(), self.cover_side(), 8.0);
-        let header = self.view_cover(&l, name, art, None, name, "", &self.album_by(name), small);
+        let header = self.view_cover(&l, name, art, None, name, "", &self.album_by(id), small);
         let label = album.map(|a| a.label.as_str()).unwrap_or_default();
         let people = self.people(&self.composers_here());
         let page = column![
@@ -1105,7 +1106,7 @@ impl App {
         // the page leaves it: iced does not end a text at a line.
         let room = (self.pane_width() - 2.0 * GUTTER - SCROLLBAR - 48.0).max(200.0);
         let chars = (room / 6.6) as usize * 3;
-        let me = p.client.me().actor.clone();
+        let me = p.client.lock().me().actor.clone();
         let mut list = column![].spacing(0);
         for (i, item) in items.iter().enumerate() {
             let on = cursor.is_some() && cell(i) == cursor;
@@ -1427,8 +1428,8 @@ impl App {
         let p = &self.peer;
         let mut arts: Vec<String> = vec![];
         for i in p.rows() {
-            let album = p.detail_of(i.id).album;
-            if let Some(a) = p.albums().iter().find(|a| a.name == album && !a.art.is_empty()) {
+            let album = p.detail_of(i.id).album_id;
+            if let Some(a) = p.albums().iter().find(|a| a.id == album && !a.art.is_empty()) {
                 if !arts.contains(&a.art) {
                     arts.push(a.art.clone());
                 }
@@ -1591,7 +1592,7 @@ impl App {
             .map(|(i, a)| {
                 let under = if a.released > 0 { a.released.to_string() } else { String::new() };
                 (
-                    self.card(&a.name, under, a.tracks, Source::Album(a.name.clone()), false, &a.art),
+                    self.card(&a.name, under, a.tracks, Source::Album(a.id.clone(), a.name.clone()), false, &a.art),
                     l.cell(Mark::Album(i)),
                 )
             })
@@ -1777,7 +1778,7 @@ impl App {
         let cursor = focused.then_some(self.at(Pane::Tracks));
         // An album is the one place a track number means anything, and where
         // the performer replaces the album column that every row would repeat.
-        let album_page = matches!(p.source, Source::Album(_));
+        let album_page = matches!(p.source, Source::Album(..));
         // A show's page has no albums: its column says how far everybody
         // has listened instead.
         let show_page = matches!(p.source, Source::Show(..));
@@ -1883,7 +1884,7 @@ impl App {
         // everywhere else this *is* the title.
         let titled = !matches!(
             p.source,
-            Source::Album(_) | Source::Artist(_) | Source::Recording(..) | Source::Playlist(..) | Source::Show(..)
+            Source::Album(..) | Source::Artist(_) | Source::Recording(..) | Source::Playlist(..) | Source::Show(..)
         );
         let mut main = column![].spacing(10).width(Length::Fill);
         if titled {
@@ -1938,7 +1939,8 @@ impl App {
     /// Exactly [`arkui::account::HEIGHT`] tall, because the menu hangs off
     /// its bottom before anything is laid out.
     fn view_top(&self) -> Element<'_, Message> {
-        let left: Element<'_, Message> = match !cfg!(feature = "demo") && self.peer.client.is_alone() {
+        let alone = self.peer.client.lock().is_alone();
+        let left: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             // Alone: everything works here, and this is how it starts
             // syncing — a server, then its sign-in (`docs/plan-alone.md` §4).
             true => row![
@@ -1982,17 +1984,16 @@ impl App {
         if !self.says_status() {
             return iced::widget::Space::new().height(Length::Fixed(0.0)).into();
         }
-        let mut line = format!(
-            "{} songs \u{b7} cursor {} \u{b7} {} pending",
-            p.items().len(),
-            p.client.cursor(),
-            p.client.pending_len()
-        );
-        if !cfg!(feature = "demo") && p.client.is_alone() {
+        let (cursor, pending) = {
+            let c = p.client.lock();
+            (c.cursor(), c.pending_len())
+        };
+        let mut line = format!("{} songs \u{b7} cursor {cursor} \u{b7} {pending} pending", p.items().len());
+        if !cfg!(feature = "demo") && p.client.lock().is_alone() {
             line = format!("alone \u{b7} {line}");
         } else if !cfg!(feature = "demo") {
             // Who the replica's session row says, once it has synced.
-            let who = match (&self.login, p.client.current()) {
+            let who = match (&self.login, p.client.lock().current()) {
                 (Some(_), Some(s)) if !s.name.is_empty() => s.name,
                 (Some(_), Some(s)) => s.user,
                 (Some(l), None) => crate::auth::who(l),
@@ -2000,7 +2001,7 @@ impl App {
             };
             // Nobody yet is a sign-in on its way, or one the note says
             // came back refused: there is no one to name.
-            let link = match (&self.login, p.client.linked) {
+            let link = match (&self.login, p.client.lock().linked) {
                 (None, _) => None,
                 (Some(_), true) => Some("online"),
                 (Some(_), false) => Some("offline"),
@@ -2050,7 +2051,7 @@ impl App {
     fn view_debug(&self) -> Element<'_, Message> {
         let l = &self.listening;
         let stats = l.stats();
-        let client = &self.peer.client;
+        let client = &self.peer.client.lock();
         let status = client.status();
         let live = crate::client::live_status(client);
         let session = self.session.as_ref();
@@ -2203,7 +2204,7 @@ impl App {
         // What this window did, and what became of each: pending, in the log,
         // or refused and why — the sentence every replica reaches.
         for e in self.edits.iter().rev().take(12) {
-            let standing = match self.peer.client.standing(&e.id) {
+            let standing = match client.standing(&e.id) {
                 crate::client::Standing::Pending => "pending".to_string(),
                 crate::client::Standing::Confirmed => "in the log".to_string(),
                 crate::client::Standing::Rejected(why) => format!("refused: {why}"),
@@ -2440,9 +2441,10 @@ impl App {
             true => self.peer.shows().iter().find(|s| s.title == track.creator),
             false => None,
         };
+        let album = self.peer.detail_of(track.id.0);
         let art = match show {
             Some(s) => s.art.as_str(),
-            None => self.peer.albums().iter().find(|a| a.name == track.album).map_or("", |a| a.art.as_str()),
+            None => self.peer.albums().iter().find(|a| a.id == album.album_id).map_or("", |a| a.art.as_str()),
         };
         let playing = row![
             self.picture(&track.album, art, BAR_ART, 4.0),
@@ -2451,7 +2453,7 @@ impl App {
             column![
                 linked(
                     Line::new(track.title.as_str(), 13.0, Cut::End, |t| arkui::theme::of(t).background.base.text).into(),
-                    (!track.album.is_empty()).then(|| Source::Album(track.album.clone())),
+                    (!album.album_id.is_empty()).then(|| Source::Album(album.album_id.clone(), track.album.clone())),
                 ),
                 linked(
                     Line::new(self.creator_line(track, position), 12.0, Cut::End, |t| style::dim(t)

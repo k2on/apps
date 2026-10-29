@@ -126,9 +126,12 @@ fn write() {
 }
 
 /// The fixture opens: the key reads back and verifies the token it signed,
-/// the session row judges it alice's, the hub's log and the device's
-/// replica hold the chain and the rows they held, and the replica its
-/// origin and nothing pending. Falsified by a byte changed in `log/kv`
+/// the session row judges it alice's, the hub's log holds the chain and
+/// the rows it held, and the replica its origin and nothing pending. The
+/// replica was written before a disk kept its schema beside it
+/// (`ark_peer::migrate`), so it holds none of the rows it was sent and is
+/// sent them again; its origin is still the one its entries were authored
+/// from. Falsified by a byte changed in `log/kv`
 /// (`p42` as `q42`): the hub's state hash differed; in `log/log` (its one
 /// record's length): the record was cut as a torn tail, the head 71; in
 /// `session.key`: the old token was not judged.
@@ -148,19 +151,19 @@ fn an_old_data_directory_opens() {
     assert_eq!((head, ark::hash::hex(&state.0)), (HEAD, STATE.to_string()), "the hub's chain");
     assert_eq!(held(&store), names());
     hub.stop();
-    let device = Peer::open(config(), who, Box::new(Files::new(data.path().join("replica")).unwrap()), false);
-    assert_eq!(device.log.log().head().0, HEAD - 1, "the replica's chain: all but bob's sign-in");
-    assert_eq!(held(&device.log.store), names(), "and its rows");
-    assert!(device.log.pending.is_empty(), "nothing pending");
-    let replica = device.local.read::<ark_peer::local::Local, _>(ark_peer::local::replica).unwrap();
-    let log = device.log.log();
-    let origins: Vec<_> = log
+    let origins: Vec<_> = store
+        .log()
         .entries()
         .iter()
         .filter(|e| e.entry.actor == "alice")
         .map(|e| e.entry.origin)
         .collect();
-    assert_eq!(origins, vec![replica.origin; N], "its origin");
+    let device = Peer::open(config(), who, Box::new(Files::new(data.path().join("replica")).unwrap()), false);
+    assert_eq!(device.log.log().head().0, 0, "the replica's chain: none, to be sent again");
+    assert!(held(&device.log.store).is_empty(), "nor its rows");
+    assert!(device.log.pending.is_empty(), "nothing pending");
+    let replica = device.local.read::<ark_peer::local::Local, _>(ark_peer::local::replica).unwrap();
+    assert!(!origins.is_empty() && origins.iter().all(|o| *o == replica.origin), "its origin");
 }
 
 fn copy(from: &Path, to: &Path) {

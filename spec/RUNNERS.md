@@ -31,7 +31,7 @@ and `pairs` (a fuzz finding each).
 kind and its space (`client-hello-volatile`). The runner decodes `bytes`
 as a frame, encodes it again to the same bytes, and checks its JSON is
 `frame`. The kinds: `Hello`, `Page` (a client's intents at sequence 0, a
-client's chain made alone, an authority's log), `Snapshot`, `Verdict`
+client's chain made alone, an authority's log), `Part` (a fill's), `Verdict`
 (`Ok`, `Refused`, `Held` built by hand: no session sends them).
 
 ## trace

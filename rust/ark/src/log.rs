@@ -283,15 +283,62 @@ impl Snapshot {
 /// A store's rows, by table.
 pub type Rows = Vec<(String, Vec<Vec<u8>>)>;
 
+/// Where a fill stands: at `table`'s first row whose key is `key` or past
+/// it, every row before it sent.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Cursor {
+    pub table: String,
+    #[serde(with = "crate::format::raw")]
+    pub key: Vec<u8>,
+}
+
+/// Every row of `table` whose key is `from` or past it and before `to`
+/// (none: to the table's end), as the authority held them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Range {
+    pub table: String,
+    #[serde(with = "crate::format::raw")]
+    pub from: Vec<u8>,
+    pub to: Option<Vec<u8>>,
+    #[serde(with = "crate::format::raw_list")]
+    pub rows: Vec<Vec<u8>>,
+}
+
+/// A part of a fill (§1.7): ranges of the authority's rows as they stood at
+/// `(seq, hash)`, with the state there, each range's rows replacing what a
+/// replica held in it; the first part of a fill begins it from nothing,
+/// and the last says no `next`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Part {
+    pub seq: Seq,
+    pub hash: EntryHash,
+    pub state: StateHash,
+    pub first: bool,
+    pub ranges: Vec<Range>,
+    pub next: Option<Cursor>,
+}
+
+impl Part {
+    /// Where it begins: its first range's start.
+    pub fn from(&self) -> Option<Cursor> {
+        self.ranges.first().map(|r| Cursor {
+            table: r.table.clone(),
+            key: r.from.clone(),
+        })
+    }
+}
+
 /// What a peer makes durable, one record per `Persist` (§1.7): a logged
 /// entry, appended, as its row of the log's table — its facts are in it —
 /// or the store's rows whole, which every entry before them is folded
-/// into.
+/// into; or a part of a fill, appended, its rows written again as a peer
+/// opens beside the entries, by its sequence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Record {
     Logged(Logged),
     Rows(#[serde(with = "crate::format::raw_tables")] Rows),
+    Part(Part),
 }
 
 impl Record {
@@ -319,7 +366,9 @@ impl Record {
 /// What a peer is opened from: its store's rows as they were last written
 /// whole — the log's table's among them — and the rows appended to the
 /// log's table since, in order, whose facts write the rest again; its own
-/// intents still pending; and the last `local` it drew.
+/// intents still pending; and the last `local` it drew. A replica filling
+/// has the parts of the fill appended since too, each after the entries at
+/// or below its sequence.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Durable {
     #[serde(with = "crate::format::raw_tables")]
@@ -327,4 +376,6 @@ pub struct Durable {
     pub logged: Vec<Logged>,
     pub pending: Vec<Entry>,
     pub local: i64,
+    #[serde(default)]
+    pub parts: Vec<Part>,
 }

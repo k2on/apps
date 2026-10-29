@@ -249,7 +249,7 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     assert_eq!((carol.log(), carol.store.state_hash().hex()), (s.server.log(), FINAL.into()));
 }
 
-/// Compaction: the horizon at 2; a hello at 0 is answered with a snapshot a
+/// Compaction: the horizon at 2; a hello at 0 is answered with a fill a
 /// replica stands on, one at 2 with the tail. Falsified by `Log::has`
 /// answering for any sequence below the base: the hello at 0 was paged from
 /// an entry the log no longer has.
@@ -270,7 +270,7 @@ fn compaction_and_the_horizon() {
     };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
     let mut r = replica("x", Functions::default());
-    assert!(matches!(at0[..], [Frame::Snapshot { .. }]));
+    assert!(matches!(&at0[..], [Frame::Part { part, .. }] if part.first && part.next.is_none()));
     r.step(down(&at0[0]));
     assert_eq!((r.log().head(), r.store.state_hash().hex()), (server.log().head(), FINAL.into()));
     let at2 = sends(&server.step(up(&who("x"), &hello(2, h2))));

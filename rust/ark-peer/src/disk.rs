@@ -19,7 +19,9 @@
 //!   there (made, empty, when there is none): a crash mid-write leaves a torn tail, never a wrong entry. The
 //!   rows of the schema's tables are not journaled: the peer writes them
 //!   again as it opens, from each entry's facts, each entry linking onto
-//!   the one before it, and writes `kv` whole when one does not.
+//!   the one before it, and writes `kv` whole when one does not. A replica
+//!   filling appends each part of its fill there too ([`Record::Part`]),
+//!   read back beside the entries.
 //!
 //! A server keeps its schema beside them, as JSON ([`SCHEMA`]): what reads
 //! the rows without its domain compiled in reads them under it.
@@ -39,7 +41,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use ark::format::Encode;
-use ark::log::{Logged, Record, Rows};
+use ark::log::{Logged, Part, Record, Rows};
 
 /// The blob a server's schema is in, beside its log.
 pub const SCHEMA: &str = "schema.json";
@@ -50,6 +52,7 @@ pub const SCHEMA: &str = "schema.json";
 pub struct Stored {
     pub rows: Option<Rows>,
     pub logged: Vec<Logged>,
+    pub parts: Vec<Part>,
 }
 
 /// Where a peer's durable records go: named blobs, and the format over them.
@@ -83,14 +86,15 @@ pub trait Disk: Send {
             _ => None,
         });
         let (records, at) = framed::<Record>(&log);
-        let logged = records.into_iter().map_while(|r| match r {
-            Record::Logged(l) => Some(l),
-            Record::Rows(_) => None,
-        });
-        let s = Stored {
-            rows,
-            logged: logged.collect(),
-        };
+        let (mut logged, mut parts) = (vec![], vec![]);
+        for r in records {
+            match r {
+                Record::Logged(l) => logged.push(l),
+                Record::Part(p) => parts.push(p),
+                Record::Rows(_) => break,
+            }
+        }
+        let s = Stored { rows, logged, parts };
         if at < log.len() || !had {
             self.put("log", &log[..at])?;
         }

@@ -299,14 +299,16 @@ fun HarkenApp(
     // visible row recompose on each of the player's position ticks: an anonymous object is a new
     // value to Compose every time, and every row's `onClick` captured it (`ScrollTests`).
     //
-    // The albums by name are made when the albums change, and only then: every row entering a list
+    // The albums by key are made when the albums change, and only then: every row entering a list
     // asks for its album, and a scan of every album per row was a cost that grew with the library.
+    val albumsById by remember(session) { derivedStateOf { albums.associateBy { it.id } } }
+    // The log's plays name their album, not its key: their covers are found by name.
     val albumsByName by remember(session) { derivedStateOf { albums.associateBy { it.name } } }
-    val albumOf: (Track) -> Album? = remember(session) { { t -> Album.ofTrack(t, details, albumsByName) } }
+    val albumOf: (Track) -> Album? = remember(session) { { t -> Album.ofTrack(t, details, albumsById) } }
     // What the search last found: the app's, not the tab's, so leaving the tab keeps it.
     val searched = remember(session) { Searched() }
     // What Home says was played last: the session's track, else the log's newest play.
-    val last = remember(heard, played, albumsByName, playlists) { lastPlayed(heard, played, playlists, { albumsByName[it]?.art ?: "" }, session.server, listen.name) }
+    val last = remember(heard, played, albumsByName, playlists) { lastPlayed(heard, played, playlists, library.artOf, session.server, listen.name) }
 
     LaunchedEffect(notice) {
         val n = notice ?: return@LaunchedEffect
@@ -405,6 +407,8 @@ fun HarkenApp(
                 val show = (page as? Page.ForArtist)?.let { p -> shows.firstOrNull { it.title == p.name }?.takeIf { artists.none { a -> a.name == p.name } } }
                 nav().navigate(show?.let { Page.ForShow(it.id) }?.route ?: page.route)
             }
+
+            override fun albumOf(now: Playing): Page? = details[Id(now.id)]?.albumId?.takeIf { it.isNotEmpty() }?.let { Page.ForAlbum(it) }
 
             override fun toggle() = playback.toggle()
 
@@ -546,7 +550,7 @@ fun HarkenApp(
                                         val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
                                         if (page != null) {
                                             val rows by held(library, page, back)
-                                            Ready(rows) { AlbumPage(page.name, albumsByName[page.name], it.orEmpty(), details, playing, act) }
+                                            Ready(rows) { AlbumPage(page.id, albumsById[page.id], it.orEmpty(), details, playing, act) }
                                         }
                                     }
                                     Route.Artist -> {
@@ -664,7 +668,7 @@ fun HarkenApp(
                                                     takes?.firstOrNull { it.id == page.id },
                                                     tracks,
                                                     details,
-                                                    Catalogue.albumsOf(tracks, { details[it.id] }, albumsByName),
+                                                    Catalogue.albumsOf(tracks, { details[it.id] }, albumsById),
                                                     people,
                                                     playing,
                                                     act,

@@ -51,6 +51,23 @@
 //! answered with the snapshot). A replica whose authority runs another
 //! schema takes each confirmed state as the entry says ([`Peer::faith`]).
 //!
+//! **A fill** is how a replica the log cannot page is sent the rows: in
+//! parts of about [`PART`] bytes, the tables a domain sends [`Peer::later`]
+//! after the rest, each part asked for (`More`) once the one before is
+//! held, so what the authority logs meanwhile is never behind more than a
+//! part. A part is no frozen snapshot: it is the rows of its key ranges as
+//! they stand at the authority's head when it is sent, and every entry
+//! before that head was sent before it, so a replica at that head takes
+//! the ranges whole and is right there. Entries come as they are logged,
+//! their facts put as they are over rows not all sent yet; nothing is
+//! judged. With the last part the store's state is checked: the
+//! authority's says every row is the authority's, judged where it was
+//! written, so the store is not judged again (one of rows another schema
+//! wrote is, whole). A filling replica makes each part durable as it is
+//! taken ([`Record::Part`]), the last the fill's end, and its place
+//! beside its rows ([`FILL`]), so one reopened goes on where it was; its own intents are
+//! the authority's to judge, one its store refuses pending unrun.
+//!
 //! **Partial sync is a view** (§1.8). A connection the driver says is fed
 //! by a scope (`Input::Feed`) is served its union: the rows its scope —
 //! a [`Scope`], its own kind of function, asked of a table's row — holds,
@@ -103,7 +120,7 @@ use std::sync::Arc;
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
-use crate::log::{Durable, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Snapshot, Span};
+use crate::log::{Cursor, Durable, Entry, EntryId, Logged, Origin, Part, Range, Record, Rows, Seq, Snapshot, Span};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Log, Store, Undo, LOG};
 use crate::Refusal;
@@ -454,7 +471,33 @@ pub struct Peer {
     /// A replica whose authority runs another schema: the state a
     /// confirmed entry carries is taken as it says.
     pub faith: bool,
+    /// The tables an authority sends last in a fill, after every other:
+    /// what a replica can be without for a while.
+    pub later: Vec<String>,
+    /// A replica filling: where its next part begins.
+    pub fill: Option<Fill>,
+    /// The part a replica filling has asked for and not been sent.
+    more: Option<Cursor>,
 }
+
+/// A replica's fill as it stands (§1.7): where the next part begins, and
+/// whether a row it was sent was another schema's. Kept beside the rows,
+/// as the one row of [`FILL`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fill {
+    pub next: Cursor,
+    pub other: bool,
+}
+
+/// The table a replica's [`Fill`] is kept in, beside the log's: not the
+/// schema's, and never sent.
+pub const FILL: &str = "_fill";
+
+/// How many bytes of rows a fill's part carries, about: past it, the
+/// part ends at the row after; a row is never cut. Small enough that a
+/// device taking one, on whatever thread it draws on, is not held up by
+/// it for a frame.
+pub const PART: usize = 256 << 10;
 
 /// Facts as some schema wrote them, read under `schema`: rows completed or
 /// cut to their prefix, changes to tables it lacks dropped; and whether any
@@ -531,6 +574,9 @@ impl Peer {
             version: String::new(),
             foreign: None,
             faith: false,
+            later: vec![],
+            fill: None,
+            more: None,
         }
     }
 
@@ -552,14 +598,22 @@ impl Peer {
     }
 
     /// The store's rows as confirmed — the pending intents' changes
-    /// undone — and the log's: what this peer makes durable whole.
+    /// undone — and the log's, and a fill's: what this peer makes durable
+    /// whole.
     pub fn confirmed_rows(&self) -> Rows {
         if self.pending.is_empty() {
-            return self.store.kv_rows();
+            return self.kv(&self.store);
         }
         let mut s = self.store.clone();
         s.undo(self.pending.iter().flat_map(|p| &p.changes)).expect("a pending change undoes");
-        s.kv_rows()
+        self.kv(&s)
+    }
+
+    /// `store`'s rows and its log's, and this peer's fill's.
+    fn kv(&self, store: &Store) -> Rows {
+        let mut rows = store.kv_rows();
+        rows.extend(self.fill.as_ref().map(|f| (FILL.to_string(), vec![f.to_bytes()])));
+        rows
     }
 
     /// A logged entry made part of the log, its facts already applied, and
@@ -716,12 +770,14 @@ impl Peer {
             let run = self.attempt(&entry, o);
             return self.decide(entry, run, o);
         }
+        // Filling, a refusal may be of rows not sent yet: the authority's to
+        // judge, the intent pending unrun.
         match self.attempt(&entry, o) {
-            Err(why) => o.out.push(Output::Refused { id, why: why.0 }),
-            Ok(changes) => {
+            Err(why) if self.fill.is_none() => o.out.push(Output::Refused { id, why: why.0 }),
+            run => {
                 self.local = local;
                 o.send(Frame::push(self.space, [entry.clone()]));
-                self.pending.push(Pending::new(entry, changes));
+                self.pending.push(Pending::new(entry, run.unwrap_or_default()));
             }
         }
     }
@@ -805,6 +861,11 @@ impl Peer {
             (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
             (Frame::Snapshot { snapshot, .. }, false, _) => self.reset(snapshot, o),
+            (Frame::More { from, .. }, true, _) if scoped.is_none() => o.send(Frame::Part {
+                space: self.space,
+                part: self.part(Some(from)),
+            }),
+            (Frame::Part { part, .. }, false, _) => self.take(part, o),
             (Frame::Verdict { id, verdict, .. }, false, _) => match verdict {
                 // At or below where this peer stands, an intent still pending
                 // here is in the state it holds (a snapshot carried it).
@@ -824,6 +885,12 @@ impl Peer {
                 Some(h) => self.log().has(cursor, &h),
                 None => cursor == 0 && self.log().base_seq() == 0,
             };
+        if !has && self.space == Space::Durable {
+            return o.send(Frame::Part {
+                space: self.space,
+                part: self.part(None),
+            });
+        }
         if !has {
             let (seq, hash) = self.log().head();
             let snapshot = Snapshot {
@@ -840,6 +907,67 @@ impl Peer {
                 from: page[0].seq - 1,
                 logged: page.to_vec(),
             });
+        }
+    }
+
+    /// The tables of this peer's space in the order a fill sends them: the
+    /// schema's, those it sends [`Peer::later`] after the rest.
+    fn fill_order(&self) -> Vec<String> {
+        let tables = self.store.schema_arc().tables.iter().filter(|t| t.space == self.space);
+        let (later, first): (Vec<_>, Vec<_>) = tables.map(|t| t.name.clone()).partition(|t| self.later.contains(t));
+        first.into_iter().chain(later).collect()
+    }
+
+    /// The part of a fill from `from` (none: the first, from the rows'
+    /// start), of the rows as they stand at the head: ranges in
+    /// [`Peer::fill_order`], each table's in key order, until about
+    /// [`PART`] bytes of rows; and where the next begins, unless none is
+    /// left. A cursor at a table this peer lacks begins the fill again.
+    fn part(&self, from: Option<Cursor>) -> Part {
+        let order = self.fill_order();
+        let at = from.as_ref().and_then(|c| order.iter().position(|t| *t == c.table));
+        let (start, key) = match (at, from) {
+            (Some(i), Some(c)) => (i, c.key),
+            _ => (0, vec![]),
+        };
+        let (mut ranges, mut size, mut next) = (vec![], 0, None);
+        for (i, table) in order.iter().enumerate().skip(start) {
+            let from = if i == start { key.clone() } else { vec![] };
+            let (mut rows, mut to) = (vec![], None);
+            for (k, r) in self.store.keyed_from(table, &from) {
+                if size >= PART {
+                    to = Some(k.to_vec());
+                    break;
+                }
+                size += r.len();
+                rows.push(r.to_vec());
+            }
+            ranges.push(Range {
+                table: table.clone(),
+                from,
+                to: to.clone(),
+                rows,
+            });
+            next = match (to, order.get(i + 1)) {
+                (Some(key), _) => Some(Cursor { table: table.clone(), key }),
+                (None, Some(t)) if size >= PART => Some(Cursor {
+                    table: t.clone(),
+                    key: vec![],
+                }),
+                _ => None,
+            };
+            if next.is_some() {
+                break;
+            }
+        }
+        let (seq, hash) = self.log().head();
+        Part {
+            seq,
+            hash,
+            state: self.store.state_hash(),
+            first: at.is_none(),
+            ranges,
+            next,
         }
     }
 
@@ -994,6 +1122,30 @@ impl Peer {
                 }
                 return self.ask(o);
             }
+            // Filling, an entry's facts are put as they are over rows not
+            // all sent yet, and its state is checked once the fill is done.
+            if self.fill.is_some() {
+                if !undone {
+                    self.undo_pending(o);
+                    undone = true;
+                }
+                let (facts, other) = fit(self.store.schema_arc(), &l.facts);
+                let Ok(moved) = self.store.force_all(&facts) else {
+                    self.redo_pending(o);
+                    return self.diverge(l.seq, o);
+                };
+                o.tell(Some(l.entry.span()), moved);
+                self.fill.as_mut().expect("filling").other |= other;
+                if let Some(i) = self.pending.iter().position(|p| p.entry.id == l.entry.id) {
+                    self.pending.remove(i);
+                }
+                if l.entry.origin == self.origin {
+                    o.out.push(Output::Confirmed(l.entry.id));
+                }
+                self.asked = None;
+                self.logged(&l, o);
+                continue;
+            }
             // Facts of another schema are read under this one, and the
             // state the entry says is taken as it says (§1.2). Facts are
             // fitted only when they are not this schema's as they are,
@@ -1084,6 +1236,7 @@ impl Peer {
     /// as one logged under a schema this one only shares tables with does.
     fn diverge(&mut self, seq: Seq, o: &mut Out) {
         let cursor = if self.diverged.contains(&seq) { -1 } else { 0 };
+        (self.fill, self.more) = (None, None);
         self.diverged.push(seq);
         self.undo_pending(o);
         let fresh = self.blank();
@@ -1113,6 +1266,7 @@ impl Peer {
             return;
         }
         (self.faith, self.foreign) = (!same, (!same).then_some(s.seq));
+        (self.fill, self.more) = (None, None);
         self.undo_pending(o);
         o.tell(None, self.store.diff(&new));
         self.store = new;
@@ -1120,6 +1274,133 @@ impl Peer {
         self.asked = None;
         self.redo_pending(o);
         self.repush(o);
+    }
+
+    /// A part of a fill. The first begins one: the store emptied, the log
+    /// standing on where the part was taken. Any other is the one asked
+    /// for, at the head — every entry the authority logged before it was
+    /// sent before it — or it is passed by: past a gap, the head asked for
+    /// again, and the part. Its ranges replace what the store held in
+    /// them, judging nothing (a row may name one not sent yet); it is made
+    /// durable, appended, and the next asked for. The last is the fill
+    /// done: every row the authority's at the head, its state checked
+    /// ([`Peer::close_fill`]). The pending intents run
+    /// again on top of each.
+    fn take(&mut self, p: Part, o: &mut Out) {
+        let (n, h) = self.log().head();
+        let asked = self.more.take();
+        if p.first {
+            if self.fill.is_none() && self.log().has(p.seq, &p.hash) && (p.seq == n || self.space == Space::Durable) {
+                return;
+            }
+        } else if self.fill.is_none() || asked.is_none() || asked != p.from() {
+            self.more = asked;
+            return;
+        } else if (n, h) != (p.seq, p.hash) {
+            self.asked = None;
+            self.ask(o);
+            return self.ask_more(o);
+        }
+        self.undo_pending(o);
+        if p.first {
+            let mut fresh = Store::new(self.store.schema_arc().clone(), self.space);
+            let base = Snapshot {
+                seq: p.seq,
+                hash: p.hash,
+                state: p.state,
+                rows: vec![],
+            };
+            fresh.start_log([base.base().to_bytes()]).expect("a first row starts a log");
+            o.tell(None, self.store.diff(&fresh));
+            self.store = fresh;
+            (self.faith, self.foreign) = (false, None);
+            self.fill = Some(Fill {
+                next: Cursor::default(),
+                other: false,
+            });
+        }
+        let mut other = false;
+        for r in &p.ranges {
+            match self.store.replace(&r.table, &r.from, r.to.as_deref(), &r.rows) {
+                Ok((moved, o2)) => {
+                    o.tell(None, moved);
+                    other |= o2;
+                }
+                Err(_) => {
+                    self.redo_pending(o);
+                    return self.diverge(p.seq, o);
+                }
+            }
+        }
+        let fill = self.fill.as_mut().expect("filling");
+        fill.other |= other;
+        let done = match p.next.clone() {
+            Some(next) => {
+                fill.next = next;
+                match p.first {
+                    true => o.persist(Record::Rows(self.kv(&self.store))),
+                    false => o.persist(Record::Part(p.clone())),
+                }
+                self.ask_more(o);
+                Ok(())
+            }
+            None => self.filled(&p, o),
+        };
+        self.redo_pending(o);
+        if p.first {
+            self.asked = None;
+            self.repush(o);
+        }
+        if done.is_err() {
+            self.diverge(p.seq, o);
+        }
+    }
+
+    /// A fill's last part taken, the pending intents undone, and the fill
+    /// closed ([`Peer::close_fill`]): made durable by the part appended —
+    /// the end of the fill, which an open reads as it does — or, the rows
+    /// judged again, whole.
+    fn filled(&mut self, last: &Part, o: &mut Out) -> Result<(), ()> {
+        match self.close_fill(last.seq, last.state)? {
+            false => o.persist(Record::Part(last.clone())),
+            true => o.persist(Record::Rows(self.store.kv_rows())),
+        }
+        Ok(())
+    }
+
+    /// A fill done: its state the authority's at `seq`, which says every
+    /// row is the authority's — judged there as it was written — so there
+    /// is nothing to judge here; or, the rows another schema's (§1.2), the
+    /// store judged whole and taken as the part says. Whether it was built
+    /// again; or not done: the state is another, and the fill begins again.
+    fn close_fill(&mut self, seq: Seq, state: crate::hash::StateHash) -> Result<bool, ()> {
+        let other = self.fill.take().is_some_and(|f| f.other);
+        if self.store.state_hash() == state {
+            (self.faith, self.foreign) = (false, None);
+            return Ok(false);
+        }
+        if !other {
+            return Err(());
+        }
+        let (log, rows): (Rows, Rows) = self.store.kv_rows().into_iter().partition(|(t, _)| t == LOG);
+        let Ok((store, _)) = self.on_fit(&rows, log.into_iter().flat_map(|(_, rs)| rs)) else {
+            return Err(());
+        };
+        (self.faith, self.foreign) = (true, Some(seq));
+        self.store = store;
+        Ok(true)
+    }
+
+    /// The next part of a fill asked for, unless one is asked already.
+    fn ask_more(&mut self, o: &mut Out) {
+        let Some(f) = &self.fill else { return };
+        if self.more.is_none() {
+            self.more = Some(f.next.clone());
+            o.send(Frame::More {
+                space: self.space,
+                from: f.next.clone(),
+            });
+        }
     }
 
     fn repush(&mut self, o: &mut Out) {
@@ -1137,10 +1418,14 @@ impl Peer {
         self.asked = None;
         self.ask(o);
         self.repush(o);
+        // What was asked on the connection before is not coming.
+        self.more = None;
+        self.ask_more(o);
     }
 
     fn alone(&mut self, o: &mut Out) {
-        if self.is_authority() {
+        // A replica filling holds too little to judge by: it stays one.
+        if self.is_authority() || self.fill.is_some() {
             return;
         }
         self.undo_pending(o);
@@ -1222,8 +1507,15 @@ impl Peer {
         self.undo_pending(o);
         self.pending.clear();
         let (log, rows): (Rows, Rows) = d.rows.into_iter().partition(|(t, _)| t == LOG);
+        let (fill, rows): (Rows, Rows) = rows.into_iter().partition(|(t, _)| t == FILL);
         let log = log.into_iter().flat_map(|(_, rs)| rs);
-        if let Ok((mut store, _)) = self.on_fit(&rows, log) {
+        (self.fill, self.more) = (None, None);
+        let filling = fill.into_iter().flat_map(|(_, rs)| rs).next().map(|f| Fill::from_bytes(&f));
+        if let Some(fill) = filling {
+            if let Ok(fill) = fill {
+                self.refill(fill, &rows, log, d.logged, d.parts, o);
+            }
+        } else if let Ok((mut store, _)) = self.on_fit(&rows, log) {
             // Every entry read once: those the rows hold, from their rows,
             // and those appended, as their records were read; facts fitted
             // only when they are not this schema's as they are.
@@ -1253,6 +1545,70 @@ impl Peer {
         self.local = self.local.max(d.local);
         self.pending = d.pending.into_iter().map(|entry| Pending::new(entry, vec![])).collect();
         self.redo_pending(o);
+    }
+
+    /// A replica's fill opened as it last stood: its rows, judging nothing,
+    /// and what was appended since in the order it was taken — each entry
+    /// put as it is, each part at its sequence, after the entries at or
+    /// below it — up to the first that does not read; the fill on from the
+    /// last part's next, or done where the last closed it.
+    fn refill(&mut self, mut fill: Fill, rows: &Rows, log: impl IntoIterator<Item = Vec<u8>>, logged: Vec<Logged>, parts: Vec<Part>, o: &mut Out) {
+        let Ok((mut store, _)) = Store::of_rows(self.store.schema_arc().clone(), self.space, rows, false) else {
+            return;
+        };
+        if store.start_log(log).is_err() {
+            return;
+        }
+        // A part taken. The last closes the fill where its state is the
+        // store's then — the part appended once it was, the state its
+        // fill was done at — or begins it again.
+        fn take(store: &mut Store, p: Part, fill: &mut Fill, closed: &mut bool) -> Result<(), Refusal> {
+            if p.seq != store.log().head().0 {
+                return Err(Refusal::new("a part not at the head"));
+            }
+            for r in &p.ranges {
+                fill.other |= store.replace(&r.table, &r.from, r.to.as_deref(), &r.rows)?.1;
+            }
+            *closed = p.next.is_none() && store.state_hash() == p.state;
+            fill.next = p.next.unwrap_or_default();
+            Ok(())
+        }
+        let mut closed = false;
+        let (all, mut read) = (logged.len() + parts.len(), 0);
+        let mut parts = parts.into_iter().peekable();
+        'read: for l in logged {
+            while let Some(p) = parts.next_if(|p| p.seq < l.seq) {
+                if take(&mut store, p, &mut fill, &mut closed).is_err() {
+                    break 'read;
+                }
+                read += 1;
+            }
+            let (n, h) = store.log().head();
+            let (facts, other) = fit(store.schema_arc(), &l.facts);
+            if l.seq != n + 1 || !l.links(&h) || store.force_all(&facts).is_err() {
+                break;
+            }
+            fill.other |= other;
+            store.log_push(&l, l.to_bytes());
+            read += 1;
+        }
+        if read == all - parts.len() {
+            for p in parts.by_ref() {
+                if take(&mut store, p, &mut fill, &mut closed).is_err() {
+                    break;
+                }
+                read += 1;
+            }
+        }
+        o.tell(None, self.store.diff(&store));
+        (self.store, self.fill) = (store, (!closed).then_some(fill));
+        if closed {
+            (self.faith, self.foreign) = (false, None);
+        }
+        // What did not read is cut, so nothing is appended after it.
+        if read < all {
+            o.persist(Record::Rows(self.kv(&self.store)));
+        }
     }
 }
 

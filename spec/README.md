@@ -35,12 +35,13 @@ is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 | 1.1 | `json.rs` | a value without a Rust type: JSON under a `Type`, written as the Rust type it describes would be (`Typed`) and read back from those bytes (`Seed`) |
 | 1.1 | `hash.rs` | the hash spaces, each its own type: `StateHash`, `EntryHash`, `SchemaHash` |
 | 1.2 | `schema.rs` | tables, columns, keys, indexes, references, spaces; append-only growth (`compat`); a row as another schema of its table wrote it read under this one, completed or cut to its prefix (`Table::fit`) |
+| 1.2 | `migrate.rs` | rows of a schema the domain's does not grow from read through its migrations: steps, each naming the schema it reads, over every row as JSON, written under the next step's schema or the domain's |
 | 1.3 | `store.rs` | one ordered map per table, rows by key and index entries; every write judged (the row's one encoding, unique indexes, references at both ends) and a `Change` that inverts exactly; the state hash, `sha256(schema_hash ‖ per-table sums of sha256(table ‖ row))` over one space, kept per write; the log as the `_log` table, its invariant the chain |
-| 1.6 | `log.rs` | `Entry`, `Logged`, the chain `sha256(prev ‖ enc(seq, entry, facts, state))`; ids from `(origin, local)`, row ids the entry's draws; `Snapshot`; what a peer makes durable (`Record`, `Durable`) |
-| 1.7–1.9 | `peer.rs` | the one sans-io machine, replica or authority (alone is an authority with a fork): sequencing, dedupe, judging, the rebase, compaction (in either role, up to the head: a replica's pending intents are rebased by their own changes, so it folds as an authority does), going alone and joining (the chain made alone pushed as intents), a held intent, opening a log (each entry read once; a grown schema keeps it); partial sync (`Feed`, `scoped`); the volatile space (its authority keeping the verdicts of each origin's last 64 `local`s, a push below them overtaken) |
+| 1.6 | `log.rs` | `Entry`, `Logged`, the chain `sha256(prev ‖ enc(seq, entry, facts, state))`; ids from `(origin, local)`, row ids the entry's draws; `Snapshot`; a fill's `Part` and `Cursor`; what a peer makes durable (`Record`, `Durable`) |
+| 1.7–1.9 | `peer.rs` | the one sans-io machine, replica or authority (alone is an authority with a fork): sequencing, dedupe, judging, the rebase, compaction (in either role, up to the head: a replica's pending intents are rebased by their own changes, so it folds as an authority does), going alone and joining (the chain made alone pushed as intents), a held intent, opening a log (each entry read once; a grown schema keeps it); a fill (a replica the log cannot page sent the rows in parts, each asked for with `More` once the one before is held, as they stand when it is sent; a domain's `later` tables last; an entry logged meanwhile put as it is, the state checked once the last part is in; a fill made durable part by part, reopened where it was); partial sync (`Feed`, `scoped`); the volatile space (its authority keeping the verdicts of each origin's last 64 `local`s, a push below them overtaken) |
 | 1.10 | `plan.rs` | maintained views: `scan`, `filter`, `map`, `sort`, `take`, `group`, `join` over typed rows, each kept from deltas, a closure's reads recorded and re-run only for what a change hits; the answer a fresh run's, the patches splicing |
 | 1.16 | `dynamic.rs` | a row without a Rust type as JSON under the schema, its bytes and its key's; a table browsed (`Browse`: equal columns, a key range, a sort by a column, the first `n`) as a plan of the same operators, kept by patches |
-| 1.11 | `frames.rs` | the four frames — `Hello`, `Page` (a peer's intents, or an authority's chain), `Snapshot`, `Verdict` — in the value format; no frame carries code |
+| 1.11 | `frames.rs` | the frames — `Hello`, `Page` (a peer's intents, or an authority's chain), `Snapshot` (a scoped or volatile resync), `Verdict`, `Part` and `More` (a fill) — in the value format; no frame carries code |
 | 1.16 | `row.rs` | `Row`, `Input` and its refinements (the form's words), `Describe` and `Type`, `Id`, typed indexes |
 | 1.16 | `db.rs` | the typed store a function reads and writes, a run reading its own writes, a refusal undoing them |
 | 1.16 | `domain.rs` | a `Domain`: the schema and functions by name — mutators, live transitions, queries, views, scopes |
@@ -78,3 +79,12 @@ and its sign-in. **A change to the on-disk format comes with a migration
 that opens the fixtures as they are, or with a new fixture beside them
 and a note here of what moved and what reads the old one**; a fixture is
 never written over.
+
+Every disk keeps the schema its rows were written under beside them,
+`schema.json` (`rust/ark-peer/src/migrate.rs`). Opened under a schema
+that does not grow from it, an authority's rows are migrated by its
+domain's steps (`migrate.rs` above) and written as a snapshot one past
+its head, what it stood on kept as `kv.<hash>` and `log.<hash>`; with no
+step that reads them it does not open. A replica's start empty, its
+pending intents and origin kept, and are sent again. The fixture's
+replica predates `schema.json`, so it now opens empty, its origin kept.

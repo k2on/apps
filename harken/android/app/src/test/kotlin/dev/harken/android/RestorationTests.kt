@@ -148,6 +148,7 @@ object Fixture {
             movementNo = 0,
             artistBanner = "",
             released = 0,
+            folder = "",
         )
 
     fun peer(): Harken {
@@ -395,7 +396,7 @@ class RestorationTests(private val case: Case) {
                 click("Search")
             }
             Route.Library -> {}
-            Route.Album -> navs.getValue(tab).navigate(Page.ForAlbum("Water Music").route)
+            Route.Album -> navs.getValue(tab).navigate(Page.ForAlbum(Demo.key("Water Music")).route)
             Route.Artist -> navs.getValue(tab).navigate(Page.ForArtist(Fixture.ARTIST).route)
             Route.Playlist -> navs.getValue(tab).navigate(Page.ForPlaylist(Fixture.first!!).route)
             Route.Work -> navs.getValue(tab).navigate(Page.ForWork(Fixture.work).route)
@@ -505,7 +506,7 @@ class RestorationTests(private val case: Case) {
             holds("tab switched back", left) { click(tab.title) }
 
             // A page opened from it, and back: by the arrow, by the edge, by a pull.
-            val page = Page.ForAlbum("The Four Seasons").route
+            val page = Page.ForAlbum(Demo.key("The Four Seasons")).route
             for (how in listOf("arrow", "edge", "pull")) {
                 navs.getValue(tab).navigate(page)
                 frames(700)

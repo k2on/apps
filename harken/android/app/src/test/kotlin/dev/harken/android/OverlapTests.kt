@@ -171,7 +171,7 @@ class OverlapTests {
      */
     @Test
     fun homeLosingTheOfflineLineKeepsItsShelvesWhereTheyWere() {
-        val live = LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum("The Four Seasons"), live = true, on = "Playing on Phone")
+        val live = LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum(Demo.key("The Four Seasons")), live = true, on = "Playing on Phone")
         val link = MutableStateFlow("waiting")
         val activity = Activity()
         val problems = mutableListOf<String>()
@@ -219,7 +219,7 @@ class OverlapTests {
      */
     @Test
     fun homeLosingTheLastPlayedCardKeepsItsShelvesWhereTheyWere() {
-        val last = MutableStateFlow<LastPlayed?>(LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum("The Four Seasons"), live = true))
+        val last = MutableStateFlow<LastPlayed?>(LastPlayed(Demo.playing(Demo.tracks[17]), Page.ForAlbum(Demo.key("The Four Seasons")), live = true))
         val problems = mutableListOf<String>()
         val thrown =
             run(Route.Home.pattern, Activity(), 3_000L, {

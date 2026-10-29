@@ -99,24 +99,24 @@ class ListenTests {
         val hall = Hall()
         val phone = hall.device("phone", true)
         val laptop = hall.device("laptop", true, "computer")
-        val air = Played(queue[0].id, "Air", "Handel", "Water Music", 100_000, "music/air.mp3", 1, "#album/Water%20Music")
+        val air = Played(queue[0].id, "Air", "Handel", "Water Music", 100_000, "music/air.mp3", 1, "#album/music%2FWater%20Music%2Fwater-music")
         val r = Presser("phone")
         val heard = { Heard(me = "phone", joined = r.joined(phone), listening = r.session(phone)) }
-        val noArt: (String) -> String = { "" }
+        val noArt: (String, String) -> String = { _, _ -> "" }
 
         val fromLog = lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!
         assertEquals("an idle session: the log's", "Air", fromLog.track.title)
-        assertEquals(Page.ForAlbum("Water Music"), fromLog.from)
+        assertEquals(Page.ForAlbum(Demo.key("Water Music")), fromLog.from)
         assertFalse(fromLog.live)
 
         val lr = Presser("laptop")
-        assertNull(lr.press(laptop, Press.Start(queue, 1, 0, "#album/Water%20Music")))
+        assertNull(lr.press(laptop, Press.Start(queue, 1, 0, "#album/music%2FWater%20Music%2Fwater-music")))
         hall.carry()
         val live = lastPlayed(heard(), air, emptyList(), noArt, "https://m", "Phone")!!
         assertEquals("the session's track", "b", live.track.title)
         assertTrue(live.live)
         assertEquals("and where it plays", "Playing on laptop", live.on)
-        assertEquals(Page.ForAlbum("Water Music"), live.from)
+        assertEquals(Page.ForAlbum(Demo.key("Water Music")), live.from)
 
         assertNull(lr.press(laptop, Press.Pause))
         hall.carry()
@@ -185,7 +185,7 @@ class ListenTests {
         assertEquals("nothing queued: empty, so no notification", 0, player.mediaItemCount)
         assertEquals(androidx.media3.common.Player.STATE_IDLE, player.playbackState)
 
-        assertNull(laptop.press(laptopPeer, Press.Start(queue, 0, 30_000, "#album/Water%20Music")))
+        assertNull(laptop.press(laptopPeer, Press.Start(queue, 0, 30_000, "#album/music%2FWater%20Music%2Fwater-music")))
         hall.carry()
         phone.poke()
         player.show(phone.heard.value)
@@ -395,5 +395,29 @@ class ListenTests {
         hall.carry()
         assertNull("and left", hall.state().devices.getValue("bedroom").follows)
         assertEquals(true, row("bedroom").join)
+    }
+
+    /**
+     * A seek is shown where the finger left it until the session's clock agrees: a clock still
+     * saying where the track was — a tick, the echo of the scrub before it — does not pull the
+     * scrubber back. Falsified by the scrubber let go of jumping back, then forward.
+     */
+    @Test
+    fun aSeekIsShownWhereTheFingerLeftItUntilTheClockAgrees() {
+        var now = 1_000L
+        val s = Sought { now }
+        assertEquals("nothing held: the clock's", 30_000L, s.shown(30_000, "a", true))
+        s.hold(90_000, "a")
+        assertEquals("let go: the hand's", 90_000L, s.shown(30_000, "a", true))
+        now += 500
+        assertEquals("a stale tick: the hand's, run on", 90_500L, s.shown(30_500, "a", true))
+        assertEquals("the clock caught up: the clock's", 90_600L, s.shown(90_600, "a", true))
+        assertEquals("and the hand is forgotten", 31_000L, s.shown(31_000, "a", true))
+        s.hold(60_000, "a")
+        assertEquals("paused: held where it was put", 60_000L, s.shown(30_000, "a", false))
+        assertEquals("another track: the clock's", 0L, s.shown(0, "b", true))
+        s.hold(60_000, "a")
+        now += Sought.FORGET_MS + 1
+        assertEquals("never agreed: the clock's again, after a while", 36_000L, s.shown(36_000, "a", true))
     }
 }

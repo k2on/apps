@@ -6,7 +6,7 @@ import Foundation
 import XCTest
 
 final class NowPlayingTests: XCTestCase {
-    private func art(_ album: String) -> String { album == "Water Music" ? "art/water.jpg" : "" }
+    private func art(_ album: String, _ creator: String) -> String { album == "Water Music" ? "art/water.jpg" : "" }
 
     private func state(_ h: Heard, now: Int64 = 12_000) -> PlayerState {
         let local = Volume(of: .here, level: 70, muted: false, remote: false)
@@ -81,6 +81,13 @@ final class NowPlayingTests: XCTestCase {
         XCTAssertEqual(logged?.track.id, Fx.id(4).hex)
         XCTAssertEqual(logged?.from, .songs)
         XCTAssertEqual(logged?.saying([]), "From your library")
+        // From an album: its name, found by its key.
+        let water = AlbumsEntry(art: "", creator: "Handel", id: ".catalogue/water-music", label: "", name: "Water Music", performer: "", released: 0, tracks: 3)
+        var fromAlbum = play
+        fromAlbum.from = "#album/.catalogue%2Fwater-music"
+        let onAlbum = LastPlayed.of(Heard(), played: fromAlbum, playlists: [], art: art, server: "https://h", here: "x")
+        XCTAssertEqual(onAlbum?.saying([], albums: [water]), "From Water Music")
+        XCTAssertEqual(onAlbum?.saying([]), "From an album")
         XCTAssertNil(LastPlayed.of(Heard(), played: nil, playlists: [], art: art, server: "h", here: "x"))
     }
 
@@ -94,5 +101,25 @@ final class NowPlayingTests: XCTestCase {
         XCTAssertEqual(plain?.at, 4)
         XCTAssertEqual(plain?.queue.first?.album, "A")
         XCTAssertNil(Started.queue([], at: 0, shuffled: false, album: { _ in "" }))
+    }
+
+    /// A seek is shown where the finger left it until the session's clock agrees: a clock still
+    /// saying where the track was does not pull the scrubber back. Android's `Sought` test.
+    func testASeekIsShownWhereTheFingerLeftItUntilTheClockAgrees() {
+        var now: Int64 = 1_000
+        var s = Sought()
+        XCTAssertEqual(s.shown(clock: 30_000, track: "a", counting: true, now: now), 30_000, "nothing held: the clock's")
+        s.hold(90_000, track: "a", now: now)
+        XCTAssertEqual(s.shown(clock: 30_000, track: "a", counting: true, now: now), 90_000, "let go: the hand's")
+        now += 500
+        XCTAssertEqual(s.shown(clock: 30_500, track: "a", counting: true, now: now), 90_500, "a stale redraw: the hand's, run on")
+        XCTAssertEqual(s.shown(clock: 90_600, track: "a", counting: true, now: now), 90_600, "the clock caught up: the clock's")
+        XCTAssertEqual(s.shown(clock: 31_000, track: "a", counting: true, now: now), 31_000, "and the hand is forgotten")
+        s.hold(60_000, track: "a", now: now)
+        XCTAssertEqual(s.shown(clock: 30_000, track: "a", counting: false, now: now), 60_000, "paused: held where it was put")
+        XCTAssertEqual(s.shown(clock: 0, track: "b", counting: true, now: now), 0, "another track: the clock's")
+        s.hold(60_000, track: "a", now: now)
+        now += Sought.forgetMs + 1
+        XCTAssertEqual(s.shown(clock: 36_000, track: "a", counting: true, now: now), 36_000, "never agreed: the clock's again, after a while")
     }
 }

@@ -113,6 +113,16 @@ impl Lib {
         self.query("alice", name, input).unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 
+    /// The key of the album of that name the albums page lists.
+    pub fn album_id(&self, name: &str) -> String {
+        let albums = self.list::<harken_domain::AlbumsEntry>("albums", &());
+        albums
+            .into_iter()
+            .find(|a| a.name == name)
+            .unwrap_or_else(|| panic!("no album {name}"))
+            .id
+    }
+
     /// Make a playlist as `user` and answer its id: the newest of theirs.
     pub fn playlist(&mut self, user: &str, name: &str) -> Id<Playlist> {
         self.mutate(user, "create_playlist", &CreatePlaylist { name: name.into() })

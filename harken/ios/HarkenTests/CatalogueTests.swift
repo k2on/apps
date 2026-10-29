@@ -17,7 +17,7 @@ private func take(_ recorded: Int64, tracks: Int64, ms: Int64, performers: Strin
 }
 
 private func detail(_ n: Int, work: String, composer: String = "Handel", track: Int64 = 0) -> TrackDetailsEntry {
-    TrackDetailsEntry(album: "Water Music", bpm: 0, catalogue: "", composer: work.isEmpty ? "" : composer, licence: "", mediaId: Fx.id(n),
+    TrackDetailsEntry(album: "Water Music", albumId: ".catalogue/water-music", bpm: 0, catalogue: "", composer: work.isEmpty ? "" : composer, licence: "", mediaId: Fx.id(n),
                       part: "", performer: "", track: track, work: work, workId: "")
 }
 
@@ -132,7 +132,7 @@ final class CatalogueTests: XCTestCase {
     }
 
     func testAnAlbumIsByWhoPlayedMostOfIt() {
-        let a = AlbumsEntry(art: "", creator: "Handel", label: "", name: "Water Music", performer: "", released: 0, tracks: 3)
+        let a = AlbumsEntry(art: "", creator: "Handel", id: ".catalogue/water-music", label: "", name: "Water Music", performer: "", released: 0, tracks: 3)
         XCTAssertEqual(a.playedBy, "Handel")
         var b = a
         b.performer = "English Baroque Soloists"

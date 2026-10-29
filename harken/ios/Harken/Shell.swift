@@ -127,7 +127,7 @@ struct Destination: View {
 
     var body: some View {
         switch route {
-        case .page(.album(let n)): AlbumPage(model: model, name: n)
+        case .page(.album(let id)): AlbumPage(model: model, id: id)
         case .page(.artist(let n)): ArtistPage(model: model, name: n)
         case .page(.playlist(let id)): PlaylistPage(model: model, id: id)
         case .page(.work(let id)): WorkPage(model: model, id: id)
