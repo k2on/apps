@@ -292,7 +292,12 @@ fn disk(place: &str) -> Result<Box<dyn ark_peer::Disk>, String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        Ok(Box::new(ark_peer::disk::Browser(format!("harken:{place}"))) as Box<dyn ark_peer::Disk>)
+        // In memory for now: the page fills from its server at every load.
+        // `localStorage` cannot hold a library (a few megabytes, written
+        // whole at every append), and the page's IndexedDB is not yet a
+        // disk that leaves the page alone while it fills.
+        let _ = place;
+        Ok(Box::new(ark_peer::Memory::default()) as Box<dyn ark_peer::Disk>)
     }
 }
 

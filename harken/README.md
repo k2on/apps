@@ -329,7 +329,7 @@ first asks whoever served it: when its `/healthz` answers — a harken
 server serving its own page — it opens on that server, as it always did;
 from anywhere else (GitHub Pages, a file) it opens alone. Alone is this
 device's own replica in a fixed place — `local` under
-`$XDG_DATA_HOME/harken`, or `harken:local` in the page's IndexedDB —
+`$XDG_DATA_HOME/harken`, in a browser in the page's memory, until it has a disk that can hold a library —
 and it is not a demo: the peer is its own authority, every change is
 sequenced as it is made and kept, and the status line says `alone`. The
 line above the table has a server address and **connect**: that joins the

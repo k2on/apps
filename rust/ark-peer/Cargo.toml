@@ -34,10 +34,7 @@ tower-http = { version = "0.5", features = ["fs"], optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-# The sync socket; and the page's disk, IndexedDB (`browser.rs`), with the
-# `localStorage` it used to be read once to move it.
-web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "CloseEvent", "BinaryType", "Event", "Storage", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode", "IdbKeyRange", "DomException"] }
+web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "CloseEvent", "BinaryType", "Event", "Storage"] }
 
 [dev-dependencies]
 tempfile = "3"

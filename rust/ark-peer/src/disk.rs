@@ -4,8 +4,8 @@
 //! are in its row, and are on disk once.
 //!
 //! A [`Disk`] is named blobs — a file each in a directory ([`Files`]), a
-//! buffer each ([`Memory`], for tests and the simulator), or a record or a few each
-//! of a page's IndexedDB (`Browser`, in a browser) — and the format is
+//! buffer each ([`Memory`], for tests and the simulator), or a key each of
+//! a page's `localStorage` (`Local`, in a browser, for what is small) — and the format is
 //! written once, over them ([`Disk::load`], [`Disk::record`]):
 //!
 //! - `kv`: the store's rows whole ([`Record::Rows`]), the log's table's
@@ -193,6 +193,29 @@ impl Disk for Files {
     }
 }
 
-/// The page's blobs, in its IndexedDB (`crate::browser`).
+/// The blobs in the page's `localStorage`, under one key's prefix, each as
+/// hex.
 #[cfg(target_arch = "wasm32")]
-pub use crate::browser::{open as open_browser, Browser};
+pub struct Local(pub String);
+
+#[cfg(target_arch = "wasm32")]
+impl Disk for Local {
+    fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>> {
+        let s = ark_auth::web::storage().ok_or_else(|| io::Error::other("no localStorage"))?;
+        Ok(s.get_item(&format!("{}:{name}", self.0))
+            .ok()
+            .flatten()
+            .and_then(|h| ark::hash::unhex(&h)))
+    }
+
+    fn put(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        let s = ark_auth::web::storage().ok_or_else(|| io::Error::other("no localStorage"))?;
+        let key = format!("{}:{name}", self.0);
+        s.set_item(&key, &ark::hash::hex(bytes)).map_err(|e| io::Error::other(format!("{e:?}")))
+    }
+
+    fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        let b = [self.get(name)?.unwrap_or_default(), bytes.to_vec()].concat();
+        self.put(name, &b)
+    }
+}
