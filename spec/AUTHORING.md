@@ -128,14 +128,15 @@ so a function reads what it wrote.
 #[view("playlists.playlist")]
 pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<LibraryEntry>, Refusal> {
     let playlist = owned(ctx, db, input.playlist_id)?;
-    Ok(scan::<Harken, PlaylistItem>()
-        .filter_with(move |db, i| i.playlist_id == playlist.id && db.media.has(i.media_id))
+    Ok(scan_from::<Harken, PlaylistItem, _, _>(playlist.id)
+        .filter_with(|db, i| db.media.has(i.media_id))
         .sort(|i| i.pos)
         .map_with(|db, i| library_entry(&db.media.get(i.media_id).expect("an item's media"), Some(i.pos))))
 }
 ```
 
-A plan is `scan`, then `filter`, `map`, `sort` (`Desc(k)` descending),
+A plan is `scan` (or `scan_from(k)`, the rows whose key begins with `k`,
+read from there), then `filter`, `map`, `sort` (`Desc(k)` descending),
 `take(n)`, `group(by, agg)` and `join`; the `_with` forms read the store.
 Each operator is kept per element, and a change re-runs a closure only
 for the elements whose recorded reads it hits; the view's own reads (the

@@ -579,14 +579,6 @@ impl Store {
         cs.into_iter().rev().map(|c| c.inverse()).map(|c| self.apply(&c).map(|_| c)).collect()
     }
 
-    /// A table's rows by their keys, in key order.
-    pub(crate) fn keyed(&self, table: &str) -> impl Iterator<Item = (&[u8], &[u8])> {
-        self.find(table)
-            .ok()
-            .into_iter()
-            .flat_map(move |t| self.tables[t].rows.iter().map(|(k, r)| (&k[..], &r[..])))
-    }
-
     /// Puts a row, adding it or replacing the one under its key.
     pub fn put(&mut self, table: &str, row: Vec<u8>) -> Result<Change, Refusal> {
         let t = self.find(table)?;

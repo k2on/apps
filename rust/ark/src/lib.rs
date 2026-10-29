@@ -65,7 +65,7 @@ pub mod prelude {
     pub use crate::effect::{Effect, Job};
     pub use crate::format::Encode;
     pub use crate::peer::Ctx;
-    pub use crate::plan::{scan, Desc, Plan};
+    pub use crate::plan::{scan, scan_from, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};
     pub use crate::Refusal;
     pub use ark_macros::{live, mutator, query, scope, view, Describe, Effect, Input, Row, Schema};
