@@ -100,14 +100,16 @@ pub fn view<'a, M: 'a>(
         });
     // Slid in from beyond the edge: as far out as it is wide, at first.
     let open = open.clamp(0.0, 1.0);
+    // Every click over it is its own: a container lets one through to the
+    // page, whose click closes. Inside the slide, so "over it" is where it
+    // is drawn: half in, a click where it will be but is not yet closes it.
+    let panel = opaque(panel);
     let drawn: Element<'a, M> = if open < 1.0 {
         motion::transformed(panel, Vector::new(width * (1.0 - open), 0.0), 1.0, 0.0, 0.0)
     } else {
-        panel.into()
+        panel
     };
-    // Every click over it is its own: a container lets one through to the
-    // page, whose click closes.
-    container(opaque(drawn)).align_right(Length::Fill).height(Length::Fill).into()
+    container(drawn).align_right(Length::Fill).height(Length::Fill).into()
 }
 
 #[cfg(test)]
@@ -118,8 +120,11 @@ mod tests {
     /// one. Falsified by a sheet the panel's own width: it overran a window
     /// of 400.
     /// A click on the sheet, below its rows, stays on it; a click on the
-    /// dimmed page beside it closes it. Falsified by the panel without
-    /// `opaque`: the click fell through to the page and closed it.
+    /// dimmed page beside it closes it — and while it slides in, so does a
+    /// click where it will be but is not yet. Falsified by the panel without
+    /// `opaque` (the click on it fell through to the page and closed it),
+    /// and by `opaque` outside the slide (the click where it would be, half
+    /// in, was taken as one on it).
     #[test]
     fn a_click_on_it_does_not_close_it() {
         #[derive(Clone, Debug, PartialEq)]
@@ -127,18 +132,24 @@ mod tests {
             Close,
             Swallow,
         }
-        let clicked = |at: iced::Point| {
+        let clicked_at = |at: iced::Point, open: f32| {
             let page = iced::widget::stack![
                 crate::dialog::backdrop(M::Close, M::Swallow, 1.0),
-                view("A sheet".into(), None, text("×").into(), text("a row").into(), width(800.0), 1.0),
+                view("A sheet".into(), None, text("×").into(), text("a row").into(), width(800.0), open),
             ];
             let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), (800.0, 600.0), page);
             ui.point_at(at);
             let _ = ui.simulate(iced_test::simulator::click());
             ui.into_messages().collect::<Vec<_>>()
         };
+        let clicked = |at| clicked_at(at, 1.0);
         assert_eq!(clicked(iced::Point::new(700.0, 500.0)), []);
         assert_eq!(clicked(iced::Point::new(100.0, 300.0)), [M::Close]);
+        // Half way in, it spans 608 to 800 of a window 800 wide (384 wide,
+        // 192 of it still beyond the edge): a click at 500, where it will
+        // be but is not yet, is on the page; one at 700 is on it.
+        assert_eq!(clicked_at(iced::Point::new(500.0, 300.0), 0.5), [M::Close]);
+        assert_eq!(clicked_at(iced::Point::new(700.0, 300.0), 0.5), []);
     }
 
     #[test]

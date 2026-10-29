@@ -1868,8 +1868,14 @@ impl App {
     /// Whether anything is on its way at `now`: what the frame clock runs
     /// for.
     fn moving(&self, now: iced::time::Instant) -> bool {
-        self.adding.iter().chain(self.adding_leaving.iter()).any(|a| a.shown.moving(now))
-            || self.command.iter().chain(self.command_leaving.iter()).any(|c| c.shown.moving(now))
+        // Anything closed and still drawn keeps it running until a tick has
+        // dropped it (`settle_motion`): stopped a tick before, it would stay
+        // on the screen at its last frame, and its backdrop take clicks.
+        self.adding_leaving.is_some()
+            || self.command_leaving.is_some()
+            || self.queue_sheet.is_some_and(|s| !s.is_shown())
+            || self.adding.as_ref().is_some_and(|a| a.shown.moving(now))
+            || self.command.as_ref().is_some_and(|c| c.shown.moving(now))
             || self.queue_sheet.is_some_and(|s| s.moving(now))
             || self.queue_drag.as_ref().is_some_and(|d| d.moving(now))
             || self.queue_settle.as_ref().is_some_and(|s| {

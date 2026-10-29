@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(d.offset(3, later), -ROW);
         assert_eq!(d.offset(4, later), 0.0);
         assert!(d.moving(at + SLIDING / 2));
-        assert!(!d.moving(later));
+        assert!(!d.moving(later + crate::motion::LAST_FRAME));
         match d.drop(later) {
             Drop::Moved { from: 1, to: 3, settle } => {
                 // Let go 0.4 of a row above its new place, and on its way.

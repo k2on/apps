@@ -186,3 +186,23 @@ fn the_queue_sheet_slides_out_when_closed() {
     let _ = app.step(Message::OpenQueue);
     assert!(app.queue_sheet.is_some_and(|s| s.is_shown()));
 }
+
+/// Opened and closed again before it was all the way in, the sheet keeps
+/// the frame clock running until a tick has dropped it, however soon it is
+/// gone: a clock that stopped a tick before left it on the screen at its
+/// last frame. Falsified by a clock run only while it moves: a sheet hidden
+/// and already gone had no tick coming to drop it.
+#[test]
+fn a_sheet_closed_on_its_way_in_is_ticked_until_dropped() {
+    let mut app = app();
+    let _ = app.step(Message::OpenQueue);
+    let _ = app.step(Message::CloseQueue);
+    assert!(app.clock().is_some(), "ticking while it is drawn");
+    // Long after it has gone, a tick drops it, and the clock stops.
+    let mut sheet = app.queue_sheet.unwrap();
+    sheet.hide(iced::time::Instant::now() - std::time::Duration::from_secs(5));
+    app.queue_sheet = Some(sheet);
+    assert!(app.clock().is_some(), "still drawn, so still ticking");
+    let _ = app.step(Message::Tick);
+    assert!(app.queue_sheet.is_none());
+}

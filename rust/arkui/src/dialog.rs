@@ -116,14 +116,16 @@ pub fn present<'a, M: 'a>(panel: impl Into<Element<'a, M>>, open: f32) -> Elemen
     // Faded in under a veil of the page's ground, thinning as it opens
     // (`motion`: iced has no opacity for a group of widgets).
     let open = open.clamp(0.0, 1.0);
+    // The dialog takes every click over it: a container lets one through,
+    // and under it is the page, whose click closes. Inside the move, so
+    // "over it" is where it is drawn, not where it will be.
+    let panel = opaque(panel);
     let drawn: Element<'a, M> = if open < 1.0 {
         motion::transformed(panel, Vector::ZERO, FROM + (1.0 - FROM) * open, 1.0 - open, RADIUS)
     } else {
         panel
     };
-    // The dialog takes every click over it: a container lets one through,
-    // and under it is the page, whose click closes.
-    container(opaque(drawn)).center_x(Length::Fill).center_y(Length::Fill).into()
+    container(drawn).center_x(Length::Fill).center_y(Length::Fill).into()
 }
 
 #[cfg(test)]
@@ -169,7 +171,7 @@ mod tests {
         assert_eq!(dimmed(&s, at + DIMMING.opening), 1.0);
         assert!(open(&s, at + DIMMING.opening) < 1.0);
         assert_eq!(open(&s, at + TIMING.opening), 1.0);
-        assert!(!s.moving(at + TIMING.opening));
+        assert!(!s.moving(at + TIMING.opening + crate::motion::LAST_FRAME));
         let closing = at + TIMING.opening;
         s.hide(closing);
         assert!(s.moving(closing + TIMING.closing / 2));

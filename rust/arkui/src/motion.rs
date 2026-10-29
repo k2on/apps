@@ -142,9 +142,13 @@ impl Shown {
         }
     }
 
-    /// Whether it is still moving at `now`: a frame to draw yet.
+    /// Whether it is still moving at `now`: a frame to draw yet. True for
+    /// [`LAST_FRAME`] past its end too, so the frame drawn at the end, not
+    /// the one just before it, is the last: an app runs its frame clock by
+    /// this, and a clock stopped a tick early leaves the move a frame short
+    /// of done on the screen until something else happens.
     pub fn moving(&self, now: Instant) -> bool {
-        let t = self.through(self.timing, now);
+        let t = self.through(self.timing, now.checked_sub(LAST_FRAME).unwrap_or(now));
         if self.shown {
             t < 1.0
         } else {
@@ -157,6 +161,10 @@ impl Shown {
         !self.shown && self.through(self.timing, now) <= 0.0
     }
 }
+
+/// How long past its end a move still counts as moving: a few frames, so
+/// that one is drawn at its end ([`Shown::moving`]).
+pub const LAST_FRAME: Duration = Duration::from_millis(50);
 
 /// A move from one place to another over a time, along a curve: where a
 /// row is on its way out of the way of one being dragged.
@@ -214,9 +222,9 @@ impl Slide {
         }
     }
 
-    /// Whether it is still on its way at `now`.
+    /// Whether it is still on its way at `now`, and for [`LAST_FRAME`] after.
     pub fn moving(&self, now: Instant) -> bool {
-        now.saturating_duration_since(self.since) < self.taking && self.from != self.to
+        self.from != self.to && now.saturating_duration_since(self.since) < self.taking + LAST_FRAME
     }
 }
 
@@ -315,19 +323,24 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Transformed<'_, M> {
             self.content
                 .as_widget()
                 .draw(tree, renderer, theme, style, layout, cursor * inverse, &(*viewport * inverse));
+            // In a layer of its own: within one, iced draws text after
+            // every quad, so a veil in the content's would cover its
+            // ground and leave its words showing.
             if self.veil > 0.0 {
                 let ground: Color = crate::theme::of(theme).background.base.color;
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds,
-                        border: Border {
-                            radius: self.radius.into(),
-                            ..Border::default()
+                renderer.with_layer(bounds, |renderer| {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds,
+                            border: Border {
+                                radius: self.radius.into(),
+                                ..Border::default()
+                            },
+                            ..renderer::Quad::default()
                         },
-                        ..renderer::Quad::default()
-                    },
-                    ground.scale_alpha(self.veil.min(1.0)),
-                );
+                        ground.scale_alpha(self.veil.min(1.0)),
+                    );
+                });
             }
         });
     }
@@ -398,7 +411,8 @@ mod tests {
         assert_eq!(s.at(at), 0.0);
         assert!(s.moving(at + T.opening / 2));
         assert_eq!(s.at(at + T.opening), 1.0);
-        assert!(!s.moving(at + T.opening));
+        assert!(s.moving(at + T.opening), "a frame drawn at its end");
+        assert!(!s.moving(at + T.opening + LAST_FRAME));
         s.hide(at + T.opening / 2);
         assert!(!s.is_shown());
         assert!(!s.gone(at + T.opening / 2 + T.closing / 4));
@@ -417,6 +431,6 @@ mod tests {
         s.toward(-10.0, half, d, EASE_IN_OUT);
         assert!((s.at(half) - there).abs() < 1e-4);
         assert_eq!(s.at(half + d), -10.0);
-        assert!(!s.moving(half + d));
+        assert!(!s.moving(half + d + LAST_FRAME));
     }
 }
