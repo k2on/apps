@@ -302,6 +302,10 @@ impl Reconciler {
             track: track.id,
         };
         let want = a.position(v.now);
+        // Where a file starts: from its start while the clock is inside the
+        // grain of it — a press a few milliseconds ago — since a player sought
+        // within a file it has only begun to fetch fetches it again.
+        let start = if want <= SYNC_MS { 0 } else { want };
         let playing = a.clock.playing();
         let mut heard = sound.heard();
         // Whether it was put where the session is on this look.
@@ -309,7 +313,7 @@ impl Reconciler {
         if heard.queue.len() != a.queue.len() || heard.queue.iter().zip(&a.queue).any(|(h, t)| *h != t.id) {
             // Another queue: the session's, loaded as the player's own, so
             // that going offline mid-track leaves it playing what it was.
-            sound.load(&a.queue, at, want, playing, &a.from);
+            sound.load(&a.queue, at, start, playing, &a.from);
             m.expect = Expect::At { at: here.at };
             m.handoff = Handoff::None;
             heard = sound.heard();
@@ -329,7 +333,7 @@ impl Reconciler {
                 }
                 // Somebody moved the session: a skip, a jump, a track pressed.
                 _ => {
-                    sound.jump(at, want);
+                    sound.jump(at, start);
                     m.expect = Expect::At { at: here.at };
                     if matches!(m.handoff, Handoff::Advanced { .. }) {
                         m.handoff = Handoff::None;
