@@ -1,15 +1,15 @@
-//! money, in iced — on the desktop and in a browser: a household's budget.
+//! money, in iced â on the desktop and in a browser: a household's budget.
 //!
 //! Two builds of one window. Without features it is the household's
 //! client: it signs in to a money server and dials it (`live.rs`), and
 //! "Sync" asks the server's importer to ask the banks now. With `demo` it
 //! is the demo: no server and no sign-in, a seeded household (`money_domain::seed`)
 //! on a peer that is its own authority, and the card's bank standing in
-//! for Plaid behind "Sync" — what GitHub Pages publishes, and a separate
+//! for Plaid behind "Sync" â what GitHub Pages publishes, and a separate
 //! build on purpose, as harken's is: a flag could be set by accident, a
 //! feature has to be asked for at build time.
 //!
-//! The window is laid out the way YNAB taught people to read a budget —
+//! The window is laid out the way YNAB taught people to read a budget â
 //! the accounts down the side, the month's categories with what each was
 //! assigned, spent and has, what is ready to assign across the top, and the
 //! selected category's story on the right.
@@ -17,7 +17,7 @@
 //! None of the budget's arithmetic is here. Every figure on screen is a
 //! view of the domain (`money/domain`), kept up to date by the rows a
 //! change touched; every button is a mutation by name, and a refusal is
-//! the domain's own sentence, said at the bottom of the sidebar.
+//! the domain's own sentence, said in the page's corner.
 //!
 //! Most of what a window is lives in `arkui`: the palette and the rule that
 //! nothing writes a colour down, the table's cells and rows, the glyphs,
@@ -312,8 +312,8 @@ impl App {
         }
     }
 
-    /// Somebody signed in: the replica moves on as them — whatever was done
-    /// signed out becomes theirs and is pushed — and the link dials.
+    /// Somebody signed in: the replica moves on as them â whatever was done
+    /// signed out becomes theirs and is pushed â and the link dials.
     pub fn signed_in(&mut self, login: ark_auth::Login) {
         let Some(s) = &mut self.server else { return };
         if let Some(logins) = &s.logins {
@@ -673,9 +673,9 @@ impl App {
 
     /// "Sync". On a server it is an ask (`banks.sync`) the server's
     /// importer answers by asking the banks; what they have arrives as any
-    /// change does, and the bank's line in the sidebar says when. In the
-    /// demo the demo's bank stands in for Plaid, and the import is authored
-    /// here, this peer holding the importer's role.
+    /// change does, and the note in the page's corner says what came of
+    /// it. In the demo the demo's bank stands in for Plaid, and the import
+    /// is authored here, this peer holding the importer's role.
     fn sync(&mut self) {
         if self.server.is_none() {
             return self.demo_sync();
@@ -813,7 +813,7 @@ impl App {
 
     /// The keys, and on a server what wakes the window: the socket ringing
     /// its bell, and the peer's next deadline (a redial) as one timer,
-    /// keyed by it — a window at rest runs nothing.
+    /// keyed by it â a window at rest runs nothing.
     pub fn subscription(&self) -> Subscription<Message> {
         let keys = iced::keyboard::listen().filter_map(|e| match e {
             iced::keyboard::Event::KeyPressed {
