@@ -240,26 +240,21 @@ impl App {
 
     /// Music, then the lists somebody made — each read back by the domain.
     fn view_sidebar(&self) -> Element<'_, Message> {
+        let (cursor, focused) = (self.at(Pane::Sidebar), self.has_keys(Pane::Sidebar));
         let items: Vec<arkui::sidebar::Item<Message>> = self
             .peer
             .choices
             .iter()
-            .map(|choice| arkui::sidebar::Item {
+            .enumerate()
+            .map(|(i, choice)| arkui::sidebar::Item {
                 glyph: choice.source.glyph(),
                 label: choice.label.clone(),
                 heading: choice.source.heading(),
-                count: choice.count,
+                trailing: choice.count.map(|n| arkui::sidebar::count(n, arkui::sidebar::lit(i, cursor, focused))),
                 press: Message::Select(choice.source.clone()),
             })
             .collect();
-        arkui::sidebar::view(
-            &items,
-            self.at(Pane::Sidebar),
-            self.has_keys(Pane::Sidebar),
-            SIDEBAR_WIDTH,
-            PAGE_PADDING,
-            SIDEBAR,
-        )
+        arkui::sidebar::view(items, cursor, focused, SIDEBAR_WIDTH, PAGE_PADDING, SIDEBAR)
     }
 
     /// The cover if one has arrived, the derived square until then.

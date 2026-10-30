@@ -15,6 +15,8 @@ use crate::peer::Ledger;
 use crate::{App, Choice, Choosing, Field, Message, Modal, Page, TxnForm};
 
 const SIDEBAR: f32 = 250.0;
+/// The sidebar's scrollable.
+const SIDEBAR_SCROLL: &str = "sidebar";
 
 /// A section of the sidebar's accounts: its heading, and which belong.
 type Section = (&'static str, fn(&AccountLine) -> bool);
@@ -72,26 +74,15 @@ fn glyph_button<'a>(shape: &'static [u8], msg: Message) -> Element<'a, Message> 
     button(icon::plain(shape, false)).on_press(msg).padding(4).style(style::quiet).into()
 }
 
-/// A line of the sidebar: a glyph, a label, what hangs off the right.
-fn entry<'a>(glyph: Option<&'static [u8]>, label: String, trailing: Option<Element<'a, Message>>, lit: bool, msg: Message) -> Element<'a, Message> {
-    let mut line = row![].spacing(8).align_y(Alignment::Center);
-    if let Some(g) = glyph {
-        line = line.push(icon::line(g, lit));
+/// What an account is, drawn beside it in the sidebar.
+fn glyph(a: &AccountLine) -> &'static [u8] {
+    match a.kind.as_str() {
+        "cash" => glyphs::WALLET,
+        "credit" => glyphs::CARD,
+        "loan" => glyphs::DEBT,
+        "investment" => glyphs::GROWTH,
+        _ => glyphs::BANK,
     }
-    line = line.push(text(label).size(13).width(Length::Fill).style(move |theme| text::Style {
-        color: Some(style::entry_text(theme, lit)),
-    }));
-    if let Some(t) = trailing {
-        line = line.push(t);
-    }
-    mouse_area(
-        container(line)
-            .width(Length::Fill)
-            .padding([5, 10])
-            .style(move |theme| style::entry(theme, lit, true)),
-    )
-    .on_press(msg)
-    .into()
 }
 
 /// An amount as the sidebar shows one: red below nothing, and in the lit
@@ -109,21 +100,6 @@ fn balance<'a>(cents: i64, lit: bool) -> Element<'a, Message> {
         .into()
 }
 
-fn heading<'a>(label: &str, total: Option<i64>) -> Element<'a, Message> {
-    let mut r = row![text(label.to_uppercase()).size(10).style(style::faint(0.5)), fill()].align_y(Alignment::Center);
-    if let Some(t) = total {
-        r = r.push(text(money(t)).size(10).style(style::faint(0.5)));
-    }
-    container(r)
-        .padding(Padding {
-            top: 14.0,
-            right: 10.0,
-            bottom: 4.0,
-            left: 10.0,
-        })
-        .into()
-}
-
 impl App {
     pub fn view(&self) -> Element<'_, Message> {
         let page: Element<'_, Message> = match self.page {
@@ -131,11 +107,24 @@ impl App {
             Page::Reflect => self.view_reflect(),
             Page::Ledger(l) => self.view_ledger(l),
         };
-        let base = container(row![self.view_sidebar(), page].height(Length::Fill))
+        // The sidebar is a surface, a step off the page's ground, with a
+        // hairline where it meets the page, as harken's is.
+        let base = container(row![self.view_sidebar(), rule::vertical(1).style(style::edge), page].height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill)
             .style(style::page);
         let mut layers = stack![base];
+        // What the last thing done came to, in the page's corner.
+        if !self.note.is_empty() {
+            layers = layers.push(
+                container(dim(self.note.clone(), 11))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding([8, 14])
+                    .align_x(Alignment::End)
+                    .align_y(Alignment::End),
+            );
+        }
         if let Some(m) = &self.modal {
             layers = layers
                 .push(layer::dimmed(Message::CloseModal, Message::Swallow))
@@ -147,98 +136,53 @@ impl App {
     // * The sidebar
 
     fn view_sidebar(&self) -> Element<'_, Message> {
-        let accounts = &self.peer.accounts.rows;
-        let inbox = self.peer.inbox.rows.len();
-        let mut side = column![
-            container(column![bold("money", 20), dim("The household's budget, shared by everyone in it", 11)].spacing(2)).padding([4, 10]),
-            Space::new().height(10),
-            entry(
-                Some(glyphs::HOME),
-                "Budget".into(),
-                None,
-                self.page == Page::Budget,
-                Message::Go(Page::Budget)
-            ),
-            entry(
-                Some(glyphs::LIBRARY),
-                "Reflect".into(),
-                None,
-                self.page == Page::Reflect,
-                Message::Go(Page::Reflect)
-            ),
-            entry(
-                Some(glyphs::PLAYLIST),
-                "All Accounts".into(),
-                (inbox > 0).then(|| self.badge(inbox, self.page == Page::Ledger(Ledger::All))),
-                self.page == Page::Ledger(Ledger::All) || self.page == Page::Ledger(Ledger::Inbox),
-                Message::Go(Page::Ledger(Ledger::All)),
-            ),
-        ]
-        .spacing(1);
+        let places = [
+            (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
+            (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
+            (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
+        ];
         let sections: [Section; 3] = [
-            ("Budget", |a| a.on_budget && !a.closed),
+            ("On Budget", |a| a.on_budget && !a.closed),
             ("Tracking", |a| !a.on_budget && !a.closed),
             ("Closed", |a| a.closed),
         ];
-        for (name, keep) in sections {
-            let these: Vec<&AccountLine> = accounts.iter().filter(|a| keep(a)).collect();
-            if these.is_empty() {
-                continue;
-            }
-            let total = (name != "Closed").then(|| these.iter().map(|a| a.balance).sum());
-            side = side.push(heading(name, total));
-            for a in these {
-                let lit = self.page == Page::Ledger(Ledger::Account(a.id));
+        let accounts = sections.into_iter().flat_map(|(name, keep)| {
+            self.peer.accounts.rows.iter().filter(move |a| keep(a)).map(move |a| {
                 let label = match a.mask.is_empty() {
                     true => a.name.clone(),
                     false => format!("{} \u{2022}\u{2022}{}", a.name, a.mask),
                 };
-                side = side.push(entry(
-                    None,
-                    label,
-                    Some(balance(a.balance, lit)),
-                    lit,
-                    Message::Go(Page::Ledger(Ledger::Account(a.id))),
-                ));
-            }
-        }
-        side = side.push(container(link("+ Add Account", Message::AddAccount)).padding([10, 10]));
-
-        let bank = self.peer.banks.rows.first();
-        let synced = bank.map_or("not linked yet".to_string(), |b| {
-            format!(
-                "{} \u{2014} {} account{} through Plaid",
-                b.institution,
-                b.accounts,
-                if b.accounts == 1 { "" } else { "s" }
-            )
+                (glyph(a), label, Some(name), Page::Ledger(Ledger::Account(a.id)))
+            })
         });
-        let foot = column![
-            row![
-                column![text("Bank sync").size(12), dim(synced, 11)].spacing(2).width(Length::Fill),
-                quiet("Sync", Message::Sync)
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
-            dim(self.note.clone(), 11),
-        ]
-        .spacing(8);
-
-        container(column![
-            scrollable(side.padding(Padding {
-                top: PAD,
-                right: 10.0,
-                bottom: 10.0,
-                left: 10.0,
-            }))
-            .height(Length::Fill)
-            .style(style::bars),
-            container(foot).padding([12, 20]),
-        ])
-        .width(Length::Fixed(SIDEBAR))
-        .height(Length::Fill)
-        .style(style::surface)
-        .into()
+        let places: Vec<_> = places.into_iter().chain(accounts).collect();
+        // The inbox is All Accounts, filtered: its row stays the one lit.
+        let here = match self.page {
+            Page::Ledger(Ledger::Inbox) => Page::Ledger(Ledger::All),
+            p => p,
+        };
+        let cursor = places.iter().position(|p| p.3 == here).unwrap_or(0);
+        let inbox = self.peer.inbox.rows.len();
+        let items = places
+            .into_iter()
+            .enumerate()
+            .map(|(i, (glyph, label, heading, page))| {
+                let lit = arkui::sidebar::lit(i, cursor, true);
+                let trailing = match page {
+                    Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
+                    Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
+                    _ => None,
+                };
+                arkui::sidebar::Item {
+                    glyph,
+                    label,
+                    heading,
+                    trailing,
+                    press: Message::Go(page),
+                }
+            })
+            .collect();
+        arkui::sidebar::view(items, cursor, true, SIDEBAR, PAD, SIDEBAR_SCROLL)
     }
 
     /// A count in a bubble: what needs looking at.
@@ -733,6 +677,13 @@ impl App {
         if let Some(a) = account {
             tools = tools.push(quiet("Reconcile", Message::Reconcile(a.id)));
             if !a.bank.is_empty() {
+                tools = tools.push(quiet("Sync", Message::Sync));
+            }
+        } else {
+            // Every account's register is where accounts are added, and every
+            // bank asked for what it has.
+            tools = tools.push(quiet("Add Account", Message::AddAccount));
+            if !self.peer.banks.rows.is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
         }
