@@ -1159,6 +1159,26 @@
               '';
               installPhase = "touch $out";
             };
+            # The same for money's iOS app (money/ios/tools/typecheck.sh): its
+            # budget arithmetic, first run, session and model with the generated
+            # types, UniFFI's Swift for money's library and ArkUICore.
+            money-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
+              name = "money-ios-typecheck";
+              src = only [ "money/ios" "rust/ark-ffi/swift" "swift/ArkUI" ];
+              nativeBuildInputs = [ pkgs.swift ];
+              buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
+              buildPhase = ''
+                mkdir -p bin bindings
+                printf '#!/bin/sh\nexec swiftc -target ${pkgs.stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu "$@"\n' > bin/swiftc-here
+                chmod +x bin/swiftc-here
+                cp ${self.checks.${system}.ffi}/money/swift/* bindings/
+                chmod u+w bindings/*
+                sed -i 's/nonisolated(unsafe) //' bindings/*.swift
+                SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
+                  bash money/ios/tools/typecheck.sh bindings
+              '';
+              installPhase = "touch $out";
+            };
             # The NixOS module, evaluated under the configurations that
             # matter and held to its assertions, its warning and its unit.
             harken-module = pkgs.callPackage ./harken/server/nix/module-test.nix {

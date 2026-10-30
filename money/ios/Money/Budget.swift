@@ -104,7 +104,7 @@ enum Moves {
 
     /// What the move sheet offers first: an overspent category's shortfall,
     /// or all a category has.
-    static func suggested(_ line: BudgetLine?) -> Int64 { line.map { $0.available.magnitude }.map(Int64.init) ?? 0 }
+    static func suggested(_ line: BudgetLine?) -> Int64 { line.map { Int64($0.available.magnitude) } ?? 0 }
 
     /// What assigning `line` to its target takes this month.
     static func toTarget(_ l: BudgetLine) -> Int64 { max(l.target - l.assigned, 0) }

@@ -187,11 +187,13 @@ public struct AmountEntry: View {
                 .frame(width: 1, height: 1)
                 .accessibilityHidden(true)
                 .onChange(of: typed) { _, now in
-                    let digits = now.filter { $0.isASCII && $0.isNumber }
-                    var c: Int64 = 0
-                    for d in digits { c = Cents.typing(c, digit: Int(String(d)) ?? 0) }
+                    let c = AmountEntry.cents(now)
                     if c != cents { cents = c }
                 }
+        }
+        // Set from outside (a suggestion tapped): the keypad goes on from there.
+        .onChange(of: cents) { _, now in
+            if AmountEntry.cents(typed) != now { typed = now == 0 ? "" : String(now) }
         }
         .onAppear {
             typed = cents == 0 ? "" : String(cents)
@@ -209,6 +211,13 @@ public struct AmountEntry: View {
             }
             typed = cents == 0 ? "" : String(cents)
         }
+    }
+
+    /// The keypad's digits read as cents.
+    static func cents(_ typed: String) -> Int64 {
+        var c: Int64 = 0
+        for d in typed where d.isASCII && d.isNumber { c = Cents.typing(c, digit: Int(String(d)) ?? 0) }
+        return c
     }
 }
 

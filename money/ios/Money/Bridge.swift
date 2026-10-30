@@ -338,8 +338,8 @@ final class Bridge {
     }
 
     /// Ask for the bank's news: the demo's bank runs its next import here;
-    /// a server's importer is asked to sync now (`banks.sync`, by name, as a
-    /// household member may), and the link dialled in case it was resting.
+    /// a server's importer is asked to sync now (`banks.sync`, which any
+    /// household member may ask), and the link dialled in case it was resting.
     /// `done` is told what to say.
     func syncBank(done: @escaping (String) -> Void) {
         queue.async {
@@ -352,9 +352,11 @@ final class Bridge {
                 }
             } else {
                 m.peer.dialNow()
-                switch moneySend(peer: m.peer, name: "banks.sync", input: "null") {
-                case .intent: said = "Asked the bank for anything new"
-                case let .refused(w): said = "Couldn't ask the bank: \(w)"
+                do {
+                    try m.sync()
+                    said = "Asked the bank for anything new"
+                } catch {
+                    said = "Couldn't ask the bank: \(why(error))"
                 }
             }
             self.drain()

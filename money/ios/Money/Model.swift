@@ -234,14 +234,8 @@ final class Model: ObservableObject {
 
     func delete(_ ids: [Id]) { write("delete it", { try $0.deleteTransactions(Txns(ids: ids)) }) }
     func approve(_ ids: [Id]) { write("approve it", { try $0.approve(Txns(ids: ids)) }) }
+    /// Given a category, which is looking at them: they are approved with it.
     func categorize(_ ids: [Id], _ category: Id?) { write("categorize it", { try $0.categorize(Categorize(ids: ids, categoryId: category)) }) }
-    /// Categorized and approved at once, as the inbox's swipe does.
-    func categorizeAndApprove(_ ids: [Id], _ category: Id?) {
-        write("categorize it", { m in
-            try m.categorize(Categorize(ids: ids, categoryId: category))
-            try m.approve(Txns(ids: ids))
-        })
-    }
     func setCleared(_ id: Id, _ cleared: Bool) { write("mark it", { try $0.setCleared(SetCleared(id: id, cleared: cleared)) }) }
 
     // MARK: accounts

@@ -1,0 +1,191 @@
+# money for iOS: built, tested and archived on every push that touches what
+# the app is built from, and on demand; sent to TestFlight only from main,
+# and only once the repository says the App Store Connect app record for
+# us.koon.money exists (variable MONEY_IOS_UPLOAD = true). harken's
+# workflow (ios.yaml), for money; its own, so neither waits on the other.
+#
+# The Rust kernel with money's domain linked in is built here with rustup
+# and cargo for a phone and the simulator, bound into MoneyFFI.xcframework
+# with the Swift UniFFI writes for it (the flake's
+# `.#money-ios-xcframework`, built natively because a nix build user cannot
+# use the system xcrun the iOS SDK is found through); the Xcode project is
+# generated from money/ios/project.yml by XcodeGen; MoneyTests run on a
+# simulator against the demo's household; and the archive is made unsigned
+# (ios.yaml says why) and, from main, signed and uploaded by xcodebuild's
+# export with the App Store Connect API key (cloud signing).
+#
+# Repository secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, APPLE_TEAM_ID (ios.yaml's).
+# Repository variables:
+#   MONEY_IOS_UPLOAD       `true` to upload from main; anything else builds only
+#   MONEY_IOS_BUNDLE_ID    the app's bundle ID; us.koon.money when unset
+name: money-ios
+
+on:
+  push:
+    paths:
+      - "money/ios/**"
+      - "money/ffi/**"
+      - "money/domain/**"
+      - "rust/**"
+      - "swift/ArkUI/**"
+      - "flake.lock"
+      - ".github/workflows/money-ios.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: money-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      BUNDLE_ID: ${{ vars.MONEY_IOS_BUNDLE_ID || 'us.koon.money' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The newest Xcode 26 on the image: Liquid Glass needs the iOS 26 SDK.
+      - name: Select Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          if [ -z "$xcode" ]; then
+            echo "::error::no Xcode 26 on this runner image"; exit 1
+          fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: money-ios
+
+      # money's library for each iOS target and for this Mac, which UniFFI
+      # reads the Swift from; then the two iOS builds bound as one
+      # xcframework with UniFFI's headers, and the Swift beside it with the
+      # bridge's typed half.
+      - name: Build the kernel for iOS
+        working-directory: rust
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        run: |
+          for t in aarch64-apple-ios aarch64-apple-ios-sim; do
+            cargo build --locked --release -p money-ffi --lib --target "$t"
+          done
+          cargo build --locked --release -p money-ffi --lib
+          cargo run --locked --release -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+            generate --library target/release/libmoney_ffi.dylib \
+            --language swift --no-format --out-dir "$RUNNER_TEMP/bindings"
+          mkdir -p "$RUNNER_TEMP/headers"
+          cp "$RUNNER_TEMP"/bindings/*.h "$RUNNER_TEMP/headers/"
+          cat "$RUNNER_TEMP"/bindings/*.modulemap > "$RUNNER_TEMP/headers/module.modulemap"
+          out=../money/ffi/ios
+          rm -rf "$out" && mkdir -p "$out/swift"
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libmoney_ffi.a -headers "$RUNNER_TEMP/headers" \
+            -library target/aarch64-apple-ios-sim/release/libmoney_ffi.a -headers "$RUNNER_TEMP/headers" \
+            -output "$out/MoneyFFI.xcframework"
+          cp "$RUNNER_TEMP"/bindings/*.swift ark-ffi/swift/Typed.swift "$out/swift/"
+
+      - name: Generate the Xcode project
+        working-directory: money/ios
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate
+
+      - name: Archive
+        working-directory: money/ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          build=$(git log -1 --format=%ct)
+          xcodebuild archive \
+            -project Money.xcodeproj \
+            -scheme Money \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Money.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CURRENT_PROJECT_VERSION="$build"
+
+      # The tests on a simulator: the newest iPhone the image has for the
+      # newest iOS 26 runtime.
+      - name: Test
+        working-directory: money/ios
+        run: |
+          id=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)["devices"]
+          rts = sorted((k for k in d if "iOS-26" in k), key=lambda k: [int(x) for x in k.split("iOS-")[1].split("-")])
+          phones = [x for k in reversed(rts) for x in d[k] if x["name"].startswith("iPhone")]
+          print(phones[0]["udid"] if phones else "")')
+          if [ -z "$id" ]; then echo "::error::no iOS 26 iPhone simulator on this image"; exit 1; fi
+          xcodebuild test \
+            -project Money.xcodeproj \
+            -scheme Money \
+            -destination "id=$id" \
+            -resultBundlePath "$RUNNER_TEMP/MoneyTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Keep the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoneyTests.xcresult
+          path: ${{ runner.temp }}/MoneyTests.xcresult
+          if-no-files-found: ignore
+
+      - name: Write the API key
+        if: github.ref == 'refs/heads/main' && vars.MONEY_IOS_UPLOAD == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
+
+      - name: Upload to TestFlight
+        if: github.ref == 'refs/heads/main' && vars.MONEY_IOS_UPLOAD == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Money.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"

@@ -1,0 +1,95 @@
+# XcodeGen project for money's iOS app. `xcodegen generate` here writes
+# Money.xcodeproj; nothing under it is committed.
+#
+# One app over money's library for iOS — `nix build
+# .#money-ios-xcframework -o …` on a Mac, copied to ../ffi/ios:
+# `MoneyFFI.xcframework` (the Rust kernel with money's domain linked in, a
+# static library for a phone and the simulator) and `swift/`, the Swift
+# UniFFI writes for it with the bridge's typed half — and the app's own
+# sources, the generated types in `Money/Gen/` among them; and its tests,
+# the model's rules and the session over the demo's household.
+#
+# Swift 5 language mode, not 6, for harken's reasons (harken/ios/project.yml):
+# the bridge's typed half declares `Id.none` a static of a type that is not
+# `Sendable`, and the kernel calls back on its own threads (`Listener`),
+# which the app meets with a queue rather than actors.
+name: Money
+options:
+  bundleIdPrefix: us.koon
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+# ArkUI for SwiftUI, any Ark app's (swift/ArkUI): the spacing, the springs,
+# the figures, the first run's page, the server probe, cents.
+packages:
+  ArkUI:
+    path: ../../swift/ArkUI
+targets:
+  Money:
+    type: application
+    platform: iOS
+    sources:
+      - path: Money
+      - path: ../ffi/ios/swift
+    dependencies:
+      - package: ArkUI
+        product: ArkUI
+      - framework: ../ffi/ios/MoneyFFI.xcframework
+        embed: false
+      # What the Rust standard library and its random numbers reach for on iOS.
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+    info:
+      path: Money/Info.plist
+      properties:
+        CFBundleDisplayName: Money
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Where the server's sign-in sends its code back to: money://auth?code=…
+        CFBundleURLTypes:
+          - CFBundleURLName: us.koon.money.auth
+            CFBundleURLSchemes: [money]
+        # Only the system's TLS and ring's, which are exempt: no export question on upload.
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Money syncs with your own budget server, which may be on this network.
+        # A server at home often speaks plain http:// and ws://; the person typed its address.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: us.koon.money
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: false
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  MoneyTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: MoneyTests
+    dependencies:
+      - target: Money
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: us.koon.money.tests
+        GENERATE_INFOPLIST_FILE: true
+schemes:
+  Money:
+    build:
+      targets:
+        Money: all
+        MoneyTests: [test]
+    test:
+      targets: [MoneyTests]
+    archive:
+      config: Release
