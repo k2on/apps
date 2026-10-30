@@ -198,9 +198,11 @@ impl Lang {
                 Type::Unit => (String::new(), "\"null\"".to_string()),
                 t => ((self.param)(&self.ty(t, &bare)), self.wr(t, "input", 0)),
             };
-            let (m, name) = (f.method.as_str(), f.name.as_str());
+            // A method named as a keyword (`banks.import`) is quoted as a
+            // field would be.
+            let (m, name) = (self.ident(&f.method), f.name.as_str());
             let h = Hole {
-                m,
+                m: &m,
                 p: &p,
                 name,
                 arg: &arg,
