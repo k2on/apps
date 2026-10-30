@@ -196,19 +196,19 @@ data class Category(val id: Id, val groupId: Id, val name: String, val pos: Long
     }
 }
 
-/** The sum `Cleared` (UniFFI's): its JSON, for the functions called by name. */
+/** The sum `Cleared` (UniFFI's enum): its JSON, for the functions called by name. */
 fun Cleared.json(): String =
-    when (val v = this) {
-        is Cleared.Uncleared -> "\"Uncleared\""
-        is Cleared.Cleared -> "\"Cleared\""
-        is Cleared.Reconciled -> "\"Reconciled\""
+    when (this) {
+        Cleared.UNCLEARED -> "\"Uncleared\""
+        Cleared.CLEARED -> "\"Cleared\""
+        Cleared.RECONCILED -> "\"Reconciled\""
     }
 
-fun Cleared.Companion.of(j: Any?): Cleared = J.sum(j) { t, o ->
+fun Cleared.Companion.of(j: Any?): Cleared = J.sum(j) { t, _ ->
     when (t) {
-        "Uncleared" -> Cleared.Uncleared
-        "Cleared" -> Cleared.Cleared
-        "Reconciled" -> Cleared.Reconciled
+        "Uncleared" -> Cleared.UNCLEARED
+        "Cleared" -> Cleared.CLEARED
+        "Reconciled" -> Cleared.RECONCILED
         else -> throw IllegalArgumentException("Cleared: no variant $t")
     }
 }

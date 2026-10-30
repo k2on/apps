@@ -75,6 +75,9 @@ android {
 
     kotlinOptions {
         jvmTarget = "21"
+        // The top app bars, pull to refresh, sheets and segmented buttons are still marked
+        // experimental in Material 3 1.3; every page here is laid out with them.
+        freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")
     }
 
     buildFeatures {
