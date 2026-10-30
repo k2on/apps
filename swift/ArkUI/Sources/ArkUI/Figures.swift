@@ -141,8 +141,9 @@ public struct HeroFigure<Footer: View>: View {
 
 @available(iOS 26.0, *)
 extension HeroFigure where Footer == EmptyView {
-    public init(_ caption: String, cents: Int64, tint: Tint, note: String = "", action: (() -> Void)? = nil) {
-        self.init(caption, cents: cents, tint: tint, note: note, action: action) { EmptyView() }
+    /// The figure alone, nothing under it and nothing to tap.
+    public init(_ caption: String, cents: Int64, tint: Tint, note: String = "") {
+        self.init(caption, cents: cents, tint: tint, note: note, action: nil) { EmptyView() }
     }
 }
 

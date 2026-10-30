@@ -18,8 +18,8 @@ iced/      the client, desktop and browser, on arkui and ark-peer: signed
            peer that is its own authority
 ffi/       the library the phones load (ffi/README.md): ark-ffi with the
            domain linked in, typed views, the demo, a server in the process
-ios/, android/
-           the phone apps, on ffi/
+ios/       the iPhone app (ios/README.md): SwiftUI on ffi/, with the demo
+android/   so far the typed Kotlin generated for ffi/
 ```
 
 The phones sign in the way the browser does (below).
