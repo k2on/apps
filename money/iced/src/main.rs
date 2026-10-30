@@ -1,6 +1,6 @@
 //! money, in iced — on the desktop and in a browser: a household's budget.
 //!
-//! The demo: no server and no sign-in, a seeded household (`seed.rs`) on a
+//! The demo: no server and no sign-in, a seeded household (`money_domain::seed`) on a
 //! peer that is its own authority, and the card's bank standing in for
 //! Plaid behind "Sync". The window is laid out the way YNAB taught people
 //! to read a budget — the accounts down the side, the month's categories
@@ -22,7 +22,6 @@ mod client;
 mod look;
 mod palette;
 mod peer;
-mod seed;
 mod view;
 
 #[cfg(test)]
@@ -31,6 +30,7 @@ mod tests;
 use iced::keyboard::{key::Named, Key};
 use iced::{Subscription, Task};
 use money_domain::dates::{add_months, day_of_ms, month_of};
+use money_domain::seed;
 use money_domain::*;
 
 use peer::{Ledger, Peer};

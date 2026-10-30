@@ -14,6 +14,17 @@ ark = { path = "../../rust/ark" }
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The demo's household (`seed`), which the demo window and the phones'
+# demo both open on.
+ark-peer = { path = "../../rust/ark-peer", default-features = false, optional = true }
+# Typed views for the phones (docs/plan-v5.md, Landed: typed views): the
+# rows of the views the phones read typed, as UniFFI records.
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+ark-ffi = { path = "../../rust/ark-ffi", optional = true }
+
+[features]
+seed = ["dep:ark-peer"]
+ffi = ["dep:uniffi", "dep:ark-ffi"]
 
 [dev-dependencies]
 ark-peer = { path = "../../rust/ark-peer", default-features = false }

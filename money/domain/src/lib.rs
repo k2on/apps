@@ -4,7 +4,9 @@
 //! ([`categories`]), the budget itself ([`budget`]), the transactions
 //! ([`transactions`]) and the banks, through Plaid ([`plaid`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
-//! [`feed`]. [`domain`] registers every function by its name.
+//! [`feed`]. [`domain`] registers every function by its name. Behind
+//! features: the demo's household (`seed`), and the rows the
+//! phones read typed as UniFFI records (`ffi`, for `money/ffi`).
 //!
 //! **One budget, the household's.** Everybody a server lets in — the
 //! people its OpenID provider knows as the household — reads and writes the
@@ -24,8 +26,13 @@ pub mod categories;
 pub mod dates;
 pub mod plaid;
 pub mod schema;
+#[cfg(feature = "seed")]
+pub mod seed;
 pub mod transactions;
 pub mod types;
+
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
 
 pub use ark::row::Id;
 pub use schema::*;
