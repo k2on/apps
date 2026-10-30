@@ -155,6 +155,17 @@ pub struct Linked {
     pub ignored: bool,
 }
 
+/// Somebody asking the server's importer to ask the banks now, rather
+/// than at its next hour: a person's latest ask, one row each. The
+/// importer answers an ask newer than the last one it answered, by
+/// importing every bank it holds a token for.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct Asked {
+    #[ark(key)]
+    pub user_id: String,
+    pub asked_ms: i64,
+}
+
 /// money's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Money {
@@ -165,6 +176,7 @@ pub struct Money {
     pub txn: Txn,
     pub bank: Bank,
     pub linked: Linked,
+    pub asked: Asked,
     pub sign_in: ark_auth::SignIn,
     pub role: ark_auth::Role,
 }

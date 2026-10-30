@@ -253,6 +253,13 @@ pub struct BankAccount {
     pub subtype: String,
     /// The bank's current balance, in cents, our sign (owed is negative).
     pub balance: Option<i64>,
+    /// What the account the first import opens for it is called, when the
+    /// server was told (its `accounts`); blank is the bank's own name.
+    pub called: String,
+    /// Not followed from its first sight: the server was told which of
+    /// this bank's accounts to follow, and this is not one. It is known
+    /// (a `Linked` row, ignored) and opens nothing; `banks.link` follows it.
+    pub ignored: bool,
 }
 
 /// A transaction Plaid added or changed, our sign: what left is negative.
