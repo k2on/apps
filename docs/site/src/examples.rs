@@ -24,12 +24,16 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("ALBUM", glyphs::ALBUM),
     ("ARTIST", glyphs::ARTIST),
     ("BACK", glyphs::BACK),
+    ("BANK", glyphs::BANK),
+    ("CARD", glyphs::CARD),
     ("CHEVRON", glyphs::CHEVRON),
     ("CLOSE", glyphs::CLOSE),
     ("COMPOSER", glyphs::COMPOSER),
+    ("DEBT", glyphs::DEBT),
     ("DEBUG", glyphs::DEBUG),
     ("DEVICES", glyphs::DEVICES),
     ("DOWN", glyphs::DOWN),
+    ("GROWTH", glyphs::GROWTH),
     ("HOME", glyphs::HOME),
     ("LAPTOP", glyphs::LAPTOP),
     ("LIBRARY", glyphs::LIBRARY),
@@ -62,6 +66,7 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("TRANSCRIPT", glyphs::TRANSCRIPT),
     ("UNTICK", glyphs::UNTICK),
     ("VOLUME", glyphs::VOLUME),
+    ("WALLET", glyphs::WALLET),
 ];
 
 /// Rows to draw with: places, long enough to be cut, and with the
@@ -527,17 +532,19 @@ fn sidebar_(c: Canvas) -> Picture {
         (glyphs::MORE, "Later", Some("Lists"), Some(8)),
         (glyphs::ARTIST, "People", Some("Lists"), Some(41)),
     ];
+    let (cursor, focused) = (1, true);
     let items: Vec<sidebar::Item<()>> = places
         .iter()
-        .map(|(glyph, name, heading, count)| sidebar::Item {
+        .enumerate()
+        .map(|(i, (glyph, name, heading, count))| sidebar::Item {
             glyph,
             label: name.to_string(),
             heading: *heading,
-            count: *count,
+            trailing: count.map(|n| sidebar::count(n, sidebar::lit(i, cursor, focused))),
             press: (),
         })
         .collect();
-    let bar = container(sidebar::view(&items, 1, true, sidebar::WIDTH, 8.0, "example-sidebar")).height(300);
+    let bar = container(sidebar::view(items, cursor, focused, sidebar::WIDTH, 8.0, "example-sidebar")).height(300);
     let page = container(text("The page for Collections").size(13)).padding(16);
     c.paint(match room < sidebar::WIDTH + 160.0 {
         true => column![bar, page].into(),
