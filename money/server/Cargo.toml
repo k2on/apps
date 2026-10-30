@@ -1,0 +1,31 @@
+[package]
+name = "money-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "money's server, an ark-peer that listens: the household's budget (money/domain) on the hub, sign-in (ark-auth), the browser client, and the bank importer, which asks Plaid for each bank's news and authors it as banks.import."
+workspace = "../../rust"
+
+[[bin]]
+name = "money-server"
+path = "src/main.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+money-domain = { path = "../domain" }
+# The server is a peer that listens; the importer is a peer in this process
+# that reaches it through its handle, never a socket.
+ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
+ark-auth = { path = "../../rust/ark-auth" }
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Plaid, over its HTTP API: blocking, on the importer's thread. The same
+# ureq ark-auth talks to an identity provider with.
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+# `/healthz` says what domain this is, in front of ark-peer's own.
+axum = "0.7"
+
+[dev-dependencies]
+tempfile = "3"

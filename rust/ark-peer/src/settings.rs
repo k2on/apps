@@ -226,3 +226,30 @@ pub fn roles_of(var: &str, text: &str) -> Result<BTreeMap<String, Vec<String>>> 
     }
     Ok(out)
 }
+
+impl SignIn {
+    /// How people sign in, made real: a provider's discovery is one
+    /// blocking request, once, off the runtime. Any app's server starts
+    /// with this.
+    pub async fn mode(&self) -> Result<ark_auth::server::Mode> {
+        use ark_auth::server::Mode;
+        Ok(match self {
+            SignIn::Dev => Mode::Dev,
+            SignIn::Oidc {
+                issuer,
+                client_id,
+                secret_file,
+                scopes,
+            } => {
+                let (issuer, client_id, file, scopes) = (issuer.clone(), client_id.clone(), secret_file.clone(), scopes.clone());
+                let provider = tokio::task::spawn_blocking(move || {
+                    let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
+                    ark_auth::oidc::Provider::discover_with_secret_file(&issuer, &client_id, &file, &scopes)
+                })
+                .await?
+                .map_err(|e| anyhow!("signing in: {e}"))?;
+                Mode::Oidc(provider)
+            }
+        })
+    }
+}

@@ -66,6 +66,15 @@ data class AddTransaction(val accountId: Id, val date: String, val payee: String
     }
 }
 
+/** The record `Asked`. */
+data class Asked(val userId: String, val askedMs: Long) {
+    fun json(): String = "{" + "\"user_id\":" + J.q(userId) + "," + "\"asked_ms\":" + askedMs.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): Asked = (j as JSONObject).let { o -> Asked(J.text(o.opt("user_id")), J.int(o.opt("asked_ms"))) }
+    }
+}
+
 /** The record `Assign`. */
 data class Assign(val month: String, val categoryId: Id, val amount: Long) {
     fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"amount\":" + amount.toString() + "}"
@@ -131,11 +140,11 @@ data class Bank(val name: String, val institution: String, val cursor: String, v
 }
 
 /** The record `BankAccount`. */
-data class BankAccount(val plaidAccountId: String, val name: String, val mask: String, val kind: String, val subtype: String, val balance: Long?) {
-    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"subtype\":" + J.q(subtype) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "}"
+data class BankAccount(val plaidAccountId: String, val name: String, val mask: String, val kind: String, val subtype: String, val balance: Long?, val called: String, val ignored: Boolean) {
+    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"subtype\":" + J.q(subtype) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"called\":" + J.q(called) + "," + "\"ignored\":" + ignored.toString() + "}"
 
     companion object {
-        fun of(j: Any?): BankAccount = (j as JSONObject).let { o -> BankAccount(J.text(o.opt("plaid_account_id")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.text(o.opt("subtype")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }) }
+        fun of(j: Any?): BankAccount = (j as JSONObject).let { o -> BankAccount(J.text(o.opt("plaid_account_id")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.text(o.opt("subtype")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.text(o.opt("called")), J.bool(o.opt("ignored"))) }
     }
 }
 
@@ -504,6 +513,9 @@ class Money(val peer: Peer) {
 
     /** `banks.link`: its intent's id. */
     fun link(input: LinkAccount): String = peer.mutate("banks.link", input.json())
+
+    /** `banks.sync`: its intent's id. */
+    fun sync(): String = peer.mutate("banks.sync", "null")
 
     /** `budget.assign`: its intent's id. */
     fun assign(input: Assign): String = peer.mutate("budget.assign", input.json())

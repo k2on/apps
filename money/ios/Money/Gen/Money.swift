@@ -84,6 +84,21 @@ public struct AddTransaction: Equatable {
     public var json: String { J.obj(["\"account_id\":" + J.q(accountId.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + String(cleared), "\"transfer_to\":" + J.wopt(transferTo) { v0 in J.q(v0.hex) }]) }
 }
 
+/// The record `Asked`.
+public struct Asked: Equatable {
+    public var userId: String
+    public var askedMs: Int64
+
+    public init(userId: String, askedMs: Int64) { self.userId = userId; self.askedMs = askedMs; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(userId: J.text(o["user_id"]), askedMs: J.int(o["asked_ms"]))
+    }
+
+    public var json: String { J.obj(["\"user_id\":" + J.q(userId), "\"asked_ms\":" + String(askedMs)]) }
+}
+
 /// The record `Assign`.
 public struct Assign: Equatable {
     public var month: String
@@ -189,15 +204,17 @@ public struct BankAccount: Equatable {
     public var kind: String
     public var subtype: String
     public var balance: Int64?
+    public var called: String
+    public var ignored: Bool
 
-    public init(plaidAccountId: String, name: String, mask: String, kind: String, subtype: String, balance: Int64?) { self.plaidAccountId = plaidAccountId; self.name = name; self.mask = mask; self.kind = kind; self.subtype = subtype; self.balance = balance; }
+    public init(plaidAccountId: String, name: String, mask: String, kind: String, subtype: String, balance: Int64?, called: String, ignored: Bool) { self.plaidAccountId = plaidAccountId; self.name = name; self.mask = mask; self.kind = kind; self.subtype = subtype; self.balance = balance; self.called = called; self.ignored = ignored; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(plaidAccountId: J.text(o["plaid_account_id"]), name: J.text(o["name"]), mask: J.text(o["mask"]), kind: J.text(o["kind"]), subtype: J.text(o["subtype"]), balance: J.opt(o["balance"]) { v0 in J.int(v0) })
+        self.init(plaidAccountId: J.text(o["plaid_account_id"]), name: J.text(o["name"]), mask: J.text(o["mask"]), kind: J.text(o["kind"]), subtype: J.text(o["subtype"]), balance: J.opt(o["balance"]) { v0 in J.int(v0) }, called: J.text(o["called"]), ignored: J.bool(o["ignored"]))
     }
 
-    public var json: String { J.obj(["\"plaid_account_id\":" + J.q(plaidAccountId), "\"name\":" + J.q(name), "\"mask\":" + J.q(mask), "\"kind\":" + J.q(kind), "\"subtype\":" + J.q(subtype), "\"balance\":" + J.wopt(balance) { v0 in String(v0) }]) }
+    public var json: String { J.obj(["\"plaid_account_id\":" + J.q(plaidAccountId), "\"name\":" + J.q(name), "\"mask\":" + J.q(mask), "\"kind\":" + J.q(kind), "\"subtype\":" + J.q(subtype), "\"balance\":" + J.wopt(balance) { v0 in String(v0) }, "\"called\":" + J.q(called), "\"ignored\":" + String(ignored)]) }
 }
 
 /// The record `BankLine` (UniFFI's): its JSON, for the functions called by name.
@@ -855,6 +872,9 @@ public struct Money {
 
     /// `banks.link`: its intent's id.
     @discardableResult public func link(_ input: LinkAccount) throws -> String { try peer.mutate(name: "banks.link", input: input.json) }
+
+    /// `banks.sync`: its intent's id.
+    @discardableResult public func sync() throws -> String { try peer.mutate(name: "banks.sync", input: "null") }
 
     /// `budget.assign`: its intent's id.
     @discardableResult public func assign(_ input: Assign) throws -> String { try peer.mutate(name: "budget.assign", input: input.json) }
