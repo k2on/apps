@@ -76,7 +76,7 @@
       # `harken/` by path, so both trees are the source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/server" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to the domain (harken/ffi/tests/gen.rs).
       genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
@@ -222,6 +222,7 @@
             buildPhaseCargoCommand = ''
               cargoWithProfile test --locked --workspace --no-run
               cargoWithProfile test --locked -p harken-iced --features demo --no-run
+              cargoWithProfile test --locked -p money-iced --features demo --no-run
             '';
           });
 
@@ -262,7 +263,7 @@
           # The pages' dependencies for wasm32, once for both.
           wasmBuild = flags: "cargoWithProfile build --locked --target wasm32-unknown-unknown ${flags}";
           wasmBuilds = lib.concatMapStringsSep "\n" wasmBuild [
-            "-p harken-iced" "-p harken-iced --features demo" "-p money-iced"
+            "-p harken-iced" "-p harken-iced --features demo" "-p money-iced" "-p money-iced --features demo"
           ];
           wasmDeps = wasmCrane.buildDepsOnly (depsArgs // {
             pname = "arkdb-wasm";
@@ -385,6 +386,14 @@
           money-web = wasmPage {
             pname = "money-web";
             crate = "money-iced";
+            features = "--features demo";
+            files = "../money/iced/web/index.html ../money/iced/web/favicon.svg";
+          };
+          # What money-server serves as its web directory: the same page,
+          # signing in against the server it is served from.
+          money-web-server = wasmPage {
+            pname = "money-web-server";
+            crate = "money-iced";
             files = "../money/iced/web/index.html ../money/iced/web/favicon.svg";
           };
 
@@ -422,6 +431,28 @@
             pname = "arkdb";
             cargoArtifacts = serverKernel;
             cargoExtraArgs = "--locked -p arkdb";
+            doCheck = false;
+          });
+          # money's server (money/server: the hub and the bank importer), on
+          # a chain of its own as harken's is, for the same reason — no GUI
+          # stack under a server — and apart from harken's so that neither
+          # rebuilds the other.
+          moneyServerBuild = "cargoWithProfile build --locked -p money-server";
+          moneyServerDeps = craneLib.buildDepsOnly (depsArgs // {
+            pname = "money-server";
+            doCheck = false;
+            buildPhaseCargoCommand = moneyServerBuild;
+          });
+          moneyServerKernel = craneLib.mkCargoDerivation (common // {
+            pname = "money-server-kernel";
+            src = kernelSrc;
+            cargoArtifacts = moneyServerDeps;
+            buildPhaseCargoCommand = moneyServerBuild;
+          });
+          money-server = craneLib.buildPackage (common // {
+            pname = "money-server";
+            cargoArtifacts = moneyServerKernel;
+            cargoExtraArgs = "--locked -p money-server";
             doCheck = false;
           });
 
@@ -907,7 +938,7 @@
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
-            inherit money-iced money-web;
+            inherit money-iced money-web money-web-server money-server;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;
@@ -1004,6 +1035,7 @@
               # The client's demo is a feature, so its tests are a second run.
               postCheck = ''
                 cargoWithProfile test --locked -p harken-iced --features demo
+                cargoWithProfile test --locked -p money-iced --features demo
               '';
             };
             # The workspace lint-clean, the demo feature too, over the
@@ -1013,7 +1045,10 @@
               cargoArtifacts = hostDeps;
               cargoExtraArgs = "--locked --workspace";
               cargoClippyExtraArgs = "--all-targets -- -D warnings";
-              postBuild = "cargoWithProfile clippy --locked -p harken-iced --features demo --all-targets -- -D warnings";
+              postBuild = ''
+                cargoWithProfile clippy --locked -p harken-iced --features demo --all-targets -- -D warnings
+                cargoWithProfile clippy --locked -p money-iced --features demo --all-targets -- -D warnings
+              '';
               doInstallCargoArtifacts = false;
               installPhase = "touch $out";
             });
@@ -1093,6 +1128,11 @@
             harken-module = pkgs.callPackage ./harken/server/nix/module-test.nix {
               module = import ./harken/server/nix/module.nix { packages = self.packages; };
             };
+            # money's, as harken's: services.money evaluated and held to its
+            # assertions and units.
+            money-module = pkgs.callPackage ./money/server/nix/module-test.nix {
+              module = import ./money/server/nix/module.nix { packages = self.packages; };
+            };
           };
 
           # Everything the workflow publishes, as data: a page goes up at
@@ -1158,5 +1198,11 @@
       # `services.harken`: the sync server, sign-in, /media and the
       # browser client on one port.
       nixosModules.default = import ./harken/server/nix/module.nix { packages = self.packages; };
+      # The same, by name; and `services.money`: the household's budget,
+      # its sync server, browser client and bank importer on one port. Its
+      # own module rather than part of `default`, so a machine that imports
+      # `default` for harken is not given money's options too.
+      nixosModules.harken = self.nixosModules.default;
+      nixosModules.money = import ./money/server/nix/module.nix { packages = self.packages; };
     };
 }

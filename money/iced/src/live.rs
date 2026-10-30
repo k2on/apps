@@ -110,6 +110,7 @@ pub fn data_dir(server: &str) -> std::path::PathBuf {
 
 /// A server's address as one path segment: `http://127.0.0.1:8788` is
 /// `http___127_0_0_1_8788`.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn server_key(server: &str) -> String {
     let server = server.trim_end_matches('/');
     server.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
