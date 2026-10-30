@@ -88,7 +88,7 @@ class BookTests {
     }
 
     @Test fun aTargetAndAutoAssignFundIt() {
-        val c = l.lines.first { it.target == 0L && it.available >= 0 }
+        val c = l.lines.first { it.available >= 0 }
         book.setTarget(c.categoryId, c.assigned + 10_000)
         assertEquals(toneOf(l.line(c.categoryId)!!), dev.arkui.Tone.Caution)
         book.autoAssign(Auto.Underfunded, listOf(c.categoryId))
