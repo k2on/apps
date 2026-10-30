@@ -110,7 +110,7 @@ final class SoundTests: XCTestCase {
         XCTAssertEqual(phone.engine.url?.absoluteString, "https://h/media/music/2.flac")
         desk.settle()
         XCTAssertEqual(desk.heard().listening?.active?.at, 1, "the session followed the phone")
-        let state = PlayerState.of(desk.heard(), server: "https://h", name: "Desk", art: { _ in "" }, local: nil, shuffle: false, repeatMode: .off, buffering: false, now: nowMs())
+        let state = PlayerState.of(desk.heard(), server: "https://h", name: "Desk", art: { _, _ in "" }, local: nil, shuffle: false, repeatMode: .off, buffering: false, now: nowMs())
         XCTAssertEqual(state.now?.title, "Song 2")
         XCTAssertEqual(state.on?.name, "phone")
     }
