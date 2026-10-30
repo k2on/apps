@@ -8,13 +8,19 @@ figure a view kept up to date by the rows a change touched.
 ```
 domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
-           transactions.rs; plaid.rs, the bank import
+           transactions.rs; plaid.rs, the bank import; seed.rs, the
+           demo's household (the `seed` feature)
 iced/      the demo client, desktop and browser, on arkui and ark-peer:
            a seeded household on a peer that is its own authority
+ffi/       the library the phones load (ffi/README.md): ark-ffi with the
+           domain linked in, typed views, the demo, a server in the process
+ios/, android/
+           so far only the typed Swift and Kotlin generated for ffi/
 ```
 
-There is no server and no phone yet. The domain is written for one
-(below), and the client is the demo, the way harken's demo is.
+There is no server and no phone app yet. The domain is written for one
+(below), the client is the demo, the way harken's demo is, and the
+phones' library is ready for the apps to be built on.
 
 ## The household
 

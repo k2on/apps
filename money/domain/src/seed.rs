@@ -1,4 +1,6 @@
-//! The demo's household: three months of a family's money, up to today.
+//! The demo's household: three months of a family's money, up to today —
+//! what the demo window (`money/iced`) and the phones' demo and previews
+//! (`money/ffi`, `money_demo`) open on, behind the `seed` feature.
 //!
 //! Everything goes in through the domain's own mutations, the ones every
 //! peer runs — accounts opened, a budget laid out, paydays, bills, a card
@@ -18,12 +20,15 @@ use ark::format::Encode;
 use ark::log::{EntryId, Record, Snapshot};
 use ark::peer::Ctx;
 use ark::store::Store;
-use ark_peer::{Disk, Memory};
-use money_domain::dates::{add_days, add_months, day_of_ms, month_of};
-use money_domain::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
-use money_domain::*;
+use ark_peer::{Config, Disk, Memory, Peer as Replica};
 
-use crate::client::{domain, Replica};
+use crate::dates::{add_days, add_months, day_of_ms, month_of};
+use crate::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
+use crate::*;
+
+fn domain() -> std::sync::Arc<ark::domain::Domain> {
+    crate::shared()
+}
 
 /// Whose window the demo is.
 pub const ME: &str = "alex";
@@ -221,8 +226,8 @@ const HABITS: &[Habit] = &[
 
 /// The day `d` of `month`, when it has come yet.
 fn day_in(month: &str, d: i64, today: &str) -> Option<String> {
-    let (y, m) = money_domain::dates::parse_month(month)?;
-    let day = money_domain::dates::day(y, m, d.min(money_domain::dates::days_in_month(y, m)));
+    let (y, m) = crate::dates::parse_month(month)?;
+    let day = crate::dates::day(y, m, d.min(crate::dates::days_in_month(y, m)));
     (day.as_str() <= today).then_some(day)
 }
 
@@ -353,7 +358,7 @@ pub fn card(owed: i64) -> PlaidAccount {
         mask: Some("4417".into()),
         kind: "credit".into(),
         subtype: Some("credit card".into()),
-        balances: money_domain::plaid::Balances {
+        balances: crate::plaid::Balances {
             current: Some(-owed as f64 / 100.0),
         },
     }
@@ -548,7 +553,7 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
 /// bank importer's role so that "Sync" can run the import here as a
 /// server's importer would.
 pub fn open(disk: Memory) -> Replica {
-    let mut peer = crate::client::open(Box::new(disk));
+    let mut peer = Replica::open_as(Config::of(domain()), Box::new(disk), None);
     peer.set_roles([BANK]);
     peer.alone();
     peer
@@ -596,12 +601,7 @@ impl Bank {
             },
             _ => Pulled::default(),
         };
-        let added: i64 = pulled
-            .added
-            .iter()
-            .filter(|t| !t.pending)
-            .map(|t| -money_domain::plaid::cents(t.amount))
-            .sum();
+        let added: i64 = pulled.added.iter().filter(|t| !t.pending).map(|t| -crate::plaid::cents(t.amount)).sum();
         let pulled = Pulled {
             cursor: format!("live-{k}"),
             ..pulled

@@ -8,7 +8,7 @@ description = "money's demo client, desktop and browser: a household's budget in
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-money-domain = { path = "../domain" }
+money-domain = { path = "../domain", features = ["seed"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 arkui = { path = "../../rust/arkui" }
 

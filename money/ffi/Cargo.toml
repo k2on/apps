@@ -1,0 +1,26 @@
+[package]
+name = "money-ffi"
+version = "0.1.0"
+workspace = "../../rust"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "money's library for its phones (docs/plan-v5.md §1.16, N3): ark-ffi with money's domain linked in, one shared library the apps load, and the demo's household for running with no server."
+
+[lib]
+name = "money_ffi"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+ark-ffi = { path = "../../rust/ark-ffi" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+money-domain = { path = "../domain", features = ["ffi", "seed"] }
+serde_json = { workspace = true }
+uniffi = { version = "0.32.2", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = { workspace = true }
+# The typed Kotlin and Swift the apps call the domain with, held to what the
+# generator writes now (tests/gen.rs).
+arkdb = { path = "../../rust/arkdb" }

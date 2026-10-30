@@ -265,4 +265,3 @@ fn an_account_is_opened_and_a_refusal_is_said() {
     let _ = app.update(Message::AssignTo(ready_to_assign(), 100));
     assert!(app.note.contains("not to it"), "{}", app.note);
 }
-
