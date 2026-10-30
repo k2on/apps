@@ -14,10 +14,10 @@ package dev.harken.android
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.harken.android.ui.Cover
-import dev.harken.android.ui.ExpandingCard
-import dev.harken.android.ui.ExpandingCardState
-import dev.harken.android.ui.rememberExpandingCard
+import dev.arkui.Cover
+import dev.arkui.ExpandingCard
+import dev.arkui.ExpandingCardState
+import dev.arkui.rememberExpandingCard
 import kotlinx.coroutines.flow.StateFlow
 
 /** The player's card: how far up it is, and the drag that moves it (`ark-ui`'s). */

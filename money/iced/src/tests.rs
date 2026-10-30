@@ -1,0 +1,324 @@
+//! The window, driven the way a person drives it: messages in, state out.
+//! Nothing here opens a window — these say that the household the demo
+//! seeds is the one described, and that what a button does lands in the
+//! domain and comes back through its views.
+
+use std::sync::OnceLock;
+
+use money_domain::budget::ready_to_assign;
+use money_domain::dates::{add_months, month_of};
+use money_domain::*;
+
+use crate::peer::Ledger;
+use crate::{seed, App, Choice, Field, Message, Modal, Page};
+
+/// A day the demo is seeded for: late in a month, so every habit has
+/// happened at least once in it.
+const TODAY: &str = "2026-10-26";
+/// Its moment, in the afternoon.
+const NOW: i64 = 1_793_030_400_000;
+
+/// The demo, seeded once per run and handed to each test as a window of its
+/// own.
+fn app() -> App {
+    static TEMPLATE: OnceLock<ark_peer::Memory> = OnceLock::new();
+    let disk = TEMPLATE.get_or_init(|| seed::seeded_disk(TODAY, NOW)).clone();
+    App::with_peer(seed::open(disk), TODAY)
+}
+
+fn account<'a>(app: &'a App, name: &str) -> &'a AccountLine {
+    app.peer
+        .accounts
+        .rows
+        .iter()
+        .find(|a| a.name == name)
+        .unwrap_or_else(|| panic!("no account {name}"))
+}
+
+fn category(app: &App, name: &str) -> BudgetLine {
+    app.peer
+        .lines
+        .rows
+        .iter()
+        .find(|l| l.name == name)
+        .cloned()
+        .unwrap_or_else(|| panic!("no category {name}"))
+}
+
+#[test]
+fn the_household_is_seeded() {
+    let app = app();
+    let names: Vec<&str> = app.peer.accounts.rows.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, ["Checking", "Savings", "Cash", "Mortgage", "Retirement", "Chase Sapphire"]);
+    let card = account(&app, "Chase Sapphire");
+    assert!(card.on_budget && card.bank == seed::BANK_NAME && card.mask == "4417");
+    assert!(card.balance < 0, "the card owes: {}", card.balance);
+    assert_eq!(app.peer.month, "2026-10");
+    let s = app.peer.summary();
+    assert_eq!(s.ready_to_assign, 128_450, "what is left to assign this month");
+    assert!(s.overspent >= 1, "Dining Out was given too little");
+    assert!(s.underfunded >= 2, "Vacation and Gifts were given nothing");
+    assert!(!app.peer.inbox.rows.is_empty(), "the last few days of the card wait for a look");
+    assert!(app.peer.inbox.rows.iter().all(|t| t.date.as_str() >= "2026-10-22"));
+    // The budget's figures are the domain's: groups and categories in order.
+    let groups: Vec<&str> = app.peer.groups.rows.iter().map(|g| g.name.as_str()).collect();
+    assert_eq!(groups, ["Bills", "Everyday", "Quality of Life", "Savings Goals"]);
+    let rent = category(&app, "Rent");
+    assert_eq!((rent.assigned, rent.activity, rent.available), (185_000, -185_000, 0));
+    // Last month's statement was paid, and the bank's payment matched the
+    // transfer rather than doubling it.
+    let card_id = card.id;
+    let mut app = app;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(card_id))));
+    let payments: Vec<&TxnLine> = app.peer.register.rows.iter().filter(|t| t.transfer).collect();
+    assert_eq!(payments.len(), 2);
+    assert!(payments.iter().all(|t| t.imported && t.approved));
+    // Some of it Sam entered.
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    assert!(app.peer.register.rows.iter().any(|t| t.user_id == seed::PARTNER));
+    // And checking was reconciled at the end of last month.
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    assert!(app.peer.register.rows.iter().any(|t| t.cleared == Cleared::Reconciled));
+}
+
+#[test]
+fn the_same_household_every_load() {
+    let a = seed::seeded_disk(TODAY, NOW);
+    let b = seed::seeded_disk(TODAY, NOW);
+    assert_eq!(seed::open(a).state(), seed::open(b).state());
+}
+
+#[test]
+fn assigning_in_a_cell_moves_ready_to_assign() {
+    let mut app = app();
+    let groceries = category(&app, "Groceries");
+    let before = app.peer.summary().ready_to_assign;
+    let _ = app.update(Message::EditAssigned(groceries.category_id));
+    assert_eq!(app.assigning.as_ref().map(|(_, t)| t.as_str()), Some("650.00"));
+    assert_eq!(
+        (app.selected, app.target.as_str()),
+        (Some(groceries.category_id), "650.00"),
+        "the inspector follows"
+    );
+    let _ = app.update(Message::AssignedTyped("700".into()));
+    let _ = app.update(Message::AssignedDone);
+    assert_eq!(category(&app, "Groceries").assigned, 70_000);
+    assert_eq!(app.peer.summary().ready_to_assign, before - 5_000);
+    // Not an amount: said, and nothing moves.
+    let _ = app.update(Message::EditAssigned(groceries.category_id));
+    let _ = app.update(Message::AssignedTyped("lots".into()));
+    let _ = app.update(Message::AssignedDone);
+    assert!(app.note.contains("not an amount"));
+    assert_eq!(category(&app, "Groceries").assigned, 70_000);
+}
+
+#[test]
+fn a_target_is_met_and_overspending_covered() {
+    let mut app = app();
+    let vacation = category(&app, "Vacation");
+    let _ = app.update(Message::Select(Some(vacation.category_id)));
+    assert_eq!(app.target, "250.00");
+    let _ = app.update(Message::AssignTo(vacation.category_id, 25_000));
+    assert_eq!(category(&app, "Vacation").available, vacation.available + 25_000);
+
+    let dining = category(&app, "Dining Out");
+    assert!(dining.available < 0, "the seed overspends it: {}", dining.available);
+    let _ = app.update(Message::Select(Some(dining.category_id)));
+    let _ = app.update(Message::MoveMoney);
+    let short = -dining.available;
+    assert!(matches!(&app.modal, Some(Modal::Choose(crate::Choosing::Move { amount, .. })) if crate::amount::parse(amount) == Some(short)));
+    let ef = category(&app, "Emergency Fund");
+    let _ = app.update(Message::Chose(Choice::Category(Some(ef.category_id))));
+    assert_eq!(category(&app, "Dining Out").available, 0);
+    assert_eq!(category(&app, "Emergency Fund").assigned, ef.assigned - short);
+}
+
+#[test]
+fn a_transaction_is_entered_and_corrected() {
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let before = account(&app, "Checking").balance;
+    let _ = app.update(Message::AddTxn);
+    // A payee paid before brings its category.
+    let _ = app.update(Message::Form(Field::Payee, "Mint Mobile".into()));
+    let phone = category(&app, "Phone").category_id;
+    assert_eq!(app.form.as_ref().unwrap().category, Some(phone));
+    let _ = app.update(Message::Form(Field::Outflow, "12.34".into()));
+    let _ = app.update(Message::Form(Field::Memo, "a top-up".into()));
+    let _ = app.update(Message::SaveTxn);
+    assert!(app.form.is_none(), "saved: {}", app.note);
+    assert_eq!(account(&app, "Checking").balance, before - 1_234);
+    let t = app.peer.register.rows.iter().find(|t| t.memo == "a top-up").unwrap().clone();
+    assert_eq!(
+        (t.payee.as_str(), t.category.as_str(), t.user_id.as_str()),
+        ("Mint Mobile", "Phone", seed::ME)
+    );
+
+    let _ = app.update(Message::EditTxn(t.id));
+    let _ = app.update(Message::Form(Field::Outflow, "20".into()));
+    let _ = app.update(Message::SaveTxn);
+    assert_eq!(account(&app, "Checking").balance, before - 2_000);
+    let _ = app.update(Message::EditTxn(t.id));
+    let _ = app.update(Message::DeleteTxn(t.id));
+    assert_eq!(account(&app, "Checking").balance, before);
+}
+
+#[test]
+fn a_transfer_is_chosen_in_the_category_column() {
+    let mut app = app();
+    let (checking, savings) = (account(&app, "Checking").id, account(&app, "Savings").clone());
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let _ = app.update(Message::AddTxn);
+    let _ = app.update(Message::ChooseCategory);
+    let _ = app.update(Message::Chose(Choice::Transfer(savings.id)));
+    let _ = app.update(Message::Form(Field::Outflow, "100".into()));
+    let _ = app.update(Message::SaveTxn);
+    assert_eq!(account(&app, "Savings").balance, savings.balance + 10_000);
+}
+
+#[test]
+fn sync_brings_the_bank_and_posts_what_was_pending() {
+    let mut app = app();
+    let card = account(&app, "Chase Sapphire").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(card))));
+    let before = app.peer.register.rows.len();
+    let _ = app.update(Message::Sync);
+    let coffee: Vec<TxnLine> = app
+        .peer
+        .register
+        .rows
+        .iter()
+        .filter(|t| t.payee == "Blue Bottle Coffee" && t.date == TODAY)
+        .cloned()
+        .collect();
+    assert_eq!(coffee.len(), 1);
+    assert_eq!(
+        (coffee[0].amount, coffee[0].cleared, coffee[0].approved),
+        (-650, Cleared::Uncleared, false)
+    );
+    assert_eq!(app.peer.register.rows.len(), before + 2);
+    // A category given while it was pending survives its posting.
+    let dining = category(&app, "Dining Out").category_id;
+    let _ = app.update(Message::Categorize(vec![coffee[0].id]));
+    let _ = app.update(Message::Chose(Choice::Category(Some(dining))));
+    let _ = app.update(Message::Sync);
+    let posted: Vec<&TxnLine> = app
+        .peer
+        .register
+        .rows
+        .iter()
+        .filter(|t| t.payee == "Blue Bottle Coffee" && t.date == TODAY)
+        .collect();
+    assert_eq!(posted.len(), 1, "posted in place, not doubled");
+    assert_eq!(
+        (posted[0].id, posted[0].amount, posted[0].cleared),
+        (coffee[0].id, -775, Cleared::Cleared)
+    );
+    assert_eq!(posted[0].category, "Dining Out");
+    assert_eq!(app.peer.register.rows.len(), before + 3);
+    let _ = app.update(Message::Sync);
+    assert_eq!(app.note, "Chase: nothing new at the bank");
+}
+
+#[test]
+fn what_needs_a_look_is_approved() {
+    let mut app = app();
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Inbox)));
+    let waiting: Vec<Id<Txn>> = app.peer.register.rows.iter().filter(|t| !t.approved).map(|t| t.id).collect();
+    assert!(!waiting.is_empty());
+    let _ = app.update(Message::Approve(waiting));
+    assert!(app.peer.register.rows.iter().all(|t| t.approved && t.category != "Needs a category"));
+}
+
+#[test]
+fn months_move_and_the_budget_follows() {
+    let mut app = app();
+    let _ = app.update(Message::Month(-1));
+    assert_eq!(app.peer.month, add_months(&month_of(TODAY), -1));
+    let s = app.peer.summary();
+    assert_eq!(s.ready_to_assign, 0, "last month everything was assigned");
+    assert!(app
+        .peer
+        .lines
+        .rows
+        .iter()
+        .all(|l| l.available >= 0 || l.name == "Dining Out" || l.activity < 0));
+    let _ = app.update(Message::ThisMonth);
+    assert_eq!(app.peer.month, "2026-10");
+}
+
+#[test]
+fn an_account_is_opened_and_a_refusal_is_said() {
+    let mut app = app();
+    let _ = app.update(Message::AddAccount);
+    let _ = app.update(Message::AccountName("Rainy Day Jar".into()));
+    let _ = app.update(Message::AccountKind("cash"));
+    let _ = app.update(Message::AccountBalance("40".into()));
+    let _ = app.update(Message::CreateAccount);
+    assert!(app.modal.is_none());
+    let before = app.peer.summary().ready_to_assign;
+    assert_eq!(account(&app, "Rainy Day Jar").balance, 4_000);
+    assert_eq!(before, 128_450 + 4_000);
+    // Ready to Assign is not a category to assign to: the domain says so.
+    let _ = app.update(Message::AssignTo(ready_to_assign(), 100));
+    assert!(app.note.contains("not to it"), "{}", app.note);
+}
+
+/// The window on a server, as the build without `demo` opens it: a
+/// replica that dials a money server in this process, signed in. What a
+/// button does goes to the server and comes back; "Sync" is an ask the
+/// server holds (`banks.sync`), not an import authored here, which nobody
+/// signed in may author. Falsified by `sync` authoring the demo's import on
+/// a server: the bank's role was refused and nothing was asked.
+#[test]
+fn on_a_server_sync_is_an_ask() {
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let server = rt
+        .block_on(money_server::start(money_server::Config::dev("127.0.0.1:0", data.path())))
+        .unwrap();
+    let url = format!("http://{}", server.running.addr);
+    let login = server
+        .auth
+        .issue(
+            &ark_auth::Account {
+                id: "alice".into(),
+                ..Default::default()
+            },
+            "a test",
+        )
+        .unwrap();
+    let mut client = crate::client::open(Box::new(ark_peer::Memory::default()));
+    client.connect(&ark_auth::socket_url(&url));
+    let mut app = App::on_server(client, TODAY, url, None);
+    app.signed_in(login);
+    let settle = |app: &mut App, done: &dyn Fn(&App) -> bool| {
+        let held = ark_peer::link::until(std::time::Duration::from_secs(10), std::time::Duration::from_millis(10), || {
+            let _ = app.update(Message::Wake);
+            done(app)
+        });
+        assert!(held, "{}", app.note);
+    };
+    settle(&mut app, &|a| a.peer.client.status().link == "online");
+
+    let _ = app.update(Message::AddAccount);
+    let _ = app.update(Message::AccountName("Checking".into()));
+    let _ = app.update(Message::AccountBalance("1200".into()));
+    let _ = app.update(Message::CreateAccount);
+    settle(&mut app, &|a| a.peer.client.pending_len() == 0);
+    let accounts = server.running.hub.with(|h| h.log.store.rows("account").count()).unwrap();
+    assert_eq!(accounts, 1);
+
+    let _ = app.update(Message::Sync);
+    assert!(app.note.starts_with("asked the server"), "{}", app.note);
+    settle(&mut app, &|a| a.peer.client.pending_len() == 0);
+    let asked: Vec<Asked> = server
+        .running
+        .hub
+        .with(|h| h.log.store.rows("asked").map(|r| ark::format::Encode::from_bytes(r).unwrap()).collect())
+        .unwrap();
+    assert_eq!(asked.iter().map(|a| a.user_id.as_str()).collect::<Vec<_>>(), ["alice"]);
+    rt.block_on(server.stop());
+}

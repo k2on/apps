@@ -120,8 +120,38 @@ fn record(out: &mut String, n: &str, fields: &[(String, Type)], q: Q) {
     );
 }
 
-/// A sum UniFFI declares: its JSON, as extensions.
+/// A variant as UniFFI's Kotlin names an `enum class` entry: `LastMonth`
+/// is `LAST_MONTH`.
+fn shouty(v: &str) -> String {
+    let mut s = String::new();
+    let mut prev_lower = false;
+    for c in v.chars() {
+        if c.is_uppercase() && prev_lower {
+            s.push('_');
+        }
+        prev_lower = c.is_lowercase() || c.is_ascii_digit();
+        s.extend(c.to_uppercase());
+    }
+    s
+}
+
+/// A sum UniFFI declares: its JSON, as extensions. One whose variants carry
+/// nothing is a Kotlin `enum class` there, its entries shouted; any other a
+/// sealed class with a class per variant.
 fn sum_json(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)], q: Q) {
+    if variants.iter().all(|(_, fs)| fs.is_empty()) {
+        let _ = writeln!(out, "\n/** The sum `{n}` (UniFFI's enum): its JSON, for the functions called by name. */");
+        let _ = writeln!(out, "fun {n}.json(): String =\n    when (this) {{");
+        for (v, _) in variants {
+            let _ = writeln!(out, "        {n}.{} -> \"\\\"{v}\\\"\"", shouty(v));
+        }
+        let _ = writeln!(out, "    }}\n\nfun {n}.Companion.of(j: Any?): {n} = J.sum(j) {{ t, _ ->\n    when (t) {{");
+        for (v, _) in variants {
+            let _ = writeln!(out, "        \"{v}\" -> {n}.{}", shouty(v));
+        }
+        let _ = writeln!(out, "        else -> throw IllegalArgumentException(\"{n}: no variant $t\")\n    }}\n}}");
+        return;
+    }
     let _ = writeln!(out, "\n/** The sum `{n}` (UniFFI's): its JSON, for the functions called by name. */");
     let _ = writeln!(out, "fun {n}.json(): String =\n    when (val v = this) {{");
     for (v, fs) in variants {

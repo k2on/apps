@@ -42,7 +42,14 @@ a crate of plain Rust every peer links — and harken, the first app on it.
 - `docs/plan-v5.md` — the design, how it landed and what it measures
   (Part 3); `docs/arkdb.md` is the history it superseded.
 
-`revelation/` is a second app, and not on ArkDB: an Android app in plain
+`money/` is a second app on ArkDB: a household's budget, YNAB's way —
+`domain/` (accounts, categories, the month, transactions, and the Plaid
+import ArkOS's `money-sync` did for Actual Budget, as a mutator) and
+`iced/`, a demo client on a seeded household with no server. Everyone a
+server's OpenID provider lets in shares one budget. `money/README.md`
+says what is built and what is not.
+
+`revelation/` is another app, and not on ArkDB: an Android app in plain
 Kotlin, no Rust and no native library, that is the Bible as one scroll
 zoomed like a map. `revelation/README.md` says how to build and run it and
 `docs/plan-bible.md` is its plan. Both apps' APKs are published through one
@@ -67,6 +74,7 @@ One command holds all of it:
                       #   type-checked on Linux against the library
     nix build .#harken-server   # or harken-iced, harken-web, harken-domain,
                                 # ark, vectors, trace-corpus
+    nix run .#money-iced        # money's demo; money-web is its page
     nix build .#harken-apk      # the kernel for three ABIs and the APK over it,
                                 # its JVM tests run on the real kernel
     nix build .#revelation-apk  # Revelation's APK, its JVM tests run first;

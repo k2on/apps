@@ -57,19 +57,19 @@ import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.harken.android.gen.RecordingsEntry
 import dev.harken.android.gen.WorkSummary
-import dev.harken.android.ui.Cover
-import dev.harken.android.ui.CoverCard
-import dev.harken.android.ui.Empty
-import dev.harken.android.ui.Glyph
-import dev.harken.android.ui.MoreButton
-import dev.harken.android.ui.PageBar
-import dev.harken.android.ui.Recompositions
-import dev.harken.android.ui.Shelf
-import dev.harken.android.ui.Space
-import dev.harken.android.ui.UnderStatusBar
-import dev.harken.android.ui.quiet
-import dev.harken.android.ui.rememberDestinationListState
-import dev.harken.android.ui.rememberDestinationScrollState
+import dev.arkui.Cover
+import dev.arkui.CoverCard
+import dev.arkui.Empty
+import dev.arkui.Glyph
+import dev.arkui.MoreButton
+import dev.arkui.PageBar
+import dev.arkui.Recompositions
+import dev.arkui.Shelf
+import dev.arkui.Space
+import dev.arkui.UnderStatusBar
+import dev.arkui.quiet
+import dev.arkui.rememberDestinationListState
+import dev.arkui.rememberDestinationScrollState
 
 private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
 

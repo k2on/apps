@@ -55,13 +55,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
-import dev.harken.android.ui.Cover
-import dev.harken.android.ui.SheetRow
-import dev.harken.android.ui.Space
-import dev.harken.android.ui.VolumeSlider
-import dev.harken.android.ui.quiet
-import dev.harken.android.ui.rememberTransientListState
-import dev.harken.android.ui.rememberTransientScrollState
+import dev.arkui.Cover
+import dev.arkui.SheetRow
+import dev.arkui.Space
+import dev.arkui.VolumeSlider
+import dev.arkui.quiet
+import dev.arkui.rememberTransientListState
+import dev.arkui.rememberTransientScrollState
 import kotlinx.coroutines.delay
 
 /** What a song's menu can do. */

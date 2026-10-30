@@ -31,7 +31,7 @@ let
   # 16 kHz mono, heard at the lowest priority the host has, its voices told
   # apart (`harken/server/voices`), its captions written only once they are
   # whole.
-  transcriber = pkgs.writeShellScript "harken-transcriber" ''
+  transcriber = pkgs.writeShellScript "harken-transcriber" (''
     set -eu
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
@@ -49,7 +49,7 @@ let
     fi
   '' else ''
     mv "$tmp/out.vtt" "$2"
-  '');
+  ''));
 
   loopbackOnly = lib.elem cfg.address [
     "127.0.0.1"
@@ -200,7 +200,7 @@ in
         a transcript that keeps time with the server's own copy (a feed's
         is timed to the host's file, which an advertisement stitched in
         moves). An hour of speech is a while of the host's cores, at the
-        lowest priority there is'';
+        lowest priority there is'' // { default = true; };
 
       package = lib.mkOption {
         type = lib.types.package;

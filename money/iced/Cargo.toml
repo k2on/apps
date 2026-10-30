@@ -1,0 +1,42 @@
+[package]
+name = "money-iced"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "money's client, desktop and browser: a household's budget in iced, on arkui, ArkDB v5's peer and the domain — signed in to a money server, or (`demo`) seeded and its own authority."
+
+[features]
+# A standalone demo: no server, no sign-in, a seeded household, its own
+# authority. What GitHub Pages publishes, and a separate build from the real
+# client on purpose — a flag could be set by accident, a feature has to be
+# asked for at build time.
+demo = []
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+money-domain = { path = "../domain", features = ["seed"] }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+# Signing in: a loopback listener and the browser on the desktop, the page's
+# own address in a browser; and the logins a device remembers.
+ark-auth = { path = "../../rust/ark-auth", default-features = false }
+arkui = { path = "../../rust/arkui" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `smol` gives iced an executor on the desktop; `svg` is every glyph,
+# `advanced` the focus operation a form's first field is given the keys by.
+# `fira-sans` is the typeface, as harken's.
+iced = { version = "0.14", features = ["smol", "svg", "advanced", "fira-sans"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WebGL rather than WebGPU, for reach, as harken's page.
+iced = { version = "0.14", features = ["webgl", "svg", "advanced", "fira-sans"] }
+# `Location` is where the page is, and so which server it is on.
+web-sys = { version = "0.3", features = ["console", "Window", "Location"] }
+
+# The live window's test runs a money server in the process and signs in
+# to it, as the window would (`src/tests.rs`).
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+money-server = { path = "../server" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+tempfile = "3"

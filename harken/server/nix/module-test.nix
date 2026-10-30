@@ -17,6 +17,14 @@ let
         # Any package will do: nothing here runs it.
         services.harken = { enable = true; package = hello; } // settings;
       }
+      {
+        # Transcripts are on by default, and this nixpkgs predates
+        # `whisper-cpp` by that name and `python3Packages.sherpa-onnx`.
+        services.harken.transcripts = {
+          package = lib.mkDefault hello;
+          voices = lib.mkDefault false;
+        };
+      }
     ];
   }).config;
   failing = c: map (a: a.message) (lib.filter (a: !a.assertion) c.assertions);
@@ -49,6 +57,7 @@ let
   adminSet = eval { devAuth = true; admin.bind = "127.0.0.1:8788"; };
   catalogued = eval { devAuth = true; catalogue = "https://k2on.github.io/classical/catalogue.json"; };
   catalogueNoMedia = eval { devAuth = true; mediaPath = null; catalogue = "https://k2on.github.io/classical/catalogue.json"; };
+  unheard = eval { devAuth = true; transcripts.enable = false; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -77,6 +86,8 @@ let
     [ (says adminSet "the admin page and its explorer were removed") "an admin option set says it is gone" ]
     [ ((env catalogued).HARKEN_CATALOGUE == "https://k2on.github.io/classical/catalogue.json" && !(env dev ? HARKEN_CATALOGUE)) "a catalogue reaches the server, and none, nothing" ]
     [ (!(env catalogueNoMedia ? HARKEN_CATALOGUE)) "and is imported only with media to serve it from" ]
+    [ ((env dev) ? HARKEN_TRANSCRIBER && !(env unheard ? HARKEN_TRANSCRIBER) && !(env noMedia ? HARKEN_TRANSCRIBER)) "episodes are heard by default, unless turned off or there is no media" ]
+    [ (builtins.match "/nix/store/[^ \n]*-harken-transcriber" (builtins.unsafeDiscardStringContext (env dev).HARKEN_TRANSCRIBER) != null) "the transcriber is one script, its whole body in it" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
 in

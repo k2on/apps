@@ -1,6 +1,6 @@
 // The splash stays while nothing is ready and the ceiling has not passed,
 // and goes on whichever comes first.
-package dev.harken.android.ui
+package dev.arkui
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

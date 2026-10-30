@@ -3326,6 +3326,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "money-domain"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-auth",
+ "ark-ffi",
+ "ark-peer",
+ "serde",
+ "serde_json",
+ "uniffi",
+]
+
+[[package]]
+name = "money-ffi"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-ffi",
+ "ark-peer",
+ "arkdb",
+ "money-domain",
+ "serde_json",
+ "tempfile",
+ "uniffi",
+]
+
+[[package]]
+name = "money-iced"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-auth",
+ "ark-peer",
+ "arkui",
+ "iced",
+ "money-domain",
+ "money-server",
+ "tempfile",
+ "tokio",
+ "web-sys",
+]
+
+[[package]]
+name = "money-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark",
+ "ark-auth",
+ "ark-peer",
+ "axum",
+ "money-domain",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

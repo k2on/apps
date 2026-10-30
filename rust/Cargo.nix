@@ -157,6 +157,46 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "money-domain" = rec {
+      packageId = "money-domain";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-domain";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "money-ffi" = rec {
+      packageId = "money-ffi";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-ffi";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "money-iced" = rec {
+      packageId = "money-iced";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-iced";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "money-server" = rec {
+      packageId = "money-server";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-server";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
   };
 
   # A derivation that joins the outputs of all workspace members together.
@@ -10392,6 +10432,262 @@ rec {
           "os-ext" = [ "os-poll" "windows-sys/Win32_System_Pipes" "windows-sys/Win32_Security" ];
         };
         resolvedDefaultFeatures = [ "default" "log" "net" "os-ext" "os-poll" ];
+      };
+      "money-domain" = rec {
+        crateName = "money-domain";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/domain; };
+        libName = "money_domain";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-ffi";
+            packageId = "ark-ffi";
+            optional = true;
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
+          "seed" = [ "dep:ark-peer" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" "seed" ];
+      };
+      "money-ffi" = rec {
+        crateName = "money-ffi";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/ffi; };
+        libName = "money_ffi";type = [ "lib" "cdylib" "staticlib" ];
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-ffi";
+            packageId = "ark-ffi";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "money-domain";
+            packageId = "money-domain";
+            features = [ "ffi" "seed" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            usesDefaultFeatures = false;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "arkdb";
+            packageId = "arkdb";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+        ];
+
+      };
+      "money-iced" = rec {
+        crateName = "money-iced";
+        version = "0.1.0";
+        edition = "2021";
+        crateBin = [
+          {
+            name = "money-iced";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/iced; };
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "arkui";
+            packageId = "arkui";
+          }
+          {
+            name = "iced";
+            packageId = "iced";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "smol" "svg" "advanced" "fira-sans" ];
+          }
+          {
+            name = "iced";
+            packageId = "iced";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "webgl" "svg" "advanced" "fira-sans" ];
+          }
+          {
+            name = "money-domain";
+            packageId = "money-domain";
+            features = [ "seed" ];
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "console" "Window" "Location" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "money-server";
+            packageId = "money-server";
+            target = {target, features}: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+            target = {target, features}: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            target = {target, features}: (!("wasm32" == target."arch" or null));
+            features = [ "rt-multi-thread" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "demo" ];
+      };
+      "money-server" = rec {
+        crateName = "money-server";
+        version = "0.1.0";
+        edition = "2021";
+        crateBin = [
+          {
+            name = "money-server";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/server; };
+        libName = "money_server";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            features = [ "server" ];
+          }
+          {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
+            name = "money-domain";
+            packageId = "money-domain";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "macros" "net" "sync" "time" "signal" ];
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            usesDefaultFeatures = false;
+            features = [ "tls" "json" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+        ];
+
       };
       "moxcms" = rec {
         crateName = "moxcms";

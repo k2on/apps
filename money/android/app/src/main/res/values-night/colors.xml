@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dark scheme's page and primary (Theme.kt, Palette.Dark). -->
+    <color name="splash_ground">#FF0F1511</color>
+    <color name="splash_mark">#FF8BD5AD</color>
+</resources>

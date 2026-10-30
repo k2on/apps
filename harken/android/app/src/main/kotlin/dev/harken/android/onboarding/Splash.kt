@@ -25,10 +25,10 @@ package dev.harken.android.onboarding
 
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.ViewModelProvider
-import dev.harken.android.ui.holdSplashUntil
+import dev.arkui.holdSplashUntil
 
 /** How long the splash may be held for, at most. */
-public const val SPLASH_CEILING_MS: Long = dev.harken.android.ui.SPLASH_CEILING_MS
+public const val SPLASH_CEILING_MS: Long = dev.arkui.SPLASH_CEILING_MS
 
 /**
  * Install the system splash and keep it until [ArkHost.ready], or `ceilingMs` — called before

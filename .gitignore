@@ -5,3 +5,6 @@ docs/perf/
 # `.#harken-ios-xcframework -o harken/ffi/ios` leave for a local build.
 /harken/ffi/android
 /harken/ffi/ios
+# The same for money (`.#money-ios-xcframework -o money/ffi/ios`).
+/money/ffi/ios
+/money/ffi/android
