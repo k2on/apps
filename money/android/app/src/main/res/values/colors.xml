@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The splash, before any Compose theme exists: the light scheme's page
+         and primary (Theme.kt, Palette.Light). -->
+    <color name="splash_ground">#FFF6FBF4</color>
+    <color name="splash_mark">#FF1B6B4A</color>
+</resources>

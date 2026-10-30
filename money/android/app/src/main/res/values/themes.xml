@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launch: the system splash (androidx.core:core-splashscreen) on the
+         page's ground with the wallet in the primary, held until the first
+         screen has what it draws, then the theme the app draws in. -->
+    <style name="Theme.Money.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_ground</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash</item>
+        <item name="postSplashScreenTheme">@android:style/Theme.DeviceDefault.NoActionBar</item>
+    </style>
+</resources>

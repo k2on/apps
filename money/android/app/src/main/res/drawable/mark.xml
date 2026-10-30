@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- money's mark: a wallet with its clasp, filled. Drawn in black and tinted
+     where it is used (the onboarding's pages tint it the primary). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="#FF000000" android:pathData="M5 5h12a2 2 0 0 1 2 2v2h-4a3 3 0 0 0 0 6h4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
+    <path android:fillColor="#FF000000" android:pathData="M15 10.5h6v3h-6a1.5 1.5 0 0 1 0-3z" />
+</vector>

@@ -806,6 +806,22 @@
           harken-apk = harken.apk;
           harken-android-screens = harken.screens;
 
+          # money's phone (money/android/README.md): Compose over
+          # `money-android-lib`, the look shared with harken (kotlin/arkui).
+          # Its Maven graph is harken's, replayed (money/android/deps.json).
+          # `appid` here is the package the screenshots are named by; the
+          # installed app is us.koon.money.
+          money = androidApp {
+            name = "money";
+            appid = "dev.money.android";
+            flags = [ "-PmoneyLib=${money-android-lib}" ];
+            shared = [ "kotlin/arkui" ];
+            title = "money";
+            note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
+          };
+          money-apk = money.apk;
+          money-android-screens = money.screens;
+
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
           # docs/plan-bible.md): plain Kotlin, no native library and none of
           # ArkDB, so it is the SDK and gradle alone.
@@ -816,7 +832,7 @@
             note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
           };
 
-          # Both apps as one F-Droid repository (nix/fdroid.nix): each app is
+          # Every app as one F-Droid repository (nix/fdroid.nix): each app is
           # its id, its APK, its metadata and its icon.
           fdroid = import ./nix/fdroid.nix {
             inherit lib pkgs;
@@ -835,6 +851,13 @@
                 apkName = "revelation.apk";
                 metadata = ./revelation/android/fdroid/metadata/dev.revelation.android.yml;
                 icon = ./revelation/android/fdroid/icon.svg;
+              }
+              {
+                appid = "us.koon.money";
+                apk = money-apk;
+                apkName = "money.apk";
+                metadata = ./money/android/fdroid/metadata/us.koon.money.yml;
+                icon = ./money/android/fdroid/icon.svg;
               }
             ];
           };
@@ -977,6 +1000,9 @@
             revelation-apk = revelation.apk;
             revelation-android-screens = revelation.screens;
             revelation-apk-deps = revelation.deps;
+            # money's phone, over money-android-lib (money/android/README.md).
+            inherit money-apk money-android-screens;
+            money-apk-deps = money.deps;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
             android-sdk = androidSdk;
@@ -1206,6 +1232,8 @@
                 # The kernel for every ABI first, so its failure reads on its own.
                 (apk "harken" harken { first = [ "harken-android-lib" ]; })
                 (apk "revelation" revelation { })
+                # money's kernel for every ABI first, as harken's.
+                (apk "money" money { first = [ "money-android-lib" ]; })
               ];
             };
 

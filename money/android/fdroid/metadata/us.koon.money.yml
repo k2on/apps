@@ -1,0 +1,20 @@
+Categories:
+  - Money
+License: MIT OR Apache-2.0
+WebSite: https://k2on.github.io/apps/
+SourceCode: https://github.com/k2on/apps
+IssueTracker: https://github.com/k2on/apps/issues
+
+Name: Money
+Summary: A household's budget, shared, every dollar given a job
+Description: |-
+    Money is a zero-based budget for a household, the kind YNAB made familiar: money that comes in is ready to assign, each category keeps what it was given until it is spent, and an overspent category is paid for by the next month. One budget per server, and everyone who signs in to it shares it.
+
+    The budget lives on the phone and syncs with the server, so it opens at once and works offline; a change made offline lands when the server can be reached. The server can follow bank accounts through Plaid, and what it imports waits on the phone to be approved. Without a server, the app runs a demo household on the phone alone.
+
+    It needs a money server to sign in to; there is no account anywhere else. The server, the desktop client and the browser client are in the same repository.
+
+    This is a release build signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the household running the server.
+
+AutoUpdateMode: None
+UpdateCheckMode: None
