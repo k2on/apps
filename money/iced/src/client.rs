@@ -17,6 +17,8 @@ pub fn domain() -> Arc<Domain> {
 }
 
 /// The peer `disk` holds, as whoever last signed in on it.
+/// The demo opens its own (`money_domain::seed::open`).
+#[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn open(disk: Box<dyn Disk>) -> Replica {
     Replica::open_as(Config::of(domain()), disk, None)
 }
