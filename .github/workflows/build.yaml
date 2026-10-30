@@ -25,7 +25,9 @@
 # set (with the secret CACHIX_AUTH_TOKEN to push): every path is pushed once by
 # its hash and substituted after, so what does have to build pulls every
 # unchanged dependency — aapt2, the toolchains, the kernel — instead of
-# compiling it. Until then, nix-community/cache-nix-action keeps each job's
+# compiling it. Every Rust crate is a derivation of its own (nix/rust.nix), so
+# that holds crate by crate: a lockfile that moves one crate compiles that crate
+# and what depends on it, and the rest of the graph is Cachix's. Until then, nix-community/cache-nix-action keeps each job's
 # store in GitHub's actions cache (10 GB per repository). The Android SDK is
 # Google's and its licence does not allow redistributing it, so it is never
 # pushed to Cachix; the APK jobs keep it in the actions cache either way.
@@ -119,10 +121,9 @@ jobs:
           path: page-out
           if-no-files-found: error
 
-  # The flake's Linux checks. Each is a few test runs over one shared
-  # build of the workspace (flake.nix: crane's layers), so building them
-  # all costs about one workspace build; with Cachix the dependency layer
-  # is substituted and only the workspace and its tests are compiled.
+  # The flake's Linux checks: each member's tests and lints a derivation of
+  # its own over the crates' (flake.nix, nix/rust.nix), so with Cachix a
+  # commit compiles and runs only what its change reaches.
   checks:
     runs-on: ubuntu-latest
     steps:
@@ -133,6 +134,16 @@ jobs:
         with:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      # The crates every build is made of are each workspace's Cargo.nix,
+      # which crate2nix writes from the lockfile: a lockfile changed without
+      # them is said here, with the command that writes them.
+      - name: Cargo.nix is the lockfiles'
+        run: |
+          nix run .#update-cargo-nix
+          git diff --exit-code -- rust/Cargo.nix docs/site/Cargo.nix || {
+            echo "::error::rust/Cargo.nix or docs/site/Cargo.nix is not the lockfile's: nix run .#update-cargo-nix"
+            exit 1
+          }
       - name: Build the checks
         run: |
           nix build --print-build-logs --no-link \
@@ -146,7 +157,13 @@ jobs:
   # What a server runs — the harken NixOS module's packages — built and
   # pushed to Cachix, which ark substitutes from: a deploy of a commit this
   # job has built downloads them rather than compiling them on the host.
+  # After the pages: the web directory it serves is the browser peer's
+  # crates compiled to wasm, the page's own, which it then substitutes
+  # rather than compiling beside it. On a tag no page is built, and it runs
+  # all the same.
   server:
+    needs: page
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

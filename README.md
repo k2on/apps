@@ -74,6 +74,9 @@ One command holds all of it:
     nix build .#fdroid-repo     # both APKs as the F-Droid repository, signed
                                 # and checked; apps-fdroid is what CI runs
     nix run .#fuzz -- 1000 1 traces
+    nix run .#update-cargo-nix  # after a Cargo.toml or lockfile edit: the
+                                # crates every Rust build is made of
+                                # (rust/Cargo.nix, docs/site/Cargo.nix)
 
 What is verified: the kernel, the peer, harken's domain and server by
 their tests and the vectors; the fuzzer's sessions converge and every

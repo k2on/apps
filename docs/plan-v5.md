@@ -1230,6 +1230,55 @@ Xcode — the SwiftUI, the engine, the lock screen, the sign-in sheet, the
 covers, the project, the xcframework's link, an archive, a device, a real
 server (`harken/ios/README.md`, "First build").
 
+### Landed: a derivation per crate
+
+crane's layers are gone. A layer was a `target/` of many crates keyed on
+everything under it, so a manifest edit anywhere — a dependency added to
+one crate — moved the dependency layer's key and compiled every third-party
+crate again, for every target: 235 for the server, 264 for wasm, each
+Android ABI's. Now every Rust build is nixpkgs' `buildRustCrate`, a
+derivation per crate, over `rust/Cargo.nix` (and `docs/site/Cargo.nix`):
+crate2nix's listing of the lockfile's crates — each one's source, features
+and dependencies — written by `nix run .#update-cargo-nix` and held to the
+lockfile by the workflow. A crate's derivation is its source, its
+resolved features, its target and its dependencies' derivations; the same
+crate built the same way is the same path in any build and on Cachix, so a
+manifest edit compiles the crates whose inputs it moved and what depends on
+them, and the server job and the pages, which share the wasm crates, build
+them once (the server job now waits for the pages and substitutes them).
+
+`nix/rust.nix` is the wiring, and not crate2nix's: crate2nix (0.14, and
+master) resolves features once, for the target, and uses that for the
+build machine's crates too, so a crate both a build script and the target
+need (`rustix`) was compiled for the build machine with the target's
+dependencies, which no cross build survives. It resolves two graphs as
+cargo does — what the target links, and the build scripts' dependencies
+and proc macros — each with its own features (one on a native build), and
+evaluates `cfg(...)` against the target rustc has (`target_os = "android"`,
+`target_env = ""`), where crate2nix said `linux` and `gnu`. And it gives
+`buildRustCrate` what cargo sets and it does not: `CARGO_CRATE_NAME`
+(UniFFI's macros), `CARGO_ENCODED_RUSTFLAGS`, and every `CARGO_CFG_*` from
+`rustc --print cfg` (it said `unix` and `gnu` for every target, so winit
+and wgpu chose X11 and no atomics for wasm). Each target is nixpkgs for
+that platform: wasm32 (`wasm32-unknown-none`, rustc's own linker), each
+Android ABI the NDK's prebuilt clang against API 26 (`*-android-prebuilt`).
+
+The checks are a derivation per member each: its tests (`checks.rust`
+links them), built from the crate's directory alone at its place in the
+tree and run in the whole of it, so `CARGO_MANIFEST_DIR` and `../../spec`
+are where cargo has them; a library's doctests (ark's `compile_fail` and
+the one that compiles) by rustdoc in its test build; harken-server's
+tests with `CARGO_BIN_EXE_*` naming the package's binaries; `clippy` each
+member built again with clippy's driver as its rustc, its lint cap
+dropped and warnings denied, as itself and as its tests; `fmt` rustfmt
+over every file with the rustfmt.toml nearest it. UniFFI's bindgen reads
+each crate's `uniffi.toml` through `cargo metadata --no-deps`, which needs
+nothing fetched; its Kotlin and Swift from the per-crate host library are
+the same files, byte for byte, as from cargo's. The iOS xcframework is
+cargo's build over the vendored lockfile still: nixpkgs has no iOS package
+set that links with the builder's Xcode, and it has not been built
+anywhere (ios.yaml builds it with cargo).
+
 ## Landed
 
 **S4** (`21c7c42`, `e00541f`): **the interpreter leaves the kernel; a
