@@ -76,10 +76,13 @@
       # `harken/` by path, so both trees are the source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" ];
-      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
-      # tests hold to the domain (harken/ffi/tests/gen.rs).
-      genDirs = [ "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" ];
+      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
+      # money/ffi's tests hold to their domains (`tests/gen.rs`).
+      genDirs = [
+        "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen"
+        "money/android/app/src/main/kotlin/dev/money/android/gen" "money/ios/Money/Gen"
+      ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
       # crate the workspace locked, or the glue it writes does not match the
@@ -538,61 +541,101 @@
               export CARGO_TARGET_${up}_LINKER=$bin/${a.clang}26-clang
               export CC_${low}=$bin/${a.clang}26-clang AR_${low}=$bin/llvm-ar
             '';
-          # `harken_ffi` for one Android ABI against API 26 (the app's
-          # minSdk), stripped, as `jniLibs/<abi>/libharken_ffi.so`: its
-          # dependencies for that target, the kernel over them, and the
-          # library over that.
-          androidLib = t: a:
+          # An app's library for its phones (`harken/ffi`, `money/ffi`) as the
+          # APK carries it: `name` the app (each derivation's name begins
+          # with it), `crate` its ffi crate, `so` the library's name
+          # (`harken_ffi`). Everything below is per app, so that one app's
+          # library does not wait on another's.
+          androidPhone = { name, crate, so }:
             let
-              build = "cargoWithProfile build --locked -p harken-ffi --lib --target ${t}";
-              deps = androidCrane.buildDepsOnly (depsArgs // {
-                pname = "harken-android-${a.abi}";
+              # `so` for one Android ABI against API 26 (the app's minSdk),
+              # stripped, as `jniLibs/<abi>/lib<so>.so`: its dependencies
+              # for that target, the kernel over them, and the library over
+              # that.
+              androidLib = t: a:
+                let
+                  build = "cargoWithProfile build --locked -p ${crate} --lib --target ${t}";
+                  deps = androidCrane.buildDepsOnly (depsArgs // {
+                    pname = "${name}-android-${a.abi}";
+                    doCheck = false;
+                    preBuild = androidEnv t a;
+                    buildPhaseCargoCommand = build;
+                  });
+                  kernel = androidCrane.mkCargoDerivation (common // {
+                    pname = "${name}-android-${a.abi}-kernel";
+                    src = kernelSrc;
+                    cargoArtifacts = deps;
+                    preBuild = androidEnv t a;
+                    buildPhaseCargoCommand = build;
+                  });
+                in
+                androidCrane.mkCargoDerivation (common // {
+                  pname = "${name}-android-${a.abi}";
+                  cargoArtifacts = kernel;
+                  doInstallCargoArtifacts = false;
+                  preBuild = androidEnv t a;
+                  buildPhaseCargoCommand = build;
+                  installPhaseCommand = ''
+                    mkdir -p $out/jniLibs/${a.abi}
+                    $bin/llvm-strip -o $out/jniLibs/${a.abi}/lib${so}.so target/${t}/release/lib${so}.so
+                  '';
+                });
+              # The Kotlin the app compiles with the library, UniFFI's
+              # bindings and the typed half, under `kotlin/`; and the library
+              # built for this machine as `host/lib<so>.so`, which the app's
+              # JVM tests load. Built as an Android ABI's is, on a chain of
+              # its own (dependencies, kernel, library) and not over the
+              # workspace's layers, whose dependency layer is every member's,
+              # iced's stack (wgpu, winit, …) among them: `-p ${crate}` would
+              # wait on it. The dependencies have UniFFI's bindgen binary's
+              # too.
+              hostBuild = "cargoWithProfile build --locked -p ${crate} --lib";
+              hostDeps = craneLib.buildDepsOnly (depsArgs // {
+                pname = "${name}-android-host";
                 doCheck = false;
-                preBuild = androidEnv t a;
-                buildPhaseCargoCommand = build;
+                buildPhaseCargoCommand = ''
+                  ${hostBuild}
+                  cargoWithProfile build --locked -p ark-ffi --features bindgen --bin uniffi-bindgen
+                '';
               });
-              kernel = androidCrane.mkCargoDerivation (common // {
-                pname = "harken-android-${a.abi}-kernel";
+              hostKernel = craneLib.mkCargoDerivation (common // {
+                pname = "${name}-android-host-kernel";
                 src = kernelSrc;
-                cargoArtifacts = deps;
-                preBuild = androidEnv t a;
-                buildPhaseCargoCommand = build;
+                cargoArtifacts = hostDeps;
+                buildPhaseCargoCommand = hostBuild;
+              });
+              androidHost = craneLib.mkCargoDerivation (common // {
+                pname = "${name}-android-host";
+                cargoArtifacts = hostKernel;
+                doInstallCargoArtifacts = false;
+                buildPhaseCargoCommand = ''
+                  ${hostBuild}
+                  ${ffiBindings { lib = "target/release/lib${so}.so"; language = "kotlin"; }}
+                '';
+                installPhaseCommand = ''
+                  mkdir -p $out/kotlin/dev/arkdb/ffi
+                  cp -r bindings/kotlin/. $out/kotlin/
+                  install -Dm755 target/release/lib${so}.so $out/host/lib${so}.so
+                  cp ark-ffi/kotlin/Typed.kt $out/kotlin/dev/arkdb/ffi/
+                '';
               });
             in
-            androidCrane.mkCargoDerivation (common // {
-              pname = "harken-android-${a.abi}";
-              cargoArtifacts = kernel;
-              doInstallCargoArtifacts = false;
-              preBuild = androidEnv t a;
-              buildPhaseCargoCommand = build;
-              installPhaseCommand = ''
-                mkdir -p $out/jniLibs/${a.abi}
-                $bin/llvm-strip -o $out/jniLibs/${a.abi}/libharken_ffi.so target/${t}/release/libharken_ffi.so
+            {
+              inherit hostDeps;
+              # Each ABI's library and the host's part, one directory: what
+              # the app's APK builds over.
+              lib = pkgs.runCommand "${name}-android-lib-0.1.0" { } ''
+                mkdir -p $out
+                for part in ${lib.concatStringsSep " " (lib.mapAttrsToList androidLib androidTargets)} ${androidHost}; do
+                  cp -r --no-preserve=mode $part/. $out/
+                done
+                chmod 755 $out/host/lib${so}.so
               '';
-            });
-          # The Kotlin the app compiles with the library, UniFFI's bindings
-          # and the typed half, under `kotlin/`; and the library built for
-          # this machine as `host/libharken_ffi.so`, which the app's JVM
-          # tests load. Built as an Android ABI's is, on a chain of its own
-          # (dependencies, kernel, library) and not over the workspace's
-          # layers, whose dependency layer is every member's, iced's stack
-          # (wgpu, winit, …) among them: `-p harken-ffi` would wait on it.
-          # The dependencies have UniFFI's bindgen binary's too.
-          ffiHostBuild = "cargoWithProfile build --locked -p harken-ffi --lib";
-          ffiHostDeps = craneLib.buildDepsOnly (depsArgs // {
-            pname = "harken-android-host";
-            doCheck = false;
-            buildPhaseCargoCommand = ''
-              ${ffiHostBuild}
-              cargoWithProfile build --locked -p ark-ffi --features bindgen --bin uniffi-bindgen
-            '';
-          });
-          ffiHostKernel = craneLib.mkCargoDerivation (common // {
-            pname = "harken-android-host-kernel";
-            src = kernelSrc;
-            cargoArtifacts = ffiHostDeps;
-            buildPhaseCargoCommand = ffiHostBuild;
-          });
+            };
+          harkenAndroid = androidPhone { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; };
+          harken-android-lib = harkenAndroid.lib;
+          # money's (`money/ffi`): what its APK will build over.
+          money-android-lib = (androidPhone { name = "money"; crate = "money-ffi"; so = "money_ffi"; }).lib;
           # UniFFI's bindgen binary (rust/ark-ffi/src/bin/uniffi-bindgen.rs),
           # which is UniFFI's main and nothing of the workspace: built over
           # the dummy source with that one file real, so the workspace is
@@ -605,7 +648,7 @@
                 install -m644 ${./rust/ark-ffi/src/bin/uniffi-bindgen.rs} $out/rust/ark-ffi/src/bin/uniffi-bindgen.rs
               '';
             });
-            cargoArtifacts = ffiHostDeps;
+            cargoArtifacts = harkenAndroid.hostDeps;
             cargoExtraArgs = "--locked -p ark-ffi --features bindgen --bin uniffi-bindgen";
             # The dummy layer built a stub at the same path, and every file
             # in the store is as old as every other, so cargo would take the
@@ -613,30 +656,6 @@
             preBuild = "touch ark-ffi/src/bin/uniffi-bindgen.rs";
             doCheck = false;
           });
-          androidHost = craneLib.mkCargoDerivation (common // {
-            pname = "harken-android-host";
-            cargoArtifacts = ffiHostKernel;
-            doInstallCargoArtifacts = false;
-            buildPhaseCargoCommand = ''
-              ${ffiHostBuild}
-              ${ffiBindings { lib = "target/release/libharken_ffi.so"; language = "kotlin"; }}
-            '';
-            installPhaseCommand = ''
-              mkdir -p $out/kotlin/dev/arkdb/ffi
-              cp -r bindings/kotlin/. $out/kotlin/
-              install -Dm755 target/release/libharken_ffi.so $out/host/libharken_ffi.so
-              cp ark-ffi/kotlin/Typed.kt $out/kotlin/dev/arkdb/ffi/
-            '';
-          });
-          # Each ABI's library and the host's part, one directory: what
-          # `harken-apk` builds the app over.
-          harken-android-lib = pkgs.runCommand "harken-android-lib-0.1.0" { } ''
-            mkdir -p $out
-            for part in ${lib.concatStringsSep " " (lib.mapAttrsToList androidLib androidTargets)} ${androidHost}; do
-              cp -r --no-preserve=mode $part/. $out/
-            done
-            chmod 755 $out/host/libharken_ffi.so
-          '';
 
           # The Android SDK the APK is built with. Google ships one for
           # x86_64 Linux and for macOS; on Linux the SDK is assembled by hand
@@ -788,73 +807,81 @@
 
           # The same library for iOS — `aarch64-apple-ios` for a phone and
           # `aarch64-apple-ios-sim` for the simulator on an Apple-silicon Mac —
-          # as `HarkenFFI.xcframework`, with UniFFI's Swift and the typed half
-          # under `swift/`. Linking for iOS needs Apple's SDK, which only a
-          # macOS builder has: on Linux this derivation evaluates and is not
-          # built (meta.platforms), and it has not been built anywhere yet.
+          # as `<Framework>.xcframework` (`HarkenFFI`, `MoneyFFI`), with
+          # UniFFI's Swift and the typed half under `swift/`. Linking for iOS
+          # needs Apple's SDK, which only a macOS builder has: on Linux these
+          # derivations evaluate and are not built (meta.platforms), and they
+          # have not been built anywhere yet.
           iosRust = rust.override { targets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ]; };
           iosCrane = craneFor iosRust;
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
-          # The library for each iOS target and for the host, which UniFFI
-          # reads the Swift from.
-          # The iOS targets compile and link with the builder's Xcode: its
-          # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
-          # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
-          # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
-          # fails under them: both are taken back for these two targets, and
-          # the host build keeps nix's toolchain.
-          iosBuild = ''
-            export PATH=/usr/bin:$PATH
-            export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
-            unset SDKROOT
-            ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
-              export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
-              export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
-            '') iosTargets}
-            ${lib.concatMapStrings (t: "cargoWithProfile build --locked -p harken-ffi --lib --target ${t}\n") iosTargets}
-            cargoWithProfile build --locked -p harken-ffi --lib
-          '';
-          # Their dependencies.
-          iosDeps = iosCrane.buildDepsOnly (depsArgs // {
-            pname = "harken-ios";
-            doCheck = false;
-            # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
-            # Xcode, outside the store.
-            __noChroot = true;
-            buildPhaseCargoCommand = iosBuild;
-            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-          });
-          # The kernel over them.
-          iosKernel = iosCrane.mkCargoDerivation (common // {
-            pname = "harken-ios-kernel";
-            src = kernelSrc;
-            cargoArtifacts = iosDeps;
-            __noChroot = true;
-            buildPhaseCargoCommand = iosBuild;
-            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-          });
-          harken-ios-xcframework = iosCrane.mkCargoDerivation (common // {
-            pname = "harken-ios-xcframework";
-            cargoArtifacts = iosKernel;
-            doInstallCargoArtifacts = false;
-            __noChroot = true;
-            buildPhaseCargoCommand = iosBuild + ''
-              ${ffiBindings { lib = "target/release/libharken_ffi.dylib"; language = "swift"; }}
-              mkdir -p headers
-              cp bindings/swift/*.h headers/
-              cat bindings/swift/*.modulemap > headers/module.modulemap
-              /usr/bin/xcodebuild -create-xcframework \
-                -library target/aarch64-apple-ios/release/libharken_ffi.a -headers headers \
-                -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers headers \
-                -output HarkenFFI.xcframework
-            '';
-            installPhaseCommand = ''
-              mkdir -p $out/swift
-              cp -r HarkenFFI.xcframework $out/
-              cp bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
-            '';
-            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-          });
+          # One app's: `name`, `crate` and `so` as `androidPhone`'s, and the
+          # framework's name.
+          iosPhone = { name, crate, so, framework }:
+            let
+              # The library for each iOS target and for the host, which
+              # UniFFI reads the Swift from.
+              # The iOS targets compile and link with the builder's Xcode:
+              # its developer directory, clang, ar and SDKs. nixpkgs' darwin
+              # stdenv sets DEVELOPER_DIR and SDKROOT to its own macOS SDK,
+              # which has no iPhoneOS platform, so `xcrun --sdk iphoneos`
+              # (cc-rs asks it) fails under them: both are taken back for
+              # these two targets, and the host build keeps nix's toolchain.
+              iosBuild = ''
+                export PATH=/usr/bin:$PATH
+                export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+                unset SDKROOT
+                ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
+                  export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
+                  export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
+                '') iosTargets}
+                ${lib.concatMapStrings (t: "cargoWithProfile build --locked -p ${crate} --lib --target ${t}\n") iosTargets}
+                cargoWithProfile build --locked -p ${crate} --lib
+              '';
+              # Their dependencies.
+              iosDeps = iosCrane.buildDepsOnly (depsArgs // {
+                pname = "${name}-ios";
+                doCheck = false;
+                # xcodebuild and the iPhoneOS and simulator SDKs: the
+                # builder's Xcode, outside the store.
+                __noChroot = true;
+                buildPhaseCargoCommand = iosBuild;
+                meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+              });
+              # The kernel over them.
+              iosKernel = iosCrane.mkCargoDerivation (common // {
+                pname = "${name}-ios-kernel";
+                src = kernelSrc;
+                cargoArtifacts = iosDeps;
+                __noChroot = true;
+                buildPhaseCargoCommand = iosBuild;
+                meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+              });
+            in
+            iosCrane.mkCargoDerivation (common // {
+              pname = "${name}-ios-xcframework";
+              cargoArtifacts = iosKernel;
+              doInstallCargoArtifacts = false;
+              __noChroot = true;
+              buildPhaseCargoCommand = iosBuild + ''
+                ${ffiBindings { lib = "target/release/lib${so}.dylib"; language = "swift"; }}
+                mkdir -p headers
+                cp bindings/swift/*.h headers/
+                cat bindings/swift/*.modulemap > headers/module.modulemap
+                /usr/bin/xcodebuild -create-xcframework \
+                  -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
+                  -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
+                  -output ${framework}.xcframework
+              '';
+              installPhaseCommand = ''
+                mkdir -p $out/swift
+                cp -r ${framework}.xcframework $out/
+                cp bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
+              '';
+              meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+            });
+          harken-ios-xcframework = iosPhone { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; framework = "HarkenFFI"; };
+          money-ios-xcframework = iosPhone { name = "money"; crate = "money-ffi"; so = "money_ffi"; framework = "MoneyFFI"; };
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
@@ -908,6 +935,8 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
             inherit money-iced money-web;
+            # money's library for its phones (money/ffi), as harken's.
+            inherit money-android-lib money-ios-xcframework;
             default = ark;
             inherit harken-apk harken-android-screens;
             harken-apk-deps = harken.deps;
@@ -1037,29 +1066,36 @@
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;
-            # The bridge (§1.16, N3): ark-ffi and harken/ffi build natively,
-            # their tests drive the whole surface in the process (a server in
-            # it, a mutate and its refusal, a view's patches, the live space,
-            # alone and joining, a hall of devices) and hold the generated
-            # Kotlin and Swift to the domain; and UniFFI writes the Kotlin and
-            # the Swift for the library.
+            # The bridge (§1.16, N3): ark-ffi, harken/ffi and money/ffi build
+            # natively, their tests drive the whole surface in the process (a
+            # server in it, a mutate and its refusal, a view's patches, the
+            # live space, alone and joining, a hall of devices, money's demo)
+            # and hold the generated Kotlin and Swift to the domains; and
+            # UniFFI writes the Kotlin and the Swift for both libraries.
             ffi = tests {
               pname = "arkdb-ffi";
-              flags = "-p ark-ffi -p harken-ffi";
+              flags = "-p ark-ffi -p harken-ffi -p money-ffi";
               src = only (rustDirs ++ genDirs);
               postCheck = ''
-                lib=target/release/libharken_ffi.so
-                for language in kotlin swift; do
-                  ${uniffiBindgen}/bin/uniffi-bindgen \
-                    generate --library "$lib" --language $language --no-format --out-dir "$TMPDIR/bindings/$language"
-                done
+                bindings() {
+                  for language in kotlin swift; do
+                    ${uniffiBindgen}/bin/uniffi-bindgen \
+                      generate --library "$1" --language $language --no-format --out-dir "$2/$language"
+                  done
+                  ls "$2/swift/"*FFI.h "$2/swift/"*.modulemap
+                }
+                bindings target/release/libharken_ffi.so "$TMPDIR/bindings"
                 grep -q 'fun `harkenOpen`' "$TMPDIR/bindings/kotlin/dev/harken/ffi/harken_ffi.kt"
                 grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
                 grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
-                ls "$TMPDIR/bindings/swift/"*FFI.h "$TMPDIR/bindings/swift/"*.modulemap
+                bindings target/release/libmoney_ffi.so "$TMPDIR/money"
+                grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/dev/money/ffi/money_ffi.kt"
+                grep -q "class TxnLineView" "$TMPDIR/money/kotlin/uniffi/money_domain/money_domain.kt"
+                grep -q "func moneyDemo" "$TMPDIR/money/swift/money_ffi.swift"
               '';
-              # The bindings it wrote, which the iOS type-check reads.
-              installPhase = "cp -r $TMPDIR/bindings $out";
+              # The bindings it wrote: harken's, which the iOS type-check
+              # reads, and money's under `money/`.
+              installPhase = "cp -r $TMPDIR/bindings $out && cp -r $TMPDIR/money $out/money";
             };
           } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             # What of the iOS app Linux can check (harken/ios/tools/typecheck.sh):

@@ -3331,9 +3331,25 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-auth",
+ "ark-ffi",
  "ark-peer",
  "serde",
  "serde_json",
+ "uniffi",
+]
+
+[[package]]
+name = "money-ffi"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-ffi",
+ "ark-peer",
+ "arkdb",
+ "money-domain",
+ "serde_json",
+ "tempfile",
+ "uniffi",
 ]
 
 [[package]]
