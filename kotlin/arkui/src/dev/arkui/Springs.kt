@@ -14,7 +14,7 @@
 // preview lets the page come only so far — free at first, then harder and
 // harder, never past a limit — and letting go finishes the move or springs it
 // back; [preview] is that curve, `limit · (1 − e^(−r / give))`.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.animation.core.AnimationVector
 import androidx.compose.animation.core.DecayAnimationSpec

@@ -690,14 +690,16 @@
           # (every screen and state, light and dark, rendered on the JVM
           # through layoutlib) and an index.html laying them out light beside
           # dark (nix/screens-index.py). `flags` are the app's own gradle
-          # properties; `title` and `note` head that page.
-          androidApp = { name, appid, flags ? [ ], title, note }:
+          # properties; `title` and `note` head that page. `shared` are the
+          # directories of this tree the app compiles beside its own:
+          # `kotlin/arkui`, the look every Ark app on Android shares.
+          androidApp = { name, appid, flags ? [ ], shared ? [ ], title, note }:
             let
               dir = "${name}/android";
               apk = pkgs.stdenv.mkDerivation (final: {
                 pname = "${name}-apk";
                 version = "0.1.0";
-                src = only [ dir ];
+                src = only ([ dir ] ++ shared);
                 sourceRoot = "source/${dir}";
                 postUnpack = "chmod -R u+w source";
                 nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
@@ -766,6 +768,7 @@
             name = "harken";
             appid = "dev.harken.android";
             flags = [ "-PharkenLib=${harken-android-lib}" ];
+            shared = [ "kotlin/arkui" ];
             title = "Harken";
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };

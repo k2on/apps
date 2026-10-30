@@ -5,7 +5,7 @@
 // menu button is one shape on every client. Every other glyph is the
 // app's. Geometry only: each is drawn in a placeholder ink that `Icon`
 // replaces with the content colour.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor

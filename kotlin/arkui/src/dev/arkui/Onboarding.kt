@@ -5,7 +5,7 @@
 // screenshots do). The machine that decides which to show, and what each
 // button does, is `ark-android`'s (`ArkApp`), which draws these. Every
 // colour is the theme's: an app's identity here is its mark and its name.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -63,7 +63,8 @@ public fun OpeningScreen(
     name: String,
     mark: Painter,
     host: String,
-    delayMs: Long = OPENING_DELAY_MS
+    delayMs: Long = OPENING_DELAY_MS,
+    what: String = "your library",
 ) {
     var shown by remember { mutableStateOf(delayMs <= 0) }
     LaunchedEffect(Unit) {
@@ -76,7 +77,7 @@ public fun OpeningScreen(
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {}
         return
     }
-    OnboardingPage(mark, title = name, sentence = "Getting your library from $host…") {
+    OnboardingPage(mark, title = name, sentence = "Getting $what from $host…") {
         LinearProgressIndicator(
             Modifier.width(96.dp).align(Alignment.CenterHorizontally),
             color = MaterialTheme.colorScheme.primary,
@@ -99,17 +100,20 @@ public fun ServerScreen(
     checking: Boolean,
     onType: (String) -> Unit,
     onContinue: () -> Unit,
+    sentence: String = "$name plays from your own server. Where is it?",
+    placeholder: String = "music.example.com",
+    more: @Composable ColumnScope.() -> Unit = {},
 ) {
     OnboardingPage(
         mark,
         title = "Welcome to $name",
-        sentence = "$name plays from your own server. Where is it?",
+        sentence = sentence,
     ) {
         OutlinedTextField(
             value = typed,
             onValueChange = onType,
             label = { Text("Server address") },
-            placeholder = { Text("music.example.com") },
+            placeholder = { Text(placeholder) },
             isError = error != null,
             supportingText = { Text(error ?: "A name or an address, with a port if it has one.") },
             enabled = !checking,
@@ -129,6 +133,7 @@ public fun ServerScreen(
             modifier = Modifier.fillMaxWidth()) {
                 if (checking) Busy("Checking…") else Text("Continue")
             }
+        more()
     }
 }
 
@@ -154,6 +159,7 @@ public fun SignInScreen(
     phase: SignInPhase,
     onSignIn: () -> Unit,
     onChangeServer: () -> Unit,
+    more: @Composable ColumnScope.() -> Unit = {},
 ) {
     OnboardingPage(
         mark,
@@ -195,6 +201,7 @@ public fun SignInScreen(
             modifier = Modifier.fillMaxWidth()) {
                 Text("Use another server")
             }
+        more()
     }
 }
 

@@ -8,7 +8,7 @@
 // loudspeaker is struck through and the track drawn quiet; the level stays
 // where it was, since unmuting goes back to it. Nothing here knows what is
 // loud: a player's volume, a speaker's, a group's.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.Row

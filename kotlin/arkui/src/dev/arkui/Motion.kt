@@ -39,7 +39,7 @@
 // tabs, puts a `Hero` on the art that opens a page and a `Spot` where the
 // header's art lands, a page under the bar says so, and the app says when
 // something over the pages (a player) takes the back gesture instead.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedDispatcher

@@ -9,7 +9,7 @@
 // `.home.arpa` or `.internal`. A public name is never tried in the clear.
 //
 // Kept free of Android, so that it is held by plain JVM tests.
-package dev.harken.android.onboarding
+package dev.arkui.server
 
 /** What the server field came to: the URLs to try, in order, or why there are none. */
 public sealed class Address {

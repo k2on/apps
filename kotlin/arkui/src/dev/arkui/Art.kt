@@ -13,7 +13,7 @@
 // (`LocalCoverLoader`), which says where a thing's art is, hands back one
 // already decoded at once, and loads the rest. With none — a screenshot —
 // only the squares are drawn.
-package dev.harken.android.ui
+package dev.arkui
 
 import android.graphics.Bitmap
 import android.graphics.Canvas

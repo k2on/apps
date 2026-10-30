@@ -17,7 +17,7 @@
 // The app owns the order. Until the list it gives says the row moved —
 // the session's answer comes back from the room — the order it was
 // dragged into is kept, so the row does not jump back on the way.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VisibilityThreshold

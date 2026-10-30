@@ -13,7 +13,7 @@ import androidx.lifecycle.Lifecycle
 import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
-import dev.harken.android.ui.routes
+import dev.arkui.routes
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame

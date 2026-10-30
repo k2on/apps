@@ -4,7 +4,7 @@
 // player and the position's two leaves, a track's row, and a `CoverCard`
 // here — while a test has installed a sink, and nothing at all otherwise,
 // which is every run of the app: one volatile read per composition.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.NonRestartableComposable

@@ -24,7 +24,7 @@
 // that is up, either end of a move), and created while it is not drawn at
 // all. A NavHost already moves its entries so; `TabStack` and
 // `LifecycleCapped` say the same of a tab and of what is behind a card.
-package dev.harken.android.ui
+package dev.arkui
 
 import android.os.Bundle
 import android.os.Looper

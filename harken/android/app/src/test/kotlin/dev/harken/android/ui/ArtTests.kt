@@ -2,7 +2,7 @@
 // gradients a name picks is FNV-1a over UTF-16 code units, pinned here with
 // `rust/arkui`'s own pins (`art::hash`), so a phone and the desktop draw one
 // album as one square.
-package dev.harken.android.ui
+package dev.arkui
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

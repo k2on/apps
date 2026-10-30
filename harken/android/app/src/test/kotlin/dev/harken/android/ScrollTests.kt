@@ -31,8 +31,8 @@ import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
 import dev.harken.android.onboarding.ArkSession
-import dev.harken.android.ui.Art
-import dev.harken.android.ui.Recompositions
+import dev.arkui.Art
+import dev.arkui.Recompositions
 import java.io.File
 import java.lang.reflect.Proxy
 import java.util.concurrent.ConcurrentHashMap

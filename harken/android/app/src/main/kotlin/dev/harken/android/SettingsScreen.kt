@@ -49,14 +49,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.arkdb.ffi.Status
-import dev.harken.android.ui.Art
-import dev.harken.android.ui.Glyph
-import dev.harken.android.ui.LocalArkTheme
-import dev.harken.android.ui.LocalCoverLoader
-import dev.harken.android.ui.PageBar
-import dev.harken.android.ui.Space
-import dev.harken.android.ui.quiet
-import dev.harken.android.ui.rememberDestinationScrollState
+import dev.arkui.Art
+import dev.arkui.Glyph
+import dev.arkui.LocalArkTheme
+import dev.arkui.LocalCoverLoader
+import dev.arkui.PageBar
+import dev.arkui.Space
+import dev.arkui.quiet
+import dev.arkui.rememberDestinationScrollState
 
 /** What Settings draws. */
 data class SettingsData(

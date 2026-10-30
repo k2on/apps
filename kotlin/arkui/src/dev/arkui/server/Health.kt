@@ -6,7 +6,7 @@
 // <version> current` — the domain it runs, as this library names its own
 // (`harken_domain`). The decision is a function of the answer and nothing
 // else, so it is held by plain JVM tests; [Probe] makes the requests.
-package dev.harken.android.onboarding
+package dev.arkui.server
 
 /** What one `/healthz` came to. */
 sealed class Health {

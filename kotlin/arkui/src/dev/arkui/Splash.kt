@@ -16,7 +16,7 @@
 // for its host to be ready. With a ceiling: past `ceilingMs` the splash goes
 // whatever is ready, and the app shows with what it has — a shell that fills
 // in — rather than holding the phone hostage to a slow open.
-package dev.harken.android.ui
+package dev.arkui
 
 import android.os.SystemClock
 import androidx.activity.ComponentActivity

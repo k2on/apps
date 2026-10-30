@@ -79,10 +79,10 @@ import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
 import dev.harken.android.onboarding.ArkSession
-import dev.harken.android.ui.DestinationState
-import dev.harken.android.ui.Destinations
-import dev.harken.android.ui.PageMotion
-import dev.harken.android.ui.routes
+import dev.arkui.DestinationState
+import dev.arkui.Destinations
+import dev.arkui.PageMotion
+import dev.arkui.routes
 import java.io.File
 import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals

@@ -21,7 +21,7 @@ on:
     paths:
       - "showcase/**"
       - "swift/ArkUI/**"
-      - "harken/android/app/src/main/kotlin/dev/harken/android/ui/**"
+      - "kotlin/arkui/**"
       - "docs/site/src/components.rs"
       - ".github/screens/**"
       - ".github/workflows/screens.yaml"

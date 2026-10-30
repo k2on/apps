@@ -6,7 +6,7 @@
 // its way from a server says. Drawn from plain values and the theme, so a
 // screen made of them is a function of its data and can be rendered
 // without a phone.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement

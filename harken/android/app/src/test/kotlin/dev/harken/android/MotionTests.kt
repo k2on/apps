@@ -58,10 +58,10 @@ import app.cash.paparazzi.Paparazzi
 import app.cash.paparazzi.Snapshot
 import app.cash.paparazzi.SnapshotHandler
 import dev.harken.android.onboarding.ArkSession
-import dev.harken.android.ui.BelowStatusBar
-import dev.harken.android.ui.Origin
-import dev.harken.android.ui.PageMotion
-import dev.harken.android.ui.Springs
+import dev.arkui.BelowStatusBar
+import dev.arkui.Origin
+import dev.arkui.PageMotion
+import dev.arkui.Springs
 import java.io.File
 import java.lang.reflect.Proxy
 import kotlin.math.abs

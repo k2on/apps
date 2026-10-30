@@ -23,7 +23,7 @@
 // nothing, and what is behind it is not composed again at all.
 @file:OptIn(ExperimentalFoundationApi::class)
 
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.animate

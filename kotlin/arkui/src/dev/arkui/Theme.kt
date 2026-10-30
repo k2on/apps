@@ -6,7 +6,7 @@
 // it is drawn in, and this library writes no colour of its own but the
 // neutral squares an app that names none gets — `rust/arkui`'s
 // `Palette::NEUTRAL`, the same three pairs.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable

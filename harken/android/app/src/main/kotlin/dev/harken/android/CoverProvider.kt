@@ -30,8 +30,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 
-import dev.harken.android.ui.Art
-import dev.harken.android.ui.squareBitmap
+import dev.arkui.Art
+import dev.arkui.squareBitmap
 import java.io.File
 import java.io.FileNotFoundException
 

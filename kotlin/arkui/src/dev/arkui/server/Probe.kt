@@ -5,7 +5,7 @@
 // last reason. The request is a parameter, so the order and the sentences
 // are held by plain JVM tests; [Probe.http] is `HttpURLConnection`, which
 // Android and the JVM both have.
-package dev.harken.android.onboarding
+package dev.arkui.server
 
 import java.io.IOException
 import java.net.ConnectException

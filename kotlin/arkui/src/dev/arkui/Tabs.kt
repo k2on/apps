@@ -14,7 +14,7 @@
 // under it, dimmed, and the tab leaving is drawn in the page preview's
 // shape — smaller, aside, its corners rounded — and, let go, a little
 // smaller still and fading.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedDispatcher
