@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- money's icon: the month's plan as three bars, each a category's share,
+       white on the accent's green, the way Wallet and Numbers draw a mark.
+       Rendered opaque at 1024 by tools/icon.sh. -->
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34C77B"/>
+      <stop offset="1" stop-color="#147A43"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#ground)"/>
+  <rect x="232" y="292" width="560" height="112" rx="56" fill="#FFFFFF"/>
+  <rect x="232" y="456" width="400" height="112" rx="56" fill="#FFFFFF" fill-opacity="0.85"/>
+  <rect x="232" y="620" width="248" height="112" rx="56" fill="#FFFFFF" fill-opacity="0.7"/>
+</svg>
