@@ -18,8 +18,13 @@
 //!   to the posted id in place, so a category somebody gave it while it was
 //!   pending survives. One somebody typed in by hand first is matched rather
 //!   than doubled. A reconciled one is never touched. The first import that
-//!   sees an account opens it here, under the bank's name for it, with the
-//!   balance before the imported history as its starting balance.
+//!   sees an account opens it here, under the bank's name for it or the
+//!   one the server was told, with the balance before the imported history
+//!   as its starting balance; one the server was told not to follow is
+//!   known and opens nothing.
+//!
+//! And **an ask** ([`sync`]): anybody in the household may ask the importer
+//! to ask the banks now, as a row it sees (`money/server`'s `importer.rs`).
 
 use std::collections::BTreeSet;
 
@@ -132,6 +137,8 @@ pub fn import_of(bank: &str, institution: &str, accounts: &[PlaidAccount], pulle
                 kind: a.kind.clone(),
                 subtype: a.subtype.clone().unwrap_or_default(),
                 balance: a.balances.current.map(|c| bank_balance(a, c)),
+                called: String::new(),
+                ignored: false,
             })
             .collect(),
         upserts: pulled.added.iter().chain(&pulled.modified).map(bank_txn).collect(),
@@ -236,8 +243,12 @@ fn followed(db: &Db<Money>, plaid_account_id: &str) -> Option<Account> {
 }
 
 /// A Plaid account seen: brought up to date, or — the first time — opened
-/// here, its starting balance what the bank holds less the history this
-/// import brings (posted only: the bank's balance leaves pending out).
+/// here under what the server calls it (the bank's name unless told), its
+/// starting balance what the bank holds less the history this import
+/// brings (posted only: the bank's balance leaves pending out). One the
+/// server was told not to follow is known from then on and opens nothing.
+/// What the server says applies at first sight only: after that, which
+/// account a bank's feeds is the household's (`banks.link`, `banks.ignore`).
 fn follow(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount) -> Result<(), Refusal> {
     if let Some(l) = db.linked.get(&a.plaid_account_id) {
         return db.linked.update(Linked {
@@ -248,13 +259,29 @@ fn follow(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount) -> Res
             ..l
         });
     }
+    if a.ignored {
+        return db.linked.insert(Linked {
+            plaid_account_id: a.plaid_account_id.clone(),
+            bank: input.bank.clone(),
+            account_id: None,
+            name: a.name.clone(),
+            mask: a.mask.clone(),
+            kind: a.kind.clone(),
+            balance: a.balance,
+            ignored: true,
+        });
+    }
+    let name = match a.called.trim() {
+        "" => a.name.clone(),
+        called => called.to_string(),
+    };
     let kind = kind_of(&a.kind, &a.subtype);
     let on_budget = crate::accounts::on_budget_by_default(kind);
     let id: Id<Account> = ctx.new_id();
     let pos = db.account.by(Account::POS).whole().last().map_or(0, |a| a.pos) + 1;
     db.account.insert(Account {
         id,
-        name: a.name.clone(),
+        name,
         kind: kind.into(),
         on_budget,
         pos,
@@ -411,6 +438,23 @@ pub fn ignore(_: &Ctx, db: &mut Db<Money>, input: IgnoreLinked) -> Result<(), Re
         .get(&input.plaid_account_id)
         .ok_or_else(|| Refusal::new("no such bank account"))?;
     db.linked.update(Linked { ignored: input.ignored, ..l })
+}
+
+/// Ask the server's importer to ask the banks now: anybody in the
+/// household may. The importer is a peer like any other and sees the ask
+/// as a row; what it imports arrives as any import does, and a bank's
+/// `synced_ms` moving is the answer.
+#[mutator("banks.sync")]
+pub fn sync(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), Refusal> {
+    db.asked.put(Asked {
+        user_id: ctx.user().into(),
+        asked_ms: ctx.now,
+    })
+}
+
+/// The latest ask of anybody's: when the importer was last asked to sync.
+pub fn last_asked(db: &Db<Money>) -> Option<Asked> {
+    db.asked.scan().into_iter().max_by_key(|a| a.asked_ms)
 }
 
 /// Every linked bank, and what its last import did.

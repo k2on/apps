@@ -315,3 +315,65 @@ fn a_payee_is_filed_where_it_was_last_time() {
     let inbox: Vec<TxnLine> = b.list("inbox", &());
     assert!(inbox.iter().all(|t| t.id != new.id));
 }
+
+/// The server was told what the household called Plaid's acc1 ("Joint
+/// Checking", as Actual had it) and nothing of acc2: the first import
+/// opens acc1 under that name, knows acc2 and opens nothing for it, and
+/// drops its interest. Linking acc2 to an account later follows it from
+/// the next import. Falsified by `follow` opening an account whatever
+/// `ignored` says: a third account, "Plaid Savings", appeared.
+#[test]
+fn the_server_names_what_it_follows_and_knows_what_it_does_not() {
+    let mut b = Book::new();
+    let mut i = import_of("chase", "Chase", &accounts(), &phase(1));
+    i.accounts[0].called = "Joint Checking".into();
+    i.accounts[1].ignored = true;
+    b.import(&i).unwrap();
+    let names: Vec<String> = b.accounts().into_iter().map(|a| a.name).collect();
+    assert_eq!(names, ["Joint Checking"]);
+    let linked: Vec<Linked> = b.rows("linked");
+    let savings = linked.iter().find(|l| l.plaid_account_id == "acc2").unwrap();
+    assert_eq!((savings.account_id, savings.ignored), (None, true));
+    assert!(b.register(None).iter().all(|t| t.payee != "INTEREST"));
+
+    // What the server says is for first sight: a later import that says
+    // otherwise changes nothing here.
+    let mut again = import_of("chase", "Chase", &accounts(), &phase(2));
+    again.accounts[0].called = "Something Else".into();
+    b.import(&again).unwrap();
+    let names: Vec<String> = b.accounts().into_iter().map(|a| a.name).collect();
+    assert_eq!(names, ["Joint Checking"]);
+
+    let jar = b.account("Savings", "savings", 0);
+    b.run(
+        "link",
+        &LinkAccount {
+            plaid_account_id: "acc2".into(),
+            account_id: jar,
+        },
+    )
+    .unwrap();
+    let next: Pulled = serde_json::from_str(&format!(
+        r#"{{"added":[{}],"modified":[],"removed":[],"cursor":"c3"}}"#,
+        txn("S2", -3.0, "INTEREST", r#","account_id":"acc2","date":"2026-10-01""#)
+    ))
+    .unwrap();
+    b.import(&import_of("chase", "Chase", &accounts(), &next)).unwrap();
+    let interest: Vec<TxnLine> = b.register(Some(jar));
+    let from_bank: Vec<i64> = interest.iter().filter(|t| t.imported).map(|t| t.amount).collect();
+    assert_eq!(from_bank, [300]);
+}
+
+/// Anybody may ask the importer to sync; each person's latest ask is one
+/// row, and the newest of them is what the importer answers.
+#[test]
+fn anybody_may_ask_for_a_sync() {
+    let mut b = Book::new();
+    b.as_("alice", "sync", &()).unwrap();
+    b.as_("sam", "sync", &()).unwrap();
+    b.as_("alice", "sync", &()).unwrap();
+    let asked: Vec<Asked> = b.rows("asked");
+    assert_eq!(asked.len(), 2);
+    let newest = asked.iter().max_by_key(|a| a.asked_ms).unwrap();
+    assert_eq!(newest.user_id, "alice");
+}

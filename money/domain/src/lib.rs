@@ -58,7 +58,7 @@ pub fn domain() -> Domain {
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
         transactions::register, transactions::inbox, transactions::payees,
-        plaid::import, plaid::link, plaid::ignore, plaid::banks, plaid::linked, feed)
+        plaid::import, plaid::link, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, feed)
     .with(ark_auth::register::<Money>)
 }
 
@@ -77,7 +77,8 @@ pub fn feed() -> Scope<Money> {
             .on::<Assigned>(all)
             .on::<Txn>(all)
             .on::<Bank>(all)
-            .on::<Linked>(all),
+            .on::<Linked>(all)
+            .on::<Asked>(all),
     )
 }
 
