@@ -276,6 +276,15 @@ fn reconciled_is_left_alone_and_ignored_is_dropped() {
     let bank: Vec<BankLine> = b.list("banks", &());
     assert_eq!(bank[0].locked, 1);
     assert_eq!(b.register(None).iter().filter(|t| t.account != "Plaid Checking").count(), savings_before);
+    // What the household links and ignores from: each of the bank's
+    // accounts, the one it feeds, and the one it was told not to follow.
+    let linked: Vec<LinkedLine> = b.list("linked", &());
+    let of = |id: &str| linked.iter().find(|l| l.plaid_account_id == id).unwrap().clone();
+    assert_eq!(
+        (of("acc1").account, of("acc1").account_id, of("acc1").ignored),
+        ("Plaid Checking".to_string(), Some(checking.id), false)
+    );
+    assert!(of("acc2").ignored);
 }
 
 #[test]

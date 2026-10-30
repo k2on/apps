@@ -428,6 +428,24 @@ pub fn banks(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<BankLi
     }))
 }
 
+/// Every account a bank has, whether it feeds one here and which, or is
+/// ignored: what a household links (`banks.link`) and stops following
+/// (`banks.ignore`) from.
+#[view("banks.linked")]
+pub fn linked(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<LinkedLine>, Refusal> {
+    Ok(scan::<Money, Linked>().map_with(|db, l| LinkedLine {
+        plaid_account_id: l.plaid_account_id.clone(),
+        bank: l.bank.clone(),
+        account_id: l.account_id,
+        account: l.account_id.and_then(|a| db.account.get(a)).map(|a| a.name).unwrap_or_default(),
+        name: l.name.clone(),
+        mask: l.mask.clone(),
+        kind: l.kind.clone(),
+        balance: l.balance,
+        ignored: l.ignored,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

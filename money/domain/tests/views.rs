@@ -156,4 +156,5 @@ fn the_accounts_and_their_transactions() {
     hold("inbox", &());
     hold("payees", &());
     hold("banks", &());
+    hold("linked", &());
 }
