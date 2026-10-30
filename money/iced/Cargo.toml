@@ -1,0 +1,24 @@
+[package]
+name = "money-iced"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "money's demo client, desktop and browser: a household's budget in iced, on arkui, ArkDB v5's peer alone and the domain, seeded."
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+money-domain = { path = "../domain" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+arkui = { path = "../../rust/arkui" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `smol` gives iced an executor on the desktop; `svg` is every glyph,
+# `advanced` the focus operation a form's first field is given the keys by.
+# `fira-sans` is the typeface, as harken's.
+iced = { version = "0.14", features = ["smol", "svg", "advanced", "fira-sans"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WebGL rather than WebGPU, for reach, as harken's page.
+iced = { version = "0.14", features = ["webgl", "svg", "advanced", "fira-sans"] }
+web-sys = { version = "0.3", features = ["console"] }
