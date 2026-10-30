@@ -3357,11 +3357,32 @@ name = "money-iced"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-auth",
  "ark-peer",
  "arkui",
  "iced",
  "money-domain",
+ "money-server",
+ "tempfile",
+ "tokio",
  "web-sys",
+]
+
+[[package]]
+name = "money-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark",
+ "ark-auth",
+ "ark-peer",
+ "axum",
+ "money-domain",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "ureq",
 ]
 
 [[package]]
