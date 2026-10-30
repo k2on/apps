@@ -31,7 +31,7 @@ let
   # 16 kHz mono, heard at the lowest priority the host has, its voices told
   # apart (`harken/server/voices`), its captions written only once they are
   # whole.
-  transcriber = pkgs.writeShellScript "harken-transcriber" ''
+  transcriber = pkgs.writeShellScript "harken-transcriber" (''
     set -eu
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
@@ -49,7 +49,7 @@ let
     fi
   '' else ''
     mv "$tmp/out.vtt" "$2"
-  '');
+  ''));
 
   loopbackOnly = lib.elem cfg.address [
     "127.0.0.1"

@@ -87,6 +87,7 @@ let
     [ ((env catalogued).HARKEN_CATALOGUE == "https://k2on.github.io/classical/catalogue.json" && !(env dev ? HARKEN_CATALOGUE)) "a catalogue reaches the server, and none, nothing" ]
     [ (!(env catalogueNoMedia ? HARKEN_CATALOGUE)) "and is imported only with media to serve it from" ]
     [ ((env dev) ? HARKEN_TRANSCRIBER && !(env unheard ? HARKEN_TRANSCRIBER) && !(env noMedia ? HARKEN_TRANSCRIBER)) "episodes are heard by default, unless turned off or there is no media" ]
+    [ (builtins.match "/nix/store/[^ \n]*-harken-transcriber" (builtins.unsafeDiscardStringContext (env dev).HARKEN_TRANSCRIBER) != null) "the transcriber is one script, its whole body in it" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
 in
