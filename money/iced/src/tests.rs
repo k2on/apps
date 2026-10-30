@@ -266,3 +266,59 @@ fn an_account_is_opened_and_a_refusal_is_said() {
     assert!(app.note.contains("not to it"), "{}", app.note);
 }
 
+/// The window on a server, as the build without `demo` opens it: a
+/// replica that dials a money server in this process, signed in. What a
+/// button does goes to the server and comes back; "Sync" is an ask the
+/// server holds (`banks.sync`), not an import authored here, which nobody
+/// signed in may author. Falsified by `sync` authoring the demo's import on
+/// a server: the bank's role was refused and nothing was asked.
+#[test]
+fn on_a_server_sync_is_an_ask() {
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let server = rt
+        .block_on(money_server::start(money_server::Config::dev("127.0.0.1:0", data.path())))
+        .unwrap();
+    let url = format!("http://{}", server.running.addr);
+    let login = server
+        .auth
+        .issue(
+            &ark_auth::Account {
+                id: "alice".into(),
+                ..Default::default()
+            },
+            "a test",
+        )
+        .unwrap();
+    let mut client = crate::client::open(Box::new(ark_peer::Memory::default()));
+    client.connect(&ark_auth::socket_url(&url));
+    let mut app = App::on_server(client, TODAY, url, None);
+    app.signed_in(login);
+    let settle = |app: &mut App, done: &dyn Fn(&App) -> bool| {
+        let held = ark_peer::link::until(std::time::Duration::from_secs(10), std::time::Duration::from_millis(10), || {
+            let _ = app.update(Message::Wake);
+            done(app)
+        });
+        assert!(held, "{}", app.note);
+    };
+    settle(&mut app, &|a| a.peer.client.status().link == "online");
+
+    let _ = app.update(Message::AddAccount);
+    let _ = app.update(Message::AccountName("Checking".into()));
+    let _ = app.update(Message::AccountBalance("1200".into()));
+    let _ = app.update(Message::CreateAccount);
+    settle(&mut app, &|a| a.peer.client.pending_len() == 0);
+    let accounts = server.running.hub.with(|h| h.log.store.rows("account").count()).unwrap();
+    assert_eq!(accounts, 1);
+
+    let _ = app.update(Message::Sync);
+    assert!(app.note.starts_with("asked the server"), "{}", app.note);
+    settle(&mut app, &|a| a.peer.client.pending_len() == 0);
+    let asked: Vec<Asked> = server
+        .running
+        .hub
+        .with(|h| h.log.store.rows("asked").map(|r| ark::format::Encode::from_bytes(r).unwrap()).collect())
+        .unwrap();
+    assert_eq!(asked.iter().map(|a| a.user_id.as_str()).collect::<Vec<_>>(), ["alice"]);
+    rt.block_on(server.stop());
+}

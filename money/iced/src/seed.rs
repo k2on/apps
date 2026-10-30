@@ -555,6 +555,7 @@ pub fn open(disk: Memory) -> Replica {
 }
 
 /// The demo, seeded for today.
+#[cfg_attr(not(feature = "demo"), allow(dead_code))]
 pub fn seeded() -> Replica {
     let now = ark_peer::now_ms();
     open(seeded_disk(&day_of_ms(now), now))

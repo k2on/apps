@@ -24,8 +24,8 @@ serde_json = { workspace = true }
 # Plaid, over its HTTP API: blocking, on the importer's thread. The same
 # ureq ark-auth talks to an identity provider with.
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+# `/healthz` says what domain this is, in front of ark-peer's own.
+axum = "0.7"
 
 [dev-dependencies]
 tempfile = "3"
-# The mock Plaid the importer's tests ask, on loopback.
-axum = "0.7"

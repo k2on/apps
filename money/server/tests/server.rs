@@ -142,3 +142,24 @@ fn the_budget_and_the_logins_survive_a_restart() {
     pump_until(&mut [&mut again], 10, |ps| ps[0].client.linked && ps[0].cursor() == head(&server));
     rt.block_on(server.stop());
 }
+
+/// `/healthz` says what domain the server runs — its schema's hash and
+/// version, as `domain <hash> <version> current` — which is what a phone
+/// holds its own build to, and how many are connected.
+#[test]
+fn health_says_which_domain() {
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |_| {});
+    let mut alice = signed_in(&server, "alice");
+    pump_until(&mut [&mut alice], 10, |ps| ps[0].client.linked);
+    let text = ureq::get(&format!("{}/healthz", server.url())).call().unwrap().into_string().unwrap();
+    let d = money_domain::shared();
+    assert!(text.starts_with("ok\n"), "{text}");
+    assert!(
+        text.contains(&format!("domain {} {} current\n", d.schema_hash(), money_domain::VERSION)),
+        "{text}"
+    );
+    assert!(text.contains("connections 1\n"), "{text}");
+    rt.block_on(server.stop());
+}

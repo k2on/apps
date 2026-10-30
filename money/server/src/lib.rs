@@ -167,6 +167,49 @@ fn banks(env: &impl Fn(&str) -> Option<String>) -> Result<Option<Banks>> {
     Ok(Some(banks))
 }
 
+/// What this build runs, in a word: its domain's schema hash and version,
+/// as a phone's build of the same domain says it (and as harken's server
+/// does).
+pub fn version() -> String {
+    let d = money_domain::shared();
+    format!("{} {}", d.schema_hash(), d.version)
+}
+
+/// What `/healthz` says, a line each: `ok`; the connections open; the
+/// log's head and its horizon; and the domain it runs (`domain <hash>
+/// <version> current`), which a phone holds its own build to. Answered in
+/// front of `ark-peer`'s own `/healthz`, which says `ok` alone.
+pub async fn health(hub: &ark_peer::Handle) -> Option<String> {
+    let hub = hub.clone();
+    let domain = format!("domain {} current\n", version());
+    let read = move || {
+        hub.with(move |h| {
+            let (connections, log) = (h.connections().count(), h.log.log());
+            format!(
+                "ok\nconnections {connections}\nhead {}\nhorizon {}\n{domain}",
+                log.head().0,
+                log.base_seq()
+            )
+        })
+    };
+    tokio::task::spawn_blocking(read).await.ok().flatten()
+}
+
+async fn healthz(
+    axum::extract::State(hub): axum::extract::State<ark_peer::Handle>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if req.uri().path() != "/healthz" {
+        return next.run(req).await;
+    }
+    match health(&hub).await {
+        Some(text) => text.into_response(),
+        None => (axum::http::StatusCode::SERVICE_UNAVAILABLE, "the hub is gone\n").into_response(),
+    }
+}
+
 /// A server that is up, and the importer beside it.
 pub struct Server {
     pub running: Running,
@@ -226,6 +269,7 @@ pub async fn start(config: Config) -> Result<Server> {
         server.web = Some((dir.clone(), config.web_module.clone()));
     }
     let (hub, router) = server.build()?;
+    let router = router.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz));
     let running = Running::listen(hub.clone(), router, &config.listen).await?;
     eprintln!("money-server: listening on http://{}", running.addr);
     match &config.web {

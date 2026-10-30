@@ -3341,10 +3341,14 @@ name = "money-iced"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-auth",
  "ark-peer",
  "arkui",
  "iced",
  "money-domain",
+ "money-server",
+ "tempfile",
+ "tokio",
  "web-sys",
 ]
 

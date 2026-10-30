@@ -1,11 +1,18 @@
 //! money, in iced — on the desktop and in a browser: a household's budget.
 //!
-//! The demo: no server and no sign-in, a seeded household (`seed.rs`) on a
-//! peer that is its own authority, and the card's bank standing in for
-//! Plaid behind "Sync". The window is laid out the way YNAB taught people
-//! to read a budget — the accounts down the side, the month's categories
-//! with what each was assigned, spent and has, what is ready to assign
-//! across the top, and the selected category's story on the right.
+//! Two builds of one window. Without features it is the household's
+//! client: it signs in to a money server and dials it (`live.rs`), and
+//! "Sync" asks the server's importer to ask the banks now. With `demo` it
+//! is the demo: no server and no sign-in, a seeded household (`seed.rs`)
+//! on a peer that is its own authority, and the card's bank standing in
+//! for Plaid behind "Sync" — what GitHub Pages publishes, and a separate
+//! build on purpose, as harken's is: a flag could be set by accident, a
+//! feature has to be asked for at build time.
+//!
+//! The window is laid out the way YNAB taught people to read a budget —
+//! the accounts down the side, the month's categories with what each was
+//! assigned, spent and has, what is ready to assign across the top, and the
+//! selected category's story on the right.
 //!
 //! None of the budget's arithmetic is here. Every figure on screen is a
 //! view of the domain (`money/domain`), kept up to date by the rows a
@@ -19,9 +26,13 @@
 
 mod amount;
 mod client;
+mod live;
 mod look;
 mod palette;
 mod peer;
+/// The demo's household. Compiled into the demo and the tests only, so the
+/// client that talks to a real server carries none of it.
+#[cfg(any(feature = "demo", test))]
 mod seed;
 mod view;
 
@@ -162,6 +173,10 @@ pub enum Message {
     Escape,
     /// A scroll or click that only has to stop at a layer.
     Swallow,
+    /// The socket said something, or the peer's deadline came: pump it.
+    Wake,
+    /// A sign-in came back.
+    SignedIn(Result<ark_auth::Login, String>),
 }
 
 pub struct App {
@@ -180,7 +195,11 @@ pub struct App {
     pub new_category: Option<(Id<Group>, String)>,
     pub form: Option<TxnForm>,
     pub modal: Option<Modal>,
+    /// The demo's bank, standing in for Plaid.
+    #[cfg(any(feature = "demo", test))]
     pub bank: seed::Bank,
+    /// The server this window is on; none for the demo, its own authority.
+    pub server: Option<live::Server>,
     /// The last thing worth saying: a refusal, a sync.
     pub note: String,
 }
@@ -200,14 +219,132 @@ impl App {
             new_category: None,
             form: None,
             modal: None,
+            #[cfg(any(feature = "demo", test))]
             bank: seed::Bank::default(),
+            server: None,
             note: "a demo \u{2014} nothing here leaves this window".into(),
         }
     }
 
+    #[cfg(feature = "demo")]
     fn boot() -> (App, Task<Message>) {
         let today = day_of_ms(ark_peer::now_ms());
         (App::with_peer(seed::seeded(), &today), Task::none())
+    }
+
+    /// The window on its server, signed in as the login this device
+    /// remembers there, or on its way to sign in.
+    #[cfg(not(feature = "demo"))]
+    fn boot() -> (App, Task<Message>) {
+        let today = day_of_ms(ark_peer::now_ms());
+        let (url, user) = live::config();
+        let logins = live::logins();
+        let login = logins.recall(&url);
+        let (client, note) = match live::open(&url, login.as_ref()) {
+            Ok(c) => (c, String::new()),
+            // A replica that will not open is no reason to show nothing:
+            // this window works in memory, and says so.
+            Err(e) => {
+                let mut c = client::open(Box::new(ark_peer::Memory::default()));
+                c.connect(&ark_auth::socket_url(&url));
+                if let Some(l) = &login {
+                    c.login(ark_peer::who(l), l.token.clone());
+                }
+                (c, format!("the saved budget would not open ({e}) \u{2014} working in memory"))
+            }
+        };
+        let mut app = App::on_server(client, &today, url, login);
+        if let Some(s) = &mut app.server {
+            (s.logins, s.user) = (Some(logins), user);
+        }
+        app.note = match (&app.server.as_ref().and_then(|s| s.login.as_ref()), note.is_empty()) {
+            (_, false) => note,
+            (Some(l), true) => format!("signed in as {}", live::who(l)),
+            (None, true) => "signing in\u{2026}".into(),
+        };
+        let task = match app.server.as_ref().is_some_and(|s| s.login.is_none()) {
+            true => app.sign_in(),
+            false => Task::none(),
+        };
+        (app, task)
+    }
+
+    /// A window over `client`, a replica of the server at `url`, as `login`.
+    pub fn on_server(client: client::Replica, today: &str, url: String, login: Option<ark_auth::Login>) -> App {
+        let bell = arkui::wake::Bell::new();
+        let mut client = client;
+        client.set_waker(live::waker(&bell));
+        let mut app = App::with_peer(client, today);
+        app.server = Some(live::Server {
+            url,
+            login,
+            logins: None,
+            user: None,
+            tried: false,
+            bell,
+        });
+        app
+    }
+
+    /// Go to sign in, once a load: in a browser the page goes to the
+    /// server's sign-in and comes back with a code (traded here when it
+    /// has one); the desktop hands the browser the same page and listens on
+    /// loopback for the code.
+    pub fn sign_in(&mut self) -> Task<Message> {
+        let Some(s) = &mut self.server else { return Task::none() };
+        #[cfg(target_arch = "wasm32")]
+        if let Some(code) = ark_auth::web::take_code() {
+            s.tried = true;
+            let url = s.url.clone();
+            return Task::perform(async move { ark_auth::web::exchange(&url, &code).await }, Message::SignedIn);
+        }
+        if std::mem::replace(&mut s.tried, true) {
+            return Task::none();
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            ark_auth::web::go_sign_in(&s.url, s.user.as_deref());
+            Task::none()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.note = "signing in \u{2014} look for a browser tab if one opened".into();
+            let (url, user) = (s.url.clone(), s.user.clone());
+            off_thread(move || ark_auth::client::login(&url, user.as_deref(), ark_auth::client::open_browser))
+        }
+    }
+
+    /// Somebody signed in: the replica moves on as them — whatever was done
+    /// signed out becomes theirs and is pushed — and the link dials.
+    pub fn signed_in(&mut self, login: ark_auth::Login) {
+        let Some(s) = &mut self.server else { return };
+        if let Some(logins) = &s.logins {
+            logins.remember(&s.url, &login);
+        }
+        self.peer.client.login(ark_peer::who(&login), login.token.clone());
+        self.note = format!("signed in as {}", live::who(&login));
+        s.login = Some(login);
+        self.peer.refresh();
+    }
+
+    /// What the socket brought, taken in: the views moved, the server's
+    /// refusals said, and a login the server turned away forgotten and
+    /// signed in again (once).
+    pub fn wake(&mut self) -> Task<Message> {
+        let p = self.peer.client.pump();
+        for (_, why) in self.peer.client.take_rejections() {
+            self.note = format!("the server refused a change: {why}");
+        }
+        self.peer.refresh();
+        let Some(why) = p.denied else { return Task::none() };
+        if let Some(s) = &mut self.server {
+            if let Some(logins) = &s.logins {
+                logins.forget(&s.url);
+            }
+            s.login = None;
+        }
+        self.note = format!("the server turned the sign-in away ({why})");
+        self.sign_in()
     }
 
     fn title(&self) -> String {
@@ -429,24 +566,7 @@ impl App {
             Message::Categorize(ids) => self.modal = Some(Modal::Choose(Choosing::Txns(ids))),
             Message::ChooseCategory => self.modal = Some(Modal::Choose(Choosing::Form)),
             Message::Chose(choice) => self.chose(choice),
-            Message::Sync => {
-                let owed = self
-                    .peer
-                    .accounts
-                    .rows
-                    .iter()
-                    .find(|a| a.bank == seed::BANK_NAME)
-                    .map_or(0, |a| a.cleared);
-                let import = self.bank.next(&self.today, owed);
-                let (n, u) = (import.upserts.len(), import.removed.len());
-                if self.author("sync the bank", "import", &import) {
-                    self.note = match (n, self.bank.syncs) {
-                        (0, _) => "Chase: nothing new at the bank".into(),
-                        (_, 1) => format!("Chase: {n} new from the bank \u{2014} one still pending"),
-                        _ => format!("Chase: {n} from the bank, {u} pending one posted"),
-                    };
-                }
-            }
+            Message::Sync => self.sync(),
             Message::AddAccount => {
                 self.modal = Some(Modal::AddAccount {
                     name: String::new(),
@@ -544,9 +664,48 @@ impl App {
                 }
             }
             Message::Swallow => {}
+            Message::Wake => return self.wake(),
+            Message::SignedIn(Ok(login)) => self.signed_in(login),
+            // Said once, and not tried again until a reload: going straight
+            // back would be a loop the person cannot stop.
+            Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
         }
         Task::none()
     }
+
+    /// "Sync". On a server it is an ask (`banks.sync`) the server's
+    /// importer answers by asking the banks; what they have arrives as any
+    /// change does, and the bank's line in the sidebar says when. In the
+    /// demo the demo's bank stands in for Plaid, and the import is authored
+    /// here, this peer holding the importer's role.
+    fn sync(&mut self) {
+        if self.server.is_none() {
+            return self.demo_sync();
+        }
+        if self.author("ask the bank to sync", "sync", &()) {
+            self.note = "asked the server to ask the banks \u{2014} what they have arrives as it hears".into();
+        }
+    }
+
+    #[cfg(any(feature = "demo", test))]
+    fn demo_sync(&mut self) {
+        let owed = (self.peer.accounts.rows.iter())
+            .find(|a| a.bank == seed::BANK_NAME)
+            .map_or(0, |a| a.cleared);
+        let import = self.bank.next(&self.today, owed);
+        let (n, u) = (import.upserts.len(), import.removed.len());
+        if self.author("sync the bank", "import", &import) {
+            self.note = match (n, self.bank.syncs) {
+                (0, _) => "Chase: nothing new at the bank".into(),
+                (_, 1) => format!("Chase: {n} new from the bank \u{2014} one still pending"),
+                _ => format!("Chase: {n} from the bank, {u} pending one posted"),
+            };
+        }
+    }
+
+    /// No demo, no demo's bank: every window of this build is on a server.
+    #[cfg(not(any(feature = "demo", test)))]
+    fn demo_sync(&mut self) {}
 
     /// The inspector on a category, or on the month; its target field
     /// holding the category's target.
@@ -654,15 +813,39 @@ impl App {
         }
     }
 
+    /// The keys, and on a server what wakes the window: the socket ringing
+    /// its bell, and the peer's next deadline (a redial) as one timer,
+    /// keyed by it — a window at rest runs nothing.
     pub fn subscription(&self) -> Subscription<Message> {
-        iced::keyboard::listen().filter_map(|e| match e {
+        let keys = iced::keyboard::listen().filter_map(|e| match e {
             iced::keyboard::Event::KeyPressed {
                 key: Key::Named(Named::Escape),
                 ..
             } => Some(Message::Escape),
             _ => None,
-        })
+        });
+        let Some(s) = &self.server else { return keys };
+        let mut subs = vec![keys, s.bell.subscription().map(|()| Message::Wake)];
+        if let Some(at) = self.peer.client.deadline() {
+            let delay = std::time::Duration::from_millis(at.saturating_sub(ark_peer::monotonic_ms()) + 2);
+            subs.push(arkui::wake::at(at, delay).map(|()| Message::Wake));
+        }
+        Subscription::batch(subs)
     }
+}
+
+/// A desktop sign-in, which waits on a loopback listener for the browser,
+/// on a thread of its own.
+#[cfg(not(target_arch = "wasm32"))]
+fn off_thread(work: impl FnOnce() -> Result<ark_auth::Login, String> + Send + 'static) -> Task<Message> {
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(work());
+    });
+    Task::perform(
+        async move { rx.await.unwrap_or_else(|_| Err("the sign-in thread went away".into())) },
+        Message::SignedIn,
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
