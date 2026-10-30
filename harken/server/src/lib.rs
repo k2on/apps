@@ -48,8 +48,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
-use ark_auth::oidc::Provider;
-use ark_auth::server::{Auth, Mode};
+use ark_auth::server::Auth;
 use ark_auth::Account;
 use ark_peer::{Config as HubConfig, Running};
 
@@ -344,34 +343,6 @@ impl Server {
     }
 }
 
-/// How people sign in, made real: the provider's discovery is one blocking
-/// request, once.
-async fn mode(sign_in: &SignIn) -> Result<Mode> {
-    Ok(match sign_in {
-        SignIn::Dev => Mode::Dev,
-        SignIn::Oidc {
-            issuer,
-            client_id,
-            secret_file,
-            scopes,
-        } => {
-            let (issuer, client_id, file, scopes) = (
-                issuer.clone(),
-                client_id.clone(),
-                secret_file.clone(),
-                scopes.clone(),
-            );
-            let provider = tokio::task::spawn_blocking(move || {
-                let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
-                Provider::discover_with_secret_file(&issuer, &client_id, &file, &scopes)
-            })
-            .await?
-            .map_err(|e| anyhow!("signing in: {e}"))?;
-            Mode::Oidc(provider)
-        }
-    })
-}
-
 /// Build the server from `config`, listen, and start the scanner and the
 /// bridge beside it.
 pub async fn start(config: Config) -> Result<Server> {
@@ -396,7 +367,7 @@ pub async fn start(config: Config) -> Result<Server> {
         )]);
     // A sign-in is a row of the log, its token signed with a key kept in
     // the data directory (`ark_auth::server`).
-    let mode = mode(&config.sign_in).await?;
+    let mode = config.sign_in.mode().await?;
     let mut auth = Auth::open::<crate::domain::Harken>(mode, &public_url, &config.data)
         .context("the session key")?
         .allow_redirect(PHONE_SCHEME)

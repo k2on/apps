@@ -3349,6 +3349,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "money-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark",
+ "ark-auth",
+ "ark-peer",
+ "axum",
+ "money-domain",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

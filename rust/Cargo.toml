@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ark", "ark-macros", "ark-peer", "ark-ffi", "arkdb", "ark-auth", "arkui", "../harken/domain", "../money/domain", "../money/iced", "../harken/server", "../harken/iced", "../harken/ffi", "../harken/player"]
+members = ["ark", "ark-macros", "ark-peer", "ark-ffi", "arkdb", "ark-auth", "arkui", "../harken/domain", "../money/domain", "../money/iced", "../money/server", "../harken/server", "../harken/iced", "../harken/ffi", "../harken/player"]
 
 [workspace.package]
 edition = "2021"
