@@ -310,20 +310,14 @@ enum Registers {
 // MARK: days
 
 /// Days as the domain writes them (`2026-10-26`), and as a `Date` a picker
-/// and a heading take: noon UTC, which is the same calendar day in every
-/// zone a person lives in.
+/// and a heading take: noon of that day in the phone's own calendar, which
+/// a picker shows and gives back as the same day.
 enum Days {
-    private static let utc: Calendar = {
-        var c = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(identifier: "UTC")!
-        return c
-    }()
-
-    static func date(_ day: String) -> Date? {
+    static func date(_ day: String, calendar cal: Calendar = .current) -> Date? {
         let p = day.split(separator: "-").map { Int($0) }
         guard p.count == 3, let y = p[0], let m = p[1], let d = p[2], (1...12).contains(m), (1...31).contains(d) else { return nil }
         let c = DateComponents(year: y, month: m, day: d, hour: 12)
-        guard let date = utc.date(from: c), utc.component(.day, from: date) == d else { return nil }
+        guard let date = cal.date(from: c), cal.component(.day, from: date) == d else { return nil }
         return date
     }
 

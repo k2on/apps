@@ -306,6 +306,7 @@ final class Bridge {
             } else {
                 self.registers[k] = nil
                 self.snap.registers[k] = nil
+                self.show()
             }
         }
     }

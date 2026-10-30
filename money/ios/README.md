@@ -154,7 +154,7 @@ Foundation only — type-checked on Linux, tested there and on the simulator:
   chosen into an overspent one, out of any other), the accounts' sections
   and net worth, the transaction form (`Draft`) and its inputs, payees
   offered, registers a day at a time, and days as the domain writes them
-  (noon UTC, the same calendar day in every zone).
+  (noon of the day in the phone's calendar, for a picker and a heading).
 
 Apple's — compiled by CI: `MoneyApp`, `Shell` (tabs, routes, sheets),
 `BudgetView`, `CategoryView`, `AccountsView` (and Bank Connections),

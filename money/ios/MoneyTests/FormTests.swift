@@ -60,13 +60,15 @@ final class FormTests: XCTestCase {
         XCTAssertEqual(Payees.suggest("safeway", p).map { $0.name }, [])
     }
 
-    /// A day is noon UTC, the same calendar day in every zone a person lives in.
+    /// A day is noon of it in the phone's calendar, and back, whatever the zone.
+    /// Falsified by noon UTC: Auckland read it as the 27th.
     func testDaysRoundTrip() {
         XCTAssertNil(Days.date("2026-13-01"))
-        guard let d = Days.date("2026-10-26") else { return XCTFail("a day") }
+        XCTAssertNil(Days.date("2026-02-30"))
         for zone in ["Pacific/Honolulu", "America/Chicago", "UTC", "Asia/Tokyo", "Pacific/Auckland"] {
             var cal = Calendar(identifier: .gregorian)
             cal.timeZone = TimeZone(identifier: zone)!
+            guard let d = Days.date("2026-10-26", calendar: cal) else { return XCTFail(zone) }
             XCTAssertEqual(Days.day(d, calendar: cal), "2026-10-26", zone)
         }
         XCTAssertEqual(Months.of("2026-10-26"), "2026-10")
