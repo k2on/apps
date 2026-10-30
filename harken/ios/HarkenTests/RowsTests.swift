@@ -94,8 +94,8 @@ final class RowsTests: XCTestCase {
                                 PeopleEntry(art: "", link: "", name: "Kiara Grouwstra", role: "Guest")])
         let lines = rows(#"[{"end_ms":4200,"speaker":"Jacek","start_ms":1500,"text":"Welcome back."},{"end_ms":9000,"speaker":"","start_ms":4200,"text":"Today: flakes."}]"#)
             .map { TranscriptEntry(json: $0) }
-        XCTAssertEqual(lines, [TranscriptEntry(endMs: 4200, speaker: "Jacek", startMs: 1500, text: "Welcome back."),
-                               TranscriptEntry(endMs: 9000, speaker: "", startMs: 4200, text: "Today: flakes.")])
+        XCTAssertEqual(lines, [TranscriptEntry(endMs: 4200, speaker: "Jacek", startMs: 1500, text: "Welcome back.", voice: ""),
+                               TranscriptEntry(endMs: 9000, speaker: "", startMs: 4200, text: "Today: flakes.", voice: "")])
     }
 
     /// A show's hosts are said once, over it; each episode names everybody
@@ -126,7 +126,7 @@ final class RowsTests: XCTestCase {
     /// The line playing is the last that has begun: none before the first,
     /// the last after it ends, and a line from the moment it starts.
     func testATranscriptsLineIsTheLastBegun() {
-        func line(_ start: Int64, _ speaker: String = "") -> TranscriptEntry { TranscriptEntry(endMs: start + 1_000, speaker: speaker, startMs: start, text: "") }
+        func line(_ start: Int64, _ speaker: String = "") -> TranscriptEntry { TranscriptEntry(endMs: start + 1_000, speaker: speaker, startMs: start, text: "", voice: "") }
         let lines = [line(1_000), line(2_000), line(2_000), line(5_000)]
         XCTAssertNil(TranscriptEntry.at(lines, 0))
         XCTAssertNil(TranscriptEntry.at(lines, 999))
@@ -146,7 +146,7 @@ final class RowsTests: XCTestCase {
     /// A speaker is named where they begin speaking, not on every line, and
     /// a line nobody is named on does not make the next one say them again.
     func testASpeakerIsNamedWhereTheSpeakerChanges() {
-        func line(_ speaker: String) -> TranscriptEntry { TranscriptEntry(endMs: 0, speaker: speaker, startMs: 0, text: "") }
+        func line(_ speaker: String) -> TranscriptEntry { TranscriptEntry(endMs: 0, speaker: speaker, startMs: 0, text: "", voice: "") }
         let lines = [line(""), line("Ada"), line("Ada"), line(""), line("Ada"), line("Bo"), line("Ada")]
         XCTAssertEqual(lines.indices.map { TranscriptEntry.names(lines, $0) }, [false, true, false, false, false, true, true])
     }
