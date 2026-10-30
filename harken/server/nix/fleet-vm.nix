@@ -64,6 +64,8 @@ pkgs.testers.runNixOSTest {
         address = "0.0.0.0";
         openFirewall = true;
         publicUrl = "http://server:8787";
+        # Nothing here to hear, and whisper.cpp's model is 550 MB.
+        transcripts.enable = false;
         package = harken-server;
       };
       # Two tracks there before the service first starts; two more are
@@ -87,6 +89,8 @@ pkgs.testers.runNixOSTest {
         address = "0.0.0.0";
         openFirewall = true;
         publicUrl = "http://oldserver:8787";
+        # Nothing here to hear, and whisper.cpp's model is 550 MB.
+        transcripts.enable = false;
         package = old;
       };
       specialisation.upgraded.configuration = {

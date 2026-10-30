@@ -200,7 +200,7 @@ in
         a transcript that keeps time with the server's own copy (a feed's
         is timed to the host's file, which an advertisement stitched in
         moves). An hour of speech is a while of the host's cores, at the
-        lowest priority there is'';
+        lowest priority there is'' // { default = true; };
 
       package = lib.mkOption {
         type = lib.types.package;
