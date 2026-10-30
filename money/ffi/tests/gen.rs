@@ -27,6 +27,7 @@ const TYPED: &[&str] = &[
     "BudgetLine",
     "Cleared",
     "GroupLine",
+    "LinkedLine",
     "PayeeLine",
     "SpendingLine",
     "Summary",

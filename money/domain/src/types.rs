@@ -467,3 +467,21 @@ pub struct SpendingLine {
     /// Spent, as a positive number.
     pub spent: i64,
 }
+
+/// One of a bank's accounts, and the account here it feeds — none when it
+/// feeds none yet, or is ignored.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
+pub struct LinkedLine {
+    pub plaid_account_id: String,
+    pub bank: String,
+    pub account_id: Option<Id<Account>>,
+    /// The account's name here, or nothing.
+    pub account: String,
+    pub name: String,
+    pub mask: String,
+    pub kind: String,
+    /// The bank's own balance at its last import.
+    pub balance: Option<i64>,
+    pub ignored: bool,
+}

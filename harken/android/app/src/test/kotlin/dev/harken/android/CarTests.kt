@@ -21,7 +21,7 @@ import app.cash.paparazzi.Paparazzi
 import dev.harken.android.gen.Harken
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.ffi.Hall
-import dev.harken.android.ui.Art
+import dev.arkui.Art
 import dev.harken.android.gen.Output
 import java.io.File
 import kotlin.random.Random

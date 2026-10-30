@@ -12,6 +12,7 @@ import uniffi.money_domain.BankLine
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.Cleared
 import uniffi.money_domain.GroupLine
+import uniffi.money_domain.LinkedLine
 import uniffi.money_domain.PayeeLine
 import uniffi.money_domain.SpendingLine
 import uniffi.money_domain.Summary
@@ -20,6 +21,7 @@ import uniffi.money_domain.AccountLineView
 import uniffi.money_domain.BankLineView
 import uniffi.money_domain.BudgetLineView
 import uniffi.money_domain.GroupLineView
+import uniffi.money_domain.LinkedLineView
 import uniffi.money_domain.PayeeLineView
 import uniffi.money_domain.SpendingLineView
 import uniffi.money_domain.SummaryView
@@ -194,19 +196,19 @@ data class Category(val id: Id, val groupId: Id, val name: String, val pos: Long
     }
 }
 
-/** The sum `Cleared` (UniFFI's): its JSON, for the functions called by name. */
+/** The sum `Cleared` (UniFFI's enum): its JSON, for the functions called by name. */
 fun Cleared.json(): String =
-    when (val v = this) {
-        is Cleared.Uncleared -> "\"Uncleared\""
-        is Cleared.Cleared -> "\"Cleared\""
-        is Cleared.Reconciled -> "\"Reconciled\""
+    when (this) {
+        Cleared.UNCLEARED -> "\"Uncleared\""
+        Cleared.CLEARED -> "\"Cleared\""
+        Cleared.RECONCILED -> "\"Reconciled\""
     }
 
-fun Cleared.Companion.of(j: Any?): Cleared = J.sum(j) { t, o ->
+fun Cleared.Companion.of(j: Any?): Cleared = J.sum(j) { t, _ ->
     when (t) {
-        "Uncleared" -> Cleared.Uncleared
-        "Cleared" -> Cleared.Cleared
-        "Reconciled" -> Cleared.Reconciled
+        "Uncleared" -> Cleared.UNCLEARED
+        "Cleared" -> Cleared.CLEARED
+        "Reconciled" -> Cleared.RECONCILED
         else -> throw IllegalArgumentException("Cleared: no variant $t")
     }
 }
@@ -323,6 +325,11 @@ data class Linked(val plaidAccountId: String, val bank: String, val accountId: I
         fun of(j: Any?): Linked = (j as JSONObject).let { o -> Linked(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored"))) }
     }
 }
+
+/** The record `LinkedLine` (UniFFI's): its JSON, for the functions called by name. */
+fun LinkedLine.json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"account\":" + J.q(account) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "}"
+
+fun LinkedLine.Companion.of(j: Any?): LinkedLine = (j as JSONObject).let { o -> LinkedLine(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("account")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored"))) }
 
 /** The record `Month`. */
 data class Month(val month: String) {
@@ -514,6 +521,9 @@ class Money(val peer: Peer) {
     /** `banks.link`: its intent's id. */
     fun link(input: LinkAccount): String = peer.mutate("banks.link", input.json())
 
+    /** `banks.linked`, kept, its rows UniFFI's. */
+    fun linked(): View<LinkedLine> = typed(LinkedLineView(peer, "banks.linked", "null"))
+
     /** `banks.sync`: its intent's id. */
     fun sync(): String = peer.mutate("banks.sync", "null")
 
@@ -623,6 +633,8 @@ class Money(val peer: Peer) {
     private fun typed(v: BudgetLineView): View<BudgetLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 
     private fun typed(v: GroupLineView): View<GroupLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+
+    private fun typed(v: LinkedLineView): View<LinkedLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 
     private fun typed(v: PayeeLineView): View<PayeeLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 

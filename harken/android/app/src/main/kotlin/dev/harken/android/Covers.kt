@@ -23,8 +23,8 @@ import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.Dp
-import dev.harken.android.ui.Art
-import dev.harken.android.ui.CoverLoader
+import dev.arkui.Art
+import dev.arkui.CoverLoader
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI

@@ -30,17 +30,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import dev.harken.android.ui.Cover
-import dev.harken.android.ui.CoverCard
-import dev.harken.android.ui.Empty
-import dev.harken.android.ui.Glyph
-import dev.harken.android.ui.Heading
-import dev.harken.android.ui.Recompositions
-import dev.harken.android.ui.ScrollsToTop
-import dev.harken.android.ui.Shelf
-import dev.harken.android.ui.Space
-import dev.harken.android.ui.TabTitle
-import dev.harken.android.ui.rememberDestinationListState
+import dev.arkui.Cover
+import dev.arkui.CoverCard
+import dev.arkui.Empty
+import dev.arkui.Glyph
+import dev.arkui.Heading
+import dev.arkui.Recompositions
+import dev.arkui.ScrollsToTop
+import dev.arkui.Shelf
+import dev.arkui.Space
+import dev.arkui.TabTitle
+import dev.arkui.rememberDestinationListState
 
 /** What a needle found, in three groups. */
 data class Results(val needle: String, val songs: List<Track>, val albums: List<Album>, val artists: List<Artist>) {

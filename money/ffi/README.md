@@ -53,7 +53,8 @@ UniFFI's own records (`uniffi.money_domain` on Android; the same module
 on iOS), no JSON per row: `accounts` (`AccountLine`), `groups`
 (`GroupLine`), `month` (`BudgetLine`), `summary` (`Summary`, one row),
 `spending` (`SpendingLine`), `register` and `inbox` (`TxnLine`),
-`payees` (`PayeeLine`), `banks` (`BankLine`). A `LiveView<T>` is read
+`payees` (`PayeeLine`), `banks` (`BankLine`), `linked` (`LinkedLine`, each of a
+bank's accounts and the one it feeds, what `link` and `ignore` act on). A `LiveView<T>` is read
 once (`rows()`), then asked what it did (`take()`: unchanged, its patches,
 or a reset with every row) and spliced into the list the screen holds.
 `peer.setListener` says when anything moved, on the kernel's thread; the

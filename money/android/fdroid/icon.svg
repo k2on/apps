@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <!-- The launcher icon at F-Droid's size: the wallet on money's green
+       (app/src/main/res/drawable/ic_launcher_*.xml, on the same canvas). -->
+  <rect width="108" height="108" fill="#1B6B4A"/>
+  <g transform="translate(24 24) scale(2.5)" fill="#FFFFFF">
+    <path d="M5 5h12a2 2 0 0 1 2 2v2h-4a3 3 0 0 0 0 6h4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/>
+    <path d="M15 10.5h6v3h-6a1.5 1.5 0 0 1 0-3z"/>
+  </g>
+</svg>

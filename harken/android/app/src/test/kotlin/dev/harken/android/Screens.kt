@@ -43,8 +43,8 @@ import dev.harken.android.onboarding.PermissionStep
 import dev.harken.android.onboarding.ServerStep
 import dev.harken.android.onboarding.SignInStep
 import dev.harken.android.onboarding.Step
-import dev.harken.android.ui.BelowStatusBar
-import dev.harken.android.ui.Space
+import dev.arkui.BelowStatusBar
+import dev.arkui.Space
 import dev.harken.android.gen.Active
 import dev.harken.android.gen.Clock
 import dev.harken.android.gen.Output

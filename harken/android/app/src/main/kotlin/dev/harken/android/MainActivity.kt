@@ -17,7 +17,7 @@ import dev.harken.android.onboarding.AppIdentity
 import dev.harken.android.onboarding.ArkApp
 import dev.harken.android.onboarding.Permission
 import dev.harken.android.onboarding.holdSplash
-import dev.harken.android.ui.Strict
+import dev.arkui.Strict
 
 /** Why harken asks for notifications, in the onboarding's words. */
 const val WHY_NOTIFY = "So what's playing, and its controls, can be in a notification and on the lock screen."

@@ -54,19 +54,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.harken.android.ui.ArkGlyphs
-import dev.harken.android.ui.Chevron
-import dev.harken.android.ui.Cover
-import dev.harken.android.ui.Glyph
-import dev.harken.android.ui.LocalPageFrame
-import dev.harken.android.ui.MoreButton
-import dev.harken.android.ui.Origin
-import dev.harken.android.ui.Recompositions
-import dev.harken.android.ui.RowOrigin
-import dev.harken.android.ui.Space
-import dev.harken.android.ui.Tapped
-import dev.harken.android.ui.quiet
-import dev.harken.android.ui.rememberHero
+import dev.arkui.ArkGlyphs
+import dev.arkui.Chevron
+import dev.arkui.Cover
+import dev.arkui.Glyph
+import dev.arkui.LocalPageFrame
+import dev.arkui.MoreButton
+import dev.arkui.Origin
+import dev.arkui.Recompositions
+import dev.arkui.RowOrigin
+import dev.arkui.Space
+import dev.arkui.Tapped
+import dev.arkui.quiet
+import dev.arkui.rememberHero
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {
@@ -288,7 +288,7 @@ fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).co
 
 /**
  * Somebody's banner, edge to edge and up to the top of the screen: their wide picture cropped to
- * fill, run up under the status bar (its page says [dev.harken.android.ui.UnderStatusBar]) and that
+ * fill, run up under the status bar (its page says [dev.arkui.UnderStatusBar]) and that
  * much taller, so what shows below the bar is the shape [bannerHeight] says; `kind` in small
  * capitals and `name` in bold on its lower edge over a shade that keeps them legible, a lighter
  * one under the bar's icons, and back over its top, below the bar. Until the picture arrives the

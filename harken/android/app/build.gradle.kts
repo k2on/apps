@@ -111,6 +111,9 @@ android {
             // The kernel, per ABI, and the Kotlin over it.
             jniLibs.srcDir("$harkenLib/jniLibs")
             kotlin.srcDir("$harkenLib/kotlin")
+            // arkui, the look every Ark app on Android shares (kotlin/arkui), compiled from its
+            // sources as part of this app.
+            kotlin.srcDir(rootProject.file("../../kotlin/arkui/src"))
         }
     }
 }

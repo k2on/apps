@@ -1,7 +1,7 @@
 // The numbers everything moves by: a gesture's preview comes free at first,
 // then harder, and never past its limit; and a settle is never longer than
 // its cap, however long the spring under it would have run.
-package dev.harken.android.ui
+package dev.arkui
 
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.VectorConverter

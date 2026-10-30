@@ -540,6 +540,16 @@ public struct Linked: Equatable {
     public var json: String { J.obj(["\"plaid_account_id\":" + J.q(plaidAccountId), "\"bank\":" + J.q(bank), "\"account_id\":" + J.wopt(accountId) { v0 in J.q(v0.hex) }, "\"name\":" + J.q(name), "\"mask\":" + J.q(mask), "\"kind\":" + J.q(kind), "\"balance\":" + J.wopt(balance) { v0 in String(v0) }, "\"ignored\":" + String(ignored)]) }
 }
 
+/// The record `LinkedLine` (UniFFI's): its JSON, for the functions called by name.
+extension LinkedLine {
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(plaidAccountId: J.text(o["plaid_account_id"]), bank: J.text(o["bank"]), accountId: J.opt(o["account_id"]) { v0 in Id(J.text(v0)) }, account: J.text(o["account"]), name: J.text(o["name"]), mask: J.text(o["mask"]), kind: J.text(o["kind"]), balance: J.opt(o["balance"]) { v0 in J.int(v0) }, ignored: J.bool(o["ignored"]))
+    }
+
+    public var json: String { J.obj(["\"plaid_account_id\":" + J.q(plaidAccountId), "\"bank\":" + J.q(bank), "\"account_id\":" + J.wopt(accountId) { v0 in J.q(v0.hex) }, "\"account\":" + J.q(account), "\"name\":" + J.q(name), "\"mask\":" + J.q(mask), "\"kind\":" + J.q(kind), "\"balance\":" + J.wopt(balance) { v0 in String(v0) }, "\"ignored\":" + String(ignored)]) }
+}
+
 /// The record `Month`.
 public struct Month: Equatable {
     public var month: String
@@ -873,6 +883,9 @@ public struct Money {
     /// `banks.link`: its intent's id.
     @discardableResult public func link(_ input: LinkAccount) throws -> String { try peer.mutate(name: "banks.link", input: input.json) }
 
+    /// `banks.linked`, kept, its rows UniFFI's.
+    public func linked() throws -> LiveView<LinkedLine> { typed(try LinkedLineView(peer: peer, name: "banks.linked", input: "null")) }
+
     /// `banks.sync`: its intent's id.
     @discardableResult public func sync() throws -> String { try peer.mutate(name: "banks.sync", input: "null") }
 
@@ -982,6 +995,8 @@ public struct Money {
     private func typed(_ v: BudgetLineView) -> LiveView<BudgetLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
     private func typed(_ v: GroupLineView) -> LiveView<GroupLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+
+    private func typed(_ v: LinkedLineView) -> LiveView<LinkedLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
     private func typed(_ v: PayeeLineView) -> LiveView<PayeeLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
