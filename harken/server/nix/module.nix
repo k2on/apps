@@ -530,6 +530,8 @@ in
         HARKEN_PICTURE_HOSTS = lib.concatStringsSep "," cfg.pictureHosts;
         HARKEN_RETAIN_DAYS = toString cfg.retainDays;
         HARKEN_RETAIN_ENTRIES = toString cfg.retainEntries;
+        # A speaker's copy of a file more than it plays (`speaker.rs`).
+        HARKEN_FFMPEG = lib.getExe pkgs.ffmpeg-headless;
       } // lib.optionalAttrs (cfg.roles != { }) {
         # `library=sub1,sub2;admin=sub1`, as `harken_server::roles_of` reads it.
         HARKEN_ROLES = lib.concatStringsSep ";"

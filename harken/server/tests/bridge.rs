@@ -583,6 +583,7 @@ fn house(url: String) -> ha::Config {
         token: TOKEN.into(),
         players: vec![(KITCHEN.into(), "Kitchen".into())],
         media: MEDIA.into(),
+        lower: None,
         tick: Duration::from_millis(40),
         idle: ha::IDLE,
         trace: ha::Trace::Off,

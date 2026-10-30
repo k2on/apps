@@ -40,6 +40,7 @@ pub mod domain;
 pub mod feeds;
 pub mod hosted;
 pub mod library;
+pub mod speaker;
 pub mod sync;
 pub mod transcribe;
 
@@ -81,6 +82,9 @@ pub struct Config {
     /// Who makes chapters of what was heard in an episode with none
     /// (`chapters.rs`), in the order to try them: `outline,tiling`.
     pub chapters: String,
+    /// ffmpeg, which makes a speaker's copy of a file more than it plays
+    /// (`speaker.rs`): `ffmpeg` on the path unless told.
+    pub ffmpeg: PathBuf,
     /// The house, if there is one.
     pub house: Option<ha::Config>,
 }
@@ -107,6 +111,7 @@ impl Config {
             catalogue: None,
             transcriber: None,
             chapters: DEFAULT_CHAPTERS.into(),
+            ffmpeg: "ffmpeg".into(),
             house: None,
         }
     }
@@ -130,6 +135,8 @@ impl Config {
     ///                               all three, or none; HARKEN_HA_MEDIA
     /// HARKEN_BRIDGE_TRACE=1         a line per poll per speaker: what the
     ///                               house said and what the bridge did
+    /// HARKEN_FFMPEG                 ffmpeg, for a speaker's copy of a file
+    ///                               it cannot play (`ffmpeg` on the path)
     /// ```
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
@@ -145,6 +152,9 @@ impl Config {
             catalogue: env("HARKEN_CATALOGUE"),
             transcriber: env("HARKEN_TRANSCRIBER").map(PathBuf::from),
             chapters: env("HARKEN_CHAPTERS").unwrap_or_else(|| DEFAULT_CHAPTERS.into()),
+            ffmpeg: env("HARKEN_FFMPEG")
+                .unwrap_or_else(|| "ffmpeg".into())
+                .into(),
             house: house(&env)?,
         })
     }
@@ -193,6 +203,7 @@ fn house(env: &impl Fn(&str) -> Option<String>) -> Result<Option<ha::Config>> {
                 token,
                 players,
                 media,
+                lower: None,
                 tick: ha::TICK,
                 idle: ha::IDLE,
                 trace: match env("HARKEN_BRIDGE_TRACE").is_some_and(|v| v != "0") {
@@ -424,6 +435,10 @@ pub async fn start(config: Config) -> Result<Server> {
     // scanner took out of files, from the data directory: the media root
     // may be read-only, and a cover is spelt the way a file is, so every
     // client joins it the same way (`covers`).
+    //
+    // What is more than a speaker plays is copied at what it does
+    // (`speaker.rs`), served at `/media/.speaker/` and handed to the house.
+    let mut lower = None;
     if let Some(dir) = &config.media {
         let art = library::art_dir(&config.data);
         eprintln!(
@@ -432,12 +447,19 @@ pub async fn start(config: Config) -> Result<Server> {
             art.display(),
             covers::ART
         );
+        let speaker = Arc::new(speaker::Lower::new(
+            dir,
+            &config.data,
+            config.ffmpeg.clone(),
+        ));
         server.routes = covers::routes(
             dir,
             &art,
             &catalogue::dir(&config.data),
             &feeds::dir(&config.data),
-        );
+        )
+        .merge(speaker::routes(speaker.clone()));
+        lower = Some(speaker);
     }
     // Everything the routes above do not match falls through to the page,
     // with the build as its validator: a store path cannot be one, since nix
@@ -460,7 +482,8 @@ pub async fn start(config: Config) -> Result<Server> {
     // place in an episode are written as them, by a sign-in of theirs the
     // house holds. It carries no name, so they are named as their own
     // sign-ins name them.
-    let house = config.house.clone().map(|house| {
+    let house = config.house.clone().map(|mut house| {
+        house.lower = lower.clone();
         eprintln!("harken-server: the house: {house}");
         let auth = auth.clone();
         let sign_in: ha::SignIn = Arc::new(move |user: &str| {

@@ -50,12 +50,14 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use harken_player::{Caps, Event, Followers, Heard, Place, Reconciler, Say, View, Vol};
 
 use crate::domain::host::url;
 use crate::domain::host::{Kind, Listening};
 use crate::domain::{Output, Track};
+use crate::speaker::Lower;
 
 pub type Args = Vec<u8>;
 
@@ -638,12 +640,22 @@ struct Room {
     events: Vec<(String, Event)>,
 }
 
+/// Where a speaker fetches `track` from, against `media`: the copy a
+/// speaker plays where `lower` says the file is more than that.
+fn url_for(media: &str, lower: Option<&Arc<Lower>>, track: &Track) -> String {
+    match lower {
+        Some(l) => url(media, &l.file(&track.file)),
+        None => url(media, &track.file),
+    }
+}
+
 /// One speaker as one session's reconciler drives it: a
 /// [`harken_player::Sound`] whose commands are service calls ([`Act`]).
 struct Hand<'a> {
     entity: &'a str,
     key: &'a str,
     media: &'a str,
+    lower: Option<&'a Arc<Lower>>,
     now: i64,
     room: &'a mut Room,
     acts: &'a RefCell<Vec<Act>>,
@@ -663,6 +675,12 @@ impl Hand<'_> {
         self.acts.borrow_mut().push(a);
     }
 
+    /// Where the speaker fetches `track` from: its file, or the copy of it
+    /// a speaker plays ([`crate::speaker`]).
+    fn url(&self, track: &Track) -> String {
+        url_for(self.media, self.lower, track)
+    }
+
     fn verb(&self, verb: &'static str, why: &'static str) {
         self.act(Act::Verb {
             entity: self.entity.into(),
@@ -673,7 +691,7 @@ impl Hand<'_> {
 
     /// The whole queue handed to the speaker, from `at`, at `position_ms`.
     fn hand(&mut self, tracks: &[Track], from: &str, at: usize, position_ms: i64, playing: bool) {
-        let urls: Vec<String> = tracks.iter().map(|t| url(self.media, &t.file)).collect();
+        let urls: Vec<String> = tracks.iter().map(|t| self.url(t)).collect();
         self.room.held = Some(Holding {
             key: self.key.into(),
             tracks: tracks.to_vec(),
@@ -717,12 +735,12 @@ impl Hand<'_> {
     /// hand-off, and for a queue longer than what the speaker was handed
     /// ([`ha::WINDOW`]).
     fn enqueued(&mut self, tracks: &[Track], at: usize) -> bool {
-        let media = self.media;
+        let (media, lower) = (self.media, self.lower);
         let entity = self.entity.to_string();
         let Some(h) = self.held_mut() else {
             return false;
         };
-        let urls: Vec<String> = tracks.iter().map(|t| url(media, &t.file)).collect();
+        let urls: Vec<String> = tracks.iter().map(|t| url_for(media, lower, t)).collect();
         let old = &h.urls;
         if !h.started
             || at != h.at
@@ -1021,6 +1039,9 @@ pub struct Speakers {
     /// the phone may be on `https://harken.example.com` while the speaker
     /// only knows an address on the LAN.
     media: String,
+    /// The copies of what is more than a speaker plays, where there is a
+    /// media root to make them from.
+    lower: Option<Arc<Lower>>,
     rooms: HashMap<String, Room>,
     /// The reconciler of each speaker in each session it stands in, by
     /// (account, entity).
@@ -1043,12 +1064,19 @@ impl Speakers {
         Speakers {
             players,
             media: media.trim_end_matches('/').to_string(),
+            lower: None,
             rooms: HashMap::new(),
             minds: HashMap::new(),
             sessions: HashMap::new(),
             released: HashSet::new(),
             records: RefCell::new(vec![]),
         }
+    }
+
+    /// Hands a speaker a copy it plays of whatever is more than it plays.
+    pub fn lowering(mut self, lower: Option<Arc<Lower>>) -> Speakers {
+        self.lower = lower;
+        self
     }
 
     /// The devices to stand in a session where somebody is listening.
@@ -1152,6 +1180,7 @@ impl Speakers {
             entity,
             key,
             media: &self.media,
+            lower: self.lower.as_ref(),
             now,
             room: self.rooms.entry(entity.into()).or_default(),
             acts: &acts,
@@ -2979,6 +3008,9 @@ pub mod ha {
         /// does: the phone may be on `https://harken.example.com` while the
         /// speaker only knows an address on the LAN.
         pub media: String,
+        /// The copies of what is more than a speaker plays
+        /// ([`crate::speaker`]); none, and every file is handed as it is.
+        pub lower: Option<Arc<crate::speaker::Lower>>,
         /// How often to poll; [`TICK`] outside a test.
         pub tick: Duration,
         /// How long a silent speaker stands where nobody is listening;
@@ -3047,7 +3079,8 @@ pub mod ha {
         let thread = std::thread::Builder::new()
             .name("harken-house".into())
             .spawn(move || {
-                let mut bridge = Speakers::new(config.players.clone(), &config.media);
+                let mut bridge = Speakers::new(config.players.clone(), &config.media)
+                    .lowering(config.lower.clone());
                 let house = House::new(&config);
                 let mut wires = Wires {
                     hub,

@@ -978,6 +978,8 @@
               pname = "arkdb-rust";
               flags = "--workspace";
               src = only (rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ]);
+              # What makes a speaker's copy of a hi-res file (harken/server/tests/speaker.rs).
+              nativeBuildInputs = [ pkgs.ffmpeg-headless ];
               # The client's demo is a feature, so its tests are a second run.
               postCheck = ''
                 cargoWithProfile test --locked -p harken-iced --features demo
