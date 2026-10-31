@@ -2,9 +2,9 @@
 // tinted card, then the budget's accounts and the ones only tracked, each a
 // row with its kind's glyph, the bank that feeds it, how many of its
 // transactions want a look, and its balance. An account opens its register;
-// the bank's accounts are a page of their own; adding an account is a sheet.
-// The person and the server, and signing out, are behind the avatar in the
-// top bar, as Google's apps put them.
+// the banks are Settings' (SettingsScreen.kt); adding an account is a sheet.
+// Settings — the banks, the person and the server, and signing out — are
+// behind the face in the top bar, as Google's apps put them.
 package dev.money.android
 
 import androidx.compose.foundation.background
@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -70,7 +72,6 @@ import uniffi.money_domain.AccountLine
 fun AccountsScreen(ledger: Ledger) {
     val shell = LocalShell.current
     var adding by rememberSaveable { mutableStateOf(false) }
-    var me by rememberSaveable { mutableStateOf(false) }
     val a = LocalAmounts.current
     val open = ledger.accounts.filter { !it.closed }.sortedBy { it.pos }
     val budget = open.filter { it.onBudget }
@@ -80,7 +81,10 @@ fun AccountsScreen(ledger: Ledger) {
     Page(
         title = "Accounts",
         actions = {
-            IconButton(onClick = { me = true }) { Avatar(ledger.who.ifEmpty { "?" }) }
+            // The face opens Settings, badged while a bank wants somebody there.
+            IconButton(onClick = shell.onSettings) {
+                BadgedBox(badge = { if (ledger.banksWanting > 0) Badge() }) { Avatar(ledger.who.ifEmpty { "?" }) }
+            }
         },
         fab = {
             androidx.compose.material3.FloatingActionButton(onClick = { shell.onAdd(null) }) {
@@ -130,16 +134,15 @@ fun AccountsScreen(ledger: Ledger) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(end = Space.s))
                             Text("Add account")
                         }
-                        OutlinedButton(onClick = shell.onBanks) {
+                        OutlinedButton(onClick = shell.onSettings) {
                             Icon(Glyphs.Link, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                            Text("Bank connections")
+                            Text(if (ledger.banks.isEmpty()) "Connect a bank" else "Banks")
                         }
                     }
             }
         }
     }
     if (adding) AddAccountSheet(onDismiss = { adding = false })
-    if (me) MeSheet(ledger, onDismiss = { me = false })
 }
 
 @Composable
@@ -263,44 +266,3 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
     }
 }
 
-/** Who is signed in, where, and the way out. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MeSheet(ledger: Ledger, onDismiss: () -> Unit) {
-    val shell = LocalShell.current
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
-        Column(Modifier.padding(horizontal = Space.xl).navigationBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier.size(64.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center) {
-                    Text(
-                        ledger.who.take(1).uppercase().ifEmpty { "?" },
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-            Spacer(Modifier.height(Space.m))
-            Text(ledger.who.ifEmpty { "Signed in" }, style = MaterialTheme.typography.titleLarge)
-            Text(
-                if (ledger.demo) "The demo household, on this phone only" else ledger.server.substringAfter("://"),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (!ledger.demo) {
-                val l = ledger.link
-                Text(
-                    when {
-                        l.linked && l.pending == 0 -> "Up to date"
-                        l.linked -> "Sending ${l.pending} change${if (l.pending == 1) "" else "s"}"
-                        else -> "Not connected (${l.word}); changes wait on this phone"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(Space.xl))
-            OutlinedButton(onClick = { onDismiss(); shell.onSignOut() }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (ledger.demo) "Leave the demo" else "Sign out")
-            }
-            Spacer(Modifier.height(Space.xl))
-        }
-    }
-}

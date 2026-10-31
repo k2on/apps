@@ -1,7 +1,7 @@
 // The app, once there is a budget: four tabs in a navigation bar — Budget,
 // Accounts, Transactions and Insights — each a page with a large top app bar
 // that collapses as it scrolls, and the pages they open (an account's
-// register, the bank's accounts) pushed over them. Navigation is
+// register, Settings with the banks) pushed over them. Navigation is
 // navigation-compose's, so the system's back gesture is predictive: the
 // page under the finger slides and fades back toward the one beneath it.
 // Each tab keeps its own place, as Google's apps do, and the tab already
@@ -13,6 +13,8 @@
 // snackbar on the page showing.
 package dev.money.android
 
+import android.net.Uri
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -65,6 +67,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
@@ -92,7 +95,7 @@ class Shell(
     val onAdd: (account: Id?) -> Unit,
     val onEdit: (TxnLine) -> Unit,
     val onAccount: (Id) -> Unit,
-    val onBanks: () -> Unit,
+    val onSettings: () -> Unit,
     val onTab: (Tab) -> Unit,
     val onSignOut: () -> Unit,
 )
@@ -107,6 +110,14 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var form by remember { mutableStateOf<TxnForm?>(null) }
     LaunchedEffect(book) { book.notes.collect { snackbar.showSnackbar(it) } }
+    // Plaid's page, in a Custom Tab, the moment the server answers a connection asked for here.
+    val context = LocalContext.current
+    LaunchedEffect(book) {
+        book.pages.collect { url ->
+            runCatching { CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url)) }
+                .onFailure { snackbar.showSnackbar("Couldn't open Plaid's page: open it from Settings") }
+        }
+    }
 
     val shell =
         remember(book, nav) {
@@ -116,7 +127,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 onAdd = { account -> form = newForm(book.state.value, account) },
                 onEdit = { t -> form = formOf(t, book.state.value) },
                 onAccount = { id -> nav.navigate("register/${id.hex}") },
-                onBanks = { nav.navigate("banks") },
+                onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
             )
@@ -170,7 +181,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                     val id = Id(e.arguments?.getString("account").orEmpty())
                     RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
                 }
-                composable("banks") { BanksScreen(ledger, onBack = { nav.popBackStack() }) }
+                composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
             }
         }
         form?.let { f -> TxnSheet(ledger, f, onDismiss = { form = null }) }

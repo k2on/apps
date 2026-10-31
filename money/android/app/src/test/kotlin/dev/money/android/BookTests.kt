@@ -88,7 +88,8 @@ class BookTests {
     }
 
     @Test fun aTargetAndAutoAssignFundIt() {
-        val c = l.lines.first { it.available >= 0 }
+        // Not a card's payment category, the budget's first: what it lacks is the card's debt, not a target.
+        val c = l.lines.first { !Ledger.isPayment(it) && it.available >= 0 }
         book.setTarget(c.categoryId, c.assigned + 10_000)
         assertEquals(toneOf(l.line(c.categoryId)!!), dev.arkui.Tone.Caution)
         book.autoAssign(Auto.Underfunded, listOf(c.categoryId))
@@ -203,7 +204,12 @@ class BookTests {
     }
 
     @Test fun categoriesAreAddedHiddenAndDeleted() {
-        val g = l.groups.first()
+        // The first group is the cards', which takes none: its categories come and go with the cards.
+        assertEquals(Book.CARD_GROUP, l.byGroup().first().first.id)
+        book.addCategory(Book.CARD_GROUP, "Kayak")
+        assertTrue(book.said.last(), book.said.last().startsWith("Couldn't add the category: "))
+        assertNull(l.lines.firstOrNull { it.name == "Kayak" })
+        val g = l.byGroup().first { it.first.id != Book.CARD_GROUP }.first
         book.addCategory(g.id, "Kayak")
         val c = l.lines.first { it.name == "Kayak" }
         assertEquals(g.id, c.groupId)

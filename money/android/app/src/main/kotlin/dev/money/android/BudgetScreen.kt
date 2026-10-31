@@ -8,6 +8,15 @@
 // overspent. A category opens its sheet (CategorySheet.kt). The month steps
 // back and forth in the top bar.
 //
+// Credit cards are budgeted as YNAB budgets them (`money/domain/src/cards.rs`):
+// the budget's own Credit Card Payments group comes first, a payment category
+// per card, each marked with the card's glyph and saying what of the card's
+// debt is covered and what is short — short in amber, and the group's header
+// adds it up. Spending on a card more than a category had is debt, not next
+// month's money: that category's pill is amber too ("on a card, not
+// covered"), where cash overspent is red. The cards' group takes no new
+// category, and a payment category is dragged only among the cards.
+//
 // The budget is put in order by hand, as a launcher's apps are: a category
 // held lifts and is dragged among the rest, and past a group's header into
 // that group; a group's header held folds every group to its header, so the
@@ -24,6 +33,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -32,6 +42,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -83,6 +94,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.arkui.AmountText
+import dev.arkui.Amounts
 import dev.arkui.Landing
 import dev.arkui.LocalAmounts
 import dev.arkui.Meter
@@ -99,22 +111,38 @@ import dev.money.android.gen.Auto
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.GroupLine
 
-/** What a category's pill says about it. */
+/** Whether a category overspent only on a card: its shortfall is the card's debt now, not next month's. */
+fun creditOverspent(l: BudgetLine): Boolean = l.available < 0 && l.creditOverspent >= -l.available
+
+/**
+ * What a category's pill says about it, as YNAB's colours do: red for cash overspent (next month pays
+ * for it), amber for overspending that was all on a card (it is debt now) and for a card's payment
+ * that does not cover what the card owes, else as its target reads it.
+ */
 fun toneOf(l: BudgetLine): Tone =
     when {
+        creditOverspent(l) -> Tone.Caution
         l.available < 0 -> Tone.Negative
+        Ledger.isPayment(l) && l.underfunded > 0 -> Tone.Caution
+        Ledger.isPayment(l) -> if (l.available > 0) Tone.Positive else Tone.Neutral
         l.target > 0 && l.assigned < l.target -> Tone.Caution
         l.available > 0 -> Tone.Positive
         else -> Tone.Neutral
     }
 
-/** How far along a category is, and in what: spent of what it had, its target funded, or overspent. */
+/**
+ * How far along a category is, and in what: spent of what it had, its target funded, or overspent —
+ * on a card, in the card's amber; and for a card's payment, how much of what the card owes it has.
+ */
 @Composable
 private fun meterOf(l: BudgetLine): Pair<Float, Color> {
     val c = MaterialTheme.colorScheme
     val had = l.carried + l.assigned
     return when {
+        creditOverspent(l) -> 1f to c.tertiary
         l.available < 0 -> 1f to c.error
+        Ledger.isPayment(l) && l.debt > 0 -> (l.available.toFloat() / l.debt) to if (l.underfunded > 0) c.tertiary else c.primary
+        Ledger.isPayment(l) -> 0f to c.primary
         l.target > 0 && l.assigned < l.target -> (l.assigned.toFloat() / l.target) to c.tertiary
         had > 0 -> ((-l.activity).toFloat() / had) to c.primary
         else -> 0f to c.primary
@@ -122,18 +150,32 @@ private fun meterOf(l: BudgetLine): Pair<Float, Color> {
 }
 
 /** The line under a category's name: what is happening to it, in words. */
-@Composable
-fun storyOf(l: BudgetLine): String {
-    val a = LocalAmounts.current
+fun storyOf(l: BudgetLine, a: Amounts): String {
     val had = l.carried + l.assigned
     return when {
+        creditOverspent(l) -> "${a.format(l.creditOverspent)} on a card, not covered"
+        l.available < 0 && l.creditOverspent > 0 -> "Overspent by ${a.format(-l.available)}, ${a.format(l.creditOverspent)} of it on a card"
         l.available < 0 -> "Overspent by ${a.format(-l.available)}"
+        // A card's: what of its debt is not covered yet.
+        Ledger.isPayment(l) && l.underfunded > 0 -> "${a.format(l.underfunded)} short of the ${a.format(l.debt)} owed"
+        Ledger.isPayment(l) && l.debt > 0 -> "Covered: ${a.format(l.debt)} owed"
+        Ledger.isPayment(l) -> "Nothing owed on the card"
         l.target > 0 && l.assigned < l.target -> "${a.format(l.target - l.assigned)} more needed this month"
         l.activity < 0 && had > 0 -> "Spent ${a.format(-l.activity)} of ${a.format(had)}"
         l.activity < 0 -> "Spent ${a.format(-l.activity)}"
         l.target > 0 -> "Funded"
         else -> ""
     }
+}
+
+/**
+ * Whether a category's key may land under a group's: a card's payment category stays with the cards,
+ * and nothing else goes among them (the domain's `move_category`).
+ */
+fun fitsOf(budget: List<Pair<GroupLine, List<BudgetLine>>>): (Any, Any?) -> Boolean {
+    val payments = budget.flatMap { it.second }.filter { Ledger.isPayment(it) }.map { categoryKey(it.categoryId) }.toSet()
+    val cards = groupKey(Book.CARD_GROUP)
+    return { row, header -> (row in payments) == (header == cards) }
 }
 
 @Composable
@@ -155,9 +197,11 @@ fun BudgetScreen(ledger: Ledger) {
     val groups = remember(budget) { budget.associate { (g, _) -> groupKey(g.id) to g } }
     val lines = remember(budget) { budget.flatMap { it.second }.associateBy { categoryKey(it.categoryId) } }
     val keys = remember(budget) { keysOf(budget) }
+    // The cards' payment categories stay among themselves, and nothing else joins them.
+    val fits = remember(budget) { fitsOf(budget) }
     // After the ready card and the notices.
     val reorder =
-        rememberReorder(list, lead = 2, isHeader = ::isGroupKey) { key, landing ->
+        rememberReorder(list, lead = 2, isHeader = ::isGroupKey, fits = fits) { key, landing ->
             when (val d = dropOf(key, landing)) {
                 is Drop.Category -> {
                     book.moveCategory(d.id, d.group, d.before)
@@ -192,6 +236,8 @@ fun BudgetScreen(ledger: Ledger) {
                 DropdownMenuItem(
                     text = { Text(if (showHidden) "Leave hidden categories out" else "Show hidden categories") },
                     onClick = { menu = false; showHidden = !showHidden })
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Settings") }, onClick = { menu = false; shell.onSettings() })
             }
         },
         fab = {
@@ -228,6 +274,7 @@ fun BudgetScreen(ledger: Ledger) {
                         GroupHeader(
                             g,
                             available = rows.sumOf { lines[it]?.available ?: 0L },
+                            short = if (g.id == Book.CARD_GROUP) rows.sumOf { lines[it]?.underfunded ?: 0L } else 0L,
                             folded = folded,
                             closed = closed,
                             lifted = reorder.dragged == gk,
@@ -247,7 +294,8 @@ fun BudgetScreen(ledger: Ledger) {
                 if (!closed) {
                     item(key = "foot/$hex") {
                         GroupFoot(
-                            onAdd = { newCategory = g.id to "" },
+                            // The cards' group is the cards': its categories come and go with them.
+                            onAdd = if (g.id == Book.CARD_GROUP) null else { { newCategory = g.id to "" } },
                             modifier = Modifier.makingWay(this).padding(bottom = Space.m))
                     }
                 }
@@ -398,11 +446,13 @@ fun dropOf(key: Any, landing: Landing<Any>): Drop? =
 /**
  * A group's header: the top of its card, or the whole card while it is `closed` (folded, or every
  * group is while one is dragged). A tap folds it or opens it; held, it is dragged among the groups.
+ * The cards' group says, under its name, what of their debt is not covered (`short`).
  */
 @Composable
 private fun GroupHeader(
     g: GroupLine,
     available: Long,
+    short: Long,
     folded: Boolean,
     closed: Boolean,
     lifted: Boolean,
@@ -425,12 +475,21 @@ private fun GroupHeader(
         ) {
             Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.rotate(turn))
             Spacer(Modifier.width(Space.s))
-            Text(
-                g.name,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f).semantics { heading() },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    g.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading() },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+                if (short > 0) {
+                    Text(
+                        "${LocalAmounts.current.format(short)} not covered",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        maxLines = 1)
+                }
+            }
             AmountText(available, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -439,16 +498,30 @@ private fun GroupHeader(
 /** A group's card's top: its top corners rounded, its bottom square where its rows go on. */
 private fun cardTop(card: CornerBasedShape): Shape = card.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
 
-/** The foot of a group's card: its bottom corners, and a new category. */
+/** The foot of a group's card: its bottom corners, and a new category where the group takes one. */
 @Composable
-private fun GroupFoot(onAdd: () -> Unit, modifier: Modifier = Modifier) {
+private fun GroupFoot(onAdd: (() -> Unit)?, modifier: Modifier = Modifier) {
     val shape = MaterialTheme.shapes.large.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize)
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = shape, modifier = modifier.fillMaxWidth()) {
         Row {
-            TextButton(onClick = onAdd, modifier = Modifier.padding(start = Space.s, bottom = Space.xs)) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(end = Space.xs))
-                Text("Category")
+            if (onAdd != null) {
+                TextButton(onClick = onAdd, modifier = Modifier.padding(start = Space.s, bottom = Space.xs)) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(end = Space.xs))
+                    Text("Category")
+                }
+            } else {
+                Spacer(Modifier.height(Space.m))
             }
+        }
+    }
+}
+
+/** A card's payment category's mark: the card's glyph on a rounded tile, as the desktop draws it. */
+@Composable
+fun CardTile(modifier: Modifier = Modifier) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small, modifier = modifier.size(36.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(Glyphs.Card, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -458,7 +531,7 @@ private fun GroupFoot(onAdd: () -> Unit, modifier: Modifier = Modifier) {
 private fun CategoryRow(l: BudgetLine, lifted: Boolean, actions: List<CustomAccessibilityAction>, onClick: () -> Unit) {
     val a = LocalAmounts.current
     val (fraction, color) = meterOf(l)
-    val story = storyOf(l)
+    val story = storyOf(l, a)
     Column(
         Modifier.fillMaxWidth()
             .background(if (lifted) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow)
@@ -470,6 +543,10 @@ private fun CategoryRow(l: BudgetLine, lifted: Boolean, actions: List<CustomAcce
             },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (Ledger.isPayment(l)) {
+                CardTile()
+                Spacer(Modifier.width(Space.m))
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     l.name + if (l.hidden) " (hidden)" else "",

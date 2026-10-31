@@ -35,6 +35,7 @@ import dev.money.android.gen.AddTransaction
 import dev.money.android.gen.Assign
 import dev.money.android.gen.Auto
 import dev.money.android.gen.AutoAssign
+import dev.money.android.gen.BankName
 import dev.money.android.gen.Categorize
 import dev.money.android.gen.DeleteCategory
 import dev.money.android.gen.EditTransaction
@@ -46,6 +47,7 @@ import dev.money.android.gen.Month
 import dev.money.android.gen.MoveCategory
 import dev.money.android.gen.MoveGroup
 import dev.money.android.gen.MoveMoney
+import dev.money.android.gen.OpenLinked
 import dev.money.android.gen.OpenAccount
 import dev.money.android.gen.Reconcile
 import dev.money.android.gen.Register
@@ -69,6 +71,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import uniffi.money_domain.AccountLine
+import uniffi.money_domain.AskLine
+import uniffi.money_domain.AskState
 import uniffi.money_domain.BankLine
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.GroupLine
@@ -103,6 +107,8 @@ data class Ledger(
     val spending: List<SpendingLine> = emptyList(),
     val banks: List<BankLine> = emptyList(),
     val linked: List<LinkedLine> = emptyList(),
+    /** This person's asks of the server's importer (`banks.asks`), the newest first. */
+    val asks: List<AskLine> = emptyList(),
     val link: Link = Link(),
     /** Who is signed in, as a name to show. */
     val who: String = "",
@@ -129,7 +135,25 @@ data class Ledger(
             .sortedBy { it.pos }
             .map { g -> g to lines.filter { it.groupId == g.id && (hidden || !it.hidden) }.sortedBy { it.pos } }
 
+    /** The cards' payment categories this month. */
+    val cards: List<BudgetLine>
+        get() = lines.filter { isPayment(it) }
+
+    /** What the cards owe beyond what is set aside for them. */
+    val cardsShort: Long
+        get() = cards.filter { !it.hidden }.sumOf { it.underfunded }
+
+    /** What wants somebody in Settings: a bank whose login ran out, or an account waiting for a choice. */
+    val banksWanting: Int
+        get() = banks.sumOf { it.waiting.toInt() + if (it.needsLogin) 1 else 0 }
+
     companion object {
+        /**
+         * Whether `l` is a card's payment category: one of the cards' own group, which is the domain's
+         * and changes as the cards do — never renamed, deleted, moved out, or a transaction's category.
+         */
+        fun isPayment(l: BudgetLine): Boolean = l.card != null || l.groupId == Book.CARD_GROUP
+
         /** A register's key: an account's id, or `all`. */
         fun key(account: Id?): String = account?.hex ?: "all"
     }
@@ -208,6 +232,14 @@ private constructor(
     /** Every note said, in order: the diagnostics' and the tests'. */
     val said: MutableList<String> = CopyOnWriteArrayList()
 
+    private val _pages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /** Plaid's pages to open, each once: the answer to a connection asked for here (Banks.kt). */
+    val pages: SharedFlow<String> = _pages.asSharedFlow()
+
+    /** Every page asked to be opened, in order: the tests'. */
+    val opened: MutableList<String> = CopyOnWriteArrayList()
+
     // Held on `run`'s thread only.
     private var month: String = today.take(7)
     private var accounts: Held<AccountLine>? = null
@@ -219,8 +251,17 @@ private constructor(
     private var payees: Held<PayeeLine>? = null
     private var banks: Held<BankLine>? = null
     private var linked: Held<LinkedLine>? = null
+    private var asks: Held<AskLine>? = null
     private val registers = HashMap<String, Pair<Held<TxnLine>, Int>>()
     private var syncing = false
+
+    /**
+     * A page asked for here and not yet opened: the newest ask there was before it (none: there was
+     * none), so the drain knows the server's answer to this one when it arrives.
+     */
+    private var awaiting: Awaiting? = null
+
+    private class Awaiting(val after: Id?)
 
     private fun start() {
         accounts = Held(money.accounts())
@@ -230,6 +271,7 @@ private constructor(
         payees = Held(money.payees())
         banks = Held(money.banks())
         linked = Held(money.linked())
+        asks = Held(money.asks())
         if (listen) {
             peer.setListener(
                 object : Listener {
@@ -273,9 +315,19 @@ private constructor(
     private fun drain() {
         draining.set(false)
         if (closed) return
-        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked)) h?.settle()
+        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks)) h?.settle()
         for ((h, _) in registers.values) h.settle()
         for (r in peer.takeRejections()) say("The server didn't take a change: ${r.why}")
+        awaiting?.let { w ->
+            when (val f = follow(asks?.rows.orEmpty(), w.after)) {
+                is Follow.Open -> {
+                    awaiting = null
+                    browse(f.url)
+                }
+                Follow.Over -> awaiting = null
+                Follow.Wait -> {}
+            }
+        }
         val s = peer.status()
         // The demo is Alex's, as the demo window is, with no session row to say so.
         val who = peer.signedIn()?.let { it.name.ifEmpty { it.user } } ?: if (demo) "alex" else ""
@@ -293,6 +345,7 @@ private constructor(
                 spending = spending?.rows?.toList().orEmpty(),
                 banks = banks?.rows?.toList().orEmpty(),
                 linked = linked?.rows?.toList().orEmpty(),
+                asks = asks?.rows?.toList().orEmpty(),
                 link = Link(s.linked, if (s.alone) "alone" else s.link, s.pending.toInt()),
                 who = who.replaceFirstChar { it.uppercase() },
                 demo = demo,
@@ -361,6 +414,20 @@ private constructor(
         }
     }
 
+    /**
+     * A card's payment category given what the card owes beyond what it has: its debt covered, from
+     * Ready to Assign, as the desktop's "Assign $X to cover the debt" does.
+     */
+    fun coverCard(category: Id) = post {
+        val l = lines?.rows?.firstOrNull { it.categoryId == category } ?: return@post
+        if (l.underfunded <= 0) return@post
+        try {
+            money.assign(Assign(month, category, l.assigned + l.underfunded))
+        } catch (e: Refusal) {
+            say("Couldn't cover the card: ${why(e)}")
+        }
+    }
+
     fun setTarget(category: Id, target: Long) =
         act("set the target") { it.setTarget(SetTarget(category, target.coerceAtLeast(0))) }
 
@@ -386,12 +453,13 @@ private constructor(
 
     // * Transactions
 
-    /** A new transaction, or the one corrected. */
+    /** A new transaction, or the one corrected; one corrected into a transfer becomes one (`transfer_to`). */
     fun save(f: TxnForm) =
         act("save the transaction") { m ->
             val editing = f.editing
             if (editing != null) {
-                m.editTransaction(EditTransaction(editing, f.date, f.payee, f.category, f.memo, f.amount))
+                m.editTransaction(
+                    EditTransaction(editing, f.date, if (f.transferTo != null) "" else f.payee, f.category, f.memo, f.amount, f.transferTo))
             } else {
                 val account = f.account ?: throw Refusal.Refused("which account?")
                 m.addTransaction(
@@ -431,6 +499,55 @@ private constructor(
     fun link(plaid: String, account: Id) = act("link it") { it.link(LinkAccount(plaid, account)) }
 
     fun ignore(plaid: String, ignored: Boolean) = act("change it") { it.ignore(IgnoreLinked(plaid, ignored)) }
+
+    /** The bank's account `plaid` given an account of its own, of its kind (a card a credit account). */
+    fun openLinked(plaid: String) =
+        act("open an account for it") {
+            it.open(OpenLinked(plaid, ""))
+            say("Opened. Its history arrives with the bank's next import")
+        }
+
+    /** Ask the server to connect a bank: its page opens when the server answers with it ([pages]). */
+    fun connect() = askPage("connect a bank") { it.connect() }
+
+    /** Ask the server for the page to log in to `bank` again. */
+    fun reconnect(bank: String) = askPage("reconnect the bank") { it.reconnect(BankName(bank)) }
+
+    /** Ask the server to forget `bank`. Its accounts here, and what is in them, stay. */
+    fun disconnect(bank: String) = post {
+        if (demo) return@post say("The demo has no server to disconnect a bank from")
+        try {
+            money.disconnect(BankName(bank))
+            say("Asked the server to disconnect the bank")
+        } catch (e: Refusal) {
+            say("Couldn't disconnect the bank: ${why(e)}")
+        }
+    }
+
+    // An ask whose answer is a page to open: the newest ask before it kept, so the drain knows its answer.
+    private fun askPage(what: String, f: (Money) -> Unit) = post {
+        if (demo) return@post say("The demo has no server to connect a bank through")
+        val after = asks?.rows?.firstOrNull()?.id
+        try {
+            f(money)
+            awaiting = Awaiting(after)
+            say("Asked the server for Plaid's page")
+        } catch (e: Refusal) {
+            say("Couldn't $what: ${why(e)}")
+        }
+    }
+
+    /** Plaid's page opened: when the server's answer arrives, or again from Settings. */
+    fun browse(url: String) {
+        opened.add(url)
+        _pages.tryEmit(url)
+    }
+
+    /**
+     * A change by the domain's function as it is, said as `what` when refused: what the server's
+     * importer does, which a test stands in for (the demo holds its role).
+     */
+    internal fun change(what: String, f: (Money) -> Unit) = act(what, f)
 
     /**
      * Ask the bank for anything new. The demo's bank answers at once; a server's importer is asked
@@ -490,7 +607,7 @@ private constructor(
         val shut = {
             closed = true
             peer.setListener(null)
-            for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked)) h?.close()
+            for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks)) h?.close()
             for ((h, _) in registers.values) h.close()
             registers.clear()
             peer.close()
@@ -506,6 +623,12 @@ private constructor(
     companion object {
         /** The budget's own category, where money that comes in goes: the same id on every peer. */
         val READY_TO_ASSIGN: Id = Id(fixed("ready to assign"))
+
+        /**
+         * The cards' own group, "Credit Card Payments", first in the budget: a card's payment category
+         * for each card on the budget, and nothing else (`money/domain/src/cards.rs`).
+         */
+        val CARD_GROUP: Id = Id(fixed("credit card payments"))
 
         private fun fixed(what: String): String =
             MessageDigest.getInstance("SHA-256")

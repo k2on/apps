@@ -125,15 +125,38 @@ does.
   (its target, last month's, its average); its target with a meter; and
   **Move money** or **Cover overspending**, a category chosen on the
   sheet's second page. Rename, hide and delete are in its menu.
+- **Credit cards**, as YNAB budgets them (`domain/src/cards.rs`): the
+  domain's **Credit Card Payments** group comes first, a payment category
+  per card with the card's glyph, saying what of the card's debt is covered
+  ("Covered: $412.00 owed") or short ("$80.00 short of the $412.00 owed",
+  amber), and the group's header adds up what is not covered. Spending more
+  on a card than a category had is debt, not next month's money: that
+  category's pill is amber ("$30.00 on a card, not covered"), where cash
+  overspent is red. A payment category's sheet has the card's balance in
+  place of a target — owed, set aside, not covered — and **Assign $X to
+  cover the debt**; it is not renamed or deleted, the cards' group takes no
+  new category, a payment category is dragged only among the cards (arkui's
+  Reorder, `fits`), and no transaction is filed under one.
 - **Accounts** — net worth large on top, then the budget's accounts and
   the tracked ones, each with its kind, its bank and mask, how many of its
   transactions want a look, and its balance. **Add account** is a sheet:
   a name the domain checks as it is typed, the kind as chips (which sets
   whether it is in the budget, as the domain's rule does), and what is in
-  it or owed. **Bank connections** lists each bank's accounts with the one
-  each feeds: tapped, it is pointed at another (`banks.link`); its switch
-  follows it or not (`banks.ignore`). The avatar opens who is signed in,
-  where, whether changes are waiting to be sent, and Sign out.
+  it or owed. The face in the top bar (badged while a bank wants a look)
+  opens **Settings**, as do **Banks** under the accounts and the budget's
+  menu.
+- **Settings** — **Banks**: each connection with how its last import went
+  (a login run out, or a failure, in the error's colour, with Reconnect),
+  Reconnect and Disconnect (asked first) in its menu, and each of its
+  accounts with the one it feeds: tapped, it is pointed at another
+  (`banks.link`); its switch follows it or not (`banks.ignore`); one waiting
+  for a choice offers a new account of its kind (`banks.open`), an existing
+  one, or Ignore. **Connect a bank** authors `banks.connect`; when the
+  server answers with Plaid's page (`banks.asks`) it opens in a Custom Tab,
+  and a card follows the ask — the server finishes the connection by
+  itself — until it is done, failed or expired (`Banks.kt`). **Account**:
+  who is signed in, where, whether changes are waiting to be sent, and Sign
+  out.
 - **An account's register** — working, cleared and uncleared balances,
   what the bank says, then the transactions by day under sticky headings.
   The mark at a row's front clears it or not; a lock is reconciled.
@@ -153,7 +176,9 @@ does.
   payee with the ones paid before as chips (each bringing the category it
   went to last time), the category or a transfer to another account, the
   account, the day (Material's date picker), a memo, and Cleared; a
-  correction says who entered it and can delete it.
+  correction says who entered it, can delete it, and can make it a
+  transfer (`transfer_to`: paired with the matching one in the other
+  account, or given its other half there).
 
 **Motion.** Between tabs, Material's fade through; into a register or the
 bank's page and back, the shared X axis, which the system's back gesture
@@ -181,7 +206,14 @@ hundredths).
   syncs and then nothing, a transaction added, corrected, cleared and
   deleted, a transfer, reconciling (and an adjustment), an account opened
   after its name is checked, a bank's account followed and not, the month
-  stepped and back, categories added, hidden and deleted.
+  stepped and back, categories added, hidden and deleted; the cards' group
+  first, a card's debt covered in one press, credit overspending as debt,
+  a transaction made a transfer, payment categories kept out of the
+  pickers; connecting a bank followed to Plaid's page, and what Settings
+  says of an ask and of a bank.
+- `ReorderTests` — arkui's Reorder in sections (a section of its own kept
+  so), and the budget's drops made on the demo, payment categories staying
+  with the cards.
 - `StartTests` — the way in: the welcome, the demo remembered and left, an
   address that is not a money server, the sign-in's tab and its code, a
   code that does not exchange, signing out; and days written in the
@@ -197,7 +229,9 @@ hundredths).
 No phone has run it, and no emulator: everything above is the JVM's.
 Signing in to `money.koon.us` has not been tried (the server must allow
 `money://` as a redirect, as harken's allows `harken://`), nor has a
-server's importer answering `banks.sync`. Dynamic colour, the predictive
-back gesture, the Custom Tab's return and JNA's loading on a device are
-the phone's to say. Splits, scheduled transactions and YNAB's
-credit-card payment categories are not in the domain, so not here either.
+server's importer answering `banks.sync` or a connection (the JVM tests
+answer it as the importer would, from the demo, which holds its role).
+Dynamic colour, the predictive back gesture, the Custom Tabs (the
+sign-in's return, Plaid's page) and JNA's loading on a device are the
+phone's to say. Splits and scheduled transactions are not in the domain,
+so not here either.

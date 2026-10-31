@@ -127,12 +127,25 @@ fun InsightsScreen(ledger: Ledger) {
                                 Spacer(Modifier.height(Space.s))
                                 Meter(kept, color = if (kept >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, height = 10.dp)
                             }
+                            // Paying a card is not spending (what it bought was), so it is in none of the
+                            // figures above; what the cards owe beyond what is set aside is.
+                            if (ledger.cards.isNotEmpty()) {
+                                Spacer(Modifier.height(Space.l))
+                                val short = ledger.cardsShort
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Text("Card debt not covered", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                    AmountText(
+                                        short,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = if (short > 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary)
+                                }
+                            }
                         }
                     }
                 }
             }
             val top =
-                ledger.lines.filter { it.activity < 0 }.sortedBy { it.activity }.take(5)
+                ledger.lines.filter { it.activity < 0 && !Ledger.isPayment(it) }.sortedBy { it.activity }.take(5)
             if (top.isNotEmpty()) {
                 item(key = "top") {
                     Card(

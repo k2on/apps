@@ -30,7 +30,10 @@
 // row). A header held moves its section, rows and all: while one is, the app
 // draws the headers alone ([Reorder.folded]) and the list is kept on the
 // header held, so a long section is passed as one row; let go, the sections
-// open again around it.
+// open again around it. A section can be one of its own (`fits`): a row of
+// it never leaves it, and no other row goes in — a budget's card payments,
+// which are the cards' — so a row dragged that way stops at the edge, and
+// the rows past it stay where they are.
 //
 // The app owns the order. Until the list it gives says the row moved —
 // the session's answer comes back from the room — the order it was
@@ -113,16 +116,24 @@ data class Landing<out K>(
 /**
  * `order` with `key` moved to where `over` is — after it when it was before it, in front of it when
  * it was after — or null when it cannot go there. With headers (`isHeader`) a row never goes above
- * the first header, and a header moves with its section's rows and passes only another header: past
- * that header's section going down, in front of it going up.
+ * the first header, nor under one it does not `fit` (the row, and the header it would be under); and a
+ * header moves with its section's rows and passes only another header: past that header's section
+ * going down, in front of it going up.
  */
-fun <K> reordered(order: List<K>, key: K, over: K, isHeader: (K) -> Boolean = { false }): List<K>? {
+fun <K> reordered(
+    order: List<K>,
+    key: K,
+    over: K,
+    isHeader: (K) -> Boolean = { false },
+    fits: (row: K, header: K?) -> Boolean = { _, _ -> true },
+): List<K>? {
     val now = order.indexOf(key)
     val to = order.indexOf(over)
     if (now < 0 || to < 0 || now == to) return null
     if (!isHeader(key)) {
         val moved = order.toMutableList().apply { add(to, removeAt(now)) }
-        return moved.takeUnless { isHeader(order[0]) && !isHeader(it[0]) }
+        if (isHeader(order[0]) && !isHeader(moved[0])) return null
+        return moved.takeIf { fits(key, moved.take(to).lastOrNull(isHeader)) }
     }
     if (!isHeader(over)) return null
     // A section is its header and the rows up to the next header.
@@ -159,6 +170,7 @@ class Reorder internal constructor(
     private val haptics: HapticFeedback,
     private val density: Density,
     private val isHeader: ((Any) -> Boolean)?,
+    private val fits: ((Any, Any?) -> Boolean)?,
     private val lead: Int,
     private val onDrop: () -> ((key: Any, from: Int, after: List<Any>) -> Unit),
 ) {
@@ -190,6 +202,8 @@ class Reorder internal constructor(
     internal val lift = Animatable(0f)
 
     private fun header(key: Any) = isHeader?.invoke(key) == true
+
+    private fun fit(row: Any, under: Any?) = fits?.invoke(row, under) ?: true
 
     /**
      * `items` in the order to draw them: their own, or the order a row has been dragged into while it
@@ -249,7 +263,7 @@ class Reorder internal constructor(
         val at = among.indexOf(key)
         if (at < 0) return false
         val over = among.getOrNull(at + by) ?: return false
-        val next = reordered(order, key, over) { header(it) } ?: return false
+        val next = reordered(order, key, over, { header(it) }, { r, h -> fit(r, h) }) ?: return false
         drawn = next
         scope.launch {
             delay(PENDING_MS)
@@ -284,7 +298,7 @@ class Reorder internal constructor(
                         (if (o.offset > held.offset) bottom > o.offset + o.size / 2f else top < o.offset + o.size / 2f)
                 }
                 .sortedByDescending { abs(it.offset - held.offset) }
-                .firstNotNullOfOrNull { o -> reordered(order, key, o.key) { header(it) } } ?: return
+                .firstNotNullOfOrNull { o -> reordered(order, key, o.key, { header(it) }, { r, h -> fit(r, h) }) } ?: return
         drawn = next
         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
@@ -334,30 +348,36 @@ class Reorder internal constructor(
 @Composable
 fun rememberReorder(list: LazyListState, onMove: (from: Int, to: Int) -> Unit): Reorder {
     val move by rememberUpdatedState(onMove)
-    return rememberDrag(list, null, 0) { key, from, after -> move(from, after.indexOf(key)) }
+    return rememberDrag(list, null, null, 0) { key, from, after -> move(from, after.indexOf(key)) }
 }
 
 /**
  * A [Reorder] of the rows of `list` in sections, each header (`isHeader`) heading the rows after it up
  * to the next: `onDrop(key, landing)` is told where a row or a header was let go when it moved. `lead`
- * is how many of the list's items come before the first header: where the folded headers start.
+ * is how many of the list's items come before the first header: where the folded headers start. A row
+ * lands only under a header it `fits` ([reordered]).
  */
 @Composable
 fun rememberReorder(
     list: LazyListState,
     lead: Int,
     isHeader: (Any) -> Boolean,
+    fits: (row: Any, header: Any?) -> Boolean = { _, _ -> true },
     onDrop: (key: Any, landing: Landing<Any>) -> Unit,
 ): Reorder {
     val drop by rememberUpdatedState(onDrop)
     val header by rememberUpdatedState(isHeader)
-    return rememberDrag(list, { k -> header(k) }, lead) { key, _, after -> landing(after, key) { header(it) }?.let { drop(key, it) } }
+    val fit by rememberUpdatedState(fits)
+    return rememberDrag(list, { k -> header(k) }, { r, h -> fit(r, h) }, lead) { key, _, after ->
+        landing(after, key) { header(it) }?.let { drop(key, it) }
+    }
 }
 
 @Composable
 private fun rememberDrag(
     list: LazyListState,
     isHeader: ((Any) -> Boolean)?,
+    fits: ((Any, Any?) -> Boolean)?,
     lead: Int,
     onDrop: (key: Any, from: Int, after: List<Any>) -> Unit,
 ): Reorder {
@@ -365,7 +385,7 @@ private fun rememberDrag(
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
     val drop by rememberUpdatedState(onDrop)
-    return remember(list) { Reorder(list, scope, haptics, density, isHeader, lead) { drop } }
+    return remember(list) { Reorder(list, scope, haptics, density, isHeader, fits, lead) { drop } }
 }
 
 /**

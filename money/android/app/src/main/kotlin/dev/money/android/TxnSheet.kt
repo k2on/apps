@@ -5,8 +5,12 @@
 // and under it, for one the bank sent, what the bank called it whole), the
 // category, the account, the day (Material's date picker), a memo, and
 // whether the bank has seen it. A transfer is chosen where a category is:
-// its payee is then the other account. Choosing a category or an account is
-// the sheet's second page.
+// its payee is then the other account. A transaction already there is made
+// a transfer the same way (`transfer_to`), paired with the matching one in
+// the other account when there is one, as a card payment the banks tell of
+// from both ends is. The cards' payment categories are not offered: a
+// transaction is not for one. Choosing a category or an account is the
+// sheet's second page.
 package dev.money.android
 
 import androidx.compose.animation.AnimatedContent
@@ -106,7 +110,8 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                         CategoryPicker(
                             ledger,
                             title = "Category",
-                            transferFrom = if (f.editing == null) f.account else null,
+                            // One already there is turned into a transfer as one entered is made one.
+                            transferFrom = f.account,
                             onPick = { p ->
                                 f =
                                     when (p) {
