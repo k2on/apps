@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -170,7 +171,7 @@ public fun MarkedAmount(
         Icon(
             mark,
             contentDescription = null,
-            tint = if (color.isSpecified) color else MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (color.isSpecified) color else LocalContentColor.current,
             modifier = Modifier.size(size))
     }
 }
