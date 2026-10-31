@@ -10600,6 +10600,11 @@ rec {
         ];
         devDependencies = [
           {
+            name = "iced_test";
+            packageId = "iced_test";
+            target = {target, features}: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "money-server";
             packageId = "money-server";
             target = {target, features}: (!("wasm32" == target."arch" or null));

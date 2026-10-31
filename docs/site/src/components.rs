@@ -218,7 +218,7 @@ pub const COMPONENTS: &[Component] = &[
         section: Section::Components,
         glyph: glyphs::PLAYLIST,
         summary: "Rows of what a page holds: what each is, a line under it, and where it goes.",
-        desktop: &["table"],
+        desktop: &["table", "outline"],
         android: Some(Mobile {
             at: &["ui/Components.kt: ListRow, Chevron"],
             how: &["ListRow(onClick, title, under, trailing = { Chevron() }) { picture }"],

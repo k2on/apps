@@ -118,7 +118,7 @@ pub const ENTRIES: &[Entry] = &[
         module: "sidebar",
         name: "Sidebar",
         summary: "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it.",
-        api: &["Item { glyph, label, heading, count, press }", "WIDTH (200)", "view(items, cursor, focused, width, padding, id)"],
+        api: &["Item { glyph, label, heading, trailing, press }", "count(n, lit)", "lit(i, cursor, focused)", "WIDTH (200)", "view(items, cursor, focused, width, padding, id)"],
         rules: &[
             "One highlight, not two: the cursor is what the page shows, marked always, lit only while the sidebar has the keys.",
             "A heading is drawn where the group changes, not stored as a row, so row n is the cursor's n.",
@@ -138,6 +138,13 @@ pub const ENTRIES: &[Entry] = &[
         summary: "Rows of cells cut to their columns at layout, headings over them, section labels and a gutter for a row's mark.",
         api: &["cell(body, width, on_cursor, accent, dim)", "cell_cut(…, cut, …)", "heading(label, width)", "section(label, indent)", "gutter()", "row(line, on_cursor, focused, odd)", "GUTTER, ROW_PADDING, SPACING, CELL_SIZE, HEADING_SIZE"],
         rules: &["A cell loses its middle and a heading its end, each to its own column.", "Columns are portions, so no text column pushes another off a narrow window."],
+    },
+    Entry {
+        module: "outline",
+        name: "Outline",
+        summary: "A table whose rows are gathered under group headings: the cursor walks the rows alone, and rows and groups are dragged, or shifted from the keyboard, into a new order.",
+        api: &["Group { head, rows, foot }", "Look { line, zebra, rules }", "view(groups, lit, focused, look, drag, settle, now, grab, menu, row)", "Drag::press, drag, drop -> Dropped", "shift(sizes, first, last, down) -> Shift", "groups(count, first, last, down)", "rows(groups), group_of(sizes, n), rows_of(sizes, g), progress(sizes, n)"],
+        rules: &["A heading is drawn, not a row: the cursor's n counts rows, so j crosses a heading without stopping on it.", "Every line is one height, so a drag is reorder's arithmetic; a heading held folds every group to its heading.", "Every row of whole groups selected is the groups: they are what a shift moves."],
     },
     Entry {
         module: "line",

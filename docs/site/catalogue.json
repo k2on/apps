@@ -142,7 +142,8 @@
       "section": "components",
       "summary": "Rows of what a page holds: what each is, a line under it, and where it goes.",
       "desktop": [
-        "table"
+        "table",
+        "outline"
       ],
       "android": {
         "at": [
@@ -688,7 +689,9 @@
       "name": "Sidebar",
       "summary": "A column of places down the left of a window, grouped under headings; the one under the cursor is the page beside it.",
       "api": [
-        "Item { glyph, label, heading, count, press }",
+        "Item { glyph, label, heading, trailing, press }",
+        "count(n, lit)",
+        "lit(i, cursor, focused)",
         "WIDTH (200)",
         "view(items, cursor, focused, width, padding, id)"
       ],
@@ -733,6 +736,25 @@
       "rules": [
         "A cell loses its middle and a heading its end, each to its own column.",
         "Columns are portions, so no text column pushes another off a narrow window."
+      ]
+    },
+    {
+      "module": "outline",
+      "name": "Outline",
+      "summary": "A table whose rows are gathered under group headings: the cursor walks the rows alone, and rows and groups are dragged, or shifted from the keyboard, into a new order.",
+      "api": [
+        "Group { head, rows, foot }",
+        "Look { line, zebra, rules }",
+        "view(groups, lit, focused, look, drag, settle, now, grab, menu, row)",
+        "Drag::press, drag, drop -> Dropped",
+        "shift(sizes, first, last, down) -> Shift",
+        "groups(count, first, last, down)",
+        "rows(groups), group_of(sizes, n), rows_of(sizes, g), progress(sizes, n)"
+      ],
+      "rules": [
+        "A heading is drawn, not a row: the cursor's n counts rows, so j crosses a heading without stopping on it.",
+        "Every line is one height, so a drag is reorder's arithmetic; a heading held folds every group to its heading.",
+        "Every row of whole groups selected is the groups: they are what a shift moves."
       ]
     },
     {
