@@ -486,7 +486,9 @@ impl Job {
             "" => String::new(),
             i => plaid.institution(i).unwrap_or_default(),
         };
-        let known: BTreeSet<String> = self.read(|db| db.bank.scan().into_iter().map(|b: Bank| b.name).collect()).unwrap_or_default();
+        let known: BTreeSet<String> = self
+            .read(|db| db.bank.scan().into_iter().map(|b: Bank| b.name).collect())
+            .unwrap_or_default();
         let name = self.store.name_for(&institution, |n| known.contains(n));
         self.store.banks.insert(
             name.clone(),

@@ -309,7 +309,13 @@ fn wells(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
                 txn(id, amount, &format!("{id} STORE"), json!({ "account_id": account, "date": date }))
             };
             match cursor.as_deref() {
-                None => Ok(page("w1", vec![t("WC1", "wf-card", 200.0, "2026-09-12"), t("WK1", "wf-chk", 40.0, "2026-09-14")], vec![], vec![], false)),
+                None => Ok(page(
+                    "w1",
+                    vec![t("WC1", "wf-card", 200.0, "2026-09-12"), t("WK1", "wf-chk", 40.0, "2026-09-14")],
+                    vec![],
+                    vec![],
+                    false,
+                )),
                 Some("w1") if script.wf_more => Ok(page("w2", vec![t("WC2", "wf-card", 25.0, "2026-10-20")], vec![], vec![], false)),
                 Some("w1" | "w2") => Ok(page(cursor.as_deref().unwrap(), vec![], vec![], vec![], false)),
                 Some(c) => Err(("INVALID_FIELD", format!("unexpected cursor {c}"))),
@@ -335,10 +341,16 @@ fn answer(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
             }
             script.pages.push(Page { update, finished: None });
             let n = script.pages.len();
-            Ok(json!({ "link_token": format!("link-{n}"), "hosted_link_url": format!("https://hosted.plaid.test/link-{n}"), "expiration": "2026-10-26T11:00:00Z" }))
+            Ok(
+                json!({ "link_token": format!("link-{n}"), "hosted_link_url": format!("https://hosted.plaid.test/link-{n}"), "expiration": "2026-10-26T11:00:00Z" }),
+            )
         }
         "/link/token/get" => {
-            let n: usize = body["link_token"].as_str().and_then(|t| t.strip_prefix("link-")).and_then(|n| n.parse().ok()).unwrap_or(0);
+            let n: usize = body["link_token"]
+                .as_str()
+                .and_then(|t| t.strip_prefix("link-"))
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0);
             let Some(page) = n.checked_sub(1).and_then(|i| script.pages.get(i)) else {
                 return Err(("INVALID_LINK_TOKEN", "no such link token".into()));
             };

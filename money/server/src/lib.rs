@@ -351,8 +351,13 @@ mod tests {
         ] {
             assert!(Config::from_vars("x:1", vars(&bad)).is_err(), "{bad:?}");
         }
-        for gone in [("MONEY_PLAID_ITEMS", "chase=/c/t"), ("MONEY_ACCOUNTS", r#"{"X":{"item":"chase","mask":"1"}}"#)] {
-            let e = Config::from_vars("x:1", vars(&[keys.to_vec(), vec![gone]].concat())).unwrap_err().to_string();
+        for gone in [
+            ("MONEY_PLAID_ITEMS", "chase=/c/t"),
+            ("MONEY_ACCOUNTS", r#"{"X":{"item":"chase","mask":"1"}}"#),
+        ] {
+            let e = Config::from_vars("x:1", vars(&[keys.to_vec(), vec![gone]].concat()))
+                .unwrap_err()
+                .to_string();
             assert!(e.contains("no longer read") && e.contains("banks.json"), "{e}");
         }
     }

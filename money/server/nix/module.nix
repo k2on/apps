@@ -7,11 +7,16 @@
 #
 #   nixosModules.money = import ./money/server/nix/module.nix { packages = self.packages; };
 #
-# Every secret is a file, handed to the service as a systemd credential and
-# read by the server from `%d` (its credentials directory): the OpenID
-# Connect client secret, Plaid's client id and secret, and each bank's
-# access token. None of them is in the store, the unit, the environment or
-# the log.
+# Every secret of the deployment's is a file, handed to the service as a
+# systemd credential and read by the server from `%d` (its credentials
+# directory): the OpenID Connect client secret, and Plaid's client id and
+# secret. None of them is in the store, the unit, the environment or the
+# log.
+#
+# The banks are not configuration. The household connects them from the
+# app, and the server keeps each one's login in its data directory
+# (`banks.json`, mode 0600, beside the log): back up the whole of
+# {option}`services.money.dataDir` and a restore keeps every connection.
 { packages }:
 { config, lib, pkgs, ... }:
 let
@@ -19,11 +24,22 @@ let
   money = packages.${pkgs.stdenv.hostPlatform.system} or { };
   plaid = cfg.plaid;
   importing = plaid.clientIdFile != null || plaid.secretFile != null;
-  # A bank's name is a credential's name and a key of MONEY_PLAID_ITEMS.
-  goodName = name: builtins.match "[A-Za-z0-9_-]+" name != null;
   state = lib.removePrefix "/var/lib/" cfg.dataDir;
+  moved = ''
+    Banks are connected from the app now, and each one's login is kept in
+    the server's data directory (banks.json): see money/server/src/store.rs
+    for moving an existing connection there by hand, then remove this.
+  '';
 in
 {
+  imports = [
+    (lib.mkRemovedOptionModule [ "services" "money" "plaid" "items" ] moved)
+    (lib.mkRemovedOptionModule [ "services" "money" "accounts" ] ''
+      Which budget account each bank account feeds is chosen in the app,
+      on the Banks page, when the bank is connected. ${moved}
+    '')
+  ];
+
   options.services.money = {
     enable = lib.mkEnableOption "money, the household's budget: its sync server, browser client and bank importer";
 
@@ -169,62 +185,11 @@ in
         description = "A file holding Plaid's secret for {option}`services.money.plaid.env`.";
       };
 
-      items = lib.mkOption {
-        type = lib.types.attrsOf (lib.types.submodule {
-          options.accessTokenFile = lib.mkOption {
-            type = lib.types.path;
-            example = "/run/secrets/money_plaid_chase";
-            description = "A file holding the bank's Plaid access token.";
-          };
-        });
-        default = { };
-        example = lib.literalExpression ''{ chase.accessTokenFile = "/run/secrets/money_plaid_chase"; }'';
-        description = ''
-          Linked banks ("items" to Plaid), by a short name (letters, digits,
-          `-` and `_`). Each is imported on {option}`services.money.schedule`,
-          when the server starts, and whenever somebody in the household
-          presses Sync. Its cursor is kept in the data directory once its
-          import is in the log.
-        '';
-      };
-
       history = lib.mkOption {
         type = lib.types.ints.between 1 730;
         default = 90;
         description = "Days of history asked of Plaid the first time a bank is pulled.";
       };
-    };
-
-    accounts = lib.mkOption {
-      type = lib.types.attrsOf (lib.types.submodule {
-        options = {
-          item = lib.mkOption {
-            type = lib.types.str;
-            description = "The bank ({option}`services.money.plaid.items`) the account is on.";
-          };
-          mask = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = "The account number's last digits, as Plaid shows them.";
-          };
-          accountId = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = "Plaid's account_id, for when two accounts on one bank share a mask.";
-          };
-        };
-      });
-      default = { };
-      example = { "Chase Checking" = { item = "chase"; mask = "1234"; }; };
-      description = ''
-        The household's name for each bank account → the Plaid account it
-        is: the name the first import opens it under (as Actual had it). A
-        bank with any account named here follows those alone; its others are
-        known and opened nowhere until somebody links one in the app. A bank
-        with none named follows every account under the bank's own name.
-        Read at an account's first import only; after that it is the
-        household's.
-      '';
     };
 
     schedule = lib.mkOption {
@@ -241,9 +206,16 @@ in
       type = lib.types.str;
       default = "/var/lib/money";
       description = ''
-        The log (the budget and the sign-ins), the session key, the
-        importer's cursors and the system's events. Under `/var/lib`: it is
-        the service's StateDirectory, owned by its dynamic user.
+        Everything the server keeps: the log (the budget and the
+        sign-ins), the session key, the system's events, and `banks.json`
+        — every bank the household connected, its Plaid login (access
+        token) and its import cursor, readable by the service alone. Back
+        all of it up: a restore of this directory, here or on another
+        machine with the same Plaid keys, keeps every bank connected, and
+        without `banks.json` every bank has to be connected again. Under
+        `/var/lib`: it is the service's StateDirectory, owned by its
+        dynamic user (`/var/lib/private/money` on disk), so a file put
+        there by hand takes that owner and mode 0600.
       '';
     };
 
@@ -275,25 +247,10 @@ in
         message = "services.money.plaid: clientIdFile and secretFile go together; set both.";
       }
       {
-        assertion = plaid.items == { } || importing;
-        message = "services.money.plaid.items names banks, and there are no Plaid keys: set plaid.clientIdFile and plaid.secretFile.";
-      }
-      {
         assertion = lib.hasPrefix "/var/lib/" cfg.dataDir && state != "";
         message = "services.money.dataDir is the service's state directory, under /var/lib: not ${cfg.dataDir}.";
       }
-    ] ++ lib.mapAttrsToList (name: _: {
-      assertion = goodName name;
-      message = "services.money.plaid.items.${name}: a bank's name is letters, digits, - and _.";
-    }) plaid.items
-    ++ lib.mapAttrsToList (name: a: {
-      assertion = plaid.items ? ${a.item};
-      message = "services.money.accounts.\"${name}\" is on ${a.item}, which is not in services.money.plaid.items.";
-    }) cfg.accounts
-    ++ lib.mapAttrsToList (name: a: {
-      assertion = a.mask != null || a.accountId != null;
-      message = "services.money.accounts.\"${name}\": say its mask or its accountId.";
-    }) cfg.accounts;
+    ];
 
     systemd.services.money = {
       description = "money, the household's budget";
@@ -324,9 +281,7 @@ in
         MONEY_PLAID_ENV = plaid.env;
         MONEY_PLAID_CLIENT_ID_FILE = "%d/plaid-client-id";
         MONEY_PLAID_SECRET_FILE = "%d/plaid-secret";
-        MONEY_PLAID_ITEMS = lib.concatStringsSep "," (lib.mapAttrsToList (name: _: "${name}=%d/plaid-item-${name}") plaid.items);
         MONEY_PLAID_HISTORY = toString plaid.history;
-        MONEY_ACCOUNTS = builtins.toJSON (lib.mapAttrs (_: a: { inherit (a) item mask accountId; }) cfg.accounts);
       };
 
       serviceConfig = {
@@ -337,8 +292,7 @@ in
           ++ lib.optionals importing [
             "plaid-client-id:${plaid.clientIdFile}"
             "plaid-secret:${plaid.secretFile}"
-          ]
-          ++ lib.mapAttrsToList (name: i: "plaid-item-${name}:${i.accessTokenFile}") plaid.items;
+          ];
 
         DynamicUser = true;
         StateDirectory = state;

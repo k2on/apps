@@ -236,7 +236,10 @@ mod tests {
         .unwrap();
         let s = Store::load(dir.path()).unwrap();
         let wf = &s.banks["wellsfargo"];
-        assert_eq!((wf.access_token.as_str(), wf.cursor.as_deref(), s.answered_ms), ("access-x", Some("c-old"), 7));
+        assert_eq!(
+            (wf.access_token.as_str(), wf.cursor.as_deref(), s.answered_ms),
+            ("access-x", Some("c-old"), 7)
+        );
         assert!(!format!("{s:?}").contains("access-x"), "a store's Debug never says a token");
         s.save(dir.path()).unwrap();
         let text = std::fs::read_to_string(file(dir.path())).unwrap();

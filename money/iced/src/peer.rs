@@ -2,7 +2,8 @@
 //! the peer keeps up to date (§1.10), patched by the rows a change touched.
 //!
 //! The sidebar's accounts, the month's lines and its summary, the register
-//! on screen, what needs looking at, the payees a form offers and the banks
+//! on screen, what needs looking at, the payees a form offers, the banks,
+//! their accounts and this person's asks about them
 //! live as long as the window; the month's and the register's are opened
 //! again when the window moves to another month or account.
 
@@ -40,6 +41,8 @@ pub struct Peer {
     pub inbox: Watched<TxnLine>,
     pub payees: Watched<PayeeLine>,
     pub banks: Watched<BankLine>,
+    pub linked: Watched<LinkedLine>,
+    pub asks: Watched<AskLine>,
     seen: ark::hash::StateHash,
 }
 
@@ -71,6 +74,8 @@ impl Peer {
             inbox: Watched::open(c, "inbox", none(), read),
             payees: Watched::open(c, "payees", none(), read),
             banks: Watched::open(c, "banks", none(), read),
+            linked: Watched::open(c, "linked", none(), read),
+            asks: Watched::open(c, "asks", none(), read),
             ledger: Ledger::All,
             month: month.into(),
             seen: c.state(),
@@ -94,6 +99,8 @@ impl Peer {
             self.inbox.view(),
             self.payees.view(),
             self.banks.view(),
+            self.linked.view(),
+            self.asks.view(),
         ]
         .into_iter()
         .flatten()
@@ -118,6 +125,8 @@ impl Peer {
         note(self.inbox.settle(c, moved));
         note(self.payees.settle(c, moved));
         note(self.banks.settle(c, moved));
+        note(self.linked.settle(c, moved));
+        note(self.asks.settle(c, moved));
         any
     }
 

@@ -20,9 +20,7 @@ fn accounts() -> Vec<PlaidAccount> {
 }
 
 fn txn(id: &str, account: &str, amount: f64, date: &str) -> String {
-    format!(
-        r#"{{"transaction_id":"{id}","account_id":"{account}","amount":{amount},"date":"{date}","name":"{id} SHOP","pending":false}}"#
-    )
+    format!(r#"{{"transaction_id":"{id}","account_id":"{account}","amount":{amount},"date":"{date}","name":"{id} SHOP","pending":false}}"#)
 }
 
 /// The bank's whole history: two on the card, one on checking long ago and
@@ -62,11 +60,17 @@ fn answer(b: &mut Book, a: Answer) -> Result<usize, String> {
 }
 
 fn bank(b: &Book) -> BankLine {
-    b.list::<BankLine>("banks", &()).into_iter().find(|l| l.name == "wells").expect("the bank")
+    b.list::<BankLine>("banks", &())
+        .into_iter()
+        .find(|l| l.name == "wells")
+        .expect("the bank")
 }
 
 fn linked(b: &Book, id: &str) -> LinkedLine {
-    b.list::<LinkedLine>("linked", &()).into_iter().find(|l| l.plaid_account_id == id).unwrap()
+    b.list::<LinkedLine>("linked", &())
+        .into_iter()
+        .find(|l| l.plaid_account_id == id)
+        .unwrap()
 }
 
 /// Anybody asks to connect; each sees their own asks; only the importer
@@ -92,7 +96,10 @@ fn a_connection_is_asked_for_and_answered() {
     assert_eq!(b.run("answer", &waiting).unwrap_err(), "only the bank importer answers");
     answer(&mut b, waiting).unwrap();
     let mine = asks(&b, "alice");
-    assert_eq!((mine[0].state, mine[0].url.as_str()), (AskState::Waiting, "https://hosted.plaid.com/link/abc"));
+    assert_eq!(
+        (mine[0].state, mine[0].url.as_str()),
+        (AskState::Waiting, "https://hosted.plaid.com/link/abc")
+    );
 
     let done = Answer {
         id: mine[0].id,
@@ -103,7 +110,10 @@ fn a_connection_is_asked_for_and_answered() {
     };
     answer(&mut b, done).unwrap();
     let mine = asks(&b, "alice");
-    assert_eq!((mine[0].state, mine[0].bank.as_str(), mine[0].url.as_str()), (AskState::Done, "wells", ""));
+    assert_eq!(
+        (mine[0].state, mine[0].bank.as_str(), mine[0].url.as_str()),
+        (AskState::Done, "wells", "")
+    );
     let line = bank(&b);
     assert_eq!((line.institution.as_str(), line.synced_ms, line.accounts), ("Wells Fargo", 0, 0));
 
@@ -148,7 +158,11 @@ fn each_account_is_chosen_for() {
         },
     )
     .unwrap();
-    let opened = b.accounts().into_iter().find(|a| a.name == "Active Cash Card").expect("opened for the card");
+    let opened = b
+        .accounts()
+        .into_iter()
+        .find(|a| a.name == "Active Cash Card")
+        .expect("opened for the card");
     assert_eq!((opened.kind.as_str(), opened.on_budget), ("credit", true));
     assert_eq!(bank(&b).waiting, 0);
     let wells: Vec<Bank> = b.rows("bank");
@@ -194,8 +208,11 @@ fn each_account_is_chosen_for() {
 #[test]
 fn a_card_opened_owes_what_its_history_does_not_explain() {
     let mut b = Book::new();
-    let one: Pulled =
-        serde_json::from_str(&format!(r#"{{"added":[{}],"modified":[],"removed":[],"cursor":"c1"}}"#, txn("C1", "card", 20.0, "2026-09-10"))).unwrap();
+    let one: Pulled = serde_json::from_str(&format!(
+        r#"{{"added":[{}],"modified":[],"removed":[],"cursor":"c1"}}"#,
+        txn("C1", "card", 20.0, "2026-09-10")
+    ))
+    .unwrap();
     b.import(&import(&one, true)).unwrap();
     b.run(
         "open",
@@ -253,7 +270,10 @@ fn a_failure_is_said_until_it_is_mended() {
 
     b.run("reconnect", &BankName { bank: "wells".into() }).unwrap();
     let ask = asks(&b, "alice").remove(0);
-    assert_eq!((ask.what.as_str(), ask.bank.as_str(), ask.institution.as_str()), ("reconnect", "wells", "Wells Fargo"));
+    assert_eq!(
+        (ask.what.as_str(), ask.bank.as_str(), ask.institution.as_str()),
+        ("reconnect", "wells", "Wells Fargo")
+    );
     answer(
         &mut b,
         Answer {
@@ -268,7 +288,15 @@ fn a_failure_is_said_until_it_is_mended() {
 
     // And an import that works clears one too.
     let ctx = b.ctx("bank", &[BANK]);
-    b.apply(&ctx, "failed", &BankFailed { error_code: "INTERNAL_SERVER_ERROR".into(), ..failed }).unwrap();
+    b.apply(
+        &ctx,
+        "failed",
+        &BankFailed {
+            error_code: "INTERNAL_SERVER_ERROR".into(),
+            ..failed
+        },
+    )
+    .unwrap();
     assert_eq!(bank(&b).error_code, "INTERNAL_SERVER_ERROR");
     b.import(&import(&history(), false)).unwrap();
     assert_eq!(bank(&b).error_code, "");

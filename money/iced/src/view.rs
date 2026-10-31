@@ -39,20 +39,20 @@ const PILL_COL: f32 = 140.0;
 /// How far in from a row's edge its first and last things sit.
 const ROW_INSET: f32 = 12.0;
 
-fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
+pub(crate) fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).font(arkui::hero::BOLD)
 }
 
-fn dim<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
+pub(crate) fn dim<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).style(style::dim)
 }
 
-fn fill() -> Space {
+pub(crate) fn fill() -> Space {
     Space::new().width(Length::Fill)
 }
 
 /// A button of the accent: something somebody is meant to press.
-fn action<'a>(label: &str, msg: Message) -> Element<'a, Message> {
+pub(crate) fn action<'a>(label: &str, msg: Message) -> Element<'a, Message> {
     button(text(label.to_string()).size(13))
         .on_press(msg)
         .padding([5, 12])
@@ -61,7 +61,7 @@ fn action<'a>(label: &str, msg: Message) -> Element<'a, Message> {
 }
 
 /// A button that is a word until pointed at.
-fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
+pub(crate) fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
     button(text(label.to_string()).size(13))
         .on_press(msg)
         .padding([5, 10])
@@ -69,7 +69,7 @@ fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
         .into()
 }
 
-fn link<'a>(label: impl Into<String>, msg: Message) -> Element<'a, Message> {
+pub(crate) fn link<'a>(label: impl Into<String>, msg: Message) -> Element<'a, Message> {
     button(text(label.into()).size(12)).on_press(msg).padding(0).style(look::link).into()
 }
 
@@ -108,6 +108,7 @@ impl App {
         let page: Element<'_, Message> = match self.page {
             Page::Budget => self.view_budget(),
             Page::Reflect => self.view_reflect(),
+            Page::Banks => self.view_banks(),
             Page::Ledger(l) => self.view_ledger(l),
         };
         // A swipe's arrow over the page, not the sidebar.
@@ -194,6 +195,7 @@ impl App {
             (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
             (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
             (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
+            (glyphs::BANK, "Banks".to_string(), None, Page::Banks),
         ];
         let sections: [Section; 3] = [
             ("On Budget", |a| a.on_budget && !a.closed),
@@ -234,6 +236,7 @@ impl App {
                 let lit = arkui::sidebar::lit(i, cursor, focused);
                 let trailing = match page {
                     Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
+                    Page::Banks => (self.banks_wanting() > 0).then(|| self.badge(self.banks_wanting(), lit)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
                     _ => None,
                 };
@@ -777,6 +780,7 @@ impl App {
             // Every account's register is where accounts are added, and every
             // bank asked for what it has.
             tools = tools.push(quiet("Add Account", Message::AddAccount));
+            tools = tools.push(quiet("Connect a Bank", Message::Banks(crate::banks::Msg::Connect)));
             if !self.peer.banks.rows.is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
@@ -1196,6 +1200,8 @@ impl App {
                 c.into()
             }
             Modal::Choose(choosing) => self.view_chooser(choosing),
+            Modal::LinkTo(plaid) => self.view_link_to(plaid),
+            Modal::Disconnect(bank) => self.view_disconnect(bank),
         };
         panel::panel(container(body).padding(14), 440.0).into()
     }

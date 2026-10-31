@@ -8,6 +8,8 @@ import dev.arkdb.ffi.Peer
 import dev.arkdb.ffi.View
 import org.json.JSONObject
 import uniffi.money_domain.AccountLine
+import uniffi.money_domain.AskLine
+import uniffi.money_domain.AskState
 import uniffi.money_domain.BankLine
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.Cleared
@@ -18,6 +20,7 @@ import uniffi.money_domain.SpendingLine
 import uniffi.money_domain.Summary
 import uniffi.money_domain.TxnLine
 import uniffi.money_domain.AccountLineView
+import uniffi.money_domain.AskLineView
 import uniffi.money_domain.BankLineView
 import uniffi.money_domain.BudgetLineView
 import uniffi.money_domain.GroupLineView
@@ -60,11 +63,46 @@ data class AddGroup(val name: String) {
 }
 
 /** The record `AddTransaction`. */
-data class AddTransaction(val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Boolean, val transferTo: Id?) {
+data class AddTransaction(val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Boolean, val transferTo: Id? = null) {
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"transfer_to\":" + J.wopt(transferTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
         fun of(j: Any?): AddTransaction = (j as JSONObject).let { o -> AddTransaction(Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), J.bool(o.opt("cleared")), J.opt(o.opt("transfer_to")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
+
+/** The record `Answer`. */
+data class Answer(val id: Id, val state: AskState, val bank: String, val institution: String, val url: String, val message: String, val expiresMs: Long) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"state\":" + state.json() + "," + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"url\":" + J.q(url) + "," + "\"message\":" + J.q(message) + "," + "\"expires_ms\":" + expiresMs.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): Answer = (j as JSONObject).let { o -> Answer(Id(J.text(o.opt("id"))), AskState.of(o.opt("state")), J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("url")), J.text(o.opt("message")), J.int(o.opt("expires_ms"))) }
+    }
+}
+
+/** The record `AskLine` (UniFFI's): its JSON, for the functions called by name. */
+fun AskLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"what\":" + J.q(what) + "," + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"state\":" + state.json() + "," + "\"url\":" + J.q(url) + "," + "\"message\":" + J.q(message) + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"asked_ms\":" + askedMs.toString() + "," + "\"answered_ms\":" + answeredMs.toString() + "}"
+
+fun AskLine.Companion.of(j: Any?): AskLine = (j as JSONObject).let { o -> AskLine(Id(J.text(o.opt("id"))), J.text(o.opt("what")), J.text(o.opt("bank")), J.text(o.opt("institution")), AskState.of(o.opt("state")), J.text(o.opt("url")), J.text(o.opt("message")), J.int(o.opt("expires_ms")), J.int(o.opt("asked_ms")), J.int(o.opt("answered_ms"))) }
+
+/** The sum `AskState` (UniFFI's enum): its JSON, for the functions called by name. */
+fun AskState.json(): String =
+    when (this) {
+        AskState.ASKED -> "\"Asked\""
+        AskState.WAITING -> "\"Waiting\""
+        AskState.DONE -> "\"Done\""
+        AskState.FAILED -> "\"Failed\""
+        AskState.EXPIRED -> "\"Expired\""
+    }
+
+fun AskState.Companion.of(j: Any?): AskState = J.sum(j) { t, _ ->
+    when (t) {
+        "Asked" -> AskState.ASKED
+        "Waiting" -> AskState.WAITING
+        "Done" -> AskState.DONE
+        "Failed" -> AskState.FAILED
+        "Expired" -> AskState.EXPIRED
+        else -> throw IllegalArgumentException("AskState: no variant $t")
     }
 }
 
@@ -133,11 +171,11 @@ data class AutoAssign(val month: String, val how: Auto, val only: List<Id>) {
 }
 
 /** The record `Bank`. */
-data class Bank(val name: String, val institution: String, val cursor: String, val syncedMs: Long, val added: Long, val updated: Long, val deleted: Long, val locked: Long, val userId: String) {
-    fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+data class Bank(val name: String, val institution: String, val cursor: String, val syncedMs: Long, val added: Long, val updated: Long, val deleted: Long, val locked: Long, val userId: String, val errorCode: String, val error: String, val failedMs: Long, val repull: Boolean) {
+    fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "," + "\"failed_ms\":" + failedMs.toString() + "," + "\"repull\":" + repull.toString() + "}"
 
     companion object {
-        fun of(j: Any?): Bank = (j as JSONObject).let { o -> Bank(J.text(o.opt("name")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.text(o.opt("user_id"))) }
+        fun of(j: Any?): Bank = (j as JSONObject).let { o -> Bank(J.text(o.opt("name")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.text(o.opt("user_id")), J.text(o.opt("error_code")), J.text(o.opt("error")), J.int(o.opt("failed_ms")), J.bool(o.opt("repull"))) }
     }
 }
 
@@ -150,10 +188,37 @@ data class BankAccount(val plaidAccountId: String, val name: String, val mask: S
     }
 }
 
-/** The record `BankLine` (UniFFI's): its JSON, for the functions called by name. */
-fun BankLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"accounts\":" + accounts.toString() + "}"
+/** The record `BankAsk`. */
+data class BankAsk(val id: Id, val what: String, val bank: String, val institution: String, val state: AskState, val url: String, val message: String, val expiresMs: Long, val askedMs: Long, val answeredMs: Long, val userId: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"what\":" + J.q(what) + "," + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"state\":" + state.json() + "," + "\"url\":" + J.q(url) + "," + "\"message\":" + J.q(message) + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"asked_ms\":" + askedMs.toString() + "," + "\"answered_ms\":" + answeredMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
-fun BankLine.Companion.of(j: Any?): BankLine = (j as JSONObject).let { o -> BankLine(J.text(o.opt("name")), J.text(o.opt("institution")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.int(o.opt("accounts"))) }
+    companion object {
+        fun of(j: Any?): BankAsk = (j as JSONObject).let { o -> BankAsk(Id(J.text(o.opt("id"))), J.text(o.opt("what")), J.text(o.opt("bank")), J.text(o.opt("institution")), AskState.of(o.opt("state")), J.text(o.opt("url")), J.text(o.opt("message")), J.int(o.opt("expires_ms")), J.int(o.opt("asked_ms")), J.int(o.opt("answered_ms")), J.text(o.opt("user_id"))) }
+    }
+}
+
+/** The record `BankFailed`. */
+data class BankFailed(val bank: String, val institution: String, val errorCode: String, val error: String) {
+    fun json(): String = "{" + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "}"
+
+    companion object {
+        fun of(j: Any?): BankFailed = (j as JSONObject).let { o -> BankFailed(J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("error_code")), J.text(o.opt("error"))) }
+    }
+}
+
+/** The record `BankLine` (UniFFI's): its JSON, for the functions called by name. */
+fun BankLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"accounts\":" + accounts.toString() + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "," + "\"failed_ms\":" + failedMs.toString() + "," + "\"needs_login\":" + needsLogin.toString() + "," + "\"waiting\":" + waiting.toString() + "}"
+
+fun BankLine.Companion.of(j: Any?): BankLine = (j as JSONObject).let { o -> BankLine(J.text(o.opt("name")), J.text(o.opt("institution")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.int(o.opt("accounts")), J.text(o.opt("error_code")), J.text(o.opt("error")), J.int(o.opt("failed_ms")), J.bool(o.opt("needs_login")), J.int(o.opt("waiting"))) }
+
+/** The record `BankName`. */
+data class BankName(val bank: String) {
+    fun json(): String = "{" + "\"bank\":" + J.q(bank) + "}"
+
+    companion object {
+        fun of(j: Any?): BankName = (j as JSONObject).let { o -> BankName(J.text(o.opt("bank"))) }
+    }
+}
 
 /** The record `BankRemoved`. */
 data class BankRemoved(val transactionId: String, val plaidAccountId: String) {
@@ -179,7 +244,7 @@ fun BudgetLine.json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) +
 fun BudgetLine.Companion.of(j: Any?): BudgetLine = (j as JSONObject).let { o -> BudgetLine(Id(J.text(o.opt("category_id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("group_pos")), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("carried")), J.int(o.opt("assigned_last_month")), J.int(o.opt("spent_last_month")), J.int(o.opt("average_spent"))) }
 
 /** The record `Categorize`. */
-data class Categorize(val ids: List<Id>, val categoryId: Id?) {
+data class Categorize(val ids: List<Id>, val categoryId: Id? = null) {
     fun json(): String = "{" + "\"ids\":" + J.wlist(ids) { v0 -> J.q(v0.hex) } + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -223,7 +288,7 @@ data class CloseAccount(val id: Id, val closed: Boolean) {
 }
 
 /** The record `DeleteCategory`. */
-data class DeleteCategory(val id: Id, val moveTo: Id?) {
+data class DeleteCategory(val id: Id, val moveTo: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"move_to\":" + J.wopt(moveTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -232,7 +297,7 @@ data class DeleteCategory(val id: Id, val moveTo: Id?) {
 }
 
 /** The record `DeleteGroup`. */
-data class DeleteGroup(val id: Id, val moveTo: Id?) {
+data class DeleteGroup(val id: Id, val moveTo: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"move_to\":" + J.wopt(moveTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -300,11 +365,11 @@ data class IgnoreLinked(val plaidAccountId: String, val ignored: Boolean) {
 }
 
 /** The record `Import`. */
-data class Import(val bank: String, val institution: String, val cursor: String, val accounts: List<BankAccount>, val upserts: List<BankTxn>, val removed: List<BankRemoved>) {
-    fun json(): String = "{" + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> v0.json() } + "," + "\"upserts\":" + J.wlist(upserts) { v0 -> v0.json() } + "," + "\"removed\":" + J.wlist(removed) { v0 -> v0.json() } + "}"
+data class Import(val bank: String, val institution: String, val cursor: String, val accounts: List<BankAccount>, val upserts: List<BankTxn>, val removed: List<BankRemoved>, val choose: Boolean, val fromStart: Boolean) {
+    fun json(): String = "{" + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> v0.json() } + "," + "\"upserts\":" + J.wlist(upserts) { v0 -> v0.json() } + "," + "\"removed\":" + J.wlist(removed) { v0 -> v0.json() } + "," + "\"choose\":" + choose.toString() + "," + "\"from_start\":" + fromStart.toString() + "}"
 
     companion object {
-        fun of(j: Any?): Import = (j as JSONObject).let { o -> Import(J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.list(o.opt("accounts")) { v0 -> BankAccount.of(v0) }, J.list(o.opt("upserts")) { v0 -> BankTxn.of(v0) }, J.list(o.opt("removed")) { v0 -> BankRemoved.of(v0) }) }
+        fun of(j: Any?): Import = (j as JSONObject).let { o -> Import(J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.list(o.opt("accounts")) { v0 -> BankAccount.of(v0) }, J.list(o.opt("upserts")) { v0 -> BankTxn.of(v0) }, J.list(o.opt("removed")) { v0 -> BankRemoved.of(v0) }, J.bool(o.opt("choose")), J.bool(o.opt("from_start"))) }
     }
 }
 
@@ -318,18 +383,18 @@ data class LinkAccount(val plaidAccountId: String, val accountId: Id) {
 }
 
 /** The record `Linked`. */
-data class Linked(val plaidAccountId: String, val bank: String, val accountId: Id?, val name: String, val mask: String, val kind: String, val balance: Long?, val ignored: Boolean) {
-    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "}"
+data class Linked(val plaidAccountId: String, val bank: String, val accountId: Id?, val name: String, val mask: String, val kind: String, val balance: Long?, val ignored: Boolean, val subtype: String, val seen: String, val since: String, val opening: Boolean) {
+    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "," + "\"subtype\":" + J.q(subtype) + "," + "\"seen\":" + J.q(seen) + "," + "\"since\":" + J.q(since) + "," + "\"opening\":" + opening.toString() + "}"
 
     companion object {
-        fun of(j: Any?): Linked = (j as JSONObject).let { o -> Linked(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored"))) }
+        fun of(j: Any?): Linked = (j as JSONObject).let { o -> Linked(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored")), J.text(o.opt("subtype")), J.text(o.opt("seen")), J.text(o.opt("since")), J.bool(o.opt("opening"))) }
     }
 }
 
 /** The record `LinkedLine` (UniFFI's): its JSON, for the functions called by name. */
-fun LinkedLine.json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"account\":" + J.q(account) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "}"
+fun LinkedLine.json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"account\":" + J.q(account) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "," + "\"subtype\":" + J.q(subtype) + "," + "\"waiting\":" + waiting.toString() + "," + "\"opens_as\":" + J.q(opensAs) + "}"
 
-fun LinkedLine.Companion.of(j: Any?): LinkedLine = (j as JSONObject).let { o -> LinkedLine(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("account")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored"))) }
+fun LinkedLine.Companion.of(j: Any?): LinkedLine = (j as JSONObject).let { o -> LinkedLine(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("account")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored")), J.text(o.opt("subtype")), J.bool(o.opt("waiting")), J.text(o.opt("opens_as"))) }
 
 /** The record `Month`. */
 data class Month(val month: String) {
@@ -341,7 +406,7 @@ data class Month(val month: String) {
 }
 
 /** The record `MoveCategory`. */
-data class MoveCategory(val id: Id, val groupId: Id, val before: Id?) {
+data class MoveCategory(val id: Id, val groupId: Id, val before: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -350,7 +415,7 @@ data class MoveCategory(val id: Id, val groupId: Id, val before: Id?) {
 }
 
 /** The record `MoveGroup`. */
-data class MoveGroup(val id: Id, val before: Id?) {
+data class MoveGroup(val id: Id, val before: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -376,6 +441,15 @@ data class OpenAccount(val name: String, val kind: String, val onBudget: Boolean
     }
 }
 
+/** The record `OpenLinked`. */
+data class OpenLinked(val plaidAccountId: String, val name: String) {
+    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"name\":" + J.q(name) + "}"
+
+    companion object {
+        fun of(j: Any?): OpenLinked = (j as JSONObject).let { o -> OpenLinked(J.text(o.opt("plaid_account_id")), J.text(o.opt("name"))) }
+    }
+}
+
 /** The record `PayeeLine` (UniFFI's): its JSON, for the functions called by name. */
 fun PayeeLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"count\":" + count.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
@@ -391,7 +465,7 @@ data class Reconcile(val accountId: Id, val balance: Long, val date: String) {
 }
 
 /** The record `Register`. */
-data class Register(val accountId: Id?) {
+data class Register(val accountId: Id? = null) {
     fun json(): String = "{" + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -518,8 +592,23 @@ class Money(val peer: Peer) {
     /** `accounts.rename_account`: its intent's id. */
     fun renameAccount(input: RenameAccount): String = peer.mutate("accounts.rename_account", input.json())
 
+    /** `banks.answer`: its intent's id. */
+    fun answer(input: Answer): String = peer.mutate("banks.answer", input.json())
+
+    /** `banks.asks`, kept, its rows UniFFI's. */
+    fun asks(): View<AskLine> = typed(AskLineView(peer, "banks.asks", "null"))
+
     /** `banks.banks`, kept, its rows UniFFI's. */
     fun banks(): View<BankLine> = typed(BankLineView(peer, "banks.banks", "null"))
+
+    /** `banks.connect`: its intent's id. */
+    fun connect(): String = peer.mutate("banks.connect", "null")
+
+    /** `banks.disconnect`: its intent's id. */
+    fun disconnect(input: BankName): String = peer.mutate("banks.disconnect", input.json())
+
+    /** `banks.failed`: its intent's id. */
+    fun failed(input: BankFailed): String = peer.mutate("banks.failed", input.json())
 
     /** `banks.ignore`: its intent's id. */
     fun ignore(input: IgnoreLinked): String = peer.mutate("banks.ignore", input.json())
@@ -532,6 +621,12 @@ class Money(val peer: Peer) {
 
     /** `banks.linked`, kept, its rows UniFFI's. */
     fun linked(): View<LinkedLine> = typed(LinkedLineView(peer, "banks.linked", "null"))
+
+    /** `banks.open`: its intent's id. */
+    fun open(input: OpenLinked): String = peer.mutate("banks.open", input.json())
+
+    /** `banks.reconnect`: its intent's id. */
+    fun reconnect(input: BankName): String = peer.mutate("banks.reconnect", input.json())
 
     /** `banks.sync`: its intent's id. */
     fun sync(): String = peer.mutate("banks.sync", "null")
@@ -639,6 +734,8 @@ class Money(val peer: Peer) {
     fun setCleared(input: SetCleared): String = peer.mutate("transactions.set_cleared", input.json())
 
     private fun typed(v: AccountLineView): View<AccountLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+
+    private fun typed(v: AskLineView): View<AskLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 
     private fun typed(v: BankLineView): View<BankLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 

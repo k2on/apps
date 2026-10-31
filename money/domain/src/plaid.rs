@@ -214,7 +214,9 @@ pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusa
     let superseded: BTreeSet<&str> = input.upserts.iter().filter_map(|u| u.pending_transaction_id.as_deref()).collect();
     let mut counts = Counts::default();
     for u in &input.upserts {
-        let Some((account, since)) = followed(db, &u.plaid_account_id) else { continue };
+        let Some((account, since)) = followed(db, &u.plaid_account_id) else {
+            continue;
+        };
         if u.date < since {
             continue;
         }
@@ -488,7 +490,9 @@ pub fn open(ctx: &Ctx, db: &mut Db<Money>, input: OpenLinked) -> Result<(), Refu
         .get(&input.plaid_account_id)
         .ok_or_else(|| Refusal::new("no such bank account"))?;
     if l.account_id.is_some_and(|a| db.account.get(a).is_some()) {
-        return Err(Refusal::new("that bank account has an account here already: follow it again, or link it to another"));
+        return Err(Refusal::new(
+            "that bank account has an account here already: follow it again, or link it to another",
+        ));
     }
     let name = match input.name.trim() {
         "" => l.name.clone(),
@@ -593,7 +597,6 @@ pub fn linked(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<Linke
         }
     }))
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -58,7 +58,10 @@ fn a_bank_is_connected_from_the_app() {
     alice.mutate("accounts.open_account", &kept);
     alice.mutate("banks.connect", &());
     let waiting = until_ask(&mut alice, AskState::Waiting);
-    assert_eq!((waiting.what.as_str(), waiting.url.as_str()), ("connect", "https://hosted.plaid.test/link-1"));
+    assert_eq!(
+        (waiting.what.as_str(), waiting.url.as_str()),
+        ("connect", "https://hosted.plaid.test/link-1")
+    );
     assert!(waiting.expires_ms > 0);
     let made = &mock.asked("/link/token/create")[0];
     assert_eq!(made["products"], serde_json::json!(["transactions"]));
@@ -69,10 +72,16 @@ fn a_bank_is_connected_from_the_app() {
 
     mock.finish();
     let done = until_ask(&mut alice, AskState::Done);
-    assert_eq!((done.bank.as_str(), done.institution.as_str(), done.url.as_str()), ("wells-fargo", "Wells Fargo", ""));
+    assert_eq!(
+        (done.bank.as_str(), done.institution.as_str(), done.url.as_str()),
+        ("wells-fargo", "Wells Fargo", "")
+    );
     let kept_now = store(data.path());
     let wf = &kept_now.banks["wells-fargo"];
-    assert_eq!((wf.access_token.as_str(), wf.item_id.as_str(), wf.institution.as_str()), (WF_TOKEN, "item-wf", "Wells Fargo"));
+    assert_eq!(
+        (wf.access_token.as_str(), wf.item_id.as_str(), wf.institution.as_str()),
+        (WF_TOKEN, "item-wf", "Wells Fargo")
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -90,7 +99,11 @@ fn a_bank_is_connected_from_the_app() {
 
     // Alice says what each feeds.
     pump_until(&mut [&mut alice], 10, |ps| ps[0].cursor() == head(&server));
-    let checking = hub_rows::<Account>(&server, "account").into_iter().find(|a| a.name == "Checking").unwrap().id;
+    let checking = hub_rows::<Account>(&server, "account")
+        .into_iter()
+        .find(|a| a.name == "Checking")
+        .unwrap()
+        .id;
     alice.mutate(
         "banks.open",
         &OpenLinked {
@@ -111,7 +124,10 @@ fn a_bank_is_connected_from_the_app() {
     let visa = accounts.iter().find(|a| a.name == "Visa").unwrap();
     assert_eq!((visa.kind.as_str(), visa.balance, visa.bank.as_str()), ("credit", -30_000, "wells-fargo"));
     let checking = accounts.iter().find(|a| a.name == "Checking").unwrap();
-    assert_eq!(checking.balance, 50_000, "its history is from before the bank was connected: kept by hand already");
+    assert_eq!(
+        checking.balance, 50_000,
+        "its history is from before the bank was connected: kept by hand already"
+    );
     let banks: Vec<BankLine> = hub_query(&server, "banks.banks", ());
     assert_eq!((banks[0].institution.as_str(), banks[0].waiting), ("Wells Fargo", 0));
 
@@ -170,7 +186,11 @@ fn a_bank_is_logged_in_to_again() {
     assert!(matches!(&r[0].banks["wells"], Outcome::Failed(why) if why.contains("ITEM_LOGIN_REQUIRED")));
     let mut alice = caught_up(&server, "alice");
     pump_until(&mut [&mut alice], 10, |ps| {
-        ps[0].query::<Vec<BankLine>>("banks.banks", &()).unwrap().first().is_some_and(|b| b.needs_login)
+        ps[0]
+            .query::<Vec<BankLine>>("banks.banks", &())
+            .unwrap()
+            .first()
+            .is_some_and(|b| b.needs_login)
     });
     let said = server.importer.as_ref().unwrap().said().join("\n");
     assert!(said.contains("Reconnect it from the app"), "{said}");
@@ -186,7 +206,11 @@ fn a_bank_is_logged_in_to_again() {
     let r = runs(&server, 2);
     assert_eq!(r[1].banks["wells"], Outcome::Imported { upserts: 0, removed: 0 });
     pump_until(&mut [&mut alice], 10, |ps| {
-        ps[0].query::<Vec<BankLine>>("banks.banks", &()).unwrap().first().is_some_and(|b| !b.needs_login && b.error.is_empty())
+        ps[0]
+            .query::<Vec<BankLine>>("banks.banks", &())
+            .unwrap()
+            .first()
+            .is_some_and(|b| !b.needs_login && b.error.is_empty())
     });
     assert_eq!(mock.cursors(), [Some("w1".to_string())], "from the cursor it had");
     rt.block_on(server.stop());
@@ -272,12 +296,23 @@ fn a_connection_written_by_hand_imports_only_what_is_new() {
     assert_eq!(txns.iter().filter(|t| t.imported_id.as_deref() == Some("WC1")).count(), 1);
     let kept = store(data.path());
     let wf = &kept.banks["wellsfargo"];
-    assert_eq!((wf.cursor.as_deref(), wf.item_id.as_str(), wf.institution.as_str()), (Some("w2"), "item-wf", "Wells Fargo"));
+    assert_eq!(
+        (wf.cursor.as_deref(), wf.item_id.as_str(), wf.institution.as_str()),
+        (Some("w2"), "item-wf", "Wells Fargo")
+    );
     rt.block_on(server.stop());
 
     // The cursor where the importer kept it before: importer.json.
-    std::fs::write(data.path().join("banks.json"), format!(r#"{{"banks": {{"wellsfargo": {{"access_token": "{WF_TOKEN}"}}}}}}"#)).unwrap();
-    std::fs::write(data.path().join("importer.json"), r#"{"cursors": {"wellsfargo": "w2"}, "answered_ms": 0}"#).unwrap();
+    std::fs::write(
+        data.path().join("banks.json"),
+        format!(r#"{{"banks": {{"wellsfargo": {{"access_token": "{WF_TOKEN}"}}}}}}"#),
+    )
+    .unwrap();
+    std::fs::write(
+        data.path().join("importer.json"),
+        r#"{"cursors": {"wellsfargo": "w2"}, "answered_ms": 0}"#,
+    )
+    .unwrap();
     let asked_before = mock.cursors().len();
     let server = importing(&rt, data.path(), &mock, secrets.path());
     runs(&server, 1);

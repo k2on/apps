@@ -85,7 +85,10 @@ fn the_importer_walks_one_bank_through_three_phases() {
     assert_eq!(accounts.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Joint Checking"]);
     let checking = &accounts[0];
     assert_eq!((checking.bank.as_str(), checking.mask.as_str()), ("chase", "0000"));
-    assert_eq!(checking.cleared, 92_350, "the bank's balance: the history and the starting balance before it");
+    assert_eq!(
+        checking.cleared, 92_350,
+        "the bank's balance: the history and the starting balance before it"
+    );
     let after1 = txns(&server);
     assert!(after1.iter().all(|t| t.1 != "INTEREST"), "acc2 is not followed: {after1:#?}");
     assert!(after1.iter().any(|t| t.1 == "GAS STATION PENDING" && t.3 == Cleared::Uncleared));
