@@ -2,7 +2,8 @@
 //! budget. The schema ([`schema`]), the types ([`types`]), days and months
 //! ([`dates`]); the accounts ([`accounts`]), the budget's shape
 //! ([`categories`]), the budget itself ([`budget`]), the transactions
-//! ([`transactions`]) and the banks, through Plaid ([`plaid`]) — one file
+//! ([`transactions`]) and the banks, through Plaid ([`plaid`]), connected
+//! from the app ([`banks`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
 //! [`feed`]. [`domain`] registers every function by its name. Behind
 //! features: the demo's household (`seed`), and the rows the
@@ -21,6 +22,7 @@ use ark::peer::Ctx;
 use ark::prelude::scope;
 
 pub mod accounts;
+pub mod banks;
 pub mod budget;
 pub mod categories;
 pub mod dates;
@@ -58,7 +60,8 @@ pub fn domain() -> Domain {
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
         transactions::register, transactions::inbox, transactions::payees,
-        plaid::import, plaid::link, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, feed)
+        plaid::import, plaid::link, plaid::open, plaid::ignore, plaid::sync, plaid::banks, plaid::linked,
+        banks::connect, banks::reconnect, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
     .with(ark_auth::register::<Money>)
 }
 
@@ -78,7 +81,8 @@ pub fn feed() -> Scope<Money> {
             .on::<Txn>(all)
             .on::<Bank>(all)
             .on::<Linked>(all)
-            .on::<Asked>(all),
+            .on::<Asked>(all)
+            .on::<BankAsk>(all),
     )
 }
 

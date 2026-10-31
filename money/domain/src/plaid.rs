@@ -150,6 +150,8 @@ pub fn import_of(bank: &str, institution: &str, accounts: &[PlaidAccount], pulle
                 plaid_account_id: r.account_id.clone(),
             })
             .collect(),
+        choose: false,
+        from_start: false,
     }
 }
 
@@ -184,21 +186,26 @@ fn by_imported(db: &Db<Money>, id: &str) -> Option<Txn> {
 }
 
 /// One bank's run of `/transactions/sync`, whole: its accounts opened or
-/// brought up to date, its transactions applied, its cursor kept.
+/// brought up to date, its transactions applied, its cursor kept, and
+/// whatever its last failure said cleared.
 #[mutator("banks.import")]
 pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusal> {
     if !ctx.has_role(crate::BANK) {
         return Err(Refusal::new("only the bank importer imports"));
     }
     ensure_setup(ctx, db)?;
-    let previous = db.bank.get(&input.bank);
+    let previous = db.bank.get(&input.bank).unwrap_or_default();
     db.bank.put(Bank {
         name: input.bank.clone(),
         institution: input.institution.clone(),
         cursor: input.cursor.clone(),
         synced_ms: ctx.now,
         user_id: ctx.user().into(),
-        ..previous.unwrap_or_default()
+        error_code: String::new(),
+        error: String::new(),
+        // A choice made while this was on its way waits for one that is.
+        repull: previous.repull && !input.from_start,
+        ..previous
     })?;
     for a in &input.accounts {
         follow(ctx, db, &input, a)?;
@@ -207,7 +214,10 @@ pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusa
     let superseded: BTreeSet<&str> = input.upserts.iter().filter_map(|u| u.pending_transaction_id.as_deref()).collect();
     let mut counts = Counts::default();
     for u in &input.upserts {
-        let Some(account) = followed(db, &u.plaid_account_id) else { continue };
+        let Some((account, since)) = followed(db, &u.plaid_account_id) else { continue };
+        if u.date < since {
+            continue;
+        }
         upsert(ctx, db, &account, u, &superseded, &mut counts)?;
     }
     for r in &input.removed {
@@ -236,69 +246,96 @@ pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusa
     })
 }
 
-/// The account a Plaid account feeds, when it is followed.
-fn followed(db: &Db<Money>, plaid_account_id: &str) -> Option<Account> {
+/// The account a Plaid account feeds, when it is followed, and the first
+/// day it takes transactions from.
+fn followed(db: &Db<Money>, plaid_account_id: &str) -> Option<(Account, String)> {
     let l = db.linked.get(plaid_account_id).filter(|l| !l.ignored)?;
-    db.account.get(l.account_id?)
+    Some((db.account.get(l.account_id?)?, l.since))
 }
 
-/// A Plaid account seen: brought up to date, or — the first time — opened
-/// here under what the server calls it (the bank's name unless told), its
-/// starting balance what the bank holds less the history this import
-/// brings (posted only: the bank's balance leaves pending out). One the
-/// server was told not to follow is known from then on and opens nothing.
-/// What the server says applies at first sight only: after that, which
-/// account a bank's feeds is the household's (`banks.link`, `banks.ignore`).
+/// A Plaid account seen: brought up to date, or — the first time — known.
+/// What the first sight does is the import's to say: a server's importer
+/// leaves it waiting for the household to choose (`choose`); otherwise it
+/// opens here under what the import calls it (the bank's name unless told),
+/// or is known and opens nothing when the import says not to follow it.
+/// After that, which account a bank's feeds is the household's
+/// (`banks.link`, `banks.open`, `banks.ignore`).
 fn follow(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount) -> Result<(), Refusal> {
     if let Some(l) = db.linked.get(&a.plaid_account_id) {
+        // An account opened for it is owed the balance before the history,
+        // which only an import from the bank's start brings whole.
+        let owed = l.opening && input.from_start && !l.ignored;
+        let opened = match (owed, l.account_id.and_then(|id| db.account.get(id))) {
+            (true, Some(account)) => {
+                opening_balance(ctx, db, input, a, &account)?;
+                true
+            }
+            _ => false,
+        };
         return db.linked.update(Linked {
             name: a.name.clone(),
             mask: a.mask.clone(),
             kind: a.kind.clone(),
+            subtype: a.subtype.clone(),
             balance: a.balance,
+            opening: l.opening && !opened,
             ..l
         });
     }
+    let known = Linked {
+        plaid_account_id: a.plaid_account_id.clone(),
+        bank: input.bank.clone(),
+        account_id: None,
+        name: a.name.clone(),
+        mask: a.mask.clone(),
+        kind: a.kind.clone(),
+        subtype: a.subtype.clone(),
+        balance: a.balance,
+        ignored: false,
+        seen: day_of_ms(ctx.now),
+        since: String::new(),
+        opening: false,
+    };
     if a.ignored {
-        return db.linked.insert(Linked {
-            plaid_account_id: a.plaid_account_id.clone(),
-            bank: input.bank.clone(),
-            account_id: None,
-            name: a.name.clone(),
-            mask: a.mask.clone(),
-            kind: a.kind.clone(),
-            balance: a.balance,
-            ignored: true,
-        });
+        return db.linked.insert(Linked { ignored: true, ..known });
+    }
+    if input.choose && a.called.trim().is_empty() {
+        return db.linked.insert(known);
     }
     let name = match a.called.trim() {
         "" => a.name.clone(),
         called => called.to_string(),
     };
-    let kind = kind_of(&a.kind, &a.subtype);
-    let on_budget = crate::accounts::on_budget_by_default(kind);
-    let id: Id<Account> = ctx.new_id();
-    let pos = db.account.by(Account::POS).whole().last().map_or(0, |a| a.pos) + 1;
-    db.account.insert(Account {
-        id,
+    let account = open_for(ctx, db, name, &a.kind, &a.subtype)?;
+    db.linked.insert(Linked {
+        account_id: Some(account.id),
+        ..known
+    })?;
+    opening_balance(ctx, db, input, a, &account)
+}
+
+/// An account opened here for one of a bank's: of the kind the bank's is
+/// (a card is a credit account), on budget as that kind is by default.
+pub(crate) fn open_for(ctx: &Ctx, db: &mut Db<Money>, name: String, kind: &str, subtype: &str) -> Result<Account, Refusal> {
+    let kind = kind_of(kind, subtype);
+    let account = Account {
+        id: ctx.new_id(),
         name,
         kind: kind.into(),
-        on_budget,
-        pos,
+        on_budget: crate::accounts::on_budget_by_default(kind),
+        pos: db.account.by(Account::POS).whole().last().map_or(0, |a| a.pos) + 1,
         created_ms: ctx.now,
         user_id: ctx.user().into(),
         ..Account::default()
-    })?;
-    db.linked.insert(Linked {
-        plaid_account_id: a.plaid_account_id.clone(),
-        bank: input.bank.clone(),
-        account_id: Some(id),
-        name: a.name.clone(),
-        mask: a.mask.clone(),
-        kind: a.kind.clone(),
-        balance: a.balance,
-        ignored: false,
-    })?;
+    };
+    db.account.insert(account.clone())?;
+    Ok(account)
+}
+
+/// An account opened for a bank's given its starting balance: what the
+/// bank holds less the history this import brings (posted only: the bank's
+/// balance leaves pending out), the day before the oldest of it.
+fn opening_balance(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount, account: &Account) -> Result<(), Refusal> {
     let Some(balance) = a.balance else { return Ok(()) };
     let mine = input.upserts.iter().filter(|u| u.plaid_account_id == a.plaid_account_id);
     let posted: i64 = mine.clone().filter(|u| !u.pending).map(|u| u.amount).sum();
@@ -312,10 +349,10 @@ fn follow(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount) -> Res
     }
     db.txn.insert(Txn {
         id: ctx.new_id(),
-        account_id: id,
+        account_id: account.id,
         date,
         payee: STARTING_BALANCE.into(),
-        category_id: on_budget.then(ready_to_assign),
+        category_id: account.on_budget.then(ready_to_assign),
         memo: "Balance before the first import".into(),
         amount: opening,
         cleared: Cleared::Cleared,
@@ -412,8 +449,13 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
 
 /// A bank's account made to feed `account_id`: every import after this
 /// writes there. What the account it fed before already holds stays.
+///
+/// One that was waiting for a choice (a bank just connected) takes what
+/// the bank has had since the day it was first seen: the next import asks
+/// for the bank's history again (`repull`), and the account, kept by hand
+/// until now, has what came before.
 #[mutator("banks.link")]
-pub fn link(_: &Ctx, db: &mut Db<Money>, input: LinkAccount) -> Result<(), Refusal> {
+pub fn link(ctx: &Ctx, db: &mut Db<Money>, input: LinkAccount) -> Result<(), Refusal> {
     let l = db
         .linked
         .get(&input.plaid_account_id)
@@ -422,11 +464,53 @@ pub fn link(_: &Ctx, db: &mut Db<Money>, input: LinkAccount) -> Result<(), Refus
     if db.linked.by(Linked::ACCOUNT_ID).from(Some(input.account_id)).any() {
         return Err(Refusal::new("that account is fed by a bank already"));
     }
+    let waiting = l.account_id.is_none() && !l.ignored;
+    if waiting {
+        repull(ctx, db, &l.bank)?;
+    }
     db.linked.update(Linked {
         account_id: Some(input.account_id),
         ignored: false,
+        since: if waiting { l.seen.clone() } else { l.since.clone() },
         ..l
     })
+}
+
+/// A bank's account given an account of its own, opened for it now — a
+/// card a credit account, a savings account savings — under the bank's
+/// name for it unless another is given. It takes the bank's whole history
+/// and a starting balance before it, which the next import brings (asked
+/// of Plaid from the start).
+#[mutator("banks.open")]
+pub fn open(ctx: &Ctx, db: &mut Db<Money>, input: OpenLinked) -> Result<(), Refusal> {
+    let l = db
+        .linked
+        .get(&input.plaid_account_id)
+        .ok_or_else(|| Refusal::new("no such bank account"))?;
+    if l.account_id.is_some_and(|a| db.account.get(a).is_some()) {
+        return Err(Refusal::new("that bank account has an account here already: follow it again, or link it to another"));
+    }
+    let name = match input.name.trim() {
+        "" => l.name.clone(),
+        n => n.to_string(),
+    };
+    let account = open_for(ctx, db, name, &l.kind, &l.subtype)?;
+    repull(ctx, db, &l.bank)?;
+    db.linked.update(Linked {
+        account_id: Some(account.id),
+        ignored: false,
+        since: String::new(),
+        opening: true,
+        ..l
+    })
+}
+
+/// The bank's next import asked from its start, and asked for now.
+fn repull(ctx: &Ctx, db: &mut Db<Money>, bank: &str) -> Result<(), Refusal> {
+    if let Some(b) = db.bank.get(bank) {
+        db.bank.update(Bank { repull: true, ..b })?;
+    }
+    sync(ctx, db, ())
 }
 
 /// A bank's account followed again, or not: an ignored one's transactions
@@ -457,38 +541,59 @@ pub fn last_asked(db: &Db<Money>) -> Option<Asked> {
     db.asked.scan().into_iter().max_by_key(|a| a.asked_ms)
 }
 
-/// Every linked bank, and what its last import did.
+/// Plaid's codes for a bank that wants its login again: a reconnect mends
+/// it, and nothing else does.
+pub const LOGIN_CODES: &[&str] = &["ITEM_LOGIN_REQUIRED", "PENDING_EXPIRATION", "PENDING_DISCONNECT", "ACCESS_NOT_GRANTED"];
+
+/// Every connected bank, what its last import did, and what is wrong with
+/// it when something is.
 #[view("banks.banks")]
 pub fn banks(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<BankLine>, Refusal> {
-    Ok(scan::<Money, Bank>().map_with(|db, b| BankLine {
-        name: b.name.clone(),
-        institution: b.institution.clone(),
-        synced_ms: b.synced_ms,
-        added: b.added,
-        updated: b.updated,
-        deleted: b.deleted,
-        locked: b.locked,
-        accounts: db.linked.scan().iter().filter(|l| l.bank == b.name).count() as i64,
+    Ok(scan::<Money, Bank>().map_with(|db, b| {
+        let accounts: Vec<Linked> = db.linked.scan().into_iter().filter(|l| l.bank == b.name).collect();
+        BankLine {
+            name: b.name.clone(),
+            institution: b.institution.clone(),
+            synced_ms: b.synced_ms,
+            added: b.added,
+            updated: b.updated,
+            deleted: b.deleted,
+            locked: b.locked,
+            accounts: accounts.len() as i64,
+            error_code: b.error_code.clone(),
+            error: b.error.clone(),
+            failed_ms: b.failed_ms,
+            needs_login: LOGIN_CODES.contains(&b.error_code.as_str()),
+            waiting: accounts.iter().filter(|l| l.account_id.is_none() && !l.ignored).count() as i64,
+        }
     }))
 }
 
-/// Every account a bank has, whether it feeds one here and which, or is
-/// ignored: what a household links (`banks.link`) and stops following
+/// Every account a bank has, whether it feeds one here and which, is
+/// ignored, or waits for somebody to say: what a household links
+/// (`banks.link`), opens an account for (`banks.open`) and stops following
 /// (`banks.ignore`) from.
 #[view("banks.linked")]
 pub fn linked(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<LinkedLine>, Refusal> {
-    Ok(scan::<Money, Linked>().map_with(|db, l| LinkedLine {
-        plaid_account_id: l.plaid_account_id.clone(),
-        bank: l.bank.clone(),
-        account_id: l.account_id,
-        account: l.account_id.and_then(|a| db.account.get(a)).map(|a| a.name).unwrap_or_default(),
-        name: l.name.clone(),
-        mask: l.mask.clone(),
-        kind: l.kind.clone(),
-        balance: l.balance,
-        ignored: l.ignored,
+    Ok(scan::<Money, Linked>().map_with(|db, l| {
+        let account = l.account_id.and_then(|a| db.account.get(a));
+        LinkedLine {
+            plaid_account_id: l.plaid_account_id.clone(),
+            bank: l.bank.clone(),
+            account_id: account.as_ref().map(|a| a.id),
+            account: account.map(|a| a.name).unwrap_or_default(),
+            name: l.name.clone(),
+            mask: l.mask.clone(),
+            kind: l.kind.clone(),
+            balance: l.balance,
+            ignored: l.ignored,
+            subtype: l.subtype.clone(),
+            waiting: l.account_id.is_none() && !l.ignored,
+            opens_as: kind_of(&l.kind, &l.subtype).into(),
+        }
     }))
 }
+
 
 #[cfg(test)]
 mod tests {

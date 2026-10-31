@@ -1,8 +1,10 @@
 //! The slice of Plaid's API the importer asks, over ureq: an item's
 //! accounts (`/accounts/get`), its institution's name
 //! (`/institutions/get_by_id`), and what changed since a cursor
-//! (`/transactions/sync`, every page). ArkOS's `cli/plaid.rs`, the half
-//! `money-sync` used, answering in the domain's types
+//! (`/transactions/sync`, every page); and connecting a bank through a
+//! Hosted Link page (`/link/token/create`, `/link/token/get`,
+//! `/item/public_token/exchange`) and forgetting one (`/item/remove`).
+//! ArkOS's `cli/plaid.rs`, answering in the domain's types
 //! (`money_domain::plaid`), which read Plaid's JSON as it comes.
 //!
 //! **Nothing secret is ever said.** The client id and the secret travel as
@@ -53,6 +55,40 @@ pub type Res<T> = Result<T, PlaidError>;
 pub struct Item {
     pub accounts: Vec<PlaidAccount>,
     pub institution_id: Option<String>,
+    pub item_id: Option<String>,
+}
+
+/// What a Hosted Link page is for.
+pub enum LinkMode {
+    /// A new bank, and this many days of its history.
+    New { days: u32 },
+    /// The item behind this access token, logged in to again.
+    Update(String),
+}
+
+/// A Hosted Link page: its address for the person, and the link token the
+/// importer asks after it by (held in memory only).
+pub struct LinkSession {
+    pub url: String,
+    link_token: String,
+}
+
+impl fmt::Debug for LinkSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LinkSession").field("url", &self.url).finish_non_exhaustive()
+    }
+}
+
+/// Where a Hosted Link page stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Linking {
+    /// Nobody has finished it yet.
+    Open,
+    /// Finished, with a public token to exchange for a new bank's login
+    /// (none in update mode).
+    Connected(Option<String>),
+    /// Ended without connecting anything, and why when Plaid said.
+    Exited(Option<String>),
 }
 
 /// One page of `/transactions/sync`.
@@ -133,7 +169,85 @@ impl Plaid {
         Ok(Item {
             accounts: r.accounts,
             institution_id: r.item["institution_id"].as_str().map(str::to_string),
+            item_id: r.item["item_id"].as_str().map(str::to_string),
         })
+    }
+
+    /// A Hosted Link session: Plaid hosts the page, the importer asks after
+    /// it ([`Plaid::link_get`]), so nothing here has to be reachable from
+    /// the person's browser and there is no redirect to register. `days`
+    /// of history for a new bank; an item's token for Plaid's update mode,
+    /// where its login is given again.
+    pub fn link_create(&self, mode: &LinkMode, lifetime_s: u64) -> Res<LinkSession> {
+        let mut body = json!({
+            "client_name": "money",
+            "language": "en",
+            "country_codes": ["US"],
+            "user": { "client_user_id": "money-household" },
+            "hosted_link": { "url_lifetime_seconds": lifetime_s },
+        });
+        match mode {
+            LinkMode::New { days } => {
+                body["products"] = json!(["transactions"]);
+                body["transactions"] = json!({ "days_requested": days });
+            }
+            LinkMode::Update(access_token) => body["access_token"] = json!(access_token),
+        }
+        #[derive(Deserialize)]
+        struct Reply {
+            link_token: String,
+            hosted_link_url: String,
+        }
+        let r: Reply = self.call("/link/token/create", body)?;
+        Ok(LinkSession {
+            url: r.hosted_link_url,
+            link_token: r.link_token,
+        })
+    }
+
+    /// Where a Hosted Link session stands.
+    pub fn link_get(&self, session: &LinkSession) -> Res<Linking> {
+        let r: Value = self.call("/link/token/get", json!({ "link_token": session.link_token }))?;
+        let sessions = r["link_sessions"].as_array().cloned().unwrap_or_default();
+        let Some(done) = sessions.iter().find(|s| !s["finished_at"].is_null()) else {
+            return Ok(Linking::Open);
+        };
+        let token = done["results"]["item_add_results"][0]["public_token"]
+            .as_str()
+            .or_else(|| done["on_success"]["public_token"].as_str());
+        if let Some(t) = token {
+            return Ok(Linking::Connected(Some(t.to_string())));
+        }
+        let error = &done["on_exit"]["error"];
+        match error["error_code"].as_str() {
+            Some(code) => {
+                let said = error["display_message"].as_str().or(error["error_message"].as_str());
+                Ok(Linking::Exited(Some(format!("{code}: {}", said.unwrap_or("Plaid's page ended")))))
+            }
+            // Update mode ends with nothing to exchange, as a new bank's page
+            // closed before a bank was connected does: the caller tells
+            // them apart.
+            None => Ok(Linking::Exited(None)),
+        }
+    }
+
+    /// A public token from Link traded for the item's access token, and
+    /// the item's id.
+    pub fn exchange(&self, public_token: &str) -> Res<(String, String)> {
+        #[derive(Deserialize)]
+        struct Reply {
+            access_token: String,
+            #[serde(default)]
+            item_id: String,
+        }
+        let r: Reply = self.call("/item/public_token/exchange", json!({ "public_token": public_token }))?;
+        Ok((r.access_token, r.item_id))
+    }
+
+    /// Plaid told to forget an item: its token works no more.
+    pub fn remove(&self, access_token: &str) -> Res<()> {
+        let _: Value = self.call("/item/remove", json!({ "access_token": access_token }))?;
+        Ok(())
     }
 
     /// An institution's name, as people know it ("Chase").
