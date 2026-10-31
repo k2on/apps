@@ -446,7 +446,14 @@ fn the_budget_drawn() {
     let _ = form.update(Message::Go(Page::Ledger(Ledger::All)));
     let _ = form.register_act(Action::Move(Motion::First));
     let _ = form.register_act(Action::Activate);
+    let mut above = app();
+    let _ = above.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = above.update(Message::Go(Page::Ledger(Ledger::All)));
+    let _ = above.register_act(Action::Move(Motion::To(14)));
+    let _ = above.register_act(Action::Key('c'));
+    let _ = above.update(Message::DropTyped("din".into()));
     for (app, scene, theme, side) in [
+        (&above, "above", iced::Theme::Dark, "dark"),
         (&form, "form", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Light, "light"),

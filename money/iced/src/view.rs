@@ -158,10 +158,23 @@ impl App {
                 at: Box::new(Message::DropAt),
                 scrolled: Box::new(Message::DropScrolled),
             };
-            let panel = arkui::command::list(&d.search, self.drop_groups(), messages, crate::DROP_WIDTH);
+            let groups = self.drop_groups();
+            // Above the cell, it stands on the cell: its bottom where its
+            // corner is, however tall what is found makes it.
+            let at = match d.above {
+                true => {
+                    let tall = match arkui::command::rows(&groups) {
+                        0 => arkui::command::EMPTY_HEIGHT,
+                        _ => arkui::command::list_height(&groups),
+                    };
+                    iced::Point::new(d.at.x, (d.at.y - tall - 2.0).max(0.0))
+                }
+                false => d.at,
+            };
+            let panel = arkui::command::list(&d.search, groups, messages, crate::DROP_WIDTH);
             layers = layers
                 .push(layer::backdrop(Message::CloseDrop, Message::Swallow))
-                .push(layer::pinned(panel, d.at));
+                .push(layer::pinned(panel, at));
         }
         if let Some(m) = &self.ctx.menu {
             layers = layers

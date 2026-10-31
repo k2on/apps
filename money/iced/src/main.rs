@@ -147,8 +147,11 @@ pub enum Choice {
 pub struct Dropdown {
     pub choosing: Choosing,
     pub search: arkui::command::Command,
-    /// Its top left corner, under the cell.
+    /// Its corner: its top left under the cell, or, `above` it where
+    /// there is no room under, its bottom left -- so a list that narrows as
+    /// it is typed into shrinks toward the cell, not away from it.
     pub at: Point,
+    pub above: bool,
 }
 
 /// A name being typed over.
@@ -777,7 +780,7 @@ impl App {
             Message::Approve(ids) => {
                 self.author("approve", "approve", &Txns { ids });
             }
-            Message::Categorize(ids) => return self.open_dropdown(Choosing::Txns(ids), self.pointer),
+            Message::Categorize(ids) => return self.open_dropdown(Choosing::Txns(ids), (self.pointer, false)),
             Message::ChooseCategory => return self.open_dropdown(Choosing::Form, self.form_category_at()),
             // `<Enter>` in the box: the row with the keys.
             Message::DropChoose => {
@@ -1568,7 +1571,7 @@ impl App {
     /// Where the category of transaction `id`'s row is on screen: the
     /// dropdown's corner, under it. The register's columns are the ones
     /// `view_ledger` lays out, worked out for this window's width.
-    fn category_at(&self, id: Id<Txn>) -> Point {
+    fn category_at(&self, id: Id<Txn>) -> (Point, bool) {
         let i = self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0);
         let above = if self.form.as_ref().is_some_and(|f| f.editing.is_none()) {
             view::TXN_ROW
@@ -1579,7 +1582,7 @@ impl App {
     }
 
     /// Where the form's category box is on screen: its list hangs under it.
-    fn form_category_at(&self) -> Point {
+    fn form_category_at(&self) -> (Point, bool) {
         let i = match self.form.as_ref().and_then(|f| f.editing) {
             Some(id) => self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0),
             None => 0,
@@ -1589,7 +1592,7 @@ impl App {
 
     /// The register's category column at `y` down its list (scrolled), as
     /// a dropdown's corner: above, if there is no room under it.
-    fn under(&self, y: f32) -> Point {
+    fn under(&self, y: f32) -> (Point, bool) {
         let all = !matches!(self.page, Page::Ledger(Ledger::Account(_)));
         let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
         let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 90.0;
@@ -1598,21 +1601,19 @@ impl App {
         let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
         let top = view::PAD + view::LEDGER_TOP + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
         let y = top + y - self.register_scroll;
-        let tall = arkui::command::LIST_HEIGHT;
-        let y = if y + tall > self.window.height {
-            (y - view::TXN_ROW - tall).max(0.0)
-        } else {
-            y
-        };
-        Point::new(x.min(self.window.width - DROP_WIDTH).max(0.0), y)
+        let above = y + arkui::command::LIST_HEIGHT > self.window.height;
+        // Above: its bottom on the cell's top.
+        let y = if above { y - view::TXN_ROW } else { y };
+        (Point::new(x.min(self.window.width - DROP_WIDTH).max(0.0), y), above)
     }
 
     /// The dropdown, for `choosing`, its corner at `at`, its box with the keys.
-    fn open_dropdown(&mut self, choosing: Choosing, at: Point) -> Task<Message> {
+    fn open_dropdown(&mut self, choosing: Choosing, (at, above): (Point, bool)) -> Task<Message> {
         self.dropdown = Some(Dropdown {
             choosing,
             search: arkui::command::Command::new(iced::time::Instant::now()),
             at,
+            above,
         });
         iced::widget::operation::focus(look::DROP_INPUT)
     }
