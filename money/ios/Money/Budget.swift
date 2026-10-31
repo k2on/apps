@@ -298,6 +298,8 @@ struct Draft: Equatable {
     var cleared = false
     /// Who entered the one corrected.
     var by = ""
+    /// What the bank called the one corrected, when it says more than its payee.
+    var bank: String? = nil
 
     init(account: Id?, date: String) {
         self.account = account
@@ -316,6 +318,7 @@ struct Draft: Equatable {
         inflow = t.amount > 0
         cleared = t.cleared != .uncleared
         by = t.userId
+        bank = Registers.bankDescription(t)
     }
 
     /// The amount in the domain's sign: spending below nothing.
@@ -398,6 +401,16 @@ enum Registers {
 
     /// Whether a line has a category it can be approved with.
     static func needsCategory(_ t: TxnLine) -> Bool { t.category == "Needs a category" }
+
+    /// What the bank called an imported line, as its form shows it under the
+    /// payee: none for one typed in, one the bank said nothing of, or one
+    /// whose payee already says it (`CHIPOTLE` for Chipotle).
+    static func bankDescription(_ t: TxnLine) -> String? {
+        let d = t.importedPayee.trimmingCharacters(in: .whitespacesAndNewlines)
+        let payee = t.payee.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.imported, !d.isEmpty, d.caseInsensitiveCompare(payee) != .orderedSame else { return nil }
+        return d
+    }
 
     /// The cleared, uncleared and working balances of an account's register.
     static func balances(_ a: AccountLine) -> (cleared: Int64, uncleared: Int64, working: Int64) { (a.cleared, a.uncleared, a.balance) }

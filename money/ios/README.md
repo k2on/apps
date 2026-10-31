@@ -80,12 +80,14 @@ Four tabs in the system's Liquid Glass bar, which shrinks as a list scrolls:
 
 Every sheet has the detents its work needs. A transaction is a form the way
 Wallet's and Reminders' are: Outflow / Inflow, the amount on the keypad as
-Apple Cash takes one, the payee with the household's payees offered as it
-is typed (each bringing its last category), the category from a searchable
-list of the budget with each one's available amount (Ready to Assign for an
-inflow, the other accounts for a transfer), the account, the date, cleared,
-the memo, "Entered by sam" when somebody else did. Assigning and setting a
-target are the keypad with suggestions (target, last month, average spent);
+Apple Cash takes one, the payee — wrapped, never cut — with the household's
+payees offered as it is typed (each bringing its last category) and, for
+one the bank brought, its **Bank Description** under it when that says
+more (`CHIPOTLE 1234 SAN FRANCISCO CA` for Chipotle), whole and copyable;
+the category from a searchable list of the budget with each one's
+available amount (Ready to Assign for an inflow, the other accounts for a
+transfer), the account, the date, cleared, the memo, "Entered by sam" when
+somebody else did. Assigning and setting a target are the keypad with suggestions (target, last month, average spent);
 moving money is the amount first and then where. Everything moves on
 ArkUI's springs; haptics mark a month paged, an approval, a save, a
 selection on the chart. Amounts are the locale's currency format, every
@@ -197,10 +199,11 @@ amounts and days with no session, and over the demo's household for
 from Groceries, assigning against Ready to Assign, Auto-Assign meeting
 every target, the month paged, the accounts shelved, a register held,
 spliced with a new transaction and let go, the inbox emptied, the demo
-bank's three syncs, a refusal said once in the domain's words, and Edit's
-drops: a category dragged under another group joining it, either end of
-the list, a group taking its categories past others, a drop that moves
-nothing asking nothing, and each drawn ahead as the budget comes back.
+bank's three syncs and what it brought opened with its bank description,
+a refusal said once in the domain's words, and Edit's drops: a category
+dragged under another group joining it, either end of the list, a group
+taking its categories past others, a drop that moves nothing asking
+nothing, and each drawn ahead as the budget comes back.
 
 ## Not built
 
