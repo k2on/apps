@@ -136,7 +136,7 @@ fun <K> reordered(order: List<K>, key: K, over: K, isHeader: (K) -> Boolean = { 
 /** `order` as its sections: each header with the rows under it, up to the next. */
 fun <K> sections(order: List<K>, isHeader: (K) -> Boolean): List<Pair<K, List<K>>> {
     val out = ArrayList<Pair<K, MutableList<K>>>()
-    for (k in order) if (isHeader(k)) out.add(k to ArrayList()) else out.lastOrNull()?.second?.add(k)
+    for (k in order) if (isHeader(k)) out.add(k to ArrayList<K>()) else out.lastOrNull()?.second?.add(k)
     return out
 }
 
