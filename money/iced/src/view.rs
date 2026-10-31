@@ -3,7 +3,7 @@
 //! the month's money went — with a panel over it when one is open.
 
 use arkui::{glyphs, icon, layer, menu, outline, panel, style, table};
-use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, tooltip, Column, Space};
+use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::budget::ready_to_assign;
 use money_domain::dates::{month_name, month_of};
@@ -902,7 +902,7 @@ impl App {
         };
         line = line
             .push(table::cell(t.date.clone(), w(96.0), lit, false, true))
-            .push(payee_cell(t, lit))
+            .push(table::cell(t.payee.clone(), Length::FillPortion(3), lit, !t.approved, false))
             .push(category)
             .push(table::cell(t.memo.clone(), Length::FillPortion(2), lit, false, true))
             .push(table::cell(money_or_blank((-t.amount).max(0)), w(100.0), lit, false, false))
@@ -1322,24 +1322,6 @@ fn progress(l: &BudgetLine) -> String {
         _ if l.activity < 0 && had > 0 => format!("{}% used", (-l.activity * 100 / had).min(999)),
         _ => String::new(),
     }
-}
-
-/// A register row's payee, cut to its column, and the whole of it on a
-/// hover — with what the bank called it, where it said more.
-fn payee_cell<'a>(t: &'a TxnLine, lit: bool) -> Element<'a, Message> {
-    let cell = table::cell(t.payee.clone(), Length::FillPortion(3), lit, !t.approved, false);
-    let mut tip = column![text(t.payee.clone()).size(13)].spacing(2);
-    let bank = crate::bank_said(t);
-    if !bank.is_empty() {
-        tip = tip.push(dim(bank, 11));
-    }
-    tooltip(
-        cell,
-        container(tip).padding([6, 10]).style(arkui::dialog::style),
-        tooltip::Position::Bottom,
-    )
-    .delay(std::time::Duration::from_millis(500))
-    .into()
 }
 
 impl App {
