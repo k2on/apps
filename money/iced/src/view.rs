@@ -834,6 +834,12 @@ impl App {
             Ledger::Inbox => ("Needs a Look".into(), "Imported and not yet approved, or for no category".into(), None),
         };
 
+        // An account's name is renamed where it stands, as a category's is.
+        let title: Element<'_, Message> = match ledger {
+            Ledger::Account(id) => self.name_or_box(Naming::Account(id), bold(title, 22).into()),
+            _ => bold(title, 22).into(),
+        };
+
         let balances: Element<'_, Message> = match account {
             Some(a) => row![
                 self.balance_box("Cleared Balance", a.cleared),
@@ -855,6 +861,7 @@ impl App {
         let mut tools = row![action("+ Add Transaction", Message::AddTxn)].spacing(10).align_y(Alignment::Center);
         if let Some(a) = account {
             tools = tools.push(quiet("Reconcile", Message::Reconcile(a.id)));
+            tools = tools.push(quiet("Rename", Message::Rename(Naming::Account(a.id))));
             if !a.bank.is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
@@ -927,7 +934,7 @@ impl App {
         // category is on screen is arithmetic (`App::category_at`): the
         // dropdown opens under it, keys or pointer.
         column![
-            container(column![column![bold(title, 22), dim(subtitle, 12)].spacing(2), balances, tools].spacing(14))
+            container(column![column![title, dim(subtitle, 12)].spacing(2), balances, tools].spacing(14))
                 .height(Length::Fixed(LEDGER_TOP))
                 .clip(true),
             column![

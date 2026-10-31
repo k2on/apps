@@ -915,3 +915,16 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     assert_eq!(app.opened.len(), 1, "a disconnection opens no page");
     rt.block_on(server.stop());
 }
+
+/// An account is renamed from its register, its name a box where it stood.
+#[test]
+fn an_account_is_renamed_where_it_stands() {
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let _ = app.update(Message::Rename(crate::Naming::Account(checking)));
+    assert!(matches!(&app.renaming, Some((_, typed)) if typed == "Checking"));
+    let _ = app.update(Message::RenameTyped("Everyday Checking".into()));
+    let _ = app.update(Message::RenameDone);
+    assert_eq!(account(&app, "Everyday Checking").id, checking);
+}

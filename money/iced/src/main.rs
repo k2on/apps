@@ -166,6 +166,7 @@ pub struct Dropdown {
 pub enum Naming {
     Category(Id<Category>),
     Group(Id<Group>),
+    Account(Id<Account>),
 }
 
 /// A panel over the page.
@@ -1019,6 +1020,7 @@ impl App {
                 let name = match named {
                     Naming::Category(c) => self.peer.line(c).map(|l| l.name.clone()),
                     Naming::Group(g) => self.peer.groups.rows.iter().find(|r| r.id == g).map(|r| r.name.clone()),
+                    Naming::Account(a) => self.peer.account(a).map(|a| a.name.clone()),
                 };
                 if let Some(name) = name {
                     self.renaming = Some((named, name));
@@ -1036,6 +1038,9 @@ impl App {
                 }
                 Some((Naming::Group(id), name)) => {
                     self.author("rename the group", "rename_group", &RenameGroup { id, name });
+                }
+                Some((Naming::Account(id), name)) => {
+                    self.author("rename the account", "rename_account", &RenameAccount { id, name });
                 }
                 None => {}
             },

@@ -117,6 +117,15 @@ pub fn bank_balance(account: &PlaidAccount, current: f64) -> i64 {
     cents(if owed { -current } else { current })
 }
 
+/// What a bank called something, as people read it: without the replacement
+/// characters a bank's text can arrive with (a character lost before Plaid
+/// ever had it, which no font draws and nothing can bring back) or control
+/// characters, and with the spaces they leave closed up.
+pub fn said(s: &str) -> String {
+    let kept: String = s.chars().filter(|c| *c != char::REPLACEMENT_CHARACTER && !c.is_control()).collect();
+    kept.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// A Plaid transaction in our sign, with the merchant as its payee where
 /// Plaid knows one and the bank's own line kept beside it.
 pub fn bank_txn(t: &PlaidTransaction) -> BankTxn {
@@ -127,8 +136,8 @@ pub fn bank_txn(t: &PlaidTransaction) -> BankTxn {
         pending_transaction_id: t.pending_transaction_id.clone(),
         date: t.date.clone(),
         amount: cents(-t.amount),
-        payee: non_empty(&t.merchant_name).unwrap_or_else(|| t.name.clone()),
-        imported_payee: non_empty(&t.original_description).unwrap_or_else(|| t.name.clone()),
+        payee: said(&non_empty(&t.merchant_name).unwrap_or_else(|| t.name.clone())),
+        imported_payee: said(&non_empty(&t.original_description).unwrap_or_else(|| t.name.clone())),
         pending: t.pending,
     }
 }
@@ -137,13 +146,13 @@ pub fn bank_txn(t: &PlaidTransaction) -> BankTxn {
 pub fn import_of(bank: &str, institution: &str, accounts: &[PlaidAccount], pulled: &Pulled) -> Import {
     Import {
         bank: bank.into(),
-        institution: institution.into(),
+        institution: said(institution),
         cursor: pulled.cursor.clone(),
         accounts: accounts
             .iter()
             .map(|a| BankAccount {
                 plaid_account_id: a.account_id.clone(),
-                name: a.name.clone(),
+                name: said(&a.name),
                 mask: a.mask.clone().unwrap_or_default(),
                 kind: a.kind.clone(),
                 subtype: a.subtype.clone().unwrap_or_default(),
@@ -888,6 +897,16 @@ pub fn linked(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<Linke
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A character the bank lost arrives as replacement characters: dropped,
+    /// and the gap closed. Falsified by keeping them: the desktop draws them
+    /// as question marks.
+    #[test]
+    fn what_a_bank_lost_is_left_out() {
+        assert_eq!(said("WAY2SAVE\u{FFFD}\u{FFFD} SAVINGS ...4629"), "WAY2SAVE SAVINGS ...4629");
+        assert_eq!(said("SQ *BLUE  BOTTLE\t"), "SQ *BLUE BOTTLE");
+        assert_eq!(said("Caf\u{e9} \u{ae}"), "Caf\u{e9} \u{ae}", "real characters stay");
+    }
 
     /// Plaid's sign is the other way, and an owed balance is negative here.
     #[test]
