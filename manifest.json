@@ -1,0 +1,146 @@
+{
+ "version": "41229557936",
+ "commit": "76dc8e2f5efe0d5593b015e3b293aeba752c0bd0",
+ "made": "2026-10-31 18:40 UTC",
+ "platforms": {
+  "android": {
+   "device": {
+    "name": "Pixel 7",
+    "width": 1080,
+    "height": 2400,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "art",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "cards",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "empty",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "expanding-card",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "headers",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "lists",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "scroll-to-top",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "sheet",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "sign-in",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "slider",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "ios": {
+   "device": {
+    "name": "iPhone 17 Pro",
+    "width": 1206,
+    "height": 2622,
+    "corner": 165,
+    "cutout": "island"
+   },
+   "shots": [
+    {
+     "id": "art",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "expanding-card",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    },
+    {
+     "id": "scroll-to-top",
+     "kind": "recording",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 60
+    }
+   ]
+  }
+ }
+}
