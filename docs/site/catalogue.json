@@ -445,7 +445,8 @@
       "section": "motion",
       "summary": "Going in and coming back: a page grows over the last, and a swipe from the edge takes it away.",
       "desktop": [
-        "swipe"
+        "swipe",
+        "history"
       ],
       "android": {
         "at": [
@@ -947,6 +948,7 @@
       "api": [
         "Command::new(now), typed(query, list), step(down, groups, list), land(at), scrolled(y), chosen(groups)",
         "view(command, placeholder, groups, messages, open)",
+        "panel(command, placeholder, groups, messages, width): the box alone, to pin as a dropdown",
         "Group { heading, items }, Item { glyph, label, detail, choose }",
         "keys(open) -> Subscription<Press>, press(key, mods, open), opens(key, mods)",
         "WIDTH, LIST_HEIGHT, ROW, HEADING"
@@ -1032,6 +1034,19 @@
         "reveal_to(id, progress)"
       ],
       "rules": []
+    },
+    {
+      "module": "history",
+      "name": "History",
+      "summary": "Back and forward every way an app is asked: the browser's buttons, ^O and ^I, and two fingers sideways. The router and the swipe, wired once.",
+      "api": [
+        "History::new(), go(by), can_go(by), wheel(delta, now), tick(now), active(), sync(&place), replace_next(), poll(ready), view(page, now)",
+        "wheel() -> Subscription<ScrollDelta>"
+      ],
+      "rules": [
+        "A jump and a swipe both move the bar; the app arrives by its next poll, the road the back button takes.",
+        "The arrow shows only where there is somewhere to go."
+      ]
     },
     {
       "module": "swipe",

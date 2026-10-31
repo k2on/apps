@@ -233,6 +233,19 @@ pub struct Messages<'a, M> {
 /// The box, `open` of the way in: `placeholder` in it while nothing is
 /// typed, and `groups` under it, the row the keys are on lit.
 pub fn view<'a, M: Clone + 'a>(command: &Command, placeholder: &str, groups: Vec<Group<M>>, messages: Messages<'a, M>, open: f32) -> Element<'a, M> {
+    dialog::present(panel(command, placeholder, groups, messages, WIDTH), open)
+}
+
+/// The box alone, `width` wide, for an app to stand where it wants: a
+/// dropdown under the cell it chooses for, as a searchable menu
+/// ([`crate::layer::pinned`]), where [`view`] stands it as a dialog.
+pub fn panel<'a, M: Clone + 'a>(
+    command: &Command,
+    placeholder: &str,
+    groups: Vec<Group<M>>,
+    messages: Messages<'a, M>,
+    width: f32,
+) -> Element<'a, M> {
     let height = list_height(&groups);
     let chosen = command.chosen(&groups);
     let mut input = text_input(placeholder, &command.query)
@@ -310,9 +323,9 @@ pub fn view<'a, M: Clone + 'a>(command: &Command, placeholder: &str, groups: Vec
             .into()
     };
     let panel = container(column![search, rule::horizontal(1).style(crate::style::edge), list])
-        .width(Length::Fixed(WIDTH))
+        .width(Length::Fixed(width))
         .style(dialog::style);
-    dialog::present(panel, open)
+    panel.into()
 }
 
 #[cfg(test)]

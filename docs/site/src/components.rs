@@ -397,7 +397,7 @@ pub const COMPONENTS: &[Component] = &[
         section: Section::Motion,
         glyph: glyphs::SKIP_BACK,
         summary: "Going in and coming back: a page grows over the last, and a swipe from the edge takes it away.",
-        desktop: &["swipe"],
+        desktop: &["swipe", "history"],
         android: Some(Mobile {
             at: &["ui/Motion.kt: PageFrame, Moving, PageBack, Hero"],
             how: &["PageBack(motion, blocked, toFirst): the edge swipe, following the finger.", "Hero carries a picture from the card to the page's header."],

@@ -12,19 +12,26 @@ use money_domain::*;
 use crate::amount::{money, money_or_blank};
 use crate::look::{self, Tone};
 use crate::peer::Ledger;
-use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, TxnForm};
+use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, Pane, TxnForm};
 
-const SIDEBAR: f32 = 250.0;
+pub const SIDEBAR: f32 = 250.0;
 /// How tall a line of the budget is, a group's heading or a category:
 /// one height, so a drag is arithmetic (`arkui::outline`).
 pub const LINE: f32 = 54.0;
+/// The register's geometry: the top above its table, the table's heading,
+/// the gap between them, and every row — one height each, so where a row
+/// is on screen is arithmetic (`App::category_at`).
+pub const LEDGER_TOP: f32 = 150.0;
+pub const LEDGER_HEAD: f32 = 28.0;
+pub const LEDGER_GAP: f32 = 14.0;
+pub const TXN_ROW: f32 = 34.0;
 /// The sidebar's scrollable.
 const SIDEBAR_SCROLL: &str = "sidebar";
 
 /// A section of the sidebar's accounts: its heading, and which belong.
 type Section = (&'static str, fn(&AccountLine) -> bool);
 const INSPECTOR: f32 = 310.0;
-const PAD: f32 = 18.0;
+pub const PAD: f32 = 18.0;
 const MONEY_COL: f32 = 120.0;
 /// The goal's column, and the pill's.
 const GOAL_COL: f32 = 110.0;
@@ -103,6 +110,8 @@ impl App {
             Page::Reflect => self.view_reflect(),
             Page::Ledger(l) => self.view_ledger(l),
         };
+        // A swipe's arrow over the page, not the sidebar.
+        let page = self.history.view(page, iced::time::Instant::now());
         // The sidebar is a surface, a step off the page's ground, with a
         // hairline where it meets the page, as harken's is.
         let base = container(row![self.view_sidebar(), rule::vertical(1).style(style::edge), page].height(Length::Fill))
@@ -140,6 +149,20 @@ impl App {
                 .push(layer::dimmed(Message::CloseModal, Message::Swallow))
                 .push(layer::centred(self.view_modal(m)));
         }
+        // The category dropdown, under the cell it is for; a click away closes it.
+        if let Some(d) = &self.dropdown {
+            let messages = arkui::command::Messages {
+                input: look::DROP_INPUT,
+                list: look::DROP_LIST,
+                typed: Box::new(Message::DropTyped),
+                at: Box::new(Message::DropAt),
+                scrolled: Box::new(Message::DropScrolled),
+            };
+            let panel = arkui::command::panel(&d.search, "Find a category", self.drop_groups(), messages, crate::DROP_WIDTH);
+            layers = layers
+                .push(layer::backdrop(Message::CloseDrop, Message::Swallow))
+                .push(layer::pinned(panel, d.at));
+        }
         if let Some(m) = &self.ctx.menu {
             layers = layers
                 .push(layer::backdrop(Message::CloseMenu, Message::Swallow))
@@ -150,8 +173,10 @@ impl App {
 
     // * The sidebar
 
-    fn view_sidebar(&self) -> Element<'_, Message> {
-        let places = [
+    /// The sidebar's places, in order: the pages, then the accounts under
+    /// their headings. What the keys walk is what is drawn.
+    pub fn places(&self) -> Vec<(&'static [u8], String, Option<&'static str>, Page)> {
+        let pages = [
             (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
             (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
             (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
@@ -170,19 +195,29 @@ impl App {
                 (glyph(a), label, Some(name), Page::Ledger(Ledger::Account(a.id)))
             })
         });
-        let places: Vec<_> = places.into_iter().chain(accounts).collect();
-        // The inbox is All Accounts, filtered: its row stays the one lit.
+        pages.into_iter().chain(accounts).collect()
+    }
+
+    /// The sidebar's cursor: the page shown. The inbox is All Accounts,
+    /// filtered, so its row stays the one lit.
+    pub fn sidebar_at(&self) -> usize {
         let here = match self.page {
             Page::Ledger(Ledger::Inbox) => Page::Ledger(Ledger::All),
             p => p,
         };
-        let cursor = places.iter().position(|p| p.3 == here).unwrap_or(0);
+        self.places().iter().position(|p| p.3 == here).unwrap_or(0)
+    }
+
+    fn view_sidebar(&self) -> Element<'_, Message> {
+        let cursor = self.sidebar_at();
+        let focused = self.pane == Pane::Sidebar && self.keys_free();
         let inbox = self.peer.inbox.rows.len();
-        let items = places
+        let items = self
+            .places()
             .into_iter()
             .enumerate()
             .map(|(i, (glyph, label, heading, page))| {
-                let lit = arkui::sidebar::lit(i, cursor, true);
+                let lit = arkui::sidebar::lit(i, cursor, focused);
                 let trailing = match page {
                     Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
@@ -197,7 +232,7 @@ impl App {
                 }
             })
             .collect();
-        arkui::sidebar::view(items, cursor, true, SIDEBAR, PAD, SIDEBAR_SCROLL)
+        arkui::sidebar::view(items, cursor, focused, SIDEBAR, PAD, SIDEBAR_SCROLL)
     }
 
     /// A count in a bubble: what needs looking at.
@@ -765,27 +800,39 @@ impl App {
         if let Some(f) = self.form.as_ref().filter(|f| f.editing.is_none()) {
             body = body.push(self.view_form(f, all));
         }
+        let lit = self.txn_lit();
+        let focused = self.pane == Pane::Page && self.keys_free();
         for (i, t) in rows.iter().enumerate() {
             match &self.form {
                 Some(f) if f.editing == Some(t.id) => body = body.push(self.view_form(f, all)),
-                _ => body = body.push(self.txn_row(t, all, i % 2 == 1)),
+                _ => {
+                    let on_cursor = lit.is_some_and(|(a, b)| a <= i && i <= b);
+                    body = body.push(self.txn_row(t, all, i % 2 == 1, on_cursor, focused));
+                }
             }
         }
         if rows.is_empty() {
             body = body.push(container(dim("Nothing here.", 13)).padding(20));
         }
 
+        // The top is one height, and so is every row, so where a row's
+        // category is on screen is arithmetic (`App::category_at`): the
+        // dropdown opens under it, keys or pointer.
         column![
-            column![bold(title, 22), dim(subtitle, 12)].spacing(2),
-            balances,
-            tools,
+            container(column![column![bold(title, 22), dim(subtitle, 12)].spacing(2), balances, tools].spacing(14))
+                .height(Length::Fixed(LEDGER_TOP))
+                .clip(true),
             column![
-                table::row(head, false, false, false),
+                table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
                 rule::horizontal(1).style(style::hairline),
-                scrollable(body).height(Length::Fill).style(style::bars),
+                scrollable(body)
+                    .id(look::REGISTER)
+                    .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
+                    .height(Length::Fill)
+                    .style(style::bars),
             ],
         ]
-        .spacing(14)
+        .spacing(LEDGER_GAP)
         .padding(PAD)
         .width(Length::Fill)
         .into()
@@ -805,50 +852,56 @@ impl App {
         .into()
     }
 
-    fn txn_row<'a>(&'a self, t: &'a TxnLine, all: bool, odd: bool) -> Element<'a, Message> {
+    /// A transaction's row. `on_cursor` is the register's cursor or its
+    /// visual selection, lit while the register has the keys; a click puts
+    /// the cursor on it, and on the cursor's row opens it to edit.
+    fn txn_row<'a>(&'a self, t: &'a TxnLine, all: bool, odd: bool, on_cursor: bool, focused: bool) -> Element<'a, Message> {
+        let lit = on_cursor && focused;
         let w = |n: f32| Length::Fixed(n);
         let mut line = row![].align_y(Alignment::Center);
         if all {
-            line = line.push(table::cell(t.account.clone(), w(130.0), false, false, true));
+            line = line.push(table::cell(t.account.clone(), w(130.0), lit, false, true));
         }
         let needs = t.category == "Needs a category";
-        let category: Element<'a, Message> = match (needs, t.transfer) {
-            (true, _) => container(
-                button(text("Needs a category").size(13))
-                    .on_press(Message::Categorize(vec![t.id]))
-                    .padding(0)
-                    .style(|theme, status| {
-                        let mut s = look::link(theme, status);
-                        s.text_color = arkui::theme::of(theme).warning.base.color;
-                        s
-                    }),
-            )
-            .width(Length::FillPortion(3))
-            .into(),
-            _ => table::cell(
-                t.category.clone(),
-                Length::FillPortion(3),
-                false,
-                false,
-                t.category_id == Some(ready_to_assign()),
-            ),
+        // The category opens the dropdown, for this row — or for the whole
+        // selection, when the row is in it.
+        let label = text(t.category.clone())
+            .size(table::CELL_SIZE)
+            .wrapping(text::Wrapping::None)
+            .style(move |theme| text::Style {
+                color: Some(match (needs, lit) {
+                    (true, false) => arkui::theme::of(theme).warning.base.color,
+                    _ => style::on_row(theme, lit, false, t.category_id == Some(ready_to_assign())),
+                }),
+            });
+        let category: Element<'a, Message> = match t.transfer {
+            true => table::cell(t.category.clone(), Length::FillPortion(3), lit, false, true),
+            false => container(mouse_area(label).on_press(Message::CategorizeRow(t.id)))
+                .width(Length::FillPortion(3))
+                .padding(Padding {
+                    right: table::SPACING,
+                    ..Padding::ZERO
+                })
+                .clip(true)
+                .into(),
         };
         line = line
-            .push(table::cell(t.date.clone(), w(96.0), false, false, true))
-            .push(table::cell(t.payee.clone(), Length::FillPortion(3), false, !t.approved, false))
+            .push(table::cell(t.date.clone(), w(96.0), lit, false, true))
+            .push(table::cell(t.payee.clone(), Length::FillPortion(3), lit, !t.approved, false))
             .push(category)
-            .push(table::cell(t.memo.clone(), Length::FillPortion(2), false, false, true))
-            .push(table::cell(money_or_blank((-t.amount).max(0)), w(100.0), false, false, false))
-            .push(table::cell(money_or_blank(t.amount.max(0)), w(100.0), false, false, false));
+            .push(table::cell(t.memo.clone(), Length::FillPortion(2), lit, false, true))
+            .push(table::cell(money_or_blank((-t.amount).max(0)), w(100.0), lit, false, false))
+            .push(table::cell(money_or_blank(t.amount.max(0)), w(100.0), lit, false, false));
         let (mark, next) = match t.cleared {
             Cleared::Uncleared => (glyphs::UNTICK, Some(true)),
             Cleared::Cleared => (glyphs::TICKED, Some(false)),
             Cleared::Reconciled => (glyphs::TICK, None),
         };
-        let mut cleared = button(icon::tinted(mark, icon::SIZE, move |p| match t.cleared {
-            Cleared::Uncleared => p.background.base.text.scale_alpha(0.35),
-            Cleared::Cleared => p.success.base.color,
-            Cleared::Reconciled => p.primary.base.color,
+        let mut cleared = button(icon::tinted(mark, icon::SIZE, move |p| match (lit, t.cleared) {
+            (true, _) => p.primary.base.text,
+            (false, Cleared::Uncleared) => p.background.base.text.scale_alpha(0.35),
+            (false, Cleared::Cleared) => p.success.base.color,
+            (false, Cleared::Reconciled) => p.primary.base.color,
         }))
         .padding(2)
         .style(style::quiet);
@@ -860,14 +913,18 @@ impl App {
             end = end.push(link("Approve", Message::Approve(vec![t.id])));
         }
         line = line.push(container(end).width(w(90.0)));
-        mouse_area(table::row(line, false, false, odd).style(move |theme| {
-            let mut s = style::row(theme, false, false, odd);
-            if !t.approved {
-                s.background = Some(iced::Background::Color(arkui::theme::of(theme).primary.base.color.scale_alpha(0.08)));
-            }
-            s
-        }))
-        .on_press(Message::EditTxn(t.id))
+        mouse_area(
+            table::row(line, on_cursor, focused, odd)
+                .center_y(Length::Fixed(TXN_ROW))
+                .style(move |theme| {
+                    let mut s = style::row(theme, on_cursor, focused, odd);
+                    if !t.approved && !on_cursor {
+                        s.background = Some(iced::Background::Color(arkui::theme::of(theme).primary.base.color.scale_alpha(0.08)));
+                    }
+                    s
+                }),
+        )
+        .on_press(Message::TxnClick(t.id))
         .into()
     }
 
@@ -1208,7 +1265,7 @@ fn tile<'a>(name: &str) -> Element<'a, Message> {
 }
 
 /// What a category is for, by the words in its name; a tag when none says.
-fn category_glyph(name: &str) -> &'static [u8] {
+pub fn category_glyph(name: &str) -> &'static [u8] {
     let name = name.to_lowercase();
     let says = |words: &[&str]| words.iter().any(|w| name.contains(w));
     match () {

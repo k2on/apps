@@ -46,6 +46,45 @@ use money_domain::*;
 
 use peer::{Ledger, Peer};
 
+/// Which pane has the keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Sidebar,
+    Page,
+}
+
+/// A page as the address bar spells it: names, not ids (`arkui::route`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Place {
+    Budget,
+    Reflect,
+    Accounts,
+    Inbox,
+    Account(String),
+}
+
+impl arkui::route::Route for Place {
+    fn fragment(&self) -> String {
+        match self {
+            Place::Budget => arkui::route::join("budget", None),
+            Place::Reflect => arkui::route::join("reflect", None),
+            Place::Accounts => arkui::route::join("accounts", None),
+            Place::Inbox => arkui::route::join("inbox", None),
+            Place::Account(name) => arkui::route::join("account", Some(name)),
+        }
+    }
+
+    fn parse(fragment: &str) -> Self {
+        match arkui::route::split(fragment) {
+            ("reflect", _) => Place::Reflect,
+            ("accounts", _) => Place::Accounts,
+            ("inbox", _) => Place::Inbox,
+            ("account", Some(name)) => Place::Account(name),
+            _ => Place::Budget,
+        }
+    }
+}
+
 /// What fills the page beside the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -98,6 +137,15 @@ pub enum Choosing {
 pub enum Choice {
     Category(Option<Id<Category>>),
     Transfer(Id<Account>),
+}
+
+/// A category being chosen, as YNAB has it: a search box dropped under
+/// the cell it is for, the categories under it by group (`arkui::command`).
+pub struct Dropdown {
+    pub choosing: Choosing,
+    pub search: arkui::command::Command,
+    /// Its top left corner, under the cell.
+    pub at: Point,
 }
 
 /// A name being typed over.
@@ -190,6 +238,20 @@ pub enum Message {
     Dropped,
     /// The clock while something slides.
     Frame,
+    /// The wheel moved sideways: perhaps a swipe back or forward.
+    Wheel(iced::mouse::ScrollDelta),
+    /// A register row clicked: the cursor onto it, or, on the cursor, open.
+    TxnClick(Id<Txn>),
+    /// A row's category clicked: the dropdown under it.
+    CategorizeRow(Id<Txn>),
+    RegisterScrolled(f32),
+    /// The category dropdown: typed into, the pointer on a row, its list
+    /// scrolled, its keys, closed.
+    DropTyped(String),
+    DropAt(usize),
+    DropScrolled(f32),
+    DropKey(arkui::command::Press),
+    CloseDrop,
     /// A row or a heading of the budget right-clicked: its menu.
     Menu(Grab),
     MenuAt(usize),
@@ -240,6 +302,18 @@ pub struct App {
     /// A row's or a heading's menu.
     pub ctx: arkui::context::Context<Message, ()>,
     pub renaming: Option<(Naming, String)>,
+    /// Which pane has the keys: the sidebar or the page beside it.
+    pub pane: Pane,
+    /// Where the window has been: the address bar, and back and forward by
+    /// `^O`/`^I` and a swipe (`arkui::history`).
+    pub history: arkui::history::History<Place>,
+    /// The register's cursor, and the other end of its visual selection.
+    pub txn_at: Option<Id<Txn>>,
+    pub txn_anchor: Option<Id<Txn>>,
+    /// How far down the register is scrolled, for where a row is.
+    pub register_scroll: f32,
+    /// A category being chosen, in a searchable dropdown.
+    pub dropdown: Option<Dropdown>,
     /// The last click on a row or a heading, and when: a second on the same
     /// one soon after is a double click, which renames it.
     pub last_click: Option<(Grab, iced::time::Instant)>,
@@ -249,7 +323,7 @@ pub struct App {
 
 impl App {
     pub fn with_peer(client: client::Replica, today: &str) -> App {
-        App {
+        let mut app = App {
             peer: Peer::open(client, &month_of(today)),
             page: Page::Budget,
             today: today.into(),
@@ -275,8 +349,21 @@ impl App {
             window: Size::new(1200.0, 760.0),
             ctx: arkui::context::Context::new(),
             renaming: None,
+            pane: Pane::Page,
+            history: arkui::history::History::new(),
+            txn_at: None,
+            txn_anchor: None,
+            register_scroll: 0.0,
+            dropdown: None,
             last_click: None,
+        };
+        // A link the window was opened with, read before anything is drawn;
+        // then where it is, as the history's first place.
+        if let Some(page) = app.history.poll(true).and_then(|p| app.page_of(&p)) {
+            let _ = app.step(Message::Go(page));
         }
+        app.history.sync(&app.place());
+        app
     }
 
     #[cfg(feature = "demo")]
@@ -421,7 +508,46 @@ impl App {
         taken
     }
 
+    /// One message, then the address bar: where it went (the back button,
+    /// `^O`/`^I`, a swipe, a link) is gone to, and where the window now is
+    /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.step(message);
+        // An account is named in the bar, so a link to one waits for the
+        // accounts to have arrived.
+        let ready = !self.peer.accounts.rows.is_empty();
+        if let Some(page) = self.history.poll(ready).and_then(|p| self.page_of(&p)) {
+            if page != self.page {
+                let _ = self.step(Message::Go(page));
+            }
+        }
+        self.history.sync(&self.place());
+        task
+    }
+
+    /// Where the window is, as the bar spells it.
+    pub fn place(&self) -> Place {
+        match self.page {
+            Page::Budget => Place::Budget,
+            Page::Reflect => Place::Reflect,
+            Page::Ledger(Ledger::All) => Place::Accounts,
+            Page::Ledger(Ledger::Inbox) => Place::Inbox,
+            Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
+        }
+    }
+
+    /// The page a place is, if it is one here: an account by its name.
+    fn page_of(&self, place: &Place) -> Option<Page> {
+        Some(match place {
+            Place::Budget => Page::Budget,
+            Place::Reflect => Page::Reflect,
+            Place::Accounts => Page::Ledger(Ledger::All),
+            Place::Inbox => Page::Ledger(Ledger::Inbox),
+            Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
+        })
+    }
+
+    fn step(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Go(page) => {
                 self.page = page;
@@ -616,8 +742,52 @@ impl App {
             Message::Approve(ids) => {
                 self.author("approve", "approve", &Txns { ids });
             }
-            Message::Categorize(ids) => self.modal = Some(Modal::Choose(Choosing::Txns(ids))),
-            Message::ChooseCategory => self.modal = Some(Modal::Choose(Choosing::Form)),
+            Message::Categorize(ids) => return self.open_dropdown(Choosing::Txns(ids), self.pointer),
+            Message::ChooseCategory => return self.open_dropdown(Choosing::Form, self.pointer),
+            Message::CategorizeRow(id) => {
+                // The selection, when the row is in it; the row alone when not.
+                let ids = match self.txn_selected().contains(&id) {
+                    true => self.txn_selected(),
+                    false => vec![id],
+                };
+                self.txn_at = Some(id);
+                let at = self.category_at(id);
+                return self.open_dropdown(Choosing::Txns(ids), at);
+            }
+            Message::TxnClick(id) => {
+                self.pane = Pane::Page;
+                self.txn_anchor = None;
+                if self.txn_at == Some(id) {
+                    return self.update(Message::EditTxn(id));
+                }
+                self.txn_at = Some(id);
+            }
+            Message::RegisterScrolled(y) => self.register_scroll = y,
+            Message::DropTyped(q) => {
+                if let Some(d) = &mut self.dropdown {
+                    return d.search.typed(q, look::DROP_LIST);
+                }
+            }
+            Message::DropAt(at) => {
+                if let Some(d) = &mut self.dropdown {
+                    d.search.land(at);
+                }
+            }
+            Message::DropScrolled(y) => {
+                if let Some(d) = &mut self.dropdown {
+                    d.search.scrolled(y);
+                }
+            }
+            Message::DropKey(press) => {
+                let groups = self.drop_groups();
+                match (press, &mut self.dropdown) {
+                    (arkui::command::Press::Close, _) => self.dropdown = None,
+                    (arkui::command::Press::Up, Some(d)) => return d.search.step(false, &groups, look::DROP_LIST),
+                    (arkui::command::Press::Down, Some(d)) => return d.search.step(true, &groups, look::DROP_LIST),
+                    _ => {}
+                }
+            }
+            Message::CloseDrop => self.dropdown = None,
             Message::Chose(choice) => self.chose(choice),
             Message::Sync => self.sync(),
             Message::AddAccount => {
@@ -708,6 +878,8 @@ impl App {
             Message::Escape => {
                 if self.ctx.is_open() {
                     self.ctx.close_menu();
+                } else if self.dropdown.is_some() {
+                    self.dropdown = None;
                 } else if self.modal.is_some() {
                     self.modal = None;
                 } else if self.renaming.is_some() {
@@ -718,6 +890,8 @@ impl App {
                     self.form = None;
                 } else if self.new_group.is_some() || self.new_category.is_some() {
                     (self.new_group, self.new_category) = (None, None);
+                } else if self.txn_anchor.is_some() {
+                    self.txn_anchor = None;
                 } else if self.anchor.is_some() {
                     self.anchor = None;
                 } else {
@@ -739,8 +913,10 @@ impl App {
                 }
             }
             Message::Dropped => return self.dropped(),
+            Message::Wheel(delta) => self.history.wheel(delta, iced::time::Instant::now()),
             Message::Frame => {
                 let now = iced::time::Instant::now();
+                self.history.tick(now);
                 if self.settle.is_some_and(|s| !s.moving(now)) {
                     self.settle = None;
                 }
@@ -878,14 +1054,20 @@ impl App {
         Some((from.min(at), from.max(at)))
     }
 
-    /// Whether the budget has the keyboard: nothing over it, nothing typed into.
-    pub fn budget_keys(&self) -> bool {
-        self.page == Page::Budget
-            && self.modal.is_none()
+    /// Whether the keys are the grammar's: nothing over the window, nothing
+    /// typed into.
+    pub fn keys_free(&self) -> bool {
+        self.modal.is_none()
+            && self.dropdown.is_none()
             && self.form.is_none()
             && self.renaming.is_none()
             && self.assigning.is_none()
             && !self.ctx.is_open()
+    }
+
+    /// Whether the budget has the keyboard.
+    pub fn budget_keys(&self) -> bool {
+        self.page == Page::Budget && self.pane == Pane::Page && self.keys_free()
     }
 
     fn key(&mut self, key: Key, mods: Modifiers) -> Task<Message> {
@@ -907,10 +1089,52 @@ impl App {
                 _ => Task::none(),
             };
         }
-        if !self.budget_keys() {
+        // Back and forward, the way the browser's buttons go: the bar moves,
+        // and the next update arrives where it went.
+        if let vim::Action::Jump(by) = action {
+            self.history.go(by);
             return Task::none();
         }
-        self.act(action)
+        if !self.keys_free() {
+            return Task::none();
+        }
+        if action == vim::Action::Cycle {
+            self.pane = match self.pane {
+                Pane::Sidebar => Pane::Page,
+                Pane::Page => Pane::Sidebar,
+            };
+            return Task::none();
+        }
+        match (self.pane, self.page) {
+            (Pane::Sidebar, _) => self.sidebar_act(action),
+            (Pane::Page, Page::Budget) => self.act(action),
+            (Pane::Page, Page::Ledger(_)) => self.register_act(action),
+            (Pane::Page, Page::Reflect) => {
+                if let vim::Action::Move(vim::Motion::Left(_)) = action {
+                    self.pane = Pane::Sidebar;
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// A command with the sidebar's keys: `j` and `k` walk the places, the
+    /// page following, and `l` or `<Enter>` give the keys to the page.
+    fn sidebar_act(&mut self, action: vim::Action) -> Task<Message> {
+        let places = self.places();
+        match action {
+            vim::Action::Move(vim::Motion::Right(_)) | vim::Action::Activate => self.pane = Pane::Page,
+            vim::Action::Move(m) => {
+                if let Some(i) = vim::Grid::column(places.len()).step(self.sidebar_at(), m) {
+                    // A cursor walking is a scrub: one history entry, not one
+                    // a place.
+                    self.history.replace_next();
+                    return self.update(Message::Go(places[i].3));
+                }
+            }
+            _ => {}
+        }
+        Task::none()
     }
 
     /// One command of the grammar, on the budget.
@@ -919,6 +1143,8 @@ impl App {
         let sizes = self.sizes();
         let n = ids.len();
         match action {
+            // The budget is one column: `h` is the sidebar, beside it.
+            vim::Action::Move(vim::Motion::Left(_)) => self.pane = Pane::Sidebar,
             vim::Action::Move(m) => {
                 let grid = vim::Grid::column(n);
                 let to = match self.at() {
@@ -1144,6 +1370,260 @@ impl App {
             .open_menu(menu::Menu::open(title, entries, self.pointer, self.window, menu::Anchor::Pointer));
     }
 
+    // * The register's keys, and the category dropdown
+
+    /// The register's cursor's row.
+    fn txn_cursor(&self) -> Option<usize> {
+        let at = self.txn_at?;
+        self.peer.register.rows.iter().position(|t| t.id == at)
+    }
+
+    /// The register's rows under the cursor, first to last: one, or from the
+    /// visual selection's anchor to the cursor.
+    pub fn txn_lit(&self) -> Option<(usize, usize)> {
+        let at = self.txn_cursor()?;
+        let rows = &self.peer.register.rows;
+        let from = self.txn_anchor.and_then(|a| rows.iter().position(|t| t.id == a)).unwrap_or(at);
+        Some((from.min(at), from.max(at)))
+    }
+
+    /// The transactions under the cursor.
+    pub fn txn_selected(&self) -> Vec<Id<Txn>> {
+        match self.txn_lit() {
+            Some((a, b)) => self.peer.register.rows[a..=b].iter().map(|t| t.id).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// A command with the register's keys: `j`/`k` and the rest walk it, `v`
+    /// selects, `cc` chooses the selection's category from the dropdown, `a`
+    /// approves it, `<Space>` clears it (or un-clears), `<Enter>` edits the
+    /// cursor's, `i` adds one, `/` finds a payee, and `h` is the sidebar.
+    pub fn register_act(&mut self, action: vim::Action) -> Task<Message> {
+        let rows: Vec<(Id<Txn>, bool, Cleared, String)> = self
+            .peer
+            .register
+            .rows
+            .iter()
+            .map(|t| (t.id, t.approved, t.cleared, t.payee.clone()))
+            .collect();
+        let n = rows.len();
+        match action {
+            vim::Action::Move(vim::Motion::Left(_)) => self.pane = Pane::Sidebar,
+            vim::Action::Move(m) => {
+                let grid = vim::Grid::column(n);
+                let to = match self.txn_cursor() {
+                    Some(i) => grid.step(i, m),
+                    None => match m {
+                        vim::Motion::Up(_) | vim::Motion::Last => n.checked_sub(1),
+                        vim::Motion::To(_) => grid.step(0, m),
+                        _ => (n > 0).then_some(0),
+                    },
+                };
+                if let Some(i) = to {
+                    self.txn_at = Some(rows[i].0);
+                    return self.reveal_txn(i);
+                }
+            }
+            vim::Action::Visual(on) => {
+                if on && self.txn_at.is_none() {
+                    self.txn_at = rows.first().map(|r| r.0);
+                }
+                self.txn_anchor = if on { self.txn_at } else { None };
+            }
+            vim::Action::Activate => {
+                if let Some(id) = self.txn_at {
+                    return self.update(Message::EditTxn(id));
+                }
+            }
+            vim::Action::Bound("cc") => {
+                if let Some(id) = self.txn_at {
+                    return self.update(Message::CategorizeRow(id));
+                }
+            }
+            vim::Action::Key('a') => {
+                let ids: Vec<Id<Txn>> = self
+                    .txn_selected()
+                    .into_iter()
+                    .filter(|id| rows.iter().any(|r| r.0 == *id && !r.1))
+                    .collect();
+                self.txn_anchor = None;
+                if !ids.is_empty() {
+                    return self.update(Message::Approve(ids));
+                }
+            }
+            vim::Action::Toggle => {
+                for id in self.txn_selected() {
+                    if let Some(r) = rows.iter().find(|r| r.0 == id) {
+                        if r.2 != Cleared::Reconciled {
+                            let _ = self.update(Message::ToggleCleared(id, r.2 == Cleared::Uncleared));
+                        }
+                    }
+                }
+            }
+            vim::Action::Key('i') => return self.update(Message::AddTxn),
+            vim::Action::Search(q) => {
+                self.search = q;
+                return self.find_txn(1);
+            }
+            vim::Action::Match(delta) => return self.find_txn(delta),
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// `/` and `n`/`N` in the register: the next payee with the search in it.
+    fn find_txn(&mut self, delta: isize) -> Task<Message> {
+        let payees: Vec<String> = self.peer.register.rows.iter().map(|t| t.payee.clone()).collect();
+        match vim::find(&payees, &self.search, self.txn_cursor().unwrap_or(0), delta) {
+            Some(i) => {
+                self.txn_at = Some(self.peer.register.rows[i].id);
+                self.reveal_txn(i)
+            }
+            None => {
+                self.note = format!("no payee has {:?} in it", self.search);
+                Task::none()
+            }
+        }
+    }
+
+    /// How tall the register's list is on screen.
+    fn register_view(&self) -> f32 {
+        (self.window.height - view::PAD * 2.0 - view::LEDGER_TOP - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
+    }
+
+    /// Scroll the register just far enough that row `i` is in sight.
+    fn reveal_txn(&mut self, i: usize) -> Task<Message> {
+        // A new transaction's form stands above the rows.
+        let above = if self.form.as_ref().is_some_and(|f| f.editing.is_none()) {
+            view::TXN_ROW
+        } else {
+            0.0
+        };
+        let top = above + i as f32 * view::TXN_ROW;
+        let seen = self.register_view();
+        let y = if top < self.register_scroll {
+            top
+        } else if top + view::TXN_ROW > self.register_scroll + seen {
+            top + view::TXN_ROW - seen
+        } else {
+            return Task::none();
+        };
+        self.register_scroll = y;
+        iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
+    }
+
+    /// Where the category of transaction `id`'s row is on screen: the
+    /// dropdown's corner, under it. The register's columns are the ones
+    /// `view_ledger` lays out, worked out for this window's width.
+    fn category_at(&self, id: Id<Txn>) -> Point {
+        let all = !matches!(self.page, Page::Ledger(Ledger::Account(_)));
+        let i = self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0);
+        let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
+        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 90.0;
+        let width = self.window.width - view::SIDEBAR - 1.0 - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
+        let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
+        let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
+        let above = if self.form.as_ref().is_some_and(|f| f.editing.is_none()) {
+            view::TXN_ROW
+        } else {
+            0.0
+        };
+        let top = view::PAD + view::LEDGER_TOP + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
+        let y = top + above + (i + 1) as f32 * view::TXN_ROW - self.register_scroll;
+        // Kept on screen: above the row, if there is no room under it.
+        let tall = arkui::command::INPUT + arkui::command::LIST_HEIGHT;
+        let y = if y + tall > self.window.height {
+            (y - view::TXN_ROW - tall).max(0.0)
+        } else {
+            y
+        };
+        Point::new(x.min(self.window.width - DROP_WIDTH).max(0.0), y)
+    }
+
+    /// The dropdown, for `choosing`, its corner at `at`, its box with the keys.
+    fn open_dropdown(&mut self, choosing: Choosing, at: Point) -> Task<Message> {
+        self.dropdown = Some(Dropdown {
+            choosing,
+            search: arkui::command::Command::new(iced::time::Instant::now()),
+            at,
+        });
+        iced::widget::operation::focus(look::DROP_INPUT)
+    }
+
+    /// What the dropdown offers for what is typed: transfers (for a new
+    /// transaction), Ready to Assign, each group's categories with what they
+    /// have, and no category at all — every one whose name has the typed
+    /// in it.
+    pub fn drop_groups(&self) -> Vec<arkui::command::Group<Message>> {
+        let Some(d) = &self.dropdown else {
+            return Vec::new();
+        };
+        let query = d.search.query.to_lowercase();
+        let has = |name: &str| query.is_empty() || name.to_lowercase().contains(&query);
+        let item = |label: String, detail: Option<String>, choice: Choice| arkui::command::Item {
+            glyph: match choice {
+                Choice::Transfer(_) => glyphs::SEND,
+                Choice::Category(Some(c)) if c == money_domain::budget::ready_to_assign() => glyphs::GROWTH,
+                Choice::Category(Some(_)) => view::category_glyph(&label),
+                Choice::Category(None) => glyphs::CLOSE,
+            },
+            label,
+            detail,
+            choose: Message::Chose(choice),
+        };
+        let mut groups = Vec::new();
+        if let (Choosing::Form, Some(f)) = (&d.choosing, &self.form) {
+            if f.editing.is_none() {
+                let transfers = self
+                    .peer
+                    .accounts
+                    .rows
+                    .iter()
+                    .filter(|a| !a.closed && Some(a.id) != f.account && has(&a.name))
+                    .map(|a| item(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)))
+                    .collect();
+                groups.push(arkui::command::Group {
+                    heading: "Transfer to".into(),
+                    items: transfers,
+                });
+            }
+        }
+        if has("Ready to Assign") {
+            let rta = self.peer.summary().ready_to_assign;
+            groups.push(arkui::command::Group {
+                heading: "Inflow".into(),
+                items: vec![item(
+                    "Ready to Assign".into(),
+                    Some(amount::money(rta)),
+                    Choice::Category(Some(money_domain::budget::ready_to_assign())),
+                )],
+            });
+        }
+        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden) {
+            let items = self
+                .peer
+                .lines
+                .rows
+                .iter()
+                .filter(|l| l.group_id == g.id && !l.hidden && has(&l.name))
+                .map(|l| item(l.name.clone(), Some(amount::money(l.available)), Choice::Category(Some(l.category_id))))
+                .collect();
+            groups.push(arkui::command::Group {
+                heading: g.name.clone(),
+                items,
+            });
+        }
+        if matches!(d.choosing, Choosing::Txns(_)) && has("No category") {
+            groups.push(arkui::command::Group {
+                heading: "None".into(),
+                items: vec![item("No category".into(), None, Choice::Category(None))],
+            });
+        }
+        groups.retain(|g| !g.items.is_empty());
+        groups
+    }
+
     /// Keep row `n` in view.
     fn reveal(&self, n: usize) -> Task<Message> {
         arkui::scroll::reveal_to(look::BUDGET, outline::progress(&self.sizes(), n))
@@ -1183,7 +1663,18 @@ impl App {
     }
 
     fn chose(&mut self, choice: Choice) {
-        let Some(Modal::Choose(choosing)) = self.modal.take() else { return };
+        // The dropdown, if one is up; the panel moving money, if not.
+        let choosing = match (self.dropdown.take(), self.modal.take()) {
+            (Some(d), modal) => {
+                self.modal = modal;
+                d.choosing
+            }
+            (None, Some(Modal::Choose(c))) => c,
+            (None, other) => {
+                self.modal = other;
+                return;
+            }
+        };
         match choosing {
             Choosing::Form => {
                 if let Some(f) = &mut self.form {
@@ -1196,6 +1687,7 @@ impl App {
             Choosing::Txns(ids) => {
                 if let Choice::Category(c) = choice {
                     self.author("categorize", "categorize", &Categorize { ids, category_id: c });
+                    self.txn_anchor = None;
                 }
             }
             Choosing::Move { from, amount: typed } => {
@@ -1271,8 +1763,13 @@ impl App {
         let mut subs = vec![
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
+            // The wheel, sideways: perhaps a swipe back or forward.
+            arkui::history::wheel().map(Message::Wheel),
         ];
-        if self.drag.as_ref().is_some_and(|d| d.moving(now)) || self.settle.is_some_and(|s| s.moving(now)) {
+        if self.dropdown.is_some() {
+            subs.push(arkui::command::keys(true).map(Message::DropKey));
+        }
+        if self.history.active() || self.drag.as_ref().is_some_and(|d| d.moving(now)) || self.settle.is_some_and(|s| s.moving(now)) {
             subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame));
         }
         if let Some(s) = &self.server {
@@ -1339,3 +1836,6 @@ fn money_keys() -> vim::Keys {
 
 /// How soon a second click is a double click: AppKit's default.
 const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How wide the category dropdown is.
+pub const DROP_WIDTH: f32 = 340.0;

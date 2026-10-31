@@ -12,6 +12,11 @@ pub const NEW_GROUP: &str = "new-group";
 pub const NEW_CATEGORY: &str = "new-category";
 pub const PAYEE: &str = "payee";
 pub const RENAME: &str = "rename";
+/// The category dropdown's box and list.
+pub const DROP_INPUT: &str = "drop-input";
+pub const DROP_LIST: &str = "drop-list";
+/// The register's scrollable.
+pub const REGISTER: &str = "register";
 
 /// The budget's scrollable, which the cursor keeps itself in.
 pub const BUDGET: &str = "budget";

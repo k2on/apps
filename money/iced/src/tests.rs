@@ -10,7 +10,7 @@ use money_domain::dates::{add_months, month_of};
 use money_domain::*;
 
 use crate::peer::Ledger;
-use crate::{seed, App, Choice, Field, Message, Modal, Page};
+use crate::{seed, App, Choice, Choosing, Field, Message, Modal, Page, Pane};
 
 /// A day the demo is seeded for: late in a month, so every habit has
 /// happened at least once in it.
@@ -430,17 +430,91 @@ fn the_budget_drawn() {
         return;
     };
     arkui::theme::install(crate::palette::MONEY);
-    let mut app = app();
-    let _ = app.act(Action::Move(Motion::Down(3)));
-    for (theme, side) in [(iced::Theme::Dark, "dark"), (iced::Theme::Light, "light")] {
+    let mut budget = app();
+    let _ = budget.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = budget.act(Action::Move(Motion::Down(3)));
+    let mut register = app();
+    let _ = register.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = register.update(Message::Go(Page::Ledger(Ledger::All)));
+    let _ = register.register_act(Action::Move(Motion::Down(3)));
+    let _ = register.register_act(Action::Visual(true));
+    let _ = register.register_act(Action::Move(Motion::Down(1)));
+    let _ = register.register_act(Action::Bound("cc"));
+    for (app, scene, theme, side) in [
+        (&budget, "budget", iced::Theme::Dark, "dark"),
+        (&budget, "budget", iced::Theme::Light, "light"),
+        (&register, "register", iced::Theme::Dark, "dark"),
+    ] {
         let settings = iced::Settings {
             fonts: vec![arkui::hero::FIRA_SANS_BOLD.into()],
             ..iced::Settings::default()
         };
         let mut sim = iced_test::Simulator::with_size(settings, (1400.0, 820.0), app.view());
         let shot = sim.snapshot(&theme).expect("a snapshot");
-        let file = format!("{path}-{side}");
+        let file = format!("{path}-{scene}-{side}");
         let _ = std::fs::remove_file(format!("{file}.png"));
         shot.matches_image(&file).expect("written");
+    }
+}
+
+/// `h` from the budget gives the sidebar the keys, `j` there walks the
+/// places with the page following, and `l` hands the keys back.
+#[test]
+fn the_keys_cross_into_the_sidebar_and_back() {
+    let mut app = app();
+    let _ = app.act(Action::Move(Motion::Left(1)));
+    assert_eq!(app.pane, Pane::Sidebar);
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Character("j".into()),
+        iced::keyboard::Modifiers::default(),
+    ));
+    assert_eq!(app.page, Page::Reflect, "the page follows the sidebar's cursor");
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Character("l".into()),
+        iced::keyboard::Modifiers::default(),
+    ));
+    assert_eq!(app.pane, Pane::Page);
+}
+
+/// `^O` goes back where the window was, and `^I` forward again.
+#[test]
+fn back_and_forward() {
+    let mut app = app();
+    let ctrl = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::Go(Page::Reflect));
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    let _ = app.update(Message::Key(iced::keyboard::Key::Character("o".into()), ctrl));
+    assert_eq!(app.page, Page::Reflect, "back");
+    let _ = app.update(Message::Key(iced::keyboard::Key::Character("o".into()), ctrl));
+    assert_eq!(app.page, Page::Budget, "and back again");
+    let _ = app.update(Message::Key(iced::keyboard::Key::Character("i".into()), ctrl));
+    assert_eq!(app.page, Page::Reflect, "forward");
+}
+
+/// In the register `v` and `j` select two transactions, `cc` drops the
+/// categories under the cursor's, typing narrows them, and the one chosen
+/// is every selected transaction's.
+#[test]
+fn the_register_categorizes_a_selection_from_the_keys() {
+    let mut app = app();
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    let _ = app.register_act(Action::Move(Motion::First));
+    let _ = app.register_act(Action::Visual(true));
+    let _ = app.register_act(Action::Move(Motion::Down(1)));
+    let ids = app.txn_selected();
+    assert_eq!(ids.len(), 2);
+    let _ = app.register_act(Action::Bound("cc"));
+    assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Txns(t)) if *t == ids));
+    let _ = app.update(Message::DropTyped("groc".into()));
+    let groups = app.drop_groups();
+    let found: Vec<&str> = groups.iter().flat_map(|g| g.items.iter().map(|i| i.label.as_str())).collect();
+    assert_eq!(found, ["Groceries"]);
+    let choose = groups[0].items[0].choose.clone();
+    let _ = app.update(choose);
+    assert!(app.dropdown.is_none());
+    let groceries = category(&app, "Groceries").category_id;
+    for id in ids {
+        let t = app.peer.register.rows.iter().find(|t| t.id == id).expect("still there");
+        assert_eq!(t.category_id, Some(groceries), "{}", t.payee);
     }
 }

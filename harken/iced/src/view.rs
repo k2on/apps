@@ -117,7 +117,7 @@ impl App {
                 self.view_sidebar(),
                 rule::vertical(1).style(style::edge),
                 // A swipe's arrow over the page, not the sidebar.
-                arkui::swipe::view(paged, &self.swipe, iced::time::Instant::now(),)
+                self.history.view(paged, iced::time::Instant::now())
             ]
             .height(Length::Fill),
             rule::horizontal(1).style(style::edge),

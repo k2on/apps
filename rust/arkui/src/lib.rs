@@ -29,6 +29,7 @@ pub mod fit;
 pub mod format;
 pub mod glyphs;
 pub mod hero;
+pub mod history;
 pub mod icon;
 pub mod images;
 pub mod layer;

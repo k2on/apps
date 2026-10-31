@@ -59,7 +59,6 @@ use arkui::glyphs;
 use arkui::images::{self, Images};
 use arkui::menu::{self, Entry, Menu};
 use arkui::picker::{Choice, Picked, Picker};
-use arkui::route::Router;
 use arkui::vim;
 use iced::{Point, Size, Subscription, Task};
 
@@ -746,11 +745,10 @@ pub struct App {
     pub queue_settle: Option<QueueSettle>,
     /// How big the window is, so a panel near an edge opens the other way.
     pub window: Size,
-    /// The address bar, reconciled after every update.
-    pub router: Router<Place>,
-    /// A sideways trackpad gesture under way: back and forward, as a
-    /// browser has them ([`arkui::swipe`]).
-    pub swipe: arkui::swipe::Swipe,
+    /// Where the window has been: the address bar, reconciled after every
+    /// update, and back and forward by `^O`/`^I` and a swipe
+    /// ([`arkui::history`]).
+    pub history: arkui::history::History<Place>,
     /// How far down each page was scrolled when it was left, so back and
     /// forward land where it was, as a browser's do.
     pub scrolls: HashMap<Place, f32>,
@@ -856,8 +854,7 @@ impl App {
             queue_drag: None,
             queue_settle: None,
             window: Size::new(860.0, 600.0),
-            router: Router::new(),
-            swipe: Default::default(),
+            history: arkui::history::History::new(),
             scrolls: HashMap::new(),
             scroll_due: None,
             travelling: false,
@@ -981,7 +978,7 @@ impl App {
     /// once, as it opens. Seen in a browser, which is the only place this
     /// shows.
     pub fn arrive(&mut self) {
-        if let Some(place) = self.router.poll(!self.peer.choices.is_empty()) {
+        if let Some(place) = self.history.poll(!self.peer.choices.is_empty()) {
             let wanted = self.peer.source_of(&place);
             if let Some(at) = self.peer.choices.iter().position(|c| c.source == wanted) {
                 self.cursors[Pane::Sidebar as usize] = at;
@@ -1326,7 +1323,7 @@ impl App {
             // Back and forward, the way the browser's buttons go: the bar
             // moves, and the next update arrives where it went.
             vim::Action::Jump(by) => {
-                self.router.go(by);
+                self.history.go(by);
                 Task::none()
             }
             vim::Action::Toggle => self.update(Message::PlayPause),
@@ -1475,7 +1472,7 @@ impl App {
         self.peer.source = source;
         // Walking the sidebar is one navigation, not one per row: forty
         // history entries would need forty presses of back to undo a scroll.
-        self.router.replace_next();
+        self.history.replace_next();
         self.peer.open_page();
         self.cursors[Pane::Tracks as usize] = 0;
         self.scroll_due = Some(0.0);
@@ -2588,7 +2585,7 @@ impl App {
             auth::reveal();
         }
         let reacted = self.react();
-        self.router.sync(&self.peer.source.place());
+        self.history.sync(&self.peer.source.place());
         Task::batch([task, reacted, self.want_covers_if_moved(), self.want_picture()])
     }
 
@@ -2838,8 +2835,7 @@ impl App {
                 self.window = size;
             }
             Message::Wheel(delta) => {
-                self.swipe.allow(self.router.can_go(-1), self.router.can_go(1));
-                self.swipe.feed(delta, iced::time::Instant::now());
+                self.history.wheel(delta, iced::time::Instant::now());
             }
             Message::HoverAt(at) => {
                 // Not while a context window is up. A backdrop stops a click
@@ -3191,9 +3187,7 @@ impl App {
                 self.release_volume(false);
                 // A swipe let go far enough: the bar moves, and the next
                 // update arrives where it went.
-                if let Some(by) = self.swipe.tick(iced::time::Instant::now()) {
-                    self.router.go(by);
-                }
+                self.history.tick(iced::time::Instant::now());
                 self.settle_motion(iced::time::Instant::now());
                 if let Some(m) = self.ctx.tick() {
                     return self.update(m);
@@ -3264,7 +3258,7 @@ impl App {
         // the sidebar has something to resolve it against, which is why it is
         // asked after every update and not only when the bar moved.
         let ready = !self.peer.choices.is_empty();
-        if let Some(place) = self.router.poll(ready) {
+        if let Some(place) = self.history.poll(ready) {
             let wanted = self.peer.source_of(&place);
             if wanted != self.peer.source {
                 self.travelling = true;
@@ -3305,7 +3299,7 @@ impl App {
         // of a drag that stopped moving without being let go.
         // A swipe under way draws a frame at a time: the page follows the
         // fingers, and springs back.
-        if self.swipe.active() {
+        if self.history.active() {
             return Some(Duration::from_millis(16));
         }
         // …and so does a dialog or a sheet coming or going, and a row of
@@ -3369,19 +3363,8 @@ impl App {
             // Ctrl+K, and the command box's own keys while it is up, whatever
             // has the keyboard: its box takes `<Esc>` for itself.
             arkui::command::keys(self.command.is_some()).map(Message::CommandKey),
-            // The wheel, when it moves mostly sideways — whichever widget
-            // took it, since a list scrolls down and a swipe is sideways.
-            iced::event::listen_with(|event, _, _| match event {
-                iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
-                    let (x, y) = match delta {
-                        iced::mouse::ScrollDelta::Pixels { x, y } | iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
-                    };
-                    // One that moved nowhere is the fingers lifting, where
-                    // the system says so (`arkui::swipe`).
-                    (x.abs() > y.abs() || (x == 0.0 && y == 0.0)).then_some(Message::Wheel(delta))
-                }
-                _ => None,
-            }),
+            // The wheel, sideways: perhaps a swipe back or forward.
+            arkui::history::wheel().map(Message::Wheel),
         ];
         // One timer for the next deadline, keyed by it: the same deadline on
         // every call is the timer already running. Two milliseconds late
