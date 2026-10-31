@@ -12,7 +12,8 @@ use ark::log::EntryId;
 use ark::peer::Who;
 use ark_auth::{Account, Login};
 use ark_peer::Memory;
-use money_server::importer::{Banks, Mapping};
+use money_server::importer::Banks;
+use money_server::store::Store;
 use money_server::{start, Config, Server};
 use serde_json::{json, Value};
 
@@ -151,28 +152,48 @@ pub fn eventually(secs: u64, mut f: impl FnMut() -> bool) -> bool {
 
 // * Plaid, scripted
 
-/// The client id and the secret the mock takes, and the token it knows.
+/// The client id and the secret the mock takes, and the tokens it knows:
+/// chase's, which the phases script, and the one a connection made through
+/// Link is given — a Wells Fargo of a checking account and a card.
 pub const CLIENT_ID: &str = "client-id-0f3a";
 pub const SECRET: &str = "secret-77c2e1";
 pub const TOKEN: &str = "access-test-5d9b";
+pub const WF_TOKEN: &str = "access-wf-7a1c";
+
+/// A Hosted Link page the mock opened: whether for a login given again,
+/// and how it ended once somebody finished it.
+#[derive(Clone, Debug, Default)]
+pub struct Page {
+    pub update: bool,
+    pub finished: Option<Value>,
+}
 
 /// What the scripted Plaid answers, and what it was asked.
 #[derive(Default)]
 pub struct Script {
-    /// Which of the three phases `/transactions/sync` is in; a fourth
-    /// fails its second page.
+    /// Which of the three phases chase's `/transactions/sync` is in; a
+    /// fourth fails its second page.
     pub phase: u8,
-    /// Every `/transactions/sync` asked: its cursor (none the first time).
+    /// Every `/transactions/sync` asked: its cursor (none from the start).
     pub cursors: Vec<Option<String>>,
     /// Every request's body, whole: what the importer sent Plaid.
-    pub bodies: Vec<String>,
+    pub bodies: Vec<(String, Value)>,
+    /// The pages opened, by link token.
+    pub pages: Vec<Page>,
+    /// Tokens Plaid wants a fresh login for, and tokens it has forgotten.
+    pub login_required: Vec<String>,
+    pub removed: Vec<String>,
+    /// Wells Fargo has a new card transaction since `w1`.
+    pub wf_more: bool,
 }
 
 /// ArkOS's mock Plaid (`sync/actual-import/src/test/mock-plaid.ts`), whose
 /// answers `money/domain/tests/import.rs` walks the domain through: one
 /// bank of two accounts, its initial pull over two pages with a pending
 /// transaction and a payroll; that transaction posting with another amount
-/// while the coffee is modified; and nothing new.
+/// while the coffee is modified; and nothing new. Beside it, Plaid's
+/// Hosted Link: pages opened, finished when a test says, and a Wells
+/// Fargo behind them.
 pub struct Mock {
     pub url: String,
     pub script: Arc<Mutex<Script>>,
@@ -185,6 +206,41 @@ impl Mock {
 
     pub fn cursors(&self) -> Vec<Option<String>> {
         self.script.lock().unwrap().cursors.clone()
+    }
+
+    /// The bodies sent to one endpoint.
+    pub fn asked(&self, endpoint: &str) -> Vec<Value> {
+        let s = self.script.lock().unwrap();
+        s.bodies.iter().filter(|(e, _)| e == endpoint).map(|(_, b)| b.clone()).collect()
+    }
+
+    /// The last page opened, finished as Plaid says a person finished it:
+    /// a bank connected (a public token), or the login given again.
+    pub fn finish(&self) {
+        let mut s = self.script.lock().unwrap();
+        let n = s.pages.len();
+        let page = s.pages.last_mut().expect("a page was opened");
+        page.finished = Some(match page.update {
+            false => json!({ "finished_at": "2026-10-26T10:00:00Z",
+                              "results": { "item_add_results": [{ "public_token": format!("public-{n}") }] } }),
+            true => json!({ "finished_at": "2026-10-26T10:00:00Z", "on_success": { "public_token": null } }),
+        });
+        if page.update {
+            s.login_required.clear();
+        }
+    }
+
+    /// The last page closed by somebody who gave up.
+    pub fn give_up(&self) {
+        let mut s = self.script.lock().unwrap();
+        let page = s.pages.last_mut().expect("a page was opened");
+        page.finished = Some(json!({ "finished_at": "2026-10-26T10:00:00Z",
+            "on_exit": { "error": { "error_code": "INSTITUTION_DOWN", "error_type": "INSTITUTION_ERROR",
+                                    "display_message": "Wells Fargo is not answering" } } }));
+    }
+
+    pub fn login_required(&self, token: &str) {
+        self.script.lock().unwrap().login_required.push(token.into());
     }
 }
 
@@ -203,7 +259,9 @@ fn page(cursor: &str, added: Vec<Value>, modified: Vec<Value>, removed: Vec<Valu
     json!({ "added": added, "modified": modified, "removed": removed, "next_cursor": cursor, "has_more": more })
 }
 
-fn answer(script: &mut Script, endpoint: &str, body: &Value) -> Result<Value, (&'static str, String)> {
+type Answered = Result<Value, (&'static str, String)>;
+
+fn chase(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
     let account = |id: &str, name: &str, mask: &str, subtype: &str| json!({ "account_id": id, "name": name, "mask": mask, "type": "depository", "subtype": subtype, "balances": { "current": 923.5 } });
     match endpoint {
         "/accounts/get" => Ok(json!({
@@ -221,8 +279,9 @@ fn answer(script: &mut Script, endpoint: &str, body: &Value) -> Result<Value, (&
             let t1m = txn("T1", 55.0, "COFFEE SHOP #12", json!({ "merchant_name": "Coffee Shop" }));
             let removed = json!({ "transaction_id": "P1", "account_id": "acc1" });
             match (script.phase, cursor.as_deref()) {
-                (1 | 4, None) => Ok(page("p1a", vec![t1, s1], vec![], vec![], true)),
-                (1, Some("p1a")) => Ok(page("c1", vec![p1, t3], vec![], vec![], false)),
+                // From the start, in any phase: the first pull's two pages.
+                (_, None) => Ok(page("p1a", vec![t1, s1], vec![], vec![], true)),
+                (1..=3, Some("p1a")) => Ok(page("c1", vec![p1, t3], vec![], vec![], false)),
                 (4, Some("p1a")) => Err(("INTERNAL_SERVER_ERROR", "the second page failed".into())),
                 (2, Some("c1")) => Ok(page("c2", vec![t2], vec![t1m], vec![removed], false)),
                 (2 | 3, Some("c2")) => Ok(page("c2", vec![], vec![], vec![], false)),
@@ -230,6 +289,94 @@ fn answer(script: &mut Script, endpoint: &str, body: &Value) -> Result<Value, (&
             }
         }
         _ => Err(("NOT_FOUND", endpoint.into())),
+    }
+}
+
+/// Wells Fargo: checking, a card, and history on both.
+fn wells(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
+    match endpoint {
+        "/accounts/get" => Ok(json!({
+            "accounts": [
+                { "account_id": "wf-chk", "name": "Everyday Checking", "mask": "4321", "type": "depository", "subtype": "checking", "balances": { "current": 1000.0 } },
+                { "account_id": "wf-card", "name": "Active Cash Card", "mask": "8765", "type": "credit", "subtype": "credit card", "balances": { "current": 300.0 } },
+            ],
+            "item": { "item_id": "item-wf", "institution_id": "ins_127991" },
+        })),
+        "/transactions/sync" => {
+            let cursor = body["cursor"].as_str().map(str::to_string);
+            script.cursors.push(cursor.clone());
+            let t = |id: &str, account: &str, amount: f64, date: &str| {
+                txn(id, amount, &format!("{id} STORE"), json!({ "account_id": account, "date": date }))
+            };
+            match cursor.as_deref() {
+                None => Ok(page(
+                    "w1",
+                    vec![t("WC1", "wf-card", 200.0, "2026-09-12"), t("WK1", "wf-chk", 40.0, "2026-09-14")],
+                    vec![],
+                    vec![],
+                    false,
+                )),
+                Some("w1") if script.wf_more => Ok(page("w2", vec![t("WC2", "wf-card", 25.0, "2026-10-20")], vec![], vec![], false)),
+                Some("w1" | "w2") => Ok(page(cursor.as_deref().unwrap(), vec![], vec![], vec![], false)),
+                Some(c) => Err(("INVALID_FIELD", format!("unexpected cursor {c}"))),
+            }
+        }
+        _ => Err(("NOT_FOUND", endpoint.into())),
+    }
+}
+
+fn answer(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
+    match endpoint {
+        "/institutions/get_by_id" => match body["institution_id"].as_str() {
+            Some("ins_127991") => Ok(json!({ "institution": { "institution_id": "ins_127991", "name": "Wells Fargo" } })),
+            _ => Err(("INVALID_INSTITUTION", "no such institution".into())),
+        },
+        "/link/token/create" => {
+            if body["hosted_link"].is_null() {
+                return Err(("INVALID_FIELD", "not a Hosted Link page".into()));
+            }
+            let update = body["access_token"].is_string();
+            if update == body["products"].is_array() {
+                return Err(("INVALID_FIELD", "products, or an access token, not both".into()));
+            }
+            script.pages.push(Page { update, finished: None });
+            let n = script.pages.len();
+            Ok(
+                json!({ "link_token": format!("link-{n}"), "hosted_link_url": format!("https://hosted.plaid.test/link-{n}"), "expiration": "2026-10-26T11:00:00Z" }),
+            )
+        }
+        "/link/token/get" => {
+            let n: usize = body["link_token"]
+                .as_str()
+                .and_then(|t| t.strip_prefix("link-"))
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0);
+            let Some(page) = n.checked_sub(1).and_then(|i| script.pages.get(i)) else {
+                return Err(("INVALID_LINK_TOKEN", "no such link token".into()));
+            };
+            Ok(json!({ "link_token": body["link_token"], "link_sessions": page.finished.clone().into_iter().collect::<Vec<_>>() }))
+        }
+        "/item/public_token/exchange" => match body["public_token"].as_str() {
+            Some(p) if p.starts_with("public-") => Ok(json!({ "access_token": WF_TOKEN, "item_id": "item-wf" })),
+            _ => Err(("INVALID_PUBLIC_TOKEN", "no such public token".into())),
+        },
+        _ => {
+            let token = body["access_token"].as_str().unwrap_or("").to_string();
+            if script.removed.contains(&token) || (token != TOKEN && token != WF_TOKEN) {
+                return Err(("INVALID_ACCESS_TOKEN", "bad token".into()));
+            }
+            if endpoint == "/item/remove" {
+                script.removed.push(token);
+                return Ok(json!({ "request_id": "r" }));
+            }
+            if script.login_required.contains(&token) && endpoint == "/accounts/get" {
+                return Err(("ITEM_LOGIN_REQUIRED", "the login details of this item have changed".into()));
+            }
+            match token == TOKEN {
+                true => chase(script, endpoint, body),
+                false => wells(script, endpoint, body),
+            }
+        }
     }
 }
 
@@ -255,10 +402,7 @@ pub fn plaid(rt: &tokio::runtime::Runtime) -> Mock {
             }
             let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
             let mut script = s.lock().unwrap();
-            script.bodies.push(body.to_string());
-            if body["access_token"] != TOKEN {
-                return error("INVALID_ACCESS_TOKEN", "bad token".into());
-            }
+            script.bodies.push((uri.path().to_string(), body.clone()));
             match answer(&mut script, uri.path(), &body) {
                 Ok(v) => axum::Json(v).into_response(),
                 Err((code, message)) => error(code, message),
@@ -271,32 +415,44 @@ pub fn plaid(rt: &tokio::runtime::Runtime) -> Mock {
     Mock { url, script }
 }
 
-/// The importer's configuration for `mock`: its keys and the bank's token
-/// in files under `dir`, the bank `chase`, and `accounts`.
-pub fn banks(mock: &Mock, dir: &Path, accounts: &[(&str, &str, &str)]) -> Banks {
+/// The importer's configuration for `mock`: its keys in files under `dir`,
+/// and a page asked after every 50ms.
+pub fn banks(mock: &Mock, dir: &Path) -> Banks {
     let file = |name: &str, text: &str| {
         let p = dir.join(name);
         std::fs::write(&p, format!("{text}\n")).unwrap();
         p
     };
     Banks {
-        url: mock.url.clone(),
-        client_id_file: file("plaid-client-id", CLIENT_ID),
-        secret_file: file("plaid-secret", SECRET),
-        items: [("chase".to_string(), file("plaid-chase", TOKEN))].into(),
-        accounts: accounts
-            .iter()
-            .map(|(name, item, mask)| {
-                let m = Mapping {
-                    item: item.to_string(),
-                    mask: Some(mask.to_string()),
-                    account_id: None,
-                };
-                (name.to_string(), m)
-            })
-            .collect(),
-        history: 90,
+        poll: Duration::from_millis(50),
+        ..Banks::new(&mock.url, file("plaid-client-id", CLIENT_ID), file("plaid-secret", SECRET))
     }
+}
+
+/// `banks.json` in `data`, as somebody would write it by hand: each bank
+/// by name, its token, and its cursor when it has one.
+pub fn connect(data: &Path, banks: &[(&str, &str, Option<&str>)]) {
+    std::fs::create_dir_all(data).unwrap();
+    let mut all = serde_json::Map::new();
+    for (name, token, cursor) in banks {
+        let mut c = json!({ "access_token": token });
+        if let Some(cursor) = cursor {
+            c["cursor"] = json!(cursor);
+        }
+        all.insert(name.to_string(), c);
+    }
+    std::fs::write(data.join("banks.json"), json!({ "banks": all }).to_string()).unwrap();
+}
+
+/// The store as the server keeps it.
+pub fn store(data: &Path) -> Store {
+    Store::load(data).unwrap()
+}
+
+/// A server importing from `mock`, its keys under `secrets`.
+pub fn importing(rt: &tokio::runtime::Runtime, data: &Path, mock: &Mock, secrets: &Path) -> Server {
+    let b = banks(mock, secrets);
+    serve(rt, data, |c| c.banks = Some(b))
 }
 
 /// The importer's finished runs, once there are `n` of them.
@@ -309,4 +465,36 @@ pub fn runs(server: &Server, n: usize) -> Vec<money_server::importer::Run> {
         i.said()
     );
     i.runs()
+}
+
+/// `user`, signed in on a device of their own and caught up with the hub.
+pub fn caught_up(server: &Server, user: &str) -> Peer {
+    let mut p = signed_in(server, user);
+    pump_until(&mut [&mut p], 10, |ps| ps[0].cursor() == head(server));
+    p
+}
+
+/// Whether `needle` is anywhere in a store's rows, any table's.
+pub fn in_rows(store: &ark::store::Store, needle: &str) -> bool {
+    let n = needle.as_bytes();
+    let tables: Vec<String> = money_domain::shared().schema.tables.iter().map(|t| t.name.clone()).collect();
+    tables.iter().any(|t| store.rows(t).any(|r| r.windows(n.len()).any(|w| w == n)))
+}
+
+/// Whether `needle` is anywhere in what the hub holds.
+pub fn leaked(server: &Server, needle: &'static str) -> bool {
+    server.running.hub.with(move |h| in_rows(&h.log.store, needle)).unwrap()
+}
+
+/// A directory copied whole, as a backup restored is.
+pub fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        let target = to.join(e.file_name());
+        match e.file_type().unwrap().is_dir() {
+            true => copy_dir(&e.path(), &target),
+            false => drop(std::fs::copy(e.path(), target).unwrap()),
+        }
+    }
 }

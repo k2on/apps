@@ -507,6 +507,9 @@ fn the_budget_drawn() {
     let _ = form.update(Message::Go(Page::Ledger(Ledger::All)));
     let _ = form.register_act(Action::Move(Motion::First));
     let _ = form.register_act(Action::Activate);
+    let mut banks = app();
+    let _ = banks.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = banks.update(Message::Go(Page::Settings));
     let mut above = app();
     let _ = above.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
     let _ = above.update(Message::Go(Page::Ledger(Ledger::All)));
@@ -526,6 +529,8 @@ fn the_budget_drawn() {
         (&budget, "budget", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Light, "light"),
         (&register, "register", iced::Theme::Dark, "dark"),
+        (&banks, "banks", iced::Theme::Dark, "dark"),
+        (&banks, "banks", iced::Theme::Light, "light"),
     ] {
         let settings = iced::Settings {
             fonts: vec![arkui::hero::FIRA_SANS_BOLD.into()],
@@ -638,4 +643,180 @@ fn back_lands_where_the_register_was_scrolled() {
     let _ = app.update(Message::Go(Page::Reflect));
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
     assert_eq!(app.register_scroll, 0.0, "a visit is the top");
+}
+
+// * Settings' Banks section
+
+use crate::banks::Msg;
+
+/// Settings, from the account menu as harken has it, at `#settings`: the
+/// demo's card's bank and the account it feeds, drawn without a panic;
+/// and connecting, which needs a server, says so. `h` gives the sidebar
+/// the keys, as on any page.
+#[test]
+fn the_demo_shows_its_bank_and_cannot_connect_one() {
+    use arkui::route::Route;
+    let mut app = app();
+    let _ = app.update(Message::AccountMenu);
+    let menu = app.ctx.menu.as_ref().expect("the account's menu");
+    assert_eq!(menu.entries[0].label, "Settings");
+    let _ = app.update(Message::MenuActivate);
+    assert_eq!(app.page, Page::Settings);
+    assert_eq!(app.place(), crate::Place::Settings);
+    assert_eq!(app.place().fragment(), crate::Place::parse("settings").fragment());
+    assert_eq!(crate::Place::parse("settings"), crate::Place::Settings);
+    let _ = app.act(Action::Move(Motion::Left(1)));
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Character("h".into()),
+        iced::keyboard::Modifiers::default(),
+    ));
+    assert_eq!(app.pane, Pane::Sidebar);
+    assert_eq!(app.peer.banks.rows.len(), 1);
+    let card = app.peer.linked.rows.first().expect("the card's link");
+    assert!(!card.waiting && !card.account.is_empty());
+    drop(app.view());
+    let _ = app.update(Message::Banks(Msg::Connect));
+    assert!(app.note.contains("no server"), "{}", app.note);
+    assert!(app.peer.asks.rows.is_empty() && app.opened.is_empty());
+}
+
+/// The live window on a server in this process, with a peer standing in
+/// for its importer (the `bank` role): "Connect a bank" is an ask; the
+/// importer's answer with Plaid's page is opened as soon as it arrives;
+/// the bank connected, its accounts wait, and the card is given a credit
+/// account of its own and checking linked to the account kept by hand;
+/// Reconnect is an ask for the same bank, and Disconnect one, asked twice.
+/// Falsified by opening every waiting ask's page: the stale page opened
+/// again at the second wake.
+#[test]
+fn on_a_server_a_bank_is_connected_from_the_banks_page() {
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let server = rt
+        .block_on(money_server::start(money_server::Config::dev("127.0.0.1:0", data.path())))
+        .unwrap();
+    let url = format!("http://{}", server.running.addr);
+    let issue = |id: &str| {
+        let account = ark_auth::Account {
+            id: id.into(),
+            ..Default::default()
+        };
+        server.auth.issue(&account, "a test").unwrap()
+    };
+    let mut client = crate::client::open(Box::new(ark_peer::Memory::default()));
+    client.connect(&ark_auth::socket_url(&url));
+    let mut app = App::on_server(client, TODAY, url.clone(), None);
+    app.signed_in(issue("alice"));
+    // The importer, by its account: the server grants it the bank's role.
+    let bank_login = issue(money_server::importer::ACCOUNT);
+    let mut importer = crate::client::open(Box::new(ark_peer::Memory::default()));
+    importer.connect(&ark_auth::socket_url(&url));
+    importer.login(ark_peer::who(&bank_login), bank_login.token.clone());
+    let settle = |app: &mut App, importer: &mut crate::client::Replica, done: &dyn Fn(&App) -> bool| {
+        let held = ark_peer::link::until(std::time::Duration::from_secs(10), std::time::Duration::from_millis(10), || {
+            let _ = app.update(Message::Wake);
+            importer.pump();
+            done(app)
+        });
+        assert!(held, "{}", app.note);
+    };
+    settle(&mut app, &mut importer, &|a| a.peer.client.status().link == "online");
+    let open = OpenAccount {
+        name: "Checking".into(),
+        kind: "checking".into(),
+        on_budget: true,
+        balance: 50_000,
+        date: TODAY.into(),
+    };
+    app.author("open", "open_account", &open);
+
+    let _ = app.update(Message::Banks(Msg::Connect));
+    assert_eq!(app.page, Page::Settings);
+    assert!(app.awaiting.is_some());
+    settle(&mut app, &mut importer, &|a| {
+        a.peer.asks.rows.first().is_some_and(|x| x.what == "connect")
+    });
+    assert!(app.opened.is_empty(), "nothing to open before the server answers");
+    let ask = app.peer.asks.rows[0].id;
+    let answer = |importer: &mut crate::client::Replica, a: Answer| {
+        importer.mutate("answer", &a).expect("the importer answers");
+    };
+    let held = ark_peer::link::until(std::time::Duration::from_secs(10), std::time::Duration::from_millis(10), || {
+        importer.pump();
+        importer.log.store.rows("bank_ask").count() == 1
+    });
+    assert!(held, "the importer hears the ask");
+    answer(
+        &mut importer,
+        Answer {
+            id: ask,
+            state: AskState::Waiting,
+            url: "https://hosted.plaid.test/link-1".into(),
+            expires_ms: ark_peer::now_ms() + 600_000,
+            ..Answer::default()
+        },
+    );
+    settle(&mut app, &mut importer, &|a| !a.opened.is_empty());
+    assert_eq!(app.opened, ["https://hosted.plaid.test/link-1"]);
+    drop(app.view());
+    settle(&mut app, &mut importer, &|_| true);
+    assert_eq!(app.opened.len(), 1, "opened once");
+
+    answer(
+        &mut importer,
+        Answer {
+            id: ask,
+            state: AskState::Done,
+            bank: "wells-fargo".into(),
+            institution: "Wells Fargo".into(),
+            ..Answer::default()
+        },
+    );
+    let plaid = |id: &str, name: &str, kind: &str, subtype: &str| money_domain::plaid::PlaidAccount {
+        account_id: id.into(),
+        name: name.into(),
+        mask: Some("4321".into()),
+        kind: kind.into(),
+        subtype: Some(subtype.into()),
+        balances: money_domain::plaid::Balances { current: Some(300.0) },
+    };
+    let accounts = [
+        plaid("wf-chk", "Everyday Checking", "depository", "checking"),
+        plaid("wf-card", "Active Cash Card", "credit", "credit card"),
+    ];
+    let import = Import {
+        choose: true,
+        from_start: true,
+        ..money_domain::plaid::import_of("wells-fargo", "Wells Fargo", &accounts, &Default::default())
+    };
+    importer.mutate("import", &import).expect("the importer imports");
+    settle(&mut app, &mut importer, &|a| a.peer.linked.rows.len() == 2);
+    assert_eq!(app.banks_wanting(), 2, "two accounts wait for a choice");
+    drop(app.view());
+
+    let _ = app.update(Message::Banks(Msg::Open("wf-card".into())));
+    let _ = app.update(Message::Banks(Msg::LinkTo("wf-chk".into())));
+    assert_eq!(app.modal, Some(Modal::LinkTo("wf-chk".into())));
+    drop(app.view());
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Banks(Msg::Link("wf-chk".into(), checking)));
+    settle(&mut app, &mut importer, &|a| a.peer.client.pending_len() == 0 && a.banks_wanting() == 0);
+    let card = account(&app, "Active Cash Card");
+    assert_eq!(card.kind, "credit");
+    assert_eq!(account(&app, "Checking").bank, "wells-fargo");
+
+    let _ = app.update(Message::Banks(Msg::Reconnect("wells-fargo".into())));
+    settle(&mut app, &mut importer, &|a| {
+        a.peer.asks.rows.first().is_some_and(|x| x.what == "reconnect")
+    });
+    assert_eq!(app.peer.asks.rows[0].bank, "wells-fargo");
+    let _ = app.update(Message::Banks(Msg::Disconnect("wells-fargo".into())));
+    assert_eq!(app.modal, Some(Modal::Disconnect("wells-fargo".into())));
+    drop(app.view());
+    let _ = app.update(Message::Banks(Msg::Disconnected("wells-fargo".into())));
+    settle(&mut app, &mut importer, &|a| a.peer.asks.rows.iter().any(|x| x.what == "disconnect"));
+    let order: Vec<(&str, i64)> = app.peer.asks.rows.iter().map(|x| (x.what.as_str(), x.asked_ms)).collect();
+    assert_eq!(order[0].0, "disconnect", "newest first: {order:?}");
+    assert_eq!(app.opened.len(), 1, "a disconnection opens no page");
+    rt.block_on(server.stop());
 }

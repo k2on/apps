@@ -5,7 +5,7 @@
 use ark::prelude::*;
 
 use crate::dates::{is_day, is_month};
-use crate::schema::{Account, Category, Group, Txn};
+use crate::schema::{Account, AskState, BankAsk, Category, Group, Txn};
 
 /// How far the bank and the household agree on a transaction: not yet seen
 /// at the bank, seen there, or agreed to as part of a reconciled balance —
@@ -312,6 +312,17 @@ pub struct Import {
     pub accounts: Vec<BankAccount>,
     pub upserts: Vec<BankTxn>,
     pub removed: Vec<BankRemoved>,
+    /// An account this import is the first to see waits for somebody to
+    /// say what it feeds (`crate::banks`), rather than opening one here
+    /// under the bank's name: what a server's importer says. The demo's
+    /// bank opens its card as it is seen.
+    #[serde(default)]
+    pub choose: bool,
+    /// Asked of Plaid from no cursor: the bank's whole history, which an
+    /// account opened for one of its accounts takes its starting balance
+    /// from.
+    #[serde(default)]
+    pub from_start: bool,
 }
 
 /// A bank's account made to feed an account already here, in place of the
@@ -326,6 +337,45 @@ pub struct LinkAccount {
 pub struct IgnoreLinked {
     pub plaid_account_id: String,
     pub ignored: bool,
+}
+
+/// A bank's account given an account of its own here, opened for it: a
+/// credit card's a credit account, a savings account's savings. Blank is
+/// the bank's name for it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct OpenLinked {
+    pub plaid_account_id: String,
+    #[ark(trim, len = "0..=80")]
+    pub name: String,
+}
+
+/// A connected bank, by the name the server keeps it under.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct BankName {
+    #[ark(trim, non_empty, why = "which bank?")]
+    pub bank: String,
+}
+
+/// The importer's answer to an ask (`crate::banks::answer`).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Answer {
+    pub id: Id<BankAsk>,
+    pub state: AskState,
+    pub bank: String,
+    pub institution: String,
+    pub url: String,
+    pub message: String,
+    pub expires_ms: i64,
+}
+
+/// The importer could not import a bank: what Plaid said.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct BankFailed {
+    #[ark(trim, non_empty, why = "a bank needs a name")]
+    pub bank: String,
+    pub institution: String,
+    pub error_code: String,
+    pub error: String,
 }
 
 // * The views' inputs
@@ -481,6 +531,35 @@ pub struct BankLine {
     pub deleted: i64,
     pub locked: i64,
     pub accounts: i64,
+    /// What Plaid said when the last import failed, and when; blank since
+    /// one worked.
+    pub error_code: String,
+    pub error: String,
+    pub failed_ms: i64,
+    /// The bank wants its login again: a reconnect (`banks.reconnect`),
+    /// not a retry, mends it.
+    pub needs_login: bool,
+    /// Its accounts waiting for somebody to say what each feeds.
+    pub waiting: i64,
+}
+
+/// An ask of the person reading, about a bank connection, and where it
+/// stands: newest first.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
+pub struct AskLine {
+    pub id: Id<BankAsk>,
+    /// `connect`, `reconnect` or `disconnect`.
+    pub what: String,
+    pub bank: String,
+    pub institution: String,
+    pub state: AskState,
+    /// Plaid's page to open, while it waits.
+    pub url: String,
+    pub message: String,
+    pub expires_ms: i64,
+    pub asked_ms: i64,
+    pub answered_ms: i64,
 }
 
 /// What a month's spending went on, by group.
@@ -510,4 +589,9 @@ pub struct LinkedLine {
     /// The bank's own balance at its last import.
     pub balance: Option<i64>,
     pub ignored: bool,
+    pub subtype: String,
+    /// Neither feeding an account nor ignored: somebody is to say which.
+    pub waiting: bool,
+    /// What an account opened for it would be: `credit` for a card.
+    pub opens_as: String,
 }

@@ -4,9 +4,15 @@
 //! routes under `/auth` and the browser client at `/` are `ark_peer`'s and
 //! `ark_auth`'s, generic over any app; the domain is `money/domain`'s, in
 //! plain Rust. What is money's is the bank importer ([`importer`]: Plaid
-//! over [`plaid`], inside the server) and [`start`], the wiring: a
-//! [`Config`] read from the environment (what the NixOS module sets) and the
-//! server built from it.
+//! over [`plaid`], inside the server, the banks' logins in [`store`]) and
+//! [`start`], the wiring: a [`Config`] read from the environment (what the
+//! NixOS module sets) and the server built from it.
+//!
+//! **Everything to keep is in the data directory** (`MONEY_DATA`): the log
+//! (the budget and the sign-ins), the session key, and `banks.json`, the
+//! banks the household connected and their logins. A backup of that
+//! directory, restored here or on another machine with the same Plaid
+//! keys, is the whole server: every bank still connected.
 //!
 //! **One budget, the household's.** Whoever the OpenID provider lets in
 //! shares it: every connection is fed every row (`money_domain::feed`), and
@@ -20,13 +26,14 @@
 //!
 //! **One role**, `bank`, held by the importer's own sign-in (the account
 //! [`importer::ACCOUNT`]) and by nobody else unless `MONEY_ROLES` says so:
-//! only `banks.import` asks for it.
+//! `banks.import` asks for it, and so do the importer's answers about
+//! connections (`banks.answer`, `banks.failed`).
 
 pub mod importer;
 pub mod plaid;
+pub mod store;
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -34,10 +41,9 @@ use ark_auth::server::Auth;
 use ark_auth::Account;
 use ark_peer::Running;
 
-use importer::{Banks, Importer, Mapping};
+use importer::{Banks, Importer};
 
 pub use ark_peer::{Keepalive, Retention, SignIn};
-
 /// The phones' URL scheme: a login may always send its code back there.
 pub const PHONE_SCHEME: &str = "money://";
 
@@ -87,17 +93,14 @@ impl Config {
     /// ```text
     /// MONEY_PLAID_CLIENT_ID_FILE, MONEY_PLAID_SECRET_FILE
     ///                         Plaid's keys, a file each; both or neither,
-    ///                         and neither imports nothing
+    ///                         and neither runs no importer
     /// MONEY_PLAID_ENV         production (the default) or sandbox
     /// MONEY_PLAID_URL         Plaid elsewhere: a mock's address
-    /// MONEY_PLAID_ITEMS       each bank and its access token's file:
-    ///                         `chase=/run/credentials/money.service/plaid-chase,…`
     /// MONEY_PLAID_HISTORY     days of history at a bank's first pull (90)
-    /// MONEY_ACCOUNTS          the household's names for the banks' accounts,
-    ///                         as JSON: `{"Chase Checking": {"item": "chase",
-    ///                         "mask": "1234"}, …}` (`accountId` for a mask
-    ///                         two share)
     /// ```
+    ///
+    /// The banks themselves are not configuration: they are connected from
+    /// the app and kept in the data directory ([`store`]).
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
     }
@@ -112,11 +115,18 @@ impl Config {
 
 /// The importer's configuration, or none when there are no Plaid keys.
 fn banks(env: &impl Fn(&str) -> Option<String>) -> Result<Option<Banks>> {
+    // What a server was told before its banks were connected from the app:
+    // said, rather than quietly importing nothing.
+    for gone in ["MONEY_PLAID_ITEMS", "MONEY_ACCOUNTS"] {
+        if env(gone).is_some() {
+            bail!(
+                "{gone} is no longer read: banks are connected from the app and kept in the data directory's banks.json \
+                 (money/server/src/store.rs says how to move a connection there by hand); unset it"
+            );
+        }
+    }
     let (id, secret) = match (env("MONEY_PLAID_CLIENT_ID_FILE"), env("MONEY_PLAID_SECRET_FILE")) {
         (Some(id), Some(secret)) => (id, secret),
-        (None, None) if env("MONEY_PLAID_ITEMS").is_some() => {
-            bail!("MONEY_PLAID_ITEMS names banks, and there are no Plaid keys: set MONEY_PLAID_CLIENT_ID_FILE and MONEY_PLAID_SECRET_FILE")
-        }
         (None, None) => return Ok(None),
         _ => bail!("MONEY_PLAID_CLIENT_ID_FILE and MONEY_PLAID_SECRET_FILE go together; set both"),
     };
@@ -125,26 +135,6 @@ fn banks(env: &impl Fn(&str) -> Option<String>) -> Result<Option<Banks>> {
         (None, None) => plaid::base_of("production"),
         (None, Some(e)) if e == "production" || e == "sandbox" => plaid::base_of(&e),
         (None, Some(e)) => bail!("MONEY_PLAID_ENV is production or sandbox, not {e}"),
-    };
-    let mut items = BTreeMap::new();
-    for part in env("MONEY_PLAID_ITEMS")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-    {
-        let Some((name, file)) = part.split_once('=') else {
-            bail!("MONEY_PLAID_ITEMS: `{part}` is not bank=token-file");
-        };
-        let (name, file) = (name.trim(), file.trim());
-        if name.is_empty() || file.is_empty() {
-            bail!("MONEY_PLAID_ITEMS: `{part}` is not bank=token-file");
-        }
-        items.insert(name.to_string(), PathBuf::from(file));
-    }
-    let accounts: BTreeMap<String, Mapping> = match env("MONEY_ACCOUNTS") {
-        Some(json) => serde_json::from_str(&json).map_err(|e| anyhow!("MONEY_ACCOUNTS is not the accounts as JSON: {e}"))?,
-        None => BTreeMap::new(),
     };
     let history = match env("MONEY_PLAID_HISTORY") {
         Some(d) => d
@@ -155,16 +145,10 @@ fn banks(env: &impl Fn(&str) -> Option<String>) -> Result<Option<Banks>> {
             .ok_or_else(|| anyhow!("MONEY_PLAID_HISTORY is a count of days, 1 to 730: {d}"))?,
         None => HISTORY,
     };
-    let banks = Banks {
-        url,
-        client_id_file: id.into(),
-        secret_file: secret.into(),
-        items,
-        accounts,
+    Ok(Some(Banks {
         history,
-    };
-    banks.check()?;
-    Ok(Some(banks))
+        ..Banks::new(&url, id.into(), secret.into())
+    }))
 }
 
 /// What this build runs, in a word: its domain's schema hash and version,
@@ -280,10 +264,9 @@ pub async fn start(config: Config) -> Result<Server> {
     let importer = match config.banks.clone() {
         Some(banks) => {
             eprintln!(
-                "money-server: importing {} bank{} from {}",
-                banks.items.len(),
-                if banks.items.len() == 1 { "" } else { "s" },
-                banks.url
+                "money-server: importing from {}, the banks kept in {}",
+                banks.url,
+                store::file(&config.data).display()
             );
             let account = Account {
                 id: importer::ACCOUNT.into(),
@@ -313,7 +296,7 @@ mod tests {
     use super::*;
 
     fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let m: BTreeMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let m: std::collections::BTreeMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         move |k| m.get(k).cloned()
     }
 
@@ -341,52 +324,41 @@ mod tests {
         assert!(c.banks.is_none(), "no keys, no importer");
     }
 
-    /// The importer's configuration: the keys both or neither, banks only
-    /// with keys, the environment's URL unless a mock's is given, and the
-    /// accounts as the module writes them. Falsified by reading
-    /// `MONEY_PLAID_ENV` after `MONEY_PLAID_URL`: the mock's address lost.
+    /// The importer's configuration: the keys both or neither, the
+    /// environment's URL unless a mock's is given, and what a server was
+    /// told before its banks were connected from the app refused out loud.
+    /// Falsified by reading `MONEY_PLAID_ENV` after `MONEY_PLAID_URL`: the
+    /// mock's address lost.
     #[test]
-    fn the_importer_is_told_its_banks() {
+    fn the_importer_is_told_where_plaid_is() {
         let keys = [DEV, ("MONEY_PLAID_CLIENT_ID_FILE", "/c/id"), ("MONEY_PLAID_SECRET_FILE", "/c/secret")];
         let b = Config::from_vars("x:1", vars(&keys)).unwrap().banks.unwrap();
-        assert_eq!((b.url.as_str(), b.items.len(), b.history), ("https://production.plaid.com", 0, 90));
+        assert_eq!((b.url.as_str(), b.history), ("https://production.plaid.com", 90));
+        assert_eq!(b.client_id_file, std::path::PathBuf::from("/c/id"));
 
         let mut more = keys.to_vec();
-        more.extend([
-            ("MONEY_PLAID_ENV", "sandbox"),
-            ("MONEY_PLAID_ITEMS", " chase=/c/plaid-chase , amex=/c/plaid-amex"),
-            ("MONEY_PLAID_HISTORY", "30"),
-            (
-                "MONEY_ACCOUNTS",
-                r#"{"Chase Checking":{"item":"chase","mask":"0000"},"Card":{"item":"amex","accountId":"x9","mask":null}}"#,
-            ),
-        ]);
+        more.extend([("MONEY_PLAID_ENV", "sandbox"), ("MONEY_PLAID_HISTORY", "30")]);
         let b = Config::from_vars("x:1", vars(&more)).unwrap().banks.unwrap();
-        assert_eq!(b.url, "https://sandbox.plaid.com");
-        assert_eq!(b.items["chase"], PathBuf::from("/c/plaid-chase"));
-        assert_eq!(b.history, 30);
-        assert_eq!(b.accounts["Card"].account_id.as_deref(), Some("x9"));
-        assert!(b.accounts["Chase Checking"].is("chase", "whatever", "0000"));
-        assert!(!b.accounts["Chase Checking"].is("amex", "whatever", "0000"));
-        assert!(b.accounts["Card"].is("amex", "x9", ""));
+        assert_eq!((b.url.as_str(), b.history), ("https://sandbox.plaid.com", 30));
 
         more.push(("MONEY_PLAID_URL", "http://127.0.0.1:9"));
         assert_eq!(Config::from_vars("x:1", vars(&more)).unwrap().banks.unwrap().url, "http://127.0.0.1:9");
 
         for bad in [
             vec![DEV, ("MONEY_PLAID_CLIENT_ID_FILE", "/c/id")],
-            vec![DEV, ("MONEY_PLAID_ITEMS", "chase=/c/t")],
             [keys.to_vec(), vec![("MONEY_PLAID_ENV", "development")]].concat(),
-            [keys.to_vec(), vec![("MONEY_PLAID_ITEMS", "chase")]].concat(),
             [keys.to_vec(), vec![("MONEY_PLAID_HISTORY", "0")]].concat(),
-            [keys.to_vec(), vec![("MONEY_ACCOUNTS", r#"{"X":{"item":"chase","mask":"1"}}"#)]].concat(),
-            [
-                keys.to_vec(),
-                vec![("MONEY_PLAID_ITEMS", "chase=/c/t"), ("MONEY_ACCOUNTS", r#"{"X":{"item":"chase"}}"#)],
-            ]
-            .concat(),
         ] {
             assert!(Config::from_vars("x:1", vars(&bad)).is_err(), "{bad:?}");
+        }
+        for gone in [
+            ("MONEY_PLAID_ITEMS", "chase=/c/t"),
+            ("MONEY_ACCOUNTS", r#"{"X":{"item":"chase","mask":"1"}}"#),
+        ] {
+            let e = Config::from_vars("x:1", vars(&[keys.to_vec(), vec![gone]].concat()))
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("no longer read") && e.contains("banks.json"), "{e}");
         }
     }
 }

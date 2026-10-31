@@ -25,11 +25,14 @@
 //! messages, its forms.
 
 mod amount;
+mod banks;
+mod browser;
 mod client;
 mod live;
 mod look;
 mod palette;
 mod peer;
+mod settings;
 mod view;
 
 #[cfg(test)]
@@ -59,6 +62,7 @@ pub enum Place {
     Budget,
     Reflect,
     Accounts,
+    Settings,
     Inbox,
     Account(String),
 }
@@ -69,6 +73,7 @@ impl arkui::route::Route for Place {
             Place::Budget => arkui::route::join("budget", None),
             Place::Reflect => arkui::route::join("reflect", None),
             Place::Accounts => arkui::route::join("accounts", None),
+            Place::Settings => arkui::route::join("settings", None),
             Place::Inbox => arkui::route::join("inbox", None),
             Place::Account(name) => arkui::route::join("account", Some(name)),
         }
@@ -78,6 +83,7 @@ impl arkui::route::Route for Place {
         match arkui::route::split(fragment) {
             ("reflect", _) => Place::Reflect,
             ("accounts", _) => Place::Accounts,
+            ("settings", _) => Place::Settings,
             ("inbox", _) => Place::Inbox,
             ("account", Some(name)) => Place::Account(name),
             _ => Place::Budget,
@@ -90,6 +96,7 @@ impl arkui::route::Route for Place {
 pub enum Page {
     Budget,
     Reflect,
+    Settings,
     Ledger(Ledger),
 }
 
@@ -177,6 +184,10 @@ pub enum Modal {
         balance: String,
     },
     Choose(Choosing),
+    /// Which account a bank's account is to feed.
+    LinkTo(String),
+    /// A bank to disconnect, asked twice.
+    Disconnect(String),
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +231,12 @@ pub enum Message {
     ChooseCategory,
     Chose(Choice),
     Sync,
+    /// Settings' Banks section: connecting, and what each account feeds.
+    Banks(banks::Msg),
+    /// The account button at the top right: its menu, whose entries open
+    /// Settings and sign out.
+    AccountMenu,
+    SignOut,
     AddAccount,
     AccountName(String),
     AccountKind(&'static str),
@@ -332,6 +349,13 @@ pub struct App {
     pub last_click: Option<(Grab, iced::time::Instant)>,
     /// The last thing worth saying: a refusal, a sync.
     pub note: String,
+    /// A Plaid page asked for here, and when: opened as soon as the
+    /// server answers with its address.
+    pub awaiting: Option<i64>,
+    /// Every page this window opened, in order.
+    pub opened: Vec<String>,
+    /// The ask whose answer was put away.
+    pub dismissed: Option<Id<BankAsk>>,
 }
 
 impl App {
@@ -370,6 +394,9 @@ impl App {
             scroll_due: None,
             dropdown: None,
             last_click: None,
+            awaiting: None,
+            opened: Vec::new(),
+            dismissed: None,
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -490,6 +517,7 @@ impl App {
             self.note = format!("the server refused a change: {why}");
         }
         self.peer.refresh();
+        self.follow_ask();
         let Some(why) = p.denied else { return Task::none() };
         if let Some(s) = &mut self.server {
             if let Some(logins) = &s.logins {
@@ -555,6 +583,7 @@ impl App {
             Page::Budget => Place::Budget,
             Page::Reflect => Place::Reflect,
             Page::Ledger(Ledger::All) => Place::Accounts,
+            Page::Settings => Place::Settings,
             Page::Ledger(Ledger::Inbox) => Place::Inbox,
             Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
         }
@@ -566,6 +595,7 @@ impl App {
             Place::Budget => Page::Budget,
             Place::Reflect => Page::Reflect,
             Place::Accounts => Page::Ledger(Ledger::All),
+            Place::Settings => Page::Settings,
             Place::Inbox => Page::Ledger(Ledger::Inbox),
             Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
         })
@@ -838,6 +868,14 @@ impl App {
             Message::CloseDrop => self.dropdown = None,
             Message::Chose(choice) => self.chose(choice),
             Message::Sync => self.sync(),
+            Message::Banks(m) => return self.banks(m),
+            Message::AccountMenu => {
+                if let Some(account) = self.account() {
+                    let right = self.window.width - view::PAD;
+                    self.ctx.open_menu(account.menu(right, view::PAD + arkui::account::HEIGHT, self.window));
+                }
+            }
+            Message::SignOut => self.sign_out(),
             Message::AddAccount => {
                 self.modal = Some(Modal::AddAccount {
                     name: String::new(),
@@ -1163,7 +1201,7 @@ impl App {
             (Pane::Sidebar, _) => self.sidebar_act(action),
             (Pane::Page, Page::Budget) => self.act(action),
             (Pane::Page, Page::Ledger(_)) => self.register_act(action),
-            (Pane::Page, Page::Reflect) => {
+            (Pane::Page, Page::Reflect | Page::Settings) => {
                 if let vim::Action::Move(vim::Motion::Left(_)) = action {
                     self.pane = Pane::Sidebar;
                 }

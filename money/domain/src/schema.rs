@@ -133,11 +133,27 @@ pub struct Bank {
     /// Reconciled transactions the last import left alone.
     pub locked: i64,
     pub user_id: String,
+    /// What Plaid said the last time the importer asked and it failed —
+    /// `ITEM_LOGIN_REQUIRED` and its sentence — and when; blank since the
+    /// last import that worked.
+    #[serde(default)]
+    pub error_code: String,
+    #[serde(default)]
+    pub error: String,
+    #[serde(default)]
+    pub failed_ms: i64,
+    /// Somebody chose what one of its accounts feeds: the next import asks
+    /// for the bank's whole history again, so what the choice follows
+    /// arrives from the start (`crate::banks`).
+    #[serde(default)]
+    pub repull: bool,
 }
 
 /// One of a bank's accounts, as Plaid names it, and the account here it
 /// feeds — made by the first import that saw it. `ignored` is an account
-/// somebody said not to follow; its transactions are dropped.
+/// somebody said not to follow; its transactions are dropped. Neither
+/// feeding nor ignored, it waits for somebody to say which
+/// ([`crate::banks`]), and its transactions are dropped until then.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(index(account_id))]
 pub struct Linked {
@@ -153,6 +169,60 @@ pub struct Linked {
     /// The bank's own balance at the last import, in cents, our sign.
     pub balance: Option<i64>,
     pub ignored: bool,
+    /// Plaid's subtype: `checking`, `savings`, `credit card`.
+    #[serde(default)]
+    pub subtype: String,
+    /// The day an import first saw it.
+    #[serde(default)]
+    pub seen: String,
+    /// Transactions dated before this day are not imported into the
+    /// account it feeds: an account kept by hand before it was linked
+    /// already has them. Blank is every one.
+    #[serde(default)]
+    pub since: String,
+    /// The account it feeds was opened for it and is owed its starting
+    /// balance, which the next import from the bank's start brings.
+    #[serde(default)]
+    pub opening: bool,
+}
+
+/// Where an ask about a bank connection stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
+pub enum AskState {
+    /// Nobody has answered it yet: the server's importer will.
+    #[default]
+    Asked,
+    /// A Plaid page is open for it at `url`, until `expires_ms`.
+    Waiting,
+    /// Done: the bank connected, logged in again, or disconnected.
+    Done,
+    /// It could not be done; `message` says why.
+    Failed,
+    /// Nobody finished Plaid's page in time.
+    Expired,
+}
+
+/// Somebody asking the server to connect a bank, log in to one again
+/// (Plaid's update mode) or disconnect one: what the server's importer
+/// answers, here, since the bank's login is the server's alone. `what` is
+/// `connect`, `reconnect` or `disconnect`.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct BankAsk {
+    #[ark(key)]
+    pub id: Id<BankAsk>,
+    pub what: String,
+    /// The bank asked about; for a connection, the one it made.
+    pub bank: String,
+    pub institution: String,
+    pub state: AskState,
+    /// Plaid's page, while it waits.
+    pub url: String,
+    pub message: String,
+    pub expires_ms: i64,
+    pub asked_ms: i64,
+    pub answered_ms: i64,
+    pub user_id: String,
 }
 
 /// Somebody asking the server's importer to ask the banks now, rather
@@ -179,6 +249,7 @@ pub struct Money {
     pub asked: Asked,
     pub sign_in: ark_auth::SignIn,
     pub role: ark_auth::Role,
+    pub bank_ask: BankAsk,
 }
 
 ark_auth::install!(Money);

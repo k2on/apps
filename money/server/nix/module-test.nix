@@ -26,21 +26,17 @@ let
 
   oidc = { issuer = "https://auth.example.com"; clientId = "money"; clientSecretFile = "/run/secrets/oidc"; };
   keys = { clientIdFile = "/run/secrets/plaid-id"; secretFile = "/run/secrets/plaid-secret"; };
-  chase.chase.accessTokenFile = "/run/secrets/plaid-chase";
-
   dev = eval { devAuth = true; };
   nobody = eval { };
   signedIn = eval { inherit oidc; publicUrl = "https://money.example.com"; };
   banks = eval {
     inherit oidc;
-    plaid = keys // { env = "sandbox"; items = chase; history = 30; };
-    accounts."Chase Checking" = { item = "chase"; mask = "1234"; };
+    plaid = keys // { env = "sandbox"; history = 30; };
   };
   halfKeys = eval { devAuth = true; plaid.clientIdFile = "/run/secrets/plaid-id"; };
-  noKeys = eval { devAuth = true; plaid.items = chase; };
-  strayAccount = eval { devAuth = true; plaid = keys // { items = chase; }; accounts.X = { item = "amex"; mask = "1"; }; };
-  vagueAccount = eval { devAuth = true; plaid = keys // { items = chase; }; accounts.X = { item = "chase"; }; };
-  badName = eval { devAuth = true; plaid = keys // { items."chase,amex".accessTokenFile = "/run/secrets/t"; }; };
+  # What a server was told before its banks were connected from the app.
+  oldItems = eval { devAuth = true; plaid = keys // { items.chase.accessTokenFile = "/run/secrets/plaid-chase"; }; };
+  oldAccounts = eval { devAuth = true; plaid = keys; accounts."Chase Checking" = { item = "chase"; mask = "1234"; }; };
   elsewhere = eval { devAuth = true; dataDir = "/srv/money"; };
   daily = eval { devAuth = true; plaid = keys; schedule = "daily"; };
 
@@ -59,18 +55,15 @@ let
     [ (failing banks == [ ]) "banks evaluate" ]
     [ ((env banks).MONEY_PLAID_ENV == "sandbox" && (env banks).MONEY_PLAID_HISTORY == "30") "the environment and the history reach the server" ]
     [ ((env banks).MONEY_PLAID_CLIENT_ID_FILE == "%d/plaid-client-id" && (env banks).MONEY_PLAID_SECRET_FILE == "%d/plaid-secret") "Plaid's keys are credentials" ]
-    [ ((env banks).MONEY_PLAID_ITEMS == "chase=%d/plaid-item-chase") "and each bank's token" ]
-    [ (lib.all (c: lib.elem c (unit banks).serviceConfig.LoadCredential) [ "plaid-client-id:/run/secrets/plaid-id" "plaid-secret:/run/secrets/plaid-secret" "plaid-item-chase:/run/secrets/plaid-chase" ]) "loaded from where they live" ]
-    [ (builtins.fromJSON (env banks).MONEY_ACCOUNTS == { "Chase Checking" = { item = "chase"; mask = "1234"; accountId = null; }; }) "the accounts reach the server as JSON" ]
+    [ ((unit banks).serviceConfig.LoadCredential == [ "oidc-secret:/run/secrets/oidc" "plaid-client-id:/run/secrets/plaid-id" "plaid-secret:/run/secrets/plaid-secret" ]) "loaded from where they live" ]
+    [ (!(env banks ? MONEY_PLAID_ITEMS) && !(env banks ? MONEY_ACCOUNTS)) "and no bank is configuration: they are the data directory's" ]
     [ (!(lib.any (v: lib.hasInfix "/run/secrets" v) (lib.attrValues (env banks)))) "no secret's path is in the environment, only the credentials'" ]
     [ (banks.systemd.timers.money-import.timerConfig.OnCalendar == "*-*-* 06,18:00:00") "twice a day by default" ]
     [ (lib.hasInfix "kill --signal=SIGUSR1 --kill-whom=main money.service" banks.systemd.services.money-import.serviceConfig.ExecStart) "by telling the server" ]
     [ (daily.systemd.timers.money-import.timerConfig.OnCalendar == "daily") "or when told" ]
     [ (says halfKeys "go together") "half of Plaid's keys is refused" ]
-    [ (says noKeys "no Plaid keys") "banks without keys are refused" ]
-    [ (says strayAccount "not in services.money.plaid.items") "an account on a bank not linked is refused" ]
-    [ (says vagueAccount "mask or its accountId") "an account that names no account is refused" ]
-    [ (says badName "letters, digits") "a bank's name that would break its credential is refused" ]
+    [ (says oldItems "plaid.items" && says oldItems "banks.json") "banks still configured are refused, saying where they live now" ]
+    [ (says oldAccounts "services.money.accounts" && says oldAccounts "in Settings") "accounts still configured are refused, saying where they are chosen now" ]
     [ (says elsewhere "under /var/lib") "the data outside the state directory is refused" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
