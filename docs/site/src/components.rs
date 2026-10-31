@@ -175,7 +175,7 @@ pub const COMPONENTS: &[Component] = &[
         section: Section::Foundations,
         glyph: glyphs::MINUS,
         summary: "Words fitted to a width, cut where a reader loses least, and numbers said as words.",
-        desktop: &["fit", "line", "format"],
+        desktop: &["fit", "line", "format", "clipboard"],
         android: None,
         ios: None,
         shots: &[],

@@ -3357,6 +3357,8 @@ impl App {
             // The socket, and in a browser the page's own events.
             self.bell.subscription().map(|()| Message::Wake),
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
+            // A paste the browser handed over: a frame, and the box takes it.
+            arkui::clipboard::pastes().map(|()| Message::Swallow),
             // Only the presses no widget took: a focused text box consumes its
             // own, so typing a playlist's name cannot walk the cursor.
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),

@@ -38,7 +38,7 @@ iced_test = "0.14"
 iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
 # The address bar: reading the fragment and writing it through the history,
 # and hearing the browser move it (`wake::page_changes`).
-web-sys = { version = "0.3", features = ["Window", "History", "Location", "EventTarget"] }
+web-sys = { version = "0.3", features = ["Window", "History", "Location", "EventTarget", "Navigator", "Clipboard"] }
 wasm-bindgen = "0.2"
 # The browser half of the picture fetch: a promise from the snippet in
 # `images.rs`, awaited, and the `Uint8Array` it resolves to copied out.

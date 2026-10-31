@@ -1765,6 +1765,8 @@ impl App {
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
             // The wheel, sideways: perhaps a swipe back or forward.
             arkui::history::wheel().map(Message::Wheel),
+            // A paste the browser handed over: a frame, and the box takes it.
+            arkui::clipboard::pastes().map(|()| Message::Swallow),
         ];
         if self.dropdown.is_some() {
             subs.push(arkui::command::keys(true).map(Message::DropKey));

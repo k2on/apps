@@ -235,7 +235,8 @@ impl App {
                 ));
         }
 
-        layers.into()
+        // Every text box copies, cuts and pastes in a browser too.
+        arkui::clipboard::view(layers)
     }
 
     /// Music, then the lists somebody made — each read back by the domain.

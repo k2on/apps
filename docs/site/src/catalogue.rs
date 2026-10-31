@@ -107,6 +107,13 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["A name loses its middle, a heading its end."],
     },
     Entry {
+        module: "clipboard",
+        name: "Clipboard",
+        summary: "Copy, cut and paste in every text box, in a browser too: the window's view handed the browser's clipboard, and a paste put in where the keys are once the browser hands it over.",
+        api: &["view(view): the whole window's, once", "pastes() -> Subscription<()>"],
+        rules: &["A paste is asked for and arrives later; it goes into whichever box has the keys, at its cursor, as typed text does.", "On the desktop it is iced's own clipboard, untouched."],
+    },
+    Entry {
         module: "url",
         name: "URL",
         summary: "Percent-encoding for a fragment, so a `/`, a `#` or an accent survives the address bar.",
