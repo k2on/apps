@@ -229,7 +229,17 @@ fun formOf(t: TxnLine, l: Ledger): TxnForm =
         amount = t.amount,
         cleared = t.cleared != uniffi.money_domain.Cleared.UNCLEARED,
         by = t.userId,
+        bankSaid = bankSaid(t),
     )
+
+/**
+ * The bank's own description of `t` when it was imported and that says something the payee does not;
+ * otherwise empty.
+ */
+fun bankSaid(t: TxnLine): String {
+    val said = t.importedPayee.trim()
+    return if (t.imported && said.isNotEmpty() && !said.equals(t.payee.trim(), ignoreCase = true)) said else ""
+}
 
 /**
  * A page as every screen here is laid out: a large top app bar that collapses as the content
