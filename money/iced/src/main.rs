@@ -119,6 +119,9 @@ pub struct TxnForm {
     pub cleared: bool,
     /// Who entered the one corrected.
     pub by: String,
+    /// What the bank called the one corrected, where it says more than the
+    /// payee does (`bank_said`).
+    pub bank: String,
 }
 
 /// What a category chooser is choosing for.
@@ -695,6 +698,7 @@ impl App {
                         inflow: if t.amount > 0 { amount::editable(t.amount) } else { String::new() },
                         cleared: t.cleared != Cleared::Uncleared,
                         by: t.user_id.clone(),
+                        bank: bank_said(t),
                     });
                 }
             }
@@ -1848,3 +1852,14 @@ const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// How wide the category dropdown is.
 pub const DROP_WIDTH: f32 = 340.0;
+
+/// What the bank called an imported transaction, where it says something the
+/// payee does not: `CHIPOTLE 1234 SAN FRANCISCO CA` beside `Chipotle`. Blank
+/// for one typed in, or one the bank and the payee name alike.
+pub fn bank_said(t: &TxnLine) -> String {
+    let said = t.imported_payee.trim();
+    match t.imported && !said.is_empty() && !said.eq_ignore_ascii_case(t.payee.trim()) {
+        true => said.to_string(),
+        false => String::new(),
+    }
+}

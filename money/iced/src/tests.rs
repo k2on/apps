@@ -440,7 +440,13 @@ fn the_budget_drawn() {
     let _ = register.register_act(Action::Visual(true));
     let _ = register.register_act(Action::Move(Motion::Down(1)));
     let _ = register.register_act(Action::Key('c'));
+    let mut form = app();
+    let _ = form.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = form.update(Message::Go(Page::Ledger(Ledger::All)));
+    let _ = form.register_act(Action::Move(Motion::First));
+    let _ = form.register_act(Action::Activate);
     for (app, scene, theme, side) in [
+        (&form, "form", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Light, "light"),
         (&register, "register", iced::Theme::Dark, "dark"),
@@ -521,4 +527,22 @@ fn the_register_categorizes_a_selection_from_the_keys() {
         let t = app.peer.register.rows.iter().find(|t| t.id == id).expect("still there");
         assert_eq!(t.category_id, Some(groceries), "{}", t.payee);
     }
+}
+
+/// What the bank called an imported transaction is said where it says
+/// more than its payee; not for one typed in, nor one named alike.
+#[test]
+fn the_bank_says_what_the_payee_does_not() {
+    let mut t = TxnLine {
+        payee: "Chipotle".into(),
+        imported: true,
+        imported_payee: "CHIPOTLE 1234 SAN FRANCISCO CA".into(),
+        ..TxnLine::default()
+    };
+    assert_eq!(crate::bank_said(&t), "CHIPOTLE 1234 SAN FRANCISCO CA");
+    t.imported_payee = "CHIPOTLE".into();
+    assert_eq!(crate::bank_said(&t), "", "named alike");
+    t.imported_payee = "CHIPOTLE 1234".into();
+    t.imported = false;
+    assert_eq!(crate::bank_said(&t), "", "typed in");
 }
