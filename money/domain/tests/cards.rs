@@ -399,6 +399,8 @@ fn import(bank: &str, accounts: Vec<BankAccount>, upserts: Vec<BankTxn>) -> Impo
         accounts,
         upserts,
         removed: vec![],
+        choose: false,
+        from_start: false,
     }
 }
 
