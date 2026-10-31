@@ -234,6 +234,23 @@ class BookTests {
         assertEquals(l.accounts.first { it.onBudget && !it.closed }.id, n.account)
     }
 
+    @Test fun theBanksOwnWordsAreShownWhenTheySayMore() {
+        book.holdRegister(null)
+        val t = l.register(null).first { !it.transfer }
+        val chipotle = t.copy(payee = "Chipotle", imported = true, importedPayee = "CHIPOTLE 1234 SAN FRANCISCO CA ")
+        assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", bankSaid(chipotle))
+        assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", formOf(chipotle, l).bankSaid)
+        // Entered by hand, said in nothing, or said as the payee already is: nothing more to show.
+        assertEquals("", bankSaid(chipotle.copy(imported = false)))
+        assertEquals("", bankSaid(chipotle.copy(importedPayee = "  ")))
+        assertEquals("", bankSaid(chipotle.copy(importedPayee = "CHIPOTLE")))
+        // What the demo's bank sends is kept as it sent it.
+        book.sync()
+        for (s in l.inbox.filter { it.imported }) {
+            assertTrue(bankSaid(s).isEmpty() || bankSaid(s) == s.importedPayee.trim())
+        }
+    }
+
     @Test fun aRegistersKeyIsItsAccount() {
         assertEquals("all", Ledger.key(null))
         assertEquals("ab".repeat(16), Ledger.key(Id("ab".repeat(16))))

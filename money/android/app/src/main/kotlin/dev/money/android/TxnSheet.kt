@@ -1,8 +1,9 @@
 // A transaction, entered or corrected, in a full-height modal bottom sheet
 // as Google's own apps take one: the amount first and large, money going out
 // or coming in as a segmented button, then who was paid (with the payees
-// seen before as chips, each bringing the category it went to last time),
-// the category, the account, the day (Material's date picker), a memo, and
+// seen before as chips, each bringing the category it went to last time,
+// and under it, for one the bank sent, what the bank called it whole), the
+// category, the account, the day (Material's date picker), a memo, and
 // whether the bank has seen it. A transfer is chosen where a category is:
 // its payee is then the other account. Choosing a category or an account is
 // the sheet's second page.
@@ -24,6 +25,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -175,12 +178,15 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                                 OutlinedTextField(
                                     value = f.payee,
                                     onValueChange = { p ->
+                                        // A name is one line, however long: wrapped to be read whole, not cut.
+                                        val one = p.replace('\n', ' ')
                                         // A payee somebody has paid before brings the category it was for last time.
-                                        val known = ledger.payees.firstOrNull { it.name.equals(p, ignoreCase = true) }
-                                        f = f.copy(payee = p, category = f.category ?: known?.categoryId)
+                                        val known = ledger.payees.firstOrNull { it.name.equals(one, ignoreCase = true) }
+                                        f = f.copy(payee = one, category = f.category ?: known?.categoryId)
                                     },
                                     label = { Text(if (inflow) "From" else "Payee") },
-                                    singleLine = true,
+                                    maxLines = 4,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 val q = f.payee.trim()
@@ -198,6 +204,14 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                                         }
                                     }
                                 }
+                            }
+                            if (f.bankSaid.isNotEmpty()) {
+                                // The bank's own words for it, whole and selectable: what the payee was made from.
+                                ListItem(
+                                    overlineContent = { Text("Bank description") },
+                                    headlineContent = { SelectionContainer { Text(f.bankSaid) } },
+                                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                )
                             }
                             Spacer(Modifier.height(Space.s))
                             Field("Category", categoryName, onClick = { choosing = Choosing.Category })

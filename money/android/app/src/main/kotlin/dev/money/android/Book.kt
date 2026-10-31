@@ -43,6 +43,8 @@ import dev.money.android.gen.IgnoreLinked
 import dev.money.android.gen.LinkAccount
 import dev.money.android.gen.Money
 import dev.money.android.gen.Month
+import dev.money.android.gen.MoveCategory
+import dev.money.android.gen.MoveGroup
 import dev.money.android.gen.MoveMoney
 import dev.money.android.gen.OpenAccount
 import dev.money.android.gen.Reconcile
@@ -171,6 +173,11 @@ data class TxnForm(
     val cleared: Boolean = false,
     /** Who entered the one corrected. */
     val by: String = "",
+    /**
+     * What the bank called the one corrected, when it was imported and the bank's words say more than
+     * the payee does: `CHIPOTLE 1234 SAN FRANCISCO CA` for Chipotle. Shown, never sent.
+     */
+    val bankSaid: String = "",
 )
 
 class Book
@@ -369,6 +376,13 @@ private constructor(
 
     fun deleteCategory(category: Id) =
         act("delete the category") { it.deleteCategory(DeleteCategory(category, null)) }
+
+    /** A category into `group`, in front of `before` (one of that group's) or at its end. */
+    fun moveCategory(category: Id, group: Id, before: Id?) =
+        act("move the category") { it.moveCategory(MoveCategory(category, group, before)) }
+
+    /** A group in front of `before`, or after every other. */
+    fun moveGroup(group: Id, before: Id?) = act("move the group") { it.moveGroup(MoveGroup(group, before)) }
 
     // * Transactions
 
