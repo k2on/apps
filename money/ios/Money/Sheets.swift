@@ -275,10 +275,26 @@ struct AssignSheet: View {
 
     var body: some View {
         let l = model.snapshot.line(id)
+        let ruled = l.map { !Ruled.editable($0) } ?? false
         NavigationStack {
             VStack(spacing: Space.l) {
-                AmountEntry(cents: $cents, prompt: "Assigned in \(model.monthName)", tint: Color.money)
-                if let l {
+                if let l, let words = Ruled.words(l) {
+                    // Its rule assigns this month: the amount shown, never typed.
+                    VStack(spacing: Space.s) {
+                        MarkedCents(l.assigned, mark: Ruled.symbol, says: "assigned by its rule")
+                            .font(.system(size: 56, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.4)
+                            .lineLimit(1)
+                        Text(words)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    AmountEntry(cents: $cents, prompt: "Assigned in \(model.monthName)", tint: Color.money)
+                }
+                if let l, !ruled {
                     HStack(spacing: Space.s) {
                         if let cover = Cards.toCover(l) { chip("Covers the Card", cover) }
                         if l.target > 0 { chip("Target", l.target) }
@@ -286,7 +302,7 @@ struct AssignSheet: View {
                         if l.averageSpent > 0 { chip("Average Spent", l.averageSpent) }
                     }
                 }
-                if let s = model.snapshot.summary {
+                if let s = model.snapshot.summary, !ruled {
                     Text("\(CentsText.string(s.readyToAssign - (cents - (l?.assigned ?? 0)))) left to assign")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -301,11 +317,13 @@ struct AssignSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(role: .confirm) {
-                        model.assign(id, cents) { if $0 { dismiss() } }
-                    } label: { Image(systemName: "checkmark") }
-                        .accessibilityLabel("Assign")
+                if !ruled {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(role: .confirm) {
+                            model.assign(id, cents) { if $0 { dismiss() } }
+                        } label: { Image(systemName: "checkmark") }
+                            .accessibilityLabel("Assign")
+                    }
                 }
             }
             .onAppear {
@@ -349,11 +367,15 @@ struct MoveSheet: View {
                         .listRowBackground(Color.clear)
                 }
                 Section(covering ? "Cover It From" : "Move It To") {
-                    if id != nil {
-                        target("Ready to Assign", model.snapshot.summary?.readyToAssign, nil, l)
-                    }
-                    ForEach(Months.groups(model.snapshot.groups, model.snapshot.lines, hidden: false)) { g in
-                        ForEach(g.lines.filter { $0.categoryId != id }) { o in
+                    if let l, let words = Ruled.words(l) {
+                        // Its rule assigns this month: nothing moves to or from it.
+                        Label(words, systemImage: Ruled.symbol).foregroundStyle(.secondary)
+                    } else {
+                        if id != nil {
+                            target("Ready to Assign", model.snapshot.summary?.readyToAssign, nil, l)
+                        }
+                        // A category its rule assigns is neither a source nor a target.
+                        ForEach(Moves.others(Months.groups(model.snapshot.groups, model.snapshot.lines, hidden: false), besides: id)) { o in
                             target(o.name, o.available, o.categoryId, l)
                         }
                     }

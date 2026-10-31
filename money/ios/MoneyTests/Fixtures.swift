@@ -46,13 +46,15 @@ final class Seen {
 /// Rows made by hand, for the rules that need no session.
 extension Fx {
     /// A month's line: a category of the household's, or — given `card` — a
-    /// card's payment category in the cards' group.
+    /// card's payment category in the cards' group; given `rule`, a month
+    /// that follows that rule.
     static func line(_ name: String, available: Int64, target: Int64 = 0, assigned: Int64 = 0, card: Id? = nil,
-                     debt: Int64 = 0, underfunded: Int64 = 0, creditOverspent: Int64 = 0) -> BudgetLine {
+                     debt: Int64 = 0, underfunded: Int64 = 0, creditOverspent: Int64 = 0, rule: String? = nil) -> BudgetLine {
         BudgetLine(categoryId: id(name.count), groupId: card == nil ? id(100) : Fixed.cardGroup, group: card == nil ? "Everyday" : "Credit Card Payments",
                    groupPos: card == nil ? 2 : 1, name: name, pos: 1, hidden: false, target: target, assigned: assigned, activity: 0,
                    available: available, carried: 0, assignedLastMonth: 0, spentLastMonth: 0, averageSpent: 0,
-                   card: card, debt: debt, underfunded: underfunded, creditOverspent: creditOverspent)
+                   card: card, debt: debt, underfunded: underfunded, creditOverspent: creditOverspent,
+                   rule: rule ?? "", ruled: rule != nil)
     }
 
     static func account(_ n: Int, _ name: String, kind: String = "checking", closed: Bool = false, bank: String = "", pos: Int64 = 0) -> AccountLine {

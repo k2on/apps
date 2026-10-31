@@ -1,7 +1,8 @@
 // The budget's arithmetic as the screens need it, and nothing of Apple's
 // but Foundation: the month's lines in their groups, what an available
 // amount says (`Tone`), the cards' payment categories (`Cards`), the
-// accounts in their sections, which way Move Money goes, the transaction
+// accounts in their sections, which way Move Money goes and what a rule
+// leaves nobody to assign (`Ruled`), the transaction
 // form and its inputs, payees offered as one types, and days as the domain
 // writes them. Every rule here is the desktop's (`money/iced`), so the
 // phone and the window agree; all of it is held by `MoneyTests`, over the
@@ -291,6 +292,34 @@ enum Moves {
 
     /// What assigning `line` to its target takes this month.
     static func toTarget(_ l: BudgetLine) -> Int64 { max(l.target - l.assigned, 0) }
+
+    /// The categories Move Money offers to move to or from, besides `id`:
+    /// none whose month follows a rule, which the domain refuses either way.
+    static func others(_ groups: [GroupMonth], besides id: Id?) -> [BudgetLine] {
+        groups.flatMap(\.lines).filter { $0.categoryId != id && Ruled.editable($0) }
+    }
+}
+
+// MARK: assigned by rule
+
+/// A category whose month follows a rule (`money_domain::rules`): its
+/// assignment is the rule's share of matching income, never typed — the
+/// domain refuses assigning it and moving money to or from it, and
+/// Auto-Assign passes it by. The phone shows the rule; the desktop sets it.
+enum Ruled {
+    /// The mark an amount the rule set wears (an SF Symbol).
+    static let symbol = "function"
+
+    /// Whether the month's assignment of `l` is anybody's to change by hand.
+    static func editable(_ l: BudgetLine) -> Bool { !l.ruled }
+
+    /// What the category's page says in place of assigning it; none when the
+    /// month is assigned by hand.
+    static func words(_ l: BudgetLine) -> String? {
+        guard l.ruled else { return nil }
+        let r = l.rule.trimmingCharacters(in: .whitespaces)
+        return r.isEmpty ? "Assigned by rule" : "Assigned by rule: \(r)"
+    }
 }
 
 // MARK: the accounts

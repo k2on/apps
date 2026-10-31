@@ -64,6 +64,14 @@ Four tabs in the system's Liquid Glass bar, which shrinks as a list scrolls:
   Auto-Assign's three amounts as one-tap choices, the month's transactions
   in it, and rename, hide and delete last. Spending on a card beyond what
   it had is its own line, in amber.
+- **A category assigned by rule** (`money_domain::rules`, set on the
+  desktop: a share of matching income from a month on) is read-only in a
+  month its rule assigns: its row wears the rule's mark (`function`) by
+  what it was assigned and has no swipes, holding it says the rule, and
+  its page says "Assigned by rule: 10% of income matching ..." where Move
+  Money would be, with no meeting the target and no Auto-Assign amounts.
+  The keypad shows the amount and no Assign; Move Money never offers it
+  as where money comes from or goes. The phone does not edit rules.
 - **Accounts** — net worth large, All Accounts, then the accounts on budget,
   tracking only and closed, each with its kind's mark (a tinted rounded
   square, as Settings draws one), its bank and last digits when Plaid
@@ -220,7 +228,7 @@ in ArkUICore, `Cents` (amounts as typed, the keypad's digits), `Order`
 (rows moved as Edit mode hands them over) and the
 first run's server half — `Address`, `Probe`, `Health`, `Shelf` — which
 harken's onboarding still keeps its own copy of; in ArkUI, `CentsText`,
-`Pill` and `Tint`, `HeroFigure`, `AmountEntry`, `Pager`, `WelcomePage`,
+`MarkedCents`, `Pill` and `Tint`, `HeroFigure`, `AmountEntry`, `Pager`, `WelcomePage`,
 `SafariView` (and `.safari`) and `.toast`.
 
 ## Checks
@@ -256,6 +264,11 @@ categories, and a typed payment made a transfer to the card from its
 form. The banks (`BankTests`, rows made by hand): an ask followed until
 its page arrives and only its own, what asks and banks say, and what a
 bank's account may feed.
+The rules (`RuleTests`): only a month by hand is editable, Move Money
+passes a ruled category by, and the demo with a rule set on Gifts
+assigned 10% of Acme's paydays, read-only, its hand assignment refused
+in the domain's words, Auto-Assign passing it by, and the month before
+the rule still by hand.
 
 ## Not built
 

@@ -18,6 +18,10 @@
 // named, filled and emptied as the cards are, so they offer no rename,
 // target or delete.
 //
+// A category whose month follows a rule (set on the desktop) wears the
+// rule's mark by what it was assigned, and offers no assigning or moving:
+// its swipes are gone and holding it says the rule.
+//
 // Reorder Categories (the ••• menu) is the list's Edit mode, as Reminders
 // has its lists and their groups: the budget becomes one list, each group a
 // row over its categories, every row with the system's grabber. A category
@@ -214,16 +218,22 @@ struct BudgetView: View {
         Section {
             if open {
                 ForEach(g.lines) { l in
+                    // A month its rule assigns offers neither: the domain
+                    // refuses assigning it and moving money to or from it.
                     NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l) }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }
-                                .tint(.money)
+                            if Ruled.editable(l) {
+                                Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }
+                                    .tint(.money)
+                            }
                         }
                         .swipeActions(edge: .trailing) {
-                            Button { present(.move(l.categoryId)) } label: {
-                                Label(l.available < 0 ? "Cover" : "Move", systemImage: "arrow.left.arrow.right")
+                            if Ruled.editable(l) {
+                                Button { present(.move(l.categoryId)) } label: {
+                                    Label(l.available < 0 ? "Cover" : "Move", systemImage: "arrow.left.arrow.right")
+                                }
+                                .tint(l.available < 0 ? Tone.of(l).tint.color : Color.indigo)
                             }
-                            .tint(l.available < 0 ? Tone.of(l).tint.color : Color.indigo)
                         }
                         .contextMenu { menu(l) }
                 }
@@ -282,20 +292,25 @@ struct BudgetView: View {
     @ViewBuilder private func menu(_ l: BudgetLine) -> some View {
         // A card's payment: covering its debt first; no target, and no
         // deleting a category that goes when its card does.
+        // A month its rule assigns: the rule said, and nothing to assign or move.
         let card = Cards.isPayment(l)
-        if let cover = Cards.toCover(l) {
-            Button { model.assign(l.categoryId, cover) } label: {
-                Label("Assign \(CentsText.string(l.underfunded)) to Cover the Card", systemImage: "creditcard")
+        if let words = Ruled.words(l) {
+            Label(words, systemImage: Ruled.symbol)
+        } else {
+            if let cover = Cards.toCover(l) {
+                Button { model.assign(l.categoryId, cover) } label: {
+                    Label("Assign \(CentsText.string(l.underfunded)) to Cover the Card", systemImage: "creditcard")
+                }
             }
-        }
-        Button { present(.assign(l.categoryId)) } label: { Label("Assign…", systemImage: "plus.circle") }
-        if !card && l.target > l.assigned {
-            Button { model.assign(l.categoryId, l.target) } label: {
-                Label("Assign \(CentsText.string(Moves.toTarget(l))) to Meet Target", systemImage: "target")
+            Button { present(.assign(l.categoryId)) } label: { Label("Assign…", systemImage: "plus.circle") }
+            if !card && l.target > l.assigned {
+                Button { model.assign(l.categoryId, l.target) } label: {
+                    Label("Assign \(CentsText.string(Moves.toTarget(l))) to Meet Target", systemImage: "target")
+                }
             }
-        }
-        Button { present(.move(l.categoryId)) } label: {
-            Label(l.available < 0 ? "Cover Overspending…" : "Move Money…", systemImage: "arrow.left.arrow.right")
+            Button { present(.move(l.categoryId)) } label: {
+                Label(l.available < 0 ? "Cover Overspending…" : "Move Money…", systemImage: "arrow.left.arrow.right")
+            }
         }
         if !card {
             Button { present(.target(l.categoryId)) } label: { Label(l.target > 0 ? "Edit Target…" : "Set Target…", systemImage: "scope") }
@@ -337,6 +352,7 @@ struct CategoryRow: View {
                         .tint(tone == .over ? Color.red : tone == .onCard || f < 1 ? Color.orange : Color.green)
                         .scaleEffect(y: 0.8, anchor: .center)
                     HStack {
+                        if line.ruled { Image(systemName: Ruled.symbol).imageScale(.small) }
                         Text("\(CentsText.string(line.assigned)) of \(CentsText.string(line.target))")
                         Spacer()
                         if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
@@ -344,8 +360,9 @@ struct CategoryRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
-                } else if line.activity != 0 || line.assigned != 0 {
+                } else if line.activity != 0 || line.assigned != 0 || line.ruled {
                     HStack {
+                        if line.ruled { Image(systemName: Ruled.symbol).imageScale(.small) }
                         Text("Assigned \(CentsText.string(line.assigned))")
                         Spacer()
                         if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
@@ -366,7 +383,7 @@ struct CategoryRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(line.name)
         .accessibilityValue(card ? paymentWords : words(tone))
-        .accessibilityHint("Swipe right to assign, left to move money")
+        .accessibilityHint(Ruled.editable(line) ? "Swipe right to assign, left to move money" : "Its rule assigns it")
     }
 
     /// A card's payment under its name: how much of the debt is set aside,
@@ -395,6 +412,7 @@ struct CategoryRow: View {
     private func words(_ tone: Tone) -> String {
         var w = "\(CentsText.string(line.available)) available, \(tone.words). Assigned \(CentsText.string(line.assigned))"
         if line.target > 0 { w += " of a \(CentsText.string(line.target)) target" }
+        if line.ruled { w += ", by its rule" }
         if line.creditOverspent > 0 { w += ". \(CentsText.string(line.creditOverspent)) spent on a card beyond what it had" }
         return w
     }
