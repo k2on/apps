@@ -72,6 +72,9 @@ object Glyphs {
     /** A sparkle for auto-assign. */
     val Auto: ImageVector = glyph("sparkles", "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z", "M19 17v4", "M17 19h4")
 
+    /** Assigned by rule: a share of what came in. */
+    val Rule: ImageVector = glyph("percent", "M19 5 5 19", circle(6.5f, 6.5f, 2.5f), circle(17.5f, 17.5f, 2.5f))
+
     /** The glyph an account of `kind` is drawn with. */
     fun account(kind: String): ImageVector =
         when (kind) {

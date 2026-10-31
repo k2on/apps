@@ -9,16 +9,30 @@
 // them lines up digit under digit, as a bank statement's do.
 package dev.arkui
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.isSpecified
+import androidx.compose.ui.unit.sp
 import java.math.BigDecimal
 import java.text.DecimalFormatSymbols
 import java.text.NumberFormat
@@ -131,3 +145,33 @@ public fun AmountText(
 @Composable
 public fun amountColor(minor: Long): Color =
     if (minor > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+
+/**
+ * An amount that is not this screen's to change, with `mark` after it at the text's own height: one
+ * worked out elsewhere (by a rule, a schedule, the bank) and shown as it is. `why` is the mark's
+ * meaning, said by TalkBack after the amount.
+ */
+@Composable
+public fun MarkedAmount(
+    minor: Long,
+    mark: ImageVector,
+    why: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    color: Color = Color.Unspecified,
+) {
+    val a = LocalAmounts.current
+    val size = with(LocalDensity.current) { (if (style.fontSize.isSpecified) style.fontSize else 14.sp).toDp() }
+    Row(
+        modifier.semantics(mergeDescendants = true) { contentDescription = "${a.format(minor)}, $why" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AmountText(minor, style = style, color = color)
+        Spacer(Modifier.width(Space.xs))
+        Icon(
+            mark,
+            contentDescription = null,
+            tint = if (color.isSpecified) color else LocalContentColor.current,
+            modifier = Modifier.size(size))
+    }
+}

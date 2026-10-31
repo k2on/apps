@@ -44,7 +44,9 @@ label; `SectionHeader`; and `Stepper`, a title stepped back and forth.
 **Money as a locale writes it** (`Amounts.kt`, `AmountField.kt`): minor
 units formatted and parsed in the phone's locale and currency
 (`Amounts`, `LocalAmounts`), drawn in tabular figures (`AmountText`), and
-typed on the number pad with the symbol before it (`AmountField`).
+typed on the number pad with the symbol before it (`AmountField`); one
+worked out elsewhere, shown with a small mark after it and not offered
+for editing (`MarkedAmount`).
 
 **Charts** (`Charts.kt`): `Donut`, a ring of parts with a figure in its
 middle, and `Bars`, the same parts against the largest — in the scheme's

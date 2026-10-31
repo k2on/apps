@@ -17,6 +17,11 @@
 // covered"), where cash overspent is red. The cards' group takes no new
 // category, and a payment category is dragged only among the cards.
 //
+// A category can be assigned by rule (`money/domain/src/rules.rs`, set on
+// the desktop): in a month that follows one, its amount is the rule's, so
+// its pill carries the rule's mark and nothing here assigns it, moves money
+// to or from it, or auto-assigns it ([assignable]).
+//
 // The budget is put in order by hand, as a launcher's apps are: a category
 // held lifts and is dragged among the rest, and past a group's header into
 // that group; a group's header held folds every group to its header, so the
@@ -97,6 +102,7 @@ import dev.arkui.AmountText
 import dev.arkui.Amounts
 import dev.arkui.Landing
 import dev.arkui.LocalAmounts
+import dev.arkui.MarkedAmount
 import dev.arkui.Meter
 import dev.arkui.Pill
 import dev.arkui.ReorderableItem
@@ -110,6 +116,20 @@ import dev.arkui.toneColors
 import dev.money.android.gen.Auto
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.GroupLine
+
+/**
+ * Whether what a category is given this month is anybody's to change here: not Ready to Assign's, and
+ * not one whose month follows its rule (`money/domain/src/rules.rs`) — its amount is the rule's, so it
+ * is not assigned, moved to or from, or auto-assigned by hand. The rule itself is set on the desktop.
+ */
+fun assignable(l: BudgetLine): Boolean = !l.ruled && l.categoryId != Book.READY_TO_ASSIGN
+
+/**
+ * The month's underfunded categories auto-assign would fund: the summary's, less those whose month
+ * follows a rule short of its target — auto-assign passes them by.
+ */
+fun fundable(ledger: Ledger): Long =
+    (ledger.summary?.underfunded ?: 0L) - ledger.lines.count { it.ruled && !Ledger.isPayment(it) && it.assigned < it.target }
 
 /** Whether a category overspent only on a card: its shortfall is the card's debt now, not next month's. */
 fun creditOverspent(l: BudgetLine): Boolean = l.available < 0 && l.creditOverspent >= -l.available
@@ -164,6 +184,7 @@ fun storyOf(l: BudgetLine, a: Amounts): String {
         l.activity < 0 && had > 0 -> "Spent ${a.format(-l.activity)} of ${a.format(had)}"
         l.activity < 0 -> "Spent ${a.format(-l.activity)}"
         l.target > 0 -> "Funded"
+        l.ruled -> "Assigned by rule"
         else -> ""
     }
 }
@@ -366,11 +387,12 @@ private fun ReadyCard(ledger: Ledger, modifier: Modifier = Modifier) {
                     "${a.format(s.overspentLastMonth)} overspent last month came out of this month",
                     style = MaterialTheme.typography.bodyMedium)
             }
-            if (ready > 0 && s != null && s.underfunded > 0) {
+            val fund = fundable(ledger)
+            if (ready > 0 && fund > 0) {
                 Spacer(Modifier.height(Space.m))
                 FilledTonalButton(onClick = { book.autoAssign(Auto.Underfunded) }) {
                     Icon(Glyphs.Auto, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                    Text("Fund ${s.underfunded} underfunded")
+                    Text("Fund $fund underfunded")
                 }
             }
             if (s != null) {
@@ -558,7 +580,11 @@ private fun CategoryRow(l: BudgetLine, lifted: Boolean, actions: List<CustomAcce
                 }
             }
             Spacer(Modifier.width(Space.m))
-            Pill(toneOf(l)) { AmountText(l.available, style = MaterialTheme.typography.labelLarge) }
+            // A month its rule assigns is marked, as the desktop marks its cell: not one to assign here.
+            Pill(toneOf(l)) {
+                if (l.ruled) MarkedAmount(l.available, Glyphs.Rule, "assigned by rule", style = MaterialTheme.typography.labelLarge)
+                else AmountText(l.available, style = MaterialTheme.typography.labelLarge)
+            }
         }
         Spacer(Modifier.height(Space.s))
         Meter(fraction, color = color)

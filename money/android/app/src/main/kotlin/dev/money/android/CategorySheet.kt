@@ -13,6 +13,10 @@
 // not covered, and "Assign $X to cover the debt" in one press. It is the
 // card's, so it is not renamed or deleted here. A category that spent more on
 // a card than it had says so in amber: that is debt, not next month's money.
+//
+// A month that follows the category's rule (set on the desktop) is the
+// rule's: the sheet says "Assigned by rule: …" where the field and its
+// chips would be, and offers neither moving money nor covering.
 package dev.money.android
 
 import androidx.compose.animation.AnimatedContent
@@ -67,6 +71,7 @@ import dev.arkdb.ffi.Id
 import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
+import dev.arkui.MarkedAmount
 import dev.arkui.Meter
 import dev.arkui.Pill
 import dev.arkui.Space
@@ -156,7 +161,10 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         Spacer(Modifier.height(Space.l))
         Row(horizontalArrangement = Arrangement.spacedBy(Space.xl)) {
             Stat("Carried over") { AmountText(l.carried, style = MaterialTheme.typography.titleSmall) }
-            Stat("Assigned") { AmountText(l.assigned, style = MaterialTheme.typography.titleSmall) }
+            Stat("Assigned") {
+                if (l.ruled) MarkedAmount(l.assigned, Glyphs.Rule, "assigned by rule", style = MaterialTheme.typography.titleSmall)
+                else AmountText(l.assigned, style = MaterialTheme.typography.titleSmall)
+            }
             // A payment category's activity is the spending its card covered, less what was paid.
             Stat(if (payment) "Covered, less paid" else "Activity") { AmountText(l.activity, style = MaterialTheme.typography.titleSmall) }
         }
@@ -169,23 +177,28 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         }
 
         Spacer(Modifier.height(Space.xl))
-        AmountField(
-            assigned,
-            onType = { assigned = it },
-            label = "Assigned in ${Dates.monthAlone(ledger.month)}",
-            error = if (typed == null) "That isn't an amount" else null,
-            onDone = { typed?.let { book.assign(l.categoryId, it) } },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // The amounts people reach for.
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.horizontalScrollSafe()) {
-            if (l.target > 0) Quick("Target", l.target) { assigned = a.editable(it); book.assign(l.categoryId, it) }
-            if (l.assignedLastMonth > 0) Quick("Last month", l.assignedLastMonth) { assigned = a.editable(it); book.assign(l.categoryId, it) }
-            if (l.averageSpent > 0) Quick("Average spent", l.averageSpent) { assigned = a.editable(it); book.assign(l.categoryId, it) }
-        }
-        if (typed != null && typed != l.assigned) {
-            Button(onClick = { book.assign(l.categoryId, typed) }, modifier = Modifier.fillMaxWidth().padding(top = Space.s)) {
-                Text("Assign ${a.format(typed)}")
+        if (!assignable(l)) {
+            // The month follows its rule: what it is given is the rule's, shown and not typed.
+            Ruled(l)
+        } else {
+            AmountField(
+                assigned,
+                onType = { assigned = it },
+                label = "Assigned in ${Dates.monthAlone(ledger.month)}",
+                error = if (typed == null) "That isn't an amount" else null,
+                onDone = { typed?.let { book.assign(l.categoryId, it) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // The amounts people reach for.
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.horizontalScrollSafe()) {
+                if (l.target > 0) Quick("Target", l.target) { assigned = a.editable(it); book.assign(l.categoryId, it) }
+                if (l.assignedLastMonth > 0) Quick("Last month", l.assignedLastMonth) { assigned = a.editable(it); book.assign(l.categoryId, it) }
+                if (l.averageSpent > 0) Quick("Average spent", l.averageSpent) { assigned = a.editable(it); book.assign(l.categoryId, it) }
+            }
+            if (typed != null && typed != l.assigned) {
+                Button(onClick = { book.assign(l.categoryId, typed) }, modifier = Modifier.fillMaxWidth().padding(top = Space.s)) {
+                    Text("Assign ${a.format(typed)}")
+                }
             }
         }
 
@@ -220,12 +233,13 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         }
 
         Spacer(Modifier.height(Space.xl))
-        if (l.available < 0) {
+        // Moving money to or from a month its rule assigns is refused: neither is offered.
+        if (l.available < 0 && assignable(l)) {
             Button(onClick = onCover, modifier = Modifier.fillMaxWidth()) {
                 Text(if (creditOverspent(l)) "Cover ${a.format(-l.available)} spent on a card" else "Cover ${a.format(-l.available)} overspending")
             }
         }
-        if (l.available > 0) {
+        if (l.available > 0 && assignable(l)) {
             OutlinedButton(onClick = onMove, modifier = Modifier.fillMaxWidth()) {
                 Icon(Glyphs.Move, contentDescription = null, modifier = Modifier.padding(end = Space.s))
                 Text("Move money")
@@ -321,6 +335,34 @@ private fun CreditOverspent(l: BudgetLine) {
     }
 }
 
+/**
+ * A month its rule assigns, in place of the field that would: the rule, said shortly, and that money is
+ * not moved in or out of it by hand. The rule is changed on the desktop, not here.
+ */
+@Composable
+private fun Ruled(l: BudgetLine) {
+    val c = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(containerColor = c.surfaceContainerHigh),
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(Space.l), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Glyphs.Rule, contentDescription = null, tint = c.primary, modifier = Modifier.padding(end = Space.m))
+            Column {
+                Text(rulesLine(l), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Its amount comes from the income it matches each month, so it isn't assigned or moved by hand. Change the rule on the desktop.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** What a ruled month's sheet says in place of its field: "Assigned by rule: 10% of income matching …". */
+fun rulesLine(l: BudgetLine): String = if (l.rule.isBlank()) "Assigned by rule" else "Assigned by rule: ${l.rule}"
+
 /** A label and its figure, on one line. */
 @Composable
 private fun Figure(label: String, amount: Long, color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface) {
@@ -355,6 +397,7 @@ private fun MoveMoney(ledger: Ledger, l: BudgetLine, onBack: () -> Unit) {
             ready = Pick.Category(null),
             skip = l.categoryId,
             cards = true,
+            moving = true,
             onPick = { p ->
                 if (p is Pick.Category && amount != null && amount > 0) {
                     book.moveMoney(l.categoryId, p.id, amount)
@@ -381,6 +424,7 @@ private fun Cover(ledger: Ledger, l: BudgetLine, onDone: () -> Unit) {
             skip = l.categoryId,
             onlyWithMoney = true,
             cards = true,
+            moving = true,
             onPick = { p ->
                 if (p is Pick.Category) {
                     book.cover(l.categoryId, p.id)
