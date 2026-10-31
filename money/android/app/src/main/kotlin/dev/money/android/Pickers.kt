@@ -52,7 +52,8 @@ sealed class Pick {
  * group's, `skip` left out; "No category" at the end when `none`; and the accounts a transfer could
  * go to, other than `transferFrom`, when it is given. The cards' payment categories are choices only
  * where money is moved (`cards`): a transaction is not for one — spending on a card moves money to
- * it, and paying the card is a transfer.
+ * it, and paying the card is a transfer. Where money is moved to or from what is chosen (`moving`), a
+ * category whose month follows its rule is not offered: the domain refuses it ([assignable]).
  */
 @Composable
 fun CategoryPicker(
@@ -65,6 +66,7 @@ fun CategoryPicker(
     transferFrom: Id? = null,
     onlyWithMoney: Boolean = false,
     cards: Boolean = false,
+    moving: Boolean = false,
 ) {
     var needle by remember { mutableStateOf("") }
     val q = needle.trim().lowercase()
@@ -89,7 +91,7 @@ fun CategoryPicker(
                     Option("Ready to Assign", ledger.summary?.readyToAssign) { onPick(ready) }
                 }
             }
-            for ((g, lines) in choosable(ledger, cards)) {
+            for ((g, lines) in choosable(ledger, cards, moving)) {
                 val ls = lines.filter { it.categoryId != skip && shown(it.name) && (!onlyWithMoney || it.available > 0) }
                 if (ls.isEmpty()) continue
                 item(key = "g" + g.id.hex) { Label(g.name) }
@@ -118,9 +120,14 @@ fun CategoryPicker(
     }
 }
 
-/** The groups and categories a picker offers: the budget's, the cards' payment categories only with `cards`. */
-fun choosable(ledger: Ledger, cards: Boolean): List<Pair<uniffi.money_domain.GroupLine, List<uniffi.money_domain.BudgetLine>>> =
-    ledger.byGroup().map { (g, ls) -> g to ls.filter { cards || !Ledger.isPayment(it) } }.filter { it.second.isNotEmpty() }
+/**
+ * The groups and categories a picker offers: the budget's, the cards' payment categories only with
+ * `cards`, and where money is `moving`, only those whose month is assigned by hand.
+ */
+fun choosable(ledger: Ledger, cards: Boolean, moving: Boolean = false): List<Pair<uniffi.money_domain.GroupLine, List<uniffi.money_domain.BudgetLine>>> =
+    ledger.byGroup()
+        .map { (g, ls) -> g to ls.filter { (cards || !Ledger.isPayment(it)) && (!moving || assignable(it)) } }
+        .filter { it.second.isNotEmpty() }
 
 @Composable
 private fun Label(text: String) {
