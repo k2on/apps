@@ -74,7 +74,7 @@ public struct AddTransaction: Equatable {
     public var cleared: Bool
     public var transferTo: Id?
 
-    public init(accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Bool, transferTo: Id? = nil) { self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.transferTo = transferTo; }
+    public init(accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Bool, transferTo: Id?) { self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.transferTo = transferTo; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -392,7 +392,7 @@ public struct Categorize: Equatable {
     public var ids: [Id]
     public var categoryId: Id?
 
-    public init(ids: [Id], categoryId: Id? = nil) { self.ids = ids; self.categoryId = categoryId; }
+    public init(ids: [Id], categoryId: Id?) { self.ids = ids; self.categoryId = categoryId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -465,7 +465,7 @@ public struct DeleteCategory: Equatable {
     public var id: Id
     public var moveTo: Id?
 
-    public init(id: Id, moveTo: Id? = nil) { self.id = id; self.moveTo = moveTo; }
+    public init(id: Id, moveTo: Id?) { self.id = id; self.moveTo = moveTo; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -480,7 +480,7 @@ public struct DeleteGroup: Equatable {
     public var id: Id
     public var moveTo: Id?
 
-    public init(id: Id, moveTo: Id? = nil) { self.id = id; self.moveTo = moveTo; }
+    public init(id: Id, moveTo: Id?) { self.id = id; self.moveTo = moveTo; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -690,7 +690,7 @@ public struct MoveCategory: Equatable {
     public var groupId: Id
     public var before: Id?
 
-    public init(id: Id, groupId: Id, before: Id? = nil) { self.id = id; self.groupId = groupId; self.before = before; }
+    public init(id: Id, groupId: Id, before: Id?) { self.id = id; self.groupId = groupId; self.before = before; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -705,7 +705,7 @@ public struct MoveGroup: Equatable {
     public var id: Id
     public var before: Id?
 
-    public init(id: Id, before: Id? = nil) { self.id = id; self.before = before; }
+    public init(id: Id, before: Id?) { self.id = id; self.before = before; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -795,7 +795,7 @@ public struct Reconcile: Equatable {
 public struct Register: Equatable {
     public var accountId: Id?
 
-    public init(accountId: Id? = nil) { self.accountId = accountId; }
+    public init(accountId: Id?) { self.accountId = accountId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]

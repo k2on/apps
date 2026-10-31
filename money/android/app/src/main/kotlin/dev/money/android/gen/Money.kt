@@ -63,7 +63,7 @@ data class AddGroup(val name: String) {
 }
 
 /** The record `AddTransaction`. */
-data class AddTransaction(val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Boolean, val transferTo: Id? = null) {
+data class AddTransaction(val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Boolean, val transferTo: Id?) {
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"transfer_to\":" + J.wopt(transferTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -244,7 +244,7 @@ fun BudgetLine.json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) +
 fun BudgetLine.Companion.of(j: Any?): BudgetLine = (j as JSONObject).let { o -> BudgetLine(Id(J.text(o.opt("category_id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("group_pos")), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("carried")), J.int(o.opt("assigned_last_month")), J.int(o.opt("spent_last_month")), J.int(o.opt("average_spent"))) }
 
 /** The record `Categorize`. */
-data class Categorize(val ids: List<Id>, val categoryId: Id? = null) {
+data class Categorize(val ids: List<Id>, val categoryId: Id?) {
     fun json(): String = "{" + "\"ids\":" + J.wlist(ids) { v0 -> J.q(v0.hex) } + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -288,7 +288,7 @@ data class CloseAccount(val id: Id, val closed: Boolean) {
 }
 
 /** The record `DeleteCategory`. */
-data class DeleteCategory(val id: Id, val moveTo: Id? = null) {
+data class DeleteCategory(val id: Id, val moveTo: Id?) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"move_to\":" + J.wopt(moveTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -297,7 +297,7 @@ data class DeleteCategory(val id: Id, val moveTo: Id? = null) {
 }
 
 /** The record `DeleteGroup`. */
-data class DeleteGroup(val id: Id, val moveTo: Id? = null) {
+data class DeleteGroup(val id: Id, val moveTo: Id?) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"move_to\":" + J.wopt(moveTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -406,7 +406,7 @@ data class Month(val month: String) {
 }
 
 /** The record `MoveCategory`. */
-data class MoveCategory(val id: Id, val groupId: Id, val before: Id? = null) {
+data class MoveCategory(val id: Id, val groupId: Id, val before: Id?) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -415,7 +415,7 @@ data class MoveCategory(val id: Id, val groupId: Id, val before: Id? = null) {
 }
 
 /** The record `MoveGroup`. */
-data class MoveGroup(val id: Id, val before: Id? = null) {
+data class MoveGroup(val id: Id, val before: Id?) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
@@ -465,7 +465,7 @@ data class Reconcile(val accountId: Id, val balance: Long, val date: String) {
 }
 
 /** The record `Register`. */
-data class Register(val accountId: Id? = null) {
+data class Register(val accountId: Id?) {
     fun json(): String = "{" + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
