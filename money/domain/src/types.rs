@@ -222,6 +222,11 @@ pub struct EditTransaction {
     #[ark(trim, len = "0..=400")]
     pub memo: String,
     pub amount: i64,
+    /// Made a transfer to (or from) this account: paired with a matching
+    /// transaction already there, or given its other half there. None
+    /// leaves it as it is — a transfer stays one, to the same account.
+    #[serde(default)]
+    pub transfer_to: Option<Id<Account>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -396,6 +401,16 @@ pub struct BudgetLine {
     pub spent_last_month: i64,
     /// The average a month spent from it over the three before this one.
     pub average_spent: i64,
+    /// The card it is the payment category of, when it is one.
+    pub card: Option<Id<Account>>,
+    /// What that card owes at the end of the month; nothing for any other.
+    pub debt: i64,
+    /// What it lacks: of a card's debt, what its payment category does not
+    /// cover; of any other's target, what the month has not given it.
+    pub underfunded: i64,
+    /// Card spending this month beyond what it had (positive): new debt,
+    /// which the next month's ready to assign does not pay for.
+    pub credit_overspent: i64,
 }
 
 /// The month as a whole: what is left to assign, and its totals.

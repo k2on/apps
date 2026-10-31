@@ -101,6 +101,22 @@ fn script(b: &mut Book) -> Vec<Step> {
             )
             .unwrap();
         }),
+        // A card that comes with debt, and a payment typed as spending
+        // made a transfer to the card.
+        Box::new(|b| {
+            b.account("Amex", "credit", -20_000);
+        }),
+        Box::new(move |b| {
+            let t = b.register(Some(checking)).into_iter().find(|t| t.amount == -1_000).unwrap();
+            let e = EditTransaction {
+                id: t.id,
+                date: t.date,
+                amount: t.amount,
+                transfer_to: Some(card),
+                ..EditTransaction::default()
+            };
+            b.run("edit_transaction", &e).unwrap();
+        }),
         Box::new(move |b| {
             let ids = b.register(Some(card)).iter().filter(|t| t.transfer).map(|t| t.id).collect();
             b.run("delete_transactions", &Txns { ids }).unwrap();

@@ -995,7 +995,7 @@ public struct LookDue: Equatable {
     public var rows: [Look]
     public var nextMs: Int64?
 
-    public init(rows: [Look], nextMs: Int64?) { self.rows = rows; self.nextMs = nextMs; }
+    public init(rows: [Look], nextMs: Int64? = nil) { self.rows = rows; self.nextMs = nextMs; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1644,7 +1644,7 @@ public struct Role: Equatable {
 public struct Scrub: Equatable {
     public var atMs: Int64?
 
-    public init(atMs: Int64?) { self.atMs = atMs; }
+    public init(atMs: Int64? = nil) { self.atMs = atMs; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]

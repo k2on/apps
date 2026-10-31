@@ -62,7 +62,13 @@ fn the_household_is_seeded() {
     assert!(app.peer.inbox.rows.iter().all(|t| t.date.as_str() >= "2026-10-22"));
     // The budget's figures are the domain's: groups and categories in order.
     let groups: Vec<&str> = app.peer.groups.rows.iter().map(|g| g.name.as_str()).collect();
-    assert_eq!(groups, ["Bills", "Everyday", "Quality of Life", "Savings Goals"]);
+    assert_eq!(groups, ["Credit Card Payments", "Bills", "Everyday", "Quality of Life", "Savings Goals"]);
+    // The card's payment category holds what its categories covered, less
+    // what was paid; the last days, not filed yet, are debt not covered.
+    let pay = category(&app, "Chase Sapphire");
+    assert_eq!((pay.card, pay.debt), (Some(card.id), -card.balance));
+    assert!(pay.available > 0 && pay.underfunded > 0, "{pay:?}");
+    assert_eq!(pay.available + pay.underfunded, pay.debt);
     let rent = category(&app, "Rent");
     assert_eq!((rent.assigned, rent.activity, rent.available), (185_000, -185_000, 0));
     // Last month's statement was paid, and the bank's payment matched the
@@ -176,6 +182,39 @@ fn a_transfer_is_chosen_in_the_category_column() {
     let _ = app.update(Message::Form(Field::Outflow, "100".into()));
     let _ = app.update(Message::SaveTxn);
     assert_eq!(account(&app, "Savings").balance, savings.balance + 10_000);
+}
+
+/// A transaction already there is made a transfer from its edit form: a
+/// payment typed as spending, made a transfer to the card, is the card's
+/// payment category's spending; the dropdown offers the accounts for it,
+/// and not the cards' payments, which are no transaction's category.
+#[test]
+fn an_existing_transaction_is_made_a_transfer() {
+    let mut app = app();
+    let (checking, card) = (account(&app, "Checking").id, account(&app, "Chase Sapphire").clone());
+    let pay = category(&app, "Chase Sapphire");
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let _ = app.update(Message::AddTxn);
+    let _ = app.update(Message::Form(Field::Payee, "Chase".into()));
+    let _ = app.update(Message::Form(Field::Outflow, "50".into()));
+    let _ = app.update(Message::Form(Field::Memo, "card payment".into()));
+    let _ = app.update(Message::SaveTxn);
+    let t = app.peer.register.rows.iter().find(|t| t.memo == "card payment").unwrap().clone();
+    assert!(!t.transfer);
+    let _ = app.update(Message::EditTxn(t.id));
+    let _ = app.update(Message::ChooseCategory);
+    let groups = app.drop_groups();
+    let headings: Vec<&str> = groups.iter().map(|g| g.heading.as_str()).collect();
+    assert_eq!(headings.first(), Some(&"Transfer to"));
+    assert!(!headings.contains(&"Credit Card Payments"), "{headings:?}");
+    let _ = app.update(Message::Chose(Choice::Transfer(card.id)));
+    let _ = app.update(Message::SaveTxn);
+    assert!(app.form.is_none(), "saved: {}", app.note);
+    let id = t.id;
+    let t = app.peer.register.rows.iter().find(|t| t.id == id).unwrap();
+    assert_eq!((t.transfer, t.payee.as_str()), (true, "Transfer : Chase Sapphire"));
+    assert_eq!(account(&app, "Chase Sapphire").balance, card.balance + 5_000);
+    assert_eq!(category(&app, "Chase Sapphire").activity, pay.activity - 5_000);
 }
 
 #[test]
@@ -361,23 +400,45 @@ fn the_cursor_walks_categories_not_groups() {
     assert_eq!(cursor(&app), *first.last().unwrap());
 }
 
+/// The cursor on the first category of the household's own groups: past
+/// the cards' payments, which come first, as YNAB draws them.
+fn first_own(app: &mut App) {
+    assert_eq!(app.shown()[0].group.id, money_domain::cards::card_group());
+    let _ = app.act(Action::Move(Motion::First));
+    let _ = app.act(Action::Move(Motion::Down(group_rows(app, 0).len())));
+}
+
 /// `J` carries the cursor's category down past the next, then off its
 /// group's end into the next group's top; `K` brings it back.
 #[test]
 fn shift_j_and_k_move_a_category() {
     let mut app = app();
-    let first = group_rows(&app, 0);
-    let _ = app.act(Action::Move(Motion::First));
+    let first = group_rows(&app, 1);
+    first_own(&mut app);
     let moved = cursor(&app);
     let _ = app.act(Action::Key('J'));
-    assert_eq!(group_rows(&app, 0)[1], moved, "past the next one");
+    assert_eq!(group_rows(&app, 1)[1], moved, "past the next one");
     assert_eq!(cursor(&app), moved, "the cursor goes with it");
     for _ in 1..first.len() {
         let _ = app.act(Action::Key('J'));
     }
-    assert_eq!(group_rows(&app, 1)[0], moved, "into the next group's top");
+    assert_eq!(group_rows(&app, 2)[0], moved, "into the next group's top");
     let _ = app.act(Action::Key('K'));
-    assert_eq!(group_rows(&app, 0).last(), Some(&moved), "back to the end of its own");
+    assert_eq!(group_rows(&app, 1).last(), Some(&moved), "back to the end of its own");
+}
+
+/// The cards' payments are the cards': `K` off the top of the household's
+/// first group, into the cards' group, is refused, and said.
+#[test]
+fn the_cards_payments_stay_the_cards() {
+    let mut app = app();
+    assert_eq!(group_rows(&app, 0), ["Chase Sapphire"]);
+    first_own(&mut app);
+    let rent = cursor(&app);
+    let _ = app.act(Action::Key('K'));
+    assert_eq!(group_rows(&app, 0), ["Chase Sapphire"]);
+    assert_eq!(group_rows(&app, 1)[0], rent);
+    assert!(app.note.contains("stays with the cards"), "{}", app.note);
 }
 
 /// `vig` selects the cursor's group's categories; `J` then moves the
@@ -403,8 +464,8 @@ fn a_whole_group_selected_moves_the_group() {
 #[test]
 fn bound_sequences_make_and_rename() {
     let mut app = app();
-    let _ = app.act(Action::Move(Motion::First));
-    let group = app.shown()[0].group.id;
+    first_own(&mut app);
+    let group = app.shown()[1].group.id;
     let _ = app.act(Action::Bound("cc"));
     assert_eq!(app.new_category.as_ref().map(|(g, _)| *g), Some(group));
     let _ = app.act(Action::Bound("cg"));
@@ -417,7 +478,7 @@ fn bound_sequences_make_and_rename() {
     let _ = app.act(Action::Bound("rg"));
     let _ = app.update(Message::RenameTyped("Every Month".into()));
     let _ = app.update(Message::RenameDone);
-    assert_eq!(app.shown()[0].group.name, "Every Month");
+    assert_eq!(app.shown()[1].group.name, "Every Month");
 }
 
 /// The budget drawn to `$MONEY_SNAPSHOT.png`, light and dark, to be looked
@@ -452,7 +513,14 @@ fn the_budget_drawn() {
     let _ = above.register_act(Action::Move(Motion::To(14)));
     let _ = above.register_act(Action::Key('c'));
     let _ = above.update(Message::DropTyped("din".into()));
+    // The cards' group on top, its payment category in the inspector.
+    let mut cards = app();
+    let _ = cards.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let pay = category(&cards, "Chase Sapphire").category_id;
+    let _ = cards.update(Message::Select(Some(pay)));
     for (app, scene, theme, side) in [
+        (&cards, "cards", iced::Theme::Dark, "dark"),
+        (&cards, "cards", iced::Theme::Light, "light"),
         (&above, "above", iced::Theme::Dark, "dark"),
         (&form, "form", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Dark, "dark"),

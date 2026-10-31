@@ -12,6 +12,10 @@
 //! - **Overspending is paid for by next month.** A category that ends a
 //!   month below nothing starts the next at nothing, and what it was short
 //!   comes out of that month's ready to assign.
+//! - **A card is money owed, not money had** ([`crate::cards`]): what a
+//!   category covers of spending on a card moves to the card's payment
+//!   category, and what it cannot is debt — overspending the next month's
+//!   ready to assign does not pay for.
 //!
 //! Nothing here is stored but what people said — the assignments and the
 //! transactions. Every figure is worked out by the views from them, so a
@@ -22,6 +26,7 @@ use std::collections::BTreeMap;
 
 use ark::prelude::*;
 
+use crate::cards::Cards;
 use crate::dates::{add_months, month_end, month_of};
 use crate::schema::*;
 use crate::types::*;
@@ -29,7 +34,7 @@ use crate::types::*;
 /// A plan over money's tables.
 pub type Plan<T> = ark::plan::Plan<Money, T>;
 
-fn fixed<T>(what: &str) -> Id<T> {
+pub(crate) fn fixed<T>(what: &str) -> Id<T> {
     let h = ark::hash::sha256(&[b"money ", what.as_bytes()]);
     Id::new(h[..16].try_into().unwrap())
 }
@@ -144,17 +149,24 @@ pub fn move_money(ctx: &Ctx, db: &mut Db<Money>, input: MoveMoney) -> Result<(),
 }
 
 /// A month assigned at once: last month's amounts, or what each target
-/// still lacks, or nothing.
+/// still lacks, or nothing. "Underfunded" gives a card's payment category
+/// what it lacks of the card's debt — after every other category, since
+/// what they cover of their card spending is money the payment category
+/// then already has.
 #[mutator("budget.auto_assign")]
 pub fn auto_assign(ctx: &Ctx, db: &mut Db<Money>, input: AutoAssign) -> Result<(), Refusal> {
     let last = add_months(&input.month, -1);
-    for c in db.category.by(Category::POS).whole().all() {
-        if is_income(db, c.id) || (!input.only.is_empty() && !input.only.contains(&c.id)) {
-            continue;
-        }
+    let all = db.category.by(Category::POS).whole().all();
+    let (payments, others): (Vec<Category>, Vec<Category>) = all
+        .into_iter()
+        .filter(|c| !is_income(db, c.id) && (input.only.is_empty() || input.only.contains(&c.id)))
+        .partition(|c| crate::cards::is_payment(db, c.id));
+    for c in others.into_iter().chain(payments) {
+        let had = assigned_in(db, &input.month, c.id);
         let amount = match input.how {
             Auto::LastMonth => assigned_in(db, &last, c.id),
-            Auto::Underfunded => assigned_in(db, &input.month, c.id).max(c.target),
+            Auto::Underfunded if crate::cards::is_payment(db, c.id) => had + line(db, &c, &input.month).underfunded,
+            Auto::Underfunded => had.max(c.target),
             Auto::Reset => 0,
         };
         set_assigned(ctx, db, &input.month, c.id, amount)?;
@@ -164,53 +176,152 @@ pub fn auto_assign(ctx: &Ctx, db: &mut Db<Money>, input: AutoAssign) -> Result<(
 
 // * The arithmetic
 
-/// One category's history, month by month: what each assigned it and what
-/// each spent from it (activity, spending negative).
+/// What one month did to one category: what it assigned, what was spent
+/// from it (activity, spending negative), and of that, what was on each of
+/// the budget's cards ([`crate::cards`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Moves {
+    pub assigned: i64,
+    pub activity: i64,
+    pub cards: BTreeMap<Id<Account>, i64>,
+}
+
+/// One category's history, month by month.
 #[derive(Default)]
 pub struct History {
-    pub months: BTreeMap<String, (i64, i64)>,
+    pub months: BTreeMap<String, Moves>,
+}
+
+/// One month of a category, walked: what it had, and how what it was short
+/// (if it was) splits between cash and a card.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Step {
+    pub carried: i64,
+    pub moves: Moves,
+    pub available: i64,
+    /// Cash spent beyond what it had (positive): the next month's ready to
+    /// assign pays for it.
+    pub cash_overspent: i64,
+    /// Card spending beyond what it had (positive): new debt, which the
+    /// card's payment category shows as not covered.
+    pub credit_overspent: i64,
+    /// Per card, what the month's spending on it moved to its payment
+    /// category (a refund moving it back is negative).
+    pub covers: BTreeMap<Id<Account>, i64>,
+}
+
+impl Step {
+    /// A month, from what it carried in and what it did.
+    pub fn of(carried: i64, moves: &Moves) -> Step {
+        let on_cards: i64 = moves.cards.values().sum();
+        let available = carried + moves.assigned + moves.activity;
+        // What it had before its card spending: cash overspending is what
+        // that left it short, and any more is the cards'.
+        let before_cards = available - on_cards;
+        let (cash, credit) = match available < 0 {
+            true => {
+                let cash = (-available).min((-before_cards).max(0));
+                (cash, -available - cash)
+            }
+            false => (0, 0),
+        };
+        // A refunding card moves what it brought back; the spending cards
+        // move what was covered, the uncovered part laid on them in turn.
+        let mut uncovered = credit;
+        let mut covers = BTreeMap::new();
+        for (card, net) in &moves.cards {
+            let short = match *net < 0 {
+                true => uncovered.min(-net),
+                false => 0,
+            };
+            uncovered -= short;
+            covers.insert(*card, -net - short);
+        }
+        Step {
+            carried,
+            moves: moves.clone(),
+            available,
+            cash_overspent: cash,
+            credit_overspent: credit,
+            covers,
+        }
+    }
 }
 
 impl History {
-    /// Read from its assignments and its transactions.
+    /// Read from its assignments and its transactions: a payment
+    /// category's from its card's too ([`crate::cards::Cards::payment_history`]).
     pub fn of(db: &Db<Money>, id: Id<Category>) -> History {
-        let mut months: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+        History::with(db, id, &Cards::of(db))
+    }
+
+    /// [`History::of`], with the cards already read.
+    pub fn with(db: &Db<Money>, id: Id<Category>, cards: &Cards) -> History {
+        match cards.card_for(id) {
+            Some(card) => cards.payment_history(db, id, card),
+            None => History::spending(db, id, cards),
+        }
+    }
+
+    /// A category's own history: its assignments, and its transactions,
+    /// with what was spent on a card kept apart.
+    pub fn spending(db: &Db<Money>, id: Id<Category>, cards: &Cards) -> History {
+        let mut h = History::default();
         for a in db.assigned.by(Assigned::CATEGORY_ID_MONTH).from(id).all() {
-            months.entry(a.month).or_default().0 += a.amount;
+            h.month(&a.month).assigned += a.amount;
         }
         for t in db.txn.by(Txn::CATEGORY_ID_DATE).from(Some(id)).all() {
-            months.entry(month_of(&t.date)).or_default().1 += t.amount;
+            let m = h.month(&month_of(&t.date));
+            m.activity += t.amount;
+            if cards.is_card(t.account_id) {
+                *m.cards.entry(t.account_id).or_default() += t.amount;
+            }
         }
-        History { months }
+        h
+    }
+
+    /// A month's moves, to add to.
+    pub fn month(&mut self, month: &str) -> &mut Moves {
+        self.months.entry(month.to_string()).or_default()
+    }
+
+    /// Every month from its first through `upto` (or its last), in order.
+    pub fn walk(&self, upto: Option<&str>, mut f: impl FnMut(&str, &Step)) {
+        let Some(first) = self.months.keys().next().cloned() else { return };
+        let last = match upto {
+            Some(m) => m.to_string(),
+            None => self.months.keys().next_back().cloned().unwrap_or_default(),
+        };
+        let none = Moves::default();
+        let mut carry = 0;
+        let mut k = first;
+        while k <= last {
+            let step = Step::of(carry, self.months.get(&k).unwrap_or(&none));
+            f(&k, &step);
+            carry = step.available.max(0);
+            k = add_months(&k, 1);
+        }
     }
 
     /// The month as this category stood in it.
     pub fn at(&self, month: &str) -> Standing {
         let mut s = Standing::default();
-        let Some(first) = self.months.keys().next().cloned() else {
-            return s;
-        };
-        let mut carry = 0;
-        let mut k = first;
-        while k.as_str() < month {
-            let (a, act) = self.months.get(&k).copied().unwrap_or_default();
-            let available = carry + a + act;
-            if available < 0 {
-                s.overspent_before += available;
+        let (last, three) = (add_months(month, -1), add_months(month, -3));
+        self.walk(Some(month), |k, step| {
+            if k == month {
+                (s.carried, s.assigned, s.activity) = (step.carried, step.moves.assigned, step.moves.activity);
+                (s.available, s.credit_overspent) = (step.available, step.credit_overspent);
+                return;
             }
-            if k == add_months(month, -1) {
-                s.overspent_last_month = available.min(0);
-                (s.assigned_last_month, s.spent_last_month) = (a, act);
+            s.overspent_before -= step.cash_overspent;
+            if k == last {
+                s.overspent_last_month = -step.cash_overspent;
+                (s.assigned_last_month, s.spent_last_month) = (step.moves.assigned, step.moves.activity);
             }
-            if k >= add_months(month, -3) {
-                s.spent_last_three += act;
+            if k >= three.as_str() {
+                s.spent_last_three += step.moves.activity;
             }
-            carry = available.max(0);
-            k = add_months(&k, 1);
-        }
-        let (a, act) = self.months.get(month).copied().unwrap_or_default();
-        (s.carried, s.assigned, s.activity) = (carry, a, act);
-        s.available = carry + a + act;
+        });
         s
     }
 }
@@ -222,9 +333,13 @@ pub struct Standing {
     pub assigned: i64,
     pub activity: i64,
     pub available: i64,
-    /// What it was overspent by, in every month before (negative).
+    /// What its cash overspending took from ready to assign, in every
+    /// month before (negative). Credit overspending took nothing.
     pub overspent_before: i64,
+    /// Of that, the month before's.
     pub overspent_last_month: i64,
+    /// This month's card spending it could not cover (positive): new debt.
+    pub credit_overspent: i64,
     pub assigned_last_month: i64,
     pub spent_last_month: i64,
     pub spent_last_three: i64,
@@ -232,8 +347,22 @@ pub struct Standing {
 
 /// A category's line in a month.
 pub fn line(db: &Db<Money>, c: &Category, month: &str) -> BudgetLine {
-    let s = History::of(db, c.id).at(month);
+    line_with(db, c, month, &Cards::of(db))
+}
+
+/// [`line`], with the cards already read.
+pub fn line_with(db: &Db<Money>, c: &Category, month: &str, cards: &Cards) -> BudgetLine {
+    let s = History::with(db, c.id, cards).at(month);
     let g = db.group.get(c.group_id).unwrap_or_default();
+    let card = cards.card_for(c.id);
+    let debt = card.map_or(0, |k| crate::cards::debt(db, k, month));
+    // A payment category lacks what the card owes beyond what it has; any
+    // other, what its target wants beyond what the month gave it.
+    let underfunded = match card {
+        Some(_) => (debt - s.available).max(0),
+        None if c.target > 0 => (c.target - s.assigned).max(0),
+        None => 0,
+    };
     BudgetLine {
         category_id: c.id,
         group_id: c.group_id,
@@ -250,6 +379,10 @@ pub fn line(db: &Db<Money>, c: &Category, month: &str) -> BudgetLine {
         assigned_last_month: s.assigned_last_month,
         spent_last_month: s.spent_last_month,
         average_spent: s.spent_last_three / 3,
+        card,
+        debt,
+        underfunded,
+        credit_overspent: s.credit_overspent,
     }
 }
 
@@ -278,19 +411,23 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
             out.income += t.amount;
         }
     }
+    let cards = Cards::of(db);
     let mut overspent_before = 0;
     for c in categories {
         if c.id == rta || is_income(db, c.id) {
             continue;
         }
-        let s = History::of(db, c.id).at(month);
+        let s = History::with(db, c.id, &cards).at(month);
         overspent_before += s.overspent_before;
         out.overspent_last_month += s.overspent_last_month;
         out.assigned += s.assigned;
         out.activity += s.activity;
         out.available += s.available;
         out.overspent += (s.available < 0) as i64;
-        out.underfunded += (s.assigned < c.target) as i64;
+        out.underfunded += match cards.card_for(c.id) {
+            Some(card) => crate::cards::debt(db, card, month) > s.available,
+            None => s.assigned < c.target,
+        } as i64;
     }
     out.ready_to_assign = income_through - assigned_through + overspent_before;
     out
@@ -328,12 +465,14 @@ pub fn summary(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<Summary>, Re
     Ok(scan::<Money, Category>().group(|_| 0i64, move |db, _, cats| summary_of(db, cats.cloned(), &month)))
 }
 
-/// What a month's spending went on, group by group, the most first.
+/// What a month's spending went on, group by group, the most first. Paying
+/// a card is not spending (what it bought was, from its own category), so
+/// the card payments' group is not here.
 #[view("budget.spending")]
 pub fn spending(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<SpendingLine>, Refusal> {
     let month = input.month;
     Ok(scan::<Money, Category>()
-        .filter_with(|db, c| !is_income(db, c.id))
+        .filter_with(|db, c| !is_income(db, c.id) && c.group_id != crate::cards::card_group())
         .group(
             |c| c.group_id,
             move |db, group, cats| {
@@ -368,8 +507,48 @@ mod tests {
 
     fn history(months: &[(&str, i64, i64)]) -> History {
         History {
-            months: months.iter().map(|(m, a, act)| (m.to_string(), (*a, *act))).collect(),
+            months: months
+                .iter()
+                .map(|(m, a, act)| {
+                    let moves = Moves {
+                        assigned: *a,
+                        activity: *act,
+                        ..Moves::default()
+                    };
+                    (m.to_string(), moves)
+                })
+                .collect(),
         }
+    }
+
+    /// Card spending a category cannot cover is the card's debt, not next
+    /// month's: its uncovered part moves nothing to the payment category,
+    /// and the next month's ready to assign is not taken for it.
+    #[test]
+    fn card_spending_moves_what_was_covered() {
+        let card: Id<Account> = Id::new([7; 16]);
+        let other: Id<Account> = Id::new([9; 16]);
+        let moves = |assigned, activity, cards: &[(Id<Account>, i64)]| Moves {
+            assigned,
+            activity,
+            cards: cards.iter().copied().collect(),
+        };
+        // $100 given, $30 cash and $120 on the card: $70 covered, $50 debt.
+        let s = Step::of(0, &moves(100, -150, &[(card, -120)]));
+        assert_eq!((s.available, s.cash_overspent, s.credit_overspent), (-50, 0, 50));
+        assert_eq!(s.covers[&card], 70);
+        // Cash first: $100 given, $130 cash and $20 on the card.
+        let s = Step::of(0, &moves(100, -150, &[(card, -20)]));
+        assert_eq!((s.cash_overspent, s.credit_overspent, s.covers[&card]), (30, 20, 0));
+        // A refund on one card moves money back from it; the other covers.
+        let s = Step::of(50, &moves(0, -10, &[(card, 15), (other, -25)]));
+        assert_eq!((s.available, s.covers[&card], s.covers[&other]), (40, -15, 25));
+        let h = History {
+            months: [("2026-09".to_string(), moves(0, -40, &[(card, -40)]))].into(),
+        };
+        let oct = h.at("2026-10");
+        assert_eq!((oct.available, oct.overspent_before, oct.overspent_last_month), (0, 0, 0));
+        assert_eq!(h.at("2026-09").credit_overspent, 40);
     }
 
     /// What is left carries; what is overspent starts the next month at

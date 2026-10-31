@@ -83,7 +83,14 @@ fn record(out: &mut String, n: &str, fields: &[(String, Type)], typed: bool) {
         for (f, t) in fields {
             let _ = writeln!(out, "    public var {}: {}", LANG.ident(f), ty(t));
         }
-        let ps: Vec<String> = fields.iter().map(|(f, t)| format!("{}: {}", LANG.ident(f), ty(t))).collect();
+        // Trailing optional fields default to nil, as a missing one reads
+        // (`super::optional_from`).
+        let from = super::optional_from(fields);
+        let ps: Vec<String> = fields
+            .iter()
+            .enumerate()
+            .map(|(i, (f, t))| format!("{}: {}{}", LANG.ident(f), ty(t), if i >= from { " = nil" } else { "" }))
+            .collect();
         let sets: String = fields.iter().map(|(f, _)| format!(" self.{0} = {0};", LANG.ident(f))).collect();
         let _ = writeln!(out, "\n    public init({}) {{{sets} }}\n", ps.join(", "));
     }

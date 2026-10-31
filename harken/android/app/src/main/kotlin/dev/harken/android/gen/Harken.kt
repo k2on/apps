@@ -565,7 +565,7 @@ data class LookClaim(val id: Id, val by: String) {
 }
 
 /** The record `LookDue`. */
-data class LookDue(val rows: List<Look>, val nextMs: Long?) {
+data class LookDue(val rows: List<Look>, val nextMs: Long? = null) {
     fun json(): String = "{" + "\"rows\":" + J.wlist(rows) { v0 -> v0.json() } + "," + "\"next_ms\":" + J.wopt(nextMs) { v0 -> v0.toString() } + "}"
 
     companion object {
@@ -936,7 +936,7 @@ data class Role(val user: String, val role: String) {
 }
 
 /** The record `Scrub`. */
-data class Scrub(val atMs: Long?) {
+data class Scrub(val atMs: Long? = null) {
     fun json(): String = "{" + "\"at_ms\":" + J.wopt(atMs) { v0 -> v0.toString() } + "}"
 
     companion object {

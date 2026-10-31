@@ -1,8 +1,9 @@
 //! money's domain in plain Rust (`docs/plan-v5.md` §1.16): a household's
 //! budget. The schema ([`schema`]), the types ([`types`]), days and months
 //! ([`dates`]); the accounts ([`accounts`]), the budget's shape
-//! ([`categories`]), the budget itself ([`budget`]), the transactions
-//! ([`transactions`]) and the banks, through Plaid ([`plaid`]) — one file
+//! ([`categories`]), the budget itself ([`budget`]) and its credit cards
+//! ([`cards`]), the transactions ([`transactions`]) and transfers made of
+//! them ([`transfers`]), and the banks, through Plaid ([`plaid`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
 //! [`feed`]. [`domain`] registers every function by its name. Behind
 //! features: the demo's household (`seed`), and the rows the
@@ -22,6 +23,7 @@ use ark::prelude::scope;
 
 pub mod accounts;
 pub mod budget;
+pub mod cards;
 pub mod categories;
 pub mod dates;
 pub mod plaid;
@@ -29,6 +31,7 @@ pub mod schema;
 #[cfg(feature = "seed")]
 pub mod seed;
 pub mod transactions;
+pub mod transfers;
 pub mod types;
 
 #[cfg(feature = "ffi")]

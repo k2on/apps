@@ -1,10 +1,14 @@
 //! The budget's shape: groups, and the categories in them. Anybody in the
 //! household changes it; the budget's own group and its one category
-//! ([`crate::budget::ready_to_assign`]) are not anybody's to change.
+//! ([`crate::budget::ready_to_assign`]) are not anybody's to change, and
+//! the card payments' group and its categories ([`crate::cards`]) are the
+//! cards': hidden or put in order, but named, made and deleted as the
+//! cards are.
 
 use ark::prelude::*;
 
 use crate::budget::{ensure_setup, inflow, ready_to_assign};
+use crate::cards::card_group;
 use crate::schema::*;
 use crate::types::*;
 
@@ -16,11 +20,29 @@ fn group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, Refusal> {
     }
 }
 
+/// A group whose name and categories are people's: not the budget's own,
+/// nor the card payments' — those are the cards' (hidden or moved, yes).
+fn named_group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, Refusal> {
+    match group_of(db, id)? {
+        g if g.id == card_group() => Err(Refusal::new("the card payments' group is the cards': it changes as they do")),
+        g => Ok(g),
+    }
+}
+
 fn category_of(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
     match db.category.get(id) {
         Some(_) if id == ready_to_assign() => Err(Refusal::new("Ready to Assign is not to change")),
         Some(c) => Ok(c),
         None => Err(Refusal::new("no such category")),
+    }
+}
+
+/// A category people name and keep: not a card's payment category, which
+/// is named as its card is and goes when the card does.
+fn named_category_of(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
+    match category_of(db, id)? {
+        c if c.group_id == card_group() => Err(Refusal::new("a card's payment category is the card's: rename or close the card")),
+        c => Ok(c),
     }
 }
 
@@ -42,7 +64,7 @@ pub fn add_group(ctx: &Ctx, db: &mut Db<Money>, input: AddGroup) -> Result<(), R
 
 #[mutator("categories.rename_group")]
 pub fn rename_group(_: &Ctx, db: &mut Db<Money>, input: RenameGroup) -> Result<(), Refusal> {
-    let g = group_of(db, input.id)?;
+    let g = named_group_of(db, input.id)?;
     db.group.update(Group { name: input.name, ..g })
 }
 
@@ -55,7 +77,7 @@ pub fn hide_group(_: &Ctx, db: &mut Db<Money>, input: HideGroup) -> Result<(), R
 /// A group gone, each of its categories as [`delete_category`] does it.
 #[mutator("categories.delete_group")]
 pub fn delete_group(ctx: &Ctx, db: &mut Db<Money>, input: DeleteGroup) -> Result<(), Refusal> {
-    let g = group_of(db, input.id)?;
+    let g = named_group_of(db, input.id)?;
     if let Some(to) = input.move_to {
         if db.category.get(to).is_some_and(|c| c.group_id == g.id) {
             return Err(Refusal::new("move its money somewhere outside the group"));
@@ -70,7 +92,7 @@ pub fn delete_group(ctx: &Ctx, db: &mut Db<Money>, input: DeleteGroup) -> Result
 /// A category, at the end of its group.
 #[mutator("categories.add_category")]
 pub fn add_category(ctx: &Ctx, db: &mut Db<Money>, input: AddCategory) -> Result<(), Refusal> {
-    let g = group_of(db, input.group_id)?;
+    let g = named_group_of(db, input.group_id)?;
     let last = db.category.by(Category::POS).whole().last().map_or(0, |c| c.pos);
     db.category.insert(Category {
         id: ctx.new_id(),
@@ -85,7 +107,7 @@ pub fn add_category(ctx: &Ctx, db: &mut Db<Money>, input: AddCategory) -> Result
 
 #[mutator("categories.rename_category")]
 pub fn rename_category(_: &Ctx, db: &mut Db<Money>, input: RenameCategory) -> Result<(), Refusal> {
-    let c = category_of(db, input.id)?;
+    let c = named_category_of(db, input.id)?;
     db.category.update(Category { name: input.name, ..c })
 }
 
@@ -103,6 +125,11 @@ pub fn hide_category(_: &Ctx, db: &mut Db<Money>, input: HideCategory) -> Result
 pub fn move_category(_: &Ctx, db: &mut Db<Money>, input: MoveCategory) -> Result<(), Refusal> {
     let c = category_of(db, input.id)?;
     let g = group_of(db, input.group_id)?;
+    // The cards' payment categories are put in order among themselves,
+    // and nothing else is put among them.
+    if (c.group_id == card_group()) != (g.id == card_group()) {
+        return Err(Refusal::new("a card's payment category stays with the cards"));
+    }
     let mut order: Vec<Category> = db
         .category
         .by(Category::GROUP_ID_POS)
@@ -169,7 +196,7 @@ pub fn set_target(_: &Ctx, db: &mut Db<Money>, input: SetTarget) -> Result<(), R
 /// back to be assigned).
 #[mutator("categories.delete_category")]
 pub fn delete_category(ctx: &Ctx, db: &mut Db<Money>, input: DeleteCategory) -> Result<(), Refusal> {
-    let c = category_of(db, input.id)?;
+    let c = named_category_of(db, input.id)?;
     delete(ctx, db, c, input.move_to)
 }
 

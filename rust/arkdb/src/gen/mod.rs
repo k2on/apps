@@ -242,6 +242,14 @@ impl Lang {
     }
 }
 
+/// Where a record's trailing optional fields begin: those default to
+/// nothing in its constructor, so that an optional field added at a
+/// record's end (as serde reads a missing one) leaves the code that makes
+/// the record as it was.
+pub fn optional_from(fields: &[(String, Type)]) -> usize {
+    fields.len() - fields.iter().rev().take_while(|(_, t)| matches!(t, Type::Option(_))).count()
+}
+
 /// Every record and sum `t` names, by name; one name meaning two types is
 /// refused.
 fn named(t: &Type, into: &mut BTreeMap<String, Type>) {

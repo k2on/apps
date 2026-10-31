@@ -534,6 +534,27 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
         if !approve.is_empty() {
             s.run(ME, "approve", &Txns { ids: approve });
         }
+        // What the card bought beyond its categories' money is debt the
+        // household covers at the month's end, from the emergency fund —
+        // so the statement it pays next month is all set aside. This
+        // month's last days are not filed yet: their debt waits.
+        if !current {
+            let pay = crate::cards::payment_category(card);
+            let short = s
+                .ask::<BudgetLine>("month", &Month { month: month.clone() })
+                .into_iter()
+                .find(|l| l.category_id == pay)
+                .map_or(0, |l| l.underfunded);
+            if short > 0 {
+                let m = MoveMoney {
+                    month: month.clone(),
+                    from: Some(s.category("Emergency Fund")),
+                    to: Some(pay),
+                    amount: short,
+                };
+                s.run(ME, "move_money", &m);
+            }
+        }
     }
 
     let snapshot = Snapshot {

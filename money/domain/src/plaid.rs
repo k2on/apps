@@ -21,7 +21,10 @@
 //!   sees an account opens it here, under the bank's name for it or the
 //!   one the server was told, with the balance before the imported history
 //!   as its starting balance; one the server was told not to follow is
-//!   known and opens nothing.
+//!   known and opens nothing. Money leaving one account on the budget and
+//!   arriving in another — a card's payment, told of by both banks — is
+//!   joined into one transfer as its second half comes
+//!   ([`crate::transfers::join_imported`]).
 //!
 //! And **an ask** ([`sync`]): anybody in the household may ask the importer
 //! to ask the banks now, as a row it sees (`money/server`'s `importer.rs`).
@@ -32,7 +35,7 @@ use ark::prelude::*;
 use serde::Deserialize as De;
 
 use crate::accounts::STARTING_BALANCE;
-use crate::budget::{ensure_setup, ready_to_assign};
+use crate::budget::ensure_setup;
 use crate::dates::{add_days, day_of_ms, days_between};
 use crate::schema::*;
 use crate::transactions::remembered;
@@ -219,9 +222,7 @@ pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusa
             counts.locked += 1;
             continue;
         }
-        if let Some(pair) = prior.transfer_id {
-            db.txn.delete(pair)?;
-        }
+        crate::transfers::unlink(db, &prior)?;
         db.txn.remove(&prior)?;
         counts.deleted += 1;
     }
@@ -279,7 +280,7 @@ fn follow(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount) -> Res
     let on_budget = crate::accounts::on_budget_by_default(kind);
     let id: Id<Account> = ctx.new_id();
     let pos = db.account.by(Account::POS).whole().last().map_or(0, |a| a.pos) + 1;
-    db.account.insert(Account {
+    let account = Account {
         id,
         name,
         kind: kind.into(),
@@ -288,7 +289,9 @@ fn follow(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount) -> Res
         created_ms: ctx.now,
         user_id: ctx.user().into(),
         ..Account::default()
-    })?;
+    };
+    db.account.insert(account.clone())?;
+    crate::cards::keep(ctx, db, &account)?;
     db.linked.insert(Linked {
         plaid_account_id: a.plaid_account_id.clone(),
         bank: input.bank.clone(),
@@ -315,7 +318,7 @@ fn follow(ctx: &Ctx, db: &mut Db<Money>, input: &Import, a: &BankAccount) -> Res
         account_id: id,
         date,
         payee: STARTING_BALANCE.into(),
-        category_id: on_budget.then(ready_to_assign),
+        category_id: crate::cards::starting_category(&account, opening),
         memo: "Balance before the first import".into(),
         amount: opening,
         cleared: Cleared::Cleared,
@@ -342,13 +345,28 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
             return Ok(());
         }
         // Known: the bank's facts brought up to date, and what somebody
-        // chose — payee, category, memo — left alone.
+        // chose — payee, category, memo — left alone. A transfer's other
+        // half follows — unless it is another bank's, which says its own
+        // date; one that no longer agrees on the amount is let go.
+        let mut prior = prior;
         if let Some(pair) = prior.transfer_id.and_then(|p| db.txn.get(p)) {
-            db.txn.update(Txn {
-                amount: -u.amount,
-                date: u.date.clone(),
-                ..pair
-            })?;
+            match pair.imported_id {
+                None => db.txn.update(Txn {
+                    amount: -u.amount,
+                    date: u.date.clone(),
+                    ..pair
+                })?,
+                Some(_) if pair.amount == -u.amount => {}
+                Some(_) => {
+                    crate::transfers::unlink(db, &prior)?;
+                    prior = Txn {
+                        transfer_account: None,
+                        transfer_id: None,
+                        approved: false,
+                        ..prior
+                    };
+                }
+            }
         }
         db.txn.update(Txn {
             imported_id: Some(u.transaction_id.clone()),
@@ -391,7 +409,7 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
         true => remembered(db, &u.payee),
         false => None,
     };
-    db.txn.insert(Txn {
+    let t = Txn {
         id: ctx.new_id(),
         account_id: account.id,
         date: u.date.clone(),
@@ -405,7 +423,11 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
         created_ms: ctx.now,
         user_id: ctx.user().into(),
         ..Txn::default()
-    })?;
+    };
+    db.txn.insert(t.clone())?;
+    // The other half of a transfer — a card's payment, most often — that
+    // another account's bank already told of: one transfer now.
+    crate::transfers::join_imported(db, &t)?;
     counts.added += 1;
     Ok(())
 }

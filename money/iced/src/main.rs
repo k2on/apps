@@ -1618,10 +1618,13 @@ impl App {
         iced::widget::operation::focus(look::DROP_INPUT)
     }
 
-    /// What the dropdown offers for what is typed: transfers (for a new
-    /// transaction), Ready to Assign, each group's categories with what they
-    /// have, and no category at all — every one whose name has the typed
-    /// in it.
+    /// What the dropdown offers for what is typed: transfers (for the
+    /// form's transaction, new or not — an existing one made a transfer is
+    /// paired with its match in the other account), Ready to Assign, each
+    /// group's categories with what they have, and no category at all —
+    /// every one whose name has the typed in it. A card's payment category
+    /// is money moved to, not a transaction's category: paying a card is a
+    /// transfer to it, so the cards' group is offered only to move money.
     pub fn drop_groups(&self) -> Vec<arkui::command::Group<Message>> {
         let Some(d) = &self.dropdown else {
             return Vec::new();
@@ -1641,20 +1644,18 @@ impl App {
         };
         let mut groups = Vec::new();
         if let (Choosing::Form, Some(f)) = (&d.choosing, &self.form) {
-            if f.editing.is_none() {
-                let transfers = self
-                    .peer
-                    .accounts
-                    .rows
-                    .iter()
-                    .filter(|a| !a.closed && Some(a.id) != f.account && has(&a.name))
-                    .map(|a| item(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)))
-                    .collect();
-                groups.push(arkui::command::Group {
-                    heading: "Transfer to".into(),
-                    items: transfers,
-                });
-            }
+            let transfers = self
+                .peer
+                .accounts
+                .rows
+                .iter()
+                .filter(|a| !a.closed && Some(a.id) != f.account && has(&a.name))
+                .map(|a| item(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)))
+                .collect();
+            groups.push(arkui::command::Group {
+                heading: "Transfer to".into(),
+                items: transfers,
+            });
         }
         if has("Ready to Assign") {
             let rta = self.peer.summary().ready_to_assign;
@@ -1667,7 +1668,9 @@ impl App {
                 )],
             });
         }
-        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden) {
+        let moving = matches!(d.choosing, Choosing::Move { .. });
+        let cards = money_domain::cards::card_group();
+        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden && (moving || g.id != cards)) {
             let items = self
                 .peer
                 .lines
@@ -1795,6 +1798,7 @@ impl App {
                     category_id: f.category,
                     memo: f.memo,
                     amount,
+                    transfer_to: f.transfer_to,
                 };
                 self.author("save the transaction", "edit_transaction", &e)
             }

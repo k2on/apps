@@ -14,7 +14,7 @@ pub const ADJUSTMENT: &str = "Reconciliation Balance Adjustment";
 
 /// A category a transaction in `account` may be for: on budget, any that
 /// is (or none yet); off budget, none — it is only tracked.
-fn category_for(db: &Db<Money>, account: &Account, category: Option<Id<Category>>) -> Result<Option<Id<Category>>, Refusal> {
+pub(crate) fn category_for(db: &Db<Money>, account: &Account, category: Option<Id<Category>>) -> Result<Option<Id<Category>>, Refusal> {
     match category {
         None => Ok(None),
         Some(_) if !account.on_budget => Err(Refusal::new("an account off the budget is only tracked: its money is for no category")),
@@ -24,7 +24,7 @@ fn category_for(db: &Db<Money>, account: &Account, category: Option<Id<Category>
 }
 
 /// An account money may be written into.
-fn open_account(db: &Db<Money>, id: Id<Account>) -> Result<Account, Refusal> {
+pub(crate) fn open_account(db: &Db<Money>, id: Id<Account>) -> Result<Account, Refusal> {
     let a = account_of(db, id)?;
     if a.closed {
         return Err(Refusal::new(format!("{} is closed", a.name)));
@@ -107,14 +107,19 @@ fn txn_of(db: &Db<Money>, id: Id<Txn>) -> Result<Txn, Refusal> {
 
 /// A transaction as somebody corrected it; a transfer's other half follows
 /// its date, amount and memo. A reconciled one keeps its amount: the bank
-/// agreed to it.
+/// agreed to it. Said to be a transfer to another account (`transfer_to`),
+/// it becomes one, paired with the matching transaction there or given its
+/// other half there ([`crate::transfers::make`]).
 #[mutator("transactions.edit_transaction")]
-pub fn edit_transaction(_: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> Result<(), Refusal> {
+pub fn edit_transaction(ctx: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> Result<(), Refusal> {
     let t = txn_of(db, input.id)?;
     if t.cleared == Cleared::Reconciled && t.amount != input.amount {
         return Err(Refusal::new("reconciled: its amount is agreed with the bank"));
     }
     let account = account_of(db, t.account_id)?;
+    if let Some(to) = input.transfer_to.filter(|to| t.transfer_account != Some(*to)) {
+        return crate::transfers::make(ctx, db, t, &account, to, &input);
+    }
     let category_id = match t.transfer_account.and_then(|a| db.account.get(a)) {
         Some(other) if !(account.on_budget && !other.on_budget) => None,
         _ => category_for(db, &account, input.category_id)?,

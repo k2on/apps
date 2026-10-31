@@ -460,30 +460,44 @@ impl App {
     }
 
     /// A group's heading, a card the rows hang under: its name, and what
-    /// its categories were given and spent.
+    /// its categories were given and spent. The cards' group is the
+    /// cards' — its categories come and go with them, so it offers no new
+    /// one — and says what of their debt is not covered.
     fn group_row<'a>(&self, g: &GroupLine, lines: &[&BudgetLine]) -> Element<'a, Message> {
         let sum = |f: fn(&BudgetLine) -> i64| lines.iter().map(|l| f(l)).sum::<i64>();
         let collapsed = self.collapsed.contains(&g.id);
-        let name = row![
-            button(icon::faint(if collapsed { glyphs::CHEVRON } else { glyphs::DOWN }, false))
-                .on_press(Message::Collapse(g.id))
-                .padding(2)
-                .style(style::quiet),
-            self.name_or_box(Naming::Group(g.id), bold(g.name.clone(), 14).into()),
-            button(icon::faint(glyphs::PLUS, false))
-                .on_press(Message::NewCategory(g.id))
-                .padding(2)
-                .style(style::quiet),
-        ]
+        let cards = g.id == money_domain::cards::card_group();
+        let mut name = row![button(icon::faint(if collapsed { glyphs::CHEVRON } else { glyphs::DOWN }, false))
+            .on_press(Message::Collapse(g.id))
+            .padding(2)
+            .style(style::quiet),]
         .spacing(8)
         .align_y(Alignment::Center);
+        if cards {
+            name = name.push(bold(g.name.clone(), 14));
+        } else {
+            name = name.push(self.name_or_box(Naming::Group(g.id), bold(g.name.clone(), 14).into())).push(
+                button(icon::faint(glyphs::PLUS, false))
+                    .on_press(Message::NewCategory(g.id))
+                    .padding(2)
+                    .style(style::quiet),
+            );
+        }
         let total = |c: i64| right(bold(money(c), 14).into(), MONEY_COL);
+        let short = sum(|l| l.underfunded);
+        let note: Element<'a, Message> = match cards && short > 0 {
+            true => right(
+                text(format!("{} not covered", money(short))).size(12).style(Tone::Short.text()).into(),
+                GOAL_COL + PILL_COL,
+            ),
+            false => Space::new().width(Length::Fixed(GOAL_COL + PILL_COL)).into(),
+        };
         let card = container(
             row![
                 container(name).width(Length::Fill),
                 total(sum(|l| l.assigned)),
                 total(sum(|l| l.activity)),
-                Space::new().width(Length::Fixed(GOAL_COL + PILL_COL)),
+                note,
             ]
             .align_y(Alignment::Center),
         )
@@ -500,12 +514,12 @@ impl App {
     /// `style::on_row` — the pill too, which on the accent is the accent's
     /// text on a wash of it.
     fn category_row<'a>(&'a self, l: &'a BudgetLine, lit: bool) -> Element<'a, Message> {
-        let tone = Tone::of(l.available, l.target, l.assigned);
+        let tone = tone(l);
         let hidden = l.hidden;
         let label = text(l.name.clone()).size(14).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, hidden)),
         });
-        let name = row![tile(&l.name), self.name_or_box(Naming::Category(l.category_id), label.into())]
+        let name = row![tile(l), self.name_or_box(Naming::Category(l.category_id), label.into())]
             .spacing(12)
             .align_y(Alignment::Center);
         let assigned: Element<'a, Message> = match &self.assigning {
@@ -625,35 +639,50 @@ impl App {
     }
 
     fn inspect_category<'a>(&'a self, l: &'a BudgetLine) -> Column<'a, Message> {
-        let tone = Tone::of(l.available, l.target, l.assigned);
-        let head = container(
-            column![
-                row![
-                    column![bold(l.name.clone(), 16), dim(l.group.clone(), 11)].spacing(2).width(Length::Fill),
-                    glyph_button(glyphs::CLOSE, Message::Select(None)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    text("Available Balance").size(12).width(Length::Fill),
-                    container(text(money(l.available)).size(14))
-                        .padding([3, 10])
-                        .style(look::pill(tone, false)),
-                ]
-                .align_y(Alignment::Center),
-                rule::horizontal(1).style(style::hairline),
-                App::figure("Cash left over from last month", l.carried),
-                App::figure("Assigned this month", l.assigned),
-                App::figure("Cash spending", l.activity),
-                if l.available < 0 {
-                    action("Cover overspending", Message::MoveMoney)
-                } else {
-                    quiet("Move money", Message::MoveMoney)
-                },
+        let tone = tone(l);
+        let spent = match l.card {
+            Some(_) => "Spending covered, less payments",
+            None => "Cash spending",
+        };
+        let mut figures = column![
+            row![
+                column![bold(l.name.clone(), 16), dim(l.group.clone(), 11)].spacing(2).width(Length::Fill),
+                glyph_button(glyphs::CLOSE, Message::Select(None)),
             ]
-            .spacing(8),
-        )
-        .padding(14)
-        .style(look::card);
+            .align_y(Alignment::Center),
+            row![
+                text("Available Balance").size(12).width(Length::Fill),
+                container(text(money(l.available)).size(14))
+                    .padding([3, 10])
+                    .style(look::pill(tone, false)),
+            ]
+            .align_y(Alignment::Center),
+            rule::horizontal(1).style(style::hairline),
+            App::figure("Cash left over from last month", l.carried),
+            App::figure("Assigned this month", l.assigned),
+            App::figure(spent, l.activity),
+        ]
+        .spacing(8);
+        if l.credit_overspent > 0 {
+            // Debt now, not next month's money: amber, as YNAB has it.
+            figures = figures.push(
+                row![
+                    text("Spent on a card, not covered").size(12).width(Length::Fill),
+                    text(money(l.credit_overspent)).size(12).style(Tone::Short.text()),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+        figures = figures.push(if l.available < 0 {
+            action("Cover overspending", Message::MoveMoney)
+        } else {
+            quiet("Move money", Message::MoveMoney)
+        });
+        let head = container(figures).padding(14).style(look::card);
+
+        if l.card.is_some() {
+            return column![head, self.inspect_card(l)];
+        }
 
         let mut target = column![bold("Target", 14)].spacing(8);
         if l.target > 0 {
@@ -713,6 +742,46 @@ impl App {
         ]
         .spacing(16);
         column![head, target, auto, manage]
+    }
+
+    /// A card's payment category: what the card owes, what of it the
+    /// category does not cover, and the money to cover it. Its name is the
+    /// card's, and it goes when the card is closed: nothing to rename or
+    /// delete here.
+    fn inspect_card<'a>(&'a self, l: &'a BudgetLine) -> Element<'a, Message> {
+        let mut card = column![
+            bold("Card balance", 14),
+            App::figure("Owed at the end of the month", l.debt),
+            row![
+                text("Not covered").size(12).width(Length::Fill),
+                text(money(l.underfunded))
+                    .size(12)
+                    .style(if l.underfunded > 0 { Tone::Short } else { Tone::Funded }.text()),
+            ]
+            .align_y(Alignment::Center),
+        ]
+        .spacing(8);
+        if l.underfunded > 0 {
+            card = card.push(action(
+                &format!("Assign {} to cover the debt", money(l.underfunded)),
+                Message::AssignTo(l.category_id, l.assigned + l.underfunded),
+            ));
+        } else if l.debt > 0 {
+            card = card.push(text("Enough set aside to pay it").size(12).style(Tone::Funded.text()));
+        } else {
+            card = card.push(dim("Nothing owed on it.", 11));
+        }
+        card = card.push(dim(
+            "Spending on the card moves what its category had here; what a category could not cover is debt to assign money to.",
+            11,
+        ));
+        let hidden = l.hidden;
+        column![
+            container(card).padding(14).style(look::card),
+            link(if hidden { "Unhide" } else { "Hide" }, Message::HideCategory(l.category_id, !hidden)),
+        ]
+        .spacing(12)
+        .into()
     }
 
     fn auto_line<'a>(&self, label: &str, l: &BudgetLine, cents: i64) -> Element<'a, Message> {
@@ -1080,12 +1149,19 @@ impl App {
         ]
         .spacing(6)
         .align_y(Alignment::Center);
-        let tiles = row![
+        let mut tiles = row![
             self.tile("Income", s.income, Tone::Funded),
             self.tile("Spent", total, Tone::Zero),
             self.tile("Net", s.income - total, if s.income >= total { Tone::Funded } else { Tone::Over }),
         ]
         .spacing(12);
+        // Paying a card is not spending (what it bought was), so it is not
+        // in the bars; what the cards owe beyond what is set aside is.
+        let cards: Vec<&BudgetLine> = self.peer.lines.rows.iter().filter(|l| l.card.is_some()).collect();
+        if !cards.is_empty() {
+            let short: i64 = cards.iter().map(|l| l.underfunded).sum();
+            tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
+        }
         column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
             .spacing(16)
             .padding(PAD)
@@ -1279,10 +1355,17 @@ fn right<'a>(content: Element<'a, Message>, width: f32) -> Element<'a, Message> 
         .into()
 }
 
-/// A category's tile: what it is for, drawn on a colour its name picks.
-fn tile<'a>(name: &str) -> Element<'a, Message> {
-    let colour = crate::palette::TILES[arkui::art::hash(name) as usize % crate::palette::TILES.len()];
-    container(icon::tinted(category_glyph(name), 16.0, |_| crate::palette::TILE_GLYPH))
+/// A category's tile: what it is for, drawn on a colour its name picks —
+/// a card's payment category, a card on the cards' slate.
+fn tile<'a>(l: &BudgetLine) -> Element<'a, Message> {
+    let (glyph, colour) = match l.card {
+        Some(_) => (glyphs::CARD, crate::palette::CARD_TILE),
+        None => (
+            category_glyph(&l.name),
+            crate::palette::TILES[arkui::art::hash(&l.name) as usize % crate::palette::TILES.len()],
+        ),
+    };
+    container(icon::tinted(glyph, 16.0, |_| crate::palette::TILE_GLYPH))
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(28.0))
         .center_x(Length::Fixed(28.0))
@@ -1325,12 +1408,29 @@ pub fn category_glyph(name: &str) -> &'static [u8] {
     }
 }
 
+/// What a category's pill says by its colour, as YNAB's does: red for cash
+/// overspent (next month pays for it), amber for overspending that was
+/// all on a card (it is debt now) and for a card's payment that does not
+/// cover what the card owes, else as its target reads it.
+pub fn tone(l: &BudgetLine) -> Tone {
+    match () {
+        _ if l.available < 0 && l.credit_overspent >= -l.available => Tone::Short,
+        _ if l.available >= 0 && l.card.is_some() && l.underfunded > 0 => Tone::Short,
+        _ => Tone::of(l.available, l.target, l.assigned),
+    }
+}
+
 /// How far along a category is: the share of its goal given this month,
 /// as the inspector counts it; for one with no goal, the share of what it
 /// had that was spent; blank for neither.
 fn progress(l: &BudgetLine) -> String {
     let had = l.carried + l.assigned;
     match () {
+        // A card's: what of its debt is not covered yet.
+        _ if l.card.is_some() && l.underfunded > 0 => format!("{} short", money(l.underfunded)),
+        _ if l.card.is_some() && l.debt > 0 => "Covered".into(),
+        _ if l.card.is_some() => String::new(),
+        _ if l.credit_overspent > 0 => format!("{} on card", money(l.credit_overspent)),
         _ if l.target > 0 => format!("{}% goal", (l.assigned.max(0) * 100 / l.target).min(999)),
         _ if l.activity < 0 && had > 0 => format!("{}% used", (-l.activity * 100 / had).min(999)),
         _ => String::new(),

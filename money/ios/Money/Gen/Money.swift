@@ -74,7 +74,7 @@ public struct AddTransaction: Equatable {
     public var cleared: Bool
     public var transferTo: Id?
 
-    public init(accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Bool, transferTo: Id?) { self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.transferTo = transferTo; }
+    public init(accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Bool, transferTo: Id? = nil) { self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.transferTo = transferTo; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -267,10 +267,10 @@ public struct BankTxn: Equatable {
 extension BudgetLine {
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(categoryId: Id(J.text(o["category_id"])), groupId: Id(J.text(o["group_id"])), group: J.text(o["group"]), groupPos: J.int(o["group_pos"]), name: J.text(o["name"]), pos: J.int(o["pos"]), hidden: J.bool(o["hidden"]), target: J.int(o["target"]), assigned: J.int(o["assigned"]), activity: J.int(o["activity"]), available: J.int(o["available"]), carried: J.int(o["carried"]), assignedLastMonth: J.int(o["assigned_last_month"]), spentLastMonth: J.int(o["spent_last_month"]), averageSpent: J.int(o["average_spent"]))
+        self.init(categoryId: Id(J.text(o["category_id"])), groupId: Id(J.text(o["group_id"])), group: J.text(o["group"]), groupPos: J.int(o["group_pos"]), name: J.text(o["name"]), pos: J.int(o["pos"]), hidden: J.bool(o["hidden"]), target: J.int(o["target"]), assigned: J.int(o["assigned"]), activity: J.int(o["activity"]), available: J.int(o["available"]), carried: J.int(o["carried"]), assignedLastMonth: J.int(o["assigned_last_month"]), spentLastMonth: J.int(o["spent_last_month"]), averageSpent: J.int(o["average_spent"]), card: J.opt(o["card"]) { v0 in Id(J.text(v0)) }, debt: J.int(o["debt"]), underfunded: J.int(o["underfunded"]), creditOverspent: J.int(o["credit_overspent"]))
     }
 
-    public var json: String { J.obj(["\"category_id\":" + J.q(categoryId.hex), "\"group_id\":" + J.q(groupId.hex), "\"group\":" + J.q(group), "\"group_pos\":" + String(groupPos), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"target\":" + String(target), "\"assigned\":" + String(assigned), "\"activity\":" + String(activity), "\"available\":" + String(available), "\"carried\":" + String(carried), "\"assigned_last_month\":" + String(assignedLastMonth), "\"spent_last_month\":" + String(spentLastMonth), "\"average_spent\":" + String(averageSpent)]) }
+    public var json: String { J.obj(["\"category_id\":" + J.q(categoryId.hex), "\"group_id\":" + J.q(groupId.hex), "\"group\":" + J.q(group), "\"group_pos\":" + String(groupPos), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"target\":" + String(target), "\"assigned\":" + String(assigned), "\"activity\":" + String(activity), "\"available\":" + String(available), "\"carried\":" + String(carried), "\"assigned_last_month\":" + String(assignedLastMonth), "\"spent_last_month\":" + String(spentLastMonth), "\"average_spent\":" + String(averageSpent), "\"card\":" + J.wopt(card) { v0 in J.q(v0.hex) }, "\"debt\":" + String(debt), "\"underfunded\":" + String(underfunded), "\"credit_overspent\":" + String(creditOverspent)]) }
 }
 
 /// The record `Categorize`.
@@ -278,7 +278,7 @@ public struct Categorize: Equatable {
     public var ids: [Id]
     public var categoryId: Id?
 
-    public init(ids: [Id], categoryId: Id?) { self.ids = ids; self.categoryId = categoryId; }
+    public init(ids: [Id], categoryId: Id? = nil) { self.ids = ids; self.categoryId = categoryId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -351,7 +351,7 @@ public struct DeleteCategory: Equatable {
     public var id: Id
     public var moveTo: Id?
 
-    public init(id: Id, moveTo: Id?) { self.id = id; self.moveTo = moveTo; }
+    public init(id: Id, moveTo: Id? = nil) { self.id = id; self.moveTo = moveTo; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -366,7 +366,7 @@ public struct DeleteGroup: Equatable {
     public var id: Id
     public var moveTo: Id?
 
-    public init(id: Id, moveTo: Id?) { self.id = id; self.moveTo = moveTo; }
+    public init(id: Id, moveTo: Id? = nil) { self.id = id; self.moveTo = moveTo; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -384,15 +384,16 @@ public struct EditTransaction: Equatable {
     public var categoryId: Id?
     public var memo: String
     public var amount: Int64
+    public var transferTo: Id?
 
-    public init(id: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64) { self.id = id; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; }
+    public init(id: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, transferTo: Id? = nil) { self.id = id; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.transferTo = transferTo; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: Id(J.text(o["id"])), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, memo: J.text(o["memo"]), amount: J.int(o["amount"]))
+        self.init(id: Id(J.text(o["id"])), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, memo: J.text(o["memo"]), amount: J.int(o["amount"]), transferTo: J.opt(o["transfer_to"]) { v0 in Id(J.text(v0)) })
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"transfer_to\":" + J.wopt(transferTo) { v0 in J.q(v0.hex) }]) }
 }
 
 /// The record `Grant`.
@@ -570,7 +571,7 @@ public struct MoveCategory: Equatable {
     public var groupId: Id
     public var before: Id?
 
-    public init(id: Id, groupId: Id, before: Id?) { self.id = id; self.groupId = groupId; self.before = before; }
+    public init(id: Id, groupId: Id, before: Id? = nil) { self.id = id; self.groupId = groupId; self.before = before; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -585,7 +586,7 @@ public struct MoveGroup: Equatable {
     public var id: Id
     public var before: Id?
 
-    public init(id: Id, before: Id?) { self.id = id; self.before = before; }
+    public init(id: Id, before: Id? = nil) { self.id = id; self.before = before; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -660,7 +661,7 @@ public struct Reconcile: Equatable {
 public struct Register: Equatable {
     public var accountId: Id?
 
-    public init(accountId: Id?) { self.accountId = accountId; }
+    public init(accountId: Id? = nil) { self.accountId = accountId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
