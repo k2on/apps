@@ -43,19 +43,33 @@ Four tabs in the system's Liquid Glass bar, which shrinks as a list scrolls:
   a group dragged takes its categories with it (`categories.move_group`).
   What was let go is drawn where it went until the session agrees. Done
   ends it.
+- **Credit cards**, budgeted the way YNAB budgets them
+  (`money_domain::cards`): the cards' group, Credit Card Payments, comes
+  first, its header saying what of the cards' debt is not covered; each
+  card's payment category wears the card's mark and a bar of how much of
+  what the card owes is set aside, "$X short" in orange or "Covered" in
+  green, and holding it offers "Assign $X to Cover the Card" (no target,
+  rename or delete: it is the card's). A category that spent more on a card
+  than it had is amber, "$X on card" — debt, not the cash overspending that
+  is red. A payment category's page is the desktop's card inspector:
+  Available for Payment large with **Assign $X** at a tap when it falls
+  short, what the card owes at the month's end and what of it is not
+  covered, how the money got there, and what went on the card this month.
+  Edit keeps a payment with the cards and every other category out of
+  their group, as the domain does.
 - **A category** (pushed from its row) is the desktop's inspector as a page:
   Available large in its tone with Cover Overspending or Move Money under
   it, how it got there (left over, assigned — tap to change — and
   activity), its target as a capacity ring with the button that meets it,
   Auto-Assign's three amounts as one-tap choices, the month's transactions
-  in it, and rename, hide and delete last.
+  in it, and rename, hide and delete last. Spending on a card beyond what
+  it had is its own line, in amber.
 - **Accounts** — net worth large, All Accounts, then the accounts on budget,
   tracking only and closed, each with its kind's mark (a tinted rounded
   square, as Settings draws one), its bank and last digits when Plaid
   feeds it, a count of what waits for a look, and its balance. Holding one
-  renames, reconciles, closes or reopens it. **Bank Connections** is a page
-  of the banks, when each last synced and what that brought, the accounts
-  each feeds, and Sync Now. **Add Account** is a sheet: name, type (which
+  renames, reconciles, closes or reopens it. **Bank Connections** is
+  Settings' Banks section on a page of its own, with Sync Now. **Add Account** is a sheet: name, type (which
   sets on budget or tracking as the desktop does), the balance on the
   keypad, and the toggle with a sentence on what it means.
 - **A register** — the working balance large with cleared and uncleared
@@ -110,6 +124,31 @@ system's browser sheet (`ASWebAuthenticationSession`) to
 `/auth/exchange`, and the replica opened and dialled at `/sync`. Settings
 signs out, or leaves the demo.
 
+**Settings** (the account button, marked when a bank wants somebody) has
+the **Banks** (`money_domain::banks`, money/README.md's banks): each
+connected bank with how it is doing and when it last synced, and
+**Connect a Bank**, which asks the server (`banks.connect`) and opens
+Plaid's page in Safari's view (ArkUI's `SafariView`,
+`SFSafariViewController`) as soon as the server answers the ask with it.
+The page does not come back to the app — the server finishes the
+connection by asking Plaid — so the app only watches the ask
+(`banks.asks`): its row says asking, the page and how long it stays open
+(Open Plaid's Page again), done, failed with the server's sentence, or
+expired, and the page closes itself once the ask is over.
+`ASWebAuthenticationSession` is the sign-in's, not this: it waits for a
+redirect that never comes. A bank's page has Reconnect (`banks.reconnect`,
+prominent when its login ran out), Disconnect behind a confirmation
+(`banks.disconnect`), and each of its accounts with what it feeds — or,
+while it waits, a menu: a new account of its kind (`banks.open`), an
+existing account (`banks.link`), or Don't Import It (`banks.ignore`). The
+demo has no server: its bank is shown, and connecting says so.
+
+A transaction already there is made a **transfer** from its form's
+category list (Transfer To, `EditTransaction.transfer_to`): the domain pairs
+it with the matching transaction in the other account or adds its other
+half. A transfer's form knows its account from its payee, and offers only
+accounts. A card's payment category is never offered as a transaction's.
+
 ## Building
 
 ```
@@ -150,20 +189,26 @@ Foundation only — type-checked on Linux, tested there and on the simulator:
   dialled, or the demo's household in memory; drained on one queue
   whenever it says anything moved (`Listener`), its views spliced
   (accounts, groups, the month's lines, summary and spending, the inbox,
-  payees, banks; a register while a screen holds it), a rejection or a
+  payees, banks, their accounts and the reader's asks; a register while a
+  screen holds it), a rejection or a
   denial said once, and a `Snapshot` sent on. The month's three views are
   opened again when the month changes. Every write is a domain function;
   a refusal is said in the domain's words.
 - **`Model`** — the main actor's: the first run's machine run, the session
-  it opens, the month on screen, and every button.
+  it opens, the month on screen, and every button; an ask for Plaid's page
+  followed until it opens.
 - **`Onboarding`** — the first run as a machine with no network, browser or
   clock, the demo one of its steps.
 - **`Budget`** — the arithmetic the screens draw: the month under its
-  groups, a figure's tone, which way Move Money goes (from the category
+  groups, a figure's tone (credit overspending apart from cash), the cards'
+  payment categories (`Cards`: what each says, what covers it, which
+  categories a transaction may have), which way Move Money goes (from the category
   chosen into an overspent one, out of any other), the accounts' sections
   and net worth, the transaction form (`Draft`) and its inputs, payees
   offered, registers a day at a time, and days as the domain writes them
   (noon of the day in the phone's calendar, for a picker and a heading).
+- **`Banks`** — the asks followed (open Plaid's page once, the newest ask
+  only), what each ask and bank says, and what a bank's account may feed.
 
 Apple's — compiled by CI: `MoneyApp`, `Shell` (tabs, routes, sheets),
 `BudgetView`, `CategoryView`, `AccountsView` (and Bank Connections),
@@ -175,8 +220,8 @@ in ArkUICore, `Cents` (amounts as typed, the keypad's digits), `Order`
 (rows moved as Edit mode hands them over) and the
 first run's server half — `Address`, `Probe`, `Health`, `Shelf` — which
 harken's onboarding still keeps its own copy of; in ArkUI, `CentsText`,
-`Pill` and `Tint`, `HeroFigure`, `AmountEntry`, `Pager`, `WelcomePage` and
-`.toast`.
+`Pill` and `Tint`, `HeroFigure`, `AmountEntry`, `Pager`, `WelcomePage`,
+`SafariView` (and `.safari`) and `.toast`.
 
 ## Checks
 
@@ -203,26 +248,29 @@ bank's three syncs and what it brought opened with its bank description,
 a refusal said once in the domain's words, and Edit's drops: a category
 dragged under another group joining it, either end of the list, a group
 taking its categories past others, a drop that moves nothing asking
-nothing, and each drawn ahead as the budget comes back.
+nothing, and each drawn ahead as the budget comes back — the cards' group
+first and its payment kept there. The cards (`CardTests`): credit
+overspending told from cash, the demo's card payment short until one tap
+covers it out of Ready to Assign, payments kept out of a transaction's
+categories, and a typed payment made a transfer to the card from its
+form. The banks (`BankTests`, rows made by hand): an ask followed until
+its page arrives and only its own, what asks and banks say, and what a
+bank's account may feed.
 
 ## Not built
 
-- **Linking and ignoring a bank's accounts.** `banks.link` and
-  `banks.ignore` take a Plaid account id, and no view hands one to a phone:
-  the `linked` table is only read inside the domain. A `banks.linked` view
-  (each followed or ignored account, its bank, mask and the account it
-  feeds) would make Bank Connections' rows into Link… and Ignore. The
-  desktop has no such page either.
-- Splits, scheduled transactions, credit-card payment categories, goals
-  with dates and moving categories by drag: the domain has none of them.
+- Splits, scheduled transactions and goals with dates: the domain has
+  none of them.
 
 ## Not verified
 
 Everything that needs a device or a real server: the screens and their
 Liquid Glass as drawn, the motion and haptics, VoiceOver's reading of
 them, the sign-in sheet and the `money://auth` redirect against
-money.koon.us, pull to refresh against a server's importer, the app icon
-in App Store Connect, and the TestFlight upload (gated off until the app
-record exists). `checks.money-ios-typecheck` evaluates but has not been
-built here (it needs the FFI's check and nixpkgs' Swift, and the disk was
-full).
+money.koon.us, pull to refresh against a server's importer, connecting,
+reconnecting and disconnecting a bank against a server with Plaid's keys
+(Plaid's page in Safari's view, and its closing when the ask is over),
+the app icon in App Store Connect, and the TestFlight upload (gated off
+until the app record exists). `checks.money-ios-typecheck` evaluates but
+has not been built here (it needs the FFI's check and nixpkgs' Swift, and
+the disk was full).

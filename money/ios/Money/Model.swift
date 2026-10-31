@@ -25,6 +25,11 @@ final class Model: ObservableObject {
     @Published var notice: String? = nil
     /// The sign-in to open in the browser sheet, once: the view runs it and answers [signInReturned].
     @Published var browse: URL? = nil
+    /// Plaid's page, once the server has answered an ask with it: Settings
+    /// shows it in Safari's sheet and answers [bankPageClosed].
+    @Published private(set) var bankPage: URL? = nil
+    /// The answered ask put away from Settings.
+    @Published private(set) var dismissedAsk: Id? = nil
 
     // MARK: what it holds
 
@@ -36,6 +41,8 @@ final class Model: ObservableObject {
     private var bridge: Bridge? = nil
     /// How a session's snapshot reaches the model: the main queue in the app.
     private let deliver: (@escaping () -> Void) -> Void
+    /// When this phone asked for a Plaid page it has not opened yet.
+    private var awaiting: Int64? = nil
 
     /// The model over `shelf` (the app's `UserDefaults`), replicas under `root`.
     init(shelf: Shelf, root: URL, demoDay: String? = nil,
@@ -130,6 +137,7 @@ final class Model: ObservableObject {
 
     private func took(_ s: Snapshot) {
         snapshot = s
+        follow()
         // Signed in just now: opening, until the replica has what the server had —
         // or the server cannot be reached, and there is nothing more to wait for.
         if case .opening = step, let st = s.status, st.linked || st.cursor > 0 || st.link == "waiting to dial" || st.link == "offline" {
@@ -274,4 +282,77 @@ final class Model: ObservableObject {
 
     /// The same, from a button.
     func syncBank() { Task { await refresh() } }
+
+    // MARK: connecting banks
+
+    /// Whether a bank can be connected: through a server's importer, which
+    /// the demo has none of.
+    var connectsBanks: Bool { !isDemo }
+
+    /// Connect a bank: the server asked for Plaid's page, which opens as
+    /// soon as it answers with it ([bankPage]).
+    func connectBank() { askForPage("connect a bank") { try $0.connect() } }
+
+    /// Log in to a bank again, on Plaid's page in update mode.
+    func reconnect(bank: String) { askForPage("reconnect the bank") { try $0.reconnect(BankName(bank: bank)) } }
+
+    /// Plaid forgets the login and the bank stops importing; its accounts here stay.
+    func disconnect(bank: String) {
+        guard connectsBanks else { notice = "The demo has no server to disconnect a bank from."; return }
+        dismissedAsk = nil
+        write("disconnect the bank", { try $0.disconnect(BankName(bank: bank)) })
+    }
+
+    /// A bank's account given an account of its own here, of the kind it is.
+    func openAccount(for plaid: String) {
+        write("open an account for it", { try $0.open(OpenLinked(plaidAccountId: plaid, name: "")) }) { [weak self] ok in
+            if ok { self?.notice = "Opened. Its history comes with the bank's next import." }
+        }
+    }
+
+    /// A bank's account made to feed an account already here.
+    func link(_ plaid: String, to account: Id) {
+        write("link it", { try $0.link(LinkAccount(plaidAccountId: plaid, accountId: account)) }) { [weak self] ok in
+            if ok { self?.notice = "Linked. The bank's next import writes there." }
+        }
+    }
+
+    /// A bank's account left out, or followed again.
+    func ignore(_ plaid: String, _ ignored: Bool) {
+        write(ignored ? "ignore it" : "follow it", { try $0.ignore(IgnoreLinked(plaidAccountId: plaid, ignored: ignored)) })
+    }
+
+    /// Plaid's page opened again, from the ask in Settings.
+    func openPage(_ a: AskLine) { bankPage = URL(string: a.url) }
+
+    /// Safari's sheet closed, by its Done or because the ask was answered.
+    func bankPageClosed() { bankPage = nil }
+
+    /// The answered ask put away from Settings.
+    func dismiss(ask: AskLine) { dismissedAsk = ask.id }
+
+    /// An ask for a Plaid page: watched from now until the server answers it.
+    private func askForPage(_ what: String, _ f: @escaping (Money) throws -> Void) {
+        guard connectsBanks else { notice = "The demo has no server to connect a bank through."; return }
+        awaiting = nowMs()
+        dismissedAsk = nil
+        write(what, f) { [weak self] ok in if !ok { self?.awaiting = nil } }
+    }
+
+    /// The asks moved: Plaid's page opened once its address arrives, and
+    /// closed again when the server says the ask is over — the person
+    /// logged in and the server finished, or the page ran out.
+    private func follow() {
+        if let page = bankPage, let a = snapshot.asks.first(where: { $0.url == page.absoluteString }), !BankAsks.isOpen(a) {
+            bankPage = nil
+        }
+        guard let since = awaiting else { return }
+        switch BankAsks.follow(snapshot.asks, since: since) {
+        case .waiting: break
+        case let .open(url):
+            awaiting = nil
+            bankPage = url
+        case .answered: awaiting = nil
+        }
+    }
 }

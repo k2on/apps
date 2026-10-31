@@ -19,6 +19,7 @@ extension Tone {
         case .funded: return .good
         case .short: return .caution
         case .over: return .bad
+        case .onCard: return .caution
         }
     }
 
@@ -29,6 +30,7 @@ extension Tone {
         case .funded: return "funded"
         case .short: return "underfunded"
         case .over: return "overspent"
+        case .onCard: return "overspent on a card"
         }
     }
 }
