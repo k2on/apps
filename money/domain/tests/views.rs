@@ -47,6 +47,28 @@ fn script(b: &mut Book) -> Vec<Step> {
             };
             b.run("move_money", &m).unwrap();
         }),
+        // Rent assigned by rule from October: a share of ACME's pay into
+        // checking, which comes before and after the rule does.
+        Box::new(move |b| b.spend(checking, "2026-10-02", "ACME Payroll", Some(budget::ready_to_assign()), 200_000)),
+        Box::new(move |b| {
+            let r = SetRule {
+                category_id: rent,
+                from: Some("2026-10".into()),
+                matching: "acme".into(),
+                accounts: vec![checking],
+                times: 3,
+                per: 4,
+            };
+            b.run("set_rule", &r).unwrap();
+        }),
+        Box::new(move |b| b.spend(checking, "2026-11-02", "ACME Payroll", Some(budget::ready_to_assign()), 210_000)),
+        Box::new(move |b| {
+            let c = ClearRule {
+                category_id: rent,
+                from: Some("2026-12".into()),
+            };
+            b.run("clear_rule", &c).unwrap();
+        }),
         Box::new(|b| {
             let accounts: Vec<PlaidAccount> = serde_json::from_str(
                 r#"[{"account_id":"a1","name":"Bank Checking","mask":"4321","type":"depository","subtype":"checking","balances":{"current":120.0}}]"#,
@@ -163,6 +185,16 @@ fn the_budget() {
     hold("summary", &month("2026-11"));
     hold("groups", &());
     hold("spending", &month("2026-10"));
+    hold("rules", &month("2026-10"));
+    hold("rules", &month("2026-11"));
+    let preview = PreviewRule {
+        month: "2026-11".into(),
+        matching: "acme".into(),
+        accounts: vec![],
+        times: 1,
+        per: 10,
+    };
+    hold("preview_rule", &preview);
 }
 
 #[test]

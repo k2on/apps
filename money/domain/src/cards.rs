@@ -210,10 +210,7 @@ impl Cards {
     /// spent from it by hand, what spending on its card moved to it, and
     /// what paid the card from the budget's other accounts.
     pub fn payment_history(&self, db: &Db<Money>, id: Id<Category>, card: Id<Account>) -> History {
-        let mut h = History::default();
-        for a in db.assigned.by(Assigned::CATEGORY_ID_MONTH).from(id).all() {
-            h.month(&a.month).assigned += a.amount;
-        }
+        let mut h = History::assigned(db, id);
         // Filed under it by hand (a payment from checking that is not a
         // transfer) — but on the card itself, it is debt and nothing else:
         // the card's starting balance, an interest charge filed so.

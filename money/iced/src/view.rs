@@ -543,6 +543,22 @@ impl App {
                 .width(Length::Fixed(MONEY_COL - 14.0))
                 .style(look::input)
                 .into(),
+            // Worked out by its rule: the amount, with the rule's mark, and
+            // pressing it says why it does not open.
+            _ if l.ruled => button(
+                row![
+                    icon::faint(glyphs::REPEAT, lit).width(12.0).height(12.0),
+                    text(money(l.assigned)).size(14).style(move |theme| text::Style {
+                        color: Some(style::on_row(theme, lit, false, false)),
+                    })
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .on_press(Message::EditAssigned(l.category_id))
+            .padding([3, 0])
+            .style(style::quiet)
+            .into(),
             _ => button(text(money(l.assigned)).size(14).style(move |theme| text::Style {
                 color: Some(style::on_row(theme, lit, false, false)),
             }))
@@ -689,7 +705,9 @@ impl App {
                 .align_y(Alignment::Center),
             );
         }
-        figures = figures.push(if l.available < 0 {
+        figures = figures.push(if l.ruled {
+            dim("Assigned by its rule this month: money is not moved to or from it by hand.", 11).into()
+        } else if l.available < 0 {
             action("Cover overspending", Message::MoveMoney)
         } else {
             quiet("Move money", Message::MoveMoney)
@@ -712,7 +730,9 @@ impl App {
                 .align_y(Alignment::Center),
             );
             target = target.push(progress_bar(0.0..=1.0, funded).girth(Length::Fixed(6.0)).style(look::progress(tone)));
-            if have < l.target {
+            if have < l.target && l.ruled {
+                target = target.push(dim("Its rule assigns it: what comes in decides.", 11));
+            } else if have < l.target {
                 let need = l.target - have;
                 target = target.push(action(
                     &format!("Assign {} to meet target", money(need)),
@@ -757,7 +777,98 @@ impl App {
             link("Delete category", Message::DeleteCategory(l.category_id)),
         ]
         .spacing(16);
-        column![head, target, auto, manage]
+        match l.ruled {
+            // Its rule before the hand's buttons, which it has no use for.
+            true => column![head, self.inspect_rule(l), target, manage],
+            false => column![head, target, auto, self.inspect_rule(l), manage],
+        }
+    }
+
+    /// "Assign by rule": the text a paycheck is matched by, the accounts it
+    /// comes into, the share, and what that would give the month on screen
+    /// before it is saved. Saved, it holds from this month on.
+    fn inspect_rule<'a>(&'a self, l: &'a BudgetLine) -> Element<'a, Message> {
+        let f = &self.rule;
+        let month = month_name(&self.peer.month);
+        let mut c = column![row![
+            bold("Assign by rule", 14),
+            fill(),
+            icon::faint(glyphs::REPEAT, false).width(13.0).height(13.0)
+        ]
+        .align_y(Alignment::Center)]
+        .spacing(8);
+        c = c.push(match self.peer.rule(l.category_id) {
+            Some(r) => dim(format!("{} \u{2014} since {}.", r.summary, month_name(&r.from)), 11),
+            None => dim("Each month, a share of the income that matches, in place of assigning it by hand.", 11),
+        });
+        c = c.push(
+            text_input("Text to match, as ACME PAYROLL", &f.matching)
+                .on_input(Message::RuleMatching)
+                .on_submit(Message::SaveRule)
+                .size(13)
+                .padding([5, 8])
+                .style(look::input),
+        );
+        // The accounts it reads, ticked; none ticked is every one.
+        let mut accounts = column![dim("Into", 11)].spacing(2);
+        for a in self.peer.accounts.rows.iter().filter(|a| a.on_budget && !a.closed) {
+            let ticked = f.accounts.contains(&a.id);
+            let mark = match ticked {
+                true => icon::accent(glyphs::TICKED, false),
+                false => icon::faint(glyphs::UNTICK, false),
+            };
+            accounts = accounts.push(
+                button(row![mark, text(a.name.clone()).size(12)].spacing(8).align_y(Alignment::Center))
+                    .on_press(Message::RuleAccount(a.id))
+                    .padding([4, 6])
+                    .width(Length::Fill)
+                    .style(look::choice(false)),
+            );
+        }
+        if f.accounts.is_empty() {
+            accounts = accounts.push(dim("None ticked: every account on the budget.", 11));
+        }
+        c = c.push(accounts);
+        c = c.push(
+            row![
+                text("Share").size(12).width(Length::Fill),
+                text_input("10% or 0.1", &f.share)
+                    .on_input(Message::RuleShare)
+                    .on_submit(Message::SaveRule)
+                    .size(13)
+                    .padding([5, 8])
+                    .width(Length::Fixed(110.0))
+                    .style(look::input),
+            ]
+            .align_y(Alignment::Center),
+        );
+        // What it would give the month on screen, as typed.
+        let preview = self.peer.preview.as_ref().and_then(|p| p.rows.first());
+        c = c.push(match preview {
+            Some(p) => column![
+                App::figure(&format!("{month} by this rule"), p.amount),
+                dim(
+                    match p.count {
+                        0 => format!("Nothing matched in {month} yet."),
+                        1 => format!("Of 1 payment matched: {}.", money(p.matched)),
+                        n => format!("Of {n} payments matched: {}.", money(p.matched)),
+                    },
+                    11
+                ),
+            ]
+            .spacing(4),
+            None if !f.matching.trim().is_empty() && !f.share.trim().is_empty() => {
+                column![dim(format!("{:?} is not a share: 10%, 0.1 or 1.5.", f.share.trim()), 11)]
+            }
+            None => column![dim("Some text and a share to see what it gives this month.", 11)],
+        });
+        let mut buttons = row![action("Save", Message::SaveRule)].spacing(8).align_y(Alignment::Center);
+        if l.ruled {
+            buttons = buttons.push(quiet("Remove rule", Message::RemoveRule));
+        }
+        c = c.push(dim(format!("Saved, it assigns from {month} on; months before keep theirs."), 11));
+        c = c.push(buttons);
+        container(c).padding(14).style(look::card).into()
     }
 
     /// A card's payment category: what the card owes, what of it the

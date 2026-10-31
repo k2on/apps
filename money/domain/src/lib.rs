@@ -1,7 +1,8 @@
 //! money's domain in plain Rust (`docs/plan-v5.md` §1.16): a household's
 //! budget. The schema ([`schema`]), the types ([`types`]), days and months
 //! ([`dates`]); the accounts ([`accounts`]), the budget's shape
-//! ([`categories`]), the budget itself ([`budget`]) and its credit cards
+//! ([`categories`]), the budget itself ([`budget`]), its assignments by
+//! rule ([`rules`]) and its credit cards
 //! ([`cards`]), the transactions ([`transactions`]) and transfers made of
 //! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
 //! from the app ([`banks`]) — one file
@@ -29,6 +30,7 @@ pub mod cards;
 pub mod categories;
 pub mod dates;
 pub mod plaid;
+pub mod rules;
 pub mod schema;
 #[cfg(feature = "seed")]
 pub mod seed;
@@ -59,6 +61,7 @@ pub fn domain() -> Domain {
         categories::add_group, categories::rename_group, categories::hide_group, categories::delete_group,
         categories::add_category, categories::rename_category, categories::hide_category, categories::move_category, categories::move_group,
         categories::set_target, categories::delete_category,
+        rules::set_rule, rules::clear_rule, rules::rules, rules::preview_rule,
         accounts::open_account, accounts::rename_account, accounts::close_account, accounts::accounts,
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
@@ -85,7 +88,8 @@ pub fn feed() -> Scope<Money> {
             .on::<Bank>(all)
             .on::<Linked>(all)
             .on::<Asked>(all)
-            .on::<BankAsk>(all),
+            .on::<BankAsk>(all)
+            .on::<Rule>(all),
     )
 }
 

@@ -16,6 +16,8 @@ import uniffi.money_domain.Cleared
 import uniffi.money_domain.GroupLine
 import uniffi.money_domain.LinkedLine
 import uniffi.money_domain.PayeeLine
+import uniffi.money_domain.RuleLine
+import uniffi.money_domain.RulePreview
 import uniffi.money_domain.SpendingLine
 import uniffi.money_domain.Summary
 import uniffi.money_domain.TxnLine
@@ -26,6 +28,8 @@ import uniffi.money_domain.BudgetLineView
 import uniffi.money_domain.GroupLineView
 import uniffi.money_domain.LinkedLineView
 import uniffi.money_domain.PayeeLineView
+import uniffi.money_domain.RuleLineView
+import uniffi.money_domain.RulePreviewView
 import uniffi.money_domain.SpendingLineView
 import uniffi.money_domain.SummaryView
 import uniffi.money_domain.TxnLineView
@@ -239,9 +243,9 @@ data class BankTxn(val transactionId: String, val plaidAccountId: String, val pe
 }
 
 /** The record `BudgetLine` (UniFFI's): its JSON, for the functions called by name. */
-fun BudgetLine.json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"group\":" + J.q(group) + "," + "\"group_pos\":" + groupPos.toString() + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"target\":" + target.toString() + "," + "\"assigned\":" + assigned.toString() + "," + "\"activity\":" + activity.toString() + "," + "\"available\":" + available.toString() + "," + "\"carried\":" + carried.toString() + "," + "\"assigned_last_month\":" + assignedLastMonth.toString() + "," + "\"spent_last_month\":" + spentLastMonth.toString() + "," + "\"average_spent\":" + averageSpent.toString() + "," + "\"card\":" + J.wopt(card) { v0 -> J.q(v0.hex) } + "," + "\"debt\":" + debt.toString() + "," + "\"underfunded\":" + underfunded.toString() + "," + "\"credit_overspent\":" + creditOverspent.toString() + "}"
+fun BudgetLine.json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"group\":" + J.q(group) + "," + "\"group_pos\":" + groupPos.toString() + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"target\":" + target.toString() + "," + "\"assigned\":" + assigned.toString() + "," + "\"activity\":" + activity.toString() + "," + "\"available\":" + available.toString() + "," + "\"carried\":" + carried.toString() + "," + "\"assigned_last_month\":" + assignedLastMonth.toString() + "," + "\"spent_last_month\":" + spentLastMonth.toString() + "," + "\"average_spent\":" + averageSpent.toString() + "," + "\"card\":" + J.wopt(card) { v0 -> J.q(v0.hex) } + "," + "\"debt\":" + debt.toString() + "," + "\"underfunded\":" + underfunded.toString() + "," + "\"credit_overspent\":" + creditOverspent.toString() + "," + "\"rule\":" + J.q(rule) + "," + "\"ruled\":" + ruled.toString() + "}"
 
-fun BudgetLine.Companion.of(j: Any?): BudgetLine = (j as JSONObject).let { o -> BudgetLine(Id(J.text(o.opt("category_id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("group_pos")), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("carried")), J.int(o.opt("assigned_last_month")), J.int(o.opt("spent_last_month")), J.int(o.opt("average_spent")), J.opt(o.opt("card")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("debt")), J.int(o.opt("underfunded")), J.int(o.opt("credit_overspent"))) }
+fun BudgetLine.Companion.of(j: Any?): BudgetLine = (j as JSONObject).let { o -> BudgetLine(Id(J.text(o.opt("category_id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("group_pos")), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("carried")), J.int(o.opt("assigned_last_month")), J.int(o.opt("spent_last_month")), J.int(o.opt("average_spent")), J.opt(o.opt("card")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("debt")), J.int(o.opt("underfunded")), J.int(o.opt("credit_overspent")), J.text(o.opt("rule")), J.bool(o.opt("ruled"))) }
 
 /** The record `Categorize`. */
 data class Categorize(val ids: List<Id>, val categoryId: Id? = null) {
@@ -258,6 +262,15 @@ data class Category(val id: Id, val groupId: Id, val name: String, val pos: Long
 
     companion object {
         fun of(j: Any?): Category = (j as JSONObject).let { o -> Category(Id(J.text(o.opt("id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.text(o.opt("note")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+    }
+}
+
+/** The record `ClearRule`. */
+data class ClearRule(val categoryId: Id, val from: String? = null) {
+    fun json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0) } + "}"
+
+    companion object {
+        fun of(j: Any?): ClearRule = (j as JSONObject).let { o -> ClearRule(Id(J.text(o.opt("category_id"))), J.opt(o.opt("from")) { v0 -> J.text(v0) }) }
     }
 }
 
@@ -455,6 +468,15 @@ fun PayeeLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"count\":
 
 fun PayeeLine.Companion.of(j: Any?): PayeeLine = (j as JSONObject).let { o -> PayeeLine(J.text(o.opt("name")), J.int(o.opt("count")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
 
+/** The record `PreviewRule`. */
+data class PreviewRule(val month: String, val matching: String, val accounts: List<Id>, val times: Long, val per: Long) {
+    fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"matching\":" + J.q(matching) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): PreviewRule = (j as JSONObject).let { o -> PreviewRule(J.text(o.opt("month")), J.text(o.opt("matching")), J.list(o.opt("accounts")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("times")), J.int(o.opt("per"))) }
+    }
+}
+
 /** The record `Reconcile`. */
 data class Reconcile(val accountId: Id, val balance: Long, val date: String) {
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"balance\":" + balance.toString() + "," + "\"date\":" + J.q(date) + "}"
@@ -518,12 +540,40 @@ data class Role(val user: String, val role: String) {
     }
 }
 
+/** The record `Rule`. */
+data class Rule(val from: String, val categoryId: Id, val manual: Boolean, val matching: String, val accounts: List<Id>, val times: Long, val per: Long, val atMs: Long, val userId: String) {
+    fun json(): String = "{" + "\"from\":" + J.q(from) + "," + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"manual\":" + manual.toString() + "," + "\"matching\":" + J.q(matching) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "," + "\"at_ms\":" + atMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+
+    companion object {
+        fun of(j: Any?): Rule = (j as JSONObject).let { o -> Rule(J.text(o.opt("from")), Id(J.text(o.opt("category_id"))), J.bool(o.opt("manual")), J.text(o.opt("matching")), J.list(o.opt("accounts")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("times")), J.int(o.opt("per")), J.int(o.opt("at_ms")), J.text(o.opt("user_id"))) }
+    }
+}
+
+/** The record `RuleLine` (UniFFI's): its JSON, for the functions called by name. */
+fun RuleLine.json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"from\":" + J.q(from) + "," + "\"matching\":" + J.q(matching) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "," + "\"summary\":" + J.q(summary) + "," + "\"matched\":" + matched.toString() + "," + "\"amount\":" + amount.toString() + "}"
+
+fun RuleLine.Companion.of(j: Any?): RuleLine = (j as JSONObject).let { o -> RuleLine(Id(J.text(o.opt("category_id"))), J.text(o.opt("from")), J.text(o.opt("matching")), J.list(o.opt("accounts")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("times")), J.int(o.opt("per")), J.text(o.opt("summary")), J.int(o.opt("matched")), J.int(o.opt("amount"))) }
+
+/** The record `RulePreview` (UniFFI's): its JSON, for the functions called by name. */
+fun RulePreview.json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"summary\":" + J.q(summary) + "," + "\"count\":" + count.toString() + "," + "\"matched\":" + matched.toString() + "," + "\"amount\":" + amount.toString() + "}"
+
+fun RulePreview.Companion.of(j: Any?): RulePreview = (j as JSONObject).let { o -> RulePreview(J.text(o.opt("month")), J.text(o.opt("summary")), J.int(o.opt("count")), J.int(o.opt("matched")), J.int(o.opt("amount"))) }
+
 /** The record `SetCleared`. */
 data class SetCleared(val id: Id, val cleared: Boolean) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"cleared\":" + cleared.toString() + "}"
 
     companion object {
         fun of(j: Any?): SetCleared = (j as JSONObject).let { o -> SetCleared(Id(J.text(o.opt("id"))), J.bool(o.opt("cleared"))) }
+    }
+}
+
+/** The record `SetRule`. */
+data class SetRule(val categoryId: Id, val from: String?, val matching: String, val accounts: List<Id>, val times: Long, val per: Long) {
+    fun json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0) } + "," + "\"matching\":" + J.q(matching) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): SetRule = (j as JSONObject).let { o -> SetRule(Id(J.text(o.opt("category_id"))), J.opt(o.opt("from")) { v0 -> J.text(v0) }, J.text(o.opt("matching")), J.list(o.opt("accounts")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("times")), J.int(o.opt("per"))) }
     }
 }
 
@@ -667,6 +717,9 @@ class Money(val peer: Peer) {
     /** `categories.add_group`: its intent's id. */
     fun addGroup(input: AddGroup): String = peer.mutate("categories.add_group", input.json())
 
+    /** `categories.clear_rule`: its intent's id. */
+    fun clearRule(input: ClearRule): String = peer.mutate("categories.clear_rule", input.json())
+
     /** `categories.delete_category`: its intent's id. */
     fun deleteCategory(input: DeleteCategory): String = peer.mutate("categories.delete_category", input.json())
 
@@ -685,11 +738,20 @@ class Money(val peer: Peer) {
     /** `categories.move_group`: its intent's id. */
     fun moveGroup(input: MoveGroup): String = peer.mutate("categories.move_group", input.json())
 
+    /** `categories.preview_rule`, kept, its rows UniFFI's. */
+    fun previewRule(input: PreviewRule): View<RulePreview> = typed(RulePreviewView(peer, "categories.preview_rule", input.json()))
+
     /** `categories.rename_category`: its intent's id. */
     fun renameCategory(input: RenameCategory): String = peer.mutate("categories.rename_category", input.json())
 
     /** `categories.rename_group`: its intent's id. */
     fun renameGroup(input: RenameGroup): String = peer.mutate("categories.rename_group", input.json())
+
+    /** `categories.rules`, kept, its rows UniFFI's. */
+    fun rules(input: Month): View<RuleLine> = typed(RuleLineView(peer, "categories.rules", input.json()))
+
+    /** `categories.set_rule`: its intent's id. */
+    fun setRule(input: SetRule): String = peer.mutate("categories.set_rule", input.json())
 
     /** `categories.set_target`: its intent's id. */
     fun setTarget(input: SetTarget): String = peer.mutate("categories.set_target", input.json())
@@ -752,6 +814,10 @@ class Money(val peer: Peer) {
     private fun typed(v: LinkedLineView): View<LinkedLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 
     private fun typed(v: PayeeLineView): View<PayeeLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+
+    private fun typed(v: RuleLineView): View<RuleLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+
+    private fun typed(v: RulePreviewView): View<RulePreview> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 
     private fun typed(v: SpendingLineView): View<SpendingLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 

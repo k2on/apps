@@ -213,18 +213,26 @@ fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Categor
         db.txn.update(Txn { category_id: move_to, ..t })?;
     }
     let into = move_to.filter(|to| db.category.get(*to).is_some_and(|c| c.group_id != inflow()));
+    // What each month gave it — typed, or its rule's share — is what moves:
+    // its rule goes with it, and what it gave stays given.
+    let gave = crate::rules::assignments(db, c.id);
     for a in db.assigned.by(Assigned::CATEGORY_ID_MONTH).from(c.id).all() {
-        if let Some(to) = into {
-            let had = crate::budget::assigned_in(db, &a.month, to);
+        db.assigned.remove(&a)?;
+    }
+    for r in db.rule.by(Rule::CATEGORY_ID_FROM).from(c.id).all() {
+        db.rule.remove(&r)?;
+    }
+    if let Some(to) = into {
+        for (month, amount) in gave {
+            let had = crate::budget::assigned_in(db, &month, to);
             db.assigned.put(Assigned {
-                month: a.month.clone(),
+                month,
                 category_id: to,
-                amount: had + a.amount,
+                amount: had + amount,
                 at_ms: ctx.now,
                 user_id: ctx.user().into(),
             })?;
         }
-        db.assigned.remove(&a)?;
     }
     db.category.remove(&c)
 }

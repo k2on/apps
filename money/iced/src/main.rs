@@ -42,7 +42,7 @@ use arkui::outline::{self, Grab, Shift};
 use arkui::{glyphs, menu, vim};
 use iced::keyboard::{key::Named, Key, Modifiers};
 use iced::{Point, Size, Subscription, Task};
-use money_domain::dates::{add_months, day_of_ms, month_of};
+use money_domain::dates::{add_months, day_of_ms, month_name, month_of};
 #[cfg(any(feature = "demo", test))]
 use money_domain::seed;
 use money_domain::*;
@@ -169,6 +169,15 @@ pub enum Naming {
     Account(Id<Account>),
 }
 
+/// The inspector's rule, as typed: the text it matches, the accounts it
+/// reads (none is every one), and the share, as "10%" or "0.1".
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RuleForm {
+    pub matching: String,
+    pub accounts: Vec<Id<Account>>,
+    pub share: String,
+}
+
 /// A panel over the page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Modal {
@@ -203,6 +212,13 @@ pub enum Message {
     /// Assign a category exactly this much this month.
     AssignTo(Id<Category>, i64),
     TargetTyped(String),
+    /// The inspector's rule: its text, its share, an account ticked or
+    /// not; saved from the month on screen, or removed from it.
+    RuleMatching(String),
+    RuleShare(String),
+    RuleAccount(Id<Account>),
+    SaveRule,
+    RemoveRule,
     TargetDone,
     Collapse(Id<Group>),
     NewGroup,
@@ -305,6 +321,8 @@ pub struct App {
     pub assigning: Option<(Id<Category>, String)>,
     /// The inspector's target, as typed.
     pub target: String,
+    /// The inspector's rule, as typed.
+    pub rule: RuleForm,
     pub collapsed: Vec<Id<Group>>,
     pub show_hidden: bool,
     pub new_group: Option<String>,
@@ -366,6 +384,7 @@ impl App {
             selected: None,
             assigning: None,
             target: String::new(),
+            rule: RuleForm::default(),
             collapsed: Vec::new(),
             show_hidden: false,
             new_group: None,
@@ -626,10 +645,20 @@ impl App {
                 let m = add_months(&self.peer.month, n);
                 self.peer.set_month(&m);
                 self.assigning = None;
+                self.load_rule();
             }
-            Message::ThisMonth => self.peer.set_month(&month_of(&self.today)),
+            Message::ThisMonth => {
+                self.peer.set_month(&month_of(&self.today));
+                self.load_rule();
+            }
             Message::Select(c) => self.select(if self.selected == c { None } else { c }),
             Message::EditAssigned(c) => {
+                // A month that follows its rule is not typed into: why not
+                // is said, and the inspector, where the rule is, follows.
+                if self.follows(c) {
+                    self.select(Some(c));
+                    return Task::none();
+                }
                 let had = self.peer.line(c).map_or(0, |l| l.assigned);
                 self.assigning = Some((c, amount::editable(had)));
                 self.select(Some(c));
@@ -656,6 +685,9 @@ impl App {
                 }
             }
             Message::AssignTo(c, cents) => {
+                if self.follows(c) {
+                    return Task::none();
+                }
                 let a = Assign {
                     month: self.peer.month.clone(),
                     category_id: c,
@@ -672,6 +704,34 @@ impl App {
                 self.author("assign the month", "auto_assign", &a);
             }
             Message::TargetTyped(t) => self.target = t,
+            Message::RuleMatching(t) => {
+                self.rule.matching = t;
+                self.preview_rule();
+            }
+            Message::RuleShare(t) => {
+                self.rule.share = t;
+                self.preview_rule();
+            }
+            Message::RuleAccount(a) => {
+                match self.rule.accounts.iter().position(|x| *x == a) {
+                    Some(i) => drop(self.rule.accounts.remove(i)),
+                    None => self.rule.accounts.push(a),
+                }
+                self.preview_rule();
+            }
+            Message::SaveRule => self.save_rule(),
+            Message::RemoveRule => {
+                if let Some(c) = self.selected {
+                    let r = ClearRule {
+                        category_id: c,
+                        from: Some(self.peer.month.clone()),
+                    };
+                    if self.author("remove the rule", "clear_rule", &r) {
+                        self.note = format!("assigned by hand from {}", month_name(&self.peer.month));
+                        self.load_rule();
+                    }
+                }
+            }
             Message::TargetDone => {
                 if let (Some(c), Some(cents)) = (self.selected, amount::parse(&self.target)) {
                     self.author("set the target", "set_target", &SetTarget { id: c, target: cents.max(0) });
@@ -717,6 +777,9 @@ impl App {
             Message::ShowHidden(on) => self.show_hidden = on,
             Message::MoveMoney => {
                 let from = self.selected;
+                if from.is_some_and(|c| self.follows(c)) {
+                    return Task::none();
+                }
                 let available = from.and_then(|c| self.peer.line(c)).map_or(0, |l| l.available);
                 self.modal = Some(Modal::Choose(Choosing::Move {
                     from,
@@ -1752,6 +1815,80 @@ impl App {
     fn select(&mut self, c: Option<Id<Category>>) {
         self.selected = c;
         self.target = c.and_then(|c| self.peer.line(c)).map(|l| amount::editable(l.target)).unwrap_or_default();
+        self.load_rule();
+    }
+
+    /// Whether a category's month follows its rule, which is then said:
+    /// nothing typed or moved by hand lands on it.
+    fn follows(&mut self, c: Id<Category>) -> bool {
+        let ruled = self.peer.line(c).is_some_and(|l| l.ruled);
+        if ruled {
+            self.note = format!("could not assign: {}", money_domain::rules::FOLLOWS);
+        }
+        ruled
+    }
+
+    /// The inspector's rule, as the selected category's month follows it,
+    /// or blank; and its preview.
+    fn load_rule(&mut self) {
+        let c = self.selected;
+        self.rule = match c.and_then(|c| self.peer.rule(c)) {
+            Some(r) => RuleForm {
+                matching: r.matching.clone(),
+                accounts: r.accounts.clone(),
+                share: money_domain::rules::percent(r.times, r.per),
+            },
+            None => RuleForm::default(),
+        };
+        self.preview_rule();
+    }
+
+    /// The rule as typed, when it is one: text to match and a share.
+    fn typed_rule(&self) -> Option<(i64, i64)> {
+        match self.rule.matching.trim().is_empty() {
+            true => None,
+            false => money_domain::rules::parse_share(&self.rule.share),
+        }
+    }
+
+    /// What the rule as typed would assign this month, watched.
+    fn preview_rule(&mut self) {
+        let p = match (self.selected, self.typed_rule()) {
+            (Some(_), Some((times, per))) => Some(PreviewRule {
+                month: self.peer.month.clone(),
+                matching: self.rule.matching.trim().to_string(),
+                accounts: self.rule.accounts.clone(),
+                times,
+                per,
+            }),
+            _ => None,
+        };
+        self.peer.set_preview(p);
+    }
+
+    /// The rule as typed, saved from the month on screen.
+    fn save_rule(&mut self) {
+        let Some(c) = self.selected else { return };
+        if self.rule.matching.trim().is_empty() {
+            self.note = "a rule matches some text, as ACME PAYROLL".into();
+            return;
+        }
+        let Some((times, per)) = money_domain::rules::parse_share(&self.rule.share) else {
+            self.note = format!("{:?} is not a share, as 10% or 0.1", self.rule.share);
+            return;
+        };
+        let r = SetRule {
+            category_id: c,
+            from: Some(self.peer.month.clone()),
+            matching: self.rule.matching.trim().to_string(),
+            accounts: self.rule.accounts.clone(),
+            times,
+            per,
+        };
+        if self.author("save the rule", "set_rule", &r) {
+            self.note = format!("assigned by rule from {}", month_name(&self.peer.month));
+            self.load_rule();
+        }
     }
 
     /// The other account of a transfer.

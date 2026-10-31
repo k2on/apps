@@ -16,6 +16,9 @@
 //!   category covers of spending on a card moves to the card's payment
 //!   category, and what it cannot is debt — overspending the next month's
 //!   ready to assign does not pay for.
+//! - **A category may be assigned by rule** ([`crate::rules`]): from a
+//!   month on, a share of what came in that matches its text. Its amount is
+//!   assigned as a typed one is, everywhere; nobody assigns it by hand.
 //!
 //! Nothing here is stored but what people said — the assignments and the
 //! transactions. Every figure is worked out by the views from them, so a
@@ -124,6 +127,7 @@ fn set_assigned(ctx: &Ctx, db: &mut Db<Money>, month: &str, id: Id<Category>, am
 #[mutator("budget.assign")]
 pub fn assign(ctx: &Ctx, db: &mut Db<Money>, input: Assign) -> Result<(), Refusal> {
     budgetable(db, input.category_id)?;
+    crate::rules::refuse(db, input.category_id, &input.month)?;
     set_assigned(ctx, db, &input.month, input.category_id, input.amount)
 }
 
@@ -137,11 +141,13 @@ pub fn move_money(ctx: &Ctx, db: &mut Db<Money>, input: MoveMoney) -> Result<(),
     }
     if let Some(from) = input.from {
         budgetable(db, from)?;
+        crate::rules::refuse(db, from, &input.month)?;
         let had = assigned_in(db, &input.month, from);
         set_assigned(ctx, db, &input.month, from, had - input.amount)?;
     }
     if let Some(to) = input.to {
         budgetable(db, to)?;
+        crate::rules::refuse(db, to, &input.month)?;
         let had = assigned_in(db, &input.month, to);
         set_assigned(ctx, db, &input.month, to, had + input.amount)?;
     }
@@ -160,11 +166,13 @@ pub fn auto_assign(ctx: &Ctx, db: &mut Db<Money>, input: AutoAssign) -> Result<(
     let (payments, others): (Vec<Category>, Vec<Category>) = all
         .into_iter()
         .filter(|c| !is_income(db, c.id) && (input.only.is_empty() || input.only.contains(&c.id)))
+        // A month that follows a rule is not anybody's to assign.
+        .filter(|c| crate::rules::rule_in(db, c.id, &input.month).is_none())
         .partition(|c| crate::cards::is_payment(db, c.id));
     for c in others.into_iter().chain(payments) {
         let had = assigned_in(db, &input.month, c.id);
         let amount = match input.how {
-            Auto::LastMonth => assigned_in(db, &last, c.id),
+            Auto::LastMonth => crate::rules::assigned_of(db, &last, c.id),
             Auto::Underfunded if crate::cards::is_payment(db, c.id) => had + line(db, &c, &input.month).underfunded,
             Auto::Underfunded => had.max(c.target),
             Auto::Reset => 0,
@@ -266,10 +274,7 @@ impl History {
     /// A category's own history: its assignments, and its transactions,
     /// with what was spent on a card kept apart.
     pub fn spending(db: &Db<Money>, id: Id<Category>, cards: &Cards) -> History {
-        let mut h = History::default();
-        for a in db.assigned.by(Assigned::CATEGORY_ID_MONTH).from(id).all() {
-            h.month(&a.month).assigned += a.amount;
-        }
+        let mut h = History::assigned(db, id);
         for t in db.txn.by(Txn::CATEGORY_ID_DATE).from(Some(id)).all() {
             let m = h.month(&month_of(&t.date));
             m.activity += t.amount;
@@ -278,6 +283,20 @@ impl History {
             }
         }
         h
+    }
+
+    /// Its assignments alone: typed, or its rule's ([`crate::rules::assignments`]).
+    pub fn assigned(db: &Db<Money>, id: Id<Category>) -> History {
+        let mut h = History::default();
+        for (month, amount) in crate::rules::assignments(db, id) {
+            h.month(&month).assigned += amount;
+        }
+        h
+    }
+
+    /// What it was assigned in every month through `month`.
+    pub fn assigned_through(&self, month: &str) -> i64 {
+        self.months.range(..=month.to_string()).map(|(_, m)| m.assigned).sum()
     }
 
     /// A month's moves, to add to.
@@ -363,6 +382,7 @@ pub fn line_with(db: &Db<Money>, c: &Category, month: &str, cards: &Cards) -> Bu
         None if c.target > 0 => (c.target - s.assigned).max(0),
         None => 0,
     };
+    let rule = crate::rules::rule_in(db, c.id, month);
     BudgetLine {
         category_id: c.id,
         group_id: c.group_id,
@@ -383,6 +403,8 @@ pub fn line_with(db: &Db<Money>, c: &Category, month: &str, cards: &Cards) -> Bu
         debt,
         underfunded,
         credit_overspent: s.credit_overspent,
+        ruled: rule.is_some(),
+        rule: rule.map_or_else(String::new, |r| crate::rules::Spec::of(&r).summary(db)),
     }
 }
 
@@ -392,12 +414,9 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
         month: month.into(),
         ..Summary::default()
     };
+    // What every category was assigned through the month, typed or by
+    // its rule, is read from its history below.
     let mut assigned_through = 0;
-    for a in db.assigned.scan() {
-        if a.month.as_str() <= month {
-            assigned_through += a.amount;
-        }
-    }
     let rta = ready_to_assign();
     let mut income_through = 0;
     for t in db
@@ -417,7 +436,9 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
         if c.id == rta || is_income(db, c.id) {
             continue;
         }
-        let s = History::with(db, c.id, &cards).at(month);
+        let h = History::with(db, c.id, &cards);
+        assigned_through += h.assigned_through(month);
+        let s = h.at(month);
         overspent_before += s.overspent_before;
         out.overspent_last_month += s.overspent_last_month;
         out.assigned += s.assigned;

@@ -43,6 +43,10 @@ pub struct Peer {
     pub banks: Watched<BankLine>,
     pub linked: Watched<LinkedLine>,
     pub asks: Watched<AskLine>,
+    /// The month's rules, one per category that follows one.
+    pub rules: Watched<RuleLine>,
+    /// What the rule being typed would assign, while it is one.
+    pub preview: Option<Watched<RulePreview>>,
     seen: ark::hash::StateHash,
 }
 
@@ -76,6 +80,8 @@ impl Peer {
             banks: Watched::open(c, "banks", none(), read),
             linked: Watched::open(c, "linked", none(), read),
             asks: Watched::open(c, "asks", none(), read),
+            rules: Watched::open(c, "rules", month_of(month), read),
+            preview: None,
             ledger: Ledger::All,
             month: month.into(),
             seen: c.state(),
@@ -101,6 +107,8 @@ impl Peer {
             self.banks.view(),
             self.linked.view(),
             self.asks.view(),
+            self.rules.view(),
+            self.preview.as_ref().and_then(|p| p.view()),
         ]
         .into_iter()
         .flatten()
@@ -127,6 +135,10 @@ impl Peer {
         note(self.banks.settle(c, moved));
         note(self.linked.settle(c, moved));
         note(self.asks.settle(c, moved));
+        note(self.rules.settle(c, moved));
+        if let Some(p) = &mut self.preview {
+            note(p.settle(c, moved));
+        }
         any
     }
 
@@ -142,6 +154,8 @@ impl Peer {
         old.close(c);
         let old = std::mem::replace(&mut self.spending, Watched::open(c, "spending", month_of(month), read));
         old.close(c);
+        let old = std::mem::replace(&mut self.rules, Watched::open(c, "rules", month_of(month), read));
+        old.close(c);
         self.month = month.into();
     }
 
@@ -155,6 +169,26 @@ impl Peer {
         let old = std::mem::replace(&mut self.register, Watched::open(c, name, input, read));
         old.close(c);
         self.ledger = ledger;
+    }
+
+    /// What a rule not yet saved would assign, watched: none closes it.
+    pub fn set_preview(&mut self, rule: Option<PreviewRule>) {
+        let input = rule.map(|r| r.to_bytes());
+        if let (Some(p), Some(i)) = (&self.preview, &input) {
+            if p.is("preview_rule", i) {
+                return;
+            }
+        }
+        let c = &mut self.client;
+        if let Some(old) = self.preview.take() {
+            old.close(c);
+        }
+        self.preview = input.map(|i| Watched::open(c, "preview_rule", i, read));
+    }
+
+    /// The rule a category's month follows, if it follows one.
+    pub fn rule(&self, id: Id<Category>) -> Option<&RuleLine> {
+        self.rules.rows.iter().find(|r| r.category_id == id)
     }
 
     pub fn summary(&self) -> Summary {

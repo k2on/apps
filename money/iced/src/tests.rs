@@ -534,7 +534,40 @@ fn the_budget_drawn() {
     let _ = picking.update(Message::Go(Page::Settings));
     let _ = picking.update(Message::Pointer(iced::Point::new(1020.0, 420.0)));
     let _ = picking.update(Message::Banks(crate::banks::Msg::Pick("wf2-chk".into())));
+    // Gifts assigned by rule: its cell marked, its inspector's rule saved;
+    // and Vacation's rule being typed, its preview under it.
+    let mut ruled = app();
+    let _ = ruled.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let checking = account(&ruled, "Checking").id;
+    let gifts = category(&ruled, "Gifts").category_id;
+    let _ = ruled.update(Message::Select(Some(gifts)));
+    let _ = ruled.update(Message::RuleMatching("Acme Corp".into()));
+    let _ = ruled.update(Message::RuleAccount(checking));
+    let _ = ruled.update(Message::RuleShare("10%".into()));
+    let _ = ruled.update(Message::SaveRule);
+    let _ = ruled.update(Message::EditAssigned(gifts));
+    // Every group above Gifts' folded, so its marked cell is on screen.
+    let folded: Vec<Id<Group>> = ruled
+        .peer
+        .groups
+        .rows
+        .iter()
+        .filter(|g| g.name != "Savings Goals")
+        .map(|g| g.id)
+        .collect();
+    for g in folded {
+        let _ = ruled.update(Message::Collapse(g));
+    }
+    let mut typing = app();
+    let _ = typing.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let vacation = category(&typing, "Vacation").category_id;
+    let _ = typing.update(Message::Select(Some(vacation)));
+    let _ = typing.update(Message::RuleMatching("riverside".into()));
+    let _ = typing.update(Message::RuleShare("0.05".into()));
     for (app, scene, theme, side) in [
+        (&ruled, "ruled", iced::Theme::Dark, "dark"),
+        (&ruled, "ruled", iced::Theme::Light, "light"),
+        (&typing, "typing", iced::Theme::Dark, "dark"),
         (&cards, "cards", iced::Theme::Dark, "dark"),
         (&cards, "cards", iced::Theme::Light, "light"),
         (&above, "above", iced::Theme::Dark, "dark"),
@@ -927,4 +960,97 @@ fn an_account_is_renamed_where_it_stands() {
     let _ = app.update(Message::RenameTyped("Everyday Checking".into()));
     let _ = app.update(Message::RenameDone);
     assert_eq!(account(&app, "Everyday Checking").id, checking);
+}
+
+/// A category's assignment set by rule in its inspector: the text, the
+/// accounts, the share, what it would give this month before it is saved;
+/// then the budget's cell shows the rule's amount and will not open, and
+/// the rule comes off again.
+#[test]
+fn a_category_is_assigned_by_rule_from_its_inspector() {
+    let mut app = app();
+    let gifts = category(&app, "Gifts");
+    assert_eq!((gifts.assigned, gifts.ruled), (0, false));
+    let checking = account(&app, "Checking").id;
+    let before = app.peer.summary().ready_to_assign;
+    let _ = app.update(Message::Select(Some(gifts.category_id)));
+    assert_eq!(app.rule, crate::RuleForm::default());
+    assert!(app.peer.preview.is_none(), "nothing typed, nothing to preview");
+    let _ = app.update(Message::RuleMatching("acme".into()));
+    assert!(app.peer.preview.is_none(), "no share yet");
+    let _ = app.update(Message::RuleShare("10%".into()));
+    // October's two Acme paydays into checking, $3,150 each.
+    let preview = |app: &App| app.peer.preview.as_ref().and_then(|p| p.rows.first().cloned()).expect("a preview");
+    let p = preview(&app);
+    assert_eq!((p.count, p.matched, p.amount), (2, 630_000, 63_000));
+    let _ = app.update(Message::RuleShare("0.15".into()));
+    assert_eq!(preview(&app).amount, 94_500);
+    let _ = app.update(Message::RuleAccount(checking));
+    assert_eq!(app.rule.accounts, vec![checking]);
+    let savings = account(&app, "Savings").id;
+    let _ = app.update(Message::RuleAccount(savings));
+    let _ = app.update(Message::RuleAccount(savings));
+    assert_eq!(app.rule.accounts, vec![checking], "ticked twice is not ticked");
+    let _ = app.update(Message::RuleShare("10%".into()));
+    assert_eq!(preview(&app).summary, "10% of income matching acme in Checking");
+    // Nothing is assigned until it is saved.
+    assert_eq!(category(&app, "Gifts").assigned, 0);
+    let _ = app.update(Message::SaveRule);
+    let g = category(&app, "Gifts");
+    assert_eq!((g.assigned, g.ruled), (63_000, true));
+    assert_eq!(g.rule, "10% of income matching acme in Checking");
+    assert_eq!(app.peer.summary().ready_to_assign, before - 63_000);
+    assert_eq!(app.rule.share, "10%", "the form is the rule as saved");
+    // The cell does not open: why not is said instead.
+    app.note.clear();
+    let _ = app.update(Message::EditAssigned(g.category_id));
+    assert!(app.assigning.is_none());
+    assert_eq!(app.note, "could not assign: this category's assignment follows its rule");
+    app.note.clear();
+    let _ = app.act(Action::Activate);
+    assert!(app.assigning.is_none());
+    assert!(app.note.contains("follows its rule"));
+    // Nor does money move to it by hand, or a quick button assign it.
+    app.note.clear();
+    let _ = app.update(Message::MoveMoney);
+    assert!(app.modal.is_none() && app.note.contains("follows its rule"));
+    let _ = app.update(Message::AssignTo(g.category_id, 1_000));
+    assert_eq!(category(&app, "Gifts").assigned, 63_000);
+    // September was before it: typed by hand, as it was.
+    let _ = app.update(Message::Month(-1));
+    let sep = category(&app, "Gifts");
+    assert!(!sep.ruled);
+    assert_eq!(app.rule, crate::RuleForm::default());
+    let _ = app.update(Message::EditAssigned(sep.category_id));
+    assert!(app.assigning.is_some());
+    let _ = app.update(Message::Escape);
+    let _ = app.update(Message::Month(1));
+    assert_eq!(app.rule.matching, "acme");
+    // Off again from October: assigned by hand, nothing given.
+    let _ = app.update(Message::RemoveRule);
+    let g = category(&app, "Gifts");
+    assert_eq!((g.assigned, g.ruled, g.rule.as_str()), (0, false, ""));
+    assert_eq!(app.peer.summary().ready_to_assign, before);
+    assert_eq!(app.rule, crate::RuleForm::default());
+    // A share that is not one is said, and nothing is saved.
+    let _ = app.update(Message::RuleMatching("acme".into()));
+    let _ = app.update(Message::RuleShare("ten".into()));
+    assert!(app.peer.preview.is_none());
+    let _ = app.update(Message::SaveRule);
+    assert!(app.note.contains("not a share"), "{}", app.note);
+    assert!(!category(&app, "Gifts").ruled);
+}
+
+/// A card's payment category has no rule to set: its inspector is the
+/// card's.
+#[test]
+fn a_payment_category_is_not_assigned_by_rule() {
+    let mut app = app();
+    let pay = category(&app, "Chase Sapphire").category_id;
+    let _ = app.update(Message::Select(Some(pay)));
+    let _ = app.update(Message::RuleMatching("acme".into()));
+    let _ = app.update(Message::RuleShare("10%".into()));
+    let _ = app.update(Message::SaveRule);
+    assert!(app.note.contains("payment category"), "{}", app.note);
+    assert!(!category(&app, "Chase Sapphire").ruled);
 }

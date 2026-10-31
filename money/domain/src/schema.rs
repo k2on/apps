@@ -265,6 +265,35 @@ pub struct Asked {
     pub asked_ms: i64,
 }
 
+/// How a category's assignment is worked out from a month on, until a
+/// later version says otherwise ([`crate::rules`]): a share of what came
+/// in, in that month, matching `matching` in the chosen accounts — or,
+/// `manual`, what people assign it by hand again. One row per category and
+/// the month it starts; a month reads the latest that starts at or before
+/// it, so every month before the first is assigned by hand as it was.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(category_id, from))]
+pub struct Rule {
+    #[ark(key)]
+    pub from: String,
+    #[ark(key, refs(Category))]
+    pub category_id: Id<Category>,
+    /// From this month the category is assigned by hand again: the rule
+    /// before it stops.
+    pub manual: bool,
+    /// What a transaction's payee or the bank's own line for it holds,
+    /// any case.
+    pub matching: String,
+    /// The on-budget accounts whose inflows count; none is every one.
+    pub accounts: Vec<Id<Account>>,
+    /// The share, exactly: `times / per` of what matched (10% is 10/100,
+    /// 1.5 is 15/10).
+    pub times: i64,
+    pub per: i64,
+    pub at_ms: i64,
+    pub user_id: String,
+}
+
 /// money's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Money {
@@ -279,6 +308,7 @@ pub struct Money {
     pub sign_in: ark_auth::SignIn,
     pub role: ark_auth::Role,
     pub bank_ask: BankAsk,
+    pub rule: Rule,
 }
 
 ark_auth::install!(Money);

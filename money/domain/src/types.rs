@@ -381,6 +381,56 @@ pub struct BankFailed {
     pub error: String,
 }
 
+// * Assignment by rule
+
+fn is_month_or_now(m: &Option<String>) -> bool {
+    m.as_deref().is_none_or(is_month)
+}
+
+/// A category assigned, from a month on, a share of what comes in: each
+/// month, `times / per` of that month's inflows (not transfers) in
+/// `accounts` (none is every account on the budget) whose payee or bank
+/// line holds `matching`, any case ([`crate::rules`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SetRule {
+    pub category_id: Id<Category>,
+    /// The first month it assigns; none is this month.
+    #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
+    #[serde(default)]
+    pub from: Option<String>,
+    #[ark(trim, non_empty, why = "a rule matches some text")]
+    #[ark(len = "0..=120")]
+    pub matching: String,
+    pub accounts: Vec<Id<Account>>,
+    #[ark(check = "at_least_0", why = "a share is never below nothing")]
+    pub times: i64,
+    #[ark(check = "more_than_0", why = "a share is of something")]
+    pub per: i64,
+}
+
+/// A category assigned by hand again from a month on (none is this one).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ClearRule {
+    pub category_id: Id<Category>,
+    #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
+    #[serde(default)]
+    pub from: Option<String>,
+}
+
+/// What a rule would assign in a month, before it is saved.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct PreviewRule {
+    #[ark(check = "is_month", why = "a month, as 2026-10")]
+    pub month: String,
+    #[ark(trim, len = "0..=120")]
+    pub matching: String,
+    pub accounts: Vec<Id<Account>>,
+    #[ark(check = "at_least_0", why = "a share is never below nothing")]
+    pub times: i64,
+    #[ark(check = "more_than_0", why = "a share is of something")]
+    pub per: i64,
+}
+
 // * The views' inputs
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -464,6 +514,15 @@ pub struct BudgetLine {
     /// Card spending this month beyond what it had (positive): new debt,
     /// which the next month's ready to assign does not pay for.
     pub credit_overspent: i64,
+    /// The rule the month's assignment follows, said shortly ("10% of
+    /// income matching ACME PAYROLL in Checking, Savings"); blank when it
+    /// is assigned by hand ([`crate::rules`]).
+    #[serde(default)]
+    pub rule: String,
+    /// Its assignment follows that rule this month: `assigned` is worked
+    /// out, and not anybody's to set or move money to or from.
+    #[serde(default)]
+    pub ruled: bool,
 }
 
 /// The month as a whole: what is left to assign, and its totals.
@@ -597,4 +656,38 @@ pub struct LinkedLine {
     pub waiting: bool,
     /// What an account opened for it would be: `credit` for a card.
     pub opens_as: String,
+}
+
+/// A category's rule as it stands in a month: what it matches, where, and
+/// the share, for a form to start from ([`crate::rules`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
+pub struct RuleLine {
+    pub category_id: Id<Category>,
+    /// The month this version of it started.
+    pub from: String,
+    pub matching: String,
+    /// The accounts it reads; none is every account on the budget.
+    pub accounts: Vec<Id<Account>>,
+    pub times: i64,
+    pub per: i64,
+    /// It, said shortly: "10% of income matching ACME PAYROLL in Checking".
+    pub summary: String,
+    /// What came in that it matched, in the month, and its share of that:
+    /// the month's assignment.
+    pub matched: i64,
+    pub amount: i64,
+}
+
+/// What a rule not yet saved would assign in a month.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
+pub struct RulePreview {
+    pub month: String,
+    pub summary: String,
+    /// The transactions it matched, and what they brought in.
+    pub count: i64,
+    pub matched: i64,
+    /// Its share of that: what the month would assign.
+    pub amount: i64,
 }

@@ -385,10 +385,10 @@ public struct BankTxn: Equatable {
 extension BudgetLine {
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(categoryId: Id(J.text(o["category_id"])), groupId: Id(J.text(o["group_id"])), group: J.text(o["group"]), groupPos: J.int(o["group_pos"]), name: J.text(o["name"]), pos: J.int(o["pos"]), hidden: J.bool(o["hidden"]), target: J.int(o["target"]), assigned: J.int(o["assigned"]), activity: J.int(o["activity"]), available: J.int(o["available"]), carried: J.int(o["carried"]), assignedLastMonth: J.int(o["assigned_last_month"]), spentLastMonth: J.int(o["spent_last_month"]), averageSpent: J.int(o["average_spent"]), card: J.opt(o["card"]) { v0 in Id(J.text(v0)) }, debt: J.int(o["debt"]), underfunded: J.int(o["underfunded"]), creditOverspent: J.int(o["credit_overspent"]))
+        self.init(categoryId: Id(J.text(o["category_id"])), groupId: Id(J.text(o["group_id"])), group: J.text(o["group"]), groupPos: J.int(o["group_pos"]), name: J.text(o["name"]), pos: J.int(o["pos"]), hidden: J.bool(o["hidden"]), target: J.int(o["target"]), assigned: J.int(o["assigned"]), activity: J.int(o["activity"]), available: J.int(o["available"]), carried: J.int(o["carried"]), assignedLastMonth: J.int(o["assigned_last_month"]), spentLastMonth: J.int(o["spent_last_month"]), averageSpent: J.int(o["average_spent"]), card: J.opt(o["card"]) { v0 in Id(J.text(v0)) }, debt: J.int(o["debt"]), underfunded: J.int(o["underfunded"]), creditOverspent: J.int(o["credit_overspent"]), rule: J.text(o["rule"]), ruled: J.bool(o["ruled"]))
     }
 
-    public var json: String { J.obj(["\"category_id\":" + J.q(categoryId.hex), "\"group_id\":" + J.q(groupId.hex), "\"group\":" + J.q(group), "\"group_pos\":" + String(groupPos), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"target\":" + String(target), "\"assigned\":" + String(assigned), "\"activity\":" + String(activity), "\"available\":" + String(available), "\"carried\":" + String(carried), "\"assigned_last_month\":" + String(assignedLastMonth), "\"spent_last_month\":" + String(spentLastMonth), "\"average_spent\":" + String(averageSpent), "\"card\":" + J.wopt(card) { v0 in J.q(v0.hex) }, "\"debt\":" + String(debt), "\"underfunded\":" + String(underfunded), "\"credit_overspent\":" + String(creditOverspent)]) }
+    public var json: String { J.obj(["\"category_id\":" + J.q(categoryId.hex), "\"group_id\":" + J.q(groupId.hex), "\"group\":" + J.q(group), "\"group_pos\":" + String(groupPos), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"target\":" + String(target), "\"assigned\":" + String(assigned), "\"activity\":" + String(activity), "\"available\":" + String(available), "\"carried\":" + String(carried), "\"assigned_last_month\":" + String(assignedLastMonth), "\"spent_last_month\":" + String(spentLastMonth), "\"average_spent\":" + String(averageSpent), "\"card\":" + J.wopt(card) { v0 in J.q(v0.hex) }, "\"debt\":" + String(debt), "\"underfunded\":" + String(underfunded), "\"credit_overspent\":" + String(creditOverspent), "\"rule\":" + J.q(rule), "\"ruled\":" + String(ruled)]) }
 }
 
 /// The record `Categorize`.
@@ -426,6 +426,21 @@ public struct Category: Equatable {
     }
 
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"group_id\":" + J.q(groupId.hex), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"target\":" + String(target), "\"note\":" + J.q(note), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
+}
+
+/// The record `ClearRule`.
+public struct ClearRule: Equatable {
+    public var categoryId: Id
+    public var from: String?
+
+    public init(categoryId: Id, from: String? = nil) { self.categoryId = categoryId; self.from = from; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(categoryId: Id(J.text(o["category_id"])), from: J.opt(o["from"]) { v0 in J.text(v0) })
+    }
+
+    public var json: String { J.obj(["\"category_id\":" + J.q(categoryId.hex), "\"from\":" + J.wopt(from) { v0 in J.q(v0) }]) }
 }
 
 /// The sum `Cleared` (UniFFI's): its JSON, for the functions called by name.
@@ -782,6 +797,24 @@ extension PayeeLine {
     public var json: String { J.obj(["\"name\":" + J.q(name), "\"count\":" + String(count), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }]) }
 }
 
+/// The record `PreviewRule`.
+public struct PreviewRule: Equatable {
+    public var month: String
+    public var matching: String
+    public var accounts: [Id]
+    public var times: Int64
+    public var per: Int64
+
+    public init(month: String, matching: String, accounts: [Id], times: Int64, per: Int64) { self.month = month; self.matching = matching; self.accounts = accounts; self.times = times; self.per = per; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(month: J.text(o["month"]), matching: J.text(o["matching"]), accounts: J.list(o["accounts"]) { v0 in Id(J.text(v0)) }, times: J.int(o["times"]), per: J.int(o["per"]))
+    }
+
+    public var json: String { J.obj(["\"month\":" + J.q(month), "\"matching\":" + J.q(matching), "\"accounts\":" + J.wlist(accounts) { v0 in J.q(v0.hex) }, "\"times\":" + String(times), "\"per\":" + String(per)]) }
+}
+
 /// The record `Reconcile`.
 public struct Reconcile: Equatable {
     public var accountId: Id
@@ -886,6 +919,48 @@ public struct Role: Equatable {
     public var json: String { J.obj(["\"user\":" + J.q(user), "\"role\":" + J.q(role)]) }
 }
 
+/// The record `Rule`.
+public struct Rule: Equatable {
+    public var from: String
+    public var categoryId: Id
+    public var manual: Bool
+    public var matching: String
+    public var accounts: [Id]
+    public var times: Int64
+    public var per: Int64
+    public var atMs: Int64
+    public var userId: String
+
+    public init(from: String, categoryId: Id, manual: Bool, matching: String, accounts: [Id], times: Int64, per: Int64, atMs: Int64, userId: String) { self.from = from; self.categoryId = categoryId; self.manual = manual; self.matching = matching; self.accounts = accounts; self.times = times; self.per = per; self.atMs = atMs; self.userId = userId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(from: J.text(o["from"]), categoryId: Id(J.text(o["category_id"])), manual: J.bool(o["manual"]), matching: J.text(o["matching"]), accounts: J.list(o["accounts"]) { v0 in Id(J.text(v0)) }, times: J.int(o["times"]), per: J.int(o["per"]), atMs: J.int(o["at_ms"]), userId: J.text(o["user_id"]))
+    }
+
+    public var json: String { J.obj(["\"from\":" + J.q(from), "\"category_id\":" + J.q(categoryId.hex), "\"manual\":" + String(manual), "\"matching\":" + J.q(matching), "\"accounts\":" + J.wlist(accounts) { v0 in J.q(v0.hex) }, "\"times\":" + String(times), "\"per\":" + String(per), "\"at_ms\":" + String(atMs), "\"user_id\":" + J.q(userId)]) }
+}
+
+/// The record `RuleLine` (UniFFI's): its JSON, for the functions called by name.
+extension RuleLine {
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(categoryId: Id(J.text(o["category_id"])), from: J.text(o["from"]), matching: J.text(o["matching"]), accounts: J.list(o["accounts"]) { v0 in Id(J.text(v0)) }, times: J.int(o["times"]), per: J.int(o["per"]), summary: J.text(o["summary"]), matched: J.int(o["matched"]), amount: J.int(o["amount"]))
+    }
+
+    public var json: String { J.obj(["\"category_id\":" + J.q(categoryId.hex), "\"from\":" + J.q(from), "\"matching\":" + J.q(matching), "\"accounts\":" + J.wlist(accounts) { v0 in J.q(v0.hex) }, "\"times\":" + String(times), "\"per\":" + String(per), "\"summary\":" + J.q(summary), "\"matched\":" + String(matched), "\"amount\":" + String(amount)]) }
+}
+
+/// The record `RulePreview` (UniFFI's): its JSON, for the functions called by name.
+extension RulePreview {
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(month: J.text(o["month"]), summary: J.text(o["summary"]), count: J.int(o["count"]), matched: J.int(o["matched"]), amount: J.int(o["amount"]))
+    }
+
+    public var json: String { J.obj(["\"month\":" + J.q(month), "\"summary\":" + J.q(summary), "\"count\":" + String(count), "\"matched\":" + String(matched), "\"amount\":" + String(amount)]) }
+}
+
 /// The record `SetCleared`.
 public struct SetCleared: Equatable {
     public var id: Id
@@ -899,6 +974,25 @@ public struct SetCleared: Equatable {
     }
 
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"cleared\":" + String(cleared)]) }
+}
+
+/// The record `SetRule`.
+public struct SetRule: Equatable {
+    public var categoryId: Id
+    public var from: String?
+    public var matching: String
+    public var accounts: [Id]
+    public var times: Int64
+    public var per: Int64
+
+    public init(categoryId: Id, from: String?, matching: String, accounts: [Id], times: Int64, per: Int64) { self.categoryId = categoryId; self.from = from; self.matching = matching; self.accounts = accounts; self.times = times; self.per = per; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(categoryId: Id(J.text(o["category_id"])), from: J.opt(o["from"]) { v0 in J.text(v0) }, matching: J.text(o["matching"]), accounts: J.list(o["accounts"]) { v0 in Id(J.text(v0)) }, times: J.int(o["times"]), per: J.int(o["per"]))
+    }
+
+    public var json: String { J.obj(["\"category_id\":" + J.q(categoryId.hex), "\"from\":" + J.wopt(from) { v0 in J.q(v0) }, "\"matching\":" + J.q(matching), "\"accounts\":" + J.wlist(accounts) { v0 in J.q(v0.hex) }, "\"times\":" + String(times), "\"per\":" + String(per)]) }
 }
 
 /// The record `SetTarget`.
@@ -1105,6 +1199,9 @@ public struct Money {
     /// `categories.add_group`: its intent's id.
     @discardableResult public func addGroup(_ input: AddGroup) throws -> String { try peer.mutate(name: "categories.add_group", input: input.json) }
 
+    /// `categories.clear_rule`: its intent's id.
+    @discardableResult public func clearRule(_ input: ClearRule) throws -> String { try peer.mutate(name: "categories.clear_rule", input: input.json) }
+
     /// `categories.delete_category`: its intent's id.
     @discardableResult public func deleteCategory(_ input: DeleteCategory) throws -> String { try peer.mutate(name: "categories.delete_category", input: input.json) }
 
@@ -1123,11 +1220,20 @@ public struct Money {
     /// `categories.move_group`: its intent's id.
     @discardableResult public func moveGroup(_ input: MoveGroup) throws -> String { try peer.mutate(name: "categories.move_group", input: input.json) }
 
+    /// `categories.preview_rule`, kept, its rows UniFFI's.
+    public func previewRule(_ input: PreviewRule) throws -> LiveView<RulePreview> { typed(try RulePreviewView(peer: peer, name: "categories.preview_rule", input: input.json)) }
+
     /// `categories.rename_category`: its intent's id.
     @discardableResult public func renameCategory(_ input: RenameCategory) throws -> String { try peer.mutate(name: "categories.rename_category", input: input.json) }
 
     /// `categories.rename_group`: its intent's id.
     @discardableResult public func renameGroup(_ input: RenameGroup) throws -> String { try peer.mutate(name: "categories.rename_group", input: input.json) }
+
+    /// `categories.rules`, kept, its rows UniFFI's.
+    public func rules(_ input: Month) throws -> LiveView<RuleLine> { typed(try RuleLineView(peer: peer, name: "categories.rules", input: input.json)) }
+
+    /// `categories.set_rule`: its intent's id.
+    @discardableResult public func setRule(_ input: SetRule) throws -> String { try peer.mutate(name: "categories.set_rule", input: input.json) }
 
     /// `categories.set_target`: its intent's id.
     @discardableResult public func setTarget(_ input: SetTarget) throws -> String { try peer.mutate(name: "categories.set_target", input: input.json) }
@@ -1190,6 +1296,10 @@ public struct Money {
     private func typed(_ v: LinkedLineView) -> LiveView<LinkedLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
     private func typed(_ v: PayeeLineView) -> LiveView<PayeeLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+
+    private func typed(_ v: RuleLineView) -> LiveView<RuleLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+
+    private func typed(_ v: RulePreviewView) -> LiveView<RulePreview> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
     private func typed(_ v: SpendingLineView) -> LiveView<SpendingLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 
