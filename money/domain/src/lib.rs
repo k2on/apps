@@ -63,8 +63,8 @@ pub fn domain() -> Domain {
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
         transactions::register, transactions::inbox, transactions::payees,
-        plaid::import, plaid::link, plaid::open, plaid::ignore, plaid::sync, plaid::banks, plaid::linked,
-        banks::connect, banks::reconnect, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
+        plaid::import, plaid::link, plaid::open, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, plaid::retired,
+        banks::connect, banks::reconnect, banks::add_accounts, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
     .with(ark_auth::register::<Money>)
 }
 

@@ -159,6 +159,10 @@ pub const CLIENT_ID: &str = "client-id-0f3a";
 pub const SECRET: &str = "secret-77c2e1";
 pub const TOKEN: &str = "access-test-5d9b";
 pub const WF_TOKEN: &str = "access-wf-7a1c";
+/// A second login to the same Wells Fargo, when a test has the next page
+/// give it ([`Script::exchange`]): its accounts the first login's, and a
+/// savings account the first did not share.
+pub const WF2_TOKEN: &str = "access-wf2-3e8b";
 
 /// A Hosted Link page the mock opened: whether for a login given again,
 /// and how it ended once somebody finished it.
@@ -185,6 +189,12 @@ pub struct Script {
     pub removed: Vec<String>,
     /// Wells Fargo has a new card transaction since `w1`.
     pub wf_more: bool,
+    /// The access token the next public token is traded for: the first
+    /// Wells Fargo login's unless a test says.
+    pub exchange: Option<String>,
+    /// The first Wells Fargo login shares its savings account too, as it
+    /// does once it is picked in Plaid's account picker.
+    pub wf_savings: bool,
 }
 
 /// ArkOS's mock Plaid (`sync/actual-import/src/test/mock-plaid.ts`), whose
@@ -292,31 +302,42 @@ fn chase(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
     }
 }
 
-/// Wells Fargo: checking, a card, and history on both.
-fn wells(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
+/// Wells Fargo: checking, a card, and history on both — and a savings
+/// account, for the second login (`second`) or once the first shares it.
+/// The second login's ids are its own: `wf2-…`, `W2…`.
+fn wells(script: &mut Script, endpoint: &str, body: &Value, second: bool) -> Answered {
+    let (a, t_, item) = match second {
+        false => ("wf", "W", "item-wf"),
+        true => ("wf2", "W2", "item-wf2"),
+    };
+    let savings = second || script.wf_savings;
     match endpoint {
-        "/accounts/get" => Ok(json!({
-            "accounts": [
-                { "account_id": "wf-chk", "name": "Everyday Checking", "mask": "4321", "type": "depository", "subtype": "checking", "balances": { "current": 1000.0 } },
-                { "account_id": "wf-card", "name": "Active Cash Card", "mask": "8765", "type": "credit", "subtype": "credit card", "balances": { "current": 300.0 } },
-            ],
-            "item": { "item_id": "item-wf", "institution_id": "ins_127991" },
-        })),
+        "/accounts/get" => {
+            let mut accounts = vec![
+                json!({ "account_id": format!("{a}-chk"), "name": "Everyday Checking", "mask": "4321", "type": "depository", "subtype": "checking", "balances": { "current": 1000.0 } }),
+                json!({ "account_id": format!("{a}-card"), "name": "Active Cash Card", "mask": "8765", "type": "credit", "subtype": "credit card", "balances": { "current": 300.0 } }),
+            ];
+            if savings {
+                accounts.push(json!({ "account_id": format!("{a}-sav"), "name": "Way Savings", "mask": "5555", "type": "depository", "subtype": "savings", "balances": { "current": 700.0 } }));
+            }
+            Ok(json!({ "accounts": accounts, "item": { "item_id": item, "institution_id": "ins_127991" } }))
+        }
         "/transactions/sync" => {
             let cursor = body["cursor"].as_str().map(str::to_string);
             script.cursors.push(cursor.clone());
             let t = |id: &str, account: &str, amount: f64, date: &str| {
-                txn(id, amount, &format!("{id} STORE"), json!({ "account_id": account, "date": date }))
+                let id = format!("{t_}{id}");
+                txn(&id, amount, &format!("{id} STORE"), json!({ "account_id": format!("{a}-{account}"), "date": date }))
             };
             match cursor.as_deref() {
-                None => Ok(page(
-                    "w1",
-                    vec![t("WC1", "wf-card", 200.0, "2026-09-12"), t("WK1", "wf-chk", 40.0, "2026-09-14")],
-                    vec![],
-                    vec![],
-                    false,
-                )),
-                Some("w1") if script.wf_more => Ok(page("w2", vec![t("WC2", "wf-card", 25.0, "2026-10-20")], vec![], vec![], false)),
+                None => {
+                    let mut added = vec![t("C1", "card", 200.0, "2026-09-12"), t("K1", "chk", 40.0, "2026-09-14")];
+                    if savings {
+                        added.push(t("S1", "sav", -500.0, "2026-09-20"));
+                    }
+                    Ok(page("w1", added, vec![], vec![], false))
+                }
+                Some("w1") if script.wf_more => Ok(page("w2", vec![t("C2", "card", 25.0, "2026-10-20")], vec![], vec![], false)),
                 Some("w1" | "w2") => Ok(page(cursor.as_deref().unwrap(), vec![], vec![], vec![], false)),
                 Some(c) => Err(("INVALID_FIELD", format!("unexpected cursor {c}"))),
             }
@@ -357,12 +378,15 @@ fn answer(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
             Ok(json!({ "link_token": body["link_token"], "link_sessions": page.finished.clone().into_iter().collect::<Vec<_>>() }))
         }
         "/item/public_token/exchange" => match body["public_token"].as_str() {
-            Some(p) if p.starts_with("public-") => Ok(json!({ "access_token": WF_TOKEN, "item_id": "item-wf" })),
+            Some(p) if p.starts_with("public-") => match script.exchange.clone() {
+                Some(t) if t == WF2_TOKEN => Ok(json!({ "access_token": t, "item_id": "item-wf2" })),
+                _ => Ok(json!({ "access_token": WF_TOKEN, "item_id": "item-wf" })),
+            },
             _ => Err(("INVALID_PUBLIC_TOKEN", "no such public token".into())),
         },
         _ => {
             let token = body["access_token"].as_str().unwrap_or("").to_string();
-            if script.removed.contains(&token) || (token != TOKEN && token != WF_TOKEN) {
+            if script.removed.contains(&token) || ![TOKEN, WF_TOKEN, WF2_TOKEN].contains(&token.as_str()) {
                 return Err(("INVALID_ACCESS_TOKEN", "bad token".into()));
             }
             if endpoint == "/item/remove" {
@@ -374,7 +398,7 @@ fn answer(script: &mut Script, endpoint: &str, body: &Value) -> Answered {
             }
             match token == TOKEN {
                 true => chase(script, endpoint, body),
-                false => wells(script, endpoint, body),
+                false => wells(script, endpoint, body, token == WF2_TOKEN),
             }
         }
     }

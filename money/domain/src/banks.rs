@@ -13,8 +13,16 @@
 //!   Every account the bank has then waits for somebody to say what it
 //!   feeds: an account already here (`banks.link`), one opened for it
 //!   (`banks.open`), or nothing (`banks.ignore`).
+//!   Unless it is a second login to a bank already here (the same
+//!   institution): then its first import folds it into the first
+//!   (`crate::plaid`), each account taking its twin's choice, and the
+//!   login it replaces is removed (`banks.retired`).
 //! - **`banks.reconnect`**: the same page in Plaid's update mode, for a bank
 //!   whose login ran out (`ITEM_LOGIN_REQUIRED`, [`crate::plaid::LOGIN_CODES`]).
+//! - **`banks.add_accounts`**: the same page in update mode with Plaid's
+//!   account picker, for sharing an account of a connected bank's that
+//!   was not shared at first: each one picked opens here at the next
+//!   import, as an account of its kind with its whole history.
 //! - **`banks.disconnect`**: the importer tells Plaid to forget the login,
 //!   drops it, and answers `Done`, which removes the bank and what it knew
 //!   of its accounts here. The accounts and their transactions stay: they
@@ -64,6 +72,16 @@ pub fn reconnect(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), R
     ask(ctx, db, "reconnect", &Some(bank))
 }
 
+/// Ask the server for a page to share more of a connected bank's accounts
+/// (Plaid's update mode, its account picker): every account picked there
+/// that was not shared before is opened here at the next import, as an
+/// account of its kind with its whole history (`banks.open`).
+#[mutator("banks.add_accounts")]
+pub fn add_accounts(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), Refusal> {
+    let bank = bank_of(db, &input.bank)?;
+    ask(ctx, db, "add_accounts", &Some(bank))
+}
+
 /// Ask the server to disconnect a bank: Plaid forgets the login and the
 /// bank stops importing. Its accounts here, and what is in them, stay.
 #[mutator("banks.disconnect")]
@@ -88,6 +106,9 @@ pub fn answer(ctx: &Ctx, db: &mut Db<Money>, input: Answer) -> Result<(), Refusa
                 name: input.bank.clone(),
                 institution: input.institution.clone(),
                 user_id: ctx.user().into(),
+                // Its first import folds it into another login to the same
+                // bank, if there is one (`crate::plaid`).
+                fresh: true,
                 ..Bank::default()
             })?,
             "reconnect" => {
@@ -95,6 +116,16 @@ pub fn answer(ctx: &Ctx, db: &mut Db<Money>, input: Answer) -> Result<(), Refusa
                     db.bank.update(Bank {
                         error_code: String::new(),
                         error: String::new(),
+                        ..b
+                    })?;
+                }
+            }
+            "add_accounts" => {
+                if let Some(b) = db.bank.get(&asked.bank) {
+                    db.bank.update(Bank {
+                        error_code: String::new(),
+                        error: String::new(),
+                        adding: true,
                         ..b
                     })?;
                 }
@@ -125,7 +156,7 @@ pub fn answer(ctx: &Ctx, db: &mut Db<Money>, input: Answer) -> Result<(), Refusa
 
 /// A bank gone: its row and its accounts' links. The accounts it fed stay,
 /// kept by hand from now on.
-fn forget(db: &mut Db<Money>, bank: &str) -> Result<(), Refusal> {
+pub(crate) fn forget(db: &mut Db<Money>, bank: &str) -> Result<(), Refusal> {
     for l in db.linked.scan().into_iter().filter(|l| l.bank == bank) {
         db.linked.remove(&l)?;
     }

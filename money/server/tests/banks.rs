@@ -352,3 +352,133 @@ fn a_restored_backup_keeps_every_connection() {
     assert_eq!((banks.len(), banks[0].institution.as_str()), (1, "Wells Fargo"));
     rt.block_on(server.stop());
 }
+
+/// Connect a bank again for an account its first login did not share,
+/// and the second login folds into the first at its first import: its
+/// checking feeds the account the first login's does, its card is ignored
+/// as the first's was, its savings account is opened as savings with its
+/// history and a starting balance; and the first login, every choice of
+/// which the second carries, is removed at Plaid, dropped from
+/// `banks.json` and forgotten here, what it fed staying. Falsified by
+/// leaving retirement to the next run: the first login was still in the
+/// store when the connection's run ended.
+#[test]
+fn a_second_login_to_the_same_bank_replaces_the_first() {
+    let rt = runtime();
+    let (data, secrets) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mock = plaid(&rt);
+    connect(data.path(), &[("wellsfargo", WF_TOKEN, None)]);
+    let server = importing(&rt, data.path(), &mock, secrets.path());
+    runs(&server, 1);
+    let mut alice = caught_up(&server, "alice");
+    alice.mutate(
+        "banks.ignore",
+        &IgnoreLinked {
+            plaid_account_id: "wf-card".into(),
+            ignored: true,
+        },
+    );
+    alice.mutate(
+        "banks.open",
+        &OpenLinked {
+            plaid_account_id: "wf-chk".into(),
+            name: "Checking".into(),
+        },
+    );
+    pump_until(&mut [&mut alice], 10, |ps| ps[0].pending() == 0);
+    runs(&server, 2);
+    assert!(eventually(20, || hub_rows::<Txn>(&server, "txn").iter().any(|t| t.payee == "WK1 STORE")));
+    let checking = hub_rows::<Account>(&server, "account").into_iter().find(|a| a.name == "Checking").unwrap().id;
+    let before = hub_rows::<Txn>(&server, "txn").len();
+
+    mock.script.lock().unwrap().exchange = Some(WF2_TOKEN.into());
+    alice.mutate("banks.connect", &());
+    until_ask(&mut alice, AskState::Waiting);
+    mock.finish();
+    let done = until_ask(&mut alice, AskState::Done);
+    assert_eq!(done.bank, "wells-fargo");
+    let r = runs(&server, 3);
+    assert_eq!(r[2].banks["wells-fargo"], Outcome::Imported { upserts: 3, removed: 0 });
+
+    assert_eq!(mock.asked("/item/remove").len(), 1);
+    assert_eq!(mock.asked("/item/remove")[0]["access_token"], WF_TOKEN);
+    let kept = store(data.path());
+    assert_eq!(kept.banks.keys().collect::<Vec<_>>(), ["wells-fargo"]);
+    assert_eq!(kept.banks["wells-fargo"].access_token, WF2_TOKEN);
+    assert!(eventually(20, || hub_rows::<Bank>(&server, "bank").len() == 1));
+    assert_eq!(hub_rows::<Bank>(&server, "bank")[0].name, "wells-fargo");
+
+    let rows: Vec<Linked> = hub_rows(&server, "linked");
+    assert!(rows.iter().all(|l| l.bank == "wells-fargo"));
+    let row = |id: &str| rows.iter().find(|l| l.plaid_account_id == id).unwrap().clone();
+    assert_eq!(row("wf2-chk").account_id, Some(checking));
+    assert!(row("wf2-card").ignored);
+    let savings = row("wf2-sav").account_id.expect("opened");
+    let accounts: Vec<AccountLine> = hub_query(&server, "accounts.accounts", ());
+    let line = accounts.iter().find(|a| a.id == savings).unwrap();
+    assert_eq!((line.name.as_str(), line.kind.as_str(), line.balance), ("Way Savings", "savings", 70_000));
+    let txns: Vec<Txn> = hub_rows(&server, "txn");
+    assert_eq!(txns.len(), before + 2, "the savings account's deposit and its starting balance, and nothing twice");
+    assert_eq!(txns.iter().filter(|t| t.account_id == checking && t.imported_id.is_some()).count(), 1);
+    let said = server.importer.as_ref().unwrap().said().join("\n");
+    assert!(said.contains("wellsfargo: replaced by wells-fargo, removed"), "{said}");
+    assert!(!said.contains(WF2_TOKEN), "{said}");
+
+    // Only the second login is imported from now on.
+    server.importer.as_ref().unwrap().nudge();
+    let r = runs(&server, 4);
+    assert_eq!(r[3].banks.keys().collect::<Vec<_>>(), ["wells-fargo"]);
+    rt.block_on(server.stop());
+}
+
+/// Add accounts on a connected bank: Plaid's update mode with its account
+/// picker (the item's token, `update.account_selection_enabled`, no
+/// products), and once the page is finished the account picked there —
+/// one the login did not share before — is opened at the import after, as
+/// savings, with its history and the bank's balance. Falsified by opening
+/// a reconnection's page for it: the page had no account picker.
+#[test]
+fn accounts_are_added_to_a_connected_bank() {
+    let rt = runtime();
+    let (data, secrets) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mock = plaid(&rt);
+    connect(data.path(), &[("wells", WF_TOKEN, None)]);
+    let server = importing(&rt, data.path(), &mock, secrets.path());
+    runs(&server, 1);
+    let mut alice = caught_up(&server, "alice");
+    alice.mutate(
+        "banks.open",
+        &OpenLinked {
+            plaid_account_id: "wf-card".into(),
+            name: "Visa".into(),
+        },
+    );
+    pump_until(&mut [&mut alice], 10, |ps| ps[0].pending() == 0);
+    runs(&server, 2);
+
+    alice.mutate("banks.add_accounts", &BankName { bank: "wells".into() });
+    let waiting = until_ask(&mut alice, AskState::Waiting);
+    assert_eq!((waiting.what.as_str(), waiting.bank.as_str()), ("add_accounts", "wells"));
+    let made = mock.asked("/link/token/create").pop().unwrap();
+    assert_eq!(made["access_token"], WF_TOKEN);
+    assert_eq!(made["update"]["account_selection_enabled"], true);
+    assert!(made["products"].is_null() && made["hosted_link"].is_object());
+
+    mock.script.lock().unwrap().wf_savings = true;
+    mock.finish();
+    until_ask(&mut alice, AskState::Done);
+    let opened = || {
+        let accounts: Vec<AccountLine> = hub_query(&server, "accounts.accounts", ());
+        accounts.into_iter().find(|a| a.name == "Way Savings")
+    };
+    assert!(eventually(20, || opened().is_some_and(|a| a.balance == 70_000)), "{:?}", opened());
+    let savings = opened().unwrap();
+    assert_eq!((savings.kind.as_str(), savings.bank.as_str()), ("savings", "wells"));
+    let accounts: Vec<AccountLine> = hub_query(&server, "accounts.accounts", ());
+    let visa = accounts.iter().find(|a| a.name == "Visa").unwrap();
+    assert_eq!(visa.balance, -30_000, "nothing twice");
+    let linked: Vec<LinkedLine> = hub_query(&server, "banks.linked", ());
+    let chk = linked.iter().find(|l| l.plaid_account_id == "wf-chk").unwrap();
+    assert!(chk.waiting, "an account shared before still waits for a choice");
+    rt.block_on(server.stop());
+}

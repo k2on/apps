@@ -114,6 +114,12 @@ pub struct Txn {
     pub imported_payee: String,
     pub created_ms: i64,
     pub user_id: String,
+    /// The bank whose import last told of it (its `bank` row), blank for
+    /// one typed in or imported before this was kept: what tells one
+    /// connection's copy of a transaction from another's, where two feed
+    /// one account ([`crate::plaid`]).
+    #[serde(default)]
+    pub imported_by: String,
 }
 
 /// A bank connected through Plaid (an "item"), by the short name it was
@@ -147,6 +153,24 @@ pub struct Bank {
     /// arrives from the start (`crate::banks`).
     #[serde(default)]
     pub repull: bool,
+    /// Plaid's id for its institution (`ins_127991`), when an import has
+    /// said it: two logins to one bank share it.
+    #[serde(default)]
+    pub institution_id: String,
+    /// Connected from the app and not imported yet: its first import folds
+    /// it into another login to the same bank, if there is one
+    /// ([`crate::plaid`]).
+    #[serde(default)]
+    pub fresh: bool,
+    /// Accounts were just added to it at Plaid (`banks.add_accounts`): its
+    /// next import opens every account it has not seen before.
+    #[serde(default)]
+    pub adding: bool,
+    /// Another login to the same bank, connected since, carries every
+    /// account this one fed or ignored: the importer removes this one at
+    /// Plaid and drops it (`banks.retired`). Its imports change nothing.
+    #[serde(default)]
+    pub replaced_by: String,
 }
 
 /// One of a bank's accounts, as Plaid names it, and the account here it
@@ -184,6 +208,11 @@ pub struct Linked {
     /// balance, which the next import from the bank's start brings.
     #[serde(default)]
     pub opening: bool,
+    /// It feeds an account another connection fed before it, or feeds
+    /// still: what it imports is matched to what that one imported
+    /// rather than doubled ([`crate::plaid`]).
+    #[serde(default)]
+    pub seam: bool,
 }
 
 /// Where an ask about a bank connection stands.
@@ -206,7 +235,7 @@ pub enum AskState {
 /// Somebody asking the server to connect a bank, log in to one again
 /// (Plaid's update mode) or disconnect one: what the server's importer
 /// answers, here, since the bank's login is the server's alone. `what` is
-/// `connect`, `reconnect` or `disconnect`.
+/// `connect`, `reconnect`, `add_accounts` or `disconnect`.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 pub struct BankAsk {
     #[ark(key)]

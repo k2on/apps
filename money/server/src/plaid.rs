@@ -64,6 +64,9 @@ pub enum LinkMode {
     New { days: u32 },
     /// The item behind this access token, logged in to again.
     Update(String),
+    /// The item behind this access token, with Plaid's account picker:
+    /// accounts it did not share before shared now.
+    AddAccounts(String),
 }
 
 /// A Hosted Link page: its address for the person, and the link token the
@@ -177,7 +180,7 @@ impl Plaid {
     /// it ([`Plaid::link_get`]), so nothing here has to be reachable from
     /// the person's browser and there is no redirect to register. `days`
     /// of history for a new bank; an item's token for Plaid's update mode,
-    /// where its login is given again.
+    /// where its login is given again, or its accounts picked again.
     pub fn link_create(&self, mode: &LinkMode, lifetime_s: u64) -> Res<LinkSession> {
         let mut body = json!({
             "client_name": "money",
@@ -192,6 +195,10 @@ impl Plaid {
                 body["transactions"] = json!({ "days_requested": days });
             }
             LinkMode::Update(access_token) => body["access_token"] = json!(access_token),
+            LinkMode::AddAccounts(access_token) => {
+                body["access_token"] = json!(access_token);
+                body["update"] = json!({ "account_selection_enabled": true });
+            }
         }
         #[derive(Deserialize)]
         struct Reply {

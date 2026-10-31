@@ -323,6 +323,9 @@ pub struct Import {
     /// from.
     #[serde(default)]
     pub from_start: bool,
+    /// Plaid's id for the bank's institution, when the importer knows it.
+    #[serde(default)]
+    pub institution_id: String,
 }
 
 /// A bank's account made to feed an account already here, in place of the
@@ -549,7 +552,7 @@ pub struct BankLine {
 #[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct AskLine {
     pub id: Id<BankAsk>,
-    /// `connect`, `reconnect` or `disconnect`.
+    /// `connect`, `reconnect`, `add_accounts` or `disconnect`.
     pub what: String,
     pub bank: String,
     pub institution: String,

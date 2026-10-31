@@ -30,7 +30,7 @@
 //! just been connected or logged in to again.
 //!
 //! **Connecting** is an ask too (`banks.connect`, `banks.reconnect`,
-//! `banks.disconnect`, rows of `bank_ask`). For a connection it opens a
+//! `banks.add_accounts`, `banks.disconnect`, rows of `bank_ask`). For a connection it opens a
 //! Plaid Hosted Link page and answers with its address; then it asks Plaid
 //! after the page every [`Banks::poll`] until somebody finishes it there,
 //! trades the public token for the bank's access token, keeps the bank in
@@ -39,6 +39,13 @@
 //! stopped is answered expired at its next start, its link token having
 //! been held in memory only. A disconnection tells Plaid to forget the
 //! login (`/item/remove`) and drops it from the store.
+//! `banks.add_accounts` is the reconnection's page with Plaid's account
+//! picker (`update.account_selection_enabled`); what is picked there is
+//! opened at the import after. A second login to a bank already
+//! connected folds into the first at its first import
+//! (`money_domain::plaid`), and the login it replaced is removed at Plaid
+//! and dropped from the store as a disconnection's is, then said retired
+//! (`banks.retired`).
 //!
 //! **Secrets are never said.** The client id and the secret are read from
 //! their files whenever they are needed, the tokens from the store; all of
@@ -59,7 +66,7 @@ use ark::row::Id;
 use ark_auth::Login;
 use ark_peer::{Handle, Memory, Peer, Standing};
 use money_domain::plaid::import_of;
-use money_domain::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, Import};
+use money_domain::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import};
 
 use crate::plaid::{LinkMode, LinkSession, Linking, Plaid, PlaidError};
 use crate::store::{Connection, Store};
@@ -131,6 +138,9 @@ pub enum Outcome {
     },
     /// Plaid has not finished the bank's first pull.
     NotReady,
+    /// Another login to the same bank replaced it (`money_domain::plaid`):
+    /// not imported, and removed at Plaid as soon as Plaid answers.
+    Replaced,
     Failed(String),
 }
 
@@ -355,9 +365,11 @@ impl Job {
                     self.answer(a.id, AskState::Expired, "the server restarted while Plaid's page was open: ask again");
                     Ok(())
                 }
-                (_, "connect") => self.open_page(&a, None),
-                (_, "reconnect") => match self.store.banks.get(&a.bank).map(|c| c.access_token.clone()) {
-                    Some(token) => self.open_page(&a, Some(token)),
+                (_, "connect") => self.open_page(&a, LinkMode::New { days: self.banks.history }),
+                (_, what @ ("reconnect" | "add_accounts")) => match self.store.banks.get(&a.bank).map(|c| c.access_token.clone()) {
+                    Some(token) if what == "reconnect" => self.open_page(&a, LinkMode::Update(token)),
+                    // Plaid's account picker, for accounts not shared before.
+                    Some(token) => self.open_page(&a, LinkMode::AddAccounts(token)),
                     None => Err(anyhow!("this server holds no login for {}", a.bank)),
                 },
                 (_, "disconnect") => self.disconnect(&a),
@@ -391,13 +403,9 @@ impl Job {
         }
     }
 
-    /// A Hosted Link page for a new bank, or for `token`'s bank's login.
-    fn open_page(&mut self, a: &BankAsk, token: Option<String>) -> Result<()> {
+    /// A Hosted Link page: for a new bank, a bank's login, or its accounts.
+    fn open_page(&mut self, a: &BankAsk, mode: LinkMode) -> Result<()> {
         let plaid = self.plaid()?;
-        let mode = match token {
-            Some(t) => LinkMode::Update(t),
-            None => LinkMode::New { days: self.banks.history },
-        };
         let session = plaid.link_create(&mode, self.banks.lifetime_s)?;
         let lifetime = Duration::from_secs(self.banks.lifetime_s);
         self.say(match a.bank.as_str() {
@@ -461,10 +469,14 @@ impl Job {
                         self.answer(id, AskState::Failed, &why);
                     }
                 }
-                // Update mode: the login given again, nothing to exchange.
-                Linking::Connected(_) | Linking::Exited(None) if live.what == "reconnect" => {
+                // Update mode: the login given again, or accounts picked;
+                // nothing to exchange.
+                Linking::Connected(_) | Linking::Exited(None) if live.what == "reconnect" || live.what == "add_accounts" => {
                     let bank = live.bank.clone();
-                    self.say(format!("{bank}: logged in again"));
+                    self.say(match live.what.as_str() {
+                        "reconnect" => format!("{bank}: logged in again"),
+                        _ => format!("{bank}: its accounts picked again"),
+                    });
                     self.answer(id, AskState::Done, "");
                     self.import_now(&bank);
                 }
@@ -564,10 +576,15 @@ impl Job {
                 return run;
             }
         };
+        self.retire(&plaid);
         let names: Vec<String> = self.store.banks.keys().cloned().collect();
         for name in names {
             if stop.load(Ordering::SeqCst) {
                 break;
+            }
+            // Retired by the import of the login that replaced it.
+            if !self.store.banks.contains_key(&name) {
+                continue;
             }
             let outcome = self.import_or_say(&plaid, &name);
             run.banks.insert(name, outcome);
@@ -578,8 +595,18 @@ impl Job {
     /// One bank imported, or what went wrong said — on stderr, and to the
     /// household as `banks.failed` when it is news.
     fn import_or_say(&mut self, plaid: &Plaid, name: &str) -> Outcome {
+        let replaced = self.read(|db| db.bank.get(name)).flatten().is_some_and(|b| !b.replaced_by.is_empty());
+        if replaced {
+            self.retire(plaid);
+            return Outcome::Replaced;
+        }
         let e = match self.import_one(plaid, name) {
-            Ok(o) => return o,
+            Ok(o) => {
+                // Its first import may have folded it into another login
+                // to the same bank: that one goes.
+                self.retire(plaid);
+                return o;
+            }
             Err(e) => e,
         };
         let (code, why) = failure(&e);
@@ -600,6 +627,39 @@ impl Job {
             }
         }
         Outcome::Failed(format!("{e:#}"))
+    }
+
+    /// Every login another login to the same bank replaced
+    /// (`Bank::replaced_by`, which a fold sets): removed at Plaid, dropped
+    /// from the store, and said retired, which has the budget forget it as
+    /// it does a disconnected bank. One Plaid will not remove now is tried
+    /// again at the next run, and imported by nobody meanwhile.
+    fn retire(&mut self, plaid: &Plaid) {
+        let replaced: Vec<Bank> = self
+            .read(|db| db.bank.scan().into_iter().filter(|b: &Bank| !b.replaced_by.is_empty()).collect())
+            .unwrap_or_default();
+        for b in replaced {
+            if let Some(c) = self.store.banks.get(&b.name).cloned() {
+                match plaid.remove(&c.access_token) {
+                    Ok(()) => {}
+                    // Plaid has forgotten it already.
+                    Err(e) if matches!(e.code(), Some("ITEM_NOT_FOUND" | "INVALID_ACCESS_TOKEN")) => {}
+                    Err(e) => {
+                        self.say(format!("{}: replaced by {}; Plaid would not remove it yet: {e}", b.name, b.replaced_by));
+                        continue;
+                    }
+                }
+                self.store.banks.remove(&b.name);
+                if let Err(e) = self.save() {
+                    self.say(format!("{}: removed at Plaid, and could not be dropped here: {e:#}", b.name));
+                    continue;
+                }
+            }
+            self.say(format!("{}: replaced by {}, removed", b.name, b.replaced_by));
+            if let Err(e) = self.author("retired", &BankName { bank: b.name.clone() }) {
+                self.say(format!("{}: could not say it is retired: {e:#}", b.name));
+            }
+        }
     }
 
     fn import_one(&mut self, plaid: &Plaid, name: &str) -> Result<Outcome> {
@@ -645,6 +705,7 @@ impl Job {
                 let import = Import {
                     cursor: bank.map(|b| b.cursor).unwrap_or_default(),
                     choose: true,
+                    institution_id: filled.institution_id.clone(),
                     ..import_of(name, &institution, &got.accounts, &Default::default())
                 };
                 self.author("import", &import)?;
@@ -662,6 +723,7 @@ impl Job {
         let import = Import {
             choose: true,
             from_start: cursor.is_none(),
+            institution_id: filled.institution_id.clone(),
             ..import_of(name, &institution, &got.accounts, &pulled)
         };
         let (upserts, removed) = (import.upserts.len(), import.removed.len());
