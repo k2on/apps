@@ -180,7 +180,8 @@
         ],
         "how": [
           "A LazyColumn drawn in reorder.order(items, key), each row in ReorderableItem(reorder, key, keys): a long press lifts it, and onMove(from, to) is told on the drop.",
-          "The rows that make way are the list's own animateItem on Springs.MOVE; a tap still does what a tap did."
+          "The rows that make way are the list's own animateItem on Springs.MOVE; a tap still does what a tap did.",
+          "In sections, rememberReorder(list, lead, isHeader) { key, landing -> … }: a row dragged past a header changes section, a header held folds every section to its header and moves its own, and the drop is told as Landing(section, before)."
         ]
       },
       "ios": {

@@ -185,7 +185,8 @@ class Reorder internal constructor(
     /** The order when the row was picked up. */
     private var picked: List<Any> = emptyList()
     private var from = -1
-    private var ending = false    internal val offset = Animatable(0f)
+    private var ending = false
+    internal val offset = Animatable(0f)
     internal val lift = Animatable(0f)
 
     private fun header(key: Any) = isHeader?.invoke(key) == true
