@@ -32,6 +32,7 @@ mod live;
 mod look;
 mod palette;
 mod peer;
+mod settings;
 mod view;
 
 #[cfg(test)]
@@ -61,7 +62,7 @@ pub enum Place {
     Budget,
     Reflect,
     Accounts,
-    Banks,
+    Settings,
     Inbox,
     Account(String),
 }
@@ -72,7 +73,7 @@ impl arkui::route::Route for Place {
             Place::Budget => arkui::route::join("budget", None),
             Place::Reflect => arkui::route::join("reflect", None),
             Place::Accounts => arkui::route::join("accounts", None),
-            Place::Banks => arkui::route::join("banks", None),
+            Place::Settings => arkui::route::join("settings", None),
             Place::Inbox => arkui::route::join("inbox", None),
             Place::Account(name) => arkui::route::join("account", Some(name)),
         }
@@ -82,7 +83,7 @@ impl arkui::route::Route for Place {
         match arkui::route::split(fragment) {
             ("reflect", _) => Place::Reflect,
             ("accounts", _) => Place::Accounts,
-            ("banks", _) => Place::Banks,
+            ("settings", _) => Place::Settings,
             ("inbox", _) => Place::Inbox,
             ("account", Some(name)) => Place::Account(name),
             _ => Place::Budget,
@@ -95,7 +96,7 @@ impl arkui::route::Route for Place {
 pub enum Page {
     Budget,
     Reflect,
-    Banks,
+    Settings,
     Ledger(Ledger),
 }
 
@@ -230,8 +231,12 @@ pub enum Message {
     ChooseCategory,
     Chose(Choice),
     Sync,
-    /// The Banks page: connecting, and what each account feeds.
+    /// Settings' Banks section: connecting, and what each account feeds.
     Banks(banks::Msg),
+    /// The account button at the top right: its menu, whose entries open
+    /// Settings and sign out.
+    AccountMenu,
+    SignOut,
     AddAccount,
     AccountName(String),
     AccountKind(&'static str),
@@ -578,7 +583,7 @@ impl App {
             Page::Budget => Place::Budget,
             Page::Reflect => Place::Reflect,
             Page::Ledger(Ledger::All) => Place::Accounts,
-            Page::Banks => Place::Banks,
+            Page::Settings => Place::Settings,
             Page::Ledger(Ledger::Inbox) => Place::Inbox,
             Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
         }
@@ -590,7 +595,7 @@ impl App {
             Place::Budget => Page::Budget,
             Place::Reflect => Page::Reflect,
             Place::Accounts => Page::Ledger(Ledger::All),
-            Place::Banks => Page::Banks,
+            Place::Settings => Page::Settings,
             Place::Inbox => Page::Ledger(Ledger::Inbox),
             Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
         })
@@ -864,6 +869,13 @@ impl App {
             Message::Chose(choice) => self.chose(choice),
             Message::Sync => self.sync(),
             Message::Banks(m) => return self.banks(m),
+            Message::AccountMenu => {
+                if let Some(account) = self.account() {
+                    let right = self.window.width - view::PAD;
+                    self.ctx.open_menu(account.menu(right, view::PAD + arkui::account::HEIGHT, self.window));
+                }
+            }
+            Message::SignOut => self.sign_out(),
             Message::AddAccount => {
                 self.modal = Some(Modal::AddAccount {
                     name: String::new(),
@@ -1189,7 +1201,7 @@ impl App {
             (Pane::Sidebar, _) => self.sidebar_act(action),
             (Pane::Page, Page::Budget) => self.act(action),
             (Pane::Page, Page::Ledger(_)) => self.register_act(action),
-            (Pane::Page, Page::Reflect | Page::Banks) => {
+            (Pane::Page, Page::Reflect | Page::Settings) => {
                 if let vim::Action::Move(vim::Motion::Left(_)) = action {
                     self.pane = Pane::Sidebar;
                 }

@@ -448,7 +448,7 @@ fn the_budget_drawn() {
     let _ = form.register_act(Action::Activate);
     let mut banks = app();
     let _ = banks.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
-    let _ = banks.update(Message::Go(Page::Banks));
+    let _ = banks.update(Message::Go(Page::Settings));
     let mut above = app();
     let _ = above.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
     let _ = above.update(Message::Go(Page::Ledger(Ledger::All)));
@@ -577,17 +577,32 @@ fn back_lands_where_the_register_was_scrolled() {
     assert_eq!(app.register_scroll, 0.0, "a visit is the top");
 }
 
-// * The Banks page
+// * Settings' Banks section
 
 use crate::banks::Msg;
 
-/// The demo's Banks page: its card's bank, the account it feeds, drawn
-/// without a panic; and connecting, which needs a server, says so.
+/// Settings, from the account menu as harken has it, at `#settings`: the
+/// demo's card's bank and the account it feeds, drawn without a panic;
+/// and connecting, which needs a server, says so. `h` gives the sidebar
+/// the keys, as on any page.
 #[test]
 fn the_demo_shows_its_bank_and_cannot_connect_one() {
+    use arkui::route::Route;
     let mut app = app();
-    let _ = app.update(Message::Go(Page::Banks));
-    assert_eq!(app.place(), crate::Place::Banks);
+    let _ = app.update(Message::AccountMenu);
+    let menu = app.ctx.menu.as_ref().expect("the account's menu");
+    assert_eq!(menu.entries[0].label, "Settings");
+    let _ = app.update(Message::MenuActivate);
+    assert_eq!(app.page, Page::Settings);
+    assert_eq!(app.place(), crate::Place::Settings);
+    assert_eq!(app.place().fragment(), crate::Place::parse("settings").fragment());
+    assert_eq!(crate::Place::parse("settings"), crate::Place::Settings);
+    let _ = app.act(Action::Move(Motion::Left(1)));
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Character("h".into()),
+        iced::keyboard::Modifiers::default(),
+    ));
+    assert_eq!(app.pane, Pane::Sidebar);
     assert_eq!(app.peer.banks.rows.len(), 1);
     let card = app.peer.linked.rows.first().expect("the card's link");
     assert!(!card.waiting && !card.account.is_empty());
@@ -648,7 +663,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     app.author("open", "open_account", &open);
 
     let _ = app.update(Message::Banks(Msg::Connect));
-    assert_eq!(app.page, Page::Banks);
+    assert_eq!(app.page, Page::Settings);
     assert!(app.awaiting.is_some());
     settle(&mut app, &mut importer, &|a| {
         a.peer.asks.rows.first().is_some_and(|x| x.what == "connect")
@@ -731,9 +746,9 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     assert_eq!(app.modal, Some(Modal::Disconnect("wells-fargo".into())));
     drop(app.view());
     let _ = app.update(Message::Banks(Msg::Disconnected("wells-fargo".into())));
-    settle(&mut app, &mut importer, &|a| {
-        a.peer.asks.rows.first().is_some_and(|x| x.what == "disconnect")
-    });
+    settle(&mut app, &mut importer, &|a| a.peer.asks.rows.iter().any(|x| x.what == "disconnect"));
+    let order: Vec<(&str, i64)> = app.peer.asks.rows.iter().map(|x| (x.what.as_str(), x.asked_ms)).collect();
+    assert_eq!(order[0].0, "disconnect", "newest first: {order:?}");
     assert_eq!(app.opened.len(), 1, "a disconnection opens no page");
     rt.block_on(server.stop());
 }

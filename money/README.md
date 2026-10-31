@@ -232,15 +232,18 @@ and their accounts' choices live now.
 is (`iced/src/live.rs`): it opens this device's replica of the server's
 budget (`--server`, `?server=`, or whoever served the page), signs in as
 above, remembers the login per server, and pumps the socket when it
-rings. **Sync** there is `banks.sync`. **Banks** (in the sidebar; and
-**Connect a Bank** on All Accounts) lists each connection with how its
-last import went, Reconnect and Disconnect, and each of its accounts
+rings. **Sync** there is `banks.sync`. **Settings**, as harken has them
+(the account button at the top right: its menu opens Settings and signs
+out; `#settings`), has two sections. **Banks** (also reached by **Connect
+a Bank** on All Accounts, and **Banks need a look** there when one does)
+lists each connection with how its last import went, Reconnect and Disconnect, and each of its accounts
 with what it feeds: a new account of its kind, an existing one, or
-nothing (`iced/src/banks.rs`). Connecting opens Plaid's page as soon as
+nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
+with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
 the server answers: in the system's browser on the desktop; in a browser,
 in a tab opened empty at the click (a browser opens tabs only right after
 one) and pointed at the page when the answer arrives, with the page's
-link on the Banks page if the tab was blocked. `money-web-server` is that
+link in Settings if the tab was blocked. `money-web-server` is that
 page, which `services.money` serves at `/`; `money-web` is the demo.
 
 ## The demo
@@ -287,7 +290,7 @@ mode, a bank disconnected, a `banks.json` written by hand (token and
 cursor alone, or the cursor in `importer.json`) importing only what is
 new, and a copy of the data directory imported from on a fresh server.
 The live window signs in to
-a server in the process; its Sync lands as an ask, and its Banks page
+a server in the process; its Sync lands as an ask, and its Settings (from the account menu)
 connects, opens the page the server answers with once, chooses, and asks
 to reconnect and disconnect
 (`iced/src/tests.rs`). `services.money` is evaluated under its

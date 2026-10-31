@@ -1,4 +1,4 @@
-//! The Banks page: the banks and cards the household connected through
+//! Settings' Banks section: the banks and cards the household connected through
 //! Plaid, how each is doing, and what each of their accounts feeds.
 //!
 //! **Connecting** is an ask of the server's (`banks.connect`,
@@ -6,7 +6,7 @@
 //! window never sees it. The server answers with the address of a Plaid
 //! page, which this window opens as soon as the answer arrives — in the
 //! system's browser on the desktop, in a tab opened at the click in a
-//! browser ([`crate::browser`]) — and the page here follows the ask until
+//! browser ([`crate::browser`]) — and Settings follow the ask until
 //! the bank is connected. **Reconnect** is the same for a bank whose login
 //! ran out, and **Disconnect** asks the server to forget a bank.
 //!
@@ -16,14 +16,14 @@
 
 use arkui::{glyphs, icon, style};
 use iced::widget::{button, column, container, row, scrollable, text, Column};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Padding};
 use money_domain::*;
 
 use crate::amount::money;
-use crate::view::{action, bold, dim, fill, link, quiet, PAD};
+use crate::view::{action, bold, dim, fill, link, quiet};
 use crate::{browser, look, App, Message, Modal, Page};
 
-/// What the Banks page does.
+/// What Settings does.
 #[derive(Debug, Clone)]
 pub enum Msg {
     Connect,
@@ -57,11 +57,11 @@ fn ago(then_ms: i64, now_ms: i64) -> String {
 }
 
 impl App {
-    /// The Banks page's messages.
+    /// Settings' Banks section's messages.
     pub fn banks(&mut self, m: Msg) -> iced::Task<Message> {
         match m {
             Msg::Connect => {
-                let _ = self.step(Message::Go(Page::Banks));
+                let _ = self.step(Message::Go(Page::Settings));
                 self.ask_page("connect a bank", "connect", &());
             }
             Msg::Reconnect(bank) => self.ask_page("reconnect the bank", "reconnect", &BankName { bank }),
@@ -146,12 +146,12 @@ impl App {
     fn open_page(&mut self, url: String) {
         self.note = match browser::open(&url) {
             true => "Plaid's page is open in your browser".into(),
-            false => "open Plaid's page from the Banks page".into(),
+            false => "open Plaid's page from Settings".into(),
         };
         self.opened.push(url);
     }
 
-    /// What wants somebody on the Banks page: a login run out, or an
+    /// What wants somebody on Settings: a login run out, or an
     /// account waiting for a choice.
     pub fn banks_wanting(&self) -> usize {
         self.peer.banks.rows.iter().map(|b| b.waiting as usize + b.needs_login as usize).sum()
@@ -205,7 +205,9 @@ impl App {
             .into()
     }
 
-    pub fn view_banks(&self) -> Element<'_, Message> {
+    /// Settings' Banks section: what it is, Connect and Sync, the ask on
+    /// show, and each connection with its accounts.
+    pub fn banks_section(&self) -> Element<'_, Message> {
         let now = ark_peer::now_ms();
         let mut tools = row![action("+ Connect a bank", Message::Banks(Msg::Connect))]
             .spacing(10)
@@ -213,7 +215,17 @@ impl App {
         if !self.peer.banks.rows.is_empty() {
             tools = tools.push(quiet("Sync", Message::Sync));
         }
-        let mut body: Column<'_, Message> = column![].spacing(14);
+        let explain = "Banks and cards connected through Plaid. Their logins are kept on the server, never here; \
+                       each of their accounts feeds an account here, or nothing.";
+        let mut body: Column<'_, Message> = column![
+            text(explain)
+                .size(14)
+                .line_height(1.45)
+                .style(style::faint(0.8))
+                .wrapping(text::Wrapping::Word),
+            tools
+        ]
+        .spacing(14);
         if let Some(a) = self.ask_shown(now) {
             body = body.push(self.view_ask(a, now));
         }
@@ -226,27 +238,7 @@ impl App {
                 13,
             ));
         }
-        column![
-            column![
-                bold("Banks", 22),
-                dim(
-                    "Banks and cards connected through Plaid. Their logins are kept on the server, never here.",
-                    12
-                )
-            ]
-            .spacing(2),
-            tools,
-            scrollable(body.padding(iced::Padding {
-                right: 12.0,
-                ..iced::Padding::ZERO
-            }))
-            .height(Length::Fill)
-            .style(style::bars),
-        ]
-        .spacing(14)
-        .padding(PAD)
-        .width(Length::Fill)
-        .into()
+        container(body).padding(Padding { top: 8.0, ..Padding::ZERO }).into()
     }
 
     fn view_bank<'a>(&'a self, b: &'a BankLine, now: i64) -> Element<'a, Message> {

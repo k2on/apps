@@ -32,13 +32,16 @@ use crate::schema::*;
 use crate::types::*;
 
 fn ask(ctx: &Ctx, db: &mut Db<Money>, what: &str, bank: &Option<Bank>) -> Result<(), Refusal> {
+    // After every ask before it, even within one millisecond: newest first
+    // is the order a person's asks are read in.
+    let last = db.bank_ask.scan().iter().map(|a| a.asked_ms).max().unwrap_or(0);
     db.bank_ask.insert(BankAsk {
         id: ctx.new_id(),
         what: what.into(),
         bank: bank.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
         institution: bank.as_ref().map(|b| b.institution.clone()).unwrap_or_default(),
         state: AskState::Asked,
-        asked_ms: ctx.now,
+        asked_ms: ctx.now.max(last + 1),
         user_id: ctx.user().into(),
         ..BankAsk::default()
     })

@@ -108,7 +108,7 @@ impl App {
         let page: Element<'_, Message> = match self.page {
             Page::Budget => self.view_budget(),
             Page::Reflect => self.view_reflect(),
-            Page::Banks => self.view_banks(),
+            Page::Settings => self.view_settings(),
             Page::Ledger(l) => self.view_ledger(l),
         };
         // A swipe's arrow over the page, not the sidebar.
@@ -143,6 +143,16 @@ impl App {
                     .padding([8, 14])
                     .align_x(Alignment::End)
                     .align_y(Alignment::End),
+            );
+        }
+        // The account at the top right, over the page, as harken's: its menu
+        // opens Settings and signs out.
+        if let Some(account) = self.account() {
+            layers = layers.push(
+                container(arkui::account::button(&account, None, Message::AccountMenu))
+                    .width(Length::Fill)
+                    .padding(PAD)
+                    .align_x(Alignment::End),
             );
         }
         if let Some(m) = &self.modal {
@@ -195,7 +205,6 @@ impl App {
             (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
             (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
             (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
-            (glyphs::BANK, "Banks".to_string(), None, Page::Banks),
         ];
         let sections: [Section; 3] = [
             ("On Budget", |a| a.on_budget && !a.closed),
@@ -236,7 +245,6 @@ impl App {
                 let lit = arkui::sidebar::lit(i, cursor, focused);
                 let trailing = match page {
                     Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
-                    Page::Banks => (self.banks_wanting() > 0).then(|| self.badge(self.banks_wanting(), lit)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
                     _ => None,
                 };
@@ -565,7 +573,12 @@ impl App {
             Some(l) => self.inspect_category(l),
             None => self.inspect_month(),
         };
-        container(scrollable(body.spacing(12).padding(PAD)).height(Length::Fill).style(style::bars))
+        // Its top clear of the account button, which floats over the corner.
+        let pad = Padding {
+            top: PAD + arkui::account::HEIGHT + 6.0,
+            ..Padding::new(PAD)
+        };
+        container(scrollable(body.spacing(12).padding(pad)).height(Length::Fill).style(style::bars))
             .width(Length::Fixed(INSPECTOR))
             .height(Length::Fill)
             .style(style::surface)
@@ -781,6 +794,10 @@ impl App {
             // bank asked for what it has.
             tools = tools.push(quiet("Add Account", Message::AddAccount));
             tools = tools.push(quiet("Connect a Bank", Message::Banks(crate::banks::Msg::Connect)));
+            if self.banks_wanting() > 0 {
+                let n = self.banks_wanting();
+                tools = tools.push(quiet(&format!("Banks need a look ({n})"), Message::Go(Page::Settings)));
+            }
             if !self.peer.banks.rows.is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }

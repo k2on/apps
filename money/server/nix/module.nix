@@ -36,7 +36,7 @@ in
     (lib.mkRemovedOptionModule [ "services" "money" "plaid" "items" ] moved)
     (lib.mkRemovedOptionModule [ "services" "money" "accounts" ] ''
       Which budget account each bank account feeds is chosen in the app,
-      on the Banks page, when the bank is connected. ${moved}
+      in Settings, under Banks, when the bank is connected. ${moved}
     '')
   ];
 

@@ -63,7 +63,7 @@ let
     [ (daily.systemd.timers.money-import.timerConfig.OnCalendar == "daily") "or when told" ]
     [ (says halfKeys "go together") "half of Plaid's keys is refused" ]
     [ (says oldItems "plaid.items" && says oldItems "banks.json") "banks still configured are refused, saying where they live now" ]
-    [ (says oldAccounts "services.money.accounts" && says oldAccounts "Banks page") "accounts still configured are refused, saying where they are chosen now" ]
+    [ (says oldAccounts "services.money.accounts" && says oldAccounts "in Settings") "accounts still configured are refused, saying where they are chosen now" ]
     [ (says elsewhere "under /var/lib") "the data outside the state directory is refused" ]
   ];
   wrong = map (c: builtins.elemAt c 1) (lib.filter (c: !(builtins.elemAt c 0)) checks);
