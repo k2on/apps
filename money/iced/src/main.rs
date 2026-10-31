@@ -248,12 +248,17 @@ pub enum Message {
     /// A row's category clicked: the dropdown under it.
     CategorizeRow(Id<Txn>),
     RegisterScrolled(f32),
+    /// The budget scrolled; and a page opened scrolled to where it was left.
+    PageScrolled(f32),
+    ScrollPage(f32),
     /// The category dropdown: typed into, the pointer on a row, its list
     /// scrolled, its keys, closed.
     DropTyped(String),
     DropAt(usize),
     DropScrolled(f32),
     DropKey(arkui::command::Press),
+    /// `<Enter>` in the box: the row with the keys chosen.
+    DropChoose,
     CloseDrop,
     /// A row or a heading of the budget right-clicked: its menu.
     Menu(Grab),
@@ -315,6 +320,8 @@ pub struct App {
     pub txn_anchor: Option<Id<Txn>>,
     /// How far down the register is scrolled, for where a row is.
     pub register_scroll: f32,
+    /// Where the page just opened is to be scrolled, once it is drawn.
+    pub scroll_due: Option<f32>,
     /// A category being chosen, in a searchable dropdown.
     pub dropdown: Option<Dropdown>,
     /// The last click on a row or a heading, and when: a second on the same
@@ -357,6 +364,7 @@ impl App {
             txn_at: None,
             txn_anchor: None,
             register_scroll: 0.0,
+            scroll_due: None,
             dropdown: None,
             last_click: None,
         };
@@ -525,7 +533,17 @@ impl App {
             }
         }
         self.history.sync(&self.place());
-        task
+        // A page just opened is drawn before this comes back, so the scroll
+        // lands on its list rather than the one it replaced.
+        match self.scroll_due.take() {
+            Some(y) => {
+                if let Page::Ledger(_) = self.page {
+                    self.register_scroll = y;
+                }
+                Task::batch([task, Task::done(Message::ScrollPage(y))])
+            }
+            None => task,
+        }
     }
 
     /// Where the window is, as the bar spells it.
@@ -558,6 +576,19 @@ impl App {
                 if let Page::Ledger(l) = page {
                     self.peer.set_ledger(l);
                 }
+                // A new visit opens at the top; back and forward where it was.
+                self.scroll_due = Some(self.history.arrive(&self.place()));
+            }
+            Message::PageScrolled(y) => self.history.scrolled(&self.place(), y),
+            Message::ScrollPage(y) => {
+                let id = match self.page {
+                    Page::Ledger(_) => {
+                        self.register_scroll = y;
+                        look::REGISTER
+                    }
+                    _ => look::BUDGET,
+                };
+                return iced::widget::operation::scroll_to(id, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y });
             }
             Message::Month(n) => {
                 let m = add_months(&self.peer.month, n);
@@ -747,7 +778,14 @@ impl App {
                 self.author("approve", "approve", &Txns { ids });
             }
             Message::Categorize(ids) => return self.open_dropdown(Choosing::Txns(ids), self.pointer),
-            Message::ChooseCategory => return self.open_dropdown(Choosing::Form, self.pointer),
+            Message::ChooseCategory => return self.open_dropdown(Choosing::Form, self.form_category_at()),
+            // `<Enter>` in the box: the row with the keys.
+            Message::DropChoose => {
+                let groups = self.drop_groups();
+                if let Some(m) = self.dropdown.as_ref().and_then(|d| d.search.chosen(&groups)) {
+                    return self.update(m);
+                }
+            }
             Message::CategorizeRow(id) => {
                 // The selection, when the row is in it; the row alone when not.
                 let ids = match self.txn_selected().contains(&id) {
@@ -766,7 +804,10 @@ impl App {
                 }
                 self.txn_at = Some(id);
             }
-            Message::RegisterScrolled(y) => self.register_scroll = y,
+            Message::RegisterScrolled(y) => {
+                self.register_scroll = y;
+                self.history.scrolled(&self.place(), y);
+            }
             Message::DropTyped(q) => {
                 if let Some(d) = &mut self.dropdown {
                     return d.search.typed(q, look::DROP_LIST);
@@ -1520,6 +1561,7 @@ impl App {
             return Task::none();
         };
         self.register_scroll = y;
+        self.history.scrolled(&self.place(), y);
         iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
     }
 
@@ -1527,22 +1569,36 @@ impl App {
     /// dropdown's corner, under it. The register's columns are the ones
     /// `view_ledger` lays out, worked out for this window's width.
     fn category_at(&self, id: Id<Txn>) -> Point {
-        let all = !matches!(self.page, Page::Ledger(Ledger::Account(_)));
         let i = self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0);
-        let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
-        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 90.0;
-        let width = self.window.width - view::SIDEBAR - 1.0 - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
-        let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
-        let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
         let above = if self.form.as_ref().is_some_and(|f| f.editing.is_none()) {
             view::TXN_ROW
         } else {
             0.0
         };
+        self.under(above + (i + 1) as f32 * view::TXN_ROW)
+    }
+
+    /// Where the form's category box is on screen: its list hangs under it.
+    fn form_category_at(&self) -> Point {
+        let i = match self.form.as_ref().and_then(|f| f.editing) {
+            Some(id) => self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0),
+            None => 0,
+        };
+        self.under(i as f32 * view::TXN_ROW + FORM_LINE)
+    }
+
+    /// The register's category column at `y` down its list (scrolled), as
+    /// a dropdown's corner: above, if there is no room under it.
+    fn under(&self, y: f32) -> Point {
+        let all = !matches!(self.page, Page::Ledger(Ledger::Account(_)));
+        let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
+        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 90.0;
+        let width = self.window.width - view::SIDEBAR - 1.0 - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
+        let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
+        let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
         let top = view::PAD + view::LEDGER_TOP + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
-        let y = top + above + (i + 1) as f32 * view::TXN_ROW - self.register_scroll;
-        // Kept on screen: above the row, if there is no room under it.
-        let tall = arkui::command::INPUT + arkui::command::LIST_HEIGHT;
+        let y = top + y - self.register_scroll;
+        let tall = arkui::command::LIST_HEIGHT;
         let y = if y + tall > self.window.height {
             (y - view::TXN_ROW - tall).max(0.0)
         } else {
@@ -1863,3 +1919,6 @@ pub fn bank_said(t: &TxnLine) -> String {
         false => String::new(),
     }
 }
+
+/// How far down the register's form its category box ends.
+const FORM_LINE: f32 = 40.0;

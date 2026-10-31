@@ -247,7 +247,7 @@ pub const ENTRIES: &[Entry] = &[
         module: "command",
         name: "Command box",
         summary: "One search box over everything, opened by Ctrl+K, as shadcn/ui's command dialog: what it finds in groups under it, the keys walking it.",
-        api: &["Command::new(now), typed(query, list), step(down, groups, list), land(at), scrolled(y), chosen(groups)", "view(command, placeholder, groups, messages, open)", "panel(command, placeholder, groups, messages, width): the box alone, to pin as a dropdown", "Group { heading, items }, Item { glyph, label, detail, choose }", "keys(open) -> Subscription<Press>, press(key, mods, open), opens(key, mods)", "WIDTH, LIST_HEIGHT, ROW, HEADING"],
+        api: &["Command::new(now), typed(query, list), step(down, groups, list), land(at), scrolled(y), chosen(groups)", "view(command, placeholder, groups, messages, open)", "panel(command, placeholder, groups, messages, width): the box alone, to pin as a dropdown", "list(command, groups, messages, width): what was found alone, under a box of the app's", "Group { heading, items }, Item { glyph, label, detail, choose }", "keys(open) -> Subscription<Press>, press(key, mods, open), opens(key, mods)", "WIDTH, LIST_HEIGHT, ROW, HEADING"],
         rules: &[
             "The app searches and the box draws: it is handed the groups for what is typed.",
             "Its keys are heard whatever has the keyboard (keys): a text box takes <Esc> for itself.",
@@ -297,7 +297,7 @@ pub const ENTRIES: &[Entry] = &[
         module: "history",
         name: "History",
         summary: "Back and forward every way an app is asked: the browser's buttons, ^O and ^I, and two fingers sideways. The router and the swipe, wired once.",
-        api: &["History::new(), go(by), can_go(by), wheel(delta, now), tick(now), active(), sync(&place), replace_next(), poll(ready), view(page, now)", "wheel() -> Subscription<ScrollDelta>"],
+        api: &["History::new(), go(by), can_go(by), wheel(delta, now), tick(now), active(), sync(&place), replace_next(), poll(ready), view(page, now)", "scrolled(&place, y), arrive(&place) -> y: back and forward land where a page was left", "wheel() -> Subscription<ScrollDelta>"],
         rules: &["A jump and a swipe both move the bar; the app arrives by its next poll, the road the back button takes.", "The arrow shows only where there is somewhere to go."],
     },
     Entry {

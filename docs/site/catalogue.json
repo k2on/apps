@@ -963,6 +963,7 @@
         "Command::new(now), typed(query, list), step(down, groups, list), land(at), scrolled(y), chosen(groups)",
         "view(command, placeholder, groups, messages, open)",
         "panel(command, placeholder, groups, messages, width): the box alone, to pin as a dropdown",
+        "list(command, groups, messages, width): what was found alone, under a box of the app's",
         "Group { heading, items }, Item { glyph, label, detail, choose }",
         "keys(open) -> Subscription<Press>, press(key, mods, open), opens(key, mods)",
         "WIDTH, LIST_HEIGHT, ROW, HEADING"
@@ -1056,6 +1057,7 @@
       "summary": "Back and forward every way an app is asked: the browser's buttons, ^O and ^I, and two fingers sideways. The router and the swipe, wired once.",
       "api": [
         "History::new(), go(by), can_go(by), wheel(delta, now), tick(now), active(), sync(&place), replace_next(), poll(ready), view(page, now)",
+        "scrolled(&place, y), arrive(&place) -> y: back and forward land where a page was left",
         "wheel() -> Subscription<ScrollDelta>"
       ],
       "rules": [

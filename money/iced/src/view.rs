@@ -158,7 +158,7 @@ impl App {
                 at: Box::new(Message::DropAt),
                 scrolled: Box::new(Message::DropScrolled),
             };
-            let panel = arkui::command::panel(&d.search, "Find a category", self.drop_groups(), messages, crate::DROP_WIDTH);
+            let panel = arkui::command::list(&d.search, self.drop_groups(), messages, crate::DROP_WIDTH);
             layers = layers
                 .push(layer::backdrop(Message::CloseDrop, Message::Swallow))
                 .push(layer::pinned(panel, d.at));
@@ -416,7 +416,11 @@ impl App {
                 header,
                 rule::horizontal(1).style(style::hairline),
                 new_group,
-                scrollable(body).id(look::BUDGET).height(Length::Fill).style(style::bars)
+                scrollable(body)
+                    .id(look::BUDGET)
+                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                    .height(Length::Fill)
+                    .style(style::bars)
             ],
         ]
         .spacing(12)
@@ -875,9 +879,19 @@ impl App {
                     _ => style::on_row(theme, lit, false, t.category_id == Some(ready_to_assign())),
                 }),
             });
-        let category: Element<'a, Message> = match t.transfer {
-            true => table::cell(t.category.clone(), Length::FillPortion(3), lit, false, true),
-            false => container(mouse_area(label).on_press(Message::CategorizeRow(t.id)))
+        // While its category is being chosen, the cell is the box it is typed
+        // into, the list hanging under it.
+        let choosing = matches!(&self.dropdown, Some(d) if matches!(d.choosing, Choosing::Txns(_))) && self.txn_at == Some(t.id);
+        let category: Element<'a, Message> = match (t.transfer, choosing) {
+            (_, true) => container(self.drop_box(&t.category))
+                .width(Length::FillPortion(3))
+                .padding(Padding {
+                    right: table::SPACING,
+                    ..Padding::ZERO
+                })
+                .into(),
+            (true, false) => table::cell(t.category.clone(), Length::FillPortion(3), lit, false, true),
+            (false, false) => container(mouse_area(label).on_press(Message::CategorizeRow(t.id)))
                 .width(Length::FillPortion(3))
                 .padding(Padding {
                     right: table::SPACING,
@@ -959,13 +973,16 @@ impl App {
                     .id(crate::look::PAYEE)
                     .width(Length::FillPortion(3)),
             )
-            .push(
-                button(text(category_label).size(13))
-                    .on_press(Message::ChooseCategory)
-                    .padding([4, 6])
-                    .width(Length::FillPortion(3))
-                    .style(look::choice(false)),
-            )
+            .push(match &self.dropdown {
+                Some(d) if d.choosing == Choosing::Form => container(self.drop_box(&category_label)).width(Length::FillPortion(3)).into(),
+                _ => Element::from(
+                    button(text(category_label).size(13))
+                        .on_press(Message::ChooseCategory)
+                        .padding([4, 6])
+                        .width(Length::FillPortion(3))
+                        .style(look::choice(false)),
+                ),
+            })
             .push(field("Memo", &f.memo, Field::Memo).width(Length::FillPortion(2)))
             .push(field("Outflow", &f.outflow, Field::Outflow).width(w(94.0)))
             .push(field("Inflow", &f.inflow, Field::Inflow).width(w(94.0)));
@@ -1323,4 +1340,20 @@ fn payee_cell<'a>(t: &'a TxnLine, lit: bool) -> Element<'a, Message> {
     )
     .delay(std::time::Duration::from_millis(500))
     .into()
+}
+
+impl App {
+    /// The box a category is typed into: the cell itself, what it says now
+    /// greyed under what is typed, `<Enter>` choosing the row with the keys.
+    fn drop_box<'a>(&'a self, now: &str) -> Element<'a, Message> {
+        let query = self.dropdown.as_ref().map(|d| d.search.query.as_str()).unwrap_or_default();
+        text_input(now, query)
+            .id(look::DROP_INPUT)
+            .on_input(Message::DropTyped)
+            .on_submit(Message::DropChoose)
+            .size(13)
+            .padding([4, 6])
+            .style(look::input)
+            .into()
+    }
 }

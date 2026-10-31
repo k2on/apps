@@ -47,7 +47,6 @@ mod wake;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use ark::log::EntryId;
@@ -749,13 +748,9 @@ pub struct App {
     /// update, and back and forward by `^O`/`^I` and a swipe
     /// ([`arkui::history`]).
     pub history: arkui::history::History<Place>,
-    /// How far down each page was scrolled when it was left, so back and
-    /// forward land where it was, as a browser's do.
-    pub scrolls: HashMap<Place, f32>,
-    /// Where the page just opened is to be scrolled, once it is drawn.
+    /// Where the page just opened is to be scrolled, once it is drawn: where
+    /// it was left, for back and forward (`history`), or its top.
     pub scroll_due: Option<f32>,
-    /// The page being opened is a step back or forward, not a new visit.
-    pub travelling: bool,
     /// Where the pointer is.
     pub cursor: Point,
     /// Where the pointer was when a key last moved the cursor, until it
@@ -855,9 +850,7 @@ impl App {
             queue_settle: None,
             window: Size::new(860.0, 600.0),
             history: arkui::history::History::new(),
-            scrolls: HashMap::new(),
             scroll_due: None,
-            travelling: false,
             keyed: None,
             cursor: Point::ORIGIN,
             player: Player::new(),
@@ -3158,11 +3151,7 @@ impl App {
                 // is a cursor that remembers the wrong list.
                 self.cursors[Pane::Tracks as usize] = 0;
                 // A new visit opens at the top; back and forward where it was.
-                let back_to = match std::mem::take(&mut self.travelling) {
-                    true => self.scrolls.get(&self.peer.source.place()).copied(),
-                    false => None,
-                };
-                self.scroll_due = Some(back_to.unwrap_or(0.0));
+                self.scroll_due = Some(self.history.arrive(&self.peer.source.place()));
                 // A transcript opens following the line being said, its
                 // cursor on it — put in the middle once the page is drawn,
                 // as any page's scroll is.
@@ -3175,7 +3164,7 @@ impl App {
                 }
             }
             Message::PageScrolled(y) => {
-                self.scrolls.insert(self.peer.source.place(), y);
+                self.history.scrolled(&self.peer.source.place(), y);
             }
             Message::ScrollPage(y) => {
                 return iced::widget::operation::scroll_to(TRACKS, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y });
@@ -3261,7 +3250,6 @@ impl App {
         if let Some(place) = self.history.poll(ready) {
             let wanted = self.peer.source_of(&place);
             if wanted != self.peer.source {
-                self.travelling = true;
                 tasks.push(self.update(Message::Select(wanted)));
             }
         }

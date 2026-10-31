@@ -440,6 +440,7 @@ fn the_budget_drawn() {
     let _ = register.register_act(Action::Visual(true));
     let _ = register.register_act(Action::Move(Motion::Down(1)));
     let _ = register.register_act(Action::Key('c'));
+    let _ = register.update(Message::DropTyped("di".into()));
     let mut form = app();
     let _ = form.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
     let _ = form.update(Message::Go(Page::Ledger(Ledger::All)));
@@ -545,4 +546,21 @@ fn the_bank_says_what_the_payee_does_not() {
     t.imported_payee = "CHIPOTLE 1234".into();
     t.imported = false;
     assert_eq!(crate::bank_said(&t), "", "typed in");
+}
+
+/// A page come back to by `^O` is where it was left; a new visit is at the
+/// top.
+#[test]
+fn back_lands_where_the_register_was_scrolled() {
+    let mut app = app();
+    let ctrl = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    let _ = app.update(Message::RegisterScrolled(300.0));
+    let _ = app.update(Message::Go(Page::Budget));
+    let _ = app.update(Message::Key(iced::keyboard::Key::Character("o".into()), ctrl));
+    assert_eq!(app.page, Page::Ledger(Ledger::All));
+    assert_eq!(app.register_scroll, 300.0, "where it was left");
+    let _ = app.update(Message::Go(Page::Reflect));
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    assert_eq!(app.register_scroll, 0.0, "a visit is the top");
 }

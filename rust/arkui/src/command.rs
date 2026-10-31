@@ -246,7 +246,6 @@ pub fn panel<'a, M: Clone + 'a>(
     messages: Messages<'a, M>,
     width: f32,
 ) -> Element<'a, M> {
-    let height = list_height(&groups);
     let chosen = command.chosen(&groups);
     let mut input = text_input(placeholder, &command.query)
         .id(messages.input)
@@ -271,14 +270,39 @@ pub fn panel<'a, M: Clone + 'a>(
         .align_y(Alignment::Center)
         .padding([0.0, 12.0])
         .height(Length::Fixed(INPUT));
+    let list = found(command, groups, messages.at, messages.scrolled, messages.list);
+    let panel = container(column![search, rule::horizontal(1).style(crate::style::edge), list])
+        .width(Length::Fixed(width))
+        .style(dialog::style);
+    panel.into()
+}
 
-    let list: Element<'a, M> = if rows(&groups) == 0 {
+/// What was found alone, `width` wide, with no box over it: for an app
+/// whose box is somewhere of its own — the cell being chosen for, typed
+/// into where it is, YNAB's way — with this hanging under it. The keys and
+/// [`Command`] are the same; `messages.input` and `typed` go unused.
+pub fn list<'a, M: Clone + 'a>(command: &Command, groups: Vec<Group<M>>, messages: Messages<'a, M>, width: f32) -> Element<'a, M> {
+    container(found(command, groups, messages.at, messages.scrolled, messages.list))
+        .width(Length::Fixed(width))
+        .style(dialog::style)
+        .into()
+}
+
+/// The groups found, the row with the keys lit, scrolled in `list`.
+fn found<'a, M: Clone + 'a>(
+    command: &Command,
+    groups: Vec<Group<M>>,
+    at_of: Box<dyn Fn(usize) -> M + 'a>,
+    scrolled: Box<dyn Fn(f32) -> M + 'a>,
+    list_id: &'static str,
+) -> Element<'a, M> {
+    let height = list_height(&groups);
+    if rows(&groups) == 0 {
         container(text(EMPTY).size(13))
             .center_x(Length::Fill)
             .center_y(Length::Fixed(EMPTY_HEIGHT))
             .into()
     } else {
-        let at_of = messages.at;
         let mut list = Column::new();
         let mut i = 0;
         for g in groups.into_iter().filter(|g| !g.items.is_empty()) {
@@ -315,17 +339,13 @@ pub fn panel<'a, M: Clone + 'a>(
             }
             list = list.push(group);
         }
-        let scrolled = messages.scrolled;
+
         scrollable(list)
-            .id(messages.list)
+            .id(list_id)
             .height(Length::Fixed(height))
             .on_scroll(move |v| scrolled(v.absolute_offset().y))
             .into()
-    };
-    let panel = container(column![search, rule::horizontal(1).style(crate::style::edge), list])
-        .width(Length::Fixed(width))
-        .style(dialog::style);
-    panel.into()
+    }
 }
 
 #[cfg(test)]
