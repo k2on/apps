@@ -217,6 +217,15 @@ final class Model: ObservableObject {
     func delete(category id: Id, moveTo: Id?) { write("delete it", { try $0.deleteCategory(DeleteCategory(id: id, moveTo: moveTo)) }) }
     func delete(group id: Id, moveTo: Id?) { write("delete it", { try $0.deleteGroup(DeleteGroup(id: id, moveTo: moveTo)) }) }
 
+    /// A row of Edit let go somewhere new, as [Arranging] reads it: a
+    /// category into a group in front of another, or a group past others.
+    func rearrange(_ r: Rearrange) {
+        switch r {
+        case let .category(m): write("move it", { try $0.moveCategory(m) })
+        case let .group(m): write("move it", { try $0.moveGroup(m) })
+        }
+    }
+
     // MARK: transactions
 
     /// The form saved: a new transaction, or the one corrected.

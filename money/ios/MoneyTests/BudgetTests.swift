@@ -84,4 +84,93 @@ final class BudgetTests: XCTestCase {
         XCTAssertFalse(s.snap.lines.isEmpty)
         XCTAssertEqual(moneyMonthName(month: last), "September 2026")
     }
+
+    // MARK: Edit
+
+    /// Dining Out dragged up under Bills, in front of its second category:
+    /// it joins Bills there, and the budget comes back the way it was drawn
+    /// ahead. Falsified by `before` read after the row was taken out, or the
+    /// group read from where the row started.
+    func testACategoryDraggedUnderAnotherGroupJoinsIt() {
+        let s = Seen()
+        let groups = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
+        let rows = Arranging.rows(groups)
+        guard let bills = groups.first(where: { $0.group.name == "Bills" }), bills.lines.count > 1,
+              let dining = s.line("Dining Out"),
+              let from = rows.firstIndex(where: { $0.id == Arranged.category(dining).id }),
+              let to = rows.firstIndex(where: { $0.id == Arranged.category(bills.lines[1]).id })
+        else { return XFail() }
+        let r = Arranging.drop(rows, from: from, to: to)
+        XCTAssertEqual(r, .category(MoveCategory(id: dining.categoryId, groupId: bills.id, before: bills.lines[1].categoryId)))
+        guard let r else { return }
+        let drawn = Arranging.applied(r, to: groups)
+        s.write { m in if case let .category(c) = r { try m.moveCategory(c) } }
+        let now = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
+        XCTAssertEqual(Arranging.shape(now), Arranging.shape(drawn))
+        XCTAssertEqual(now.first { $0.id == bills.id }?.lines.map { $0.name },
+                       [bills.lines[0].name, "Dining Out"] + bills.lines.dropFirst().map { $0.name })
+        XCTAssertFalse(now.first { $0.group.name == "Everyday" }?.lines.contains { $0.name == "Dining Out" } ?? true)
+        XCTAssertEqual(s.line("Dining Out")?.groupId, bills.id)
+        XCTAssertEqual(s.notices, [])
+    }
+
+    /// Let go past the last row, a category goes last in the last group; let
+    /// go above every group, first in the first.
+    func testACategoryAtEitherEndGoesToTheNearestGroup() {
+        let s = Seen()
+        let groups = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
+        let rows = Arranging.rows(groups)
+        guard let first = groups.first, let last = groups.last, let groceries = s.line("Groceries"),
+              let from = rows.firstIndex(where: { $0.id == Arranged.category(groceries).id })
+        else { return XFail() }
+        XCTAssertEqual(Arranging.drop(rows, from: from, to: rows.count),
+                       .category(MoveCategory(id: groceries.categoryId, groupId: last.id, before: nil)))
+        XCTAssertEqual(Arranging.drop(rows, from: from, to: 0),
+                       .category(MoveCategory(id: groceries.categoryId, groupId: first.id, before: first.lines.first?.categoryId)))
+    }
+
+    /// A group dragged to the top goes first; into the middle of another's
+    /// categories, after that one; past the end, last. Its categories go
+    /// with it, as drawn ahead.
+    func testAGroupDraggedTakesItsCategories() {
+        let s = Seen()
+        let groups = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
+        let rows = Arranging.rows(groups)
+        let names = groups.map { $0.group.name }
+        guard names.count == 4,
+              let savings = rows.firstIndex(where: { $0.id == Arranged.group(groups[3].group).id }),
+              let bills = rows.firstIndex(where: { $0.id == Arranged.group(groups[0].group).id }),
+              let everyday = groups[1].lines.last.flatMap({ l in rows.firstIndex { $0.id == Arranged.category(l).id } })
+        else { return XFail() }
+        XCTAssertEqual(Arranging.drop(rows, from: savings, to: 0), .group(MoveGroup(id: groups[3].id, before: groups[0].id)))
+        XCTAssertEqual(Arranging.drop(rows, from: bills, to: rows.count), .group(MoveGroup(id: groups[0].id, before: nil)))
+        // In among Everyday's categories: after Everyday, in front of Quality of Life.
+        let r = Arranging.drop(rows, from: bills, to: everyday)
+        XCTAssertEqual(r, .group(MoveGroup(id: groups[0].id, before: groups[2].id)))
+        guard let r else { return }
+        let drawn = Arranging.applied(r, to: groups)
+        s.write { m in if case let .group(g) = r { try m.moveGroup(g) } }
+        let now = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
+        XCTAssertEqual(now.map { $0.group.name }, [names[1], names[0], names[2], names[3]])
+        XCTAssertEqual(Arranging.shape(now), Arranging.shape(drawn))
+        XCTAssertEqual(now[1].lines.map { $0.name }, groups[0].lines.map { $0.name })
+    }
+
+    /// A row let go where it was, or a group among its own categories, or
+    /// the first category above every group, asks nothing.
+    func testADropThatMovesNothingAsksNothing() {
+        let s = Seen()
+        let groups = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
+        let rows = Arranging.rows(groups)
+        guard groups[0].lines.count > 1 else { return XFail() }
+        for i in rows.indices {
+            XCTAssertNil(Arranging.drop(rows, from: i, to: i))
+            XCTAssertNil(Arranging.drop(rows, from: i, to: i + 1))
+        }
+        XCTAssertNil(Arranging.drop(rows, from: 0, to: 2))
+        XCTAssertNil(Arranging.drop(rows, from: 1, to: 0))
+        XCTAssertNil(Arranging.drop(rows, from: rows.count, to: 0))
+    }
+
+    private func XFail(file: StaticString = #filePath, line: UInt = #line) { XCTFail("the seed's groups and categories", file: file, line: line) }
 }

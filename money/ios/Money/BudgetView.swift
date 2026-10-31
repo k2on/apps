@@ -8,6 +8,13 @@
 // A row opens the category's month (CategoryView: target, move money, cover
 // overspending); swiping it assigns or moves money, and holding it offers
 // everything else. Pull to refresh asks the bank for anything new.
+//
+// Reorder Categories (the ••• menu) is the list's Edit mode, as Reminders
+// has its lists and their groups: the budget becomes one list, each group a
+// row over its categories, every row with the system's grabber. A category
+// dragged under another group joins it there; a group dragged takes its
+// categories with it. What was let go is drawn as it will be (`ahead`)
+// until the session's answer says the same, so nothing jumps back.
 import ArkUI
 import SwiftUI
 
@@ -18,6 +25,10 @@ struct BudgetView: View {
     @State private var collapsed: Set<Id> = []
     @State private var naming: Naming? = nil
     @State private var typed = ""
+    @State private var editing = false
+    /// The groups as a drop left them, drawn ahead of the session's saying so.
+    @State private var ahead: [GroupMonth]? = nil
+    @State private var drops = 0
 
     /// A name being typed in an alert: a new group, or a group renamed.
     enum Naming: Identifiable {
@@ -30,6 +41,8 @@ struct BudgetView: View {
 
     var body: some View {
         let s = model.snapshot
+        let groups = Months.groups(s.groups, s.lines, hidden: showHidden)
+        let shown = ahead ?? groups
         List {
             Section {
                 VStack(spacing: Space.l) {
@@ -46,9 +59,22 @@ struct BudgetView: View {
                 Section { HStack { Spacer(); ProgressView(); Spacer() } }
                     .listRowBackground(Color.clear)
             }
-            ForEach(Months.groups(s.groups, s.lines, hidden: showHidden)) { g in
-                group(g)
+            if editing {
+                Section {
+                    ForEach(Arranging.rows(shown)) { r in arranged(r) }
+                        .onMove { from, to in drop(shown, from, to) }
+                } footer: {
+                    Text("Drag a category under another group to move it there. A group moves with its categories.")
+                }
+            } else {
+                ForEach(shown) { g in
+                    group(g)
+                }
             }
+        }
+        .environment(\.editMode, .constant(editing ? .active : .inactive))
+        .onChange(of: Arranging.shape(groups)) { _, now in
+            if let a = ahead, Arranging.shape(a) == now { ahead = nil }
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
@@ -57,22 +83,13 @@ struct BudgetView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { AccountButton() }
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Menu {
-                    Section("Auto-Assign") {
-                        Button { model.autoAssign(.underfunded) } label: { Label("Underfunded", systemImage: "target") }
-                        Button { model.autoAssign(.lastMonth) } label: { Label("Assigned Last Month", systemImage: "arrow.uturn.backward") }
-                        Button(role: .destructive) { model.autoAssign(.reset) } label: { Label("Reset Assigned Amounts", systemImage: "arrow.counterclockwise") }
-                    }
-                    Section {
-                        Button { present(.newCategory(group: nil)) } label: { Label("New Category", systemImage: "plus.circle") }
-                        Button { typed = ""; naming = .newGroup } label: { Label("New Group", systemImage: "folder.badge.plus") }
-                        Toggle(isOn: $showHidden) { Label("Show Hidden Categories", systemImage: "eye") }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
+                if editing {
+                    Button("Done") { withAnimation(Springs.move) { editing = false } }
+                        .fontWeight(.semibold)
+                } else {
+                    options
+                    AddTransactionButton()
                 }
-                .accessibilityLabel("Budget options")
-                AddTransactionButton()
             }
         }
         .alert(naming?.title ?? "",
@@ -90,6 +107,67 @@ struct BudgetView: View {
             }
         }
         .sensoryFeedback(.selection, trigger: model.month)
+    }
+
+    private var options: some View {
+        Menu {
+            Section("Auto-Assign") {
+                Button { model.autoAssign(.underfunded) } label: { Label("Underfunded", systemImage: "target") }
+                Button { model.autoAssign(.lastMonth) } label: { Label("Assigned Last Month", systemImage: "arrow.uturn.backward") }
+                Button(role: .destructive) { model.autoAssign(.reset) } label: { Label("Reset Assigned Amounts", systemImage: "arrow.counterclockwise") }
+            }
+            Section {
+                Button { present(.newCategory(group: nil)) } label: { Label("New Category", systemImage: "plus.circle") }
+                Button { typed = ""; naming = .newGroup } label: { Label("New Group", systemImage: "folder.badge.plus") }
+                Button { withAnimation(Springs.move) { editing = true } } label: { Label("Reorder Categories", systemImage: "arrow.up.arrow.down") }
+                Toggle(isOn: $showHidden) { Label("Show Hidden Categories", systemImage: "eye") }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .accessibilityLabel("Budget options")
+    }
+
+    // MARK: Edit
+
+    /// A row of Edit: a group as Reminders draws one, its categories under it.
+    @ViewBuilder private func arranged(_ r: Arranged) -> some View {
+        switch r {
+        case let .group(g):
+            HStack(spacing: Space.m) {
+                Image(systemName: "folder.fill").foregroundStyle(.tint)
+                Text(g.name).font(.headline).lineLimit(1)
+                if g.hidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.secondary) }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(g.name) group")
+        case let .category(l):
+            HStack {
+                Text(l.name)
+                    .foregroundStyle(l.hidden ? Color.secondary : Color.primary)
+                    .lineLimit(1)
+                Spacer(minLength: Space.s)
+                Pill(cents: l.available, tint: Tone.of(l).tint)
+            }
+            .padding(.leading, Space.xl + Space.s)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(l.name)
+            .accessibilityValue("\(CentsText.string(l.available)) available")
+        }
+    }
+
+    /// A row let go: drawn where it went and asked of the budget, and let
+    /// go of once the session agrees, or after a while if it never does.
+    private func drop(_ groups: [GroupMonth], _ from: IndexSet, _ to: Int) {
+        guard let f = from.first, let r = Arranging.drop(Arranging.rows(groups), from: f, to: to) else { return }
+        withAnimation(Springs.move) { ahead = Arranging.applied(r, to: groups) }
+        model.rearrange(r)
+        drops += 1
+        let mine = drops
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if drops == mine { withAnimation(Springs.move) { ahead = nil } }
+        }
     }
 
     // MARK: Ready to Assign

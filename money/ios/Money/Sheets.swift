@@ -38,10 +38,20 @@ struct TransactionSheet: View {
                         .listRowBackground(Color.clear)
                 }
                 Section {
-                    TextField("Payee", text: $draft.payee)
+                    // Wrapped, never cut: a long payee is read whole. Return
+                    // ends it, as it would a one-line field.
+                    TextField("Payee", text: $draft.payee, axis: .vertical)
+                        .lineLimit(1...4)
                         .focused($payeeFocused)
                         .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
                         .disabled(draft.transferTo != nil)
+                        .onChange(of: draft.payee) { _, p in
+                            if p.contains("\n") {
+                                draft.payee = p.replacingOccurrences(of: "\n", with: "")
+                                payeeFocused = false
+                            }
+                        }
                     if payeeFocused {
                         ForEach(Payees.suggest(draft.payee, s.payees)) { p in
                             Button {
@@ -57,6 +67,18 @@ struct TransactionSheet: View {
                             }
                             .foregroundStyle(.primary)
                         }
+                    }
+                    // What the bank called it, under the payee as Wallet
+                    // shows a merchant's statement name: whole, and copyable.
+                    if let bank = draft.bank {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Bank Description").font(.caption).foregroundStyle(.secondary)
+                            Text(bank)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
                     NavigationLink {
                         CategoryPicker(chosen: draft.transferTo == nil ? draft.category : nil,
