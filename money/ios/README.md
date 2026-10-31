@@ -35,7 +35,14 @@ Four tabs in the system's Liquid Glass bar, which shrinks as a list scrolls:
   left to move money (Cover, in red, when it is overspent); hold for
   everything else — assign to meet the target, set the target, hide,
   delete. The ••• menu has Auto-Assign's three, a new category or group,
-  and showing hidden categories.
+  Reorder Categories, and showing hidden categories. **Reorder Categories**
+  is the list's Edit mode, as Reminders has its lists and their groups:
+  one list, each group a row (a folder) over its categories, every row with
+  the system's grabber. A category dragged under another group joins it
+  there (`categories.move_category`, in front of the category it lands on);
+  a group dragged takes its categories with it (`categories.move_group`).
+  What was let go is drawn where it went until the session agrees. Done
+  ends it.
 - **A category** (pushed from its row) is the desktop's inspector as a page:
   Available large in its tone with Cover Overspending or Move Money under
   it, how it got there (left over, assigned — tap to change — and
@@ -162,7 +169,8 @@ Apple's — compiled by CI: `MoneyApp`, `Shell` (tabs, routes, sheets),
 `SettingsView`, `OnboardingViews`, `Theme`.
 
 **From ArkUI** (`swift/ArkUI`, any Ark app's, harken's use of it unchanged):
-in ArkUICore, `Cents` (amounts as typed, the keypad's digits) and the
+in ArkUICore, `Cents` (amounts as typed, the keypad's digits), `Order`
+(rows moved as Edit mode hands them over) and the
 first run's server half — `Address`, `Probe`, `Health`, `Shelf` — which
 harken's onboarding still keeps its own copy of; in ArkUI, `CentsText`,
 `Pill` and `Tint`, `HeroFigure`, `AmountEntry`, `Pager`, `WelcomePage` and
@@ -189,7 +197,10 @@ amounts and days with no session, and over the demo's household for
 from Groceries, assigning against Ready to Assign, Auto-Assign meeting
 every target, the month paged, the accounts shelved, a register held,
 spliced with a new transaction and let go, the inbox emptied, the demo
-bank's three syncs, and a refusal said once in the domain's words.
+bank's three syncs, a refusal said once in the domain's words, and Edit's
+drops: a category dragged under another group joining it, either end of
+the list, a group taking its categories past others, a drop that moves
+nothing asking nothing, and each drawn ahead as the budget comes back.
 
 ## Not built
 

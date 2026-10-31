@@ -89,6 +89,102 @@ enum Months {
     static func attention(_ s: Summary?) -> Int { Int((s?.overspent ?? 0) + (s?.underfunded ?? 0)) }
 }
 
+// MARK: the budget rearranged
+
+/// A row of the budget as Edit lists it: one list, each group a row over
+/// its categories, so a category is dragged out of one group into another
+/// and a group past the others, as Reminders' lists are into and out of
+/// their groups.
+enum Arranged: Identifiable {
+    case group(GroupLine)
+    case category(BudgetLine)
+
+    var id: String {
+        switch self {
+        case let .group(g): return "group " + g.id.hex
+        case let .category(l): return "category " + l.categoryId.hex
+        }
+    }
+
+    var isGroup: Bool { if case .group = self { return true } else { return false } }
+}
+
+/// What a row let go somewhere new in Edit asks of the budget.
+enum Rearrange: Equatable {
+    case category(MoveCategory)
+    case group(MoveGroup)
+}
+
+enum Arranging {
+    /// The groups on screen as Edit lists them, each over its categories.
+    static func rows(_ groups: [GroupMonth]) -> [Arranged] {
+        groups.flatMap { [Arranged.group($0.group)] + $0.lines.map(Arranged.category) }
+    }
+
+    /// The row at `from` let go in front of the row at `to`, both counted as
+    /// `onMove` counts them (before the row was lifted; past the last is the
+    /// end). A category goes into the group it is now under — the first,
+    /// let go above every group — in front of the category after it, or
+    /// last; a group goes in front of the next group, or last, its
+    /// categories with it, wherever among another's it was let go. None when
+    /// that moves nothing.
+    static func drop(_ rows: [Arranged], from: Int, to: Int) -> Rearrange? {
+        guard rows.indices.contains(from) else { return nil }
+        let row = rows[from]
+        var after = Order.moved(rows, from: IndexSet(integer: from), to: to)
+        guard var at = after.firstIndex(where: { $0.id == row.id }) else { return nil }
+        switch row {
+        case let .category(l):
+            if !after[..<at].contains(where: \.isGroup) {
+                after.remove(at: at)
+                guard let first = after.firstIndex(where: \.isGroup) else { return nil }
+                at = first + 1
+                after.insert(row, at: at)
+            }
+            guard after.map(\.id) != rows.map(\.id), case let .group(g)? = after[..<at].last(where: \.isGroup) else { return nil }
+            var before: Id? = nil
+            if at + 1 < after.count, case let .category(next) = after[at + 1] { before = next.categoryId }
+            return .category(MoveCategory(id: l.categoryId, groupId: g.id, before: before))
+        case let .group(g):
+            let order = groupIds(after)
+            guard order != groupIds(rows), let i = order.firstIndex(of: g.id) else { return nil }
+            return .group(MoveGroup(id: g.id, before: i + 1 < order.count ? order[i + 1] : nil))
+        }
+    }
+
+    /// The groups on screen as they will be once `r` is done — the domain's
+    /// `move_category` and `move_group` over what is shown — drawn while the
+    /// session does it, so a dropped row never jumps back on the way.
+    static func applied(_ r: Rearrange, to groups: [GroupMonth]) -> [GroupMonth] {
+        switch r {
+        case let .category(m):
+            guard let line = groups.flatMap(\.lines).first(where: { $0.categoryId == m.id }) else { return groups }
+            return groups.map { g in
+                var lines = g.lines.filter { $0.categoryId != m.id }
+                if g.id == m.groupId {
+                    let at = m.before.flatMap { b in lines.firstIndex { $0.categoryId == b } } ?? lines.count
+                    lines.insert(line, at: at)
+                }
+                return GroupMonth(group: g.group, lines: lines)
+            }
+        case let .group(m):
+            guard let g = groups.first(where: { $0.id == m.id }) else { return groups }
+            var rest = groups.filter { $0.id != m.id }
+            let at = m.before.flatMap { b in rest.firstIndex { $0.id == b } } ?? rest.count
+            rest.insert(g, at: at)
+            return rest
+        }
+    }
+
+    /// The groups' order and each one's categories', as the rows name it:
+    /// what says the session has caught up with what was drawn ahead.
+    static func shape(_ groups: [GroupMonth]) -> [String] { rows(groups).map(\.id) }
+
+    private static func groupIds(_ rows: [Arranged]) -> [Id] {
+        rows.compactMap { if case let .group(g) = $0 { return g.id } else { return nil } }
+    }
+}
+
 // MARK: moving money
 
 enum Moves {
