@@ -148,6 +148,7 @@ final class CardTests: XCTestCase {
         XCTAssertEqual(again.transferTo, card.id)
         XCTAssertEqual(again.edit?.transferTo, card.id)
         s.bridge.release(register: checking.id)
+        s.bridge.settle()
     }
 
     /// A transfer's account is read from its payee: an open one before a
