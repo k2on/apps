@@ -123,6 +123,17 @@ impl Keys {
         self.bindings.push(seq);
     }
 
+    /// The sequences bound, all of them, replaced by `seqs`: for an app whose
+    /// panes bind different ones — where nothing starts with `c`, a `c` is
+    /// an [`Action::Key`] at once rather than the start of `cc`. What was
+    /// half-typed of the old ones is dropped.
+    pub fn set_bindings(&mut self, seqs: &[&'static str]) {
+        if self.bindings != seqs {
+            self.bindings = seqs.to_vec();
+            self.typed.clear();
+        }
+    }
+
     /// Whether visual mode is on.
     pub fn visual(&self) -> bool {
         self.visual
@@ -289,7 +300,9 @@ impl Keys {
                 None => Motion::Last,
             })),
             "o" => Some(Action::Activate),
-            "v" => {
+            // `V` is vim's line-wise visual mode, and every selection here is
+            // of whole rows: the two are one.
+            "v" | "V" => {
                 self.count = None;
                 self.visual = !self.visual;
                 Some(Action::Visual(self.visual))
@@ -629,6 +642,11 @@ mod tests {
         assert_eq!(press(&mut keys, "j"), Some(Action::Move(Motion::Down(1))), "and the next key is itself");
         assert_eq!(press(&mut keys, "g"), None);
         assert_eq!(press(&mut keys, "g"), Some(Action::Move(Motion::First)), "gg is still the top");
+        // Where nothing bound starts with `c`, `c` is itself at once.
+        assert_eq!(press(&mut keys, "c"), None);
+        keys.set_bindings(&["rg"]);
+        assert_eq!(keys.pending(), "", "what was half-typed is dropped");
+        assert_eq!(press(&mut keys, "c"), Some(Action::Key('c')));
     }
 
     /// `v` turns visual mode on and off, and `<Esc>` off; in it `i` and a
@@ -644,7 +662,7 @@ mod tests {
         assert_eq!(keys.pending(), "i");
         assert_eq!(press(&mut keys, "g"), Some(Action::Inner('g')));
         assert_eq!(press(&mut keys, "v"), Some(Action::Visual(false)));
-        assert_eq!(press(&mut keys, "v"), Some(Action::Visual(true)));
+        assert_eq!(press(&mut keys, "V"), Some(Action::Visual(true))); // and `V` is the same
         assert_eq!(press(&mut keys, "<Esc>"), Some(Action::Cancel));
         assert!(!keys.visual());
     }

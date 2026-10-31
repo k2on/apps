@@ -439,7 +439,7 @@ fn the_budget_drawn() {
     let _ = register.register_act(Action::Move(Motion::Down(3)));
     let _ = register.register_act(Action::Visual(true));
     let _ = register.register_act(Action::Move(Motion::Down(1)));
-    let _ = register.register_act(Action::Bound("cc"));
+    let _ = register.register_act(Action::Key('c'));
     for (app, scene, theme, side) in [
         (&budget, "budget", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Light, "light"),
@@ -491,7 +491,7 @@ fn back_and_forward() {
     assert_eq!(app.page, Page::Reflect, "forward");
 }
 
-/// In the register `v` and `j` select two transactions, `cc` drops the
+/// In the register `v` and `j` select two transactions, `c` drops the
 /// categories under the cursor's, typing narrows them, and the one chosen
 /// is every selected transaction's.
 #[test]
@@ -503,7 +503,11 @@ fn the_register_categorizes_a_selection_from_the_keys() {
     let _ = app.register_act(Action::Move(Motion::Down(1)));
     let ids = app.txn_selected();
     assert_eq!(ids.len(), 2);
-    let _ = app.register_act(Action::Bound("cc"));
+    // Pressed as a key: nothing bound starts with `c` here, so it is at once.
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::default(),
+    ));
     assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Txns(t)) if *t == ids));
     let _ = app.update(Message::DropTyped("groc".into()));
     let groups = app.drop_groups();

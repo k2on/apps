@@ -276,7 +276,7 @@ pub const ENTRIES: &[Entry] = &[
         module: "vim",
         name: "Keys",
         summary: "The keyboard grammar — counts, gg/G, ^d/^u, / and n/N, <Tab>, <Esc> — and the grids it moves a cursor over.",
-        api: &["Keys::new(), press(key, mods) -> Option<Action>, pending(), mode()", "Action::{Move, Activate, Toggle, Search, Match, Cycle, Cancel, Jump, Key}", "Motion::{Down, Up, Left, Right, First, Last, To}", "Grid { cells, columns }, column, row, step, progress", "Section, Page", "presses()", "find(labels, needle, at, delta)", "PAGE"],
+        api: &["Keys::new(), press(key, mods) -> Option<Action>, pending(), mode()", "Keys::bind(seq), set_bindings(seqs), visual(), leave_visual()", "Action::{Move, Activate, Toggle, Search, Match, Cycle, Cancel, Jump, Key, Visual (v or V), Inner (i and a letter), Bound}", "Motion::{Down, Up, Left, Right, First, Last, To}", "Grid { cells, columns }, column, row, step, progress", "Section, Page", "presses()", "find(labels, needle, at, delta)", "PAGE"],
         rules: &["`step` returns None only at that edge, which means \"not mine\": the app says what lies past it."],
     },
     Entry {

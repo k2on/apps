@@ -1075,6 +1075,12 @@ impl App {
             self.keys.press(&key, mods);
             return self.update(Message::Escape);
         }
+        // The budget binds its sequences; the register none, so its `c`
+        // categorizes at once rather than waiting for a second key.
+        self.keys.set_bindings(match (self.pane, self.page) {
+            (Pane::Page, Page::Budget) => &MONEY_KEYS,
+            _ => &[],
+        });
         let Some(action) = self.keys.press(&key, mods) else {
             return Task::none();
         };
@@ -1396,7 +1402,7 @@ impl App {
     }
 
     /// A command with the register's keys: `j`/`k` and the rest walk it, `v`
-    /// selects, `cc` chooses the selection's category from the dropdown, `a`
+    /// selects (`V` too), `c` chooses the selection's category from the dropdown, `a`
     /// approves it, `<Space>` clears it (or un-clears), `<Enter>` edits the
     /// cursor's, `i` adds one, `/` finds a payee, and `h` is the sidebar.
     pub fn register_act(&mut self, action: vim::Action) -> Task<Message> {
@@ -1436,7 +1442,7 @@ impl App {
                     return self.update(Message::EditTxn(id));
                 }
             }
-            vim::Action::Bound("cc") => {
+            vim::Action::Key('c') => {
                 if let Some(id) = self.txn_at {
                     return self.update(Message::CategorizeRow(id));
                 }
@@ -1826,13 +1832,14 @@ pub struct Shown<'a> {
     pub rows: Vec<&'a BudgetLine>,
 }
 
-/// The grammar, with money's sequences: `cc` a category and `cg` a group
-/// made, `rc` and `rg` one renamed.
+/// The budget's sequences: `cc` a category and `cg` a group made, `rc` and
+/// `rg` one renamed.
+const MONEY_KEYS: [&str; 4] = ["cc", "cg", "rc", "rg"];
+
+/// The grammar, with the budget's sequences bound.
 fn money_keys() -> vim::Keys {
     let mut keys = vim::Keys::new();
-    for seq in ["cc", "cg", "rc", "rg"] {
-        keys.bind(seq);
-    }
+    keys.set_bindings(&MONEY_KEYS);
     keys
 }
 
