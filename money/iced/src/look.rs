@@ -11,6 +11,10 @@ pub const ASSIGNED: &str = "assigned";
 pub const NEW_GROUP: &str = "new-group";
 pub const NEW_CATEGORY: &str = "new-category";
 pub const PAYEE: &str = "payee";
+pub const RENAME: &str = "rename";
+
+/// The budget's scrollable, which the cursor keeps itself in.
+pub const BUDGET: &str = "budget";
 
 /// What an amount says about the money: the colour of its pill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,13 +63,18 @@ impl Tone {
 }
 
 /// The pill an available amount is drawn in: a wash of its tone, the text
-/// in the tone itself.
-pub fn pill(tone: Tone) -> impl Fn(&Theme) -> container::Style {
+/// in the tone itself. On a `lit` row the tone is the accent's text
+/// colour instead: a tone drawn on the accent is a pairing nobody chose.
+pub fn pill(tone: Tone, lit: bool) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
-        let c = tone.color(theme);
+        let c = match lit {
+            true => of(theme).primary.base.text,
+            false => tone.color(theme),
+        };
         container::Style {
             background: Some(Background::Color(c.scale_alpha(if tone == Tone::Zero { 0.18 } else { 0.2 }))),
             text_color: Some(match tone {
+                _ if lit => c,
                 Tone::Zero => of(theme).background.base.text.scale_alpha(0.75),
                 _ => c,
             }),
@@ -181,5 +190,18 @@ pub fn progress(tone: Tone) -> impl Fn(&Theme) -> progress_bar::Style {
             radius: 2.0.into(),
             ..Border::default()
         },
+    }
+}
+
+/// A group's heading in the budget: a card a step off the page, its rows
+/// hanging under it.
+pub fn group_card(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(of(theme).background.base.text.scale_alpha(0.06))),
+        border: Border {
+            radius: 10.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
     }
 }

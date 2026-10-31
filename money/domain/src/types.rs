@@ -119,6 +119,17 @@ pub struct HideCategory {
 pub struct MoveCategory {
     pub id: Id<Category>,
     pub group_id: Id<Group>,
+    /// The category it goes in front of, in that group; none for its end.
+    #[serde(default)]
+    pub before: Option<Id<Category>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct MoveGroup {
+    pub id: Id<Group>,
+    /// The group it goes in front of; none for after every other.
+    #[serde(default)]
+    pub before: Option<Id<Group>>,
 }
 
 /// What a category wants each month, in cents; 0 for nothing.

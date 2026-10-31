@@ -568,15 +568,31 @@ public struct Month: Equatable {
 public struct MoveCategory: Equatable {
     public var id: Id
     public var groupId: Id
+    public var before: Id?
 
-    public init(id: Id, groupId: Id) { self.id = id; self.groupId = groupId; }
+    public init(id: Id, groupId: Id, before: Id?) { self.id = id; self.groupId = groupId; self.before = before; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: Id(J.text(o["id"])), groupId: Id(J.text(o["group_id"])))
+        self.init(id: Id(J.text(o["id"])), groupId: Id(J.text(o["group_id"])), before: J.opt(o["before"]) { v0 in Id(J.text(v0)) })
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"group_id\":" + J.q(groupId.hex)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"group_id\":" + J.q(groupId.hex), "\"before\":" + J.wopt(before) { v0 in J.q(v0.hex) }]) }
+}
+
+/// The record `MoveGroup`.
+public struct MoveGroup: Equatable {
+    public var id: Id
+    public var before: Id?
+
+    public init(id: Id, before: Id?) { self.id = id; self.before = before; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), before: J.opt(o["before"]) { v0 in Id(J.text(v0)) })
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"before\":" + J.wopt(before) { v0 in J.q(v0.hex) }]) }
 }
 
 /// The record `MoveMoney`.
@@ -933,6 +949,9 @@ public struct Money {
 
     /// `categories.move_category`: its intent's id.
     @discardableResult public func moveCategory(_ input: MoveCategory) throws -> String { try peer.mutate(name: "categories.move_category", input: input.json) }
+
+    /// `categories.move_group`: its intent's id.
+    @discardableResult public func moveGroup(_ input: MoveGroup) throws -> String { try peer.mutate(name: "categories.move_group", input: input.json) }
 
     /// `categories.rename_category`: its intent's id.
     @discardableResult public func renameCategory(_ input: RenameCategory) throws -> String { try peer.mutate(name: "categories.rename_category", input: input.json) }

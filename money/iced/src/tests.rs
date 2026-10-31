@@ -322,3 +322,125 @@ fn on_a_server_sync_is_an_ask() {
     assert_eq!(asked.iter().map(|a| a.user_id.as_str()).collect::<Vec<_>>(), ["alice"]);
     rt.block_on(server.stop());
 }
+
+// * The budget's keys
+
+use arkui::vim::{Action, Motion};
+
+/// The budget as drawn: each group's name, then its categories'.
+fn drawn(app: &App) -> Vec<String> {
+    app.shown()
+        .iter()
+        .flat_map(|s| std::iter::once(s.group.name.to_uppercase()).chain(s.rows.iter().map(|l| l.name.clone())))
+        .collect()
+}
+
+/// The category under the cursor.
+fn cursor(app: &App) -> String {
+    let c = app.selected.expect("a cursor");
+    app.peer.line(c).expect("its line").name.clone()
+}
+
+/// The rows' names, one group's.
+fn group_rows(app: &App, group: usize) -> Vec<String> {
+    app.shown()[group].rows.iter().map(|l| l.name.clone()).collect()
+}
+
+/// `j` and `k` walk the categories alone: off a group's last, onto the
+/// next group's first, never its heading.
+#[test]
+fn the_cursor_walks_categories_not_groups() {
+    let mut app = app();
+    let first = group_rows(&app, 0);
+    let second = group_rows(&app, 1);
+    let _ = app.act(Action::Move(Motion::Down(1)));
+    assert_eq!(cursor(&app), first[0], "the first `j` lands on the first category");
+    let _ = app.act(Action::Move(Motion::Down(first.len())));
+    assert_eq!(cursor(&app), second[0], "past the heading, not onto it");
+    let _ = app.act(Action::Move(Motion::Up(1)));
+    assert_eq!(cursor(&app), *first.last().unwrap());
+}
+
+/// `J` carries the cursor's category down past the next, then off its
+/// group's end into the next group's top; `K` brings it back.
+#[test]
+fn shift_j_and_k_move_a_category() {
+    let mut app = app();
+    let first = group_rows(&app, 0);
+    let _ = app.act(Action::Move(Motion::First));
+    let moved = cursor(&app);
+    let _ = app.act(Action::Key('J'));
+    assert_eq!(group_rows(&app, 0)[1], moved, "past the next one");
+    assert_eq!(cursor(&app), moved, "the cursor goes with it");
+    for _ in 1..first.len() {
+        let _ = app.act(Action::Key('J'));
+    }
+    assert_eq!(group_rows(&app, 1)[0], moved, "into the next group's top");
+    let _ = app.act(Action::Key('K'));
+    assert_eq!(group_rows(&app, 0).last(), Some(&moved), "back to the end of its own");
+}
+
+/// `vig` selects the cursor's group's categories; `J` then moves the
+/// group, as `}` does without a selection.
+#[test]
+fn a_whole_group_selected_moves_the_group() {
+    let mut app = app();
+    let before = drawn(&app);
+    let name = app.shown()[0].group.name.clone();
+    let _ = app.act(Action::Move(Motion::First));
+    let _ = app.act(Action::Visual(true));
+    let _ = app.act(Action::Inner('g'));
+    assert_eq!(app.lit(), Some((0, group_rows(&app, 0).len() - 1)), "every row of the group");
+    let _ = app.act(Action::Key('J'));
+    assert_eq!(app.shown()[1].group.name, name, "the group went down past the next");
+    let _ = app.act(Action::Visual(false));
+    let _ = app.act(Action::Key('{'));
+    assert_eq!(drawn(&app), before, "and `{{` brings it back");
+}
+
+/// `cc` and `cg` open a new category and a new group; `rc` and `rg`
+/// rename the cursor's.
+#[test]
+fn bound_sequences_make_and_rename() {
+    let mut app = app();
+    let _ = app.act(Action::Move(Motion::First));
+    let group = app.shown()[0].group.id;
+    let _ = app.act(Action::Bound("cc"));
+    assert_eq!(app.new_category.as_ref().map(|(g, _)| *g), Some(group));
+    let _ = app.act(Action::Bound("cg"));
+    assert!(app.new_group.is_some());
+    let _ = app.update(Message::Escape);
+    let _ = app.act(Action::Bound("rc"));
+    let _ = app.update(Message::RenameTyped("Groceries & Household".into()));
+    let _ = app.update(Message::RenameDone);
+    assert_eq!(cursor(&app), "Groceries & Household");
+    let _ = app.act(Action::Bound("rg"));
+    let _ = app.update(Message::RenameTyped("Every Month".into()));
+    let _ = app.update(Message::RenameDone);
+    assert_eq!(app.shown()[0].group.name, "Every Month");
+}
+
+/// The budget drawn to `$MONEY_SNAPSHOT.png`, light and dark, to be looked
+/// at: `MONEY_SNAPSHOT=/tmp/budget cargo test -p money-iced the_budget_drawn
+/// -- --ignored`.
+#[test]
+#[ignore]
+fn the_budget_drawn() {
+    let Ok(path) = std::env::var("MONEY_SNAPSHOT") else {
+        return;
+    };
+    arkui::theme::install(crate::palette::MONEY);
+    let mut app = app();
+    let _ = app.act(Action::Move(Motion::Down(3)));
+    for (theme, side) in [(iced::Theme::Dark, "dark"), (iced::Theme::Light, "light")] {
+        let settings = iced::Settings {
+            fonts: vec![arkui::hero::FIRA_SANS_BOLD.into()],
+            ..iced::Settings::default()
+        };
+        let mut sim = iced_test::Simulator::with_size(settings, (1400.0, 820.0), app.view());
+        let shot = sim.snapshot(&theme).expect("a snapshot");
+        let file = format!("{path}-{side}");
+        let _ = std::fs::remove_file(format!("{file}.png"));
+        shot.matches_image(&file).expect("written");
+    }
+}

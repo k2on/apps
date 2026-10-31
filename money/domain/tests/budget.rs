@@ -284,3 +284,53 @@ fn a_form_says_what_is_wrong_with_it() {
         .unwrap_err()
         .contains("a group needs a name"));
 }
+
+/// The order the budget is drawn in: each group, its categories under it.
+fn order(b: &Book) -> Vec<String> {
+    let groups: Vec<GroupLine> = b.list("groups", &());
+    let lines: Vec<BudgetLine> = b.list("month", &Month { month: "2026-09".into() });
+    groups
+        .iter()
+        .flat_map(|g| std::iter::once(g.name.to_uppercase()).chain(lines.iter().filter(|l| l.group_id == g.id).map(|l| l.name.clone())))
+        .collect()
+}
+
+#[test]
+fn categories_and_groups_are_put_where_they_are_dragged() {
+    let (mut b, _, rent, groceries) = household();
+    let fun = b.group("Fun");
+    let games = b.category(fun, "Games");
+    assert_eq!(order(&b), ["BILLS", "Rent", "Groceries", "FUN", "Games"]);
+    // In front of one in its own group…
+    let to = |id, group_id, before| MoveCategory { id, group_id, before };
+    b.run(
+        "move_category",
+        &to(
+            groceries,
+            b.rows::<Group>("group").iter().find(|g| g.name == "Bills").unwrap().id,
+            Some(rent),
+        ),
+    )
+    .unwrap();
+    assert_eq!(order(&b), ["BILLS", "Groceries", "Rent", "FUN", "Games"]);
+    // …in front of one in another…
+    b.run("move_category", &to(rent, fun, Some(games))).unwrap();
+    assert_eq!(order(&b), ["BILLS", "Groceries", "FUN", "Rent", "Games"]);
+    // …and at a group's end.
+    b.run("move_category", &to(rent, fun, None)).unwrap();
+    assert_eq!(order(&b), ["BILLS", "Groceries", "FUN", "Games", "Rent"]);
+    let refused = b.run("move_category", &to(rent, fun, Some(rent))).unwrap_err();
+    assert!(refused.contains("in front of itself"), "{refused}");
+    // A group in front of another, and back to the end.
+    b.run(
+        "move_group",
+        &MoveGroup {
+            id: fun,
+            before: Some(b.line("2026-09", groceries).group_id),
+        },
+    )
+    .unwrap();
+    assert_eq!(order(&b), ["FUN", "Games", "Rent", "BILLS", "Groceries"]);
+    b.run("move_group", &MoveGroup { id: fun, before: None }).unwrap();
+    assert_eq!(order(&b), ["BILLS", "Groceries", "FUN", "Games", "Rent"]);
+}

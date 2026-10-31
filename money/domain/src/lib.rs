@@ -52,7 +52,7 @@ pub fn domain() -> Domain {
         budget::setup, budget::assign, budget::move_money, budget::auto_assign,
         budget::groups, budget::month, budget::summary, budget::spending,
         categories::add_group, categories::rename_group, categories::hide_group, categories::delete_group,
-        categories::add_category, categories::rename_category, categories::hide_category, categories::move_category,
+        categories::add_category, categories::rename_category, categories::hide_category, categories::move_category, categories::move_group,
         categories::set_target, categories::delete_category,
         accounts::open_account, accounts::rename_account, accounts::close_account, accounts::accounts,
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,

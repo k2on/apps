@@ -35,6 +35,7 @@ pub mod layer;
 pub mod line;
 pub mod menu;
 pub mod motion;
+pub mod outline;
 pub mod panel;
 pub mod picker;
 pub mod reorder;

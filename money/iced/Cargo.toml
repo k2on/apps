@@ -40,3 +40,5 @@ web-sys = { version = "0.3", features = ["console", "Window", "Location"] }
 money-server = { path = "../server" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 tempfile = "3"
+# The budget drawn to a picture, to look at (`tests::the_budget_drawn`).
+iced_test = "0.14"

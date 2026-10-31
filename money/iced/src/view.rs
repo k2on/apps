@@ -2,7 +2,7 @@
 //! the month's budget and its inspector, an account's register, or where
 //! the month's money went — with a panel over it when one is open.
 
-use arkui::{glyphs, icon, layer, panel, style, table};
+use arkui::{glyphs, icon, layer, menu, outline, panel, style, table};
 use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::budget::ready_to_assign;
@@ -12,9 +12,12 @@ use money_domain::*;
 use crate::amount::{money, money_or_blank};
 use crate::look::{self, Tone};
 use crate::peer::Ledger;
-use crate::{App, Choice, Choosing, Field, Message, Modal, Page, TxnForm};
+use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, TxnForm};
 
 const SIDEBAR: f32 = 250.0;
+/// How tall a line of the budget is, a group's heading or a category:
+/// one height, so a drag is arithmetic (`arkui::outline`).
+pub const LINE: f32 = 54.0;
 /// The sidebar's scrollable.
 const SIDEBAR_SCROLL: &str = "sidebar";
 
@@ -23,18 +26,11 @@ type Section = (&'static str, fn(&AccountLine) -> bool);
 const INSPECTOR: f32 = 310.0;
 const PAD: f32 = 18.0;
 const MONEY_COL: f32 = 120.0;
-/// Where the figures of a money column start: inside the assigned cell's
-/// button padding, and inside an available pill's.
-const ASSIGNED_INSET: f32 = 6.0;
-const PILL_INSET: f32 = 9.0;
-
-/// A heading of a money column, in from its edge as the figures under it are.
-fn inset<'a>(heading: Element<'a, Message>, by: f32) -> Element<'a, Message> {
-    container(heading)
-        .width(Length::Fixed(MONEY_COL))
-        .padding(Padding { left: by, ..Padding::ZERO })
-        .into()
-}
+/// The goal's column, and the pill's.
+const GOAL_COL: f32 = 110.0;
+const PILL_COL: f32 = 140.0;
+/// How far in from a row's edge its first and last things sit.
+const ROW_INSET: f32 = 12.0;
 
 fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).font(arkui::hero::BOLD)
@@ -113,11 +109,25 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(style::page);
-        let mut layers = stack![base];
-        // What the last thing done came to, in the page's corner.
-        if !self.note.is_empty() {
+        // Where the pointer is, so a press knows where a drag starts.
+        let mut layers = stack![mouse_area(base).on_move(Message::Pointer)];
+        // While a row or a heading is held, one layer over everything follows
+        // the pointer and hears it let go, wherever that is.
+        if self.drag.is_some() {
             layers = layers.push(
-                container(dim(self.note.clone(), 11))
+                mouse_area(container(text("")).width(Length::Fill).height(Length::Fill))
+                    .on_move(Message::Dragged)
+                    .on_release(Message::Dropped)
+                    .on_scroll(|_| Message::Swallow),
+            );
+        }
+        // What the last thing done came to, in the page's corner — or what
+        // is half-typed: a count, a `c`, a `/search`.
+        let pending = self.keys.pending();
+        let note = if pending.is_empty() { self.note.clone() } else { pending };
+        if !note.is_empty() {
+            layers = layers.push(
+                container(dim(note, 11))
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .padding([8, 14])
@@ -129,6 +139,11 @@ impl App {
             layers = layers
                 .push(layer::dimmed(Message::CloseModal, Message::Swallow))
                 .push(layer::centred(self.view_modal(m)));
+        }
+        if let Some(m) = &self.ctx.menu {
+            layers = layers
+                .push(layer::backdrop(Message::CloseMenu, Message::Swallow))
+                .push(layer::pinned(menu::view(m, true, Message::MenuAt, Message::MenuActivate), m.origin));
         }
         layers.into()
     }
@@ -278,22 +293,22 @@ impl App {
         ]
         .spacing(18);
 
-        let header = table::row(
+        let heading = |label: &str, width: f32| right(text(label.to_string()).size(11).style(style::faint(0.55)).into(), width);
+        let header = container(
             row![
-                table::heading("CATEGORY", Length::Fill),
-                inset(table::heading("ASSIGNED", Length::Fill), ASSIGNED_INSET),
-                inset(table::heading("ACTIVITY", Length::Fill), ASSIGNED_INSET),
-                inset(table::heading("AVAILABLE", Length::Fill), PILL_INSET),
+                text("CATEGORY").size(11).style(style::faint(0.55)).width(Length::Fill),
+                heading("ASSIGNED", MONEY_COL),
+                heading("ACTIVITY", MONEY_COL),
+                Space::new().width(Length::Fixed(GOAL_COL)),
+                heading("AVAILABLE", PILL_COL),
             ]
             .align_y(Alignment::Center),
-            false,
-            false,
-            false,
-        );
+        )
+        .padding([6.0, ROW_INSET + 4.0]);
 
-        let mut body: Column<'_, Message> = Column::new();
+        let mut new_group: Column<'_, Message> = Column::new();
         if let Some(name) = &self.new_group {
-            body = body.push(
+            new_group = new_group.push(
                 container(
                     text_input("New category group", name)
                         .id(look::NEW_GROUP)
@@ -306,29 +321,15 @@ impl App {
                 .padding([4, 8]),
             );
         }
-        let mut odd = false;
-        for g in &self.peer.groups.rows {
-            if g.hidden && !self.show_hidden {
-                continue;
-            }
-            let lines: Vec<&BudgetLine> = self
-                .peer
-                .lines
-                .rows
-                .iter()
-                .filter(|l| l.group_id == g.id && (self.show_hidden || !l.hidden))
-                .collect();
-            body = body.push(self.group_row(g, &lines));
-            if self.collapsed.contains(&g.id) {
-                continue;
-            }
-            for l in lines {
-                body = body.push(self.category_row(l, odd));
-                odd = !odd;
-            }
-            if let Some((ng, name)) = &self.new_category {
-                if *ng == g.id {
-                    body = body.push(
+        // The categories under their groups, the cursor on the categories
+        // alone (`arkui::outline`): `j` and `k` walk past the headings, `J`
+        // and `K` carry what is selected, `{` and `}` its group.
+        let groups = self
+            .shown()
+            .into_iter()
+            .map(|s| {
+                let foot = match &self.new_category {
+                    Some((ng, name)) if *ng == s.group.id => Some(
                         container(
                             text_input("New category", name)
                                 .id(look::NEW_CATEGORY)
@@ -343,11 +344,34 @@ impl App {
                             right: 8.0,
                             bottom: 2.0,
                             left: 32.0,
-                        }),
-                    );
+                        })
+                        .into(),
+                    ),
+                    _ => None,
+                };
+                outline::Group {
+                    head: self.group_row(s.group, &s.lines),
+                    rows: s.rows,
+                    foot,
                 }
-            }
-        }
+            })
+            .collect();
+        let body = outline::view(
+            groups,
+            self.lit(),
+            self.budget_keys(),
+            outline::Look {
+                line: LINE,
+                zebra: false,
+                rules: true,
+            },
+            self.drag.as_ref(),
+            self.settle.as_ref(),
+            iced::time::Instant::now(),
+            Message::Grab,
+            Message::Menu,
+            |l, lit| self.category_row(l, lit),
+        );
 
         let page = column![
             top,
@@ -355,7 +379,8 @@ impl App {
             column![
                 header,
                 rule::horizontal(1).style(style::hairline),
-                scrollable(body).height(Length::Fill).style(style::bars)
+                new_group,
+                scrollable(body).id(look::BUDGET).height(Length::Fill).style(style::bars)
             ],
         ]
         .spacing(12)
@@ -365,102 +390,116 @@ impl App {
         row![page, self.view_inspector()].into()
     }
 
+    /// A name, or the box it is being renamed in.
+    fn name_or_box<'a>(&self, named: Naming, name: Element<'a, Message>) -> Element<'a, Message> {
+        match &self.renaming {
+            Some((n, typed)) if *n == named => text_input("Name", typed)
+                .id(look::RENAME)
+                .on_input(Message::RenameTyped)
+                .on_submit(Message::RenameDone)
+                .size(13)
+                .padding([3, 6])
+                .width(Length::Fixed(240.0))
+                .style(look::input)
+                .into(),
+            _ => name,
+        }
+    }
+
+    /// A group's heading, a card the rows hang under: its name, and what
+    /// its categories were given and spent.
     fn group_row<'a>(&self, g: &GroupLine, lines: &[&BudgetLine]) -> Element<'a, Message> {
         let sum = |f: fn(&BudgetLine) -> i64| lines.iter().map(|l| f(l)).sum::<i64>();
         let collapsed = self.collapsed.contains(&g.id);
-        let mut name = row![
+        let name = row![
             button(icon::faint(if collapsed { glyphs::CHEVRON } else { glyphs::DOWN }, false))
                 .on_press(Message::Collapse(g.id))
                 .padding(2)
                 .style(style::quiet),
-            bold(g.name.clone(), 13),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        name = name.push(
+            self.name_or_box(Naming::Group(g.id), bold(g.name.clone(), 14).into()),
             button(icon::faint(glyphs::PLUS, false))
                 .on_press(Message::NewCategory(g.id))
                 .padding(2)
                 .style(style::quiet),
-        );
-        let total = |c: i64, inset: f32| {
-            container(text(money(c)).size(12).font(arkui::hero::BOLD))
-                .width(Length::Fixed(MONEY_COL))
-                .padding(Padding {
-                    left: inset,
-                    ..Padding::ZERO
-                })
-        };
-        container(
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let total = |c: i64| right(bold(money(c), 14).into(), MONEY_COL);
+        let card = container(
             row![
                 container(name).width(Length::Fill),
-                total(sum(|l| l.assigned), ASSIGNED_INSET),
-                total(sum(|l| l.activity), ASSIGNED_INSET),
-                total(sum(|l| l.available), PILL_INSET),
+                total(sum(|l| l.assigned)),
+                total(sum(|l| l.activity)),
+                Space::new().width(Length::Fixed(GOAL_COL + PILL_COL)),
             ]
             .align_y(Alignment::Center),
         )
-        .padding([6, 4])
-        .style(|theme| container::Style {
-            background: Some(iced::Background::Color(arkui::theme::of(theme).background.base.text.scale_alpha(0.06))),
-            ..container::Style::default()
-        })
-        .into()
+        .padding([0.0, ROW_INSET])
+        .height(Length::Fill)
+        .align_y(Alignment::Center)
+        .style(look::group_card);
+        container(card).padding([6, 0]).height(Length::Fill).into()
     }
 
-    fn category_row<'a>(&'a self, l: &'a BudgetLine, odd: bool) -> Element<'a, Message> {
-        let selected = self.selected == Some(l.category_id);
+    /// A category's line: its tile and name, what it was given, what was
+    /// spent, how far along its goal is, and what is left in a pill.
+    /// `lit` is the accent under it, so every colour on it asks
+    /// `style::on_row` — the pill too, which on the accent is the accent's
+    /// text on a wash of it.
+    fn category_row<'a>(&'a self, l: &'a BudgetLine, lit: bool) -> Element<'a, Message> {
         let tone = Tone::of(l.available, l.target, l.assigned);
-        let mut name = column![text(l.name.clone()).size(13).style(move |theme| text::Style {
-            color: Some(
-                arkui::theme::of(theme)
-                    .background
-                    .base
-                    .text
-                    .scale_alpha(if l.hidden { 0.45 } else { 1.0 })
-            ),
-        })]
-        .spacing(3);
-        if l.target > 0 {
-            let funded = (l.assigned as f32 / l.target as f32).clamp(0.0, 1.0);
-            name = name.push(
-                progress_bar(0.0..=1.0, funded)
-                    .length(Length::Fixed(160.0))
-                    .girth(Length::Fixed(4.0))
-                    .style(look::progress(tone)),
-            );
-        }
+        let hidden = l.hidden;
+        let label = text(l.name.clone()).size(14).style(move |theme| text::Style {
+            color: Some(style::on_row(theme, lit, false, hidden)),
+        });
+        let name = row![tile(&l.name), self.name_or_box(Naming::Category(l.category_id), label.into())]
+            .spacing(12)
+            .align_y(Alignment::Center);
         let assigned: Element<'a, Message> = match &self.assigning {
             Some((c, typed)) if *c == l.category_id => text_input("0.00", typed)
                 .id(look::ASSIGNED)
                 .on_input(Message::AssignedTyped)
                 .on_submit(Message::AssignedDone)
-                .size(13)
+                .size(14)
                 .padding([3, 6])
                 .width(Length::Fixed(MONEY_COL - 14.0))
                 .style(look::input)
                 .into(),
-            _ => button(text(money(l.assigned)).size(13))
-                .on_press(Message::EditAssigned(l.category_id))
-                .padding([3, 6])
-                .style(style::quiet)
-                .into(),
+            _ => button(text(money(l.assigned)).size(14).style(move |theme| text::Style {
+                color: Some(style::on_row(theme, lit, false, false)),
+            }))
+            .on_press(Message::EditAssigned(l.category_id))
+            .padding([3, 0])
+            .style(style::quiet)
+            .into(),
         };
-        let activity = text(money(l.activity)).size(13).style(style::dim);
-        let available = container(text(money(l.available)).size(12)).padding([2, 9]).style(look::pill(tone));
-        let line = row![
-            container(name).width(Length::Fill).padding(Padding { left: 28.0, ..Padding::ZERO }),
-            container(assigned).width(Length::Fixed(MONEY_COL)),
-            container(activity).width(Length::Fixed(MONEY_COL)).padding(Padding {
-                left: ASSIGNED_INSET,
-                ..Padding::ZERO
+        // Nothing spent is a dash, quiet, rather than a row of zeros.
+        let activity = match l.activity {
+            0 => text("\u{2014}").size(14).style(move |theme| text::Style {
+                color: Some(style::on_row(theme, lit, false, true)),
             }),
-            container(available).width(Length::Fixed(MONEY_COL)),
-        ]
-        .align_y(Alignment::Center);
-        mouse_area(table::row(line, selected, false, odd).padding([5, 4]))
-            .on_press(Message::Select(Some(l.category_id)))
-            .into()
+            a => text(money(a)).size(14).style(move |theme| text::Style {
+                color: Some(style::on_row(theme, lit, false, false)),
+            }),
+        };
+        let goal = text(progress(l)).size(13).style(move |theme| text::Style {
+            color: Some(style::on_row(theme, lit, false, true)),
+        });
+        let available = container(text(money(l.available)).size(14).font(arkui::hero::BOLD))
+            .padding([4, 12])
+            .style(look::pill(tone, lit));
+        container(
+            row![
+                container(name).width(Length::Fill),
+                right(assigned, MONEY_COL),
+                right(activity.into(), MONEY_COL),
+                right(goal.into(), GOAL_COL),
+                right(available.into(), PILL_COL),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .padding([0.0, ROW_INSET])
+        .into()
     }
 
     // * The inspector
@@ -543,7 +582,9 @@ impl App {
                 .align_y(Alignment::Center),
                 row![
                     text("Available Balance").size(12).width(Length::Fill),
-                    container(text(money(l.available)).size(14)).padding([3, 10]).style(look::pill(tone)),
+                    container(text(money(l.available)).size(14))
+                        .padding([3, 10])
+                        .style(look::pill(tone, false)),
                 ]
                 .align_y(Alignment::Center),
                 rule::horizontal(1).style(style::hairline),
@@ -1075,7 +1116,7 @@ impl App {
             let mut r = row![text(label).size(13).width(Length::Fill)].align_y(Alignment::Center);
             if let Some(cents) = trailing {
                 let tone = Tone::of(cents, 0, 0);
-                r = r.push(container(text(money(cents)).size(11)).padding([1, 7]).style(look::pill(tone)));
+                r = r.push(container(text(money(cents)).size(11)).padding([1, 7]).style(look::pill(tone, false)));
             }
             button(r)
                 .on_press(Message::Chose(choice))
@@ -1135,5 +1176,72 @@ impl App {
         c.push(scrollable(list).height(Length::Fixed(380.0)).style(style::bars))
             .push(row![fill(), quiet("Cancel", Message::CloseModal)])
             .into()
+    }
+}
+
+/// `content` at the right of a column `width` wide: figures line up on
+/// their last digit.
+fn right<'a>(content: Element<'a, Message>, width: f32) -> Element<'a, Message> {
+    container(content)
+        .width(Length::Fixed(width))
+        .align_x(iced::alignment::Horizontal::Right)
+        .into()
+}
+
+/// A category's tile: what it is for, drawn on a colour its name picks.
+fn tile<'a>(name: &str) -> Element<'a, Message> {
+    let colour = crate::palette::TILES[arkui::art::hash(name) as usize % crate::palette::TILES.len()];
+    container(icon::tinted(category_glyph(name), 16.0, |_| crate::palette::TILE_GLYPH))
+        .width(Length::Fixed(28.0))
+        .height(Length::Fixed(28.0))
+        .center_x(Length::Fixed(28.0))
+        .center_y(Length::Fixed(28.0))
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(colour)),
+            border: iced::Border {
+                radius: 7.0.into(),
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// What a category is for, by the words in its name; a tag when none says.
+fn category_glyph(name: &str) -> &'static [u8] {
+    let name = name.to_lowercase();
+    let says = |words: &[&str]| words.iter().any(|w| name.contains(w));
+    match () {
+        _ if says(&["rent", "mortgage", "home", "household"]) => glyphs::HOME,
+        _ if says(&["electric", "power", "utilit"]) => glyphs::ZAP,
+        _ if says(&["water"]) => glyphs::DROPLET,
+        _ if says(&["internet", "wifi"]) => glyphs::ONLINE,
+        _ if says(&["phone", "mobile"]) => glyphs::PHONE,
+        _ if says(&["insurance", "emergency"]) => glyphs::SHIELD,
+        _ if says(&["grocer", "food", "supermarket"]) => glyphs::CART,
+        _ if says(&["dining", "restaurant", "coffee", "eat"]) => glyphs::UTENSILS,
+        _ if says(&["gas", "transit", "fuel", "commute"]) => glyphs::FUEL,
+        _ if says(&["car", "repair", "maintenance"]) => glyphs::WRENCH,
+        _ if says(&["entertain", "movie", "game", "fun"]) => glyphs::PLAY,
+        _ if says(&["subscription", "streaming"]) => glyphs::REPEAT,
+        _ if says(&["cloth", "shoe"]) => glyphs::SHIRT,
+        _ if says(&["health", "medical", "doctor", "pharmacy"]) => glyphs::HEART,
+        _ if says(&["vacation", "trip", "travel", "flight"]) => glyphs::SEND,
+        _ if says(&["gift", "holiday", "birthday"]) => glyphs::GIFT,
+        _ if says(&["laptop", "computer", "tech"]) => glyphs::LAPTOP,
+        _ if says(&["saving", "invest", "retire"]) => glyphs::GROWTH,
+        _ => glyphs::TAG,
+    }
+}
+
+/// How far along a category is: the share of its goal given this month,
+/// as the inspector counts it; for one with no goal, the share of what it
+/// had that was spent; blank for neither.
+fn progress(l: &BudgetLine) -> String {
+    let had = l.carried + l.assigned;
+    match () {
+        _ if l.target > 0 => format!("{}% goal", (l.assigned.max(0) * 100 / l.target).min(999)),
+        _ if l.activity < 0 && had > 0 => format!("{}% used", (-l.activity * 100 / had).min(999)),
+        _ => String::new(),
     }
 }

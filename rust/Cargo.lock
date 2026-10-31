@@ -3361,6 +3361,7 @@ dependencies = [
  "ark-peer",
  "arkui",
  "iced",
+ "iced_test",
  "money-domain",
  "money-server",
  "tempfile",

@@ -1,15 +1,15 @@
-//! money, in iced â on the desktop and in a browser: a household's budget.
+//! money, in iced — on the desktop and in a browser: a household's budget.
 //!
 //! Two builds of one window. Without features it is the household's
 //! client: it signs in to a money server and dials it (`live.rs`), and
 //! "Sync" asks the server's importer to ask the banks now. With `demo` it
 //! is the demo: no server and no sign-in, a seeded household (`money_domain::seed`)
 //! on a peer that is its own authority, and the card's bank standing in
-//! for Plaid behind "Sync" â what GitHub Pages publishes, and a separate
+//! for Plaid behind "Sync" — what GitHub Pages publishes, and a separate
 //! build on purpose, as harken's is: a flag could be set by accident, a
 //! feature has to be asked for at build time.
 //!
-//! The window is laid out the way YNAB taught people to read a budget â
+//! The window is laid out the way YNAB taught people to read a budget —
 //! the accounts down the side, the month's categories with what each was
 //! assigned, spent and has, what is ready to assign across the top, and the
 //! selected category's story on the right.
@@ -35,8 +35,10 @@ mod view;
 #[cfg(test)]
 mod tests;
 
-use iced::keyboard::{key::Named, Key};
-use iced::{Subscription, Task};
+use arkui::outline::{self, Grab, Shift};
+use arkui::{glyphs, menu, vim};
+use iced::keyboard::{key::Named, Key, Modifiers};
+use iced::{Point, Size, Subscription, Task};
 use money_domain::dates::{add_months, day_of_ms, month_of};
 #[cfg(any(feature = "demo", test))]
 use money_domain::seed;
@@ -96,6 +98,13 @@ pub enum Choosing {
 pub enum Choice {
     Category(Option<Id<Category>>),
     Transfer(Id<Account>),
+}
+
+/// A name being typed over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Naming {
+    Category(Id<Category>),
+    Group(Id<Group>),
 }
 
 /// A panel over the page.
@@ -169,6 +178,26 @@ pub enum Message {
     ReconcileDone,
     CloseModal,
     Escape,
+    /// A key no widget took, for the grammar (`arkui::vim`).
+    Key(Key, Modifiers),
+    /// Where the pointer is, for a press to start a drag from.
+    Pointer(Point),
+    Resized(Size),
+    /// A row or a heading of the budget pressed, and the pointer moving
+    /// and let go while it is held.
+    Grab(Grab),
+    Dragged(Point),
+    Dropped,
+    /// The clock while something slides.
+    Frame,
+    /// A row or a heading of the budget right-clicked: its menu.
+    Menu(Grab),
+    MenuAt(usize),
+    MenuActivate,
+    CloseMenu,
+    Rename(Naming),
+    RenameTyped(String),
+    RenameDone,
     /// A scroll or click that only has to stop at a layer.
     Swallow,
     /// The socket said something, or the peer's deadline came: pump it.
@@ -198,6 +227,22 @@ pub struct App {
     pub bank: seed::Bank,
     /// The server this window is on; none for the demo, its own authority.
     pub server: Option<live::Server>,
+    /// The grammar, with money's sequences bound (`cc`, `cg`, `rc`, `rg`).
+    pub keys: vim::Keys,
+    /// The other end of a visual selection from `selected`: where `v` was.
+    pub anchor: Option<Id<Category>>,
+    /// The last `/` search, for `n` and `N`.
+    pub search: String,
+    pub drag: Option<outline::Drag>,
+    pub settle: Option<arkui::reorder::Settle>,
+    pub pointer: Point,
+    pub window: Size,
+    /// A row's or a heading's menu.
+    pub ctx: arkui::context::Context<Message, ()>,
+    pub renaming: Option<(Naming, String)>,
+    /// The last click on a row or a heading, and when: a second on the same
+    /// one soon after is a double click, which renames it.
+    pub last_click: Option<(Grab, iced::time::Instant)>,
     /// The last thing worth saying: a refusal, a sync.
     pub note: String,
 }
@@ -221,6 +266,16 @@ impl App {
             bank: seed::Bank::default(),
             server: None,
             note: "a demo \u{2014} nothing here leaves this window".into(),
+            keys: money_keys(),
+            anchor: None,
+            search: String::new(),
+            drag: None,
+            settle: None,
+            pointer: Point::ORIGIN,
+            window: Size::new(1200.0, 760.0),
+            ctx: arkui::context::Context::new(),
+            renaming: None,
+            last_click: None,
         }
     }
 
@@ -312,8 +367,8 @@ impl App {
         }
     }
 
-    /// Somebody signed in: the replica moves on as them â whatever was done
-    /// signed out becomes theirs and is pushed â and the link dials.
+    /// Somebody signed in: the replica moves on as them — whatever was done
+    /// signed out becomes theirs and is pushed — and the link dials.
     pub fn signed_in(&mut self, login: ark_auth::Login) {
         let Some(s) = &mut self.server else { return };
         if let Some(logins) = &s.logins {
@@ -651,16 +706,79 @@ impl App {
             }
             Message::CloseModal => self.modal = None,
             Message::Escape => {
-                if self.modal.is_some() {
+                if self.ctx.is_open() {
+                    self.ctx.close_menu();
+                } else if self.modal.is_some() {
                     self.modal = None;
+                } else if self.renaming.is_some() {
+                    self.renaming = None;
                 } else if self.assigning.is_some() {
                     self.assigning = None;
                 } else if self.form.is_some() {
                     self.form = None;
+                } else if self.new_group.is_some() || self.new_category.is_some() {
+                    (self.new_group, self.new_category) = (None, None);
+                } else if self.anchor.is_some() {
+                    self.anchor = None;
                 } else {
                     self.selected = None;
                 }
             }
+            Message::Key(key, mods) => return self.key(key, mods),
+            Message::Pointer(at) => self.pointer = at,
+            Message::Resized(size) => self.window = size,
+            Message::Grab(grab) => {
+                let now = iced::time::Instant::now();
+                self.settle = None;
+                self.drag = Some(outline::Drag::press(grab, &self.sizes(), view::LINE, self.pointer.y, now));
+            }
+            Message::Dragged(at) => {
+                self.pointer = at;
+                if let Some(d) = self.drag.as_mut() {
+                    d.drag(at.y, iced::time::Instant::now());
+                }
+            }
+            Message::Dropped => return self.dropped(),
+            Message::Frame => {
+                let now = iced::time::Instant::now();
+                if self.settle.is_some_and(|s| !s.moving(now)) {
+                    self.settle = None;
+                }
+            }
+            Message::Menu(grab) => self.menu(grab),
+            Message::MenuAt(at) => self.ctx.land(at),
+            Message::MenuActivate => {
+                let chosen = self.ctx.chosen();
+                self.ctx.close_menu();
+                if let Some(m) = chosen {
+                    return self.update(m);
+                }
+            }
+            Message::CloseMenu => self.ctx.close_menu(),
+            Message::Rename(named) => {
+                let name = match named {
+                    Naming::Category(c) => self.peer.line(c).map(|l| l.name.clone()),
+                    Naming::Group(g) => self.peer.groups.rows.iter().find(|r| r.id == g).map(|r| r.name.clone()),
+                };
+                if let Some(name) = name {
+                    self.renaming = Some((named, name));
+                    return iced::widget::operation::focus(look::RENAME);
+                }
+            }
+            Message::RenameTyped(t) => {
+                if let Some((_, typed)) = &mut self.renaming {
+                    *typed = t;
+                }
+            }
+            Message::RenameDone => match self.renaming.take() {
+                Some((Naming::Category(id), name)) => {
+                    self.author("rename the category", "rename_category", &RenameCategory { id, name });
+                }
+                Some((Naming::Group(id), name)) => {
+                    self.author("rename the group", "rename_group", &RenameGroup { id, name });
+                }
+                None => {}
+            },
             Message::Swallow => {}
             Message::Wake => return self.wake(),
             Message::SignedIn(Ok(login)) => self.signed_in(login),
@@ -704,6 +822,339 @@ impl App {
     /// No demo, no demo's bank: every window of this build is on a server.
     #[cfg(not(any(feature = "demo", test)))]
     fn demo_sync(&mut self) {}
+
+    // * The budget's keys, drags and menus
+
+    /// The groups as the budget draws them, each with every line it sums
+    /// and the rows the cursor can be on: none when folded.
+    pub fn shown(&self) -> Vec<Shown<'_>> {
+        self.peer
+            .groups
+            .rows
+            .iter()
+            .filter(|g| self.show_hidden || !g.hidden)
+            .map(|g| {
+                let lines: Vec<&BudgetLine> = self
+                    .peer
+                    .lines
+                    .rows
+                    .iter()
+                    .filter(|l| l.group_id == g.id && (self.show_hidden || !l.hidden))
+                    .collect();
+                let rows = match self.collapsed.contains(&g.id) {
+                    true => Vec::new(),
+                    false => lines.clone(),
+                };
+                Shown { group: g, lines, rows }
+            })
+            .collect()
+    }
+
+    /// Each group's row count, for `arkui::outline`.
+    pub fn sizes(&self) -> Vec<usize> {
+        self.shown().iter().map(|s| s.rows.len()).collect()
+    }
+
+    /// The rows' categories, in order.
+    fn row_ids(&self) -> Vec<Id<Category>> {
+        self.shown().iter().flat_map(|s| s.rows.iter().map(|l| l.category_id)).collect()
+    }
+
+    fn group_ids(&self) -> Vec<Id<Group>> {
+        self.shown().iter().map(|s| s.group.id).collect()
+    }
+
+    /// The cursor's row.
+    fn at(&self) -> Option<usize> {
+        let c = self.selected?;
+        self.row_ids().iter().position(|&r| r == c)
+    }
+
+    /// The rows under the cursor, first to last: one, or from the visual
+    /// selection's anchor to the cursor.
+    pub fn lit(&self) -> Option<(usize, usize)> {
+        let at = self.at()?;
+        let from = self.anchor.and_then(|a| self.row_ids().iter().position(|&r| r == a)).unwrap_or(at);
+        Some((from.min(at), from.max(at)))
+    }
+
+    /// Whether the budget has the keyboard: nothing over it, nothing typed into.
+    pub fn budget_keys(&self) -> bool {
+        self.page == Page::Budget
+            && self.modal.is_none()
+            && self.form.is_none()
+            && self.renaming.is_none()
+            && self.assigning.is_none()
+            && !self.ctx.is_open()
+    }
+
+    fn key(&mut self, key: Key, mods: Modifiers) -> Task<Message> {
+        if key == Key::Named(Named::Escape) {
+            self.keys.press(&key, mods);
+            return self.update(Message::Escape);
+        }
+        let Some(action) = self.keys.press(&key, mods) else {
+            return Task::none();
+        };
+        // A menu that is up has the keys.
+        if self.ctx.is_open() {
+            return match action {
+                vim::Action::Move(m) => match self.ctx.travel(m) {
+                    Some(msg) => self.update(msg),
+                    None => Task::none(),
+                },
+                vim::Action::Activate => self.update(Message::MenuActivate),
+                _ => Task::none(),
+            };
+        }
+        if !self.budget_keys() {
+            return Task::none();
+        }
+        self.act(action)
+    }
+
+    /// One command of the grammar, on the budget.
+    pub fn act(&mut self, action: vim::Action) -> Task<Message> {
+        let ids = self.row_ids();
+        let sizes = self.sizes();
+        let n = ids.len();
+        match action {
+            vim::Action::Move(m) => {
+                let grid = vim::Grid::column(n);
+                let to = match self.at() {
+                    Some(i) => grid.step(i, m),
+                    // No cursor yet: `j` starts at the top, `k` at the bottom.
+                    None => match m {
+                        vim::Motion::Up(_) | vim::Motion::Last => n.checked_sub(1),
+                        vim::Motion::To(_) => grid.step(0, m),
+                        _ => (n > 0).then_some(0),
+                    },
+                };
+                if let Some(i) = to {
+                    self.select(Some(ids[i]));
+                    return self.reveal(i);
+                }
+            }
+            vim::Action::Activate => {
+                if let Some(c) = self.selected {
+                    return self.update(Message::EditAssigned(c));
+                }
+            }
+            vim::Action::Search(q) => {
+                self.search = q;
+                return self.find(1);
+            }
+            vim::Action::Match(delta) => return self.find(delta),
+            vim::Action::Visual(on) => {
+                if on && self.selected.is_none() {
+                    self.selected = ids.first().copied();
+                }
+                self.anchor = if on { self.selected } else { None };
+            }
+            // `vig`: every row of the cursor's group.
+            vim::Action::Inner('g') => {
+                if let Some(g) = self.at().and_then(|i| outline::group_of(&sizes, i)) {
+                    let rows = outline::rows_of(&sizes, g);
+                    self.anchor = Some(ids[rows.start]);
+                    self.select(Some(ids[rows.end - 1]));
+                }
+            }
+            vim::Action::Bound("cc") => {
+                let group = self.cursor_group().or_else(|| self.group_ids().first().copied());
+                if let Some(g) = group {
+                    return self.update(Message::NewCategory(g));
+                }
+            }
+            vim::Action::Bound("cg") => return self.update(Message::NewGroup),
+            vim::Action::Bound("rc") => {
+                if let Some(c) = self.selected {
+                    return self.update(Message::Rename(Naming::Category(c)));
+                }
+            }
+            vim::Action::Bound("rg") => {
+                if let Some(g) = self.cursor_group() {
+                    return self.update(Message::Rename(Naming::Group(g)));
+                }
+            }
+            vim::Action::Key('J') => return self.shift(true),
+            vim::Action::Key('K') => return self.shift(false),
+            vim::Action::Key(c @ ('{' | '}')) => {
+                if let Some(g) = self.at().and_then(|i| outline::group_of(&sizes, i)) {
+                    let shift = outline::groups(sizes.len(), g, g, c == '}');
+                    self.apply(shift, g, g);
+                    return self.reveal_cursor();
+                }
+            }
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// The group the cursor's row is in.
+    fn cursor_group(&self) -> Option<Id<Group>> {
+        let g = outline::group_of(&self.sizes(), self.at()?)?;
+        self.group_ids().get(g).copied()
+    }
+
+    /// `/` and `n`/`N`: the next category whose name has the search in it.
+    fn find(&mut self, delta: isize) -> Task<Message> {
+        let ids = self.row_ids();
+        let labels: Vec<String> = self.shown().iter().flat_map(|s| s.rows.iter().map(|l| l.name.clone())).collect();
+        match vim::find(&labels, &self.search, self.at().unwrap_or(0), delta) {
+            Some(i) => {
+                self.select(Some(ids[i]));
+                self.reveal(i)
+            }
+            None => {
+                self.note = format!("no category has {:?} in it", self.search);
+                Task::none()
+            }
+        }
+    }
+
+    /// `J` and `K`: the selection one place down or up — every row of whole
+    /// groups moves the groups.
+    fn shift(&mut self, down: bool) -> Task<Message> {
+        let Some((first, last)) = self.lit() else {
+            return Task::none();
+        };
+        let shift = outline::shift(&self.sizes(), first, last, down);
+        self.apply(shift, first, last);
+        self.reveal_cursor()
+    }
+
+    /// A shift's moves, authored: rows `first..=last` (or the groups they
+    /// are) each in front of the same neighbour, so they keep their order.
+    fn apply(&mut self, shift: Shift, first: usize, last: usize) {
+        let ids = self.row_ids();
+        let groups = self.group_ids();
+        match shift {
+            Shift::Refused => {}
+            Shift::Rows { group, before } => {
+                for &id in &ids[first..=last] {
+                    let m = MoveCategory {
+                        id,
+                        group_id: groups[group],
+                        before: before.map(|b| ids[b]),
+                    };
+                    self.author("move the category", "move_category", &m);
+                }
+            }
+            Shift::Groups { first, last, before } => {
+                for &id in &groups[first..=last] {
+                    let m = MoveGroup {
+                        id,
+                        before: before.map(|b| groups[b]),
+                    };
+                    self.author("move the group", "move_group", &m);
+                }
+            }
+        }
+    }
+
+    /// A row or a heading let go.
+    fn dropped(&mut self) -> Task<Message> {
+        let Some(drag) = self.drag.take() else {
+            return Task::none();
+        };
+        let ids = self.row_ids();
+        let groups = self.group_ids();
+        let now = iced::time::Instant::now();
+        match drag.drop(&self.sizes(), now) {
+            outline::Dropped::Click(grab) => {
+                let double = self.last_click.is_some_and(|(g, at)| g == grab && now.duration_since(at) < DOUBLE_CLICK);
+                self.last_click = (!double).then_some((grab, now));
+                if let Grab::Row(n) = grab {
+                    self.anchor = None;
+                    self.select(ids.get(n).copied());
+                }
+                if double {
+                    let named = match grab {
+                        Grab::Row(n) => ids.get(n).map(|&c| Naming::Category(c)),
+                        Grab::Group(g) => groups.get(g).map(|&g| Naming::Group(g)),
+                    };
+                    if let Some(named) = named {
+                        return self.update(Message::Rename(named));
+                    }
+                }
+            }
+            outline::Dropped::Stayed => {}
+            outline::Dropped::Row { row, group, before, settle } => {
+                let m = MoveCategory {
+                    id: ids[row],
+                    group_id: groups[group],
+                    before: before.map(|b| ids[b]),
+                };
+                self.anchor = None;
+                self.select(Some(ids[row]));
+                if self.author("move the category", "move_category", &m) {
+                    self.settle = Some(settle);
+                }
+            }
+            outline::Dropped::Group { group, before } => {
+                let m = MoveGroup {
+                    id: groups[group],
+                    before: before.map(|b| groups[b]),
+                };
+                self.author("move the group", "move_group", &m);
+            }
+        }
+        Task::none()
+    }
+
+    /// A row's or a heading's menu, at the pointer.
+    fn menu(&mut self, grab: Grab) {
+        let shown = self.shown();
+        let (title, entries) = match grab {
+            Grab::Row(n) => {
+                let Some(l) = shown.iter().flat_map(|s| s.rows.iter()).nth(n).copied() else {
+                    return;
+                };
+                let (c, g) = (l.category_id, l.group_id);
+                let hide = match l.hidden {
+                    true => menu::Entry::run(glyphs::UNHIDE, "Show", Message::HideCategory(c, false)),
+                    false => menu::Entry::run(glyphs::HIDE, "Hide", Message::HideCategory(c, true)),
+                };
+                let entries = vec![
+                    menu::Entry::run(glyphs::RENAME, "Rename", Message::Rename(Naming::Category(c))),
+                    hide,
+                    menu::Entry::run(glyphs::PLUS, "New Category", Message::NewCategory(g)),
+                ];
+                (l.name.clone(), entries)
+            }
+            Grab::Group(g) => {
+                let Some(s) = shown.get(g) else {
+                    return;
+                };
+                let id = s.group.id;
+                let entries = vec![
+                    menu::Entry::run(glyphs::RENAME, "Rename", Message::Rename(Naming::Group(id))),
+                    menu::Entry::run(glyphs::PLUS, "New Category", Message::NewCategory(id)),
+                    menu::Entry::run(glyphs::PLUS, "New Group", Message::NewGroup),
+                ];
+                (s.group.name.clone(), entries)
+            }
+        };
+        if let Grab::Row(n) = grab {
+            let ids = self.row_ids();
+            self.anchor = None;
+            self.select(ids.get(n).copied());
+        }
+        self.ctx
+            .open_menu(menu::Menu::open(title, entries, self.pointer, self.window, menu::Anchor::Pointer));
+    }
+
+    /// Keep row `n` in view.
+    fn reveal(&self, n: usize) -> Task<Message> {
+        arkui::scroll::reveal_to(look::BUDGET, outline::progress(&self.sizes(), n))
+    }
+
+    fn reveal_cursor(&self) -> Task<Message> {
+        match self.at() {
+            Some(n) => self.reveal(n),
+            None => Task::none(),
+        }
+    }
 
     /// The inspector on a category, or on the month; its target field
     /// holding the category's target.
@@ -811,22 +1262,25 @@ impl App {
         }
     }
 
-    /// The keys, and on a server what wakes the window: the socket ringing
+    /// The keys no widget took, the window's size, and a clock only while
+    /// a row slides; on a server, what wakes the window: the socket ringing
     /// its bell, and the peer's next deadline (a redial) as one timer,
-    /// keyed by it â a window at rest runs nothing.
+    /// keyed by it — a window at rest runs nothing.
     pub fn subscription(&self) -> Subscription<Message> {
-        let keys = iced::keyboard::listen().filter_map(|e| match e {
-            iced::keyboard::Event::KeyPressed {
-                key: Key::Named(Named::Escape),
-                ..
-            } => Some(Message::Escape),
-            _ => None,
-        });
-        let Some(s) = &self.server else { return keys };
-        let mut subs = vec![keys, s.bell.subscription().map(|()| Message::Wake)];
-        if let Some(at) = self.peer.client.deadline() {
-            let delay = std::time::Duration::from_millis(at.saturating_sub(ark_peer::monotonic_ms()) + 2);
-            subs.push(arkui::wake::at(at, delay).map(|()| Message::Wake));
+        let now = iced::time::Instant::now();
+        let mut subs = vec![
+            vim::presses().map(|(key, mods)| Message::Key(key, mods)),
+            iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
+        ];
+        if self.drag.as_ref().is_some_and(|d| d.moving(now)) || self.settle.is_some_and(|s| s.moving(now)) {
+            subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame));
+        }
+        if let Some(s) = &self.server {
+            subs.push(s.bell.subscription().map(|()| Message::Wake));
+            if let Some(at) = self.peer.client.deadline() {
+                let delay = std::time::Duration::from_millis(at.saturating_sub(ark_peer::monotonic_ms()) + 2);
+                subs.push(arkui::wake::at(at, delay).map(|()| Message::Wake));
+            }
         }
         Subscription::batch(subs)
     }
@@ -864,3 +1318,24 @@ pub fn main() -> iced::Result {
         .font(arkui::hero::FIRA_SANS_BOLD)
         .run()
 }
+
+/// A group as the budget draws it: every line it sums, and the rows the
+/// cursor can be on — none while it is folded.
+pub struct Shown<'a> {
+    pub group: &'a GroupLine,
+    pub lines: Vec<&'a BudgetLine>,
+    pub rows: Vec<&'a BudgetLine>,
+}
+
+/// The grammar, with money's sequences: `cc` a category and `cg` a group
+/// made, `rc` and `rg` one renamed.
+fn money_keys() -> vim::Keys {
+    let mut keys = vim::Keys::new();
+    for seq in ["cc", "cg", "rc", "rg"] {
+        keys.bind(seq);
+    }
+    keys
+}
+
+/// How soon a second click is a double click: AppKit's default.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);

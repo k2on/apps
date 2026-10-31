@@ -1345,6 +1345,8 @@ impl App {
                 self.narrow(None);
                 Task::none()
             }
+            // No range is selected here and no sequence is bound.
+            vim::Action::Visual(_) | vim::Action::Inner(_) | vim::Action::Bound(_) => Task::none(),
             // Keys this app binds for itself, kept out of the grammar so a
             // convenience cannot collide with a motion by accident.
             vim::Action::Key(c) => match c {
@@ -2816,6 +2818,9 @@ impl App {
                 // `None` is still typing: a count, a `g`, a search — drawn in
                 // the status line so nothing swallowed is a mystery.
                 let action = self.keys.press(&key, mods);
+                // harken selects no ranges: visual mode is never left on, so `i`
+                // stays the app's.
+                self.keys.leave_visual();
                 // A search typed on the Songs page narrows it as it is typed
                 // (`docs/plan-db.md` D4): the domain's `search`, a view over
                 // the needle so far. `<Enter>` keeps it and lands on the first

@@ -71,6 +71,16 @@ pub enum Action {
     /// Keys an application binds for itself: `a`, `m`, `?`. Held apart from the
     /// motions so that adding one cannot change the grammar.
     Key(char),
+    /// `v`: visual mode on (`true`) or off. While it is on, the motions
+    /// stretch a selection from where it was turned on — the app keeps
+    /// that anchor; the grammar only says the mode.
+    Visual(bool),
+    /// `i` and a letter in visual mode: vim's inner text object — `ip`
+    /// is a paragraph, and an app says what its letters are (`ig`, a group).
+    Inner(char),
+    /// A sequence the application registered with [`Keys::bind`] — `cc`,
+    /// `cg` — typed whole.
+    Bound(&'static str),
 }
 
 /// What [`Keys`] is in the middle of.
@@ -86,9 +96,14 @@ pub enum Mode {
 #[derive(Debug, Default)]
 pub struct Keys {
     count: Option<usize>,
-    /// A prefix waiting for its second key — only `g` today.
+    /// A prefix waiting for its second key: `g`, or `i` in visual mode.
     pending: Option<char>,
     mode: Mode,
+    visual: bool,
+    /// The sequences the application registered, and what of one has been
+    /// typed so far.
+    bindings: Vec<&'static str>,
+    typed: String,
 }
 
 impl Keys {
@@ -98,6 +113,24 @@ impl Keys {
 
     pub fn mode(&self) -> &Mode {
         &self.mode
+    }
+
+    /// Register `seq` — two keys or more, `cc` — to come back whole as
+    /// [`Action::Bound`]. Its first key then waits for the rest instead of
+    /// being an [`Action::Key`]; a key that breaks the sequence drops it, as
+    /// vim drops an operator given no motion.
+    pub fn bind(&mut self, seq: &'static str) {
+        self.bindings.push(seq);
+    }
+
+    /// Whether visual mode is on.
+    pub fn visual(&self) -> bool {
+        self.visual
+    }
+
+    /// Turn visual mode off from outside — the selection was acted on.
+    pub fn leave_visual(&mut self) {
+        self.visual = false;
     }
 
     /// What to show so the typist can see what the editor thinks it has: `5`,
@@ -111,6 +144,7 @@ impl Keys {
                 if let Some(n) = self.count {
                     s.push_str(&n.to_string());
                 }
+                s.push_str(&self.typed);
                 if let Some(c) = self.pending {
                     s.push(c);
                 }
@@ -173,6 +207,8 @@ impl Keys {
             Key::Named(Named::Escape) => {
                 self.count = None;
                 self.pending = None;
+                self.typed.clear();
+                self.visual = false;
                 Some(Action::Cancel)
             }
             Key::Named(Named::Enter) => {
@@ -196,6 +232,27 @@ impl Keys {
     }
 
     fn character(&mut self, c: &str) -> Option<Action> {
+        // `i` in visual mode, then the object's letter.
+        if self.pending == Some('i') {
+            self.pending = None;
+            return c.chars().next().map(Action::Inner);
+        }
+
+        // A registered sequence, whole or begun.
+        if self.count.is_none() && self.pending.is_none() && (!self.typed.is_empty() || self.bindings.iter().any(|b| b.starts_with(c))) {
+            let seq = format!("{}{c}", self.typed);
+            if let Some(&b) = self.bindings.iter().find(|b| **b == seq) {
+                self.typed.clear();
+                return Some(Action::Bound(b));
+            }
+            if self.bindings.iter().any(|b| b.starts_with(seq.as_str())) {
+                self.typed = seq;
+                return None;
+            }
+            self.typed.clear();
+            return None;
+        }
+
         // A count is built up digit by digit, and a leading zero is not a count
         // — in vim `0` is a motion. There is no `0` motion here, so it is
         // simply ignored rather than starting a count of nothing.
@@ -232,6 +289,16 @@ impl Keys {
                 None => Motion::Last,
             })),
             "o" => Some(Action::Activate),
+            "v" => {
+                self.count = None;
+                self.visual = !self.visual;
+                Some(Action::Visual(self.visual))
+            }
+            "i" if self.visual => {
+                self.count = None;
+                self.pending = Some('i');
+                None
+            }
             "/" => {
                 self.count = None;
                 self.mode = Mode::Search(String::new());
@@ -542,6 +609,44 @@ mod tests {
         // Spent: the next motion is a single step, not another twelve.
         assert_eq!(press(&mut keys, "j"), Some(Action::Move(Motion::Down(1))));
         assert_eq!(keys.pending(), "");
+    }
+
+    /// A registered sequence comes back whole; its first key waits for the
+    /// rest, and a key that breaks it drops it. Falsified by matching
+    /// bindings after the builtin `g`: `cg` came back as nothing.
+    #[test]
+    fn a_bound_sequence_comes_back_whole() {
+        let mut keys = Keys::new();
+        keys.bind("cc");
+        keys.bind("cg");
+        assert_eq!(press(&mut keys, "c"), None);
+        assert_eq!(keys.pending(), "c");
+        assert_eq!(press(&mut keys, "g"), Some(Action::Bound("cg")));
+        assert_eq!(press(&mut keys, "c"), None);
+        assert_eq!(press(&mut keys, "c"), Some(Action::Bound("cc")));
+        assert_eq!(press(&mut keys, "c"), None);
+        assert_eq!(press(&mut keys, "x"), None, "broken, and dropped");
+        assert_eq!(press(&mut keys, "j"), Some(Action::Move(Motion::Down(1))), "and the next key is itself");
+        assert_eq!(press(&mut keys, "g"), None);
+        assert_eq!(press(&mut keys, "g"), Some(Action::Move(Motion::First)), "gg is still the top");
+    }
+
+    /// `v` turns visual mode on and off, and `<Esc>` off; in it `i` and a
+    /// letter is an inner object, and out of it `i` is the app's.
+    #[test]
+    fn visual_mode_and_its_objects() {
+        let mut keys = Keys::new();
+        assert_eq!(press(&mut keys, "i"), Some(Action::Key('i')));
+        assert_eq!(press(&mut keys, "v"), Some(Action::Visual(true)));
+        assert!(keys.visual());
+        assert_eq!(press(&mut keys, "j"), Some(Action::Move(Motion::Down(1))));
+        assert_eq!(press(&mut keys, "i"), None);
+        assert_eq!(keys.pending(), "i");
+        assert_eq!(press(&mut keys, "g"), Some(Action::Inner('g')));
+        assert_eq!(press(&mut keys, "v"), Some(Action::Visual(false)));
+        assert_eq!(press(&mut keys, "v"), Some(Action::Visual(true)));
+        assert_eq!(press(&mut keys, "<Esc>"), Some(Action::Cancel));
+        assert!(!keys.visual());
     }
 
     #[test]

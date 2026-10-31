@@ -341,11 +341,20 @@ data class Month(val month: String) {
 }
 
 /** The record `MoveCategory`. */
-data class MoveCategory(val id: Id, val groupId: Id) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "}"
+data class MoveCategory(val id: Id, val groupId: Id, val before: Id?) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
-        fun of(j: Any?): MoveCategory = (j as JSONObject).let { o -> MoveCategory(Id(J.text(o.opt("id"))), Id(J.text(o.opt("group_id")))) }
+        fun of(j: Any?): MoveCategory = (j as JSONObject).let { o -> MoveCategory(Id(J.text(o.opt("id"))), Id(J.text(o.opt("group_id"))), J.opt(o.opt("before")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
+
+/** The record `MoveGroup`. */
+data class MoveGroup(val id: Id, val before: Id?) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
+
+    companion object {
+        fun of(j: Any?): MoveGroup = (j as JSONObject).let { o -> MoveGroup(Id(J.text(o.opt("id"))), J.opt(o.opt("before")) { v0 -> Id(J.text(v0)) }) }
     }
 }
 
@@ -571,6 +580,9 @@ class Money(val peer: Peer) {
 
     /** `categories.move_category`: its intent's id. */
     fun moveCategory(input: MoveCategory): String = peer.mutate("categories.move_category", input.json())
+
+    /** `categories.move_group`: its intent's id. */
+    fun moveGroup(input: MoveGroup): String = peer.mutate("categories.move_group", input.json())
 
     /** `categories.rename_category`: its intent's id. */
     fun renameCategory(input: RenameCategory): String = peer.mutate("categories.rename_category", input.json())

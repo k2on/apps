@@ -95,17 +95,67 @@ pub fn hide_category(_: &Ctx, db: &mut Db<Money>, input: HideCategory) -> Result
     db.category.update(Category { hidden: input.hidden, ..c })
 }
 
-/// A category into another group, at its end.
+/// A category into a group, in front of `before` (one of that group's) or
+/// at its end. The group's categories are numbered again in their new
+/// order, so where it lands is what the order says and not arithmetic on
+/// neighbours' numbers.
 #[mutator("categories.move_category")]
 pub fn move_category(_: &Ctx, db: &mut Db<Money>, input: MoveCategory) -> Result<(), Refusal> {
     let c = category_of(db, input.id)?;
     let g = group_of(db, input.group_id)?;
-    let last = db.category.by(Category::POS).whole().last().map_or(0, |c| c.pos);
-    db.category.update(Category {
-        group_id: g.id,
-        pos: last + 1,
-        ..c
-    })
+    let mut order: Vec<Category> = db
+        .category
+        .by(Category::GROUP_ID_POS)
+        .from(g.id)
+        .all()
+        .into_iter()
+        .filter(|o| o.id != c.id)
+        .collect();
+    let at = match input.before {
+        Some(b) if b == c.id => return Err(Refusal::new("a category does not go in front of itself")),
+        Some(b) => order
+            .iter()
+            .position(|o| o.id == b)
+            .ok_or_else(|| Refusal::new("that category is not in the group"))?,
+        None => order.len(),
+    };
+    order.insert(at, Category { group_id: g.id, ..c });
+    for (i, o) in order.into_iter().enumerate() {
+        let pos = i as i64 + 1;
+        if o.pos != pos || o.id == c.id {
+            db.category.update(Category { pos, ..o })?;
+        }
+    }
+    Ok(())
+}
+
+/// A group in front of `before`, or after every other; the groups are
+/// numbered again in their new order, as [`move_category`] numbers a
+/// group's categories.
+#[mutator("categories.move_group")]
+pub fn move_group(_: &Ctx, db: &mut Db<Money>, input: MoveGroup) -> Result<(), Refusal> {
+    let g = group_of(db, input.id)?;
+    let mut order: Vec<Group> = db
+        .group
+        .by(Group::POS)
+        .whole()
+        .all()
+        .into_iter()
+        .filter(|o| o.id != g.id && !o.income)
+        .collect();
+    let at = match input.before {
+        Some(b) if b == g.id => return Err(Refusal::new("a group does not go in front of itself")),
+        Some(b) => order.iter().position(|o| o.id == b).ok_or_else(|| Refusal::new("no such group"))?,
+        None => order.len(),
+    };
+    order.insert(at, g);
+    for (i, o) in order.into_iter().enumerate() {
+        let pos = i as i64 + 1;
+        if o.pos != pos {
+            db.group.update(Group { pos, ..o })?;
+        }
+    }
+    Ok(())
 }
 
 #[mutator("categories.set_target")]
