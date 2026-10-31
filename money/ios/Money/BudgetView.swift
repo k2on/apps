@@ -9,6 +9,15 @@
 // overspending); swiping it assigns or moves money, and holding it offers
 // everything else. Pull to refresh asks the bank for anything new.
 //
+// The cards' group, Credit Card Payments, comes first, as YNAB draws it:
+// each card's payment category wears the card's mark and says how much of
+// what the card owes is set aside — a bar, "$X short" or "Covered" — and
+// the group what of the cards' debt is not covered. A category that spent
+// more on a card than it had is amber, "$X on card": debt, not the cash
+// overspending that is red. The cards' group and its categories are
+// named, filled and emptied as the cards are, so they offer no rename,
+// target or delete.
+//
 // Reorder Categories (the ••• menu) is the list's Edit mode, as Reminders
 // has its lists and their groups: the budget becomes one list, each group a
 // row over its categories, every row with the system's grabber. A category
@@ -64,7 +73,7 @@ struct BudgetView: View {
                     ForEach(Arranging.rows(shown)) { r in arranged(r) }
                         .onMove { from, to in drop(shown, from, to) }
                 } footer: {
-                    Text("Drag a category under another group to move it there. A group moves with its categories.")
+                    Text("Drag a category under another group to move it there. A group moves with its categories; a card's payment stays with the cards.")
                 }
             } else {
                 ForEach(shown) { g in
@@ -143,6 +152,7 @@ struct BudgetView: View {
             .accessibilityLabel("\(g.name) group")
         case let .category(l):
             HStack {
+                if Cards.isPayment(l) { AccountMark(kind: "credit", side: 22) }
                 Text(l.name)
                     .foregroundStyle(l.hidden ? Color.secondary : Color.primary)
                     .lineLimit(1)
@@ -213,11 +223,11 @@ struct BudgetView: View {
                             Button { present(.move(l.categoryId)) } label: {
                                 Label(l.available < 0 ? "Cover" : "Move", systemImage: "arrow.left.arrow.right")
                             }
-                            .tint(l.available < 0 ? Color.red : Color.indigo)
+                            .tint(l.available < 0 ? Tone.of(l).tint.color : Color.indigo)
                         }
                         .contextMenu { menu(l) }
                 }
-                if g.lines.isEmpty {
+                if g.lines.isEmpty && !g.isCards {
                     Button { present(.newCategory(group: g.id)) } label: { Label("Add a Category", systemImage: "plus") }
                 }
             }
@@ -234,28 +244,52 @@ struct BudgetView: View {
                     Text(g.group.name)
                     if g.group.hidden { Image(systemName: "eye.slash").font(.caption) }
                     Spacer()
-                    CentsText(g.available).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(g.available < 0 ? Color.red : Color.secondary)
+                    // The cards' group says what of their debt is not
+                    // covered; any other, what its categories have.
+                    if g.isCards && g.uncovered > 0 {
+                        Text("\(CentsText.string(g.uncovered)) not covered")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.orange)
+                    } else {
+                        CentsText(g.available).font(.subheadline.weight(.semibold))
+                            .foregroundStyle(g.available < 0 ? Color.red : Color.secondary)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(g.group.name), \(CentsText.string(g.available)) available")
+            .accessibilityLabel("\(g.group.name), \(CentsText.string(g.available)) available"
+                + (g.uncovered > 0 ? ", \(CentsText.string(g.uncovered)) of the cards' debt not covered" : ""))
             .accessibilityHint(open ? "Collapses the group" : "Expands the group")
             .contextMenu {
-                Button { present(.newCategory(group: g.id)) } label: { Label("New Category", systemImage: "plus.circle") }
-                Button { typed = g.group.name; naming = .group(g.group) } label: { Label("Rename", systemImage: "pencil") }
+                // The cards' group is the cards': hidden or shown, but
+                // named, filled and emptied only as the cards are.
+                if !g.isCards {
+                    Button { present(.newCategory(group: g.id)) } label: { Label("New Category", systemImage: "plus.circle") }
+                    Button { typed = g.group.name; naming = .group(g.group) } label: { Label("Rename", systemImage: "pencil") }
+                }
                 Button { model.hide(group: g.id, !g.group.hidden) } label: {
                     Label(g.group.hidden ? "Show" : "Hide", systemImage: g.group.hidden ? "eye" : "eye.slash")
                 }
-                Button(role: .destructive) { model.delete(group: g.id, moveTo: nil) } label: { Label("Delete Group", systemImage: "trash") }
+                if !g.isCards {
+                    Button(role: .destructive) { model.delete(group: g.id, moveTo: nil) } label: { Label("Delete Group", systemImage: "trash") }
+                }
             }
         }
     }
 
     @ViewBuilder private func menu(_ l: BudgetLine) -> some View {
+        // A card's payment: covering its debt first; no target, and no
+        // deleting a category that goes when its card does.
+        let card = Cards.isPayment(l)
+        if let cover = Cards.toCover(l) {
+            Button { model.assign(l.categoryId, cover) } label: {
+                Label("Assign \(CentsText.string(l.underfunded)) to Cover the Card", systemImage: "creditcard")
+            }
+        }
         Button { present(.assign(l.categoryId)) } label: { Label("Assign…", systemImage: "plus.circle") }
-        if l.target > l.assigned {
+        if !card && l.target > l.assigned {
             Button { model.assign(l.categoryId, l.target) } label: {
                 Label("Assign \(CentsText.string(Moves.toTarget(l))) to Meet Target", systemImage: "target")
             }
@@ -263,57 +297,110 @@ struct BudgetView: View {
         Button { present(.move(l.categoryId)) } label: {
             Label(l.available < 0 ? "Cover Overspending…" : "Move Money…", systemImage: "arrow.left.arrow.right")
         }
-        Button { present(.target(l.categoryId)) } label: { Label(l.target > 0 ? "Edit Target…" : "Set Target…", systemImage: "scope") }
+        if !card {
+            Button { present(.target(l.categoryId)) } label: { Label(l.target > 0 ? "Edit Target…" : "Set Target…", systemImage: "scope") }
+        }
         Divider()
         Button { model.hide(category: l.categoryId, !l.hidden) } label: {
             Label(l.hidden ? "Show" : "Hide", systemImage: l.hidden ? "eye" : "eye.slash")
         }
-        Button(role: .destructive) { model.delete(category: l.categoryId, moveTo: nil) } label: { Label("Delete Category", systemImage: "trash") }
+        if !card {
+            Button(role: .destructive) { model.delete(category: l.categoryId, moveTo: nil) } label: { Label("Delete Category", systemImage: "trash") }
+        }
     }
 }
 
 /// One category in the month: its name, how far it is toward its target,
-/// and what it has, in its tone's pill.
+/// and what it has, in its tone's pill. A card's payment category wears
+/// the card's mark and says how much of what the card owes is set aside;
+/// a category that spent more on a card than it had says so in amber.
 struct CategoryRow: View {
     let line: BudgetLine
 
     var body: some View {
         let tone = Tone.of(line)
-        VStack(alignment: .leading, spacing: Space.xs + 2) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(line.name)
-                    .foregroundStyle(line.hidden ? Color.secondary : Color.primary)
-                    .lineLimit(1)
-                Spacer(minLength: Space.s)
-                Pill(cents: line.available, tint: tone.tint)
-            }
-            if let f = funded(line) {
-                ProgressView(value: f)
-                    .tint(tone == .over ? Color.red : f >= 1 ? Color.green : Color.orange)
-                    .scaleEffect(y: 0.8, anchor: .center)
-                HStack {
-                    Text("\(CentsText.string(line.assigned)) of \(CentsText.string(line.target))")
-                    Spacer()
-                    if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
+        let card = Cards.isPayment(line)
+        HStack(spacing: Space.m) {
+            if card { AccountMark(kind: "credit", side: 28) }
+            VStack(alignment: .leading, spacing: Space.xs + 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(line.name)
+                        .foregroundStyle(line.hidden ? Color.secondary : Color.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: Space.s)
+                    Pill(cents: line.available, tint: tone.tint)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-            } else if line.activity != 0 || line.assigned != 0 {
-                HStack {
-                    Text("Assigned \(CentsText.string(line.assigned))")
-                    Spacer()
-                    if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
+                if card {
+                    payment
+                } else if let f = funded(line) {
+                    ProgressView(value: f)
+                        .tint(tone == .over ? Color.red : tone == .onCard || f < 1 ? Color.orange : Color.green)
+                        .scaleEffect(y: 0.8, anchor: .center)
+                    HStack {
+                        Text("\(CentsText.string(line.assigned)) of \(CentsText.string(line.target))")
+                        Spacer()
+                        if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                } else if line.activity != 0 || line.assigned != 0 {
+                    HStack {
+                        Text("Assigned \(CentsText.string(line.assigned))")
+                        Spacer()
+                        if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+                if !card && line.creditOverspent > 0 {
+                    Label("\(CentsText.string(line.creditOverspent)) on card", systemImage: "creditcard")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.orange)
+                        .monospacedDigit()
+                }
             }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(line.name)
-        .accessibilityValue("\(CentsText.string(line.available)) available, \(tone.words). Assigned \(CentsText.string(line.assigned))" + (line.target > 0 ? " of a \(CentsText.string(line.target)) target" : ""))
+        .accessibilityValue(card ? paymentWords : words(tone))
         .accessibilityHint("Swipe right to assign, left to move money")
+    }
+
+    /// A card's payment under its name: how much of the debt is set aside,
+    /// as a bar, and whether that covers it.
+    @ViewBuilder private var payment: some View {
+        if let c = Cards.covered(line) {
+            ProgressView(value: c)
+                .tint(c >= 1 ? Color.green : Color.orange)
+                .scaleEffect(y: 0.8, anchor: .center)
+            HStack {
+                switch Cards.word(line) {
+                case let .short(x)?: Text("\(CentsText.string(x)) short").foregroundStyle(Color.orange)
+                case .covered?: Text("Covered").foregroundStyle(Color.green)
+                default: EmptyView()
+                }
+                Spacer()
+                Text("Owed \(CentsText.string(line.debt))").foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .monospacedDigit()
+        } else {
+            Text("Nothing owed").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func words(_ tone: Tone) -> String {
+        var w = "\(CentsText.string(line.available)) available, \(tone.words). Assigned \(CentsText.string(line.assigned))"
+        if line.target > 0 { w += " of a \(CentsText.string(line.target)) target" }
+        if line.creditOverspent > 0 { w += ". \(CentsText.string(line.creditOverspent)) spent on a card beyond what it had" }
+        return w
+    }
+
+    private var paymentWords: String {
+        "\(CentsText.string(line.available)) set aside for the card, which owes \(CentsText.string(line.debt))"
+            + (line.underfunded > 0 ? ". \(CentsText.string(line.underfunded)) not covered" : "")
     }
 }

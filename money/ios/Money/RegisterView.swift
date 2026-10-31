@@ -144,10 +144,10 @@ struct TxnButton: View {
     @Environment(\.present) private var present
 
     var body: some View {
-        Button { present(.transaction(Draft(txn))) } label: { TxnRow(txn: txn, showAccount: showAccount) }
+        Button { present(.transaction(Draft(txn, accounts: model.snapshot.accounts))) } label: { TxnRow(txn: txn, showAccount: showAccount) }
             .foregroundStyle(.primary)
             .contextMenu {
-                Button { present(.transaction(Draft(txn))) } label: { Label("Edit", systemImage: "pencil") }
+                Button { present(.transaction(Draft(txn, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
                 if !txn.transfer {
                     Button { present(.categorize([txn.id], approve: false)) } label: { Label("Categorize…", systemImage: "folder") }
                 }
