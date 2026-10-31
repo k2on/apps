@@ -171,11 +171,11 @@ data class AutoAssign(val month: String, val how: Auto, val only: List<Id>) {
 }
 
 /** The record `Bank`. */
-data class Bank(val name: String, val institution: String, val cursor: String, val syncedMs: Long, val added: Long, val updated: Long, val deleted: Long, val locked: Long, val userId: String, val errorCode: String, val error: String, val failedMs: Long, val repull: Boolean) {
-    fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "," + "\"failed_ms\":" + failedMs.toString() + "," + "\"repull\":" + repull.toString() + "}"
+data class Bank(val name: String, val institution: String, val cursor: String, val syncedMs: Long, val added: Long, val updated: Long, val deleted: Long, val locked: Long, val userId: String, val errorCode: String, val error: String, val failedMs: Long, val repull: Boolean, val institutionId: String, val fresh: Boolean, val adding: Boolean, val replacedBy: String) {
+    fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "," + "\"failed_ms\":" + failedMs.toString() + "," + "\"repull\":" + repull.toString() + "," + "\"institution_id\":" + J.q(institutionId) + "," + "\"fresh\":" + fresh.toString() + "," + "\"adding\":" + adding.toString() + "," + "\"replaced_by\":" + J.q(replacedBy) + "}"
 
     companion object {
-        fun of(j: Any?): Bank = (j as JSONObject).let { o -> Bank(J.text(o.opt("name")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.text(o.opt("user_id")), J.text(o.opt("error_code")), J.text(o.opt("error")), J.int(o.opt("failed_ms")), J.bool(o.opt("repull"))) }
+        fun of(j: Any?): Bank = (j as JSONObject).let { o -> Bank(J.text(o.opt("name")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.text(o.opt("user_id")), J.text(o.opt("error_code")), J.text(o.opt("error")), J.int(o.opt("failed_ms")), J.bool(o.opt("repull")), J.text(o.opt("institution_id")), J.bool(o.opt("fresh")), J.bool(o.opt("adding")), J.text(o.opt("replaced_by"))) }
     }
 }
 
@@ -365,11 +365,11 @@ data class IgnoreLinked(val plaidAccountId: String, val ignored: Boolean) {
 }
 
 /** The record `Import`. */
-data class Import(val bank: String, val institution: String, val cursor: String, val accounts: List<BankAccount>, val upserts: List<BankTxn>, val removed: List<BankRemoved>, val choose: Boolean, val fromStart: Boolean) {
-    fun json(): String = "{" + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> v0.json() } + "," + "\"upserts\":" + J.wlist(upserts) { v0 -> v0.json() } + "," + "\"removed\":" + J.wlist(removed) { v0 -> v0.json() } + "," + "\"choose\":" + choose.toString() + "," + "\"from_start\":" + fromStart.toString() + "}"
+data class Import(val bank: String, val institution: String, val cursor: String, val accounts: List<BankAccount>, val upserts: List<BankTxn>, val removed: List<BankRemoved>, val choose: Boolean, val fromStart: Boolean, val institutionId: String? = null) {
+    fun json(): String = "{" + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> v0.json() } + "," + "\"upserts\":" + J.wlist(upserts) { v0 -> v0.json() } + "," + "\"removed\":" + J.wlist(removed) { v0 -> v0.json() } + "," + "\"choose\":" + choose.toString() + "," + "\"from_start\":" + fromStart.toString() + "," + "\"institution_id\":" + J.wopt(institutionId) { v0 -> J.q(v0) } + "}"
 
     companion object {
-        fun of(j: Any?): Import = (j as JSONObject).let { o -> Import(J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.list(o.opt("accounts")) { v0 -> BankAccount.of(v0) }, J.list(o.opt("upserts")) { v0 -> BankTxn.of(v0) }, J.list(o.opt("removed")) { v0 -> BankRemoved.of(v0) }, J.bool(o.opt("choose")), J.bool(o.opt("from_start"))) }
+        fun of(j: Any?): Import = (j as JSONObject).let { o -> Import(J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.list(o.opt("accounts")) { v0 -> BankAccount.of(v0) }, J.list(o.opt("upserts")) { v0 -> BankTxn.of(v0) }, J.list(o.opt("removed")) { v0 -> BankRemoved.of(v0) }, J.bool(o.opt("choose")), J.bool(o.opt("from_start")), J.opt(o.opt("institution_id")) { v0 -> J.text(v0) }) }
     }
 }
 
@@ -383,11 +383,11 @@ data class LinkAccount(val plaidAccountId: String, val accountId: Id) {
 }
 
 /** The record `Linked`. */
-data class Linked(val plaidAccountId: String, val bank: String, val accountId: Id?, val name: String, val mask: String, val kind: String, val balance: Long?, val ignored: Boolean, val subtype: String, val seen: String, val since: String, val opening: Boolean) {
-    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "," + "\"subtype\":" + J.q(subtype) + "," + "\"seen\":" + J.q(seen) + "," + "\"since\":" + J.q(since) + "," + "\"opening\":" + opening.toString() + "}"
+data class Linked(val plaidAccountId: String, val bank: String, val accountId: Id?, val name: String, val mask: String, val kind: String, val balance: Long?, val ignored: Boolean, val subtype: String, val seen: String, val since: String, val opening: Boolean, val seam: Boolean) {
+    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "," + "\"subtype\":" + J.q(subtype) + "," + "\"seen\":" + J.q(seen) + "," + "\"since\":" + J.q(since) + "," + "\"opening\":" + opening.toString() + "," + "\"seam\":" + seam.toString() + "}"
 
     companion object {
-        fun of(j: Any?): Linked = (j as JSONObject).let { o -> Linked(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored")), J.text(o.opt("subtype")), J.text(o.opt("seen")), J.text(o.opt("since")), J.bool(o.opt("opening"))) }
+        fun of(j: Any?): Linked = (j as JSONObject).let { o -> Linked(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored")), J.text(o.opt("subtype")), J.text(o.opt("seen")), J.text(o.opt("since")), J.bool(o.opt("opening")), J.bool(o.opt("seam"))) }
     }
 }
 
@@ -556,11 +556,11 @@ fun Summary.json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"ready_to
 fun Summary.Companion.of(j: Any?): Summary = (j as JSONObject).let { o -> Summary(J.text(o.opt("month")), J.int(o.opt("ready_to_assign")), J.int(o.opt("income")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("overspent_last_month")), J.int(o.opt("overspent")), J.int(o.opt("underfunded"))) }
 
 /** The record `Txn`. */
-data class Txn(val id: Id, val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Cleared, val approved: Boolean, val transferAccount: Id?, val transferId: Id?, val importedId: String?, val importedPayee: String, val createdMs: Long, val userId: String) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer_account\":" + J.wopt(transferAccount) { v0 -> J.q(v0.hex) } + "," + "\"transfer_id\":" + J.wopt(transferId) { v0 -> J.q(v0.hex) } + "," + "\"imported_id\":" + J.wopt(importedId) { v0 -> J.q(v0) } + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+data class Txn(val id: Id, val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Cleared, val approved: Boolean, val transferAccount: Id?, val transferId: Id?, val importedId: String?, val importedPayee: String, val createdMs: Long, val userId: String, val importedBy: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer_account\":" + J.wopt(transferAccount) { v0 -> J.q(v0.hex) } + "," + "\"transfer_id\":" + J.wopt(transferId) { v0 -> J.q(v0.hex) } + "," + "\"imported_id\":" + J.wopt(importedId) { v0 -> J.q(v0) } + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"imported_by\":" + J.q(importedBy) + "}"
 
     companion object {
-        fun of(j: Any?): Txn = (j as JSONObject).let { o -> Txn(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.opt(o.opt("transfer_account")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("transfer_id")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("imported_id")) { v0 -> J.text(v0) }, J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+        fun of(j: Any?): Txn = (j as JSONObject).let { o -> Txn(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.opt(o.opt("transfer_account")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("transfer_id")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("imported_id")) { v0 -> J.text(v0) }, J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id")), J.text(o.opt("imported_by"))) }
     }
 }
 
@@ -591,6 +591,9 @@ class Money(val peer: Peer) {
 
     /** `accounts.rename_account`: its intent's id. */
     fun renameAccount(input: RenameAccount): String = peer.mutate("accounts.rename_account", input.json())
+
+    /** `banks.add_accounts`: its intent's id. */
+    fun addAccounts(input: BankName): String = peer.mutate("banks.add_accounts", input.json())
 
     /** `banks.answer`: its intent's id. */
     fun answer(input: Answer): String = peer.mutate("banks.answer", input.json())
@@ -627,6 +630,9 @@ class Money(val peer: Peer) {
 
     /** `banks.reconnect`: its intent's id. */
     fun reconnect(input: BankName): String = peer.mutate("banks.reconnect", input.json())
+
+    /** `banks.retired`: its intent's id. */
+    fun retired(input: BankName): String = peer.mutate("banks.retired", input.json())
 
     /** `banks.sync`: its intent's id. */
     fun sync(): String = peer.mutate("banks.sync", "null")

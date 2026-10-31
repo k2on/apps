@@ -327,7 +327,12 @@ fn wells(script: &mut Script, endpoint: &str, body: &Value, second: bool) -> Ans
             script.cursors.push(cursor.clone());
             let t = |id: &str, account: &str, amount: f64, date: &str| {
                 let id = format!("{t_}{id}");
-                txn(&id, amount, &format!("{id} STORE"), json!({ "account_id": format!("{a}-{account}"), "date": date }))
+                txn(
+                    &id,
+                    amount,
+                    &format!("{id} STORE"),
+                    json!({ "account_id": format!("{a}-{account}"), "date": date }),
+                )
             };
             match cursor.as_deref() {
                 None => {

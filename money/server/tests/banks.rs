@@ -388,7 +388,11 @@ fn a_second_login_to_the_same_bank_replaces_the_first() {
     pump_until(&mut [&mut alice], 10, |ps| ps[0].pending() == 0);
     runs(&server, 2);
     assert!(eventually(20, || hub_rows::<Txn>(&server, "txn").iter().any(|t| t.payee == "WK1 STORE")));
-    let checking = hub_rows::<Account>(&server, "account").into_iter().find(|a| a.name == "Checking").unwrap().id;
+    let checking = hub_rows::<Account>(&server, "account")
+        .into_iter()
+        .find(|a| a.name == "Checking")
+        .unwrap()
+        .id;
     let before = hub_rows::<Txn>(&server, "txn").len();
 
     mock.script.lock().unwrap().exchange = Some(WF2_TOKEN.into());
@@ -418,7 +422,11 @@ fn a_second_login_to_the_same_bank_replaces_the_first() {
     let line = accounts.iter().find(|a| a.id == savings).unwrap();
     assert_eq!((line.name.as_str(), line.kind.as_str(), line.balance), ("Way Savings", "savings", 70_000));
     let txns: Vec<Txn> = hub_rows(&server, "txn");
-    assert_eq!(txns.len(), before + 2, "the savings account's deposit and its starting balance, and nothing twice");
+    assert_eq!(
+        txns.len(),
+        before + 2,
+        "the savings account's deposit and its starting balance, and nothing twice"
+    );
     assert_eq!(txns.iter().filter(|t| t.account_id == checking && t.imported_id.is_some()).count(), 1);
     let said = server.importer.as_ref().unwrap().said().join("\n");
     assert!(said.contains("wellsfargo: replaced by wells-fargo, removed"), "{said}");

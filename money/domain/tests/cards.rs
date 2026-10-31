@@ -401,7 +401,7 @@ fn import(bank: &str, accounts: Vec<BankAccount>, upserts: Vec<BankTxn>) -> Impo
         removed: vec![],
         choose: false,
         from_start: false,
-        institution_id: String::new(),
+        institution_id: None,
     }
 }
 

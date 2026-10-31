@@ -65,7 +65,16 @@ fn accounts(login: &str, second: bool) -> Vec<BankAccount> {
 fn checking(login: &str, posted: bool) -> Vec<BankTxn> {
     let chk = format!("{login}-chk");
     let mut t: Vec<BankTxn> = (0..30)
-        .map(|n| txn(&format!("{login}-k{n}"), &chk, &add_days(TODAY, -3 * n), &format!("Shop {n}"), -(1_000 + 41 * n), false))
+        .map(|n| {
+            txn(
+                &format!("{login}-k{n}"),
+                &chk,
+                &add_days(TODAY, -3 * n),
+                &format!("Shop {n}"),
+                -(1_000 + 41 * n),
+                false,
+            )
+        })
         .collect();
     t.push(match posted {
         false => txn(&format!("{login}-pend"), &chk, &add_days(TODAY, -2), "Diner", -1_999, true),
@@ -74,7 +83,14 @@ fn checking(login: &str, posted: bool) -> Vec<BankTxn> {
             ..txn(&format!("{login}-post"), &chk, &add_days(TODAY, -1), "Diner", -1_999, false)
         },
     });
-    t.push(txn(&format!("{login}-c1"), &format!("{login}-card"), &add_days(TODAY, -5), "Fuel", -4_000, false));
+    t.push(txn(
+        &format!("{login}-c1"),
+        &format!("{login}-card"),
+        &add_days(TODAY, -5),
+        "Fuel",
+        -4_000,
+        false,
+    ));
     t
 }
 
@@ -92,7 +108,7 @@ fn import(bank: &str, accounts: Vec<BankAccount>, upserts: Vec<BankTxn>, from_st
     Import {
         bank: bank.into(),
         institution: INSTITUTION.into(),
-        institution_id: INSTITUTION_ID.into(),
+        institution_id: Some(INSTITUTION_ID.into()),
         cursor: format!("{bank}-c"),
         accounts,
         upserts,
@@ -114,7 +130,8 @@ fn bank_row(b: &Book, name: &str) -> Option<Bank> {
 /// an account of its own with its whole history, the card and the old
 /// savings ignored. The account checking feeds.
 fn first_login(b: &mut Book) -> Id<Account> {
-    b.import(&import("granite", accounts("granite", false), checking("granite", false), true)).unwrap();
+    b.import(&import("granite", accounts("granite", false), checking("granite", false), true))
+        .unwrap();
     b.run(
         "open",
         &OpenLinked {
@@ -133,10 +150,15 @@ fn first_login(b: &mut Book) -> Id<Account> {
         )
         .unwrap();
     }
-    b.import(&import("granite", accounts("granite", false), checking("granite", false), true)).unwrap();
+    b.import(&import("granite", accounts("granite", false), checking("granite", false), true))
+        .unwrap();
     let id = b.accounts().into_iter().find(|a| a.name == "Checking").unwrap().id;
     assert_eq!(b.register(Some(id)).len(), 32, "its history, the pending charge, and a starting balance");
-    assert_eq!(b.accounts().into_iter().find(|a| a.id == id).unwrap().balance, 248_001, "the bank's balance and the charge pending");
+    assert_eq!(
+        b.accounts().into_iter().find(|a| a.id == id).unwrap().balance,
+        248_001,
+        "the bank's balance and the charge pending"
+    );
     id
 }
 
@@ -185,14 +207,18 @@ fn a_second_login_to_the_same_bank_folds_into_the_first() {
     assert!(bank_row(&b, "granite-2").unwrap().fresh);
     let mut history = checking("granite-2", true);
     history.extend(savings("granite-2"));
-    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true)).unwrap();
+    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true))
+        .unwrap();
 
     let chk = linked(&b, "granite-2-chk");
     assert_eq!((chk.account_id, chk.since.as_str(), chk.seam), (Some(kept), TODAY, true));
     assert!(linked(&b, "granite-2-card").ignored && linked(&b, "granite-2-sav").ignored);
     let way = linked(&b, "granite-2-way");
     let opened = b.accounts().into_iter().find(|a| Some(a.id) == way.account_id).expect("opened for it");
-    assert_eq!((opened.name.as_str(), opened.kind.as_str(), opened.on_budget), ("Way Savings", "savings", true));
+    assert_eq!(
+        (opened.name.as_str(), opened.kind.as_str(), opened.on_budget),
+        ("Way Savings", "savings", true)
+    );
     assert_eq!(opened.balance, 512_000, "the bank's balance");
     let mut way_held = held(&b, opened.id);
     way_held.retain(|t| t.0 != "Starting Balance");
@@ -208,14 +234,27 @@ fn a_second_login_to_the_same_bank_folds_into_the_first() {
     let txns: Vec<Txn> = b.rows("txn");
     let diner = txns.iter().find(|t| t.payee == "Diner").unwrap();
     assert_eq!(
-        (diner.imported_id.as_deref(), diner.imported_by.as_str(), diner.cleared, diner.date.as_str()),
+        (
+            diner.imported_id.as_deref(),
+            diner.imported_by.as_str(),
+            diner.cleared,
+            diner.date.as_str()
+        ),
         (Some("granite-2-post"), "granite-2", Cleared::Cleared, add_days(TODAY, -1).as_str())
     );
     let today = txns.iter().find(|t| t.payee == "Shop 0").unwrap();
     assert_eq!(today.imported_id.as_deref(), Some("granite-2-k0"));
     let older = txns.iter().find(|t| t.payee == "Shop 5").unwrap();
-    assert_eq!(older.imported_id.as_deref(), Some("granite-k5"), "before the second login was seen: the first's");
-    assert_eq!(b.accounts().into_iter().find(|a| a.id == kept).unwrap().balance, 248_001, "the bank's balance and the charge pending");
+    assert_eq!(
+        older.imported_id.as_deref(),
+        Some("granite-k5"),
+        "before the second login was seen: the first's"
+    );
+    assert_eq!(
+        b.accounts().into_iter().find(|a| a.id == kept).unwrap().balance,
+        248_001,
+        "the bank's balance and the charge pending"
+    );
 
     // The first login is replaced: what it imports now changes nothing.
     assert_eq!(bank_row(&b, "granite").unwrap().replaced_by, "granite-2");
@@ -238,7 +277,8 @@ fn a_second_login_to_the_same_bank_folds_into_the_first() {
     assert_eq!((line.bank.as_str(), line.balance), ("granite-2", 248_001));
 
     // The second login's history again, and what is new: nothing doubles.
-    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true)).unwrap();
+    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true))
+        .unwrap();
     assert_eq!(held(&b, kept), after);
     let mut new = history;
     new.push(txn("granite-2-new", "granite-2-chk", TODAY, "Grocer", -5_500, false));
@@ -261,8 +301,13 @@ fn a_waiting_second_login_is_mended_by_hand() {
     // Known by its import alone, as one connected before this was: no fold.
     let mut history = checking("granite-2", true);
     history.extend(savings("granite-2"));
-    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true)).unwrap();
-    assert!(b.rows::<Linked>("linked").iter().filter(|l| l.bank == "granite-2").all(|l| l.account_id.is_none() && !l.ignored));
+    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true))
+        .unwrap();
+    assert!(b
+        .rows::<Linked>("linked")
+        .iter()
+        .filter(|l| l.bank == "granite-2")
+        .all(|l| l.account_id.is_none() && !l.ignored));
     assert!(bank_row(&b, "granite").unwrap().replaced_by.is_empty());
     let before = held(&b, kept);
 
@@ -308,7 +353,8 @@ fn a_waiting_second_login_is_mended_by_hand() {
     );
 
     // The history again, from the start, as the choice asked.
-    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true)).unwrap();
+    b.import(&import("granite-2", accounts("granite-2", true), history.clone(), true))
+        .unwrap();
     let after = held(&b, kept);
     let amounts = |h: &[(String, i64, String)]| h.iter().map(|t| (t.0.clone(), t.1)).collect::<Vec<_>>();
     assert_eq!(amounts(&after), amounts(&before), "nothing twice");
@@ -319,7 +365,8 @@ fn a_waiting_second_login_is_mended_by_hand() {
     // Both feed checking for now: each one's copy of the other's is matched.
     let mut second = history.clone();
     second.push(txn("granite-2-new", "granite-2-chk", TODAY, "Grocer", -5_500, false));
-    b.import(&import("granite-2", accounts("granite-2", true), second.clone(), false)).unwrap();
+    b.import(&import("granite-2", accounts("granite-2", true), second.clone(), false))
+        .unwrap();
     let mut first = checking("granite", true);
     first.push(txn("granite-new", "granite-chk", TODAY, "Grocer", -5_500, false));
     b.import(&import("granite", accounts("granite", false), first, false)).unwrap();
@@ -357,7 +404,7 @@ fn nothing_folds_across_banks_or_without_a_twin() {
     connected(&mut b, "other");
     let elsewhere = Import {
         institution: "Other Bank".into(),
-        institution_id: "ins_other".into(),
+        institution_id: Some("ins_other".into()),
         ..import("other", accounts("other", true), checking("other", true), true)
     };
     b.import(&elsewhere).unwrap();

@@ -109,6 +109,28 @@ replaced by the domain:
   reader's own asks, newest first. `banks.failed` is what Plaid said when
   a bank's import failed, shown beside the bank (`needs_login` for
   `ITEM_LOGIN_REQUIRED` and its kin) until an import works.
+- `banks.add_accounts {bank}` is Plaid's update mode with its account
+  picker, for an account a connected bank did not share at first: each
+  account picked there opens at the next import as `banks.open` would.
+- A bank connected (`banks.connect`) for an institution already here is
+  a second login to it, and folds into the first at its first import:
+  each of its accounts whose twin (same type, subtype and last digits)
+  at the other login has a choice takes that choice (it feeds the same
+  account from the day it was first seen, or is ignored); its accounts
+  with no twin were picked in Plaid's picker and open with their whole
+  history; and the login every choice of which it now carries is
+  replaced (`Bank.replaced_by`): the importer removes it at Plaid, drops
+  it from `banks.json` and says `banks.retired`, which forgets it as a
+  disconnection does. Only that first import folds; a bank whose
+  accounts have no twin, or another institution's, is never touched.
+- Where two connections feed one account (that fold, or a waiting
+  account linked by hand to an account another login feeds, which
+  `banks.link` allows), a transaction one imports that the other already
+  imported (same amount, within three days, not yet matched by the
+  importing one) takes the importer's id instead of being doubled
+  (`Txn.imported_by` says whose copy a row is). Before the day the
+  account was taken over, only a copy still pending is matched (it
+  posts through the new login).
 
 The importer is the server's (below). Its tokens are secrets and never go
 in the log. `domain/tests/import.rs` walks the three phases ArkOS's
@@ -236,8 +258,8 @@ rings. **Sync** there is `banks.sync`. **Settings**, as harken has them
 (the account button at the top right: its menu opens Settings and signs
 out; `#settings`), has two sections. **Banks** (also reached by **Connect
 a Bank** on All Accounts, and **Banks need a look** there when one does)
-lists each connection with how its last import went, Reconnect and Disconnect, and each of its accounts
-with what it feeds: a new account of its kind, an existing one, or
+lists each connection with how its last import went (a dim line), Reconnect (only when its login ran out), Add accounts and Disconnect, and each of its accounts
+with one control for what it feeds, a menu: a new account of its kind (the cursor on the account another login to the bank feeds from the same last digits, when there is one), every account here, or
 nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
 with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
 the server answers: in the system's browser on the desktop; in a browser,

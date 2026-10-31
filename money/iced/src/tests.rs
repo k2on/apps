@@ -521,6 +521,19 @@ fn the_budget_drawn() {
     let _ = cards.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
     let pay = category(&cards, "Chase Sapphire").category_id;
     let _ = cards.update(Message::Select(Some(pay)));
+    // Settings with a second login to a bank waiting: one control per
+    // account, the first on the account the other login feeds; and its
+    // menu open.
+    let mut waiting = app();
+    let _ = waiting.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    second_login(&mut waiting);
+    let _ = waiting.update(Message::Go(Page::Settings));
+    let mut picking = app();
+    let _ = picking.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    second_login(&mut picking);
+    let _ = picking.update(Message::Go(Page::Settings));
+    let _ = picking.update(Message::Pointer(iced::Point::new(1020.0, 420.0)));
+    let _ = picking.update(Message::Banks(crate::banks::Msg::Pick("wf2-chk".into())));
     for (app, scene, theme, side) in [
         (&cards, "cards", iced::Theme::Dark, "dark"),
         (&cards, "cards", iced::Theme::Light, "light"),
@@ -531,6 +544,9 @@ fn the_budget_drawn() {
         (&register, "register", iced::Theme::Dark, "dark"),
         (&banks, "banks", iced::Theme::Dark, "dark"),
         (&banks, "banks", iced::Theme::Light, "light"),
+        (&waiting, "waiting", iced::Theme::Dark, "dark"),
+        (&waiting, "waiting", iced::Theme::Light, "light"),
+        (&picking, "picking", iced::Theme::Dark, "dark"),
     ] {
         let settings = iced::Settings {
             fonts: vec![arkui::hero::FIRA_SANS_BOLD.into()],
@@ -648,6 +664,74 @@ fn back_lands_where_the_register_was_scrolled() {
 // * Settings' Banks section
 
 use crate::banks::Msg;
+
+/// A first login to Wells Fargo, its checking followed, and a second login
+/// to it whose checking (the same last digits) and a savings account the
+/// first did not share wait for a choice.
+fn second_login(app: &mut App) {
+    let account = |id: &str, name: &str, mask: &str, subtype: &str, balance: i64| BankAccount {
+        plaid_account_id: id.into(),
+        name: name.into(),
+        mask: mask.into(),
+        kind: "depository".into(),
+        subtype: subtype.into(),
+        balance: Some(balance),
+        called: String::new(),
+        ignored: false,
+    };
+    let first = Import {
+        bank: "wells".into(),
+        institution: "Wells Fargo".into(),
+        cursor: "w1".into(),
+        accounts: vec![account("wf-chk", "Everyday Checking", "4321", "checking", 182_340)],
+        ..Import::default()
+    };
+    assert!(app.author("import", "import", &first), "{}", app.note);
+    let second = Import {
+        bank: "wells-fargo".into(),
+        institution: "Wells Fargo".into(),
+        cursor: "x1".into(),
+        accounts: vec![
+            account("wf2-chk", "Everyday Checking", "4321", "checking", 182_340),
+            account("wf2-sav", "Way Savings", "5555", "savings", 512_000),
+        ],
+        choose: true,
+        ..Import::default()
+    };
+    assert!(app.author("import", "import", &second), "{}", app.note);
+}
+
+/// A waiting account is chosen for with one control, a menu: a new account
+/// of its kind, every account here, and nothing — its cursor on the
+/// account another login to the same bank feeds from the same account at
+/// the bank, else on the new account. Choosing links it. Falsified by
+/// suggesting by kind alone: the savings account was offered checking.
+#[test]
+fn a_waiting_account_is_chosen_for_from_one_menu() {
+    let mut app = app();
+    second_login(&mut app);
+    let _ = app.update(Message::Go(Page::Settings));
+    let checking = account(&app, "Everyday Checking").id;
+    let line = |app: &App, id: &str| app.peer.linked.rows.iter().find(|l| l.plaid_account_id == id).unwrap().clone();
+    assert_eq!(app.suggested(&line(&app, "wf2-chk")), Some(checking));
+    assert_eq!(app.suggested(&line(&app, "wf2-sav")), None);
+    drop(app.view());
+
+    let _ = app.update(Message::Banks(Msg::Pick("wf2-sav".into())));
+    let menu = app.ctx.menu.as_ref().expect("its menu");
+    assert_eq!((menu.entries[0].label.as_str(), menu.at), ("New savings account", 0));
+    assert_eq!(menu.entries.last().unwrap().label, "Ignore");
+    let _ = app.update(Message::CloseMenu);
+
+    let _ = app.update(Message::Banks(Msg::Pick("wf2-chk".into())));
+    let menu = app.ctx.menu.as_ref().expect("its menu");
+    assert_eq!(menu.entries[menu.at].label, "Feeds Everyday Checking");
+    assert!(menu.entries.iter().any(|e| e.label == "Feeds Chase Sapphire"), "every account");
+    let _ = app.update(Message::MenuActivate);
+    let l = line(&app, "wf2-chk");
+    assert_eq!((l.account_id, l.waiting), (Some(checking), false), "{}", app.note);
+    drop(app.view());
+}
 
 /// Settings, from the account menu as harken has it, at `#settings`: the
 /// demo's card's bank and the account it feeds, drawn without a panic;
@@ -794,12 +878,18 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     assert_eq!(app.banks_wanting(), 2, "two accounts wait for a choice");
     drop(app.view());
 
-    let _ = app.update(Message::Banks(Msg::Open("wf-card".into())));
-    let _ = app.update(Message::Banks(Msg::LinkTo("wf-chk".into())));
-    assert_eq!(app.modal, Some(Modal::LinkTo("wf-chk".into())));
+    // One control each: a menu of a new account, every account, nothing.
+    let _ = app.update(Message::Banks(Msg::Pick("wf-card".into())));
+    let labels = |app: &App| -> Vec<String> { app.ctx.menu.as_ref().expect("its menu").entries.iter().map(|e| e.label.clone()).collect() };
+    assert_eq!(labels(&app), ["New credit account", "Feeds Checking", "Ignore"]);
+    assert_eq!(app.ctx.menu.as_ref().unwrap().at, 0, "nothing to suggest: the first");
     drop(app.view());
-    let checking = account(&app, "Checking").id;
-    let _ = app.update(Message::Banks(Msg::Link("wf-chk".into(), checking)));
+    let _ = app.update(Message::MenuActivate);
+    assert!(app.ctx.menu.is_none());
+    let _ = app.update(Message::Banks(Msg::Pick("wf-chk".into())));
+    let feeds = labels(&app).iter().position(|l| l == "Feeds Checking").unwrap();
+    let _ = app.update(Message::MenuAt(feeds));
+    let _ = app.update(Message::MenuActivate);
     settle(&mut app, &mut importer, &|a| a.peer.client.pending_len() == 0 && a.banks_wanting() == 0);
     let card = account(&app, "Active Cash Card");
     assert_eq!(card.kind, "credit");
@@ -808,6 +898,11 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     let _ = app.update(Message::Banks(Msg::Reconnect("wells-fargo".into())));
     settle(&mut app, &mut importer, &|a| {
         a.peer.asks.rows.first().is_some_and(|x| x.what == "reconnect")
+    });
+    assert_eq!(app.peer.asks.rows[0].bank, "wells-fargo");
+    let _ = app.update(Message::Banks(Msg::AddAccounts("wells-fargo".into())));
+    settle(&mut app, &mut importer, &|a| {
+        a.peer.asks.rows.first().is_some_and(|x| x.what == "add_accounts")
     });
     assert_eq!(app.peer.asks.rows[0].bank, "wells-fargo");
     let _ = app.update(Message::Banks(Msg::Disconnect("wells-fargo".into())));

@@ -705,7 +705,7 @@ impl Job {
                 let import = Import {
                     cursor: bank.map(|b| b.cursor).unwrap_or_default(),
                     choose: true,
-                    institution_id: filled.institution_id.clone(),
+                    institution_id: Some(filled.institution_id.clone()).filter(|i| !i.is_empty()),
                     ..import_of(name, &institution, &got.accounts, &Default::default())
                 };
                 self.author("import", &import)?;
@@ -723,7 +723,7 @@ impl Job {
         let import = Import {
             choose: true,
             from_start: cursor.is_none(),
-            institution_id: filled.institution_id.clone(),
+            institution_id: Some(filled.institution_id.clone()).filter(|i| !i.is_empty()),
             ..import_of(name, &institution, &got.accounts, &pulled)
         };
         let (upserts, removed) = (import.upserts.len(), import.removed.len());

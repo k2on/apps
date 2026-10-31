@@ -8,14 +8,17 @@
 //! system's browser on the desktop, in a tab opened at the click in a
 //! browser ([`crate::browser`]) — and Settings follow the ask until
 //! the bank is connected. **Reconnect** is the same for a bank whose login
-//! ran out, and **Disconnect** asks the server to forget a bank.
+//! ran out (shown only then), **Add accounts** the same with Plaid's
+//! account picker, for an account the bank did not share at first, and
+//! **Disconnect** asks the server to forget a bank.
 //!
-//! A new bank's accounts wait for somebody to say what each feeds: an
-//! account opened for it (a card a credit account), one already here, or
-//! nothing.
+//! A new bank's accounts wait for somebody to say what each feeds, with
+//! one control each: a menu of a new account of its kind (a card a credit
+//! account), every account here, and nothing — the account another login
+//! to the same bank feeds with the same last digits already on the cursor.
 
-use arkui::{glyphs, icon, style};
-use iced::widget::{button, column, container, row, scrollable, text, Column};
+use arkui::{glyphs, icon, menu, style};
+use iced::widget::{button, column, container, row, text, Column};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::*;
 
@@ -33,8 +36,10 @@ pub enum Msg {
     Disconnected(String),
     /// A bank's account given an account of its own.
     Open(String),
-    /// Which account here it is to feed, asked.
-    LinkTo(String),
+    /// What it feeds, asked: its menu.
+    Pick(String),
+    /// Plaid's account picker, for accounts a bank did not share.
+    AddAccounts(String),
     Link(String, Id<Account>),
     Ignore(String, bool),
     /// Plaid's page opened again, from its link.
@@ -84,7 +89,8 @@ impl App {
                     self.note = "opened \u{2014} its history arrives with the bank's next import".into();
                 }
             }
-            Msg::LinkTo(plaid) => self.modal = Some(Modal::LinkTo(plaid)),
+            Msg::Pick(plaid) => self.pick(&plaid),
+            Msg::AddAccounts(bank) => self.ask_page("add accounts", "add_accounts", &BankName { bank }),
             Msg::Link(plaid_account_id, account_id) => {
                 self.modal = None;
                 let l = LinkAccount {
@@ -103,6 +109,81 @@ impl App {
             Msg::Dismiss => self.dismissed = self.peer.asks.rows.first().map(|a| a.id),
         }
         iced::Task::none()
+    }
+
+    /// What a bank's account could feed, as its menu's entries: a new
+    /// account of its kind, while it feeds none; every open account here
+    /// but the one it feeds and those another of its bank's accounts feeds
+    /// (one fed by another login to the bank is one it may take over); and
+    /// nothing. With the entry the cursor starts on: the account another
+    /// login to the same bank feeds from the same account at the bank,
+    /// when there is one, else the first.
+    pub fn choices(&self, l: &LinkedLine) -> (Vec<menu::Entry<Message>>, usize) {
+        let id = || l.plaid_account_id.clone();
+        let mut entries = vec![];
+        if l.account_id.is_none() {
+            let new = format!("New {} account", l.opens_as);
+            entries.push(menu::Entry::run(glyphs::PLUS, new, Message::Banks(Msg::Open(id()))));
+        }
+        if l.ignored && l.account_id.is_some() {
+            let again = format!("Feeds {} again", l.account);
+            entries.push(menu::Entry::run(glyphs::WALLET, again, Message::Banks(Msg::Ignore(id(), false))));
+        }
+        let suggested = self.suggested(l);
+        let mut at = 0;
+        let siblings = |a: Id<Account>| {
+            (self.peer.linked.rows.iter())
+                .any(|o| o.bank == l.bank && o.plaid_account_id != l.plaid_account_id && !o.ignored && o.account_id == Some(a))
+        };
+        for a in self
+            .peer
+            .accounts
+            .rows
+            .iter()
+            .filter(|a| !a.closed && Some(a.id) != l.account_id && !siblings(a.id))
+        {
+            if Some(a.id) == suggested {
+                at = entries.len();
+            }
+            let feeds = format!("Feeds {}", a.name);
+            entries.push(menu::Entry::run(glyphs::WALLET, feeds, Message::Banks(Msg::Link(id(), a.id))));
+        }
+        if !l.ignored {
+            entries.push(menu::Entry::run(glyphs::HIDE, "Ignore", Message::Banks(Msg::Ignore(id(), true))));
+        }
+        (entries, at)
+    }
+
+    /// The account another login to the same bank (by its institution)
+    /// feeds from an account with the same last digits and type.
+    pub fn suggested(&self, l: &LinkedLine) -> Option<Id<Account>> {
+        let institution = |bank: &str| {
+            (self.peer.banks.rows.iter())
+                .find(|b| b.name == bank)
+                .map(|b| b.institution.trim().to_lowercase())
+                .filter(|i| !i.is_empty())
+        };
+        let mine = institution(&l.bank)?;
+        if l.mask.is_empty() {
+            return None;
+        }
+        (self.peer.linked.rows.iter())
+            .filter(|o| o.bank != l.bank && !o.ignored && o.mask == l.mask && o.kind == l.kind && o.subtype == l.subtype)
+            .filter(|o| institution(&o.bank).as_ref() == Some(&mine))
+            .find_map(|o| o.account_id)
+            .filter(|a| self.peer.accounts.rows.iter().any(|x| x.id == *a && !x.closed))
+    }
+
+    /// A bank's account's menu, at the pointer, on the entry suggested.
+    fn pick(&mut self, plaid: &str) {
+        let Some(l) = self.peer.linked.rows.iter().find(|l| l.plaid_account_id == plaid) else {
+            return;
+        };
+        let (entries, at) = self.choices(l);
+        let title = account_name(l);
+        let mut m = menu::Menu::open(title, entries, self.pointer, self.window, menu::Anchor::Pointer);
+        m.at = at;
+        self.ctx.open_menu(m);
     }
 
     /// An ask for a Plaid page: a tab kept for it now, while the click
@@ -179,6 +260,7 @@ impl App {
             (AskState::Waiting, _) => "Plaid's page is open in your browser. Log in to your bank there; this page follows.".into(),
             (AskState::Done, "connect") => format!("Connected {name}. Say below what each of its accounts feeds."),
             (AskState::Done, "reconnect") => format!("Logged in to {name} again."),
+            (AskState::Done, "add_accounts") => format!("Shared {name}'s accounts again: one shared for the first time opens with its next import."),
             (AskState::Done, _) => format!("Disconnected {name}. Its accounts here stay, kept by hand from now on."),
             (AskState::Failed, _) => format!("Could not {} {name}: {}", a.what, a.message),
             (AskState::Expired, _) => a.message.clone(),
@@ -260,27 +342,30 @@ impl App {
                     color: Some(arkui::theme::of(theme).danger.base.color),
                 })
                 .into()
-        } else if b.synced_ms == 0 {
-            dim("Waiting for its first import", 12).into()
         } else {
-            dim(
-                format!("Synced {} \u{2014} {} new, {} updated", ago(b.synced_ms, now), b.added, b.updated),
-                12,
-            )
-            .into()
+            let mut said = match b.synced_ms {
+                0 => "Waiting for its first import".to_string(),
+                _ => format!("Synced {} \u{2014} {} new, {} updated", ago(b.synced_ms, now), b.added, b.updated),
+            };
+            match b.waiting {
+                0 => {}
+                1 => said.push_str(" \u{2014} 1 account to choose for"),
+                n => said.push_str(&format!(" \u{2014} {n} accounts to choose for")),
+            }
+            dim(said, 12).into()
         };
-        let reconnect = match b.needs_login {
-            true => action("Reconnect", Message::Banks(Msg::Reconnect(b.name.clone()))),
-            false => quiet("Reconnect", Message::Banks(Msg::Reconnect(b.name.clone()))),
-        };
-        let head = row![
+        let mut head = row![
             icon::plain(glyphs::BANK, false),
             column![bold(title, 15), status].spacing(2).width(Length::Fill),
-            reconnect,
-            quiet("Disconnect", Message::Banks(Msg::Disconnect(b.name.clone()))),
         ]
         .spacing(10)
         .align_y(Alignment::Center);
+        if b.needs_login {
+            head = head.push(action("Reconnect", Message::Banks(Msg::Reconnect(b.name.clone()))));
+        }
+        head = head
+            .push(quiet("Add accounts", Message::Banks(Msg::AddAccounts(b.name.clone()))))
+            .push(quiet("Disconnect", Message::Banks(Msg::Disconnect(b.name.clone()))));
         let mut accounts = column![].spacing(6);
         for l in self.peer.linked.rows.iter().filter(|l| l.bank == b.name) {
             accounts = accounts.push(self.view_linked(l));
@@ -292,18 +377,16 @@ impl App {
             .into()
     }
 
+    /// A bank's account: what it is at the bank, and one control for what
+    /// it feeds — its menu ([`App::choices`]), saying what it feeds now or,
+    /// while it waits, what its menu suggests.
     fn view_linked<'a>(&'a self, l: &'a LinkedLine) -> Element<'a, Message> {
-        let id = || l.plaid_account_id.clone();
-        let name = match l.mask.is_empty() {
-            true => l.name.clone(),
-            false => format!("{} \u{2022}\u{2022}{}", l.name, l.mask),
-        };
         let what = match l.subtype.is_empty() {
             true => l.kind.clone(),
             false => l.subtype.clone(),
         };
         let about = column![
-            text(name).size(13),
+            text(account_name(l)).size(13),
             dim(
                 match l.balance {
                     Some(b) => format!("{what} \u{2014} the bank says {}", money(b)),
@@ -314,70 +397,38 @@ impl App {
         ]
         .spacing(1)
         .width(Length::Fill);
-        let choice: Element<'a, Message> = if l.waiting {
-            row![
-                dim("Feeds?", 12),
-                action(&format!("New {} account", l.opens_as), Message::Banks(Msg::Open(id()))),
-                quiet("An existing account\u{2026}", Message::Banks(Msg::LinkTo(id()))),
-                quiet("Ignore", Message::Banks(Msg::Ignore(id(), true))),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .into()
+        let label = if l.waiting {
+            let (entries, at) = self.choices(l);
+            entries.get(at).map(|e| e.label.clone()).unwrap_or_else(|| "Choose".into())
         } else if l.ignored {
-            row![dim("Ignored", 12), link("Follow", Message::Banks(Msg::Ignore(id(), false)))]
-                .spacing(10)
-                .align_y(Alignment::Center)
-                .into()
+            "Ignored".into()
         } else {
-            let to = l.account_id.map(|a| Message::Go(Page::Ledger(crate::peer::Ledger::Account(a))));
-            let mut r = row![dim("Feeds", 12)].spacing(10).align_y(Alignment::Center);
-            r = match to {
-                Some(go) => r.push(link(l.account.clone(), go)),
-                None => r.push(dim(l.account.clone(), 12)),
-            };
-            r.push(link("Change\u{2026}", Message::Banks(Msg::LinkTo(id()))))
-                .push(link("Ignore", Message::Banks(Msg::Ignore(id(), true))))
-                .into()
+            format!("Feeds {}", l.account)
         };
+        let pick = button(
+            row![text(label).size(13), icon::line(glyphs::DOWN, false)]
+                .spacing(6)
+                .align_y(Alignment::Center),
+        )
+        .on_press(Message::Banks(Msg::Pick(l.plaid_account_id.clone())))
+        .padding([5, 10]);
+        let pick = match l.waiting {
+            true => pick.style(style::action),
+            false => pick.style(look::choice(false)),
+        };
+        let mut choice = row![].spacing(8).align_y(Alignment::Center);
+        if l.waiting {
+            choice = choice.push(dim("Feeds?", 12));
+        }
+        choice = choice.push(pick);
+        if let Some(a) = l.account_id.filter(|_| !l.ignored) {
+            choice = choice.push(link("Open", Message::Go(Page::Ledger(crate::peer::Ledger::Account(a)))));
+        }
         container(row![about, choice].spacing(12).align_y(Alignment::Center))
             .padding([8, 10])
             .width(Length::Fill)
             .style(look::group_card)
             .into()
-    }
-
-    /// The accounts a bank's account could feed: open, and fed by no bank.
-    pub fn view_link_to<'a>(&'a self, plaid: &'a str) -> Element<'a, Message> {
-        let l = self.peer.linked.rows.iter().find(|l| l.plaid_account_id == plaid);
-        let name = l.map(|l| l.name.clone()).unwrap_or_default();
-        let mut list = column![].spacing(1);
-        let free = self.peer.accounts.rows.iter().filter(|a| !a.closed && a.bank.is_empty());
-        let mut any = false;
-        for a in free {
-            any = true;
-            list = list.push(
-                button(row![text(a.name.clone()).size(13).width(Length::Fill), dim(a.kind.clone(), 11)].align_y(Alignment::Center))
-                    .on_press(Message::Banks(Msg::Link(plaid.to_string(), a.id)))
-                    .padding([6, 8])
-                    .width(Length::Fill)
-                    .style(look::choice(false)),
-            );
-        }
-        if !any {
-            list = list.push(dim("Every open account here is fed by a bank already.", 12));
-        }
-        column![
-            bold(format!("What does {name} feed?"), 16),
-            dim(
-                "An account you have kept by hand takes what the bank has from the day it was connected.",
-                11
-            ),
-            scrollable(list).height(Length::Shrink),
-            row![fill(), quiet("Cancel", Message::CloseModal)],
-        ]
-        .spacing(10)
-        .into()
     }
 
     pub fn view_disconnect<'a>(&'a self, bank: &'a str) -> Element<'a, Message> {
@@ -403,6 +454,14 @@ impl App {
         ]
         .spacing(10)
         .into()
+    }
+}
+
+/// A bank's account as the bank names it, with its last digits.
+fn account_name(l: &LinkedLine) -> String {
+    match l.mask.is_empty() {
+        true => l.name.clone(),
+        false => format!("{} \u{2022}\u{2022}{}", l.name, l.mask),
     }
 }
 

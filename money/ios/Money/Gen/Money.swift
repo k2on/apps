@@ -244,15 +244,19 @@ public struct Bank: Equatable {
     public var error: String
     public var failedMs: Int64
     public var repull: Bool
+    public var institutionId: String
+    public var fresh: Bool
+    public var adding: Bool
+    public var replacedBy: String
 
-    public init(name: String, institution: String, cursor: String, syncedMs: Int64, added: Int64, updated: Int64, deleted: Int64, locked: Int64, userId: String, errorCode: String, error: String, failedMs: Int64, repull: Bool) { self.name = name; self.institution = institution; self.cursor = cursor; self.syncedMs = syncedMs; self.added = added; self.updated = updated; self.deleted = deleted; self.locked = locked; self.userId = userId; self.errorCode = errorCode; self.error = error; self.failedMs = failedMs; self.repull = repull; }
+    public init(name: String, institution: String, cursor: String, syncedMs: Int64, added: Int64, updated: Int64, deleted: Int64, locked: Int64, userId: String, errorCode: String, error: String, failedMs: Int64, repull: Bool, institutionId: String, fresh: Bool, adding: Bool, replacedBy: String) { self.name = name; self.institution = institution; self.cursor = cursor; self.syncedMs = syncedMs; self.added = added; self.updated = updated; self.deleted = deleted; self.locked = locked; self.userId = userId; self.errorCode = errorCode; self.error = error; self.failedMs = failedMs; self.repull = repull; self.institutionId = institutionId; self.fresh = fresh; self.adding = adding; self.replacedBy = replacedBy; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(name: J.text(o["name"]), institution: J.text(o["institution"]), cursor: J.text(o["cursor"]), syncedMs: J.int(o["synced_ms"]), added: J.int(o["added"]), updated: J.int(o["updated"]), deleted: J.int(o["deleted"]), locked: J.int(o["locked"]), userId: J.text(o["user_id"]), errorCode: J.text(o["error_code"]), error: J.text(o["error"]), failedMs: J.int(o["failed_ms"]), repull: J.bool(o["repull"]))
+        self.init(name: J.text(o["name"]), institution: J.text(o["institution"]), cursor: J.text(o["cursor"]), syncedMs: J.int(o["synced_ms"]), added: J.int(o["added"]), updated: J.int(o["updated"]), deleted: J.int(o["deleted"]), locked: J.int(o["locked"]), userId: J.text(o["user_id"]), errorCode: J.text(o["error_code"]), error: J.text(o["error"]), failedMs: J.int(o["failed_ms"]), repull: J.bool(o["repull"]), institutionId: J.text(o["institution_id"]), fresh: J.bool(o["fresh"]), adding: J.bool(o["adding"]), replacedBy: J.text(o["replaced_by"]))
     }
 
-    public var json: String { J.obj(["\"name\":" + J.q(name), "\"institution\":" + J.q(institution), "\"cursor\":" + J.q(cursor), "\"synced_ms\":" + String(syncedMs), "\"added\":" + String(added), "\"updated\":" + String(updated), "\"deleted\":" + String(deleted), "\"locked\":" + String(locked), "\"user_id\":" + J.q(userId), "\"error_code\":" + J.q(errorCode), "\"error\":" + J.q(error), "\"failed_ms\":" + String(failedMs), "\"repull\":" + String(repull)]) }
+    public var json: String { J.obj(["\"name\":" + J.q(name), "\"institution\":" + J.q(institution), "\"cursor\":" + J.q(cursor), "\"synced_ms\":" + String(syncedMs), "\"added\":" + String(added), "\"updated\":" + String(updated), "\"deleted\":" + String(deleted), "\"locked\":" + String(locked), "\"user_id\":" + J.q(userId), "\"error_code\":" + J.q(errorCode), "\"error\":" + J.q(error), "\"failed_ms\":" + String(failedMs), "\"repull\":" + String(repull), "\"institution_id\":" + J.q(institutionId), "\"fresh\":" + String(fresh), "\"adding\":" + String(adding), "\"replaced_by\":" + J.q(replacedBy)]) }
 }
 
 /// The record `BankAccount`.
@@ -610,15 +614,16 @@ public struct Import: Equatable {
     public var removed: [BankRemoved]
     public var choose: Bool
     public var fromStart: Bool
+    public var institutionId: String?
 
-    public init(bank: String, institution: String, cursor: String, accounts: [BankAccount], upserts: [BankTxn], removed: [BankRemoved], choose: Bool, fromStart: Bool) { self.bank = bank; self.institution = institution; self.cursor = cursor; self.accounts = accounts; self.upserts = upserts; self.removed = removed; self.choose = choose; self.fromStart = fromStart; }
+    public init(bank: String, institution: String, cursor: String, accounts: [BankAccount], upserts: [BankTxn], removed: [BankRemoved], choose: Bool, fromStart: Bool, institutionId: String? = nil) { self.bank = bank; self.institution = institution; self.cursor = cursor; self.accounts = accounts; self.upserts = upserts; self.removed = removed; self.choose = choose; self.fromStart = fromStart; self.institutionId = institutionId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(bank: J.text(o["bank"]), institution: J.text(o["institution"]), cursor: J.text(o["cursor"]), accounts: J.list(o["accounts"]) { v0 in BankAccount(json: v0) }, upserts: J.list(o["upserts"]) { v0 in BankTxn(json: v0) }, removed: J.list(o["removed"]) { v0 in BankRemoved(json: v0) }, choose: J.bool(o["choose"]), fromStart: J.bool(o["from_start"]))
+        self.init(bank: J.text(o["bank"]), institution: J.text(o["institution"]), cursor: J.text(o["cursor"]), accounts: J.list(o["accounts"]) { v0 in BankAccount(json: v0) }, upserts: J.list(o["upserts"]) { v0 in BankTxn(json: v0) }, removed: J.list(o["removed"]) { v0 in BankRemoved(json: v0) }, choose: J.bool(o["choose"]), fromStart: J.bool(o["from_start"]), institutionId: J.opt(o["institution_id"]) { v0 in J.text(v0) })
     }
 
-    public var json: String { J.obj(["\"bank\":" + J.q(bank), "\"institution\":" + J.q(institution), "\"cursor\":" + J.q(cursor), "\"accounts\":" + J.wlist(accounts) { v0 in v0.json }, "\"upserts\":" + J.wlist(upserts) { v0 in v0.json }, "\"removed\":" + J.wlist(removed) { v0 in v0.json }, "\"choose\":" + String(choose), "\"from_start\":" + String(fromStart)]) }
+    public var json: String { J.obj(["\"bank\":" + J.q(bank), "\"institution\":" + J.q(institution), "\"cursor\":" + J.q(cursor), "\"accounts\":" + J.wlist(accounts) { v0 in v0.json }, "\"upserts\":" + J.wlist(upserts) { v0 in v0.json }, "\"removed\":" + J.wlist(removed) { v0 in v0.json }, "\"choose\":" + String(choose), "\"from_start\":" + String(fromStart), "\"institution_id\":" + J.wopt(institutionId) { v0 in J.q(v0) }]) }
 }
 
 /// The record `LinkAccount`.
@@ -650,15 +655,16 @@ public struct Linked: Equatable {
     public var seen: String
     public var since: String
     public var opening: Bool
+    public var seam: Bool
 
-    public init(plaidAccountId: String, bank: String, accountId: Id?, name: String, mask: String, kind: String, balance: Int64?, ignored: Bool, subtype: String, seen: String, since: String, opening: Bool) { self.plaidAccountId = plaidAccountId; self.bank = bank; self.accountId = accountId; self.name = name; self.mask = mask; self.kind = kind; self.balance = balance; self.ignored = ignored; self.subtype = subtype; self.seen = seen; self.since = since; self.opening = opening; }
+    public init(plaidAccountId: String, bank: String, accountId: Id?, name: String, mask: String, kind: String, balance: Int64?, ignored: Bool, subtype: String, seen: String, since: String, opening: Bool, seam: Bool) { self.plaidAccountId = plaidAccountId; self.bank = bank; self.accountId = accountId; self.name = name; self.mask = mask; self.kind = kind; self.balance = balance; self.ignored = ignored; self.subtype = subtype; self.seen = seen; self.since = since; self.opening = opening; self.seam = seam; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(plaidAccountId: J.text(o["plaid_account_id"]), bank: J.text(o["bank"]), accountId: J.opt(o["account_id"]) { v0 in Id(J.text(v0)) }, name: J.text(o["name"]), mask: J.text(o["mask"]), kind: J.text(o["kind"]), balance: J.opt(o["balance"]) { v0 in J.int(v0) }, ignored: J.bool(o["ignored"]), subtype: J.text(o["subtype"]), seen: J.text(o["seen"]), since: J.text(o["since"]), opening: J.bool(o["opening"]))
+        self.init(plaidAccountId: J.text(o["plaid_account_id"]), bank: J.text(o["bank"]), accountId: J.opt(o["account_id"]) { v0 in Id(J.text(v0)) }, name: J.text(o["name"]), mask: J.text(o["mask"]), kind: J.text(o["kind"]), balance: J.opt(o["balance"]) { v0 in J.int(v0) }, ignored: J.bool(o["ignored"]), subtype: J.text(o["subtype"]), seen: J.text(o["seen"]), since: J.text(o["since"]), opening: J.bool(o["opening"]), seam: J.bool(o["seam"]))
     }
 
-    public var json: String { J.obj(["\"plaid_account_id\":" + J.q(plaidAccountId), "\"bank\":" + J.q(bank), "\"account_id\":" + J.wopt(accountId) { v0 in J.q(v0.hex) }, "\"name\":" + J.q(name), "\"mask\":" + J.q(mask), "\"kind\":" + J.q(kind), "\"balance\":" + J.wopt(balance) { v0 in String(v0) }, "\"ignored\":" + String(ignored), "\"subtype\":" + J.q(subtype), "\"seen\":" + J.q(seen), "\"since\":" + J.q(since), "\"opening\":" + String(opening)]) }
+    public var json: String { J.obj(["\"plaid_account_id\":" + J.q(plaidAccountId), "\"bank\":" + J.q(bank), "\"account_id\":" + J.wopt(accountId) { v0 in J.q(v0.hex) }, "\"name\":" + J.q(name), "\"mask\":" + J.q(mask), "\"kind\":" + J.q(kind), "\"balance\":" + J.wopt(balance) { v0 in String(v0) }, "\"ignored\":" + String(ignored), "\"subtype\":" + J.q(subtype), "\"seen\":" + J.q(seen), "\"since\":" + J.q(since), "\"opening\":" + String(opening), "\"seam\":" + String(seam)]) }
 }
 
 /// The record `LinkedLine` (UniFFI's): its JSON, for the functions called by name.
@@ -970,15 +976,16 @@ public struct Txn: Equatable {
     public var importedPayee: String
     public var createdMs: Int64
     public var userId: String
+    public var importedBy: String
 
-    public init(id: Id, accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Cleared, approved: Bool, transferAccount: Id?, transferId: Id?, importedId: String?, importedPayee: String, createdMs: Int64, userId: String) { self.id = id; self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.approved = approved; self.transferAccount = transferAccount; self.transferId = transferId; self.importedId = importedId; self.importedPayee = importedPayee; self.createdMs = createdMs; self.userId = userId; }
+    public init(id: Id, accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Cleared, approved: Bool, transferAccount: Id?, transferId: Id?, importedId: String?, importedPayee: String, createdMs: Int64, userId: String, importedBy: String) { self.id = id; self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.approved = approved; self.transferAccount = transferAccount; self.transferId = transferId; self.importedId = importedId; self.importedPayee = importedPayee; self.createdMs = createdMs; self.userId = userId; self.importedBy = importedBy; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: Id(J.text(o["id"])), accountId: Id(J.text(o["account_id"])), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, memo: J.text(o["memo"]), amount: J.int(o["amount"]), cleared: Cleared(json: o["cleared"]), approved: J.bool(o["approved"]), transferAccount: J.opt(o["transfer_account"]) { v0 in Id(J.text(v0)) }, transferId: J.opt(o["transfer_id"]) { v0 in Id(J.text(v0)) }, importedId: J.opt(o["imported_id"]) { v0 in J.text(v0) }, importedPayee: J.text(o["imported_payee"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
+        self.init(id: Id(J.text(o["id"])), accountId: Id(J.text(o["account_id"])), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, memo: J.text(o["memo"]), amount: J.int(o["amount"]), cleared: Cleared(json: o["cleared"]), approved: J.bool(o["approved"]), transferAccount: J.opt(o["transfer_account"]) { v0 in Id(J.text(v0)) }, transferId: J.opt(o["transfer_id"]) { v0 in Id(J.text(v0)) }, importedId: J.opt(o["imported_id"]) { v0 in J.text(v0) }, importedPayee: J.text(o["imported_payee"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]), importedBy: J.text(o["imported_by"]))
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"account_id\":" + J.q(accountId.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + cleared.json, "\"approved\":" + String(approved), "\"transfer_account\":" + J.wopt(transferAccount) { v0 in J.q(v0.hex) }, "\"transfer_id\":" + J.wopt(transferId) { v0 in J.q(v0.hex) }, "\"imported_id\":" + J.wopt(importedId) { v0 in J.q(v0) }, "\"imported_payee\":" + J.q(importedPayee), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"account_id\":" + J.q(accountId.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + cleared.json, "\"approved\":" + String(approved), "\"transfer_account\":" + J.wopt(transferAccount) { v0 in J.q(v0.hex) }, "\"transfer_id\":" + J.wopt(transferId) { v0 in J.q(v0.hex) }, "\"imported_id\":" + J.wopt(importedId) { v0 in J.q(v0) }, "\"imported_payee\":" + J.q(importedPayee), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId), "\"imported_by\":" + J.q(importedBy)]) }
 }
 
 /// The record `TxnLine` (UniFFI's): its JSON, for the functions called by name.
@@ -1023,6 +1030,9 @@ public struct Money {
     /// `accounts.rename_account`: its intent's id.
     @discardableResult public func renameAccount(_ input: RenameAccount) throws -> String { try peer.mutate(name: "accounts.rename_account", input: input.json) }
 
+    /// `banks.add_accounts`: its intent's id.
+    @discardableResult public func addAccounts(_ input: BankName) throws -> String { try peer.mutate(name: "banks.add_accounts", input: input.json) }
+
     /// `banks.answer`: its intent's id.
     @discardableResult public func answer(_ input: Answer) throws -> String { try peer.mutate(name: "banks.answer", input: input.json) }
 
@@ -1058,6 +1068,9 @@ public struct Money {
 
     /// `banks.reconnect`: its intent's id.
     @discardableResult public func reconnect(_ input: BankName) throws -> String { try peer.mutate(name: "banks.reconnect", input: input.json) }
+
+    /// `banks.retired`: its intent's id.
+    @discardableResult public func retired(_ input: BankName) throws -> String { try peer.mutate(name: "banks.retired", input: input.json) }
 
     /// `banks.sync`: its intent's id.
     @discardableResult public func sync() throws -> String { try peer.mutate(name: "banks.sync", input: "null") }

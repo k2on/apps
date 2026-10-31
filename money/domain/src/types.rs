@@ -325,7 +325,7 @@ pub struct Import {
     pub from_start: bool,
     /// Plaid's id for the bank's institution, when the importer knows it.
     #[serde(default)]
-    pub institution_id: String,
+    pub institution_id: Option<String>,
 }
 
 /// A bank's account made to feed an account already here, in place of the

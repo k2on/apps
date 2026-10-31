@@ -163,7 +163,7 @@ pub fn import_of(bank: &str, institution: &str, accounts: &[PlaidAccount], pulle
             .collect(),
         choose: false,
         from_start: false,
-        institution_id: String::new(),
+        institution_id: None,
     }
 }
 
@@ -215,7 +215,7 @@ pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusa
     db.bank.put(Bank {
         name: input.bank.clone(),
         institution: input.institution.clone(),
-        institution_id: match input.institution_id.trim() {
+        institution_id: match input.institution_id.as_deref().unwrap_or_default().trim() {
             "" => previous.institution_id.clone(),
             i => i.to_string(),
         },
@@ -258,10 +258,8 @@ pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusa
             // Before the day it took over another connection's account: that
             // one's copy is there already. Only one still pending there is
             // this one's to post.
-            if feed.seam {
-                if !superseded.contains(u.transaction_id.as_str()) {
-                    seam(db, &input.bank, &feed.account, u, true, &mut counts)?;
-                }
+            if feed.seam && !superseded.contains(u.transaction_id.as_str()) {
+                seam(db, &input.bank, &feed.account, u, true, &mut counts)?;
             }
             continue;
         }
@@ -745,12 +743,14 @@ pub fn link(ctx: &Ctx, db: &mut Db<Money>, input: LinkAccount) -> Result<(), Ref
         .ok_or_else(|| Refusal::new("no such bank account"))?;
     crate::accounts::account_of(db, input.account_id)?;
     let fed = db.linked.by(Linked::ACCOUNT_ID).from(Some(input.account_id)).all();
-    if fed.iter().any(|o| o.bank == l.bank && o.plaid_account_id != l.plaid_account_id && !o.ignored) {
+    if fed
+        .iter()
+        .any(|o| o.bank == l.bank && o.plaid_account_id != l.plaid_account_id && !o.ignored)
+    {
         return Err(Refusal::new("that account is fed by another of this bank's accounts already"));
     }
     let others = fed.iter().any(|o| o.bank != l.bank && !o.ignored)
-        || (db.txn.by(Txn::ACCOUNT_ID_DATE).from(input.account_id).all().iter())
-            .any(|t| t.imported_id.is_some() && t.imported_by != l.bank);
+        || (db.txn.by(Txn::ACCOUNT_ID_DATE).from(input.account_id).all().iter()).any(|t| t.imported_id.is_some() && t.imported_by != l.bank);
     let waiting = l.account_id.is_none() && !l.ignored;
     if waiting {
         repull(ctx, db, &l.bank)?;

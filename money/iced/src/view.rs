@@ -1293,7 +1293,6 @@ impl App {
                 c.into()
             }
             Modal::Choose(choosing) => self.view_chooser(choosing),
-            Modal::LinkTo(plaid) => self.view_link_to(plaid),
             Modal::Disconnect(bank) => self.view_disconnect(bank),
         };
         panel::panel(container(body).padding(14), 440.0).into()

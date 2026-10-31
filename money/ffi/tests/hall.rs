@@ -41,7 +41,7 @@ fn a_household_shares_one_budget() {
     assert_eq!(rows.len(), before + 1);
     assert!(rows.iter().any(|t| t.payee == "Blue Bottle" && t.user_id == "sam"));
 
-    let import = r#"{"bank":"chase","institution":"Chase","cursor":"c1","accounts":[],"upserts":[],"removed":[],"choose":false,"from_start":false}"#;
+    let import = r#"{"bank":"chase","institution":"Chase","cursor":"c1","accounts":[],"upserts":[],"removed":[],"choose":false,"from_start":false,"institution_id":null}"#;
     assert!(alex.mutate("import".into(), import.into()).is_err(), "only the importer imports");
     let importer = hall.device(path(&c), "importer".into(), "plaid".into(), vec!["bank".into()]).unwrap();
     let id = importer.mutate("import".into(), import.into()).unwrap();

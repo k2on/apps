@@ -184,8 +184,6 @@ pub enum Modal {
         balance: String,
     },
     Choose(Choosing),
-    /// Which account a bank's account is to feed.
-    LinkTo(String),
     /// A bank to disconnect, asked twice.
     Disconnect(String),
 }
