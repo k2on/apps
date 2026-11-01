@@ -31,8 +31,6 @@ const TYPED: &[&str] = &[
     "GroupLine",
     "LinkedLine",
     "PayeeLine",
-    "RuleLine",
-    "RulePreview",
     "SpendingLine",
     "Summary",
     "TxnLine",

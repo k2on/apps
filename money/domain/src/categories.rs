@@ -209,18 +209,40 @@ fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Categor
             return Err(Refusal::new("no such category to move to"));
         }
     }
+    // What each month gave it — typed, or its formula's, read before its
+    // transactions move — is what moves: its formula goes with it, and
+    // what it gave stays given.
+    let gave = crate::formulas::assignments(db, c.id);
     for t in db.txn.by(Txn::CATEGORY_ID_DATE).from(Some(c.id)).all() {
         db.txn.update(Txn { category_id: move_to, ..t })?;
     }
     let into = move_to.filter(|to| db.category.get(*to).is_some_and(|c| c.group_id != inflow()));
-    // What each month gave it — typed, or its rule's share — is what moves:
-    // its rule goes with it, and what it gave stays given.
-    let gave = crate::rules::assignments(db, c.id);
     for a in db.assigned.by(Assigned::CATEGORY_ID_MONTH).from(c.id).all() {
         db.assigned.remove(&a)?;
     }
+    for f in db.formula.by(Formula::CATEGORY_ID_FROM).from(c.id).all() {
+        db.formula.remove(&f)?;
+    }
+    // A rule from before formulas is read by nothing, but it names the
+    // category: it goes with it, or the category could not.
     for r in db.rule.by(Rule::CATEGORY_ID_FROM).from(c.id).all() {
         db.rule.remove(&r)?;
+    }
+    // A saved filter that asked for it asks for where its transactions
+    // went instead: the category they moved to, or none.
+    for s in db.saved_filter.scan() {
+        if s.filter.categories.contains(&Some(c.id)) {
+            let mut filter = s.filter.clone();
+            for x in &mut filter.categories {
+                if *x == Some(c.id) {
+                    *x = move_to;
+                }
+            }
+            db.saved_filter.update(SavedFilter {
+                filter: filter.tidy(),
+                ..s
+            })?;
+        }
     }
     if let Some(to) = into {
         for (month, amount) in gave {

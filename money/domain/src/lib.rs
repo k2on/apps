@@ -2,8 +2,9 @@
 //! budget. The schema ([`schema`]), the types ([`types`]), days and months
 //! ([`dates`]); the accounts ([`accounts`]), the budget's shape
 //! ([`categories`]), the budget itself ([`budget`]), its assignments by
-//! rule ([`rules`]) and its credit cards
-//! ([`cards`]), the transactions ([`transactions`]) and transfers made of
+//! formula ([`formulas`]) and its credit cards
+//! ([`cards`]), the transactions ([`transactions`]), the filters that say
+//! which ([`filters`]), and transfers made of
 //! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
 //! from the app ([`banks`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
@@ -29,8 +30,9 @@ pub mod budget;
 pub mod cards;
 pub mod categories;
 pub mod dates;
+pub mod filters;
+pub mod formulas;
 pub mod plaid;
-pub mod rules;
 pub mod schema;
 #[cfg(feature = "seed")]
 pub mod seed;
@@ -61,7 +63,9 @@ pub fn domain() -> Domain {
         categories::add_group, categories::rename_group, categories::hide_group, categories::delete_group,
         categories::add_category, categories::rename_category, categories::hide_category, categories::move_category, categories::move_group,
         categories::set_target, categories::delete_category,
-        rules::set_rule, rules::clear_rule, rules::rules, rules::preview_rule,
+        formulas::set_formula, formulas::clear_formula, formulas::formulas, formulas::preview_formula, formulas::set_rule,
+        filters::save_filter, filters::rename_filter, filters::change_filter, filters::delete_filter, filters::move_filter,
+        filters::saved, filters::filtered, filters::filtered_total,
         accounts::open_account, accounts::rename_account, accounts::close_account, accounts::accounts,
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
@@ -89,7 +93,9 @@ pub fn feed() -> Scope<Money> {
             .on::<Linked>(all)
             .on::<Asked>(all)
             .on::<BankAsk>(all)
-            .on::<Rule>(all),
+            .on::<Rule>(all)
+            .on::<SavedFilter>(all)
+            .on::<Formula>(all),
     )
 }
 

@@ -281,23 +281,27 @@ pub fn txn_line(db: &Db<Money>, t: &Txn) -> TxnLine {
     }
 }
 
-/// One account's transactions, or every account's, the newest first.
+/// One account's transactions, or every account's, the newest first: the
+/// register for [`Filter::account`] or [`Filter::all`], kept for the
+/// phones, through the one matcher ([`crate::filters`]).
 #[view("transactions.register")]
 pub fn register(_: &Ctx, _: &Db<Money>, input: Register) -> Result<Plan<TxnLine>, Refusal> {
-    let only = input.account_id;
+    let f = input.account_id.map_or_else(Filter::all, Filter::account);
     Ok(scan::<Money, Txn>()
-        .filter(move |t| only.is_none_or(|a| t.account_id == a))
+        .filter_with(move |db, t| f.matches(db, t))
         .map_with(txn_line)
         .sort(|l| (Desc(l.date.clone()), Desc(l.created_ms), l.id)))
 }
 
 /// What needs somebody to look at it: imported and not yet approved, or
-/// on budget and for no category.
+/// on budget and for no category — the register for
+/// [`Filter::needs_a_look`], kept for the phones.
 #[view("transactions.inbox")]
 pub fn inbox(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<TxnLine>, Refusal> {
+    let f = Filter::needs_a_look();
     Ok(scan::<Money, Txn>()
+        .filter_with(move |db, t| f.matches(db, t))
         .map_with(txn_line)
-        .filter(|l| !l.approved || l.category == "Needs a category")
         .sort(|l| (Desc(l.date.clone()), Desc(l.created_ms), l.id)))
 }
 

@@ -265,8 +265,10 @@ pub struct Asked {
     pub asked_ms: i64,
 }
 
-/// How a category's assignment is worked out from a month on, until a
-/// later version says otherwise ([`crate::rules`]): a share of what came
+/// **No longer read** — kept because the schema only grows: what
+/// assignment by rule stored before formulas ([`Formula`]) replaced it. A
+/// row here assigns nothing now, and nothing writes one. It said how a
+/// category's assignment was worked out from a month on: a share of what came
 /// in, in that month, matching `matching` in the chosen accounts — or,
 /// `manual`, what people assign it by hand again. One row per category and
 /// the month it starts; a month reads the latest that starts at or before
@@ -294,6 +296,92 @@ pub struct Rule {
     pub user_id: String,
 }
 
+/// Which way money moved: either, in, or out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+pub enum Direction {
+    #[default]
+    /// Either way (not `Any`, which a Kotlin binding could not name).
+    Either,
+    /// Money in: a positive amount.
+    In,
+    /// Money out: a negative amount.
+    Out,
+}
+
+/// Which transactions: conditions every one of which a transaction meets
+/// ([`crate::filters`]); the default is every transaction. One type for
+/// the register on screen, a saved filter, the built-in ones (every
+/// account, what needs a look, one account) and what a formula sums — and
+/// one matcher for all of them, [`Filter::matches`].
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct Filter {
+    /// The accounts it reads; none is every account.
+    pub accounts: Vec<Id<Account>>,
+    /// Only accounts on the budget.
+    pub on_budget: bool,
+    /// What the payee or the bank's own line for it holds, any case; blank
+    /// is anything.
+    pub text: String,
+    /// The categories; none is any. `None` among them is "no category".
+    pub categories: Vec<Option<Id<Category>>>,
+    pub direction: Direction,
+    /// Transfers left out.
+    pub no_transfers: bool,
+    /// Only what needs a look: not yet approved, or on the budget and for
+    /// no category (the inbox's condition).
+    pub needs_look: bool,
+    /// Dated on or after this day, and on or before this one, when said.
+    pub from: Option<String>,
+    pub through: Option<String>,
+}
+
+/// A filter somebody named and kept: in the sidebar under Filters, in
+/// `pos` order, and what a formula's term sums ([`crate::formulas`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(pos))]
+pub struct SavedFilter {
+    #[ark(key)]
+    pub id: Id<SavedFilter>,
+    pub name: String,
+    pub pos: i64,
+    pub filter: Filter,
+    pub created_ms: i64,
+    pub user_id: String,
+}
+
+/// One term of a formula: `times / per` (kept exactly: 10% is 1/10) of
+/// what a saved filter's transactions add up to in the month.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct Term {
+    pub filter_id: Id<SavedFilter>,
+    pub times: i64,
+    pub per: i64,
+}
+
+/// How a category's assignment is worked out from a month on, until a
+/// later version says otherwise ([`crate::formulas`]): the sum of its
+/// terms over the month, rounded once to the cent — or, `manual`, what
+/// people assign it by hand again. One row per category and the month it
+/// starts; a month reads the latest that starts at or before it, so every
+/// month before the first is assigned by hand as it was.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(category_id, from))]
+pub struct Formula {
+    #[ark(key)]
+    pub from: String,
+    #[ark(key, refs(Category))]
+    pub category_id: Id<Category>,
+    /// From this month the category is assigned by hand again.
+    pub manual: bool,
+    pub terms: Vec<Term>,
+    /// What it is said as, when it was set through the phones' old
+    /// `categories.set_rule` ("10% of income matching ACME in Checking");
+    /// blank for one set as a formula, which is said by its terms.
+    pub said: String,
+    pub at_ms: i64,
+    pub user_id: String,
+}
+
 /// money's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Money {
@@ -308,7 +396,10 @@ pub struct Money {
     pub sign_in: ark_auth::SignIn,
     pub role: ark_auth::Role,
     pub bank_ask: BankAsk,
+    /// No longer read: assignment by rule became formulas.
     pub rule: Rule,
+    pub saved_filter: SavedFilter,
+    pub formula: Formula,
 }
 
 ark_auth::install!(Money);

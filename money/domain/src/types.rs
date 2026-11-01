@@ -5,7 +5,7 @@
 use ark::prelude::*;
 
 use crate::dates::{is_day, is_month};
-use crate::schema::{Account, AskState, BankAsk, Category, Group, Txn};
+use crate::schema::{Account, AskState, BankAsk, Category, Filter, Group, SavedFilter, Term, Txn};
 
 /// How far the bank and the household agree on a transaction: not yet seen
 /// at the bank, seen there, or agreed to as part of a reconciled balance —
@@ -381,16 +381,85 @@ pub struct BankFailed {
     pub error: String,
 }
 
-// * Assignment by rule
+// * Filters and formulas
 
 fn is_month_or_now(m: &Option<String>) -> bool {
     m.as_deref().is_none_or(is_month)
 }
 
-/// A category assigned, from a month on, a share of what comes in: each
-/// month, `times / per` of that month's inflows (not transfers) in
-/// `accounts` (none is every account on the budget) whose payee or bank
-/// line holds `matching`, any case ([`crate::rules`]).
+/// A filter kept under a name ([`crate::filters`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SaveFilter {
+    #[ark(trim, non_empty, why = "a filter needs a name")]
+    #[ark(len = "0..=80")]
+    pub name: String,
+    pub filter: Filter,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct RenameFilter {
+    pub id: Id<SavedFilter>,
+    #[ark(trim, non_empty, why = "a filter needs a name")]
+    #[ark(len = "0..=80")]
+    pub name: String,
+}
+
+/// A saved filter's conditions, changed: every formula that sums it moves
+/// with it, in every month it covers.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ChangeFilter {
+    pub id: Id<SavedFilter>,
+    pub filter: Filter,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct FilterId {
+    pub id: Id<SavedFilter>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct MoveFilter {
+    pub id: Id<SavedFilter>,
+    /// The filter it goes in front of; none for after every other.
+    #[serde(default)]
+    pub before: Option<Id<SavedFilter>>,
+}
+
+/// A category assigned by formula from a month on: each month, the sum of
+/// `times / per` of what each term's saved filter adds up to in it,
+/// rounded once to the cent ([`crate::formulas`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SetFormula {
+    pub category_id: Id<Category>,
+    /// The first month it assigns; none is this month.
+    #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
+    #[serde(default)]
+    pub from: Option<String>,
+    pub terms: Vec<Term>,
+}
+
+/// A category assigned by hand again from a month on (none is this one).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ClearFormula {
+    pub category_id: Id<Category>,
+    #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
+    #[serde(default)]
+    pub from: Option<String>,
+}
+
+/// What a formula would assign in a month, before it is saved.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct PreviewFormula {
+    #[ark(check = "is_month", why = "a month, as 2026-10")]
+    pub month: String,
+    pub terms: Vec<Term>,
+}
+
+/// What the phones set before formulas, kept for them: a category given,
+/// from a month on, `times / per` of the month's inflows (not transfers)
+/// in `accounts` (none is every account on the budget) whose payee or
+/// bank line holds `matching`. It is a formula of one term, over a saved
+/// filter of exactly those conditions ([`crate::formulas::set_rule`]).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct SetRule {
     pub category_id: Id<Category>,
@@ -400,29 +469,6 @@ pub struct SetRule {
     pub from: Option<String>,
     #[ark(trim, non_empty, why = "a rule matches some text")]
     #[ark(len = "0..=120")]
-    pub matching: String,
-    pub accounts: Vec<Id<Account>>,
-    #[ark(check = "at_least_0", why = "a share is never below nothing")]
-    pub times: i64,
-    #[ark(check = "more_than_0", why = "a share is of something")]
-    pub per: i64,
-}
-
-/// A category assigned by hand again from a month on (none is this one).
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
-pub struct ClearRule {
-    pub category_id: Id<Category>,
-    #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
-    #[serde(default)]
-    pub from: Option<String>,
-}
-
-/// What a rule would assign in a month, before it is saved.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
-pub struct PreviewRule {
-    #[ark(check = "is_month", why = "a month, as 2026-10")]
-    pub month: String,
-    #[ark(trim, len = "0..=120")]
     pub matching: String,
     pub accounts: Vec<Id<Account>>,
     #[ark(check = "at_least_0", why = "a share is never below nothing")]
@@ -444,6 +490,22 @@ pub struct Month {
 pub struct Register {
     pub account_id: Option<Id<Account>>,
 }
+
+/// The register for a filter: a saved one's (`saved`, whose conditions
+/// are read from it, so it follows a change to it), or these conditions —
+/// a built-in filter's, or ones not saved. `month`, when said, keeps the
+/// month's alone.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Filtered {
+    #[serde(default)]
+    pub saved: Option<Id<SavedFilter>>,
+    #[serde(default)]
+    pub filter: Filter,
+    #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
+    #[serde(default)]
+    pub month: Option<String>,
+}
+
 
 // * The views' rows
 
@@ -514,12 +576,12 @@ pub struct BudgetLine {
     /// Card spending this month beyond what it had (positive): new debt,
     /// which the next month's ready to assign does not pay for.
     pub credit_overspent: i64,
-    /// The rule the month's assignment follows, said shortly ("10% of
-    /// income matching ACME PAYROLL in Checking, Savings"); blank when it
-    /// is assigned by hand ([`crate::rules`]).
+    /// The formula the month's assignment follows, said ("10% ×
+    /// SUM(ACME paychecks)"); blank when it is assigned by hand
+    /// ([`crate::formulas`]). Named `rule` for the phones, which read it.
     #[serde(default)]
     pub rule: String,
-    /// Its assignment follows that rule this month: `assigned` is worked
+    /// Its assignment follows that formula this month: `assigned` is worked
     /// out, and not anybody's to set or move money to or from.
     #[serde(default)]
     pub ruled: bool,
@@ -658,36 +720,63 @@ pub struct LinkedLine {
     pub opens_as: String,
 }
 
-/// A category's rule as it stands in a month: what it matches, where, and
-/// the share, for a form to start from ([`crate::rules`]).
+/// A saved filter, with what its transactions add up to: every one it
+/// matches, ever (within its own dates, if it has them).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
-pub struct RuleLine {
+pub struct FilterLine {
+    pub id: Id<SavedFilter>,
+    pub name: String,
+    pub pos: i64,
+    pub filter: Filter,
+    /// Its conditions, said shortly: "Checking, Savings · \"acme\" · money in".
+    pub said: String,
+    pub count: i64,
+    pub total: i64,
+    /// The categories whose formulas sum it, by name.
+    pub used_by: Vec<String>,
+}
+
+/// What a register's transactions add up to: one row, or none for none.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct FilterTotal {
+    pub count: i64,
+    pub total: i64,
+    /// Of that, what came in and what went out (negative).
+    pub inflow: i64,
+    pub outflow: i64,
+}
+
+/// One term of a formula in a month: its filter, its factor, and what the
+/// filter's transactions added up to.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct TermLine {
+    pub filter_id: Id<SavedFilter>,
+    /// The filter's name; blank when it is gone.
+    pub name: String,
+    pub times: i64,
+    pub per: i64,
+    pub count: i64,
+    pub sum: i64,
+}
+
+/// A category's formula as a month follows it ([`crate::formulas`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct FormulaLine {
     pub category_id: Id<Category>,
     /// The month this version of it started.
     pub from: String,
-    pub matching: String,
-    /// The accounts it reads; none is every account on the budget.
-    pub accounts: Vec<Id<Account>>,
-    pub times: i64,
-    pub per: i64,
-    /// It, said shortly: "10% of income matching ACME PAYROLL in Checking".
-    pub summary: String,
-    /// What came in that it matched, in the month, and its share of that:
-    /// the month's assignment.
-    pub matched: i64,
+    pub terms: Vec<TermLine>,
+    /// It, said: "10% × SUM(ACME paychecks)".
+    pub text: String,
+    /// What it gives the month: the terms' sum, rounded once.
     pub amount: i64,
 }
 
-/// What a rule not yet saved would assign in a month.
+/// What a formula not yet saved would assign in a month.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
-pub struct RulePreview {
+pub struct FormulaPreview {
     pub month: String,
-    pub summary: String,
-    /// The transactions it matched, and what they brought in.
-    pub count: i64,
-    pub matched: i64,
-    /// Its share of that: what the month would assign.
+    pub terms: Vec<TermLine>,
+    pub text: String,
     pub amount: i64,
 }
