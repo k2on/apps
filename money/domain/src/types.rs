@@ -506,7 +506,6 @@ pub struct Filtered {
     pub month: Option<String>,
 }
 
-
 // * The views' rows
 
 /// An account as the sidebar and its own page draw it.

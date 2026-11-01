@@ -132,7 +132,14 @@ fn script(b: &mut Book) -> Vec<Step> {
         // One change a step: what a view is pushed is the last change.
         Box::new(move |b| {
             let id = saved(b, "Food");
-            b.run("move_filter", &MoveFilter { id, before: Some(saved(b, "Pay")) }).unwrap();
+            b.run(
+                "move_filter",
+                &MoveFilter {
+                    id,
+                    before: Some(saved(b, "Pay")),
+                },
+            )
+            .unwrap();
         }),
         Box::new(move |b| {
             let id = saved(b, "Food");

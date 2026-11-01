@@ -238,10 +238,7 @@ fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Categor
                     *x = move_to;
                 }
             }
-            db.saved_filter.update(SavedFilter {
-                filter: filter.tidy(),
-                ..s
-            })?;
+            db.saved_filter.update(SavedFilter { filter: filter.tidy(), ..s })?;
         }
     }
     if let Some(to) = into {

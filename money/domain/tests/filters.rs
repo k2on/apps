@@ -94,13 +94,7 @@ impl House {
     }
 
     fn save(&mut self, name: &str, filter: Filter) -> Result<Id<SavedFilter>, String> {
-        self.b.run(
-            "save_filter",
-            &SaveFilter {
-                name: name.into(),
-                filter,
-            },
-        )?;
+        self.b.run("save_filter", &SaveFilter { name: name.into(), filter })?;
         Ok(self.saved().into_iter().find(|f| f.name == name).unwrap().id)
     }
 

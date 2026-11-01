@@ -63,16 +63,13 @@ impl House {
 
     /// A filter saved under `name`, by its id.
     fn filter(&mut self, name: &str, filter: Filter) -> Id<SavedFilter> {
+        self.b.run("save_filter", &SaveFilter { name: name.into(), filter }).unwrap();
         self.b
-            .run(
-                "save_filter",
-                &SaveFilter {
-                    name: name.into(),
-                    filter,
-                },
-            )
-            .unwrap();
-        self.b.rows::<SavedFilter>("saved_filter").into_iter().find(|f| f.name == name).unwrap().id
+            .rows::<SavedFilter>("saved_filter")
+            .into_iter()
+            .find(|f| f.name == name)
+            .unwrap()
+            .id
     }
 
     fn terms(terms: &[(Id<SavedFilter>, &str)]) -> Vec<Term> {
@@ -80,11 +77,7 @@ impl House {
             .iter()
             .map(|(f, share)| {
                 let (times, per) = parse_share(share).expect("a share");
-                Term {
-                    filter_id: *f,
-                    times,
-                    per,
-                }
+                Term { filter_id: *f, times, per }
             })
             .collect()
     }
@@ -366,7 +359,10 @@ fn overspending_and_cards_count_the_formulas_amount() {
         category_id: ready_to_assign(),
         ..pay_formula.clone()
     };
-    assert_eq!(h.b.run("set_formula", &rta).unwrap_err(), "money is assigned from Ready to Assign, not to it");
+    assert_eq!(
+        h.b.run("set_formula", &rta).unwrap_err(),
+        "money is assigned from Ready to Assign, not to it"
+    );
     // Nothing summed, a filter not here, a factor below nothing.
     let none = SetFormula {
         category_id: giving,
@@ -532,9 +528,17 @@ fn the_phones_rule_is_a_formula() {
         accounts: vec![loan],
         ..rule.clone()
     };
-    assert_eq!(h.b.run("set_rule", &off).unwrap_err(), "Loan is not on the budget: its money is not assigned");
+    assert_eq!(
+        h.b.run("set_rule", &off).unwrap_err(),
+        "Loan is not on the budget: its money is not assigned"
+    );
     // Set as a formula on the desktop afterwards, it is said by its terms.
-    let f = h.b.rows::<SavedFilter>("saved_filter").into_iter().find(|f| f.name.ends_with("Savings")).unwrap().id;
+    let f =
+        h.b.rows::<SavedFilter>("saved_filter")
+            .into_iter()
+            .find(|f| f.name.ends_with("Savings"))
+            .unwrap()
+            .id;
     h.formula(Some("2026-10"), &[(f, "10%")]).unwrap();
     assert_eq!(h.giving("2026-10").rule, "10% \u{d7} SUM(Income matching acme in Checking, Savings)");
 }

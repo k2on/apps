@@ -21,7 +21,9 @@ pub const LINE: f32 = 54.0;
 /// The register's geometry: the top above its table, the table's heading,
 /// the gap between them, and every row — one height each, so where a row
 /// is on screen is arithmetic (`App::category_at`).
-pub const LEDGER_TOP: f32 = 150.0;
+/// The top above the register: an account's has its balances too.
+pub const LEDGER_TOP: f32 = 160.0;
+pub const LEDGER_BALANCES: f32 = 52.0;
 pub const LEDGER_HEAD: f32 = 28.0;
 pub const LEDGER_GAP: f32 = 14.0;
 pub const TXN_ROW: f32 = 34.0;
@@ -198,8 +200,9 @@ impl App {
 
     // * The sidebar
 
-    /// The sidebar's places, in order: the pages, then the accounts under
-    /// their headings. What the keys walk is what is drawn.
+    /// The sidebar's places, in order: the pages, All Accounts, the accounts
+    /// under their headings, then the saved filters — every register one is
+    /// a filter's. What the keys walk is what is drawn.
     pub fn places(&self) -> Vec<(&'static [u8], String, Option<&'static str>, Page)> {
         let pages = [
             (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
@@ -220,14 +223,26 @@ impl App {
                 (glyph(a), label, Some(name), Page::Ledger(Ledger::Account(a.id)))
             })
         });
-        pages.into_iter().chain(accounts).collect()
+        // The saved filters, after the accounts: registers like theirs.
+        let saved = self
+            .peer
+            .filters
+            .rows
+            .iter()
+            .map(|f| (glyphs::SEARCH, f.name.clone(), Some("Filters"), Page::Ledger(Ledger::Saved(f.id))));
+        pages.into_iter().chain(accounts).chain(saved).collect()
     }
 
     /// The sidebar's cursor: the page shown. The inbox is All Accounts,
-    /// filtered, so its row stays the one lit.
+    /// filtered, and a register changed here is what it was changed from,
+    /// so their rows stay the ones lit.
     pub fn sidebar_at(&self) -> usize {
         let here = match self.page {
             Page::Ledger(Ledger::Inbox) => Page::Ledger(Ledger::All),
+            Page::Ledger(Ledger::Adhoc) => match self.peer.base {
+                Ledger::Inbox | Ledger::Adhoc => Page::Ledger(Ledger::All),
+                b => Page::Ledger(b),
+            },
             p => p,
         };
         self.places().iter().position(|p| p.3 == here).unwrap_or(0)
@@ -246,6 +261,7 @@ impl App {
                 let trailing = match page {
                     Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
+                    Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map(|f| balance(f.total, lit)),
                     _ => None,
                 };
                 arkui::sidebar::Item {
@@ -543,7 +559,7 @@ impl App {
                 .width(Length::Fixed(MONEY_COL - 14.0))
                 .style(look::input)
                 .into(),
-            // Worked out by its rule: the amount, with the rule's mark, and
+            // Worked out by its formula: the amount, with the formula's mark, and
             // pressing it says why it does not open.
             _ if l.ruled => button(
                 row![
@@ -615,7 +631,7 @@ impl App {
             .into()
     }
 
-    fn figure<'a>(label: &str, cents: i64) -> Element<'a, Message> {
+    pub(crate) fn figure<'a>(label: &str, cents: i64) -> Element<'a, Message> {
         row![text(label.to_string()).size(12).width(Length::Fill), text(money(cents)).size(12)]
             .align_y(Alignment::Center)
             .into()
@@ -706,7 +722,7 @@ impl App {
             );
         }
         figures = figures.push(if l.ruled {
-            dim("Assigned by its rule this month: money is not moved to or from it by hand.", 11).into()
+            dim("Assigned by its formula this month: money is not moved to or from it by hand.", 11).into()
         } else if l.available < 0 {
             action("Cover overspending", Message::MoveMoney)
         } else {
@@ -731,7 +747,7 @@ impl App {
             );
             target = target.push(progress_bar(0.0..=1.0, funded).girth(Length::Fixed(6.0)).style(look::progress(tone)));
             if have < l.target && l.ruled {
-                target = target.push(dim("Its rule assigns it: what comes in decides.", 11));
+                target = target.push(dim("Its formula assigns it: what its filters add up to decides.", 11));
             } else if have < l.target {
                 let need = l.target - have;
                 target = target.push(action(
@@ -778,97 +794,10 @@ impl App {
         ]
         .spacing(16);
         match l.ruled {
-            // Its rule before the hand's buttons, which it has no use for.
-            true => column![head, self.inspect_rule(l), target, manage],
-            false => column![head, target, auto, self.inspect_rule(l), manage],
+            // Its formula before the hand's buttons, which it has no use for.
+            true => column![head, self.inspect_formula(l), target, manage],
+            false => column![head, target, auto, self.inspect_formula(l), manage],
         }
-    }
-
-    /// "Assign by rule": the text a paycheck is matched by, the accounts it
-    /// comes into, the share, and what that would give the month on screen
-    /// before it is saved. Saved, it holds from this month on.
-    fn inspect_rule<'a>(&'a self, l: &'a BudgetLine) -> Element<'a, Message> {
-        let f = &self.rule;
-        let month = month_name(&self.peer.month);
-        let mut c = column![row![
-            bold("Assign by rule", 14),
-            fill(),
-            icon::faint(glyphs::REPEAT, false).width(13.0).height(13.0)
-        ]
-        .align_y(Alignment::Center)]
-        .spacing(8);
-        c = c.push(match self.peer.rule(l.category_id) {
-            Some(r) => dim(format!("{} \u{2014} since {}.", r.summary, month_name(&r.from)), 11),
-            None => dim("Each month, a share of the income that matches, in place of assigning it by hand.", 11),
-        });
-        c = c.push(
-            text_input("Text to match, as ACME PAYROLL", &f.matching)
-                .on_input(Message::RuleMatching)
-                .on_submit(Message::SaveRule)
-                .size(13)
-                .padding([5, 8])
-                .style(look::input),
-        );
-        // The accounts it reads, ticked; none ticked is every one.
-        let mut accounts = column![dim("Into", 11)].spacing(2);
-        for a in self.peer.accounts.rows.iter().filter(|a| a.on_budget && !a.closed) {
-            let ticked = f.accounts.contains(&a.id);
-            let mark = match ticked {
-                true => icon::accent(glyphs::TICKED, false),
-                false => icon::faint(glyphs::UNTICK, false),
-            };
-            accounts = accounts.push(
-                button(row![mark, text(a.name.clone()).size(12)].spacing(8).align_y(Alignment::Center))
-                    .on_press(Message::RuleAccount(a.id))
-                    .padding([4, 6])
-                    .width(Length::Fill)
-                    .style(look::choice(false)),
-            );
-        }
-        if f.accounts.is_empty() {
-            accounts = accounts.push(dim("None ticked: every account on the budget.", 11));
-        }
-        c = c.push(accounts);
-        c = c.push(
-            row![
-                text("Share").size(12).width(Length::Fill),
-                text_input("10% or 0.1", &f.share)
-                    .on_input(Message::RuleShare)
-                    .on_submit(Message::SaveRule)
-                    .size(13)
-                    .padding([5, 8])
-                    .width(Length::Fixed(110.0))
-                    .style(look::input),
-            ]
-            .align_y(Alignment::Center),
-        );
-        // What it would give the month on screen, as typed.
-        let preview = self.peer.preview.as_ref().and_then(|p| p.rows.first());
-        c = c.push(match preview {
-            Some(p) => column![
-                App::figure(&format!("{month} by this rule"), p.amount),
-                dim(
-                    match p.count {
-                        0 => format!("Nothing matched in {month} yet."),
-                        1 => format!("Of 1 payment matched: {}.", money(p.matched)),
-                        n => format!("Of {n} payments matched: {}.", money(p.matched)),
-                    },
-                    11
-                ),
-            ]
-            .spacing(4),
-            None if !f.matching.trim().is_empty() && !f.share.trim().is_empty() => {
-                column![dim(format!("{:?} is not a share: 10%, 0.1 or 1.5.", f.share.trim()), 11)]
-            }
-            None => column![dim("Some text and a share to see what it gives this month.", 11)],
-        });
-        let mut buttons = row![action("Save", Message::SaveRule)].spacing(8).align_y(Alignment::Center);
-        if l.ruled {
-            buttons = buttons.push(quiet("Remove rule", Message::RemoveRule));
-        }
-        c = c.push(dim(format!("Saved, it assigns from {month} on; months before keep theirs."), 11));
-        c = c.push(buttons);
-        container(c).padding(14).style(look::card).into()
     }
 
     /// A card's payment category: what the card owes, what of it the
@@ -922,35 +851,39 @@ impl App {
 
     // * The registers
 
+    /// How tall the top above the register is: taller by the balances when
+    /// it is one account's.
+    pub fn ledger_top(&self) -> f32 {
+        match self.register_account() {
+            Some(_) => LEDGER_TOP + LEDGER_BALANCES,
+            None => LEDGER_TOP,
+        }
+    }
+
+    /// The register for a filter: its name and what it adds up to, the
+    /// account's balances and tools when it is exactly one account's, the
+    /// household's tools on every account's, the bar of its conditions,
+    /// and its transactions.
     fn view_ledger(&self, ledger: Ledger) -> Element<'_, Message> {
         let rows = &self.peer.register.rows;
-        let all = !matches!(ledger, Ledger::Account(_));
-        let (title, subtitle, account) = match ledger {
-            Ledger::Account(id) => {
-                let a = self.peer.account(id);
-                let name = a.map(|a| a.name.clone()).unwrap_or_default();
-                let sub = match a {
-                    Some(a) if !a.bank.is_empty() => format!(
-                        "{} \u{2022}\u{2022}{} \u{2014} linked through Plaid{}",
-                        a.kind,
-                        a.mask,
-                        a.bank_balance.map(|b| format!(", the bank says {}", money(b))).unwrap_or_default()
-                    ),
-                    Some(a) => format!("{} \u{2014} {}", a.kind, if a.on_budget { "on budget" } else { "tracking" }),
-                    None => String::new(),
-                };
-                (name, sub, a)
-            }
-            Ledger::All => ("All Accounts".into(), "Every transaction in the household".into(), None),
-            Ledger::Inbox => ("Needs a Look".into(), "Imported and not yet approved, or for no category".into(), None),
-        };
+        let account = self.register_account().and_then(|a| self.peer.account(a));
+        // The account column, unless every row is one account's.
+        let all = account.is_none();
+        let (title, subtitle) = self.register_title();
 
-        // An account's name is renamed where it stands, as a category's is.
-        let title: Element<'_, Message> = match ledger {
-            Ledger::Account(id) => self.name_or_box(Naming::Account(id), bold(title, 22).into()),
+        // An account's name is renamed where it stands, as a category's is,
+        // and so is a saved filter's.
+        let title: Element<'_, Message> = match (ledger, account) {
+            (Ledger::Account(id), _) => self.name_or_box(Naming::Account(id), bold(title, 22).into()),
+            (Ledger::Saved(id), _) => self.name_or_box(Naming::Filter(id), bold(title, 22).into()),
             _ => bold(title, 22).into(),
         };
+        let head_line = column![title, dim(subtitle, 12)].spacing(2);
+        // The conditions, and what they come to at their end.
+        let bar = row![self.view_filter_bar(), fill(), self.view_filter_total()].align_y(Alignment::Center);
 
+        // One slot whatever the register, so the bar under it keeps its
+        // place (and the text box its focus) as the filter changes.
         let balances: Element<'_, Message> = match account {
             Some(a) => row![
                 self.balance_box("Cleared Balance", a.cleared),
@@ -962,10 +895,7 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center)
             .into(),
-            None => {
-                let on: i64 = self.peer.accounts.rows.iter().filter(|a| a.on_budget).map(|a| a.balance).sum();
-                row![self.balance_box("On Budget", on)].into()
-            }
+            None => Space::new().height(Length::Fixed(0.0)).into(),
         };
 
         let unapproved: Vec<Id<Txn>> = rows.iter().filter(|t| !t.approved).map(|t| t.id).collect();
@@ -976,7 +906,7 @@ impl App {
             if !a.bank.is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
-        } else {
+        } else if ledger == Ledger::All {
             // Every account's register is where accounts are added, and every
             // bank asked for what it has.
             tools = tools.push(quiet("Add Account", Message::AddAccount));
@@ -992,20 +922,9 @@ impl App {
         if !unapproved.is_empty() {
             tools = tools.push(quiet(&format!("Approve all ({})", unapproved.len()), Message::Approve(unapproved)));
         }
-        if all {
-            tools = tools.push(fill());
-            tools = tools.push(
-                button(text("All").size(12))
-                    .on_press(Message::Go(Page::Ledger(Ledger::All)))
-                    .padding([4, 10])
-                    .style(look::choice(ledger == Ledger::All)),
-            );
-            tools = tools.push(
-                button(text(format!("Needs a look ({})", self.peer.inbox.rows.len())).size(12))
-                    .on_press(Message::Go(Page::Ledger(Ledger::Inbox)))
-                    .padding([4, 10])
-                    .style(look::choice(ledger == Ledger::Inbox)),
-            );
+        tools = tools.push(fill());
+        for t in self.filter_tools() {
+            tools = tools.push(t);
         }
 
         let w = |n: f32| Length::Fixed(n);
@@ -1038,15 +957,15 @@ impl App {
             }
         }
         if rows.is_empty() {
-            body = body.push(container(dim("Nothing here.", 13)).padding(20));
+            body = body.push(container(dim("Nothing here matches.", 13)).padding(20));
         }
 
         // The top is one height, and so is every row, so where a row's
         // category is on screen is arithmetic (`App::category_at`): the
         // dropdown opens under it, keys or pointer.
         column![
-            container(column![column![title, dim(subtitle, 12)].spacing(2), balances, tools].spacing(14))
-                .height(Length::Fixed(LEDGER_TOP))
+            container(column![head_line, balances, tools, bar].spacing(12))
+                .height(Length::Fixed(self.ledger_top()))
                 .clip(true),
             column![
                 table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
@@ -1412,6 +1331,7 @@ impl App {
             }
             Modal::Choose(choosing) => self.view_chooser(choosing),
             Modal::Disconnect(bank) => self.view_disconnect(bank),
+            Modal::SaveFilter { name } => self.view_save_filter(name),
         };
         panel::panel(container(body).padding(14), 440.0).into()
     }
@@ -1434,6 +1354,7 @@ impl App {
         };
         let (skip, title) = match choosing {
             Choosing::Form => (None, "Category".to_string()),
+            Choosing::Filter => (None, "Categories".to_string()),
             Choosing::Txns(ids) => (
                 None,
                 format!("Categorize {} transaction{}", ids.len(), if ids.len() == 1 { "" } else { "s" }),

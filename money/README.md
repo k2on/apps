@@ -72,6 +72,52 @@ comes out of its categories as cash spending would, and paying the card
 is a transfer. Splits, scheduled transactions, goals with dates, and
 moving categories by drag are also missing.
 
+## Filters and formulas
+
+**A filter says which transactions** (`domain/src/filters.rs`): conditions
+every one of which must hold — the accounts (none is every account; or
+only those on the budget), text the payee or the bank's line holds (any
+case), the categories ("no category" among them), which way the money
+went (either, in, out), transfers in or left out, only what needs a look
+(not approved, or on budget for no category), and optionally a range of
+days. `Filter::matches` is the only matcher: every register is the
+register for a filter (`transactions.filtered {saved | filter, month}`,
+with `transactions.filtered_total` its sum), and the built-in ones are
+filters too — All Accounts (no conditions), Needs a Look (the inbox's
+condition) and one per account. The phones' `transactions.register` and
+`transactions.inbox` are those built-in filters through the same matcher.
+
+**Saved filters** (`SavedFilter`, appended to the schema) have a name,
+unique in any case, and a place: `filters.save_filter`, `rename_filter`,
+`change_filter`, `move_filter`, `delete_filter`, and `filters.saved`,
+which lists them with what each adds up to (ever, within its own days).
+A category deleted is replaced in a filter's conditions by the one its
+transactions moved to (or "no category").
+
+**A formula assigns a category** (`domain/src/formulas.rs`), as a
+spreadsheet's cell is worked out: a sum of terms, each `factor ×
+SUM(saved filter over the month)` — "10% × SUM(ACME paychecks)". A factor
+is kept exactly as a ratio (typed "10%", "0.1" or "1.5x"); the terms are
+added exactly and the month's total rounded once, to the cent, half away
+from zero. A formula is a version from a month on (`Formula`, appended to
+the schema; `categories.set_formula`, `categories.clear_formula`, the
+views `categories.formulas` and `categories.preview_formula`): months
+before keep what was typed, and removing one is a manual version. While a
+month follows one, `assign` and `move_money` refuse it, auto-assign
+passes it by, and everything else counts its amount as assigned. Ready to
+Assign and a card's payment category have none. A saved filter a formula
+sums (in any version) is not deleted — the deletion is refused, naming
+the categories; were one gone anyway, its term would count nothing.
+Changing a filter's conditions moves every month the formula covers.
+
+**Formulas replaced rules.** The `Rule` table is still in the schema and
+is read by nothing: a rule saved before this assigns nothing now (none
+are migrated), and a category deleted takes its old rows with it. The
+phones read `BudgetLine.rule` (the formula said) and `ruled` unchanged.
+A phone built before still sends `categories.set_rule`, kept for it: it
+saves (or reuses) a filter of the rule's conditions — "Income matching
+acme in Checking" — and a one-term formula over it, said as the rule was.
+
 ## The bank, through Plaid
 
 `domain/src/plaid.rs` is ArkOS's `money-sync` with Actual Budget
@@ -284,14 +330,27 @@ posts the coffee with its tip in place and brings an order. After that the
 bank has nothing new. Nothing leaves the window, and a reload starts from
 the seed again.
 
-The layout follows YNAB: accounts down the side; the month's categories
+The layout follows YNAB: down the side, Budget and Reflect, All
+Accounts (with what needs a look), each account under On Budget,
+Tracking and Closed, and the saved filters under Filters with their
+totals; the month's categories
 with Assigned, Activity and Available, and Ready to Assign across the
 top; the selected category's story on the right (its target, Move Money
-or Cover Overspending, Auto-Assign); a register per account with cleared,
-uncleared and working balances; and Reflect, where the month's spending
-went.
+or Cover Overspending, Auto-Assign, Assign by formula: a row per term,
+each a saved filter picked from a menu and a factor, Open for the
+filter's register in the month, a live preview, Save and Remove); a
+register for any filter — an account's is the filter for that account,
+with its cleared, uncleared and working balances, Reconcile, Rename and
+Sync — whose bar shows its conditions as chips to change (the address bar
+says `#account/Checking`, `#accounts`, `#inbox`, `#filter/<name>`, or
+`#filtered` for one not saved), what it adds up to, and "Save as filter…";
+and Reflect, where the month's spending went.
 
-**What is verified:** the domain's rules, transfers, reconciliation, the
+**What is verified:** the domain's rules, transfers, reconciliation,
+every filter condition alone and together, the built-in filters against
+what the registers and the inbox showed, saved filters and their totals,
+formulas (terms, factors, rounding once, history, refusals, cards, a
+filter in use), the
 import's phases, the accounts a server names and does not follow, and
 every view against a fresh evaluation (`domain/tests/`); the demo's
 seed, and every button the tests press (`iced/src/tests.rs`). The server

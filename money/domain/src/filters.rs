@@ -131,7 +131,10 @@ impl Filter {
     /// The days it reads, at most, as a range of the date index: from its
     /// first, up to just past its last.
     fn days(&self) -> (String, String) {
-        (self.from.clone().unwrap_or_default(), self.through.as_ref().map_or_else(|| "~".into(), |t| format!("{t}~")))
+        (
+            self.from.clone().unwrap_or_default(),
+            self.through.as_ref().map_or_else(|| "~".into(), |t| format!("{t}~")),
+        )
     }
 
     /// Every transaction it matches, read through the narrowest index:
@@ -334,7 +337,10 @@ pub fn move_filter(_: &Ctx, db: &mut Db<Money>, input: MoveFilter) -> Result<(),
         .filter(|f| f.id != moved.id)
         .collect();
     let at = match input.before {
-        Some(b) => order.iter().position(|f| f.id == b).ok_or_else(|| Refusal::new("no such filter to go before"))?,
+        Some(b) => order
+            .iter()
+            .position(|f| f.id == b)
+            .ok_or_else(|| Refusal::new("no such filter to go before"))?,
         None => order.len(),
     };
     order.insert(at, moved);
@@ -456,7 +462,13 @@ mod tests {
         };
         assert!(on.holds(&t, true, false) && !on.holds(&t, false, false));
         // Text: the payee or the bank's line, any case.
-        for (text, hit) in [("acme", true), ("PAYROLL", true), ("dir dep", true), (" corp ", true), ("side gig", false)] {
+        for (text, hit) in [
+            ("acme", true),
+            ("PAYROLL", true),
+            ("dir dep", true),
+            (" corp ", true),
+            ("side gig", false),
+        ] {
             let f = Filter {
                 text: text.into(),
                 ..all.clone()
@@ -471,13 +483,13 @@ mod tests {
         assert!(cats(vec![Some(id(7))]).holds(&t, true, false));
         assert!(!cats(vec![Some(id(8))]).holds(&t, true, false));
         assert!(!cats(vec![None]).holds(&t, true, false));
-        let none = Txn { category_id: None, ..t.clone() };
+        let none = Txn {
+            category_id: None,
+            ..t.clone()
+        };
         assert!(cats(vec![None, Some(id(8))]).holds(&none, true, true));
         // Direction.
-        let dir = |d| Filter {
-            direction: d,
-            ..all.clone()
-        };
+        let dir = |d| Filter { direction: d, ..all.clone() };
         let out = Txn { amount: -5, ..t.clone() };
         let zero = Txn { amount: 0, ..t.clone() };
         assert!(dir(Direction::In).holds(&t, true, false) && !dir(Direction::In).holds(&out, true, false));
@@ -502,7 +514,14 @@ mod tests {
         // Needs a look: not approved, or needing a category.
         let look = Filter::needs_a_look();
         assert!(!look.holds(&t, true, false));
-        assert!(look.holds(&Txn { approved: false, ..t.clone() }, true, false));
+        assert!(look.holds(
+            &Txn {
+                approved: false,
+                ..t.clone()
+            },
+            true,
+            false
+        ));
         assert!(look.holds(&none, true, true));
         // Dates, inclusive.
         let dates = |f: Option<&str>, h: Option<&str>| Filter {
@@ -530,8 +549,23 @@ mod tests {
         assert!(!paychecks.holds(&t, false, false), "off the budget");
         assert!(!paychecks.holds(&out, true, false), "money out");
         assert!(!paychecks.holds(&half, true, false), "a transfer");
-        assert!(!paychecks.holds(&Txn { payee: "Side".into(), imported_payee: String::new(), ..t.clone() }, true, false));
-        assert!(!Filter { needs_look: true, ..paychecks }.holds(&t, true, false), "looked at already");
+        assert!(!paychecks.holds(
+            &Txn {
+                payee: "Side".into(),
+                imported_payee: String::new(),
+                ..t.clone()
+            },
+            true,
+            false
+        ));
+        assert!(
+            !Filter {
+                needs_look: true,
+                ..paychecks
+            }
+            .holds(&t, true, false),
+            "looked at already"
+        );
     }
 
     #[test]

@@ -534,17 +534,26 @@ fn the_budget_drawn() {
     let _ = picking.update(Message::Go(Page::Settings));
     let _ = picking.update(Message::Pointer(iced::Point::new(1020.0, 420.0)));
     let _ = picking.update(Message::Banks(crate::banks::Msg::Pick("wf2-chk".into())));
-    // Gifts assigned by rule: its cell marked, its inspector's rule saved;
-    // and Vacation's rule being typed, its preview under it.
+    // Gifts assigned by formula: its cell marked, its inspector's formula
+    // saved, two terms; and Vacation's being typed, its preview under it.
     let mut ruled = app();
     let _ = ruled.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
-    let checking = account(&ruled, "Checking").id;
+    let edits = acme(&ruled);
+    let pay = saved_filter(&mut ruled, "Acme pay", &edits);
+    let side = saved_filter(
+        &mut ruled,
+        "Riverside pay",
+        &[filter::Edit::Text("riverside".into()), filter::Edit::Direction(Direction::In)],
+    );
+    let _ = ruled.update(Message::Go(Page::Budget));
     let gifts = category(&ruled, "Gifts").category_id;
     let _ = ruled.update(Message::Select(Some(gifts)));
-    let _ = ruled.update(Message::RuleMatching("Acme Corp".into()));
-    let _ = ruled.update(Message::RuleAccount(checking));
-    let _ = ruled.update(Message::RuleShare("10%".into()));
-    let _ = ruled.update(Message::SaveRule);
+    let _ = ruled.update(Message::Formula(formula::Msg::Chose(0, pay)));
+    let _ = ruled.update(Message::Formula(formula::Msg::Factor(0, "10%".into())));
+    let _ = ruled.update(Message::Formula(formula::Msg::Add));
+    let _ = ruled.update(Message::Formula(formula::Msg::Chose(1, side)));
+    let _ = ruled.update(Message::Formula(formula::Msg::Factor(1, "2.5%".into())));
+    let _ = ruled.update(Message::Formula(formula::Msg::Save));
     let _ = ruled.update(Message::EditAssigned(gifts));
     // Every group above Gifts' folded, so its marked cell is on screen.
     let folded: Vec<Id<Group>> = ruled
@@ -560,14 +569,39 @@ fn the_budget_drawn() {
     }
     let mut typing = app();
     let _ = typing.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let side = saved_filter(
+        &mut typing,
+        "Riverside pay",
+        &[filter::Edit::Text("riverside".into()), filter::Edit::Direction(Direction::In)],
+    );
+    let _ = typing.update(Message::Go(Page::Budget));
     let vacation = category(&typing, "Vacation").category_id;
     let _ = typing.update(Message::Select(Some(vacation)));
-    let _ = typing.update(Message::RuleMatching("riverside".into()));
-    let _ = typing.update(Message::RuleShare("0.05".into()));
+    let _ = typing.update(Message::Formula(formula::Msg::Chose(0, side)));
+    let _ = typing.update(Message::Formula(formula::Msg::Factor(0, "0.05".into())));
+    // A saved filter's register, changed: its chips lit, its total, "Save
+    // to" and "Save as filter…"; and one account's, its tools and bar.
+    let mut filtered = app();
+    let _ = filtered.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let edits = acme(&filtered);
+    saved_filter(&mut filtered, "Acme pay", &edits);
+    let _ = filtered.update(Message::Filter(filter::Msg::Edit(filter::Edit::NoTransfers(true))));
+    let _ = filtered.update(Message::Filter(filter::Msg::Edit(filter::Edit::Dates(
+        Some("2026-10-01".into()),
+        Some("2026-10-31".into()),
+    ))));
+    let _ = filtered.register_act(Action::Move(Motion::First));
+    let mut one = app();
+    let _ = one.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let checking = account(&one, "Checking").id;
+    let _ = one.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
     for (app, scene, theme, side) in [
         (&ruled, "ruled", iced::Theme::Dark, "dark"),
         (&ruled, "ruled", iced::Theme::Light, "light"),
         (&typing, "typing", iced::Theme::Dark, "dark"),
+        (&filtered, "filtered", iced::Theme::Dark, "dark"),
+        (&filtered, "filtered", iced::Theme::Light, "light"),
+        (&one, "account", iced::Theme::Dark, "dark"),
         (&cards, "cards", iced::Theme::Dark, "dark"),
         (&cards, "cards", iced::Theme::Light, "light"),
         (&above, "above", iced::Theme::Dark, "dark"),
@@ -962,95 +996,296 @@ fn an_account_is_renamed_where_it_stands() {
     assert_eq!(account(&app, "Everyday Checking").id, checking);
 }
 
-/// A category's assignment set by rule in its inspector: the text, the
-/// accounts, the share, what it would give this month before it is saved;
-/// then the budget's cell shows the rule's amount and will not open, and
-/// the rule comes off again.
+// * Filters and formulas
+
+use crate::{filter, formula, Place};
+
+/// A filter typed into the register's bar from All Accounts and saved
+/// under `name`: its id.
+fn saved_filter(app: &mut App, name: &str, edits: &[filter::Edit]) -> Id<SavedFilter> {
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    for e in edits {
+        let _ = app.update(Message::Filter(filter::Msg::Edit(e.clone())));
+    }
+    let _ = app.update(Message::Filter(filter::Msg::SaveAs));
+    let _ = app.update(Message::Filter(filter::Msg::Name(name.into())));
+    let _ = app.update(Message::Filter(filter::Msg::SaveDone));
+    app.peer.filters.rows.iter().find(|f| f.name == name).expect("saved").id
+}
+
+/// What Acme paid into checking: money in, matching "acme".
+fn acme(app: &App) -> Vec<filter::Edit> {
+    vec![
+        filter::Edit::Text("acme".into()),
+        filter::Edit::Direction(Direction::In),
+        filter::Edit::Account(account(app, "Checking").id),
+    ]
+}
+
+/// The bar's conditions typed from All Accounts make a register not
+/// saved, its total the domain's; saved, it is a place in the sidebar, under
+/// Filters, with its total, and the address bar names it. Changed again, it
+/// is the saved one changed — kept back into it, or as another.
 #[test]
-fn a_category_is_assigned_by_rule_from_its_inspector() {
+fn a_filter_is_typed_into_the_bar_and_saved() {
     let mut app = app();
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    let every = app.peer.register.rows.len();
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Text("acme".into()))));
+    assert_eq!(app.page, Page::Ledger(Ledger::Adhoc));
+    assert_eq!(app.place(), Place::Filtered);
+    let rows = app.peer.register.rows.clone();
+    assert!(!rows.is_empty() && rows.len() < every);
+    assert!(rows.iter().all(|t| (t.payee.clone() + &t.imported_payee).to_lowercase().contains("acme")));
+    let total = app.peer.total();
+    assert_eq!(
+        (total.count as usize, total.total),
+        (rows.len(), rows.iter().map(|t| t.amount).sum::<i64>())
+    );
+    assert_eq!(app.register_title().0, "All Accounts, filtered");
+    // Into checking alone: money in, every row checking's.
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::In))));
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Account(checking))));
+    assert!(app.peer.register.rows.iter().all(|t| t.account_id == checking && t.amount > 0));
+    assert_eq!(app.register_account(), None, "more than an account's conditions: no account tools");
+    // Saved: the register is the saved filter's, by its name.
+    let _ = app.update(Message::Filter(filter::Msg::SaveAs));
+    assert!(matches!(app.modal, Some(Modal::SaveFilter { .. })));
+    let _ = app.update(Message::Filter(filter::Msg::Name("Acme pay".into())));
+    let _ = app.update(Message::Filter(filter::Msg::SaveDone));
+    assert!(app.modal.is_none(), "{}", app.note);
+    let saved = app.peer.filters.rows.iter().find(|f| f.name == "Acme pay").expect("saved").clone();
+    assert_eq!(app.page, Page::Ledger(Ledger::Saved(saved.id)));
+    assert_eq!(app.place(), Place::Filter("Acme pay".into()));
+    assert_eq!(saved.total, app.peer.total().total);
+    let places = app.places();
+    let entry = places
+        .iter()
+        .position(|p| p.3 == Page::Ledger(Ledger::Saved(saved.id)))
+        .expect("in the sidebar");
+    assert_eq!((places[entry].1.as_str(), places[entry].2), ("Acme pay", Some("Filters")));
+    assert_eq!(app.sidebar_at(), entry, "lit");
+    // Changed: the saved one, changed; the sidebar still lights it.
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Either))));
+    assert_eq!((app.page, app.peer.base), (Page::Ledger(Ledger::Adhoc), Ledger::Saved(saved.id)));
+    assert_eq!(app.sidebar_at(), entry);
+    assert_eq!(app.register_title().0, "Acme pay, filtered");
+    // Changed back to what it is saved as: the saved one again.
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::In))));
+    assert_eq!(app.page, Page::Ledger(Ledger::Saved(saved.id)));
+    // Kept back into it.
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::NoTransfers(true))));
+    let _ = app.update(Message::Filter(filter::Msg::SaveChanges));
+    assert_eq!(app.page, Page::Ledger(Ledger::Saved(saved.id)));
+    assert!(app.peer.saved(saved.id).unwrap().filter.no_transfers);
+    // A name already a filter's is said.
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::NeedsLook(true))));
+    let _ = app.update(Message::Filter(filter::Msg::SaveAs));
+    let _ = app.update(Message::Filter(filter::Msg::Name("acme PAY".into())));
+    let _ = app.update(Message::Filter(filter::Msg::SaveDone));
+    assert!(app.note.contains("already called"), "{}", app.note);
+    let _ = app.update(Message::CloseModal);
+    // Renamed where it stands, and deleted.
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Saved(saved.id))));
+    let _ = app.update(Message::Rename(crate::Naming::Filter(saved.id)));
+    let _ = app.update(Message::RenameTyped("Paychecks".into()));
+    let _ = app.update(Message::RenameDone);
+    assert_eq!(app.place(), Place::Filter("Paychecks".into()));
+    let _ = app.update(Message::Filter(filter::Msg::Delete(saved.id)));
+    assert_eq!(app.page, Page::Ledger(Ledger::All));
+    assert!(app.peer.filters.rows.is_empty());
+}
+
+/// An account in the sidebar is the built-in filter for it, the same
+/// register: conditions added make it a filtered register without the
+/// account's tools, and taken off again it is the account's.
+#[test]
+fn an_accounts_register_is_its_filter() {
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    assert_eq!(app.register_filter(), Filter::account(checking));
+    assert_eq!(app.register_account(), Some(checking));
+    assert!(app.peer.register.rows.iter().all(|t| t.account_id == checking));
+    assert_eq!(app.peer.total().total, account(&app, "Checking").balance, "its total is its balance");
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Out))));
+    assert_eq!((app.page, app.peer.base), (Page::Ledger(Ledger::Adhoc), Ledger::Account(checking)));
+    assert_eq!(app.register_account(), None);
+    assert!(app.peer.register.rows.iter().all(|t| t.account_id == checking && t.amount < 0));
+    let lit = app.sidebar_at();
+    assert_eq!(app.places()[lit].3, Page::Ledger(Ledger::Account(checking)), "the account stays lit");
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Either))));
+    assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
+    assert_eq!(app.place(), Place::Account("Checking".into()));
+    // Every account taken off: All Accounts; needs a look: the inbox.
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Account(checking))));
+    assert_eq!(app.page, Page::Ledger(Ledger::All));
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::NeedsLook(true))));
+    assert_eq!(app.page, Page::Ledger(Ledger::Inbox));
+    assert_eq!(app.peer.register.rows, app.peer.inbox.rows);
+}
+
+/// The sidebar's keys walk into the saved filters as into the accounts,
+/// and the address bar's places all land: an account, every account, the
+/// inbox, a saved filter by its name.
+#[test]
+fn the_sidebar_and_the_bar_open_saved_filters() {
+    let mut app = app();
+    let edits = acme(&app);
+    let id = saved_filter(&mut app, "Acme pay", &edits);
+    let _ = app.update(Message::Go(Page::Budget));
+    app.pane = crate::Pane::Sidebar;
+    let n = app.places().len();
+    let _ = app.update(Message::Key(iced::keyboard::Key::Character("G".into()), iced::keyboard::Modifiers::SHIFT));
+    assert_eq!(app.sidebar_at(), n - 1);
+    assert_eq!(app.page, Page::Ledger(Ledger::Saved(id)), "the last place is the filter");
+    let f = app.peer.saved(id).unwrap().filter.clone();
+    assert!(app.peer.register.rows.iter().all(|t| t.amount > 0 && t.account_id == f.accounts[0]));
+    let checking = account(&app, "Checking").id;
+    for (fragment, page) in [
+        ("#filter/Acme%20pay", Page::Ledger(Ledger::Saved(id))),
+        ("#account/Checking", Page::Ledger(Ledger::Account(checking))),
+        ("#accounts", Page::Ledger(Ledger::All)),
+        ("#inbox", Page::Ledger(Ledger::Inbox)),
+    ] {
+        let place = <Place as arkui::route::Route>::parse(fragment);
+        assert_eq!(app.page_of(&place), Some(page), "{fragment}");
+        assert_eq!(arkui::route::Route::fragment(&place), fragment);
+    }
+    assert_eq!(app.page_of(&Place::Filter("nobody".into())), None);
+}
+
+/// The register's keys in a filtered register: `j`, `v`, `c` and the
+/// dropdown file what needs a look, which then leaves it.
+#[test]
+fn the_keys_work_in_a_filtered_register() {
+    let mut app = app();
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::NeedsLook(true))));
+    let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Out))));
+    assert_eq!(app.page, Page::Ledger(Ledger::Adhoc));
+    let before = app.peer.register.rows.len();
+    assert!(before >= 2, "the card's last days");
+    let _ = app.register_act(Action::Move(Motion::First));
+    let _ = app.register_act(Action::Visual(true));
+    let _ = app.register_act(Action::Move(Motion::Down(1)));
+    let ids = app.txn_selected();
+    assert_eq!(ids.len(), 2);
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::default(),
+    ));
+    assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Txns(t)) if *t == ids));
+    let _ = app.update(Message::DropTyped("groc".into()));
+    let _ = app.update(Message::DropChoose);
+    assert_eq!(app.peer.register.rows.len(), before - 2, "looked at: no longer here");
+    assert!(app.peer.register.rows.iter().all(|t| !ids.contains(&t.id)));
+    // The categories' chip is the same dropdown, ticking.
+    let _ = app.update(Message::Filter(filter::Msg::Chip(filter::Chip::Categories)));
+    assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Filter)));
+    let _ = app.update(Message::DropTyped("No category".into()));
+    let _ = app.update(Message::DropChoose);
+    assert_eq!(app.register_filter().categories, vec![None]);
+    assert!(app.peer.register.rows.iter().all(|t| t.category_id.is_none()));
+    // `h` is the sidebar from here too.
+    let _ = app.register_act(Action::Move(Motion::Left(1)));
+    assert_eq!(app.pane, crate::Pane::Sidebar);
+}
+
+/// A category's assignment set by formula in its inspector: a saved
+/// filter picked for its term, a factor, what it would give this month
+/// before it is saved; then the cell shows the formula's amount and will
+/// not open, a term opens the register for its filter in the month, the
+/// filter it sums is not deleted, and the formula comes off again.
+#[test]
+fn a_category_is_assigned_by_formula_from_its_inspector() {
+    let mut app = app();
+    let edits = acme(&app);
+    let pay = saved_filter(&mut app, "Acme pay", &edits);
+    let _ = app.update(Message::Go(Page::Budget));
     let gifts = category(&app, "Gifts");
     assert_eq!((gifts.assigned, gifts.ruled), (0, false));
-    let checking = account(&app, "Checking").id;
     let before = app.peer.summary().ready_to_assign;
     let _ = app.update(Message::Select(Some(gifts.category_id)));
-    assert_eq!(app.rule, crate::RuleForm::default());
-    assert!(app.peer.preview.is_none(), "nothing typed, nothing to preview");
-    let _ = app.update(Message::RuleMatching("acme".into()));
-    assert!(app.peer.preview.is_none(), "no share yet");
-    let _ = app.update(Message::RuleShare("10%".into()));
-    // October's two Acme paydays into checking, $3,150 each.
+    assert_eq!(app.formula, formula::Form::default());
+    assert!(app.peer.preview.is_none(), "nothing chosen, nothing to preview");
+    let _ = app.update(Message::Formula(formula::Msg::Pick(0)));
+    let menu = app.ctx.menu.as_ref().expect("the filters' menu");
+    assert_eq!(menu.entries.len(), 1);
+    let _ = app.update(Message::MenuActivate);
+    assert_eq!(app.formula.terms[0].filter, Some(pay));
+    assert_eq!(app.formula.terms[0].factor, "100%");
     let preview = |app: &App| app.peer.preview.as_ref().and_then(|p| p.rows.first().cloned()).expect("a preview");
+    // October's two Acme paydays into checking, $3,150 each.
+    assert_eq!(preview(&app).amount, 630_000);
+    let _ = app.update(Message::Formula(formula::Msg::Factor(0, "10%".into())));
     let p = preview(&app);
-    assert_eq!((p.count, p.matched, p.amount), (2, 630_000, 63_000));
-    let _ = app.update(Message::RuleShare("0.15".into()));
-    assert_eq!(preview(&app).amount, 94_500);
-    let _ = app.update(Message::RuleAccount(checking));
-    assert_eq!(app.rule.accounts, vec![checking]);
-    let savings = account(&app, "Savings").id;
-    let _ = app.update(Message::RuleAccount(savings));
-    let _ = app.update(Message::RuleAccount(savings));
-    assert_eq!(app.rule.accounts, vec![checking], "ticked twice is not ticked");
-    let _ = app.update(Message::RuleShare("10%".into()));
-    assert_eq!(preview(&app).summary, "10% of income matching acme in Checking");
-    // Nothing is assigned until it is saved.
-    assert_eq!(category(&app, "Gifts").assigned, 0);
-    let _ = app.update(Message::SaveRule);
+    assert_eq!((p.amount, p.terms[0].count, p.terms[0].sum), (63_000, 2, 630_000));
+    assert_eq!(p.text, "10% \u{d7} SUM(Acme pay)");
+    // A second term, not yet a filter: no preview; removed again.
+    let _ = app.update(Message::Formula(formula::Msg::Add));
+    assert!(app.peer.preview.is_none());
+    let _ = app.update(Message::Formula(formula::Msg::Save));
+    assert!(app.note.contains("every term sums a filter"), "{}", app.note);
+    let _ = app.update(Message::Formula(formula::Msg::Remove(1)));
+    assert_eq!(category(&app, "Gifts").assigned, 0, "nothing until it is saved");
+    let _ = app.update(Message::Formula(formula::Msg::Save));
     let g = category(&app, "Gifts");
     assert_eq!((g.assigned, g.ruled), (63_000, true));
-    assert_eq!(g.rule, "10% of income matching acme in Checking");
+    assert_eq!(g.rule, "10% \u{d7} SUM(Acme pay)");
     assert_eq!(app.peer.summary().ready_to_assign, before - 63_000);
-    assert_eq!(app.rule.share, "10%", "the form is the rule as saved");
-    // The cell does not open: why not is said instead.
+    assert_eq!(app.formula.terms[0].factor, "10%", "the form is the formula as saved");
+    // The cell does not open: why not is said.
     app.note.clear();
     let _ = app.update(Message::EditAssigned(g.category_id));
     assert!(app.assigning.is_none());
-    assert_eq!(app.note, "could not assign: this category's assignment follows its rule");
-    app.note.clear();
-    let _ = app.act(Action::Activate);
-    assert!(app.assigning.is_none());
-    assert!(app.note.contains("follows its rule"));
-    // Nor does money move to it by hand, or a quick button assign it.
-    app.note.clear();
+    assert!(app.note.contains("follows its rule"), "{}", app.note);
     let _ = app.update(Message::MoveMoney);
-    assert!(app.modal.is_none() && app.note.contains("follows its rule"));
-    let _ = app.update(Message::AssignTo(g.category_id, 1_000));
-    assert_eq!(category(&app, "Gifts").assigned, 63_000);
-    // September was before it: typed by hand, as it was.
+    assert!(app.modal.is_none());
+    // The filter it sums stays.
+    let _ = app.update(Message::Filter(filter::Msg::Delete(pay)));
+    assert!(app.note.contains("summed by the formula of Gifts"), "{}", app.note);
+    // Its term opened: the filter's register, October's alone.
+    let _ = app.update(Message::Formula(formula::Msg::Open(0)));
+    assert_eq!((app.page, app.peer.base), (Page::Ledger(Ledger::Adhoc), Ledger::Saved(pay)));
+    let rows = &app.peer.register.rows;
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|t| t.date.starts_with("2026-10")));
+    assert_eq!(app.peer.total().total, 630_000);
+    let lit = app.sidebar_at();
+    assert_eq!(app.places()[lit].3, Page::Ledger(Ledger::Saved(pay)));
+    // September was before it; off again from October.
+    let _ = app.update(Message::Go(Page::Budget));
     let _ = app.update(Message::Month(-1));
-    let sep = category(&app, "Gifts");
-    assert!(!sep.ruled);
-    assert_eq!(app.rule, crate::RuleForm::default());
-    let _ = app.update(Message::EditAssigned(sep.category_id));
-    assert!(app.assigning.is_some());
-    let _ = app.update(Message::Escape);
+    assert!(!category(&app, "Gifts").ruled);
+    assert_eq!(app.formula, formula::Form::default());
     let _ = app.update(Message::Month(1));
-    assert_eq!(app.rule.matching, "acme");
-    // Off again from October: assigned by hand, nothing given.
-    let _ = app.update(Message::RemoveRule);
+    assert_eq!(app.formula.terms[0].filter, Some(pay));
+    let _ = app.update(Message::Formula(formula::Msg::Clear));
     let g = category(&app, "Gifts");
     assert_eq!((g.assigned, g.ruled, g.rule.as_str()), (0, false, ""));
     assert_eq!(app.peer.summary().ready_to_assign, before);
-    assert_eq!(app.rule, crate::RuleForm::default());
-    // A share that is not one is said, and nothing is saved.
-    let _ = app.update(Message::RuleMatching("acme".into()));
-    let _ = app.update(Message::RuleShare("ten".into()));
+    // A factor that is not one is said, and nothing is saved.
+    let _ = app.update(Message::Formula(formula::Msg::Chose(0, pay)));
+    let _ = app.update(Message::Formula(formula::Msg::Factor(0, "ten".into())));
     assert!(app.peer.preview.is_none());
-    let _ = app.update(Message::SaveRule);
-    assert!(app.note.contains("not a share"), "{}", app.note);
+    let _ = app.update(Message::Formula(formula::Msg::Save));
+    assert!(app.note.contains("not a factor"), "{}", app.note);
     assert!(!category(&app, "Gifts").ruled);
 }
 
-/// A card's payment category has no rule to set: its inspector is the
-/// card's.
+/// A card's payment category has no formula to set.
 #[test]
-fn a_payment_category_is_not_assigned_by_rule() {
+fn a_payment_category_is_not_assigned_by_formula() {
     let mut app = app();
-    let pay = category(&app, "Chase Sapphire").category_id;
-    let _ = app.update(Message::Select(Some(pay)));
-    let _ = app.update(Message::RuleMatching("acme".into()));
-    let _ = app.update(Message::RuleShare("10%".into()));
-    let _ = app.update(Message::SaveRule);
+    let edits = acme(&app);
+    let pay = saved_filter(&mut app, "Acme pay", &edits);
+    let _ = app.update(Message::Go(Page::Budget));
+    let card = category(&app, "Chase Sapphire").category_id;
+    let _ = app.update(Message::Select(Some(card)));
+    let _ = app.update(Message::Formula(formula::Msg::Chose(0, pay)));
+    let _ = app.update(Message::Formula(formula::Msg::Save));
     assert!(app.note.contains("payment category"), "{}", app.note);
     assert!(!category(&app, "Chase Sapphire").ruled);
 }
