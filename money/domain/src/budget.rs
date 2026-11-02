@@ -53,20 +53,20 @@ pub fn ensure_setup(ctx: &Ctx, db: &mut Db<Money>) -> Result<(), Refusal> {
     if db.category.has(ready_to_assign()) {
         return Ok(());
     }
-    if !db.group.has(inflow()) {
-        db.group.insert(Group {
+    if !db.category.has(inflow()) {
+        db.category.insert(Category {
             id: inflow(),
             name: "Inflow".into(),
-            pos: 0,
             hidden: true,
             income: true,
             created_ms: ctx.now,
             user_id: ctx.user().into(),
+            ..Category::default()
         })?;
     }
     db.category.insert(Category {
         id: ready_to_assign(),
-        group_id: inflow(),
+        parent_id: Some(inflow()),
         name: "Ready to Assign".into(),
         pos: 0,
         created_ms: ctx.now,
@@ -81,18 +81,110 @@ pub fn setup(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), Refusal> {
     ensure_setup(ctx, db)
 }
 
-/// Whether a category is the budget's own (money in, not a job for it).
-pub fn is_income(db: &Db<Money>, id: Id<Category>) -> bool {
-    db.category.get(id).and_then(|c| db.group.get(c.group_id)).is_some_and(|g| g.income)
+// * The tree
+
+/// How deep the tree may go: a parent's chain longer than this is a loop
+/// (which no mutator makes) and is read as ending there.
+pub const DEEPEST: usize = 16;
+
+/// A category and every one above it, itself first and its heading last.
+pub fn ancestry(db: &Db<Money>, id: Id<Category>) -> Vec<Category> {
+    let mut out: Vec<Category> = vec![];
+    let mut at = db.category.get(id);
+    while let Some(c) = at {
+        if out.len() == DEEPEST {
+            break;
+        }
+        at = c.parent_id.and_then(|p| db.category.get(p));
+        out.push(c);
+    }
+    out
 }
 
-/// A category money can be assigned to: one that is, and not the budget's own.
+/// How far below its heading a category is: 0 is a heading (a group), 1 an
+/// envelope, 2 and on a kind of one. None for no such category.
+pub fn depth(db: &Db<Money>, id: Id<Category>) -> Option<usize> {
+    ancestry(db, id).len().checked_sub(1)
+}
+
+/// The heading a category is under (itself, for a heading).
+pub fn heading_of(db: &Db<Money>, id: Id<Category>) -> Option<Category> {
+    ancestry(db, id).pop()
+}
+
+/// The envelope a category's money is: itself, or the one it is a kind of.
+/// None for a heading.
+pub fn envelope_of(db: &Db<Money>, id: Id<Category>) -> Option<Category> {
+    let mut a = ancestry(db, id);
+    a.pop();
+    a.pop()
+}
+
+/// A category's children, in order.
+pub fn children(db: &Db<Money>, id: Id<Category>) -> Vec<Category> {
+    db.category.by(Category::PARENT_ID_POS).from(Some(id)).all()
+}
+
+/// A category and every one below it, itself first.
+pub fn subtree(db: &Db<Money>, id: Id<Category>) -> Vec<Category> {
+    let Some(top) = db.category.get(id) else { return vec![] };
+    let mut out = vec![top];
+    let mut i = 0;
+    while i < out.len() && out.len() < 10_000 {
+        let next = children(db, out[i].id);
+        out.extend(next);
+        i += 1;
+    }
+    out
+}
+
+/// The categories from a heading down to `id`, by name: "Everyday ›
+/// Groceries › Eggs".
+pub fn path_of(db: &Db<Money>, id: Id<Category>) -> String {
+    let mut names: Vec<String> = ancestry(db, id).into_iter().map(|c| c.name).collect();
+    names.reverse();
+    names.join(" › ")
+}
+
+/// Whether a category is the budget's own (money in, not a job for it).
+pub fn is_income(db: &Db<Money>, id: Id<Category>) -> bool {
+    heading_of(db, id).is_some_and(|g| g.income)
+}
+
+/// A category money can be assigned to: an envelope, and not the budget's
+/// own. A kind of one is given money through it.
 pub fn budgetable(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
     let c = db.category.get(id).ok_or_else(|| Refusal::new("no such category"))?;
     if is_income(db, id) {
         return Err(Refusal::new("money is assigned from Ready to Assign, not to it"));
     }
-    Ok(c)
+    match depth(db, id) {
+        Some(1) => Ok(c),
+        Some(0) => Err(Refusal::new("money is assigned to a category, not a group")),
+        _ => Err(Refusal::new(format!("money for {} is assigned to the category it is a kind of", c.name))),
+    }
+}
+
+/// What was spent from (or came into) one category itself, between two
+/// days: its transactions' amounts and its split lines'. Not its kinds'.
+pub fn own_activity(db: &Db<Money>, id: Id<Category>, from: &str, to: &str) -> i64 {
+    let txns: i64 = db
+        .txn
+        .by(Txn::CATEGORY_ID_DATE)
+        .between((Some(id), from.to_string()), (Some(id), to.to_string()))
+        .all()
+        .iter()
+        .map(|t| t.amount)
+        .sum();
+    let splits: i64 = db
+        .split
+        .by(Split::CATEGORY_ID_DATE)
+        .between((id, from.to_string()), (id, to.to_string()))
+        .all()
+        .iter()
+        .map(|s| s.amount)
+        .sum();
+    txns + splits
 }
 
 /// What a month gave a category.
@@ -149,7 +241,7 @@ pub fn move_money(ctx: &Ctx, db: &mut Db<Money>, input: MoveMoney) -> Result<(),
 pub fn auto_assign(ctx: &Ctx, db: &mut Db<Money>, input: AutoAssign) -> Result<(), Refusal> {
     let last = add_months(&input.month, -1);
     for c in db.category.by(Category::POS).whole().all() {
-        if is_income(db, c.id) || (!input.only.is_empty() && !input.only.contains(&c.id)) {
+        if budgetable(db, c.id).is_err() || (!input.only.is_empty() && !input.only.contains(&c.id)) {
             continue;
         }
         let amount = match input.how {
@@ -172,14 +264,20 @@ pub struct History {
 }
 
 impl History {
-    /// Read from its assignments and its transactions.
+    /// Read from its assignments, and the transactions and split lines
+    /// for it or for any kind of it.
     pub fn of(db: &Db<Money>, id: Id<Category>) -> History {
         let mut months: BTreeMap<String, (i64, i64)> = BTreeMap::new();
         for a in db.assigned.by(Assigned::CATEGORY_ID_MONTH).from(id).all() {
             months.entry(a.month).or_default().0 += a.amount;
         }
-        for t in db.txn.by(Txn::CATEGORY_ID_DATE).from(Some(id)).all() {
-            months.entry(month_of(&t.date)).or_default().1 += t.amount;
+        for c in subtree(db, id) {
+            for t in db.txn.by(Txn::CATEGORY_ID_DATE).from(Some(c.id)).all() {
+                months.entry(month_of(&t.date)).or_default().1 += t.amount;
+            }
+            for s in db.split.by(Split::CATEGORY_ID_DATE).from(c.id).all() {
+                months.entry(month_of(&s.date)).or_default().1 += s.amount;
+            }
         }
         History { months }
     }
@@ -233,10 +331,10 @@ pub struct Standing {
 /// A category's line in a month.
 pub fn line(db: &Db<Money>, c: &Category, month: &str) -> BudgetLine {
     let s = History::of(db, c.id).at(month);
-    let g = db.group.get(c.group_id).unwrap_or_default();
+    let g = heading_of(db, c.id).unwrap_or_default();
     BudgetLine {
         category_id: c.id,
-        group_id: c.group_id,
+        group_id: g.id,
         group: g.name,
         group_pos: g.pos,
         name: c.name.clone(),
@@ -278,9 +376,15 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
             out.income += t.amount;
         }
     }
+    for s in db.split.by(Split::CATEGORY_ID_DATE).between((rta, String::new()), (rta, month_end(month))).all() {
+        income_through += s.amount;
+        if month_of(&s.date) == month {
+            out.income += s.amount;
+        }
+    }
     let mut overspent_before = 0;
     for c in categories {
-        if c.id == rta || is_income(db, c.id) {
+        if c.id == rta || budgetable(db, c.id).is_err() {
             continue;
         }
         let s = History::of(db, c.id).at(month);
@@ -301,7 +405,7 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
 /// The groups the budget draws, in order; not the budget's own.
 #[view("budget.groups")]
 pub fn groups(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<GroupLine>, Refusal> {
-    Ok(scan::<Money, Group>().filter(|g| !g.income).sort(|g| (g.pos, g.id)).map(|g| GroupLine {
+    Ok(scan::<Money, Category>().filter(|g| g.parent_id.is_none() && !g.income).sort(|g| (g.pos, g.id)).map(|g| GroupLine {
         id: g.id,
         name: g.name.clone(),
         pos: g.pos,
@@ -309,14 +413,15 @@ pub fn groups(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<GroupLine>, Refusal>
     }))
 }
 
-/// Every category in one month, in the budget's order. A category's line
-/// is kept by the rows it read — its own assignments and transactions —
-/// so a transaction moves the one line it is for.
+/// Every envelope in one month, in the budget's order. A line is kept by
+/// the rows it read — its own assignments, and its and its kinds'
+/// transactions and split lines — so a transaction moves the one line it is
+/// for.
 #[view("budget.month")]
 pub fn month(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<BudgetLine>, Refusal> {
     let month = input.month;
     Ok(scan::<Money, Category>()
-        .filter_with(|db, c| !is_income(db, c.id))
+        .filter_with(|db, c| budgetable(db, c.id).is_ok())
         .map_with(move |db, c| line(db, c, &month))
         .sort(|l| (l.group_pos, l.group_id, l.pos, l.category_id)))
 }
@@ -333,23 +438,14 @@ pub fn summary(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<Summary>, Re
 pub fn spending(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<SpendingLine>, Refusal> {
     let month = input.month;
     Ok(scan::<Money, Category>()
-        .filter_with(|db, c| !is_income(db, c.id))
+        .filter_with(|db, c| c.parent_id.is_some() && !is_income(db, c.id))
+        .map_with(|db, c| (heading_of(db, c.id).map_or(c.id, |g| g.id), c.id))
         .group(
-            |c| c.group_id,
+            |(heading, _)| *heading,
             move |db, group, cats| {
-                let g = db.group.get(*group).unwrap_or_default();
-                let lo = (crate::dates::month_start(&month), month_end(&month));
-                let spent: i64 = cats
-                    .map(|c| {
-                        db.txn
-                            .by(Txn::CATEGORY_ID_DATE)
-                            .between((Some(c.id), lo.0.clone()), (Some(c.id), lo.1.clone()))
-                            .all()
-                            .iter()
-                            .map(|t| t.amount)
-                            .sum::<i64>()
-                    })
-                    .sum();
+                let g = db.category.get(*group).unwrap_or_default();
+                let (lo, hi) = (crate::dates::month_start(&month), month_end(&month));
+                let spent: i64 = cats.map(|(_, c)| own_activity(db, *c, &lo, &hi)).sum();
                 SpendingLine {
                     group_id: *group,
                     group: g.name,
