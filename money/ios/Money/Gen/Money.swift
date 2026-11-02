@@ -63,6 +63,26 @@ public struct AddGroup: Equatable {
     public var json: String { J.obj(["\"name\":" + J.q(name)]) }
 }
 
+/// The record `AddSplit`.
+public struct AddSplit: Equatable {
+    public var accountId: Id
+    public var date: String
+    public var payee: String
+    public var memo: String
+    public var amount: Int64
+    public var cleared: Bool
+    public var lines: [SplitPart]
+
+    public init(accountId: Id, date: String, payee: String, memo: String, amount: Int64, cleared: Bool, lines: [SplitPart]) { self.accountId = accountId; self.date = date; self.payee = payee; self.memo = memo; self.amount = amount; self.cleared = cleared; self.lines = lines; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(accountId: Id(J.text(o["account_id"])), date: J.text(o["date"]), payee: J.text(o["payee"]), memo: J.text(o["memo"]), amount: J.int(o["amount"]), cleared: J.bool(o["cleared"]), lines: J.list(o["lines"]) { v0 in SplitPart(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"account_id\":" + J.q(accountId.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + String(cleared), "\"lines\":" + J.wlist(lines) { v0 in v0.json }]) }
+}
+
 /// The record `AddSubcategory`.
 public struct AddSubcategory: Equatable {
     public var parentId: Id
@@ -1317,6 +1337,9 @@ public struct Money {
 
     /// `session.revoke`: its intent's id.
     @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
+
+    /// `transactions.add_split`: its intent's id.
+    @discardableResult public func addSplit(_ input: AddSplit) throws -> String { try peer.mutate(name: "transactions.add_split", input: input.json) }
 
     /// `transactions.add_transaction`: its intent's id.
     @discardableResult public func addTransaction(_ input: AddTransaction) throws -> String { try peer.mutate(name: "transactions.add_transaction", input: input.json) }

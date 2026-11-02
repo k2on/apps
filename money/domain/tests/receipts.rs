@@ -163,6 +163,39 @@ fn a_transaction_splits_by_amounts() {
     assert!(b.rows::<Split>("split").is_empty());
 }
 
+/// A transaction added split, refused whole when its lines do not add up.
+#[test]
+fn a_transaction_is_split_as_it_is_added() {
+    let (mut b, checking, groceries, eggs, improvement) = household();
+    let part = |c, amount| SplitPart {
+        category_id: c,
+        amount,
+        memo: String::new(),
+    };
+    let add = |lines: Vec<SplitPart>| AddSplit {
+        account_id: checking,
+        date: "2026-10-25".into(),
+        payee: "Target".into(),
+        memo: String::new(),
+        amount: -8_740,
+        cleared: false,
+        lines,
+    };
+    let short = b
+        .run("add_split", &add(vec![part(Some(groceries), -100), part(Some(improvement), -100)]))
+        .unwrap_err();
+    assert!(short.contains("add up to its amount"), "{short}");
+    assert!(b.register(None).iter().all(|t| t.payee != "Target"), "refused whole");
+    b.run("add_split", &add(vec![part(Some(eggs), -4_370), part(Some(improvement), -4_370)]))
+        .unwrap();
+    let t = txn(&b, "Target");
+    assert_eq!((t.category.as_str(), t.approved), ("Split (2)", true));
+    assert_eq!(
+        (b.line("2026-10", groceries).activity, b.line("2026-10", improvement).activity),
+        (-4_370, -4_370)
+    );
+}
+
 fn target_receipt(items: &[(&str, &str, i64)], total: i64) -> ReceiptImport {
     ReceiptImport {
         store: "target".into(),

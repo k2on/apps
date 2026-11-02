@@ -59,6 +59,15 @@ data class AddGroup(val name: String) {
     }
 }
 
+/** The record `AddSplit`. */
+data class AddSplit(val accountId: Id, val date: String, val payee: String, val memo: String, val amount: Long, val cleared: Boolean, val lines: List<SplitPart>) {
+    fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"lines\":" + J.wlist(lines) { v0 -> v0.json() } + "}"
+
+    companion object {
+        fun of(j: Any?): AddSplit = (j as JSONObject).let { o -> AddSplit(Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.text(o.opt("memo")), J.int(o.opt("amount")), J.bool(o.opt("cleared")), J.list(o.opt("lines")) { v0 -> SplitPart.of(v0) }) }
+    }
+}
+
 /** The record `AddSubcategory`. */
 data class AddSubcategory(val parentId: Id, val name: String) {
     fun json(): String = "{" + "\"parent_id\":" + J.q(parentId.hex) + "," + "\"name\":" + J.q(name) + "}"
@@ -793,6 +802,9 @@ class Money(val peer: Peer) {
 
     /** `session.revoke`: its intent's id. */
     fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
+
+    /** `transactions.add_split`: its intent's id. */
+    fun addSplit(input: AddSplit): String = peer.mutate("transactions.add_split", input.json())
 
     /** `transactions.add_transaction`: its intent's id. */
     fun addTransaction(input: AddTransaction): String = peer.mutate("transactions.add_transaction", input.json())

@@ -704,3 +704,32 @@ fn a_kind_is_added_and_settings_say_where_amazon_is_set_up() {
     let _ = app.update(Message::SetUpAmazon);
     assert!(app.note.contains("the demo has no server"), "{}", app.note);
 }
+
+/// A new transaction split in the form as it is entered.
+#[test]
+fn a_new_transaction_is_split_as_it_is_entered() {
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let (groceries, household) = (category(&app, "Groceries").category_id, category(&app, "Household").category_id);
+    let _ = app.update(Message::AddTxn);
+    let _ = app.update(Message::Form(Field::Payee, "Corner Hardware".into()));
+    let _ = app.update(Message::Form(Field::Outflow, "40.00".into()));
+    let _ = app.update(Message::Split(true));
+    let _ = app.update(Message::SplitCategory(0));
+    let _ = app.update(Message::Chose(Choice::Category(Some(groceries))));
+    let _ = app.update(Message::SplitAmount(0, "15.00".into()));
+    let _ = app.update(Message::SplitCategory(1));
+    let _ = app.update(Message::Chose(Choice::Category(Some(household))));
+    let _ = app.update(Message::SplitAmount(1, "25.00".into()));
+    let _ = app.update(Message::SaveTxn);
+    assert!(app.form.is_none(), "{}", app.note);
+    let t = app.peer.register.rows.iter().find(|t| t.payee == "Corner Hardware").unwrap().clone();
+    assert_eq!((t.category.as_str(), t.amount), ("Split (2)", -4_000));
+    let _ = app.update(Message::EditTxn(t.id));
+    let rows = app.form.as_ref().unwrap().split.clone().unwrap();
+    assert_eq!(
+        rows.iter().map(|r| (r.category, r.amount.clone())).collect::<Vec<_>>(),
+        [(Some(groceries), "15.00".to_string()), (Some(household), "25.00".to_string())]
+    );
+}

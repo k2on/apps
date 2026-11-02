@@ -1053,8 +1053,8 @@ impl App {
             under = under.push(dim(format!("Entered by {}", f.by), 11));
         }
         under = under.push(fill());
-        // A transfer's money only moved; a new one is split once it is in.
-        if f.editing.is_some() && f.transfer_to.is_none() {
+        // A transfer's money only moved, and is not split.
+        if f.transfer_to.is_none() {
             under = under.push(match f.split.is_some() {
                 true => link("Unsplit", Message::Split(false)),
                 false => link("Split", Message::Split(true)),

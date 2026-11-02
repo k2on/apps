@@ -70,6 +70,7 @@ pub fn add_transaction(ctx: &Ctx, db: &mut Db<Money>, input: AddTransaction) -> 
         let category_id = category_for(db, &account, input.category_id)?;
         let id: Id<Txn> = ctx.new_id();
         db.txn.insert(Txn { id, category_id, ..base })?;
+
         // A receipt imported before anybody typed in what paid for it.
         if account.on_budget {
             crate::receipts::pay_waiting(db, id)?;
@@ -172,6 +173,40 @@ pub fn write_split(db: &mut Db<Money>, t: Txn, lines: &[SplitPart], approve: boo
         })?;
     }
     db.txn.update(Txn { split: true, approved, ..t })
+}
+
+/// A transaction added split, as somebody entered it: one with no
+/// category, then its lines — refused whole when they do not add up.
+#[mutator("transactions.add_split")]
+pub fn add_split(ctx: &Ctx, db: &mut Db<Money>, input: AddSplit) -> Result<(), Refusal> {
+    let add = AddTransaction {
+        account_id: input.account_id,
+        date: input.date,
+        payee: input.payee,
+        category_id: None,
+        memo: input.memo,
+        amount: input.amount,
+        cleared: input.cleared,
+        transfer_to: None,
+    };
+    let before: Vec<Id<Txn>> = db
+        .txn
+        .by(Txn::ACCOUNT_ID_DATE)
+        .from(input.account_id)
+        .all()
+        .iter()
+        .map(|t| t.id)
+        .collect();
+    add_transaction(ctx, db, add)?;
+    let t = db
+        .txn
+        .by(Txn::ACCOUNT_ID_DATE)
+        .from(input.account_id)
+        .all()
+        .into_iter()
+        .find(|t| !before.contains(&t.id))
+        .ok_or_else(|| Refusal::new("the transaction did not land"))?;
+    write_split(db, t, &input.lines, true)
 }
 
 /// A split transaction's lines dated as it is, after its date moved.

@@ -1831,6 +1831,9 @@ impl App {
                         Choice::Category(c) => (c, None),
                         Choice::Transfer(a) => (None, Some(a)),
                     };
+                    if f.transfer_to.is_some() {
+                        f.split = None;
+                    }
                 }
             }
             Choosing::Items(items) => {
@@ -1878,8 +1881,18 @@ impl App {
             return;
         };
         let amount = inn - out;
-        if let (Some(lines), Some(id)) = (&f.split, f.editing) {
-            return self.save_split(id, &f, lines, amount);
+        let splits = match &f.split {
+            Some(rows) => match split_lines(rows, amount) {
+                Ok(lines) => lines,
+                Err(why) => {
+                    self.note = why;
+                    return;
+                }
+            },
+            None => vec![],
+        };
+        if let (Some(_), Some(id)) = (&f.split, f.editing) {
+            return self.save_split(id, &f, splits, amount);
         }
         let taken = match f.editing {
             Some(id) => {
@@ -1898,17 +1911,30 @@ impl App {
                     self.note = "which account?".into();
                     return;
                 };
-                let t = AddTransaction {
-                    account_id: account,
-                    date: f.date,
-                    payee: f.payee,
-                    category_id: f.category,
-                    memo: f.memo,
-                    amount,
-                    cleared: f.cleared,
-                    transfer_to: f.transfer_to,
-                };
-                self.author("add the transaction", "add_transaction", &t)
+                if f.split.is_some() && splits.len() > 1 {
+                    let t = AddSplit {
+                        account_id: account,
+                        date: f.date,
+                        payee: f.payee,
+                        memo: f.memo,
+                        amount,
+                        cleared: f.cleared,
+                        lines: splits,
+                    };
+                    self.author("add the transaction", "add_split", &t)
+                } else {
+                    let t = AddTransaction {
+                        account_id: account,
+                        date: f.date,
+                        payee: f.payee,
+                        category_id: splits.first().map_or(f.category, |l| l.category_id),
+                        memo: f.memo,
+                        amount,
+                        cleared: f.cleared,
+                        transfer_to: f.transfer_to,
+                    };
+                    self.author("add the transaction", "add_transaction", &t)
+                }
             }
         };
         if taken {
@@ -1919,25 +1945,7 @@ impl App {
     /// A split saved: its lines adding up to the amount, then what else the
     /// form says. A split whose amount moves is unsplit first, as the
     /// domain keeps a split's amount to its lines.
-    fn save_split(&mut self, id: Id<Txn>, f: &TxnForm, rows: &[SplitRow], whole: i64) {
-        let sign = if whole < 0 { -1 } else { 1 };
-        let mut lines = Vec::new();
-        for r in rows.iter().filter(|r| !r.amount.trim().is_empty() || r.category.is_some()) {
-            let Some(cents) = amount::parse(&r.amount) else {
-                self.note = format!("{:?} is not an amount", r.amount);
-                return;
-            };
-            lines.push(SplitPart {
-                category_id: r.category,
-                amount: sign * cents.abs(),
-                memo: String::new(),
-            });
-        }
-        let sum: i64 = lines.iter().map(|l| l.amount).sum();
-        if lines.len() > 1 && sum != whole {
-            self.note = format!("the lines come to {}, of {}", amount::money(sum.abs()), amount::money(whole.abs()));
-            return;
-        }
+    fn save_split(&mut self, id: Id<Txn>, f: &TxnForm, lines: Vec<SplitPart>, whole: i64) {
         let was = self.peer.register.rows.iter().find(|t| t.id == id).map(|t| t.amount);
         if was != Some(whole) && self.peer.splits.as_ref().is_some_and(|(_, w)| !w.rows.is_empty()) {
             self.author("unsplit it", "split", &SplitTxn { id, lines: vec![] });
@@ -2002,6 +2010,30 @@ impl App {
         }
         Subscription::batch(subs)
     }
+}
+
+/// A split's lines as typed, in the transaction's sign (an outflow's lines
+/// are outflows), adding up to `whole`; or what is wrong with them.
+pub fn split_lines(rows: &[SplitRow], whole: i64) -> Result<Vec<SplitPart>, String> {
+    let sign = if whole < 0 { -1 } else { 1 };
+    let mut lines = Vec::new();
+    for r in rows.iter().filter(|r| !r.amount.trim().is_empty() || r.category.is_some()) {
+        let cents = amount::parse(&r.amount).ok_or_else(|| format!("{:?} is not an amount", r.amount))?;
+        lines.push(SplitPart {
+            category_id: r.category,
+            amount: sign * cents.abs(),
+            memo: String::new(),
+        });
+    }
+    let sum: i64 = lines.iter().map(|l| l.amount).sum();
+    if lines.len() > 1 && sum != whole {
+        return Err(format!(
+            "the lines come to {}, of {}",
+            amount::money(sum.abs()),
+            amount::money(whole.abs())
+        ));
+    }
+    Ok(lines)
 }
 
 /// A desktop sign-in, which waits on a loopback listener for the browser,

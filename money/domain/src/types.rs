@@ -222,6 +222,23 @@ pub struct AddTransaction {
     pub transfer_to: Option<Id<Account>>,
 }
 
+/// A transaction added split: its amount in lines, each for a category.
+/// Its own input, so that `AddTransaction` keeps the shape every client
+/// sends.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct AddSplit {
+    pub account_id: Id<Account>,
+    #[ark(check = "is_day", why = "a day, as 2026-10-26")]
+    pub date: String,
+    #[ark(trim, len = "0..=120")]
+    pub payee: String,
+    #[ark(trim, len = "0..=400")]
+    pub memo: String,
+    pub amount: i64,
+    pub cleared: bool,
+    pub lines: Vec<SplitPart>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct EditTransaction {
     pub id: Id<Txn>,
