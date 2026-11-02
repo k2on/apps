@@ -288,15 +288,13 @@ pub async fn start(config: Config) -> Result<Server> {
     if let Some(dir) = &config.web {
         server.web = Some((dir.clone(), config.web_module.clone()));
     }
-    // The stores page, and the folder its uploads (and anybody's exports)
+    // The settings page, and the receipts folder anybody's exports
     // wait in: the server's own receipts folder unless told another.
     let mut stores = config.stores.clone();
-    let receipts = stores.dir.get_or_insert_with(|| config.data.join("receipts")).clone();
+    stores.dir.get_or_insert_with(|| config.data.join("receipts"));
     let importer_slot = Arc::new(std::sync::Mutex::new(None));
     server.routes = std::mem::take(&mut server.routes).merge(setup::routes(setup::Setup {
         data: config.data.clone(),
-        receipts,
-        public_url: public_url.clone(),
         amazon_program: stores.amazon.is_some(),
         authenticate: auth.authenticate(),
         importer: importer_slot.clone(),
@@ -354,7 +352,7 @@ pub async fn start(config: Config) -> Result<Server> {
     if let Some(i) = &importer {
         *importer_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(i.handle());
     }
-    eprintln!("money-server: stores page at {public_url}/stores");
+    eprintln!("money-server: settings at {public_url}/settings");
 
     Ok(Server { running, auth, importer })
 }

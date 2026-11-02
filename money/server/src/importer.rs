@@ -270,7 +270,7 @@ impl Importer {
         (self.wake)();
     }
 
-    /// A handle the stores page asks a run with, and reads the last of.
+    /// A handle the settings page asks a run with, and reads the last of.
     pub fn handle(&self) -> ImporterHandle {
         ImporterHandle {
             wake: self.wake.clone(),

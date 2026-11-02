@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>money · Stores</title>
+<title>money · Settings</title>
 <style>
   :root { --bg: #f7f7f5; --card: #fff; --ink: #1d1d1b; --soft: #6b6b66; --line: #e3e3de; --accent: #2f6f4f; --bad: #a33a2a; }
   @media (prefers-color-scheme: dark) {
@@ -24,7 +24,6 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .state { font-weight: 600; }
   .bad { color: var(--bad); }
-  a.bookmarklet { display: inline-block; margin-top: 10px; padding: 7px 14px; border-radius: 6px; border: 1px dashed var(--accent); color: var(--accent); text-decoration: none; font-weight: 600; }
   ol { padding-left: 20px; margin: 8px 0 0; }
   code { font-size: 13px; }
   #last li { font-size: 13px; }
@@ -32,7 +31,7 @@
 </head>
 <body>
 <main>
-  <h1>Stores</h1>
+  <h1>Settings</h1>
   <p class="lede">Where receipts come from. What you enter here stays on this server, in a file only it can read. It is never part of the budget, so it doesn't sync to any device.</p>
   <p id="error" class="bad" hidden></p>
 
@@ -50,29 +49,6 @@
       <p class="soft">The secret is the key shown when you add an authenticator app on Amazon (Login &amp; security → 2-Step Verification). It lets the server make its own one-time codes. A code texted to your phone can't be used here.</p>
       <div class="row"><button type="submit">Save</button><button type="button" class="quiet" id="amazon-forget" hidden>Remove login</button></div>
     </form>
-  </section>
-
-  <section id="costco">
-    <h2>Costco</h2>
-    <p class="soft">Costco is read with your own signed-in costco.com page, so your Costco password never leaves Costco. A bookmarklet asks Costco for the last year of warehouse and gas receipts and sends them here, using a key that can only upload receipts.</p>
-    <p id="costco-state" class="state"></p>
-    <div id="costco-link"></div>
-    <ol class="soft" id="costco-how" hidden>
-      <li>Drag the button above to your bookmarks bar.</li>
-      <li>Open <code>costco.com</code>, sign in, and go to Orders &amp; Purchases.</li>
-      <li>Click the bookmark. It tells you how many receipts it sent.</li>
-    </ol>
-    <div class="row"><button type="button" id="costco-make">Make my bookmarklet</button><button type="button" class="quiet" id="costco-revoke" hidden>Revoke</button></div>
-  </section>
-
-  <section id="upload">
-    <h2>Upload an export</h2>
-    <p class="soft">A file saved from a store, read the way the server's folder reads it.</p>
-    <label for="u-store">Store</label>
-    <select id="u-store"><option value="costco">Costco</option><option value="target">Target</option><option value="amazon">Amazon (amazon-orders JSON)</option></select>
-    <label for="u-file">File</label>
-    <input id="u-file" type="file" accept=".json,application/json">
-    <div class="row"><button type="button" id="u-send">Upload</button><span id="u-said" class="soft"></span></div>
   </section>
 
   <section>
@@ -126,20 +102,6 @@
       : "Not set up.";
     if (!a.program) $("amazon-state").textContent += " This server has no amazon-orders program yet (services.money.amazon.package), so nothing is read until it does.";
     $("amazon-forget").hidden = !a.login;
-    const c = s.costco;
-    $("costco-state").textContent = c.key ? "Bookmarklet ready." : "No bookmarklet yet.";
-    $("costco-link").innerHTML = "";
-    if (c.bookmarklet) {
-      const link = document.createElement("a");
-      link.className = "bookmarklet";
-      link.href = c.bookmarklet;
-      link.textContent = "Costco → money";
-      link.onclick = e => { e.preventDefault(); alert("Drag this to your bookmarks bar, then click it on costco.com."); };
-      $("costco-link").appendChild(link);
-    }
-    $("costco-how").hidden = !c.key;
-    $("costco-make").textContent = c.key ? "Make a new one" : "Make my bookmarklet";
-    $("costco-revoke").hidden = !c.key;
     const last = Object.entries(s.last || {});
     $("last").innerHTML = "";
     for (const [what, how] of last.length ? last : [["", "Nothing yet."]]) {
@@ -159,17 +121,6 @@
     return s;
   });
   $("amazon-forget").onclick = run(() => api("DELETE", "amazon"));
-  $("costco-make").onclick = run(() => api("POST", "keys/costco"));
-  $("costco-revoke").onclick = run(() => api("DELETE", "keys/costco"));
-  $("u-send").onclick = async () => {
-    const f = $("u-file").files[0];
-    if (!f) return;
-    try {
-      const got = await api("POST", "upload/" + $("u-store").value, await f.text(), true);
-      $("u-said").textContent = got.receipts + (got.receipts === 1 ? " receipt" : " receipts") + " read; they'll be in the budget in a moment.";
-      setTimeout(run(() => api("GET", "status")), 3000);
-    } catch (e) { $("u-said").textContent = ""; say(String(e.message || e)); }
-  };
   run(() => api("GET", "status"))();
 })();
 </script>

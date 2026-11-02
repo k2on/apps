@@ -11,7 +11,7 @@
 //!   for a one-time code, `AMAZON_OTP_SECRET_KEY`, each read at the run and
 //!   given to that program alone: from the files the server was told
 //!   (`MONEY_AMAZON_USERNAME_FILE`, …), else from the login given on the
-//!   stores page ([`crate::vault`]). Its home is
+//!   settings page ([`crate::vault`]). Its home is
 //!   `<data>/amazon-orders`, so the session it keeps there spares Amazon a
 //!   login each run.
 //! - **A folder of exports** (`MONEY_RECEIPTS_DIR`): a file in
@@ -51,7 +51,7 @@ impl Stores {
                 let (u, p) = (env("MONEY_AMAZON_USERNAME_FILE"), env("MONEY_AMAZON_PASSWORD_FILE"));
                 if u.is_some() != p.is_some() {
                     bail!(
-                        "MONEY_AMAZON_USERNAME_FILE and MONEY_AMAZON_PASSWORD_FILE go together; set both, or neither and sign in on the stores page"
+                        "MONEY_AMAZON_USERNAME_FILE and MONEY_AMAZON_PASSWORD_FILE go together; set both, or neither and sign in on the settings page"
                     );
                 }
                 Some(AmazonOrders {
@@ -81,7 +81,7 @@ pub const DEFAULT_ARGS: [&str; 5] = ["orders", "--last-30-days", "--full-details
 pub struct AmazonOrders {
     pub program: PathBuf,
     pub args: Vec<String>,
-    /// The sign-in's files; none, and it is the stores page's
+    /// The sign-in's files; none, and it is the settings page's
     /// ([`crate::vault`]).
     pub username_file: Option<PathBuf>,
     pub password_file: Option<PathBuf>,
@@ -110,7 +110,7 @@ impl AmazonOrders {
         }
         crate::vault::Vault::load(data)?
             .amazon
-            .ok_or_else(|| anyhow!("no Amazon login: give one on the stores page (/stores)"))
+            .ok_or_else(|| anyhow!("no Amazon login: give one on the settings page (/settings)"))
     }
 
     /// What the program prints, run once with its home in `data`.
@@ -209,7 +209,7 @@ mod tests {
     fn the_stores_are_told_by_the_environment() {
         assert!(!Stores::from_env(&vars(&[])).unwrap().any());
         let page = Stores::from_env(&vars(&[("MONEY_AMAZON_ORDERS", "/bin/amazon-orders")])).unwrap();
-        assert_eq!(page.amazon.unwrap().username_file, None, "the stores page's login");
+        assert_eq!(page.amazon.unwrap().username_file, None, "the settings page's login");
         let e = Stores::from_env(&vars(&[
             ("MONEY_AMAZON_ORDERS", "/bin/amazon-orders"),
             ("MONEY_AMAZON_USERNAME_FILE", "/c/u"),
@@ -262,20 +262,19 @@ mod tests {
         };
         let e = wrong.run(dir.path()).unwrap_err().to_string();
         assert!(e.contains("bad password") && !e.contains("nope"), "{e}");
-        // No files: the stores page's login, or none yet.
+        // No files: the settings page's login, or none yet.
         let page = AmazonOrders {
             username_file: None,
             password_file: None,
             ..a
         };
-        assert!(page.run(dir.path()).unwrap_err().to_string().contains("stores page"));
+        assert!(page.run(dir.path()).unwrap_err().to_string().contains("settings page"));
         let v = crate::vault::Vault {
             amazon: Some(crate::vault::AmazonLogin {
                 username: "me@example.com".into(),
                 password: "hunter2".into(),
                 otp_secret: None,
             }),
-            ..Default::default()
         };
         v.save(dir.path()).unwrap();
         assert!(page.run(dir.path()).unwrap().contains("order_number"));

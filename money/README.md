@@ -118,21 +118,15 @@ beside what the bank says was paid:
   or the payee's last). All one category is just that category. The split
   is written again when the receipt is matched or an item is filed.
 
-**The stores page** (`server/src/setup.rs`, at `/stores`) sets them up,
-and nothing it is told is part of the budget. You sign in the way the
-browser client does. Amazon's login (an authenticator secret too, for an
-account with two-step verification) and each store's upload key are kept
-in `<data>/stores.json`, readable by the server alone (`server/src/vault.rs`),
-never a row, so never in the log or on a device. The page is told only who,
-masked. Costco's password never reaches money at all. The page makes a
-bookmarklet carrying an upload key. Clicked on a signed-in costco.com
-page, it asks Costco's receipts query with that page's session and posts
-the answer to `/stores/upload/costco?key=…`, or saves it as a file for the
-page's upload when costco.com will not let it reach the server. Any
-store's export can be uploaded on the page as well.
+**The settings page** (`server/src/setup.rs`, at `/settings`) sets up
+Amazon, and nothing it is told is part of the budget. You sign in the way
+the browser client does. Amazon's login, with an authenticator secret for
+an account with two-step verification, is kept in `<data>/stores.json`,
+readable by the server alone (`server/src/vault.rs`). It is never a row, so
+it is never in the log or on a device. The page is told only who, masked.
 
 **The server gathers them** (`server/src/stores.rs`) on each importer run
-(at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`) signed in by the stores
+(at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`) signed in by the settings
 page's login, or by `MONEY_AMAZON_USERNAME_FILE`, `MONEY_AMAZON_PASSWORD_FILE`
 and `MONEY_AMAZON_OTP_SECRET_FILE` when the server is given them. The login
 goes to that program alone, with its session kept in `<data>/amazon-orders`.
