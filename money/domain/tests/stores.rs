@@ -21,7 +21,10 @@ fn amazon_orders_prints_orders() {
     assert_eq!((r.date.as_str(), r.total), ("2026-10-02", -1_653));
     assert_eq!(
         items(r),
-        [("Vital Farms Pasture-Raised Eggs, 12 Count", "B07XYZ", 1000, -649), ("Scotch-Brite Sponges, 9 pack", "B000PCWKV2", 2000, -900)]
+        [
+            ("Vital Farms Pasture-Raised Eggs, 12 Count", "B07XYZ", 1000, -649),
+            ("Scotch-Brite Sponges, 9 pack", "B000PCWKV2", 2000, -900)
+        ]
     );
     assert_eq!(items(&got.receipts[1]), [("USB-C cable", "B0C", 1000, -899)]);
     assert!(amazon("Order ID,Order Date\n1,2026-10-01").is_err());
@@ -33,7 +36,10 @@ fn amazon_orders_prints_orders() {
 fn costco_warehouse_and_gas() {
     let got = costco(include_str!("stores/costco.json")).unwrap();
     let (shop, gas) = (&got.receipts[0], &got.receipts[1]);
-    assert_eq!((shop.date.as_str(), shop.total, shop.place.as_str()), ("2026-10-12", -4_720, "Costco MAPLEWOOD"));
+    assert_eq!(
+        (shop.date.as_str(), shop.total, shop.place.as_str()),
+        ("2026-10-12", -4_720, "Costco MAPLEWOOD")
+    );
     assert_eq!(
         items(shop),
         [
@@ -53,7 +59,10 @@ fn costco_warehouse_and_gas() {
 fn target_orders() {
     let got = read("target", include_str!("stores/target.json")).unwrap();
     let r = &got.receipts[0];
-    assert_eq!((r.order_id.as_str(), r.date.as_str(), r.total, r.place.as_str()), ("9120004511", "2026-10-25", -8_740, "Target Maplewood"));
+    assert_eq!(
+        (r.order_id.as_str(), r.date.as_str(), r.total, r.place.as_str()),
+        ("9120004511", "2026-10-25", -8_740, "Target Maplewood")
+    );
     assert_eq!(
         items(r),
         [

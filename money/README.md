@@ -8,7 +8,8 @@ figure a view kept up to date by the rows a change touched.
 ```
 domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
-           transactions.rs; plaid.rs, the bank import; seed.rs, the
+           transactions.rs; plaid.rs, the bank import; receipts.rs and
+           stores.rs, the stores' receipts; migrations.rs; seed.rs, the
            demo's household (the `seed` feature)
 server/    money-server: the hub, sign-in, the browser client, and the
            bank importer (src/importer.rs, Plaid over src/plaid.rs);
@@ -67,10 +68,67 @@ budget side is spending like any other. Reconciling agrees with the bank's
 balance, adds an adjustment for any difference, and locks what it agreed
 to.
 
+**Categories are one tree** (`domain/src/categories.rs`). A category
+with no parent is a heading, which the budget draws as a group. One under
+a heading is an envelope: a month gives money to it, and it has Assigned,
+Activity and Available. One under an envelope, at any depth, is a kind of
+it (`Everyday › Groceries › Eggs`). Its spending is its envelope's, and
+nothing is assigned to it. The budget draws headings and envelopes as it
+did; `categories.tree` is the whole tree, and `categories.add_subcategory`
+adds a kind. Groups were a table of their own until
+`migrations/categories-as-a-tree.json`, whose step makes each a heading.
+
+**A transaction can be split by amounts** (`transactions.split`): its
+amount in lines, each for a category of its own, adding up to it. A line
+for no category yet leaves it needing one, in the inbox. Activity, Ready
+to Assign and Reflect read the lines. Giving a split transaction one
+category unsplits it, and its amount changes only with its lines.
+
 **Not built:** YNAB's credit-card payment categories. Spending on a card
 comes out of its categories as cash spending would, and paying the card
-is a transfer. Splits, scheduled transactions, goals with dates, and
-moving categories by drag are also missing.
+is a transfer. Scheduled transactions, goals with dates, and moving
+categories by drag are also missing.
+
+## The stores' receipts
+
+`domain/src/receipts.rs` keeps what a store says was bought, line by line,
+beside what the bank says was paid:
+
+- **Adapters** (`domain/src/stores.rs`) read an export into one
+  `ReceiptImport`. Amazon's is what `amazon-orders orders --full-details
+  -o json` prints. Target's is the JSON its order history loads. Costco's
+  is its Orders & Purchases page's `receiptsWithCounts` JSON, warehouse and
+  gas station alike (fuel in gallons). Amazon's is the library's own
+  serializer. Target's and Costco's are their sites' unpublished JSON, read
+  under the names they have been seen with.
+- **Filing an item.** An item is filed under the category the same
+  store's same item was filed under last (by its ASIN, TCIN or item
+  number), or under a category whose name is in its own ("Eggs" in `KS
+  ORGANIC EGGS 24CT`). Filing one (`receipts.file_items`) files every
+  unfiled item with the same key. `receipts.items` lists a category's
+  items from every store, with what one cost.
+- **Paid by.** A receipt is paid by a transaction for the same amount, on
+  budget, from the store's payee, from two days before it to four days
+  after (two weeks for Amazon). Whichever arrives second makes the match,
+  and `receipts.pay` says otherwise.
+- **The split.** A paid receipt splits its transaction: its items' amounts
+  summed by category, and each sum's share of what the bank took. Tax and
+  rounding are spread in proportion, and the lines add up to the cent.
+  Items not filed yet go where the transaction went before (its category,
+  or the payee's last). All one category is just that category. The split
+  is written again when the receipt is matched or an item is filed.
+
+**The server gathers them** (`server/src/stores.rs`) on each importer run
+(at start, on its timer, on Sync). It runs `amazon-orders` signed in by
+`MONEY_AMAZON_USERNAME_FILE`, `MONEY_AMAZON_PASSWORD_FILE` and
+`MONEY_AMAZON_OTP_SECRET_FILE`, each given to that program alone, with
+its session kept in `<data>/amazon-orders`. It reads a folder of exports
+(`MONEY_RECEIPTS_DIR`: `target/`, `costco/`, `amazon/`), moving each file
+to `imported/`, or to `failed/` when it does not read. The module's
+options are `amazon.{package, args, usernameFile, passwordFile,
+otpSecretFile}` and `receiptsDir`. Target and Costco have no program like
+`amazon-orders`, so their exports are saved from the browser into the
+folder.
 
 ## The bank, through Plaid
 
@@ -199,8 +257,9 @@ uncleared and working balances; and Reflect, where the month's spending
 went.
 
 **What is verified:** the domain's rules, transfers, reconciliation, the
-import's phases, the accounts a server names and does not follow, and
-every view against a fresh evaluation (`domain/tests/`); the demo's
+import's phases, the accounts a server names and does not follow, the
+tree, splits, receipts and their adapters, the migration of groups into
+the tree, and every view against a fresh evaluation (`domain/tests/`); the demo's
 seed, and every button the tests press (`iced/src/tests.rs`). The server
 in the process on a real port (`server/tests/`): signing in through the
 routes and syncing on the socket, a phone's code sent back to
@@ -215,7 +274,9 @@ a server in the process and its Sync lands as an ask
 (`iced/src/tests.rs`). `services.money` is evaluated under its
 configurations (`checks.money-module`). The desktop demo window has been
 opened under Xvfb and each page looked at.
-**What is not:** real Plaid (sandbox or production); a real OpenID
+**What is not:** real Plaid (sandbox or production); real
+`amazon-orders` against Amazon, and Target's and Costco's JSON as their
+sites serve it today; the phones built against the regenerated types; a real OpenID
 provider in front of this server (the routes are ark-auth's, which
 harken's deployment uses); the module on a booted machine (the timer's
 signal, the credentials, the hardening); the live window drawn, on the

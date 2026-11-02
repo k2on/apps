@@ -59,6 +59,15 @@ data class AddGroup(val name: String) {
     }
 }
 
+/** The record `AddSubcategory`. */
+data class AddSubcategory(val parentId: Id, val name: String) {
+    fun json(): String = "{" + "\"parent_id\":" + J.q(parentId.hex) + "," + "\"name\":" + J.q(name) + "}"
+
+    companion object {
+        fun of(j: Any?): AddSubcategory = (j as JSONObject).let { o -> AddSubcategory(Id(J.text(o.opt("parent_id"))), J.text(o.opt("name"))) }
+    }
+}
+
 /** The record `AddTransaction`. */
 data class AddTransaction(val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Boolean, val transferTo: Id?) {
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"transfer_to\":" + J.wopt(transferTo) { v0 -> J.q(v0.hex) } + "}"
@@ -188,11 +197,29 @@ data class Categorize(val ids: List<Id>, val categoryId: Id?) {
 }
 
 /** The record `Category`. */
-data class Category(val id: Id, val groupId: Id, val name: String, val pos: Long, val hidden: Boolean, val target: Long, val note: String, val createdMs: Long, val userId: String) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"target\":" + target.toString() + "," + "\"note\":" + J.q(note) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+data class Category(val id: Id, val parentId: Id?, val name: String, val pos: Long, val hidden: Boolean, val income: Boolean, val target: Long, val note: String, val createdMs: Long, val userId: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"parent_id\":" + J.wopt(parentId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"income\":" + income.toString() + "," + "\"target\":" + target.toString() + "," + "\"note\":" + J.q(note) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
-        fun of(j: Any?): Category = (j as JSONObject).let { o -> Category(Id(J.text(o.opt("id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.text(o.opt("note")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+        fun of(j: Any?): Category = (j as JSONObject).let { o -> Category(Id(J.text(o.opt("id"))), J.opt(o.opt("parent_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.bool(o.opt("income")), J.int(o.opt("target")), J.text(o.opt("note")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+    }
+}
+
+/** The record `CategoryNode`. */
+data class CategoryNode(val id: Id, val parentId: Id?, val name: String, val path: String, val depth: Long, val hidden: Boolean, val income: Boolean, val order: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"parent_id\":" + J.wopt(parentId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"path\":" + J.q(path) + "," + "\"depth\":" + depth.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"income\":" + income.toString() + "," + "\"order\":" + J.q(order) + "}"
+
+    companion object {
+        fun of(j: Any?): CategoryNode = (j as JSONObject).let { o -> CategoryNode(Id(J.text(o.opt("id"))), J.opt(o.opt("parent_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("path")), J.int(o.opt("depth")), J.bool(o.opt("hidden")), J.bool(o.opt("income")), J.text(o.opt("order"))) }
+    }
+}
+
+/** The record `ClassifyItems`. */
+data class ClassifyItems(val items: List<ItemRef>, val categoryId: Id?) {
+    fun json(): String = "{" + "\"items\":" + J.wlist(items) { v0 -> v0.json() } + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
+
+    companion object {
+        fun of(j: Any?): ClassifyItems = (j as JSONObject).let { o -> ClassifyItems(J.list(o.opt("items")) { v0 -> ItemRef.of(v0) }, J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
 
@@ -258,15 +285,6 @@ data class Grant(val user: String, val role: String) {
     }
 }
 
-/** The record `Group`. */
-data class Group(val id: Id, val name: String, val pos: Long, val hidden: Boolean, val income: Boolean, val createdMs: Long, val userId: String) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"income\":" + income.toString() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
-
-    companion object {
-        fun of(j: Any?): Group = (j as JSONObject).let { o -> Group(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.bool(o.opt("income")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
-    }
-}
-
 /** The record `GroupLine` (UniFFI's): its JSON, for the functions called by name. */
 fun GroupLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "}"
 
@@ -308,6 +326,42 @@ data class Import(val bank: String, val institution: String, val cursor: String,
     }
 }
 
+/** The record `Item`. */
+data class Item(val receiptId: String, val line: Long, val name: String, val sku: String, val same: String, val quantity: Long, val unit: String, val amount: Long, val categoryId: Id?) {
+    fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"line\":" + line.toString() + "," + "\"name\":" + J.q(name) + "," + "\"sku\":" + J.q(sku) + "," + "\"same\":" + J.q(same) + "," + "\"quantity\":" + quantity.toString() + "," + "\"unit\":" + J.q(unit) + "," + "\"amount\":" + amount.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
+
+    companion object {
+        fun of(j: Any?): Item = (j as JSONObject).let { o -> Item(J.text(o.opt("receipt_id")), J.int(o.opt("line")), J.text(o.opt("name")), J.text(o.opt("sku")), J.text(o.opt("same")), J.int(o.opt("quantity")), J.text(o.opt("unit")), J.int(o.opt("amount")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
+
+/** The record `ItemLine`. */
+data class ItemLine(val receiptId: String, val line: Long, val store: String, val date: String, val place: String, val name: String, val sku: String, val quantity: Long, val unit: String, val amount: Long, val unitPrice: Long, val categoryId: Id?, val category: String) {
+    fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"line\":" + line.toString() + "," + "\"store\":" + J.q(store) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"name\":" + J.q(name) + "," + "\"sku\":" + J.q(sku) + "," + "\"quantity\":" + quantity.toString() + "," + "\"unit\":" + J.q(unit) + "," + "\"amount\":" + amount.toString() + "," + "\"unit_price\":" + unitPrice.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "}"
+
+    companion object {
+        fun of(j: Any?): ItemLine = (j as JSONObject).let { o -> ItemLine(J.text(o.opt("receipt_id")), J.int(o.opt("line")), J.text(o.opt("store")), J.text(o.opt("date")), J.text(o.opt("place")), J.text(o.opt("name")), J.text(o.opt("sku")), J.int(o.opt("quantity")), J.text(o.opt("unit")), J.int(o.opt("amount")), J.int(o.opt("unit_price")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category"))) }
+    }
+}
+
+/** The record `ItemRef`. */
+data class ItemRef(val receiptId: String, val line: Long) {
+    fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"line\":" + line.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): ItemRef = (j as JSONObject).let { o -> ItemRef(J.text(o.opt("receipt_id")), J.int(o.opt("line"))) }
+    }
+}
+
+/** The record `ItemsIn`. */
+data class ItemsIn(val categoryId: Id?) {
+    fun json(): String = "{" + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
+
+    companion object {
+        fun of(j: Any?): ItemsIn = (j as JSONObject).let { o -> ItemsIn(J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
+
 /** The record `LinkAccount`. */
 data class LinkAccount(val plaidAccountId: String, val accountId: Id) {
     fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"account_id\":" + J.q(accountId.hex) + "}"
@@ -330,6 +384,15 @@ data class Linked(val plaidAccountId: String, val bank: String, val accountId: I
 fun LinkedLine.json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"account\":" + J.q(account) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "}"
 
 fun LinkedLine.Companion.of(j: Any?): LinkedLine = (j as JSONObject).let { o -> LinkedLine(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("account")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored"))) }
+
+/** The record `MatchReceipt`. */
+data class MatchReceipt(val receiptId: String, val txnId: Id?) {
+    fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "}"
+
+    companion object {
+        fun of(j: Any?): MatchReceipt = (j as JSONObject).let { o -> MatchReceipt(J.text(o.opt("receipt_id")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
 
 /** The record `Month`. */
 data class Month(val month: String) {
@@ -367,6 +430,15 @@ data class MoveMoney(val month: String, val from: Id?, val to: Id?, val amount: 
     }
 }
 
+/** The record `OneTxn`. */
+data class OneTxn(val id: Id) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
+
+    companion object {
+        fun of(j: Any?): OneTxn = (j as JSONObject).let { o -> OneTxn(Id(J.text(o.opt("id")))) }
+    }
+}
+
 /** The record `OpenAccount`. */
 data class OpenAccount(val name: String, val kind: String, val onBudget: Boolean, val balance: Long, val date: String) {
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"kind\":" + J.q(kind) + "," + "\"on_budget\":" + onBudget.toString() + "," + "\"balance\":" + balance.toString() + "," + "\"date\":" + J.q(date) + "}"
@@ -380,6 +452,33 @@ data class OpenAccount(val name: String, val kind: String, val onBudget: Boolean
 fun PayeeLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"count\":" + count.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
 fun PayeeLine.Companion.of(j: Any?): PayeeLine = (j as JSONObject).let { o -> PayeeLine(J.text(o.opt("name")), J.int(o.opt("count")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
+
+/** The record `Receipt`. */
+data class Receipt(val id: String, val store: String, val date: String, val place: String, val total: Long, val txnId: Id?, val importedMs: Long, val userId: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"store\":" + J.q(store) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"total\":" + total.toString() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"imported_ms\":" + importedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+
+    companion object {
+        fun of(j: Any?): Receipt = (j as JSONObject).let { o -> Receipt(J.text(o.opt("id")), J.text(o.opt("store")), J.text(o.opt("date")), J.text(o.opt("place")), J.int(o.opt("total")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("imported_ms")), J.text(o.opt("user_id"))) }
+    }
+}
+
+/** The record `ReceiptImport`. */
+data class ReceiptImport(val store: String, val receipts: List<StoreReceipt>) {
+    fun json(): String = "{" + "\"store\":" + J.q(store) + "," + "\"receipts\":" + J.wlist(receipts) { v0 -> v0.json() } + "}"
+
+    companion object {
+        fun of(j: Any?): ReceiptImport = (j as JSONObject).let { o -> ReceiptImport(J.text(o.opt("store")), J.list(o.opt("receipts")) { v0 -> StoreReceipt.of(v0) }) }
+    }
+}
+
+/** The record `ReceiptLine`. */
+data class ReceiptLine(val id: String, val store: String, val date: String, val place: String, val total: Long, val items: Long, val filed: Long, val txnId: Id?, val payee: String, val account: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"store\":" + J.q(store) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"total\":" + total.toString() + "," + "\"items\":" + items.toString() + "," + "\"filed\":" + filed.toString() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"payee\":" + J.q(payee) + "," + "\"account\":" + J.q(account) + "}"
+
+    companion object {
+        fun of(j: Any?): ReceiptLine = (j as JSONObject).let { o -> ReceiptLine(J.text(o.opt("id")), J.text(o.opt("store")), J.text(o.opt("date")), J.text(o.opt("place")), J.int(o.opt("total")), J.int(o.opt("items")), J.int(o.opt("filed")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("payee")), J.text(o.opt("account"))) }
+    }
+}
 
 /** The record `Reconcile`. */
 data class Reconcile(val accountId: Id, val balance: Long, val date: String) {
@@ -476,17 +575,71 @@ fun SpendingLine.json(): String = "{" + "\"group_id\":" + J.q(groupId.hex) + ","
 
 fun SpendingLine.Companion.of(j: Any?): SpendingLine = (j as JSONObject).let { o -> SpendingLine(Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("pos")), J.int(o.opt("spent"))) }
 
+/** The record `Split`. */
+data class Split(val txnId: Id, val line: Long, val categoryId: Id?, val date: String, val amount: Long, val memo: String) {
+    fun json(): String = "{" + "\"txn_id\":" + J.q(txnId.hex) + "," + "\"line\":" + line.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"date\":" + J.q(date) + "," + "\"amount\":" + amount.toString() + "," + "\"memo\":" + J.q(memo) + "}"
+
+    companion object {
+        fun of(j: Any?): Split = (j as JSONObject).let { o -> Split(Id(J.text(o.opt("txn_id"))), J.int(o.opt("line")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("date")), J.int(o.opt("amount")), J.text(o.opt("memo"))) }
+    }
+}
+
+/** The record `SplitLine`. */
+data class SplitLine(val txnId: Id, val line: Long, val categoryId: Id?, val category: String, val amount: Long, val memo: String) {
+    fun json(): String = "{" + "\"txn_id\":" + J.q(txnId.hex) + "," + "\"line\":" + line.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "," + "\"amount\":" + amount.toString() + "," + "\"memo\":" + J.q(memo) + "}"
+
+    companion object {
+        fun of(j: Any?): SplitLine = (j as JSONObject).let { o -> SplitLine(Id(J.text(o.opt("txn_id"))), J.int(o.opt("line")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category")), J.int(o.opt("amount")), J.text(o.opt("memo"))) }
+    }
+}
+
+/** The record `SplitPart`. */
+data class SplitPart(val categoryId: Id?, val amount: Long, val memo: String) {
+    fun json(): String = "{" + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"amount\":" + amount.toString() + "," + "\"memo\":" + J.q(memo) + "}"
+
+    companion object {
+        fun of(j: Any?): SplitPart = (j as JSONObject).let { o -> SplitPart(J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("amount")), J.text(o.opt("memo"))) }
+    }
+}
+
+/** The record `SplitTxn`. */
+data class SplitTxn(val id: Id, val lines: List<SplitPart>) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"lines\":" + J.wlist(lines) { v0 -> v0.json() } + "}"
+
+    companion object {
+        fun of(j: Any?): SplitTxn = (j as JSONObject).let { o -> SplitTxn(Id(J.text(o.opt("id"))), J.list(o.opt("lines")) { v0 -> SplitPart.of(v0) }) }
+    }
+}
+
+/** The record `StoreItem`. */
+data class StoreItem(val name: String, val sku: String, val quantity: Long, val unit: String, val amount: Long) {
+    fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"sku\":" + J.q(sku) + "," + "\"quantity\":" + quantity.toString() + "," + "\"unit\":" + J.q(unit) + "," + "\"amount\":" + amount.toString() + "}"
+
+    companion object {
+        fun of(j: Any?): StoreItem = (j as JSONObject).let { o -> StoreItem(J.text(o.opt("name")), J.text(o.opt("sku")), J.int(o.opt("quantity")), J.text(o.opt("unit")), J.int(o.opt("amount"))) }
+    }
+}
+
+/** The record `StoreReceipt`. */
+data class StoreReceipt(val orderId: String, val date: String, val place: String, val total: Long, val items: List<StoreItem>) {
+    fun json(): String = "{" + "\"order_id\":" + J.q(orderId) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"total\":" + total.toString() + "," + "\"items\":" + J.wlist(items) { v0 -> v0.json() } + "}"
+
+    companion object {
+        fun of(j: Any?): StoreReceipt = (j as JSONObject).let { o -> StoreReceipt(J.text(o.opt("order_id")), J.text(o.opt("date")), J.text(o.opt("place")), J.int(o.opt("total")), J.list(o.opt("items")) { v0 -> StoreItem.of(v0) }) }
+    }
+}
+
 /** The record `Summary` (UniFFI's): its JSON, for the functions called by name. */
 fun Summary.json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"ready_to_assign\":" + readyToAssign.toString() + "," + "\"income\":" + income.toString() + "," + "\"assigned\":" + assigned.toString() + "," + "\"activity\":" + activity.toString() + "," + "\"available\":" + available.toString() + "," + "\"overspent_last_month\":" + overspentLastMonth.toString() + "," + "\"overspent\":" + overspent.toString() + "," + "\"underfunded\":" + underfunded.toString() + "}"
 
 fun Summary.Companion.of(j: Any?): Summary = (j as JSONObject).let { o -> Summary(J.text(o.opt("month")), J.int(o.opt("ready_to_assign")), J.int(o.opt("income")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("overspent_last_month")), J.int(o.opt("overspent")), J.int(o.opt("underfunded"))) }
 
 /** The record `Txn`. */
-data class Txn(val id: Id, val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Cleared, val approved: Boolean, val transferAccount: Id?, val transferId: Id?, val importedId: String?, val importedPayee: String, val createdMs: Long, val userId: String) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer_account\":" + J.wopt(transferAccount) { v0 -> J.q(v0.hex) } + "," + "\"transfer_id\":" + J.wopt(transferId) { v0 -> J.q(v0.hex) } + "," + "\"imported_id\":" + J.wopt(importedId) { v0 -> J.q(v0) } + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+data class Txn(val id: Id, val accountId: Id, val date: String, val payee: String, val categoryId: Id?, val memo: String, val amount: Long, val cleared: Cleared, val approved: Boolean, val transferAccount: Id?, val transferId: Id?, val importedId: String?, val importedPayee: String, val createdMs: Long, val userId: String, val split: Boolean) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer_account\":" + J.wopt(transferAccount) { v0 -> J.q(v0.hex) } + "," + "\"transfer_id\":" + J.wopt(transferId) { v0 -> J.q(v0.hex) } + "," + "\"imported_id\":" + J.wopt(importedId) { v0 -> J.q(v0) } + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"split\":" + split.toString() + "}"
 
     companion object {
-        fun of(j: Any?): Txn = (j as JSONObject).let { o -> Txn(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.opt(o.opt("transfer_account")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("transfer_id")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("imported_id")) { v0 -> J.text(v0) }, J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+        fun of(j: Any?): Txn = (j as JSONObject).let { o -> Txn(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.opt(o.opt("transfer_account")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("transfer_id")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("imported_id")) { v0 -> J.text(v0) }, J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id")), J.bool(o.opt("split"))) }
     }
 }
 
@@ -566,6 +719,9 @@ class Money(val peer: Peer) {
     /** `categories.add_group`: its intent's id. */
     fun addGroup(input: AddGroup): String = peer.mutate("categories.add_group", input.json())
 
+    /** `categories.add_subcategory`: its intent's id. */
+    fun addSubcategory(input: AddSubcategory): String = peer.mutate("categories.add_subcategory", input.json())
+
     /** `categories.delete_category`: its intent's id. */
     fun deleteCategory(input: DeleteCategory): String = peer.mutate("categories.delete_category", input.json())
 
@@ -592,6 +748,24 @@ class Money(val peer: Peer) {
 
     /** `categories.set_target`: its intent's id. */
     fun setTarget(input: SetTarget): String = peer.mutate("categories.set_target", input.json())
+
+    /** `categories.tree`, kept. */
+    fun tree(): View<CategoryNode> = View(peer.view("categories.tree", "null")) { j -> CategoryNode.of(j) }
+
+    /** `receipts.add_receipts`: its intent's id. */
+    fun addReceipts(input: ReceiptImport): String = peer.mutate("receipts.add_receipts", input.json())
+
+    /** `receipts.file_items`: its intent's id. */
+    fun fileItems(input: ClassifyItems): String = peer.mutate("receipts.file_items", input.json())
+
+    /** `receipts.items`, kept. */
+    fun items(input: ItemsIn): View<ItemLine> = View(peer.view("receipts.items", input.json())) { j -> ItemLine.of(j) }
+
+    /** `receipts.pay`: its intent's id. */
+    fun pay(input: MatchReceipt): String = peer.mutate("receipts.pay", input.json())
+
+    /** `receipts.receipts`, kept. */
+    fun receipts(): View<ReceiptLine> = View(peer.view("receipts.receipts", "null")) { j -> ReceiptLine.of(j) }
 
     /** `role.grant`: its intent's id. */
     fun grant(input: Grant): String = peer.mutate("role.grant", input.json())
@@ -637,6 +811,12 @@ class Money(val peer: Peer) {
 
     /** `transactions.set_cleared`: its intent's id. */
     fun setCleared(input: SetCleared): String = peer.mutate("transactions.set_cleared", input.json())
+
+    /** `transactions.split`: its intent's id. */
+    fun split(input: SplitTxn): String = peer.mutate("transactions.split", input.json())
+
+    /** `transactions.splits`, kept. */
+    fun splits(input: OneTxn): View<SplitLine> = View(peer.view("transactions.splits", input.json())) { j -> SplitLine.of(j) }
 
     private fun typed(v: AccountLineView): View<AccountLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
 

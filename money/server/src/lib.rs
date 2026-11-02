@@ -24,6 +24,7 @@
 
 pub mod importer;
 pub mod plaid;
+pub mod stores;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +56,8 @@ pub struct Config {
     pub serve: ark_peer::Serve,
     /// The banks, when the server holds Plaid's keys.
     pub banks: Option<Banks>,
+    /// The stores' receipts: `amazon-orders`, and a folder of exports.
+    pub stores: stores::Stores,
 }
 
 impl std::ops::Deref for Config {
@@ -76,6 +79,7 @@ impl Config {
         Config {
             serve: ark_peer::Serve::dev(listen, data),
             banks: None,
+            stores: stores::Stores::default(),
         }
     }
 
@@ -97,6 +101,16 @@ impl Config {
     ///                         as JSON: `{"Chase Checking": {"item": "chase",
     ///                         "mask": "1234"}, …}` (`accountId` for a mask
     ///                         two share)
+    /// MONEY_AMAZON_ORDERS     the amazon-orders program: Amazon's orders
+    ///                         each run ([`stores`])
+    /// MONEY_AMAZON_ARGS       what it is run with (`orders --last-30-days
+    ///                         --full-details -o json`)
+    /// MONEY_AMAZON_USERNAME_FILE, MONEY_AMAZON_PASSWORD_FILE
+    ///                         its sign-in, a file each
+    /// MONEY_AMAZON_OTP_SECRET_FILE
+    ///                         the one-time code's secret, when the account
+    ///                         has one
+    /// MONEY_RECEIPTS_DIR      a folder of exports: `<store>/*.json`
     /// ```
     pub fn from_env(listen: &str) -> Result<Config> {
         Config::from_vars(listen, |k| std::env::var(k).ok())
@@ -106,7 +120,11 @@ impl Config {
     pub fn from_vars(listen: &str, var: impl Fn(&str) -> Option<String>) -> Result<Config> {
         let serve = ark_peer::Serve::from_vars("MONEY", listen, &var)?;
         let env = |k: &str| var(k).filter(|v| !v.trim().is_empty());
-        Ok(Config { serve, banks: banks(&env)? })
+        Ok(Config {
+            serve,
+            banks: banks(&env)?,
+            stores: stores::Stores::from_env(&env)?,
+        })
     }
 }
 
@@ -277,14 +295,25 @@ pub async fn start(config: Config) -> Result<Server> {
         None => eprintln!("money-server: no browser client: set MONEY_WEB to a built one"),
     }
 
-    let importer = match config.banks.clone() {
-        Some(banks) => {
-            eprintln!(
-                "money-server: importing {} bank{} from {}",
-                banks.items.len(),
-                if banks.items.len() == 1 { "" } else { "s" },
-                banks.url
-            );
+    match &config.banks {
+        Some(banks) => eprintln!(
+            "money-server: importing {} bank{} from {}",
+            banks.items.len(),
+            if banks.items.len() == 1 { "" } else { "s" },
+            banks.url
+        ),
+        // Said out loud: a server with no keys looks exactly like one whose
+        // keys are misconfigured.
+        None => eprintln!("money-server: no bank importer: set MONEY_PLAID_CLIENT_ID_FILE and MONEY_PLAID_SECRET_FILE"),
+    }
+    if let Some(a) = &config.stores.amazon {
+        eprintln!("money-server: importing Amazon's orders with {}", a.program.display());
+    }
+    if let Some(d) = &config.stores.dir {
+        eprintln!("money-server: importing receipts dropped in {}", d.display());
+    }
+    let importer = match config.banks.is_some() || config.stores.any() {
+        true => {
             let account = Account {
                 id: importer::ACCOUNT.into(),
                 name: "Bank".into(),
@@ -295,14 +324,15 @@ pub async fn start(config: Config) -> Result<Server> {
             let login = tokio::task::spawn_blocking(move || auth.own(&account, importer::DEVICE))
                 .await?
                 .map_err(|e| anyhow!("signing the importer in: {e}"))?;
-            Some(Importer::start(banks, hub.clone(), config.data.clone(), login)?)
+            Some(Importer::start(
+                config.banks.clone(),
+                config.stores.clone(),
+                hub.clone(),
+                config.data.clone(),
+                login,
+            )?)
         }
-        // Said out loud: a server with no keys looks exactly like one whose
-        // keys are misconfigured.
-        None => {
-            eprintln!("money-server: no bank importer: set MONEY_PLAID_CLIENT_ID_FILE and MONEY_PLAID_SECRET_FILE");
-            None
-        }
+        false => None,
     };
 
     Ok(Server { running, auth, importer })

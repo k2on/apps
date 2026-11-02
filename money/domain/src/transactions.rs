@@ -150,10 +150,7 @@ pub fn write_split(db: &mut Db<Money>, t: Txn, lines: &[SplitPart], approve: boo
     }
     let sum: i64 = lines.iter().map(|l| l.amount).sum();
     if lines.len() > 1 && sum != t.amount {
-        return Err(Refusal::new(format!(
-            "a split's lines add up to its amount: {} of {}",
-            sum, t.amount
-        )));
+        return Err(Refusal::new(format!("a split's lines add up to its amount: {} of {}", sum, t.amount)));
     }
     let approved = t.approved || approve;
     let t = unsplit(db, t)?;
@@ -174,11 +171,7 @@ pub fn write_split(db: &mut Db<Money>, t: Txn, lines: &[SplitPart], approve: boo
             memo: l.memo.clone(),
         })?;
     }
-    db.txn.update(Txn {
-        split: true,
-        approved,
-        ..t
-    })
+    db.txn.update(Txn { split: true, approved, ..t })
 }
 
 /// A split transaction's lines dated as it is, after its date moved.
@@ -213,9 +206,7 @@ pub fn edit_transaction(_: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> 
     if t.split {
         match input.category_id {
             Some(_) => t = unsplit(db, t)?,
-            None if t.amount != input.amount => {
-                return Err(Refusal::new("split: change its lines with its amount, or give it one category"))
-            }
+            None if t.amount != input.amount => return Err(Refusal::new("split: change its lines with its amount, or give it one category")),
             None => {}
         }
     }

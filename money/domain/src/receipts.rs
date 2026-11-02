@@ -208,8 +208,12 @@ pub fn shares(total: i64, parts: &[i64]) -> Vec<i64> {
 
 /// A receipt's transaction split by its items, as this module's head says.
 pub fn split_by(db: &mut Db<Money>, receipt_id: &str) -> Result<(), Refusal> {
-    let Some(r) = db.receipt.get(receipt_id.to_string()) else { return Ok(()) };
-    let Some(t) = r.txn_id.and_then(|id| db.txn.get(id)) else { return Ok(()) };
+    let Some(r) = db.receipt.get(receipt_id.to_string()) else {
+        return Ok(());
+    };
+    let Some(t) = r.txn_id.and_then(|id| db.txn.get(id)) else {
+        return Ok(());
+    };
     let on_budget = db.account.get(t.account_id).is_some_and(|a| a.on_budget);
     if !on_budget || t.transfer_id.is_some() {
         return Ok(());
@@ -357,10 +361,7 @@ pub fn file_items(_: &Ctx, db: &mut Db<Money>, input: ClassifyItems) -> Result<(
     }
     let mut receipts: Vec<String> = vec![];
     for r in &input.items {
-        let item = db
-            .item
-            .get((r.receipt_id.clone(), r.line))
-            .ok_or_else(|| Refusal::new("no such item"))?;
+        let item = db.item.get((r.receipt_id.clone(), r.line)).ok_or_else(|| Refusal::new("no such item"))?;
         let mut same: Vec<Item> = match input.category_id {
             Some(_) => db
                 .item
@@ -396,10 +397,7 @@ pub fn file_items(_: &Ctx, db: &mut Db<Money>, input: ClassifyItems) -> Result<(
 /// when one.
 #[mutator("receipts.pay")]
 pub fn pay(_: &Ctx, db: &mut Db<Money>, input: MatchReceipt) -> Result<(), Refusal> {
-    let r = db
-        .receipt
-        .get(input.receipt_id.clone())
-        .ok_or_else(|| Refusal::new("no such receipt"))?;
+    let r = db.receipt.get(input.receipt_id.clone()).ok_or_else(|| Refusal::new("no such receipt"))?;
     if let Some(t) = input.txn_id {
         let t = db.txn.get(t).ok_or_else(|| Refusal::new("no such transaction"))?;
         if t.transfer_id.is_some() {

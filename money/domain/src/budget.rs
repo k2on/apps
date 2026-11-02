@@ -376,7 +376,12 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
             out.income += t.amount;
         }
     }
-    for s in db.split.by(Split::CATEGORY_ID_DATE).between((Some(rta), String::new()), (Some(rta), month_end(month))).all() {
+    for s in db
+        .split
+        .by(Split::CATEGORY_ID_DATE)
+        .between((Some(rta), String::new()), (Some(rta), month_end(month)))
+        .all()
+    {
         income_through += s.amount;
         if month_of(&s.date) == month {
             out.income += s.amount;
@@ -405,12 +410,15 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
 /// The groups the budget draws, in order; not the budget's own.
 #[view("budget.groups")]
 pub fn groups(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<GroupLine>, Refusal> {
-    Ok(scan::<Money, Category>().filter(|g| g.parent_id.is_none() && !g.income).sort(|g| (g.pos, g.id)).map(|g| GroupLine {
-        id: g.id,
-        name: g.name.clone(),
-        pos: g.pos,
-        hidden: g.hidden,
-    }))
+    Ok(scan::<Money, Category>()
+        .filter(|g| g.parent_id.is_none() && !g.income)
+        .sort(|g| (g.pos, g.id))
+        .map(|g| GroupLine {
+            id: g.id,
+            name: g.name.clone(),
+            pos: g.pos,
+            hidden: g.hidden,
+        }))
 }
 
 /// Every envelope in one month, in the budget's order. A line is kept by

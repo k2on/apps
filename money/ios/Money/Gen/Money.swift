@@ -63,6 +63,21 @@ public struct AddGroup: Equatable {
     public var json: String { J.obj(["\"name\":" + J.q(name)]) }
 }
 
+/// The record `AddSubcategory`.
+public struct AddSubcategory: Equatable {
+    public var parentId: Id
+    public var name: String
+
+    public init(parentId: Id, name: String) { self.parentId = parentId; self.name = name; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(parentId: Id(J.text(o["parent_id"])), name: J.text(o["name"]))
+    }
+
+    public var json: String { J.obj(["\"parent_id\":" + J.q(parentId.hex), "\"name\":" + J.q(name)]) }
+}
+
 /// The record `AddTransaction`.
 public struct AddTransaction: Equatable {
     public var accountId: Id
@@ -291,23 +306,60 @@ public struct Categorize: Equatable {
 /// The record `Category`.
 public struct Category: Equatable {
     public var id: Id
-    public var groupId: Id
+    public var parentId: Id?
     public var name: String
     public var pos: Int64
     public var hidden: Bool
+    public var income: Bool
     public var target: Int64
     public var note: String
     public var createdMs: Int64
     public var userId: String
 
-    public init(id: Id, groupId: Id, name: String, pos: Int64, hidden: Bool, target: Int64, note: String, createdMs: Int64, userId: String) { self.id = id; self.groupId = groupId; self.name = name; self.pos = pos; self.hidden = hidden; self.target = target; self.note = note; self.createdMs = createdMs; self.userId = userId; }
+    public init(id: Id, parentId: Id?, name: String, pos: Int64, hidden: Bool, income: Bool, target: Int64, note: String, createdMs: Int64, userId: String) { self.id = id; self.parentId = parentId; self.name = name; self.pos = pos; self.hidden = hidden; self.income = income; self.target = target; self.note = note; self.createdMs = createdMs; self.userId = userId; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: Id(J.text(o["id"])), groupId: Id(J.text(o["group_id"])), name: J.text(o["name"]), pos: J.int(o["pos"]), hidden: J.bool(o["hidden"]), target: J.int(o["target"]), note: J.text(o["note"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
+        self.init(id: Id(J.text(o["id"])), parentId: J.opt(o["parent_id"]) { v0 in Id(J.text(v0)) }, name: J.text(o["name"]), pos: J.int(o["pos"]), hidden: J.bool(o["hidden"]), income: J.bool(o["income"]), target: J.int(o["target"]), note: J.text(o["note"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"group_id\":" + J.q(groupId.hex), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"target\":" + String(target), "\"note\":" + J.q(note), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"parent_id\":" + J.wopt(parentId) { v0 in J.q(v0.hex) }, "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"income\":" + String(income), "\"target\":" + String(target), "\"note\":" + J.q(note), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
+}
+
+/// The record `CategoryNode`.
+public struct CategoryNode: Equatable {
+    public var id: Id
+    public var parentId: Id?
+    public var name: String
+    public var path: String
+    public var depth: Int64
+    public var hidden: Bool
+    public var income: Bool
+    public var order: String
+
+    public init(id: Id, parentId: Id?, name: String, path: String, depth: Int64, hidden: Bool, income: Bool, order: String) { self.id = id; self.parentId = parentId; self.name = name; self.path = path; self.depth = depth; self.hidden = hidden; self.income = income; self.order = order; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), parentId: J.opt(o["parent_id"]) { v0 in Id(J.text(v0)) }, name: J.text(o["name"]), path: J.text(o["path"]), depth: J.int(o["depth"]), hidden: J.bool(o["hidden"]), income: J.bool(o["income"]), order: J.text(o["order"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"parent_id\":" + J.wopt(parentId) { v0 in J.q(v0.hex) }, "\"name\":" + J.q(name), "\"path\":" + J.q(path), "\"depth\":" + String(depth), "\"hidden\":" + String(hidden), "\"income\":" + String(income), "\"order\":" + J.q(order)]) }
+}
+
+/// The record `ClassifyItems`.
+public struct ClassifyItems: Equatable {
+    public var items: [ItemRef]
+    public var categoryId: Id?
+
+    public init(items: [ItemRef], categoryId: Id?) { self.items = items; self.categoryId = categoryId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(items: J.list(o["items"]) { v0 in ItemRef(json: v0) }, categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) })
+    }
+
+    public var json: String { J.obj(["\"items\":" + J.wlist(items) { v0 in v0.json }, "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }]) }
 }
 
 /// The sum `Cleared` (UniFFI's): its JSON, for the functions called by name.
@@ -410,26 +462,6 @@ public struct Grant: Equatable {
     public var json: String { J.obj(["\"user\":" + J.q(user), "\"role\":" + J.q(role)]) }
 }
 
-/// The record `Group`.
-public struct Group: Equatable {
-    public var id: Id
-    public var name: String
-    public var pos: Int64
-    public var hidden: Bool
-    public var income: Bool
-    public var createdMs: Int64
-    public var userId: String
-
-    public init(id: Id, name: String, pos: Int64, hidden: Bool, income: Bool, createdMs: Int64, userId: String) { self.id = id; self.name = name; self.pos = pos; self.hidden = hidden; self.income = income; self.createdMs = createdMs; self.userId = userId; }
-
-    public init(json j: Any?) {
-        let o = j as! [String: Any]
-        self.init(id: Id(J.text(o["id"])), name: J.text(o["name"]), pos: J.int(o["pos"]), hidden: J.bool(o["hidden"]), income: J.bool(o["income"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
-    }
-
-    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"name\":" + J.q(name), "\"pos\":" + String(pos), "\"hidden\":" + String(hidden), "\"income\":" + String(income), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
-}
-
 /// The record `GroupLine` (UniFFI's): its JSON, for the functions called by name.
 extension GroupLine {
     public init(json j: Any?) {
@@ -504,6 +536,83 @@ public struct Import: Equatable {
     public var json: String { J.obj(["\"bank\":" + J.q(bank), "\"institution\":" + J.q(institution), "\"cursor\":" + J.q(cursor), "\"accounts\":" + J.wlist(accounts) { v0 in v0.json }, "\"upserts\":" + J.wlist(upserts) { v0 in v0.json }, "\"removed\":" + J.wlist(removed) { v0 in v0.json }]) }
 }
 
+/// The record `Item`.
+public struct Item: Equatable {
+    public var receiptId: String
+    public var line: Int64
+    public var name: String
+    public var sku: String
+    public var same: String
+    public var quantity: Int64
+    public var unit: String
+    public var amount: Int64
+    public var categoryId: Id?
+
+    public init(receiptId: String, line: Int64, name: String, sku: String, same: String, quantity: Int64, unit: String, amount: Int64, categoryId: Id?) { self.receiptId = receiptId; self.line = line; self.name = name; self.sku = sku; self.same = same; self.quantity = quantity; self.unit = unit; self.amount = amount; self.categoryId = categoryId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(receiptId: J.text(o["receipt_id"]), line: J.int(o["line"]), name: J.text(o["name"]), sku: J.text(o["sku"]), same: J.text(o["same"]), quantity: J.int(o["quantity"]), unit: J.text(o["unit"]), amount: J.int(o["amount"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) })
+    }
+
+    public var json: String { J.obj(["\"receipt_id\":" + J.q(receiptId), "\"line\":" + String(line), "\"name\":" + J.q(name), "\"sku\":" + J.q(sku), "\"same\":" + J.q(same), "\"quantity\":" + String(quantity), "\"unit\":" + J.q(unit), "\"amount\":" + String(amount), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }]) }
+}
+
+/// The record `ItemLine`.
+public struct ItemLine: Equatable {
+    public var receiptId: String
+    public var line: Int64
+    public var store: String
+    public var date: String
+    public var place: String
+    public var name: String
+    public var sku: String
+    public var quantity: Int64
+    public var unit: String
+    public var amount: Int64
+    public var unitPrice: Int64
+    public var categoryId: Id?
+    public var category: String
+
+    public init(receiptId: String, line: Int64, store: String, date: String, place: String, name: String, sku: String, quantity: Int64, unit: String, amount: Int64, unitPrice: Int64, categoryId: Id?, category: String) { self.receiptId = receiptId; self.line = line; self.store = store; self.date = date; self.place = place; self.name = name; self.sku = sku; self.quantity = quantity; self.unit = unit; self.amount = amount; self.unitPrice = unitPrice; self.categoryId = categoryId; self.category = category; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(receiptId: J.text(o["receipt_id"]), line: J.int(o["line"]), store: J.text(o["store"]), date: J.text(o["date"]), place: J.text(o["place"]), name: J.text(o["name"]), sku: J.text(o["sku"]), quantity: J.int(o["quantity"]), unit: J.text(o["unit"]), amount: J.int(o["amount"]), unitPrice: J.int(o["unit_price"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, category: J.text(o["category"]))
+    }
+
+    public var json: String { J.obj(["\"receipt_id\":" + J.q(receiptId), "\"line\":" + String(line), "\"store\":" + J.q(store), "\"date\":" + J.q(date), "\"place\":" + J.q(place), "\"name\":" + J.q(name), "\"sku\":" + J.q(sku), "\"quantity\":" + String(quantity), "\"unit\":" + J.q(unit), "\"amount\":" + String(amount), "\"unit_price\":" + String(unitPrice), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"category\":" + J.q(category)]) }
+}
+
+/// The record `ItemRef`.
+public struct ItemRef: Equatable {
+    public var receiptId: String
+    public var line: Int64
+
+    public init(receiptId: String, line: Int64) { self.receiptId = receiptId; self.line = line; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(receiptId: J.text(o["receipt_id"]), line: J.int(o["line"]))
+    }
+
+    public var json: String { J.obj(["\"receipt_id\":" + J.q(receiptId), "\"line\":" + String(line)]) }
+}
+
+/// The record `ItemsIn`.
+public struct ItemsIn: Equatable {
+    public var categoryId: Id?
+
+    public init(categoryId: Id?) { self.categoryId = categoryId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) })
+    }
+
+    public var json: String { J.obj(["\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }]) }
+}
+
 /// The record `LinkAccount`.
 public struct LinkAccount: Equatable {
     public var plaidAccountId: String
@@ -548,6 +657,21 @@ extension LinkedLine {
     }
 
     public var json: String { J.obj(["\"plaid_account_id\":" + J.q(plaidAccountId), "\"bank\":" + J.q(bank), "\"account_id\":" + J.wopt(accountId) { v0 in J.q(v0.hex) }, "\"account\":" + J.q(account), "\"name\":" + J.q(name), "\"mask\":" + J.q(mask), "\"kind\":" + J.q(kind), "\"balance\":" + J.wopt(balance) { v0 in String(v0) }, "\"ignored\":" + String(ignored)]) }
+}
+
+/// The record `MatchReceipt`.
+public struct MatchReceipt: Equatable {
+    public var receiptId: String
+    public var txnId: Id?
+
+    public init(receiptId: String, txnId: Id?) { self.receiptId = receiptId; self.txnId = txnId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(receiptId: J.text(o["receipt_id"]), txnId: J.opt(o["txn_id"]) { v0 in Id(J.text(v0)) })
+    }
+
+    public var json: String { J.obj(["\"receipt_id\":" + J.q(receiptId), "\"txn_id\":" + J.wopt(txnId) { v0 in J.q(v0.hex) }]) }
 }
 
 /// The record `Month`.
@@ -612,6 +736,20 @@ public struct MoveMoney: Equatable {
     public var json: String { J.obj(["\"month\":" + J.q(month), "\"from\":" + J.wopt(from) { v0 in J.q(v0.hex) }, "\"to\":" + J.wopt(to) { v0 in J.q(v0.hex) }, "\"amount\":" + String(amount)]) }
 }
 
+/// The record `OneTxn`.
+public struct OneTxn: Equatable {
+    public var id: Id
+
+    public init(id: Id) { self.id = id; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex)]) }
+}
+
 /// The record `OpenAccount`.
 public struct OpenAccount: Equatable {
     public var name: String
@@ -638,6 +776,65 @@ extension PayeeLine {
     }
 
     public var json: String { J.obj(["\"name\":" + J.q(name), "\"count\":" + String(count), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }]) }
+}
+
+/// The record `Receipt`.
+public struct Receipt: Equatable {
+    public var id: String
+    public var store: String
+    public var date: String
+    public var place: String
+    public var total: Int64
+    public var txnId: Id?
+    public var importedMs: Int64
+    public var userId: String
+
+    public init(id: String, store: String, date: String, place: String, total: Int64, txnId: Id?, importedMs: Int64, userId: String) { self.id = id; self.store = store; self.date = date; self.place = place; self.total = total; self.txnId = txnId; self.importedMs = importedMs; self.userId = userId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: J.text(o["id"]), store: J.text(o["store"]), date: J.text(o["date"]), place: J.text(o["place"]), total: J.int(o["total"]), txnId: J.opt(o["txn_id"]) { v0 in Id(J.text(v0)) }, importedMs: J.int(o["imported_ms"]), userId: J.text(o["user_id"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id), "\"store\":" + J.q(store), "\"date\":" + J.q(date), "\"place\":" + J.q(place), "\"total\":" + String(total), "\"txn_id\":" + J.wopt(txnId) { v0 in J.q(v0.hex) }, "\"imported_ms\":" + String(importedMs), "\"user_id\":" + J.q(userId)]) }
+}
+
+/// The record `ReceiptImport`.
+public struct ReceiptImport: Equatable {
+    public var store: String
+    public var receipts: [StoreReceipt]
+
+    public init(store: String, receipts: [StoreReceipt]) { self.store = store; self.receipts = receipts; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(store: J.text(o["store"]), receipts: J.list(o["receipts"]) { v0 in StoreReceipt(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"store\":" + J.q(store), "\"receipts\":" + J.wlist(receipts) { v0 in v0.json }]) }
+}
+
+/// The record `ReceiptLine`.
+public struct ReceiptLine: Equatable {
+    public var id: String
+    public var store: String
+    public var date: String
+    public var place: String
+    public var total: Int64
+    public var items: Int64
+    public var filed: Int64
+    public var txnId: Id?
+    public var payee: String
+    public var account: String
+
+    public init(id: String, store: String, date: String, place: String, total: Int64, items: Int64, filed: Int64, txnId: Id?, payee: String, account: String) { self.id = id; self.store = store; self.date = date; self.place = place; self.total = total; self.items = items; self.filed = filed; self.txnId = txnId; self.payee = payee; self.account = account; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: J.text(o["id"]), store: J.text(o["store"]), date: J.text(o["date"]), place: J.text(o["place"]), total: J.int(o["total"]), items: J.int(o["items"]), filed: J.int(o["filed"]), txnId: J.opt(o["txn_id"]) { v0 in Id(J.text(v0)) }, payee: J.text(o["payee"]), account: J.text(o["account"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id), "\"store\":" + J.q(store), "\"date\":" + J.q(date), "\"place\":" + J.q(place), "\"total\":" + String(total), "\"items\":" + String(items), "\"filed\":" + String(filed), "\"txn_id\":" + J.wopt(txnId) { v0 in J.q(v0.hex) }, "\"payee\":" + J.q(payee), "\"account\":" + J.q(account)]) }
 }
 
 /// The record `Reconcile`.
@@ -807,6 +1004,111 @@ extension SpendingLine {
     public var json: String { J.obj(["\"group_id\":" + J.q(groupId.hex), "\"group\":" + J.q(group), "\"pos\":" + String(pos), "\"spent\":" + String(spent)]) }
 }
 
+/// The record `Split`.
+public struct Split: Equatable {
+    public var txnId: Id
+    public var line: Int64
+    public var categoryId: Id?
+    public var date: String
+    public var amount: Int64
+    public var memo: String
+
+    public init(txnId: Id, line: Int64, categoryId: Id?, date: String, amount: Int64, memo: String) { self.txnId = txnId; self.line = line; self.categoryId = categoryId; self.date = date; self.amount = amount; self.memo = memo; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(txnId: Id(J.text(o["txn_id"])), line: J.int(o["line"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, date: J.text(o["date"]), amount: J.int(o["amount"]), memo: J.text(o["memo"]))
+    }
+
+    public var json: String { J.obj(["\"txn_id\":" + J.q(txnId.hex), "\"line\":" + String(line), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"date\":" + J.q(date), "\"amount\":" + String(amount), "\"memo\":" + J.q(memo)]) }
+}
+
+/// The record `SplitLine`.
+public struct SplitLine: Equatable {
+    public var txnId: Id
+    public var line: Int64
+    public var categoryId: Id?
+    public var category: String
+    public var amount: Int64
+    public var memo: String
+
+    public init(txnId: Id, line: Int64, categoryId: Id?, category: String, amount: Int64, memo: String) { self.txnId = txnId; self.line = line; self.categoryId = categoryId; self.category = category; self.amount = amount; self.memo = memo; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(txnId: Id(J.text(o["txn_id"])), line: J.int(o["line"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, category: J.text(o["category"]), amount: J.int(o["amount"]), memo: J.text(o["memo"]))
+    }
+
+    public var json: String { J.obj(["\"txn_id\":" + J.q(txnId.hex), "\"line\":" + String(line), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"category\":" + J.q(category), "\"amount\":" + String(amount), "\"memo\":" + J.q(memo)]) }
+}
+
+/// The record `SplitPart`.
+public struct SplitPart: Equatable {
+    public var categoryId: Id?
+    public var amount: Int64
+    public var memo: String
+
+    public init(categoryId: Id?, amount: Int64, memo: String) { self.categoryId = categoryId; self.amount = amount; self.memo = memo; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, amount: J.int(o["amount"]), memo: J.text(o["memo"]))
+    }
+
+    public var json: String { J.obj(["\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"amount\":" + String(amount), "\"memo\":" + J.q(memo)]) }
+}
+
+/// The record `SplitTxn`.
+public struct SplitTxn: Equatable {
+    public var id: Id
+    public var lines: [SplitPart]
+
+    public init(id: Id, lines: [SplitPart]) { self.id = id; self.lines = lines; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), lines: J.list(o["lines"]) { v0 in SplitPart(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"lines\":" + J.wlist(lines) { v0 in v0.json }]) }
+}
+
+/// The record `StoreItem`.
+public struct StoreItem: Equatable {
+    public var name: String
+    public var sku: String
+    public var quantity: Int64
+    public var unit: String
+    public var amount: Int64
+
+    public init(name: String, sku: String, quantity: Int64, unit: String, amount: Int64) { self.name = name; self.sku = sku; self.quantity = quantity; self.unit = unit; self.amount = amount; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(name: J.text(o["name"]), sku: J.text(o["sku"]), quantity: J.int(o["quantity"]), unit: J.text(o["unit"]), amount: J.int(o["amount"]))
+    }
+
+    public var json: String { J.obj(["\"name\":" + J.q(name), "\"sku\":" + J.q(sku), "\"quantity\":" + String(quantity), "\"unit\":" + J.q(unit), "\"amount\":" + String(amount)]) }
+}
+
+/// The record `StoreReceipt`.
+public struct StoreReceipt: Equatable {
+    public var orderId: String
+    public var date: String
+    public var place: String
+    public var total: Int64
+    public var items: [StoreItem]
+
+    public init(orderId: String, date: String, place: String, total: Int64, items: [StoreItem]) { self.orderId = orderId; self.date = date; self.place = place; self.total = total; self.items = items; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(orderId: J.text(o["order_id"]), date: J.text(o["date"]), place: J.text(o["place"]), total: J.int(o["total"]), items: J.list(o["items"]) { v0 in StoreItem(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"order_id\":" + J.q(orderId), "\"date\":" + J.q(date), "\"place\":" + J.q(place), "\"total\":" + String(total), "\"items\":" + J.wlist(items) { v0 in v0.json }]) }
+}
+
 /// The record `Summary` (UniFFI's): its JSON, for the functions called by name.
 extension Summary {
     public init(json j: Any?) {
@@ -834,15 +1136,16 @@ public struct Txn: Equatable {
     public var importedPayee: String
     public var createdMs: Int64
     public var userId: String
+    public var split: Bool
 
-    public init(id: Id, accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Cleared, approved: Bool, transferAccount: Id?, transferId: Id?, importedId: String?, importedPayee: String, createdMs: Int64, userId: String) { self.id = id; self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.approved = approved; self.transferAccount = transferAccount; self.transferId = transferId; self.importedId = importedId; self.importedPayee = importedPayee; self.createdMs = createdMs; self.userId = userId; }
+    public init(id: Id, accountId: Id, date: String, payee: String, categoryId: Id?, memo: String, amount: Int64, cleared: Cleared, approved: Bool, transferAccount: Id?, transferId: Id?, importedId: String?, importedPayee: String, createdMs: Int64, userId: String, split: Bool) { self.id = id; self.accountId = accountId; self.date = date; self.payee = payee; self.categoryId = categoryId; self.memo = memo; self.amount = amount; self.cleared = cleared; self.approved = approved; self.transferAccount = transferAccount; self.transferId = transferId; self.importedId = importedId; self.importedPayee = importedPayee; self.createdMs = createdMs; self.userId = userId; self.split = split; }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: Id(J.text(o["id"])), accountId: Id(J.text(o["account_id"])), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, memo: J.text(o["memo"]), amount: J.int(o["amount"]), cleared: Cleared(json: o["cleared"]), approved: J.bool(o["approved"]), transferAccount: J.opt(o["transfer_account"]) { v0 in Id(J.text(v0)) }, transferId: J.opt(o["transfer_id"]) { v0 in Id(J.text(v0)) }, importedId: J.opt(o["imported_id"]) { v0 in J.text(v0) }, importedPayee: J.text(o["imported_payee"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
+        self.init(id: Id(J.text(o["id"])), accountId: Id(J.text(o["account_id"])), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, memo: J.text(o["memo"]), amount: J.int(o["amount"]), cleared: Cleared(json: o["cleared"]), approved: J.bool(o["approved"]), transferAccount: J.opt(o["transfer_account"]) { v0 in Id(J.text(v0)) }, transferId: J.opt(o["transfer_id"]) { v0 in Id(J.text(v0)) }, importedId: J.opt(o["imported_id"]) { v0 in J.text(v0) }, importedPayee: J.text(o["imported_payee"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]), split: J.bool(o["split"]))
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"account_id\":" + J.q(accountId.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + cleared.json, "\"approved\":" + String(approved), "\"transfer_account\":" + J.wopt(transferAccount) { v0 in J.q(v0.hex) }, "\"transfer_id\":" + J.wopt(transferId) { v0 in J.q(v0.hex) }, "\"imported_id\":" + J.wopt(importedId) { v0 in J.q(v0) }, "\"imported_payee\":" + J.q(importedPayee), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"account_id\":" + J.q(accountId.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + cleared.json, "\"approved\":" + String(approved), "\"transfer_account\":" + J.wopt(transferAccount) { v0 in J.q(v0.hex) }, "\"transfer_id\":" + J.wopt(transferId) { v0 in J.q(v0.hex) }, "\"imported_id\":" + J.wopt(importedId) { v0 in J.q(v0) }, "\"imported_payee\":" + J.q(importedPayee), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId), "\"split\":" + String(split)]) }
 }
 
 /// The record `TxnLine` (UniFFI's): its JSON, for the functions called by name.
@@ -935,6 +1238,9 @@ public struct Money {
     /// `categories.add_group`: its intent's id.
     @discardableResult public func addGroup(_ input: AddGroup) throws -> String { try peer.mutate(name: "categories.add_group", input: input.json) }
 
+    /// `categories.add_subcategory`: its intent's id.
+    @discardableResult public func addSubcategory(_ input: AddSubcategory) throws -> String { try peer.mutate(name: "categories.add_subcategory", input: input.json) }
+
     /// `categories.delete_category`: its intent's id.
     @discardableResult public func deleteCategory(_ input: DeleteCategory) throws -> String { try peer.mutate(name: "categories.delete_category", input: input.json) }
 
@@ -961,6 +1267,24 @@ public struct Money {
 
     /// `categories.set_target`: its intent's id.
     @discardableResult public func setTarget(_ input: SetTarget) throws -> String { try peer.mutate(name: "categories.set_target", input: input.json) }
+
+    /// `categories.tree`, kept.
+    public func tree() throws -> LiveView<CategoryNode> { LiveView(try peer.view(name: "categories.tree", input: "null")) { j in CategoryNode(json: j) } }
+
+    /// `receipts.add_receipts`: its intent's id.
+    @discardableResult public func addReceipts(_ input: ReceiptImport) throws -> String { try peer.mutate(name: "receipts.add_receipts", input: input.json) }
+
+    /// `receipts.file_items`: its intent's id.
+    @discardableResult public func fileItems(_ input: ClassifyItems) throws -> String { try peer.mutate(name: "receipts.file_items", input: input.json) }
+
+    /// `receipts.items`, kept.
+    public func items(_ input: ItemsIn) throws -> LiveView<ItemLine> { LiveView(try peer.view(name: "receipts.items", input: input.json)) { j in ItemLine(json: j) } }
+
+    /// `receipts.pay`: its intent's id.
+    @discardableResult public func pay(_ input: MatchReceipt) throws -> String { try peer.mutate(name: "receipts.pay", input: input.json) }
+
+    /// `receipts.receipts`, kept.
+    public func receipts() throws -> LiveView<ReceiptLine> { LiveView(try peer.view(name: "receipts.receipts", input: "null")) { j in ReceiptLine(json: j) } }
 
     /// `role.grant`: its intent's id.
     @discardableResult public func grant(_ input: Grant) throws -> String { try peer.mutate(name: "role.grant", input: input.json) }
@@ -1006,6 +1330,12 @@ public struct Money {
 
     /// `transactions.set_cleared`: its intent's id.
     @discardableResult public func setCleared(_ input: SetCleared) throws -> String { try peer.mutate(name: "transactions.set_cleared", input: input.json) }
+
+    /// `transactions.split`: its intent's id.
+    @discardableResult public func split(_ input: SplitTxn) throws -> String { try peer.mutate(name: "transactions.split", input: input.json) }
+
+    /// `transactions.splits`, kept.
+    public func splits(_ input: OneTxn) throws -> LiveView<SplitLine> { LiveView(try peer.view(name: "transactions.splits", input: input.json)) { j in SplitLine(json: j) } }
 
     private func typed(_ v: AccountLineView) -> LiveView<AccountLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
 

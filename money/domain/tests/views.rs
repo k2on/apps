@@ -23,7 +23,11 @@ fn script(b: &mut Book) -> Vec<Step> {
     let rent = b.category(bills, "Rent");
     let food = b.category(bills, "Food");
     let produce = b.kind(food, "Produce");
-    let part = |c, amount| SplitPart { category_id: c, amount, memo: String::new() };
+    let part = |c, amount| SplitPart {
+        category_id: c,
+        amount,
+        memo: String::new(),
+    };
     vec![
         Box::new(move |b| b.assign("2026-10", rent, 150_000)),
         Box::new(move |b| b.assign("2026-10", food, 40_000)),
@@ -105,8 +109,20 @@ fn script(b: &mut Book) -> Vec<Step> {
                     place: "Costco".into(),
                     total: -4_000,
                     items: vec![
-                        StoreItem { name: "PRODUCE BOX".into(), sku: "1".into(), quantity: 1000, unit: "ea".into(), amount: -3_000 },
-                        StoreItem { name: "TOWELS".into(), sku: "2".into(), quantity: 1000, unit: "ea".into(), amount: -900 },
+                        StoreItem {
+                            name: "PRODUCE BOX".into(),
+                            sku: "1".into(),
+                            quantity: 1000,
+                            unit: "ea".into(),
+                            amount: -3_000,
+                        },
+                        StoreItem {
+                            name: "TOWELS".into(),
+                            sku: "2".into(),
+                            quantity: 1000,
+                            unit: "ea".into(),
+                            amount: -900,
+                        },
                     ],
                 }],
             };
@@ -114,11 +130,28 @@ fn script(b: &mut Book) -> Vec<Step> {
         }),
         Box::new(move |b| b.spend(card, "2026-10-10", "Costco", Some(food), -4_000)),
         Box::new(move |b| {
-            let items = vec![ItemRef { receipt_id: "costco:2113".into(), line: 2 }];
-            b.run("file_items", &ClassifyItems { items, category_id: Some(rent) }).unwrap();
+            let items = vec![ItemRef {
+                receipt_id: "costco:2113".into(),
+                line: 2,
+            }];
+            b.run(
+                "file_items",
+                &ClassifyItems {
+                    items,
+                    category_id: Some(rent),
+                },
+            )
+            .unwrap();
         }),
         Box::new(move |b| {
-            b.run("rename_category", &RenameCategory { id: produce, name: "Fruit".into() }).unwrap();
+            b.run(
+                "rename_category",
+                &RenameCategory {
+                    id: produce,
+                    name: "Fruit".into(),
+                },
+            )
+            .unwrap();
         }),
         Box::new(move |b| {
             let first = b.register(Some(checking)).last().unwrap().id;

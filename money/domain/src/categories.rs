@@ -298,6 +298,10 @@ pub fn node_of(db: &Db<Money>, c: &Category) -> CategoryNode {
         depth: up.len() as i64 - 1,
         hidden: up.iter().any(|a| a.hidden),
         income: up.first().is_some_and(|h| h.income),
-        order: up.iter().map(|a| format!("{:012}.{}", a.pos.max(0), a.id.hex())).collect::<Vec<_>>().join("/"),
+        order: up
+            .iter()
+            .map(|a| format!("{:012}.{}", a.pos.max(0), a.id.hex()))
+            .collect::<Vec<_>>()
+            .join("/"),
     }
 }

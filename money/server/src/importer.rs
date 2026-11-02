@@ -49,10 +49,11 @@ use ark::peer::Who;
 use ark_auth::Login;
 use ark_peer::{Handle, Memory, Peer, Standing};
 use money_domain::plaid::import_of;
-use money_domain::{Asked, Import};
+use money_domain::{Asked, Import, ReceiptImport};
 use serde::{Deserialize, Serialize};
 
 use crate::plaid::{Plaid, PlaidError};
+use crate::stores::{put_away, waiting, Stores};
 
 /// The account the importer signs in as: what every row it writes says
 /// wrote it.
@@ -168,10 +169,13 @@ fn secret(path: &Path) -> Result<String> {
     }
 }
 
-/// What a run did, bank by bank: what each one's run ended in.
+/// What a run did, bank by bank and store by store: what each one's run
+/// ended in. A store's is `amazon` for `amazon-orders`, and an export's
+/// file name for one from the folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Run {
     pub banks: BTreeMap<String, Outcome>,
+    pub stores: BTreeMap<String, Outcome>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -183,6 +187,10 @@ pub enum Outcome {
     },
     /// Plaid has not finished the bank's first pull.
     NotReady,
+    /// A store's receipts, imported and confirmed.
+    Receipts {
+        receipts: usize,
+    },
     Failed(String),
 }
 
@@ -199,8 +207,10 @@ pub struct Importer {
 impl Importer {
     /// The importer for `banks`, signed in as `login`, dialling `hub`; its
     /// state in `data`. It runs once as soon as it is linked.
-    pub fn start(banks: Banks, hub: Handle, data: PathBuf, login: Login) -> Result<Importer> {
-        banks.check()?;
+    pub fn start(banks: Option<Banks>, stores: Stores, hub: Handle, data: PathBuf, login: Login) -> Result<Importer> {
+        if let Some(b) = &banks {
+            b.check()?;
+        }
         let mut roles = login.user.roles.clone();
         roles.push(money_domain::BANK.to_string());
         roles.sort();
@@ -230,6 +240,8 @@ impl Importer {
             peer,
             rx,
             banks,
+            stores,
+            data: data.clone(),
             file: state_file(&data),
             state,
             said: said.clone(),
@@ -283,7 +295,9 @@ impl Drop for Importer {
 struct Job {
     peer: Peer,
     rx: mpsc::Receiver<()>,
-    banks: Banks,
+    banks: Option<Banks>,
+    stores: Stores,
+    data: PathBuf,
     file: PathBuf,
     state: State,
     said: Arc<Mutex<Vec<String>>>,
@@ -329,7 +343,8 @@ impl Job {
             if !due {
                 continue;
             }
-            let run = self.import_all(stop);
+            let mut run = self.import_all(stop);
+            run.stores = self.import_stores(stop);
             if asked > self.state.answered_ms {
                 self.state.answered_ms = asked;
                 if let Err(e) = self.state.save(&self.file) {
@@ -344,21 +359,22 @@ impl Job {
     /// rest go on.
     fn import_all(&mut self, stop: &AtomicBool) -> Run {
         let mut run = Run::default();
-        if self.banks.items.is_empty() {
+        let Some(banks) = self.banks.clone() else { return run };
+        if banks.items.is_empty() {
             self.say("no banks to import: link one and give the server its token".into());
             return run;
         }
-        let plaid = match (secret(&self.banks.client_id_file), secret(&self.banks.secret_file)) {
-            (Ok(id), Ok(s)) => Plaid::new(&self.banks.url, id, s),
+        let plaid = match (secret(&banks.client_id_file), secret(&banks.secret_file)) {
+            (Ok(id), Ok(s)) => Plaid::new(&banks.url, id, s),
             (Err(e), _) | (_, Err(e)) => {
                 self.say(format!("no Plaid keys: {e}"));
-                for item in self.banks.items.keys() {
+                for item in banks.items.keys() {
                     run.banks.insert(item.clone(), Outcome::Failed(e.to_string()));
                 }
                 return run;
             }
         };
-        let items: Vec<(String, PathBuf)> = self.banks.items.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let items: Vec<(String, PathBuf)> = banks.items.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         for (item, token_file) in items {
             if stop.load(Ordering::SeqCst) {
                 break;
@@ -389,7 +405,8 @@ impl Job {
             None => item.to_string(),
         };
         let cursor = self.state.cursors.get(item).cloned();
-        let Some(pulled) = plaid.pull(&token, cursor.as_deref(), self.banks.history)? else {
+        let history = self.banks.as_ref().map_or(crate::HISTORY, |b| b.history);
+        let Some(pulled) = plaid.pull(&token, cursor.as_deref(), history)? else {
             self.say(format!("{item}: Plaid has not finished its first pull; the next run picks it up"));
             return Ok(Outcome::NotReady);
         };
@@ -402,7 +419,7 @@ impl Job {
         ));
         let import = self.named(item, import_of(item, &institution, &got.accounts, &pulled));
         let (upserts, removed) = (import.upserts.len(), import.removed.len());
-        self.author(&import)?;
+        self.author("import", import.to_bytes())?;
         self.state.cursors.insert(item.to_string(), pulled.cursor.clone());
         self.state
             .save(&self.file)
@@ -413,7 +430,8 @@ impl Job {
     /// The import as the server was told to name and follow the bank's
     /// accounts.
     fn named(&self, item: &str, mut import: Import) -> Import {
-        let told: Vec<(&String, &Mapping)> = self.banks.accounts.iter().filter(|(_, m)| m.item == item).collect();
+        let Some(banks) = &self.banks else { return import };
+        let told: Vec<(&String, &Mapping)> = banks.accounts.iter().filter(|(_, m)| m.item == item).collect();
         if told.is_empty() {
             return import;
         }
@@ -426,13 +444,72 @@ impl Job {
         import
     }
 
-    /// `banks.import` authored, and waited for until the hub confirms it —
-    /// on its disk — or refuses it.
-    fn author(&mut self, import: &Import) -> Result<()> {
-        let id = self
-            .peer
-            .mutate_bytes("import", import.to_bytes())
-            .map_err(|why| anyhow!("refused here: {why}"))?;
+    /// Every store's receipts, from `amazon-orders` and the folder of
+    /// exports: each on its own, one failing said and the rest going on.
+    fn import_stores(&mut self, stop: &AtomicBool) -> BTreeMap<String, Outcome> {
+        let mut out = BTreeMap::new();
+        if let Some(amazon) = self.stores.amazon.clone() {
+            let got = amazon
+                .run(&self.data)
+                .and_then(|text| money_domain::stores::amazon(&text).map_err(|e| anyhow!(e)))
+                .and_then(|import| self.author_receipts(&import));
+            out.insert("amazon".to_string(), self.outcome("amazon", got));
+        }
+        let Some(dir) = self.stores.dir.clone() else { return out };
+        for w in waiting(&dir) {
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
+            let name = format!("{}/{}", w.store, w.file.file_name().and_then(|n| n.to_str()).unwrap_or("?"));
+            let read = std::fs::read_to_string(&w.file)
+                .map_err(|e| anyhow!("cannot read it: {e}"))
+                .and_then(|text| money_domain::stores::read(&w.store, &text).map_err(|e| anyhow!(e)));
+            let (got, under) = match read {
+                Err(e) => (Err(e), "failed"),
+                Ok(import) => match self.author_receipts(&import) {
+                    Ok(n) => (Ok(n), "imported"),
+                    // Not the file's fault: it is tried again next run.
+                    Err(e) => {
+                        out.insert(name.clone(), self.outcome(&name, Err(e)));
+                        continue;
+                    }
+                },
+            };
+            if let Err(e) = put_away(&w, under) {
+                self.say(format!("{name}: could not put it away: {e:#}"));
+            }
+            out.insert(name.clone(), self.outcome(&name, got));
+        }
+        out
+    }
+
+    fn outcome(&self, what: &str, got: Result<usize>) -> Outcome {
+        match got {
+            Ok(n) => {
+                self.say(format!("{what}: {n} receipt{}", if n == 1 { "" } else { "s" }));
+                Outcome::Receipts { receipts: n }
+            }
+            Err(e) => {
+                self.say(format!("{what}: failed: {e:#}"));
+                Outcome::Failed(format!("{e:#}"))
+            }
+        }
+    }
+
+    /// A store's receipts authored as `receipts.add_receipts`, and
+    /// confirmed: how many.
+    fn author_receipts(&mut self, import: &ReceiptImport) -> Result<usize> {
+        if import.receipts.is_empty() {
+            return Ok(0);
+        }
+        self.author("add_receipts", import.to_bytes())?;
+        Ok(import.receipts.len())
+    }
+
+    /// A mutation authored, and waited for until the hub confirms it — on
+    /// its disk — or refuses it.
+    fn author(&mut self, name: &str, bytes: Vec<u8>) -> Result<()> {
+        let id = self.peer.mutate_bytes(name, bytes).map_err(|why| anyhow!("refused here: {why}"))?;
         let mut why = None;
         let held = ark_peer::link::until(CONFIRM, Duration::from_millis(0), || {
             ark_peer::link::wait(&self.peer, &self.rx, Duration::from_millis(50));

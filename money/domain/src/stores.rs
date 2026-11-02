@@ -206,7 +206,10 @@ pub fn target(text: &str) -> Result<ReceiptImport, String> {
         if id.is_empty() {
             return Err(format!("target: order {}: no order number", n + 1));
         }
-        let raw = field(o, &["placed_date", "order_date", "orderDate", "purchase_date", "transaction_date", "date"]);
+        let raw = field(
+            o,
+            &["placed_date", "order_date", "orderDate", "purchase_date", "transaction_date", "date"],
+        );
         let date = day_of(&raw).ok_or_else(|| format!("target: order {id}: `{raw}` is not a date"))?;
         let mut items = vec![];
         for l in list(o, &["order_lines", "orderLines", "lines", "items"]) {
@@ -255,7 +258,15 @@ pub fn target(text: &str) -> Result<ReceiptImport, String> {
 /// that a category called "Gas" finds them.
 pub fn costco(text: &str) -> Result<ReceiptImport, String> {
     let v: Json = serde_json::from_str(text).map_err(|e| format!("costco: not JSON: {e}"))?;
-    let all = list(&v, &["data.receiptsWithCounts.receipts", "receiptsWithCounts.receipts", "data.receipts", "receipts"]);
+    let all = list(
+        &v,
+        &[
+            "data.receiptsWithCounts.receipts",
+            "receiptsWithCounts.receipts",
+            "data.receipts",
+            "receipts",
+        ],
+    );
     let mut receipts = vec![];
     for (n, r) in all.iter().enumerate() {
         let id = field(r, &["transactionBarcode", "barcode", "receiptId"]);
@@ -268,13 +279,9 @@ pub fn costco(text: &str) -> Result<ReceiptImport, String> {
         let gas = kind.contains("gas") || kind.contains("fuel");
         let mut items = vec![];
         for i in list(r, &["itemArray", "items"]) {
-            let name = format!(
-                "{} {}",
-                field(i, &["itemDescription01", "description"]),
-                field(i, &["itemDescription02"])
-            )
-            .trim()
-            .to_string();
+            let name = format!("{} {}", field(i, &["itemDescription01", "description"]), field(i, &["itemDescription02"]))
+                .trim()
+                .to_string();
             let amount = dig(i, &["amount", "price"])
                 .and_then(cents_of)
                 .ok_or_else(|| format!("costco: receipt {id}: `{name}` has no amount"))?;

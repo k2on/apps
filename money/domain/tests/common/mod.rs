@@ -114,7 +114,11 @@ impl Book {
 
     pub fn group(&mut self, name: &str) -> Id<Group> {
         self.run("add_group", &AddGroup { name: name.into() }).unwrap();
-        self.rows::<Group>("category").into_iter().find(|g| g.name == name && g.parent_id.is_none()).unwrap().id
+        self.rows::<Group>("category")
+            .into_iter()
+            .find(|g| g.name == name && g.parent_id.is_none())
+            .unwrap()
+            .id
     }
 
     pub fn category(&mut self, group: Id<Group>, name: &str) -> Id<Category> {

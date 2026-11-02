@@ -19,6 +19,9 @@ let
   money = packages.${pkgs.stdenv.hostPlatform.system} or { };
   plaid = cfg.plaid;
   importing = plaid.clientIdFile != null || plaid.secretFile != null;
+  amazon = cfg.amazon;
+  # Anything the importer's runs read: a bank, Amazon, or a folder of exports.
+  syncing = importing || amazon.package != null || cfg.receiptsDir != null;
   # A bank's name is a credential's name and a key of MONEY_PLAID_ITEMS.
   goodName = name: builtins.match "[A-Za-z0-9_-]+" name != null;
   state = lib.removePrefix "/var/lib/" cfg.dataDir;
@@ -195,6 +198,49 @@ in
       };
     };
 
+    amazon = {
+      package = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = null;
+        description = ''
+          The amazon-orders program (its Python package), which the importer
+          runs at each sync to read Amazon's orders as receipts. Null imports
+          none from Amazon.
+        '';
+      };
+      args = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ "orders" "--last-30-days" "--full-details" "-o" "json" ];
+        description = "What amazon-orders is run with: `--year 2026` in place of `--last-30-days` for a first pull.";
+      };
+      usernameFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = "A file holding the Amazon account's email.";
+      };
+      passwordFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = "A file holding the Amazon account's password.";
+      };
+      otpSecretFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = "A file holding the account's one-time-code secret, when it has two-step verification.";
+      };
+    };
+
+    receiptsDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/var/lib/money/receipts";
+      description = ''
+        A folder of stores' exports the importer reads at each sync:
+        `target/*.json`, `costco/*.json`, `amazon/*.json`, each moved to
+        `imported/` (or `failed/`) beside it once read.
+      '';
+    };
+
     accounts = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule {
         options = {
@@ -293,7 +339,12 @@ in
     ++ lib.mapAttrsToList (name: a: {
       assertion = a.mask != null || a.accountId != null;
       message = "services.money.accounts.\"${name}\": say its mask or its accountId.";
-    }) cfg.accounts;
+    }) cfg.accounts ++ [
+      {
+        assertion = amazon.package == null || (amazon.usernameFile != null && amazon.passwordFile != null);
+        message = "services.money.amazon: amazon-orders signs in with usernameFile and passwordFile; set both.";
+      }
+    ];
 
     systemd.services.money = {
       description = "money, the household's budget";
@@ -327,6 +378,15 @@ in
         MONEY_PLAID_ITEMS = lib.concatStringsSep "," (lib.mapAttrsToList (name: _: "${name}=%d/plaid-item-${name}") plaid.items);
         MONEY_PLAID_HISTORY = toString plaid.history;
         MONEY_ACCOUNTS = builtins.toJSON (lib.mapAttrs (_: a: { inherit (a) item mask accountId; }) cfg.accounts);
+      } // lib.optionalAttrs (amazon.package != null) {
+        MONEY_AMAZON_ORDERS = "${amazon.package}/bin/amazon-orders";
+        MONEY_AMAZON_ARGS = lib.concatStringsSep " " amazon.args;
+        MONEY_AMAZON_USERNAME_FILE = "%d/amazon-username";
+        MONEY_AMAZON_PASSWORD_FILE = "%d/amazon-password";
+      } // lib.optionalAttrs (amazon.package != null && amazon.otpSecretFile != null) {
+        MONEY_AMAZON_OTP_SECRET_FILE = "%d/amazon-otp-secret";
+      } // lib.optionalAttrs (cfg.receiptsDir != null) {
+        MONEY_RECEIPTS_DIR = cfg.receiptsDir;
       };
 
       serviceConfig = {
@@ -338,7 +398,12 @@ in
             "plaid-client-id:${plaid.clientIdFile}"
             "plaid-secret:${plaid.secretFile}"
           ]
-          ++ lib.mapAttrsToList (name: i: "plaid-item-${name}:${i.accessTokenFile}") plaid.items;
+          ++ lib.mapAttrsToList (name: i: "plaid-item-${name}:${i.accessTokenFile}") plaid.items
+          ++ lib.optionals (amazon.package != null) [
+            "amazon-username:${amazon.usernameFile}"
+            "amazon-password:${amazon.passwordFile}"
+          ]
+          ++ lib.optional (amazon.package != null && amazon.otpSecretFile != null) "amazon-otp-secret:${amazon.otpSecretFile}";
 
         DynamicUser = true;
         StateDirectory = state;
@@ -369,7 +434,7 @@ in
     # the bank's role and the cursors. Persistent: a run missed while the
     # machine was off is sent at boot, and the server imports at every
     # start anyway.
-    systemd.services.money-import = lib.mkIf importing {
+    systemd.services.money-import = lib.mkIf syncing {
       description = "Ask money's server to import from the banks now";
       serviceConfig = {
         Type = "oneshot";
@@ -377,7 +442,7 @@ in
         ExecStart = "-${config.systemd.package}/bin/systemctl kill --signal=SIGUSR1 --kill-whom=main money.service";
       };
     };
-    systemd.timers.money-import = lib.mkIf importing {
+    systemd.timers.money-import = lib.mkIf syncing {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnCalendar = cfg.schedule;

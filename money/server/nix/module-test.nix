@@ -43,6 +43,13 @@ let
   badName = eval { devAuth = true; plaid = keys // { items."chase,amex".accessTokenFile = "/run/secrets/t"; }; };
   elsewhere = eval { devAuth = true; dataDir = "/srv/money"; };
   daily = eval { devAuth = true; plaid = keys; schedule = "daily"; };
+  fakeAmazon = runCommand "amazon-orders" { } "mkdir -p $out/bin; touch $out/bin/amazon-orders";
+  stores = eval {
+    devAuth = true;
+    amazon = { package = fakeAmazon; usernameFile = "/run/secrets/amazon-user"; passwordFile = "/run/secrets/amazon-pass"; otpSecretFile = "/run/secrets/amazon-otp"; };
+    receiptsDir = "/var/lib/money/receipts";
+  };
+  amazonNoLogin = eval { devAuth = true; amazon.package = fakeAmazon; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -66,6 +73,13 @@ let
     [ (banks.systemd.timers.money-import.timerConfig.OnCalendar == "*-*-* 06,18:00:00") "twice a day by default" ]
     [ (lib.hasInfix "kill --signal=SIGUSR1 --kill-whom=main money.service" banks.systemd.services.money-import.serviceConfig.ExecStart) "by telling the server" ]
     [ (daily.systemd.timers.money-import.timerConfig.OnCalendar == "daily") "or when told" ]
+    [ (failing stores == [ ]) "the stores evaluate" ]
+    [ (lib.hasSuffix "/bin/amazon-orders" (env stores).MONEY_AMAZON_ORDERS && (env stores).MONEY_AMAZON_ARGS == "orders --last-30-days --full-details -o json") "amazon-orders reaches the server, and what it is run with" ]
+    [ ((env stores).MONEY_AMAZON_PASSWORD_FILE == "%d/amazon-password" && (env stores).MONEY_AMAZON_OTP_SECRET_FILE == "%d/amazon-otp-secret") "Amazon's sign-in is credentials" ]
+    [ (lib.all (c: lib.elem c (unit stores).serviceConfig.LoadCredential) [ "amazon-username:/run/secrets/amazon-user" "amazon-password:/run/secrets/amazon-pass" "amazon-otp-secret:/run/secrets/amazon-otp" ]) "loaded from where they live" ]
+    [ ((env stores).MONEY_RECEIPTS_DIR == "/var/lib/money/receipts" && stores.systemd.timers ? money-import) "the folder reaches the server, and the timer runs without a bank" ]
+    [ (!(lib.any (v: lib.hasInfix "/run/secrets" v) (lib.attrValues (env stores)))) "no Amazon secret's path is in the environment" ]
+    [ (says amazonNoLogin "usernameFile and passwordFile") "amazon-orders without a sign-in is refused" ]
     [ (says halfKeys "go together") "half of Plaid's keys is refused" ]
     [ (says noKeys "no Plaid keys") "banks without keys are refused" ]
     [ (says strayAccount "not in services.money.plaid.items") "an account on a bank not linked is refused" ]

@@ -303,15 +303,8 @@ fn categories_and_groups_are_put_where_they_are_dragged() {
     assert_eq!(order(&b), ["BILLS", "Rent", "Groceries", "FUN", "Games"]);
     // In front of one in its own group…
     let to = |id, group_id, before| MoveCategory { id, group_id, before };
-    b.run(
-        "move_category",
-        &to(
-            groceries,
-            b.line("2026-09", groceries).group_id,
-            Some(rent),
-        ),
-    )
-    .unwrap();
+    b.run("move_category", &to(groceries, b.line("2026-09", groceries).group_id, Some(rent)))
+        .unwrap();
     assert_eq!(order(&b), ["BILLS", "Groceries", "Rent", "FUN", "Games"]);
     // …in front of one in another…
     b.run("move_category", &to(rent, fun, Some(games))).unwrap();
