@@ -8,8 +8,10 @@
 //!   program): run as `amazon-orders orders --last-30-days --full-details
 //!   -o json` (`MONEY_AMAZON_ARGS` to say otherwise, `--year 2026` for a
 //!   first pull), signed in by `AMAZON_USERNAME`, `AMAZON_PASSWORD` and,
-//!   for a one-time code, `AMAZON_OTP_SECRET_KEY`, each read from its file
-//!   at the run and given to that program alone. Its home is
+//!   for a one-time code, `AMAZON_OTP_SECRET_KEY`, each read at the run and
+//!   given to that program alone: from the files the server was told
+//!   (`MONEY_AMAZON_USERNAME_FILE`, …), else from the login given on the
+//!   stores page ([`crate::vault`]). Its home is
 //!   `<data>/amazon-orders`, so the session it keeps there spares Amazon a
 //!   login each run.
 //! - **A folder of exports** (`MONEY_RECEIPTS_DIR`): a file in
@@ -46,19 +48,20 @@ impl Stores {
         let amazon = match env("MONEY_AMAZON_ORDERS") {
             None => None,
             Some(program) => {
-                let file = |k: &str| {
-                    env(k)
-                        .map(PathBuf::from)
-                        .ok_or_else(|| anyhow!("MONEY_AMAZON_ORDERS runs amazon-orders, which needs {k}"))
-                };
+                let (u, p) = (env("MONEY_AMAZON_USERNAME_FILE"), env("MONEY_AMAZON_PASSWORD_FILE"));
+                if u.is_some() != p.is_some() {
+                    bail!(
+                        "MONEY_AMAZON_USERNAME_FILE and MONEY_AMAZON_PASSWORD_FILE go together; set both, or neither and sign in on the stores page"
+                    );
+                }
                 Some(AmazonOrders {
                     program: program.into(),
                     args: match env("MONEY_AMAZON_ARGS") {
                         Some(a) => a.split_whitespace().map(String::from).collect(),
                         None => DEFAULT_ARGS.iter().map(|s| s.to_string()).collect(),
                     },
-                    username_file: file("MONEY_AMAZON_USERNAME_FILE")?,
-                    password_file: file("MONEY_AMAZON_PASSWORD_FILE")?,
+                    username_file: u.map(PathBuf::from),
+                    password_file: p.map(PathBuf::from),
                     otp_secret_file: env("MONEY_AMAZON_OTP_SECRET_FILE").map(PathBuf::from),
                 })
             }
@@ -78,8 +81,10 @@ pub const DEFAULT_ARGS: [&str; 5] = ["orders", "--last-30-days", "--full-details
 pub struct AmazonOrders {
     pub program: PathBuf,
     pub args: Vec<String>,
-    pub username_file: PathBuf,
-    pub password_file: PathBuf,
+    /// The sign-in's files; none, and it is the stores page's
+    /// ([`crate::vault`]).
+    pub username_file: Option<PathBuf>,
+    pub password_file: Option<PathBuf>,
     pub otp_secret_file: Option<PathBuf>,
 }
 
@@ -93,20 +98,36 @@ fn secret(path: &Path) -> Result<String> {
 }
 
 impl AmazonOrders {
+    /// The login it signs in with: the server's files, else the stores
+    /// page's.
+    pub fn login(&self, data: &Path) -> Result<crate::vault::AmazonLogin> {
+        if let (Some(u), Some(p)) = (&self.username_file, &self.password_file) {
+            return Ok(crate::vault::AmazonLogin {
+                username: secret(u)?,
+                password: secret(p)?,
+                otp_secret: self.otp_secret_file.as_deref().map(secret).transpose()?,
+            });
+        }
+        crate::vault::Vault::load(data)?
+            .amazon
+            .ok_or_else(|| anyhow!("no Amazon login: give one on the stores page (/stores)"))
+    }
+
     /// What the program prints, run once with its home in `data`.
     pub fn run(&self, data: &Path) -> Result<String> {
+        let login = self.login(data)?;
         let home = data.join("amazon-orders");
         std::fs::create_dir_all(&home).with_context(|| format!("creating {}", home.display()))?;
         let mut cmd = Command::new(&self.program);
         cmd.args(&self.args)
             .env("HOME", &home)
-            .env("AMAZON_USERNAME", secret(&self.username_file)?)
-            .env("AMAZON_PASSWORD", secret(&self.password_file)?)
+            .env("AMAZON_USERNAME", &login.username)
+            .env("AMAZON_PASSWORD", &login.password)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(f) = &self.otp_secret_file {
-            cmd.env("AMAZON_OTP_SECRET_KEY", secret(f)?);
+        if let Some(otp) = &login.otp_secret {
+            cmd.env("AMAZON_OTP_SECRET_KEY", otp);
         }
         let mut child = cmd.spawn().with_context(|| format!("running {}", self.program.display()))?;
         // Read as it is written, so a long history does not fill the pipe
@@ -187,8 +208,14 @@ mod tests {
     #[test]
     fn the_stores_are_told_by_the_environment() {
         assert!(!Stores::from_env(&vars(&[])).unwrap().any());
-        let e = Stores::from_env(&vars(&[("MONEY_AMAZON_ORDERS", "/bin/amazon-orders")])).unwrap_err();
-        assert!(e.to_string().contains("MONEY_AMAZON_USERNAME_FILE"), "{e}");
+        let page = Stores::from_env(&vars(&[("MONEY_AMAZON_ORDERS", "/bin/amazon-orders")])).unwrap();
+        assert_eq!(page.amazon.unwrap().username_file, None, "the stores page's login");
+        let e = Stores::from_env(&vars(&[
+            ("MONEY_AMAZON_ORDERS", "/bin/amazon-orders"),
+            ("MONEY_AMAZON_USERNAME_FILE", "/c/u"),
+        ]))
+        .unwrap_err();
+        assert!(e.to_string().contains("go together"), "{e}");
         let s = Stores::from_env(&vars(&[
             ("MONEY_AMAZON_ORDERS", "/bin/amazon-orders"),
             ("MONEY_AMAZON_USERNAME_FILE", "/c/u"),
@@ -222,19 +249,36 @@ mod tests {
         let a = AmazonOrders {
             program,
             args: vec!["orders".into()],
-            username_file: write("u", "me@example.com\n"),
-            password_file: write("p", "hunter2\n"),
+            username_file: Some(write("u", "me@example.com\n")),
+            password_file: Some(write("p", "hunter2\n")),
             otp_secret_file: None,
         };
         let out = a.run(dir.path()).unwrap();
         assert!(out.contains("\"order_number\":\"orders\""), "{out}");
         assert!(out.contains("/amazon-orders\"") && !out.contains("hunter2"), "{out}");
         let wrong = AmazonOrders {
-            password_file: write("p2", "nope"),
-            ..a
+            password_file: Some(write("p2", "nope")),
+            ..a.clone()
         };
         let e = wrong.run(dir.path()).unwrap_err().to_string();
         assert!(e.contains("bad password") && !e.contains("nope"), "{e}");
+        // No files: the stores page's login, or none yet.
+        let page = AmazonOrders {
+            username_file: None,
+            password_file: None,
+            ..a
+        };
+        assert!(page.run(dir.path()).unwrap_err().to_string().contains("stores page"));
+        let v = crate::vault::Vault {
+            amazon: Some(crate::vault::AmazonLogin {
+                username: "me@example.com".into(),
+                password: "hunter2".into(),
+                otp_secret: None,
+            }),
+            ..Default::default()
+        };
+        v.save(dir.path()).unwrap();
+        assert!(page.run(dir.path()).unwrap().contains("order_number"));
     }
 
     #[test]

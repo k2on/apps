@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>money · Stores</title>
+<style>
+  :root { --bg: #f7f7f5; --card: #fff; --ink: #1d1d1b; --soft: #6b6b66; --line: #e3e3de; --accent: #2f6f4f; --bad: #a33a2a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --card: #1f1f1d; --ink: #ecece8; --soft: #9a9a94; --line: #33332f; --accent: #6fbf8f; --bad: #e07a68; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lede { color: var(--soft); margin: 0 0 24px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 18px 14px; margin-bottom: 16px; }
+  h2 { font-size: 16px; margin: 0 0 6px; }
+  .soft { color: var(--soft); font-size: 13px; }
+  label { display: block; font-size: 13px; color: var(--soft); margin: 10px 0 4px; }
+  input[type=text], input[type=email], input[type=password], select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+  button { margin-top: 12px; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  button.quiet { background: transparent; color: var(--accent); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .state { font-weight: 600; }
+  .bad { color: var(--bad); }
+  a.bookmarklet { display: inline-block; margin-top: 10px; padding: 7px 14px; border-radius: 6px; border: 1px dashed var(--accent); color: var(--accent); text-decoration: none; font-weight: 600; }
+  ol { padding-left: 20px; margin: 8px 0 0; }
+  code { font-size: 13px; }
+  #last li { font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Stores</h1>
+  <p class="lede">Where receipts come from. What you enter here stays on this server, in a file only it can read. It is never part of the budget, so it doesn't sync to any device.</p>
+  <p id="error" class="bad" hidden></p>
+
+  <section id="amazon">
+    <h2>Amazon</h2>
+    <p class="soft">The server signs in with <code>amazon-orders</code> at each sync and reads the last 30 days of orders.</p>
+    <p id="amazon-state" class="state"></p>
+    <form id="amazon-form">
+      <label for="a-user">Email</label>
+      <input id="a-user" type="email" autocomplete="off" required>
+      <label for="a-pass">Password</label>
+      <input id="a-pass" type="password" autocomplete="new-password" required>
+      <label for="a-otp">Authenticator secret (optional)</label>
+      <input id="a-otp" type="text" autocomplete="off" placeholder="Only if your account uses two-step verification">
+      <p class="soft">The secret is the key shown when you add an authenticator app on Amazon (Login &amp; security → 2-Step Verification). It lets the server make its own one-time codes. A code texted to your phone can't be used here.</p>
+      <div class="row"><button type="submit">Save</button><button type="button" class="quiet" id="amazon-forget" hidden>Remove login</button></div>
+    </form>
+  </section>
+
+  <section id="costco">
+    <h2>Costco</h2>
+    <p class="soft">Costco is read with your own signed-in costco.com page, so your Costco password never leaves Costco. A bookmarklet asks Costco for the last year of warehouse and gas receipts and sends them here, using a key that can only upload receipts.</p>
+    <p id="costco-state" class="state"></p>
+    <div id="costco-link"></div>
+    <ol class="soft" id="costco-how" hidden>
+      <li>Drag the button above to your bookmarks bar.</li>
+      <li>Open <code>costco.com</code>, sign in, and go to Orders &amp; Purchases.</li>
+      <li>Click the bookmark. It tells you how many receipts it sent.</li>
+    </ol>
+    <div class="row"><button type="button" id="costco-make">Make my bookmarklet</button><button type="button" class="quiet" id="costco-revoke" hidden>Revoke</button></div>
+  </section>
+
+  <section id="upload">
+    <h2>Upload an export</h2>
+    <p class="soft">A file saved from a store, read the way the server's folder reads it.</p>
+    <label for="u-store">Store</label>
+    <select id="u-store"><option value="costco">Costco</option><option value="target">Target</option><option value="amazon">Amazon (amazon-orders JSON)</option></select>
+    <label for="u-file">File</label>
+    <input id="u-file" type="file" accept=".json,application/json">
+    <div class="row"><button type="button" id="u-send">Upload</button><span id="u-said" class="soft"></span></div>
+  </section>
+
+  <section>
+    <h2>Last sync</h2>
+    <ul id="last" class="soft"><li>Nothing yet.</li></ul>
+  </section>
+</main>
+<script>
+(() => {
+  const KEY = "money.stores.login";
+  const $ = id => document.getElementById(id);
+  const here = location.origin + location.pathname;
+  const say = text => { $("error").hidden = !text; $("error").textContent = text || ""; };
+
+  async function token() {
+    const kept = sessionStorage.getItem(KEY);
+    if (kept) {
+      const l = JSON.parse(kept);
+      if (!l.expires_ms || l.expires_ms > Date.now() + 60000) return l.token;
+    }
+    const code = new URLSearchParams(location.search).get("code");
+    if (code) {
+      history.replaceState(null, "", location.pathname);
+      const r = await fetch("/auth/exchange", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+      if (r.ok) {
+        const l = await r.json();
+        sessionStorage.setItem(KEY, JSON.stringify(l));
+        return l.token;
+      }
+    }
+    location.assign("/auth/login?redirect=" + encodeURIComponent(here));
+    return new Promise(() => {});
+  }
+
+  async function api(method, path, body, raw) {
+    const t = await token();
+    const headers = { Authorization: "Bearer " + t };
+    if (body !== undefined && !raw) headers["Content-Type"] = "application/json";
+    const r = await fetch("/stores/api/" + path, { method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
+    if (r.status === 401) { sessionStorage.removeItem(KEY); return api(method, path, body, raw); }
+    const text = await r.text();
+    if (!r.ok) throw new Error(text || r.status);
+    return JSON.parse(text);
+  }
+
+  function draw(s) {
+    say("");
+    const a = s.amazon;
+    $("amazon-state").textContent = a.login
+      ? "Signed in as " + a.login.who + (a.login.otp ? ", with an authenticator secret." : ".")
+      : "Not set up.";
+    if (!a.program) $("amazon-state").textContent += " This server has no amazon-orders program yet (services.money.amazon.package), so nothing is read until it does.";
+    $("amazon-forget").hidden = !a.login;
+    const c = s.costco;
+    $("costco-state").textContent = c.key ? "Bookmarklet ready." : "No bookmarklet yet.";
+    $("costco-link").innerHTML = "";
+    if (c.bookmarklet) {
+      const link = document.createElement("a");
+      link.className = "bookmarklet";
+      link.href = c.bookmarklet;
+      link.textContent = "Costco → money";
+      link.onclick = e => { e.preventDefault(); alert("Drag this to your bookmarks bar, then click it on costco.com."); };
+      $("costco-link").appendChild(link);
+    }
+    $("costco-how").hidden = !c.key;
+    $("costco-make").textContent = c.key ? "Make a new one" : "Make my bookmarklet";
+    $("costco-revoke").hidden = !c.key;
+    const last = Object.entries(s.last || {});
+    $("last").innerHTML = "";
+    for (const [what, how] of last.length ? last : [["", "Nothing yet."]]) {
+      const li = document.createElement("li");
+      li.textContent = what ? what + ": " + how : how;
+      if (how.startsWith("failed")) li.className = "bad";
+      $("last").appendChild(li);
+    }
+  }
+
+  const run = f => async (...a) => { try { draw(await f(...a)); } catch (e) { say(String(e.message || e)); } };
+
+  $("amazon-form").onsubmit = run(async e => {
+    e.preventDefault();
+    const s = await api("PUT", "amazon", { username: $("a-user").value, password: $("a-pass").value, otp_secret: $("a-otp").value });
+    $("a-pass").value = ""; $("a-otp").value = "";
+    return s;
+  });
+  $("amazon-forget").onclick = run(() => api("DELETE", "amazon"));
+  $("costco-make").onclick = run(() => api("POST", "keys/costco"));
+  $("costco-revoke").onclick = run(() => api("DELETE", "keys/costco"));
+  $("u-send").onclick = async () => {
+    const f = $("u-file").files[0];
+    if (!f) return;
+    try {
+      const got = await api("POST", "upload/" + $("u-store").value, await f.text(), true);
+      $("u-said").textContent = got.receipts + (got.receipts === 1 ? " receipt" : " receipts") + " read; they'll be in the budget in a moment.";
+      setTimeout(run(() => api("GET", "status")), 3000);
+    } catch (e) { $("u-said").textContent = ""; say(String(e.message || e)); }
+  };
+  run(() => api("GET", "status"))();
+})();
+</script>
+</body>
+</html>

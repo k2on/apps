@@ -24,7 +24,9 @@
 
 pub mod importer;
 pub mod plaid;
+pub mod setup;
 pub mod stores;
+pub mod vault;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -286,6 +288,20 @@ pub async fn start(config: Config) -> Result<Server> {
     if let Some(dir) = &config.web {
         server.web = Some((dir.clone(), config.web_module.clone()));
     }
+    // The stores page, and the folder its uploads (and anybody's exports)
+    // wait in: the server's own receipts folder unless told another.
+    let mut stores = config.stores.clone();
+    let receipts = stores.dir.get_or_insert_with(|| config.data.join("receipts")).clone();
+    let importer_slot = Arc::new(std::sync::Mutex::new(None));
+    server.routes = std::mem::take(&mut server.routes).merge(setup::routes(setup::Setup {
+        data: config.data.clone(),
+        receipts,
+        public_url: public_url.clone(),
+        amazon_program: stores.amazon.is_some(),
+        authenticate: auth.authenticate(),
+        importer: importer_slot.clone(),
+        lock: Arc::new(std::sync::Mutex::new(())),
+    }));
     let (hub, router) = server.build()?;
     let router = router.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz));
     let running = Running::listen(hub.clone(), router, &config.listen).await?;
@@ -312,7 +328,7 @@ pub async fn start(config: Config) -> Result<Server> {
     if let Some(d) = &config.stores.dir {
         eprintln!("money-server: importing receipts dropped in {}", d.display());
     }
-    let importer = match config.banks.is_some() || config.stores.any() {
+    let importer = match config.banks.is_some() || stores.any() {
         true => {
             let account = Account {
                 id: importer::ACCOUNT.into(),
@@ -326,7 +342,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 .map_err(|e| anyhow!("signing the importer in: {e}"))?;
             Some(Importer::start(
                 config.banks.clone(),
-                config.stores.clone(),
+                stores.clone(),
                 hub.clone(),
                 config.data.clone(),
                 login,
@@ -334,6 +350,11 @@ pub async fn start(config: Config) -> Result<Server> {
         }
         false => None,
     };
+
+    if let Some(i) = &importer {
+        *importer_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(i.handle());
+    }
+    eprintln!("money-server: stores page at {public_url}/stores");
 
     Ok(Server { running, auth, importer })
 }

@@ -49,7 +49,8 @@ let
     amazon = { package = fakeAmazon; usernameFile = "/run/secrets/amazon-user"; passwordFile = "/run/secrets/amazon-pass"; otpSecretFile = "/run/secrets/amazon-otp"; };
     receiptsDir = "/var/lib/money/receipts";
   };
-  amazonNoLogin = eval { devAuth = true; amazon.package = fakeAmazon; };
+  amazonPage = eval { devAuth = true; amazon.package = fakeAmazon; };
+  amazonHalf = eval { devAuth = true; amazon = { package = fakeAmazon; usernameFile = "/run/secrets/u"; }; };
 
   checks = [
     [ (says nobody "nobody could sign in") "a server nobody can sign in to is refused" ]
@@ -58,7 +59,7 @@ let
     [ ((env dev).MONEY_DATA == "/var/lib/money" && (unit dev).serviceConfig.StateDirectory == "money") "the state is the state directory" ]
     [ ((unit dev).serviceConfig.DynamicUser) "as a dynamic user" ]
     [ (lib.hasSuffix "/bin/money-server 127.0.0.1:8788" (unit dev).serviceConfig.ExecStart) "it listens on loopback by default" ]
-    [ (!(env dev ? MONEY_PLAID_CLIENT_ID_FILE) && !(dev.systemd.timers ? money-import)) "no keys, no importer and no timer" ]
+    [ (!(env dev ? MONEY_PLAID_CLIENT_ID_FILE) && dev.systemd.timers ? money-import) "no keys, no banks; the timer still asks for the receipts folder" ]
     [ (failing signedIn == [ ]) "a provider evaluates" ]
     [ ((env signedIn).MONEY_OIDC_CLIENT_SECRET_FILE == "%d/oidc-secret") "the client secret is a credential, by file" ]
     [ ((unit signedIn).serviceConfig.LoadCredential == [ "oidc-secret:/run/secrets/oidc" ]) "loaded from where it lives" ]
@@ -79,7 +80,8 @@ let
     [ (lib.all (c: lib.elem c (unit stores).serviceConfig.LoadCredential) [ "amazon-username:/run/secrets/amazon-user" "amazon-password:/run/secrets/amazon-pass" "amazon-otp-secret:/run/secrets/amazon-otp" ]) "loaded from where they live" ]
     [ ((env stores).MONEY_RECEIPTS_DIR == "/var/lib/money/receipts" && stores.systemd.timers ? money-import) "the folder reaches the server, and the timer runs without a bank" ]
     [ (!(lib.any (v: lib.hasInfix "/run/secrets" v) (lib.attrValues (env stores)))) "no Amazon secret's path is in the environment" ]
-    [ (says amazonNoLogin "usernameFile and passwordFile") "amazon-orders without a sign-in is refused" ]
+    [ (failing amazonPage == [ ] && !((env amazonPage) ? MONEY_AMAZON_USERNAME_FILE) && (env amazonPage) ? MONEY_AMAZON_ORDERS) "amazon-orders with no files signs in with the stores page's login" ]
+    [ (says amazonHalf "go together") "half of Amazon's sign-in is refused" ]
     [ (says halfKeys "go together") "half of Plaid's keys is refused" ]
     [ (says noKeys "no Plaid keys") "banks without keys are refused" ]
     [ (says strayAccount "not in services.money.plaid.items") "an account on a bank not linked is refused" ]

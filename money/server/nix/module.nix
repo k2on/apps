@@ -21,7 +21,8 @@ let
   importing = plaid.clientIdFile != null || plaid.secretFile != null;
   amazon = cfg.amazon;
   # Anything the importer's runs read: a bank, Amazon, or a folder of exports.
-  syncing = importing || amazon.package != null || cfg.receiptsDir != null;
+  # Every server watches its receipts folder, so its importer always runs.
+  syncing = true;
   # A bank's name is a credential's name and a key of MONEY_PLAID_ITEMS.
   goodName = name: builtins.match "[A-Za-z0-9_-]+" name != null;
   state = lib.removePrefix "/var/lib/" cfg.dataDir;
@@ -216,7 +217,7 @@ in
       usernameFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
-        description = "A file holding the Amazon account's email.";
+        description = "A file holding the Amazon account's email. Null (and passwordFile null): the login given on the server's stores page, /stores.";
       };
       passwordFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
@@ -341,8 +342,8 @@ in
       message = "services.money.accounts.\"${name}\": say its mask or its accountId.";
     }) cfg.accounts ++ [
       {
-        assertion = amazon.package == null || (amazon.usernameFile != null && amazon.passwordFile != null);
-        message = "services.money.amazon: amazon-orders signs in with usernameFile and passwordFile; set both.";
+        assertion = (amazon.usernameFile == null) == (amazon.passwordFile == null);
+        message = "services.money.amazon: usernameFile and passwordFile go together; set both, or neither and sign in on the stores page.";
       }
     ];
 
@@ -381,6 +382,7 @@ in
       } // lib.optionalAttrs (amazon.package != null) {
         MONEY_AMAZON_ORDERS = "${amazon.package}/bin/amazon-orders";
         MONEY_AMAZON_ARGS = lib.concatStringsSep " " amazon.args;
+      } // lib.optionalAttrs (amazon.package != null && amazon.usernameFile != null) {
         MONEY_AMAZON_USERNAME_FILE = "%d/amazon-username";
         MONEY_AMAZON_PASSWORD_FILE = "%d/amazon-password";
       } // lib.optionalAttrs (amazon.package != null && amazon.otpSecretFile != null) {
@@ -399,7 +401,7 @@ in
             "plaid-secret:${plaid.secretFile}"
           ]
           ++ lib.mapAttrsToList (name: i: "plaid-item-${name}:${i.accessTokenFile}") plaid.items
-          ++ lib.optionals (amazon.package != null) [
+          ++ lib.optionals (amazon.package != null && amazon.usernameFile != null) [
             "amazon-username:${amazon.usernameFile}"
             "amazon-password:${amazon.passwordFile}"
           ]

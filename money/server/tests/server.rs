@@ -145,7 +145,8 @@ fn the_budget_and_the_logins_survive_a_restart() {
 
 /// `/healthz` says what domain the server runs — its schema's hash and
 /// version, as `domain <hash> <version> current` — which is what a phone
-/// holds its own build to, and how many are connected.
+/// holds its own build to, and how many are connected: alice, and the
+/// importer, which every server runs for its receipts folder.
 #[test]
 fn health_says_which_domain() {
     let rt = runtime();
@@ -160,6 +161,6 @@ fn health_says_which_domain() {
         text.contains(&format!("domain {} {} current\n", d.schema_hash(), money_domain::VERSION)),
         "{text}"
     );
-    assert!(text.contains("connections 1\n"), "{text}");
+    assert!(text.contains("connections 2\n"), "{text}");
     rt.block_on(server.stop());
 }

@@ -270,6 +270,15 @@ impl Importer {
         (self.wake)();
     }
 
+    /// A handle the stores page asks a run with, and reads the last of.
+    pub fn handle(&self) -> ImporterHandle {
+        ImporterHandle {
+            wake: self.wake.clone(),
+            nudged: self.nudged.clone(),
+            runs: self.runs.clone(),
+        }
+    }
+
     /// Every line the importer has said.
     pub fn said(&self) -> Vec<String> {
         self.said.lock().unwrap_or_else(|e| e.into_inner()).clone()
@@ -278,6 +287,26 @@ impl Importer {
     /// Every run it has finished, oldest first.
     pub fn runs(&self) -> Vec<Run> {
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// What of the importer another thread may hold: its nudge, and its runs.
+#[derive(Clone)]
+pub struct ImporterHandle {
+    wake: ark_peer::Wake,
+    nudged: Arc<AtomicBool>,
+    runs: Arc<Mutex<Vec<Run>>>,
+}
+
+impl ImporterHandle {
+    pub fn nudge(&self) {
+        self.nudged.store(true, Ordering::SeqCst);
+        (self.wake)();
+    }
+
+    /// The last run it finished.
+    pub fn last(&self) -> Option<Run> {
+        self.runs.lock().unwrap_or_else(|e| e.into_inner()).last().cloned()
     }
 }
 
