@@ -22,7 +22,7 @@
 pub mod account;
 pub mod art;
 pub mod cards;
-pub mod clipboard;
+mod clipboard;
 pub mod command;
 pub mod context;
 pub mod dialog;
@@ -52,6 +52,7 @@ pub mod theme;
 pub mod url;
 pub mod vim;
 pub mod wake;
+pub mod window;
 
 /// iced's default scrollbar width, which it takes out of the content's.
 ///

@@ -194,8 +194,8 @@ impl App {
                 .push(layer::backdrop(Message::CloseMenu, Message::Swallow))
                 .push(layer::pinned(menu::view(m, true, Message::MenuAt, Message::MenuActivate), m.origin));
         }
-        // Every text box copies, cuts and pastes in a browser too.
-        arkui::clipboard::view(layers)
+        // The window's root: arkui's own needs of the platform.
+        arkui::window::view(layers)
     }
 
     // * The sidebar

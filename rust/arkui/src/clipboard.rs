@@ -17,9 +17,10 @@
 //!   the window when it arrives, so it goes in at once rather than at the
 //!   next event.
 //!
-//! An app wraps its window's view in [`view`], once, and subscribes to
-//! [`pastes`]; on the desktop both cost nothing. Every text box under it is
-//! covered, arkui's own (the command box, a picker's name) included.
+//! Private to arkui: an app gets it from its root, [`crate::window`],
+//! whose [`crate::window::wakes`] carries [`pastes`]; on the desktop both
+//! cost nothing. Every text box under it is covered, arkui's own (the
+//! command box, a picker's name) included.
 use std::cell::RefCell;
 
 use iced::advanced::layout::{self, Layout};
@@ -41,13 +42,13 @@ thread_local! {
 
 /// `view` with every text box in it copying, cutting and pasting in a
 /// browser as it does on the desktop: the whole window's, once.
-pub fn view<'a, M: 'a>(view: impl Into<Element<'a, M>>) -> Element<'a, M> {
+pub(crate) fn view<'a, M: 'a>(view: impl Into<Element<'a, M>>) -> Element<'a, M> {
     Element::new(Field { content: view.into() })
 }
 
 /// Rings when a paste has arrived, for the app to answer with any message:
 /// the update draws a frame, and the box with the keys takes it then.
-pub fn pastes() -> Subscription<()> {
+pub(crate) fn pastes() -> Subscription<()> {
     #[cfg(target_arch = "wasm32")]
     {
         fn stream() -> iced::futures::channel::mpsc::UnboundedReceiver<()> {

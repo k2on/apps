@@ -130,11 +130,10 @@ impl App {
         .style(style::page);
 
         // Everything above the page is a layer of one stack, and the pointer
-        // is tracked around the whole of it (below), so that `pin` shares its
-        // origin — and so that it is tracked over a layer too: the stack hides
-        // the pointer from the layers under the one it is over, and a row of
-        // the queue grabbed would start its drag from wherever it last was
-        // over the page.
+        // is tracked around the whole of it (`arkui::window::tracked`,
+        // below), so that `pin` shares its origin and it is heard over a
+        // layer too — a row of the queue grabbed starts its drag from where
+        // it is.
         let mut layers = stack![base];
         let focus = self.focus();
 
@@ -244,8 +243,9 @@ impl App {
                 ));
         }
 
-        // Every text box copies, cuts and pastes in a browser too.
-        arkui::clipboard::view(mouse_area(layers).on_move(Message::Hover))
+        // The window's root: the pointer heard over every layer, in the
+        // window's own coordinates, and arkui's own needs of the platform.
+        arkui::window::tracked(layers, Message::Hover)
     }
 
     /// Music, then the lists somebody made — each read back by the domain.
