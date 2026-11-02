@@ -154,7 +154,7 @@ jobs:
             .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module \
             .#checks.x86_64-linux.docs
 
-  # What a server runs — the harken NixOS module's packages — built and
+  # What a server runs — the harken and money NixOS modules' packages — built and
   # pushed to Cachix, which ark substitutes from: a deploy of a commit this
   # job has built downloads them rather than compiling them on the host.
   # After the pages: the web directory it serves is the browser peer's
@@ -174,7 +174,7 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build what the server runs
-        run: nix build --print-build-logs --no-link .#harken-server .#harken-web-server .#arkdb
+        run: nix build --print-build-logs --no-link .#harken-server .#harken-web-server .#money-server .#money-web-server .#arkdb
 
   apk:
     needs: plan
