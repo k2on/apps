@@ -1,0 +1,35 @@
+[
+  {
+    "full_details": true,
+    "index": 0,
+    "cancelled": false,
+    "is_whole_foods": false,
+    "shipments": [],
+    "items": [
+      {"title": "Vital Farms Pasture-Raised Eggs, 12 Count", "link": "https://www.amazon.com/dp/B07XYZ", "asin": "B07XYZ", "price": 6.49, "quantity": 1},
+      {"title": "Scotch-Brite Sponges, 9 pack", "asin": "B000PCWKV2", "price": 4.5, "quantity": 2}
+    ],
+    "order_number": "112-1234567-1234567",
+    "grand_total": 16.53,
+    "order_placed_date": "2026-10-02",
+    "subtotal": 15.49,
+    "estimated_tax": 1.04,
+    "payment_method_last_4": "4821"
+  },
+  {
+    "cancelled": true,
+    "items": [{"title": "Never sent", "asin": "B0", "price": 9.99, "quantity": 1}],
+    "order_number": "112-0000000-0000000",
+    "grand_total": 9.99,
+    "order_placed_date": "2026-10-03"
+  },
+  {
+    "cancelled": false,
+    "items": [],
+    "shipments": [{"items": [{"title": "USB-C cable", "asin": "B0C", "price": 8.99, "quantity": 1}]}],
+    "order_number": "112-7654321-7654321",
+    "grand_total": 9.62,
+    "order_placed_date": "2026-10-04"
+  }
+]
+... 3 Orders parsed in 4.2 seconds.

@@ -179,7 +179,7 @@ pub fn own_activity(db: &Db<Money>, id: Id<Category>, from: &str, to: &str) -> i
     let splits: i64 = db
         .split
         .by(Split::CATEGORY_ID_DATE)
-        .between((id, from.to_string()), (id, to.to_string()))
+        .between((Some(id), from.to_string()), (Some(id), to.to_string()))
         .all()
         .iter()
         .map(|s| s.amount)
@@ -275,7 +275,7 @@ impl History {
             for t in db.txn.by(Txn::CATEGORY_ID_DATE).from(Some(c.id)).all() {
                 months.entry(month_of(&t.date)).or_default().1 += t.amount;
             }
-            for s in db.split.by(Split::CATEGORY_ID_DATE).from(c.id).all() {
+            for s in db.split.by(Split::CATEGORY_ID_DATE).from(Some(c.id)).all() {
                 months.entry(month_of(&s.date)).or_default().1 += s.amount;
             }
         }
@@ -376,7 +376,7 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
             out.income += t.amount;
         }
     }
-    for s in db.split.by(Split::CATEGORY_ID_DATE).between((rta, String::new()), (rta, month_end(month))).all() {
+    for s in db.split.by(Split::CATEGORY_ID_DATE).between((Some(rta), String::new()), (Some(rta), month_end(month))).all() {
         income_through += s.amount;
         if month_of(&s.date) == month {
             out.income += s.amount;

@@ -307,7 +307,7 @@ fn categories_and_groups_are_put_where_they_are_dragged() {
         "move_category",
         &to(
             groceries,
-            b.rows::<Group>("group").iter().find(|g| g.name == "Bills").unwrap().id,
+            b.line("2026-09", groceries).group_id,
             Some(rent),
         ),
     )

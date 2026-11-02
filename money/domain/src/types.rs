@@ -101,6 +101,15 @@ pub struct AddCategory {
     pub name: String,
 }
 
+/// A kind of a category, under it: "Eggs" under "Groceries".
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct AddSubcategory {
+    pub parent_id: Id<Category>,
+    #[ark(trim, non_empty, why = "a category needs a name")]
+    #[ark(len = "0..=80")]
+    pub name: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct RenameCategory {
     pub id: Id<Category>,
@@ -115,6 +124,8 @@ pub struct HideCategory {
     pub hidden: bool,
 }
 
+/// A category moved: an envelope into a group (`group_id`, a heading),
+/// a kind under another category (`group_id`, its new parent).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct MoveCategory {
     pub id: Id<Category>,
@@ -235,6 +246,30 @@ pub struct Categorize {
     pub category_id: Option<Id<Category>>,
 }
 
+/// One line of a split: part of the transaction's amount, for a category
+/// (none: not yet said).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct SplitPart {
+    pub category_id: Option<Id<Category>>,
+    pub amount: i64,
+    #[serde(default)]
+    pub memo: String,
+}
+
+/// A transaction split into `lines`, which add up to its amount; no lines
+/// is unsplit, for no category until somebody gives it one.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct SplitTxn {
+    pub id: Id<Txn>,
+    pub lines: Vec<SplitPart>,
+}
+
+/// One transaction, by id.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct OneTxn {
+    pub id: Id<Txn>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct SetCleared {
     pub id: Id<Txn>,
@@ -323,6 +358,66 @@ pub struct IgnoreLinked {
     pub ignored: bool,
 }
 
+// * Receipts
+
+fn is_store(s: &str) -> bool {
+    crate::stores::STORES.contains(&s)
+}
+
+/// A thing bought, as a store's adapter read it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct StoreItem {
+    pub name: String,
+    pub sku: String,
+    /// In thousandths: 1000 is one.
+    pub quantity: i64,
+    pub unit: String,
+    /// Our sign: spent is negative, a discount positive.
+    pub amount: i64,
+}
+
+/// A receipt or order, as a store's adapter read it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct StoreReceipt {
+    /// The store's own id for it: an order number, a receipt's barcode.
+    pub order_id: String,
+    pub date: String,
+    pub place: String,
+    /// What was paid, tax in, our sign.
+    pub total: i64,
+    pub items: Vec<StoreItem>,
+}
+
+/// One store's receipts, from one export ([`crate::stores`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ReceiptImport {
+    #[ark(check = "is_store", why = "amazon, target or costco")]
+    pub store: String,
+    pub receipts: Vec<StoreReceipt>,
+}
+
+/// One item of one receipt.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ItemRef {
+    pub receipt_id: String,
+    pub line: i64,
+}
+
+/// Items filed under a category (none: unfiled); every unfiled item with
+/// the same key as one of them is filed with it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ClassifyItems {
+    pub items: Vec<ItemRef>,
+    pub category_id: Option<Id<Category>>,
+}
+
+/// A receipt said to be paid by a transaction (none: by none found yet).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct MatchReceipt {
+    pub receipt_id: String,
+    pub txn_id: Option<Id<Txn>>,
+}
+
 // * The views' inputs
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -335,6 +430,13 @@ pub struct Month {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct Register {
     pub account_id: Option<Id<Account>>,
+}
+
+/// The items filed under a category or any kind of it — the eggs from
+/// every store under "Eggs" — or (none) every item not filed yet.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ItemsIn {
+    pub category_id: Option<Id<Category>>,
 }
 
 // * The views' rows
@@ -495,4 +597,70 @@ pub struct LinkedLine {
     /// The bank's own balance at its last import.
     pub balance: Option<i64>,
     pub ignored: bool,
+}
+
+/// A category in the whole tree.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct CategoryNode {
+    pub id: Id<Category>,
+    pub parent_id: Option<Id<Category>>,
+    pub name: String,
+    /// From its heading down: "Everyday › Groceries › Eggs".
+    pub path: String,
+    /// 0 a heading (a group), 1 an envelope, 2 and on a kind of one.
+    pub depth: i64,
+    /// It, or a category above it, is hidden.
+    pub hidden: bool,
+    /// Under the budget's own heading.
+    pub income: bool,
+    /// What the tree sorts by: each position from the heading down.
+    pub order: String,
+}
+
+/// One line of a split transaction, as a register draws it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct SplitLine {
+    pub txn_id: Id<Txn>,
+    pub line: i64,
+    pub category_id: Option<Id<Category>>,
+    /// The category's path, or "Needs a category".
+    pub category: String,
+    pub amount: i64,
+    pub memo: String,
+}
+
+/// A receipt, and how far along its items are.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ReceiptLine {
+    pub id: String,
+    pub store: String,
+    pub date: String,
+    pub place: String,
+    pub total: i64,
+    pub items: i64,
+    /// Items filed under a category.
+    pub filed: i64,
+    pub txn_id: Option<Id<Txn>>,
+    /// The paying transaction's payee and account, when found.
+    pub payee: String,
+    pub account: String,
+}
+
+/// A thing bought, wherever it was bought.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ItemLine {
+    pub receipt_id: String,
+    pub line: i64,
+    pub store: String,
+    pub date: String,
+    pub place: String,
+    pub name: String,
+    pub sku: String,
+    pub quantity: i64,
+    pub unit: String,
+    pub amount: i64,
+    /// What one cost, in cents, our sign: per each, per gallon.
+    pub unit_price: i64,
+    pub category_id: Option<Id<Category>>,
+    pub category: String,
 }

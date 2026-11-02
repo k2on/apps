@@ -219,10 +219,10 @@ pub fn import(ctx: &Ctx, db: &mut Db<Money>, input: Import) -> Result<(), Refusa
             counts.locked += 1;
             continue;
         }
-        if let Some(pair) = prior.transfer_id {
-            db.txn.delete(pair)?;
+        if let Some(pair) = prior.transfer_id.and_then(|p| db.txn.get(p)) {
+            crate::transactions::remove_txn(db, &pair)?;
         }
-        db.txn.remove(&prior)?;
+        crate::transactions::remove_txn(db, &prior)?;
         counts.deleted += 1;
     }
 
@@ -350,14 +350,30 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
                 ..pair
             })?;
         }
-        db.txn.update(Txn {
+        // A split whose amount the bank changed (a tip added as it posted)
+        // no longer adds up: split again from its receipt, when it has one,
+        // and otherwise left for no category, to be looked at again.
+        let resplit = prior.split && prior.amount != u.amount;
+        let prior = match resplit {
+            true => Txn {
+                approved: false,
+                ..crate::transactions::unsplit(db, prior)?
+            },
+            false => prior,
+        };
+        let t = Txn {
             imported_id: Some(u.transaction_id.clone()),
             imported_payee: u.imported_payee.clone(),
             amount: u.amount,
             date: u.date.clone(),
             cleared: cleared(u.pending),
             ..prior
-        })?;
+        };
+        db.txn.update(t.clone())?;
+        crate::transactions::redate_splits(db, &t)?;
+        if resplit {
+            crate::receipts::resplit_txn(db, t.id)?;
+        }
         counts.updated += 1;
         return Ok(());
     }
@@ -391,8 +407,9 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
         true => remembered(db, &u.payee),
         false => None,
     };
+    let id: Id<Txn> = ctx.new_id();
     db.txn.insert(Txn {
-        id: ctx.new_id(),
+        id,
         account_id: account.id,
         date: u.date.clone(),
         payee: u.payee.clone(),
@@ -406,6 +423,10 @@ fn upsert(ctx: &Ctx, db: &mut Db<Money>, account: &Account, u: &BankTxn, superse
         user_id: ctx.user().into(),
         ..Txn::default()
     })?;
+    // A receipt imported before its charge reached the bank, paid now.
+    if account.on_budget {
+        crate::receipts::pay_waiting(db, id)?;
+    }
     counts.added += 1;
     Ok(())
 }

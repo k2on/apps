@@ -114,7 +114,7 @@ impl Book {
 
     pub fn group(&mut self, name: &str) -> Id<Group> {
         self.run("add_group", &AddGroup { name: name.into() }).unwrap();
-        self.rows::<Group>("group").into_iter().find(|g| g.name == name).unwrap().id
+        self.rows::<Group>("category").into_iter().find(|g| g.name == name && g.parent_id.is_none()).unwrap().id
     }
 
     pub fn category(&mut self, group: Id<Group>, name: &str) -> Id<Category> {
@@ -122,6 +122,18 @@ impl Book {
             "add_category",
             &AddCategory {
                 group_id: group,
+                name: name.into(),
+            },
+        )
+        .unwrap();
+        self.rows::<Category>("category").into_iter().find(|c| c.name == name).unwrap().id
+    }
+
+    pub fn kind(&mut self, parent: Id<Category>, name: &str) -> Id<Category> {
+        self.run(
+            "add_subcategory",
+            &AddSubcategory {
+                parent_id: parent,
                 name: name.into(),
             },
         )

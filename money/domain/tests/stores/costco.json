@@ -1,0 +1,17 @@
+{"data": {"receiptsWithCounts": {"inWarehouse": 1, "gasStation": 1, "receipts": [
+  {"warehouseName": "MAPLEWOOD", "receiptType": "In-Warehouse", "documentType": "WarehouseReceiptDetail",
+   "transactionDateTime": "2026-10-12T15:04:00", "transactionBarcode": "21134300501232510121504",
+   "total": 47.2, "subTotal": 44.97, "taxes": 2.23,
+   "itemArray": [
+     {"itemNumber": "1234", "itemDescription01": "KS ORGANIC EGGS", "itemDescription02": "24CT", "unit": 2, "amount": 13.98, "itemUnitPriceAmount": 6.99},
+     {"itemNumber": "5678", "itemDescription01": "KS PAPER TOWEL", "itemDescription02": "", "unit": 1, "amount": 22.99},
+     {"itemNumber": "345", "itemDescription01": "/5678", "unit": -1, "amount": -4.0},
+     {"itemNumber": "9012", "itemDescription01": "BANANAS", "unit": 1, "amount": 12.0}
+   ]},
+  {"warehouseName": "MAPLEWOOD", "receiptType": "Gas Station", "documentType": "FuelReceipts",
+   "transactionDateTime": "2026-10-25T08:10:00", "transactionBarcode": "21134300501232510250810",
+   "total": 41.27,
+   "itemArray": [
+     {"itemNumber": "800", "itemDescription01": "REGULAR", "fuelUnitQuantity": 11.482, "itemUnitPriceAmount": 3.594, "amount": 41.27}
+   ]}
+]}}}

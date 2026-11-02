@@ -24,10 +24,13 @@ pub mod accounts;
 pub mod budget;
 pub mod categories;
 pub mod dates;
+pub mod migrations;
 pub mod plaid;
+pub mod receipts;
 pub mod schema;
 #[cfg(feature = "seed")]
 pub mod seed;
+pub mod stores;
 pub mod transactions;
 pub mod types;
 
@@ -53,13 +56,15 @@ pub fn domain() -> Domain {
         budget::groups, budget::month, budget::summary, budget::spending,
         categories::add_group, categories::rename_group, categories::hide_group, categories::delete_group,
         categories::add_category, categories::rename_category, categories::hide_category, categories::move_category, categories::move_group,
-        categories::set_target, categories::delete_category,
+        categories::set_target, categories::delete_category, categories::add_subcategory, categories::tree,
         accounts::open_account, accounts::rename_account, accounts::close_account, accounts::accounts,
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
-        transactions::register, transactions::inbox, transactions::payees,
+        transactions::register, transactions::inbox, transactions::payees, transactions::split, transactions::splits,
+        receipts::add_receipts, receipts::file_items, receipts::pay, receipts::receipts, receipts::items,
         plaid::import, plaid::link, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, feed)
     .with(ark_auth::register::<Money>)
+    .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
 }
 
 /// What a connection fed by scope holds (§1.8): the budget whole — it is
@@ -72,13 +77,15 @@ pub fn feed() -> Scope<Money> {
     ark_auth::feed(
         Scope::new()
             .on::<Account>(all)
-            .on::<Group>(all)
             .on::<Category>(all)
             .on::<Assigned>(all)
             .on::<Txn>(all)
             .on::<Bank>(all)
             .on::<Linked>(all)
-            .on::<Asked>(all),
+            .on::<Asked>(all)
+            .on::<Split>(all)
+            .on::<Receipt>(all)
+            .on::<Item>(all),
     )
 }
 

@@ -1,0 +1,10 @@
+{"orders": [
+  {"order_number": "9120004511", "placed_date": "2026-10-25T17:32:11.000Z", "order_purchase_type": "STORE",
+   "store": {"location_name": "Maplewood"},
+   "summary": {"grand_total": "87.40"},
+   "order_lines": [
+     {"item": {"tcin": "14713534", "description": "Good & Gather Large Eggs, 12ct"}, "quantity": 1, "total_price": 4.29},
+     {"item": {"tcin": "53212", "description": "Dutch Boy Interior Paint"}, "quantity": 1, "unit_price": "$35.99"},
+     {"item": {"description": "Snacks"}, "quantity": 3, "unit_price": 13.94}
+   ]}
+]}

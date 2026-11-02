@@ -1,6 +1,11 @@
 //! Transactions: money moving, as somebody entered it or the bank told of
 //! it. A transfer is two, one in each account, kept together: whatever is
 //! done to one is done to the other.
+//!
+//! A transaction is for one category, or split: its amount in lines, each
+//! for a category of its own ([`Split`]), adding up to it. A split is by
+//! amounts, whoever said them — somebody typing, or a receipt's items
+//! ([`crate::receipts`]); a line for no category yet leaves it needing one.
 
 use ark::prelude::*;
 
@@ -18,8 +23,11 @@ fn category_for(db: &Db<Money>, account: &Account, category: Option<Id<Category>
     match category {
         None => Ok(None),
         Some(_) if !account.on_budget => Err(Refusal::new("an account off the budget is only tracked: its money is for no category")),
-        Some(c) if db.category.has(c) => Ok(Some(c)),
-        Some(_) => Err(Refusal::new("no such category")),
+        Some(c) => match db.category.get(c) {
+            Some(g) if g.parent_id.is_none() => Err(Refusal::new(format!("{} is a group: money is for a category in it", g.name))),
+            Some(_) => Ok(Some(c)),
+            None => Err(Refusal::new("no such category")),
+        },
     }
 }
 
@@ -60,11 +68,13 @@ pub fn add_transaction(ctx: &Ctx, db: &mut Db<Money>, input: AddTransaction) -> 
     };
     let Some(to) = input.transfer_to else {
         let category_id = category_for(db, &account, input.category_id)?;
-        return db.txn.insert(Txn {
-            id: ctx.new_id(),
-            category_id,
-            ..base
-        });
+        let id: Id<Txn> = ctx.new_id();
+        db.txn.insert(Txn { id, category_id, ..base })?;
+        // A receipt imported before anybody typed in what paid for it.
+        if account.on_budget {
+            crate::receipts::pay_waiting(db, id)?;
+        }
+        return Ok(());
     };
     let other = open_account(db, to)?;
     if other.id == account.id {
@@ -105,14 +115,109 @@ fn txn_of(db: &Db<Money>, id: Id<Txn>) -> Result<Txn, Refusal> {
     db.txn.get(id).ok_or_else(|| Refusal::new("no such transaction"))
 }
 
+/// A transaction's split lines, in order.
+pub fn splits_of(db: &Db<Money>, id: Id<Txn>) -> Vec<Split> {
+    let mut lines = db.split.by(Split::TXN_ID).from(id).all();
+    lines.sort_by_key(|s| s.line);
+    lines
+}
+
+/// A transaction's split lines gone, and it for no category.
+pub fn unsplit(db: &mut Db<Money>, t: Txn) -> Result<Txn, Refusal> {
+    for s in splits_of(db, t.id) {
+        db.split.remove(&s)?;
+    }
+    let t = Txn {
+        split: false,
+        category_id: None,
+        ..t
+    };
+    db.txn.update(t.clone())?;
+    Ok(t)
+}
+
+/// `t` split into `lines`, in place of how it was categorised: one line is
+/// a category, none is no category, more are a split, and they add up to
+/// its amount. A transfer's money only moved, and is not split; off the
+/// budget, money is for no category.
+pub fn write_split(db: &mut Db<Money>, t: Txn, lines: &[SplitPart], approve: bool) -> Result<(), Refusal> {
+    if t.transfer_id.is_some() {
+        return Err(Refusal::new("a transfer is not split"));
+    }
+    let account = account_of(db, t.account_id)?;
+    for l in lines {
+        category_for(db, &account, l.category_id)?;
+    }
+    let sum: i64 = lines.iter().map(|l| l.amount).sum();
+    if lines.len() > 1 && sum != t.amount {
+        return Err(Refusal::new(format!(
+            "a split's lines add up to its amount: {} of {}",
+            sum, t.amount
+        )));
+    }
+    let approved = t.approved || approve;
+    let t = unsplit(db, t)?;
+    if lines.len() < 2 {
+        return db.txn.update(Txn {
+            category_id: lines.first().and_then(|l| l.category_id),
+            approved,
+            ..t
+        });
+    }
+    for (i, l) in lines.iter().enumerate() {
+        db.split.insert(Split {
+            txn_id: t.id,
+            line: i as i64 + 1,
+            category_id: l.category_id,
+            date: t.date.clone(),
+            amount: l.amount,
+            memo: l.memo.clone(),
+        })?;
+    }
+    db.txn.update(Txn {
+        split: true,
+        approved,
+        ..t
+    })
+}
+
+/// A split transaction's lines dated as it is, after its date moved.
+pub fn redate_splits(db: &mut Db<Money>, t: &Txn) -> Result<(), Refusal> {
+    for s in splits_of(db, t.id) {
+        if s.date != t.date {
+            db.split.update(Split { date: t.date.clone(), ..s })?;
+        }
+    }
+    Ok(())
+}
+
+/// A transaction split by hand (and so looked at): its amount in lines, each
+/// for a category; one line, or none, is no split.
+#[mutator("transactions.split")]
+pub fn split(_: &Ctx, db: &mut Db<Money>, input: SplitTxn) -> Result<(), Refusal> {
+    let t = txn_of(db, input.id)?;
+    write_split(db, t, &input.lines, true)
+}
+
 /// A transaction as somebody corrected it; a transfer's other half follows
 /// its date, amount and memo. A reconciled one keeps its amount: the bank
-/// agreed to it.
+/// agreed to it. A split one given a category is no longer split; left for
+/// none, it stays split, and keeps its amount — its lines say what the
+/// amount is for.
 #[mutator("transactions.edit_transaction")]
 pub fn edit_transaction(_: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> Result<(), Refusal> {
-    let t = txn_of(db, input.id)?;
+    let mut t = txn_of(db, input.id)?;
     if t.cleared == Cleared::Reconciled && t.amount != input.amount {
         return Err(Refusal::new("reconciled: its amount is agreed with the bank"));
+    }
+    if t.split {
+        match input.category_id {
+            Some(_) => t = unsplit(db, t)?,
+            None if t.amount != input.amount => {
+                return Err(Refusal::new("split: change its lines with its amount, or give it one category"))
+            }
+            None => {}
+        }
     }
     let account = account_of(db, t.account_id)?;
     let category_id = match t.transfer_account.and_then(|a| db.account.get(a)) {
@@ -131,7 +236,7 @@ pub fn edit_transaction(_: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> 
             ..pair
         })?;
     }
-    db.txn.update(Txn {
+    let t = Txn {
         date: input.date,
         payee,
         category_id,
@@ -139,7 +244,21 @@ pub fn edit_transaction(_: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> 
         amount: input.amount,
         approved: true,
         ..t
-    })
+    };
+    db.txn.update(t.clone())?;
+    redate_splits(db, &t)
+}
+
+/// A transaction gone, with its split lines; what receipt it paid for is
+/// paid for by none found.
+pub fn remove_txn(db: &mut Db<Money>, t: &Txn) -> Result<(), Refusal> {
+    for s in splits_of(db, t.id) {
+        db.split.remove(&s)?;
+    }
+    for r in db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).all() {
+        db.receipt.update(Receipt { txn_id: None, ..r })?;
+    }
+    db.txn.remove(t)
 }
 
 /// Transactions gone, each with its transfer's other half.
@@ -147,10 +266,10 @@ pub fn edit_transaction(_: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> 
 pub fn delete_transactions(_: &Ctx, db: &mut Db<Money>, input: Txns) -> Result<(), Refusal> {
     for id in input.ids {
         let Some(t) = db.txn.get(id) else { continue };
-        if let Some(pair) = t.transfer_id {
-            db.txn.delete(pair)?;
+        if let Some(pair) = t.transfer_id.and_then(|p| db.txn.get(p)) {
+            remove_txn(db, &pair)?;
         }
-        db.txn.remove(&t)?;
+        remove_txn(db, &t)?;
     }
     Ok(())
 }
@@ -179,6 +298,10 @@ pub fn categorize(_: &Ctx, db: &mut Db<Money>, input: Categorize) -> Result<(), 
             }
         }
         let category_id = category_for(db, &account, input.category_id)?;
+        let t = match t.split {
+            true => unsplit(db, t)?,
+            false => t,
+        };
         db.txn.update(Txn {
             category_id,
             approved: true,
@@ -244,12 +367,18 @@ pub fn txn_line(db: &Db<Money>, t: &Txn) -> TxnLine {
     let account = db.account.get(t.account_id).unwrap_or_default();
     let other = t.transfer_account.and_then(|a| db.account.get(a));
     let category = t.category_id.and_then(|c| db.category.get(c));
-    let group = category.as_ref().and_then(|c| db.group.get(c.group_id));
+    let group = category.as_ref().and_then(|c| crate::budget::heading_of(db, c.id));
+    let lines = match t.split {
+        true => splits_of(db, t.id),
+        false => vec![],
+    };
     let payee = match &other {
         Some(o) => format!("Transfer : {}", o.name),
         None => t.payee.clone(),
     };
     let label = match (&category, &other) {
+        _ if t.split && lines.iter().any(|l| l.category_id.is_none()) => "Needs a category".into(),
+        _ if t.split => format!("Split ({})", lines.len()),
         (Some(c), _) => c.name.clone(),
         (None, Some(_)) => String::new(),
         (None, None) if account.on_budget => "Needs a category".into(),
@@ -294,6 +423,26 @@ pub fn inbox(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<TxnLine>, Refusal> {
         .map_with(txn_line)
         .filter(|l| !l.approved || l.category == "Needs a category")
         .sort(|l| (Desc(l.date.clone()), Desc(l.created_ms), l.id)))
+}
+
+/// A split transaction's lines, in order.
+#[view("transactions.splits")]
+pub fn splits(_: &Ctx, _: &Db<Money>, input: OneTxn) -> Result<Plan<SplitLine>, Refusal> {
+    let id = input.id;
+    Ok(scan::<Money, Split>()
+        .filter(move |s| s.txn_id == id)
+        .map_with(|db, s| SplitLine {
+            txn_id: s.txn_id,
+            line: s.line,
+            category_id: s.category_id,
+            category: match s.category_id {
+                Some(c) => crate::budget::path_of(db, c),
+                None => "Needs a category".into(),
+            },
+            amount: s.amount,
+            memo: s.memo.clone(),
+        })
+        .sort(|l| l.line))
 }
 
 /// Everybody paid, by name, with the category their newest transaction was

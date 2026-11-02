@@ -172,15 +172,18 @@ pub struct Asked {
 /// a receipt's items ([`crate::receipts`]) — and its lines add up to the
 /// transaction's amount. Each carries its transaction's date, so a month's
 /// spending in a category is a range of an index, as the transactions' is.
+#[allow(clippy::duplicated_attributes)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
-#[ark(index(category_id, date))]
+#[ark(index(txn_id), index(category_id, date))]
 pub struct Split {
     #[ark(key, refs(Txn))]
     pub txn_id: Id<Txn>,
     #[ark(key)]
     pub line: i64,
+    /// None: a part nobody has said the purpose of yet (a receipt's item
+    /// not yet filed), which leaves the transaction needing a category.
     #[ark(refs(Category))]
-    pub category_id: Id<Category>,
+    pub category_id: Option<Id<Category>>,
     pub date: String,
     pub amount: i64,
     pub memo: String,
@@ -214,7 +217,7 @@ pub struct Receipt {
 /// category it is filed under — the same "Eggs" whichever store sold them.
 #[allow(clippy::duplicated_attributes)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
-#[ark(index(category_id), index(key))]
+#[ark(index(receipt_id), index(category_id), index(same))]
 pub struct Item {
     #[ark(key, refs(Receipt))]
     pub receipt_id: String,
@@ -224,9 +227,10 @@ pub struct Item {
     /// The store's number for it: an ASIN, a TCIN, a Costco item number;
     /// blank when the store gave none.
     pub sku: String,
-    /// What remembering goes by: `<store>:<sku>`, else the store and the
-    /// name, folded ([`crate::receipts::key_of`]).
-    pub key: String,
+    /// What remembering goes by — the same store's same thing:
+    /// `<store>:<sku>`, else the store and the name, folded
+    /// ([`crate::receipts::key_of`]).
+    pub same: String,
     /// How many, in thousandths: two cartons are 2000, 11.482 gallons 11482.
     pub quantity: i64,
     /// `ea`, `gal`, `lb`.

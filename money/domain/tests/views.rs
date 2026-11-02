@@ -22,6 +22,8 @@ fn script(b: &mut Book) -> Vec<Step> {
     let bills = b.group("Bills");
     let rent = b.category(bills, "Rent");
     let food = b.category(bills, "Food");
+    let produce = b.kind(food, "Produce");
+    let part = |c, amount| SplitPart { category_id: c, amount, memo: String::new() };
     vec![
         Box::new(move |b| b.assign("2026-10", rent, 150_000)),
         Box::new(move |b| b.assign("2026-10", food, 40_000)),
@@ -87,6 +89,37 @@ fn script(b: &mut Book) -> Vec<Step> {
             )
             .unwrap();
         }),
+        Box::new(move |b| b.spend(checking, "2026-10-07", "Farm", Some(produce), -2_500)),
+        Box::new(move |b| {
+            b.spend(checking, "2026-10-08", "Target", None, -10_000);
+            let id = b.register(None).into_iter().find(|t| t.payee == "Target").unwrap().id;
+            let lines = vec![part(Some(food), -6_000), part(Some(rent), -3_000), part(None, -1_000)];
+            b.run("split", &SplitTxn { id, lines }).unwrap();
+        }),
+        Box::new(move |b| {
+            let r = ReceiptImport {
+                store: "costco".into(),
+                receipts: vec![StoreReceipt {
+                    order_id: "2113".into(),
+                    date: "2026-10-09".into(),
+                    place: "Costco".into(),
+                    total: -4_000,
+                    items: vec![
+                        StoreItem { name: "PRODUCE BOX".into(), sku: "1".into(), quantity: 1000, unit: "ea".into(), amount: -3_000 },
+                        StoreItem { name: "TOWELS".into(), sku: "2".into(), quantity: 1000, unit: "ea".into(), amount: -900 },
+                    ],
+                }],
+            };
+            b.run("add_receipts", &r).unwrap();
+        }),
+        Box::new(move |b| b.spend(card, "2026-10-10", "Costco", Some(food), -4_000)),
+        Box::new(move |b| {
+            let items = vec![ItemRef { receipt_id: "costco:2113".into(), line: 2 }];
+            b.run("file_items", &ClassifyItems { items, category_id: Some(rent) }).unwrap();
+        }),
+        Box::new(move |b| {
+            b.run("rename_category", &RenameCategory { id: produce, name: "Fruit".into() }).unwrap();
+        }),
         Box::new(move |b| {
             let first = b.register(Some(checking)).last().unwrap().id;
             b.run("set_cleared", &SetCleared { id: first, cleared: false }).ok();
@@ -147,6 +180,13 @@ fn the_budget() {
     hold("summary", &month("2026-11"));
     hold("groups", &());
     hold("spending", &month("2026-10"));
+    hold("tree", &());
+}
+
+#[test]
+fn the_receipts() {
+    hold("receipts", &());
+    hold("items", &ItemsIn { category_id: None });
 }
 
 #[test]
