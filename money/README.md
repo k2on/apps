@@ -128,7 +128,10 @@ to `imported/`, or to `failed/` when it does not read. The module's
 options are `amazon.{package, args, usernameFile, passwordFile,
 otpSecretFile}` and `receiptsDir`. Target and Costco have no program like
 `amazon-orders`, so their exports are saved from the browser into the
-folder.
+folder. For Costco, `download/download_costco_receipts.js` in
+ankurdave/beancount_import_sources, run in the console of a signed-in
+costco.com page, saves the array the adapter reads
+(`domain/tests/stores/costco-receipts-script.json` is its shape).
 
 ## The bank, through Plaid
 

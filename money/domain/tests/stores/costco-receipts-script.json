@@ -1,0 +1,26 @@
+[
+  {
+    "warehouseName": "MAPLEWOOD",
+    "documentType": "WarehouseReceiptDetail",
+    "transactionDateTime": "2026-10-12T15:04:00",
+    "transactionDate": "2026-10-12",
+    "warehouseNumber": 1134,
+    "warehouseShortName": "MAPLEWOOD",
+    "transactionType": "Sales",
+    "transactionBarcode": "21134300501232510121504",
+    "total": 47.2,
+    "totalItemCount": 3,
+    "subTotal": 44.97,
+    "taxes": 2.23,
+    "itemArray": [
+      {"itemNumber": "1234", "itemDescription01": "KS ORGANIC EGGS", "frenchItemDescription1": null, "itemDescription02": "24CT", "itemIdentifier": "E", "unit": 2, "amount": 13.98, "taxFlag": "N"},
+      {"itemNumber": "5678", "itemDescription01": "KS PAPER TOWEL", "itemDescription02": null, "unit": 1, "amount": 22.99, "taxFlag": "Y"},
+      {"itemNumber": "345678", "itemDescription01": "/5678", "itemDescription02": null, "unit": -1, "amount": -4, "taxFlag": "Y"},
+      {"itemNumber": "9012", "itemDescription01": "BANANAS", "itemDescription02": null, "unit": 1, "amount": 12, "taxFlag": "N"}
+    ],
+    "tenderArray": [{"tenderTypeCode": "061", "tenderDescription": "VISA", "amountTender": 47.2, "displayAccountNumber": "4821"}],
+    "couponArray": [],
+    "instantSavings": 4,
+    "membershipNumber": "111222333"
+  }
+]

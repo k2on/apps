@@ -54,6 +54,25 @@ fn costco_warehouse_and_gas() {
     assert_eq!(gas.items[0].unit, "gal");
 }
 
+/// What `download_costco_receipts.js` (ankurdave/beancount_import_sources)
+/// saves: the `receipts` query's answer, a bare array, its fields as that
+/// script asks for them.
+#[test]
+fn costco_as_the_receipts_script_saves_them() {
+    let got = costco(include_str!("stores/costco-receipts-script.json")).unwrap();
+    let r = &got.receipts[0];
+    assert_eq!((r.order_id.as_str(), r.date.as_str(), r.total), ("21134300501232510121504", "2026-10-12", -4_720));
+    assert_eq!(
+        items(r),
+        [
+            ("KS ORGANIC EGGS 24CT", "1234", 2000, -1_398),
+            ("KS PAPER TOWEL", "5678", 1000, -2_299),
+            ("/5678", "345678", -1000, 400),
+            ("BANANAS", "9012", 1000, -1_200),
+        ]
+    );
+}
+
 /// A line's price as a total, or as one's times how many; text or number.
 #[test]
 fn target_orders() {
