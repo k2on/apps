@@ -536,6 +536,105 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
         }
     }
 
+    // Kinds of a few categories, and the stores' receipts for the newest
+    // Target and Costco charges: each matched, its items filed by their
+    // names (eggs as Eggs, a cleaner as Cleaning) and the charge split by
+    // them; a bag of chips not filed yet.
+    for (parent, kind) in [("Groceries", "Eggs"), ("Groceries", "Produce"), ("Household", "Cleaning")] {
+        let parent_id = s.category(parent);
+        s.run(
+            ME,
+            "add_subcategory",
+            &AddSubcategory {
+                parent_id,
+                name: kind.into(),
+            },
+        );
+    }
+    let all = s.ask::<TxnLine>("register", &Register { account_id: None });
+    let newest = |payee: &str| {
+        all.iter()
+            .filter(|t| t.payee == payee && t.amount < 0)
+            .max_by_key(|t| t.date.clone())
+            .cloned()
+    };
+    let share = |total: i64, pct: i64| -((-total) * pct / 100).max(1);
+    if let Some(t) = newest("Target") {
+        let (eggs, cleaner) = (share(t.amount, 12), share(t.amount, 30));
+        let chips = share(t.amount, 93) - eggs - cleaner;
+        let r = StoreReceipt {
+            order_id: "9120-0045-1123".into(),
+            date: t.date.clone(),
+            place: "Target Maplewood".into(),
+            total: t.amount,
+            items: vec![
+                StoreItem {
+                    name: "GG LARGE EGGS 12CT".into(),
+                    sku: "14713534".into(),
+                    quantity: 1000,
+                    unit: "ea".into(),
+                    amount: eggs,
+                },
+                StoreItem {
+                    name: "METHOD ALL-PURPOSE CLEANING SPRAY".into(),
+                    sku: "53212".into(),
+                    quantity: 2000,
+                    unit: "ea".into(),
+                    amount: cleaner,
+                },
+                StoreItem {
+                    name: "GG TORTILLA CHIPS".into(),
+                    sku: "88123".into(),
+                    quantity: 1000,
+                    unit: "ea".into(),
+                    amount: chips,
+                },
+            ],
+        };
+        s.run(
+            ME,
+            "add_receipts",
+            &ReceiptImport {
+                store: "target".into(),
+                receipts: vec![r],
+            },
+        );
+    }
+    if let Some(t) = newest("Costco") {
+        let eggs = share(t.amount, 15);
+        let bananas = share(t.amount, 94) - eggs;
+        let r = StoreReceipt {
+            order_id: "21134300501232510121504".into(),
+            date: t.date.clone(),
+            place: "Costco Maplewood".into(),
+            total: t.amount,
+            items: vec![
+                StoreItem {
+                    name: "KS ORGANIC EGGS 24CT".into(),
+                    sku: "1234".into(),
+                    quantity: 2000,
+                    unit: "ea".into(),
+                    amount: eggs,
+                },
+                StoreItem {
+                    name: "BANANAS".into(),
+                    sku: "9012".into(),
+                    quantity: 1000,
+                    unit: "ea".into(),
+                    amount: bananas,
+                },
+            ],
+        };
+        s.run(
+            ME,
+            "add_receipts",
+            &ReceiptImport {
+                store: "costco".into(),
+                receipts: vec![r],
+            },
+        );
+    }
+
     let snapshot = Snapshot {
         seq: 0,
         hash: Default::default(),

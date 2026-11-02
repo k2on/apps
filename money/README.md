@@ -260,6 +260,17 @@ posts the coffee with its tip in place and brings an order. After that the
 bank has nothing new. Nothing leaves the window, and a reload starts from
 the seed again.
 
+Beside the budget, **Receipts** lists the stores' receipts with what paid
+for each and how many of its items are filed. One opened shows its items,
+and each is filed from the dropdown the register uses, which offers an
+envelope's kinds beneath it. Items not filed yet are gathered at the top,
+and the sidebar counts them. A transaction opened in the register can be
+**split**: lines of a category and an amount each, with what is left to
+give one. The inspector lists a category's kinds and adds one.
+**Settings** sends you to the server's own page to set up Amazon. The
+demo's household has kinds (Eggs, Produce, Cleaning) and a Target and a
+Costco receipt, matched and split.
+
 The layout follows YNAB: accounts down the side; the month's categories
 with Assigned, Activity and Available, and Ready to Assign across the
 top; the selected category's story on the right (its target, Move Money

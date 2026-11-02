@@ -61,7 +61,7 @@ pub fn domain() -> Domain {
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
         transactions::register, transactions::inbox, transactions::payees, transactions::split, transactions::splits,
-        receipts::add_receipts, receipts::file_items, receipts::pay, receipts::receipts, receipts::items,
+        receipts::add_receipts, receipts::file_items, receipts::pay, receipts::receipts, receipts::items, receipts::receipt_items,
         plaid::import, plaid::link, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, feed)
     .with(ark_auth::register::<Money>)
     .with(|d| migrations::all().into_iter().fold(d, Domain::migration))

@@ -61,6 +61,8 @@ pub enum Place {
     Accounts,
     Inbox,
     Account(String),
+    Receipts,
+    Settings,
 }
 
 impl arkui::route::Route for Place {
@@ -71,6 +73,8 @@ impl arkui::route::Route for Place {
             Place::Accounts => arkui::route::join("accounts", None),
             Place::Inbox => arkui::route::join("inbox", None),
             Place::Account(name) => arkui::route::join("account", Some(name)),
+            Place::Receipts => arkui::route::join("receipts", None),
+            Place::Settings => arkui::route::join("settings", None),
         }
     }
 
@@ -80,6 +84,8 @@ impl arkui::route::Route for Place {
             ("accounts", _) => Place::Accounts,
             ("inbox", _) => Place::Inbox,
             ("account", Some(name)) => Place::Account(name),
+            ("receipts", _) => Place::Receipts,
+            ("settings", _) => Place::Settings,
             _ => Place::Budget,
         }
     }
@@ -91,6 +97,10 @@ pub enum Page {
     Budget,
     Reflect,
     Ledger(Ledger),
+    /// The stores' receipts, and the items on them.
+    Receipts,
+    /// Where receipts come from: Amazon, set up on the server.
+    Settings,
 }
 
 /// A field of the transaction form.
@@ -122,6 +132,16 @@ pub struct TxnForm {
     /// What the bank called the one corrected, where it says more than the
     /// payee does (`bank_said`).
     pub bank: String,
+    /// Split: its amount in lines, each for a category.
+    pub split: Option<Vec<SplitRow>>,
+}
+
+/// One line of a split as it is typed.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SplitRow {
+    pub category: Option<Id<Category>>,
+    /// Spent on it, as typed: an outflow, unsigned.
+    pub amount: String,
 }
 
 /// What a category chooser is choosing for.
@@ -133,6 +153,10 @@ pub enum Choosing {
     Txns(Vec<Id<Txn>>),
     /// Where the inspector's category's money goes (or comes from).
     Move { from: Option<Id<Category>>, amount: String },
+    /// Receipts' items: what they are filed under.
+    Items(Vec<ItemRef>),
+    /// A line of the form's split.
+    SplitLine(usize),
 }
 
 /// What a chooser offers.
@@ -269,6 +293,22 @@ pub enum Message {
     Wake,
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
+    /// A receipt opened on the receipts page, or closed.
+    OpenReceipt(Option<String>),
+    /// Items' category: the dropdown, under the pointer.
+    FileItems(Vec<ItemRef>),
+    /// The form's transaction split: into two lines, or (none) back into one.
+    Split(bool),
+    SplitAmount(usize, String),
+    SplitCategory(usize),
+    SplitAdd,
+    SplitRemove(usize),
+    /// A kind of a category, being named.
+    NewKind(Id<Category>),
+    NewKindTyped(String),
+    NewKindDone,
+    /// The server's settings page, in a browser.
+    SetUpAmazon,
 }
 
 pub struct App {
@@ -322,6 +362,8 @@ pub struct App {
     pub last_click: Option<(Grab, iced::time::Instant)>,
     /// The last thing worth saying: a refusal, a sync.
     pub note: String,
+    /// A kind of the inspector's category, being named.
+    pub new_kind: Option<(Id<Category>, String)>,
 }
 
 impl App {
@@ -359,6 +401,7 @@ impl App {
             register_scroll: 0.0,
             dropdown: None,
             last_click: None,
+            new_kind: None,
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -536,6 +579,8 @@ impl App {
             Page::Ledger(Ledger::All) => Place::Accounts,
             Page::Ledger(Ledger::Inbox) => Place::Inbox,
             Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
+            Page::Receipts => Place::Receipts,
+            Page::Settings => Place::Settings,
         }
     }
 
@@ -547,6 +592,8 @@ impl App {
             Place::Accounts => Page::Ledger(Ledger::All),
             Place::Inbox => Page::Ledger(Ledger::Inbox),
             Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
+            Place::Receipts => Page::Receipts,
+            Place::Settings => Page::Settings,
         })
     }
 
@@ -699,7 +746,22 @@ impl App {
                         cleared: t.cleared != Cleared::Uncleared,
                         by: t.user_id.clone(),
                         bank: bank_said(t),
+                        split: None,
                     });
+                    // A split one opens on its lines.
+                    self.peer.set_splits(Some(id));
+                    let lines = self.peer.splits.as_ref().map(|(_, w)| w.rows.clone()).unwrap_or_default();
+                    if let (Some(f), false) = (&mut self.form, lines.is_empty()) {
+                        f.split = Some(
+                            lines
+                                .iter()
+                                .map(|l| SplitRow {
+                                    category: l.category_id,
+                                    amount: amount::editable(-l.amount),
+                                })
+                                .collect(),
+                        );
+                    }
                 }
             }
             Message::Form(field, value) => {
@@ -892,8 +954,8 @@ impl App {
                     self.assigning = None;
                 } else if self.form.is_some() {
                     self.form = None;
-                } else if self.new_group.is_some() || self.new_category.is_some() {
-                    (self.new_group, self.new_category) = (None, None);
+                } else if self.new_group.is_some() || self.new_category.is_some() || self.new_kind.is_some() {
+                    (self.new_group, self.new_category, self.new_kind) = (None, None, None);
                 } else if self.txn_anchor.is_some() {
                     self.txn_anchor = None;
                 } else if self.anchor.is_some() {
@@ -959,6 +1021,67 @@ impl App {
                 }
                 None => {}
             },
+            Message::OpenReceipt(id) => {
+                let id = match (&id, self.peer.receipt.as_ref()) {
+                    (Some(a), Some((b, _))) if a == b => None,
+                    _ => id,
+                };
+                self.peer.set_receipt(id.as_deref());
+            }
+            Message::FileItems(items) => return self.open_dropdown(Choosing::Items(items), self.pointer),
+            Message::Split(on) => {
+                if let Some(f) = &mut self.form {
+                    f.split = match on {
+                        true => {
+                            let whole = amount::parse(&f.outflow).unwrap_or(0) - amount::parse(&f.inflow).unwrap_or(0);
+                            Some(vec![
+                                SplitRow {
+                                    category: f.category,
+                                    amount: amount::editable(whole.abs()),
+                                },
+                                SplitRow::default(),
+                            ])
+                        }
+                        false => None,
+                    };
+                    if on {
+                        f.transfer_to = None;
+                    }
+                }
+            }
+            Message::SplitAmount(i, typed) => {
+                if let Some(row) = self.form.as_mut().and_then(|f| f.split.as_mut()).and_then(|s| s.get_mut(i)) {
+                    row.amount = typed;
+                }
+            }
+            Message::SplitCategory(i) => return self.open_dropdown(Choosing::SplitLine(i), self.pointer),
+            Message::SplitAdd => {
+                if let Some(lines) = self.form.as_mut().and_then(|f| f.split.as_mut()) {
+                    lines.push(SplitRow::default());
+                }
+            }
+            Message::SplitRemove(i) => {
+                if let Some(lines) = self.form.as_mut().and_then(|f| f.split.as_mut()) {
+                    if lines.len() > 2 && i < lines.len() {
+                        lines.remove(i);
+                    }
+                }
+            }
+            Message::NewKind(parent) => {
+                self.new_kind = Some((parent, String::new()));
+                return iced::widget::operation::focus(look::NEW_KIND);
+            }
+            Message::NewKindTyped(t) => {
+                if let Some((_, typed)) = &mut self.new_kind {
+                    *typed = t;
+                }
+            }
+            Message::NewKindDone => {
+                if let Some((parent_id, name)) = self.new_kind.take().filter(|(_, n)| !n.trim().is_empty()) {
+                    self.author("add the kind", "add_subcategory", &AddSubcategory { parent_id, name });
+                }
+            }
+            Message::SetUpAmazon => self.set_up_amazon(),
             Message::Swallow => {}
             Message::Wake => return self.wake(),
             Message::SignedIn(Ok(login)) => self.signed_in(login),
@@ -1119,7 +1242,7 @@ impl App {
             (Pane::Sidebar, _) => self.sidebar_act(action),
             (Pane::Page, Page::Budget) => self.act(action),
             (Pane::Page, Page::Ledger(_)) => self.register_act(action),
-            (Pane::Page, Page::Reflect) => {
+            (Pane::Page, Page::Reflect | Page::Receipts | Page::Settings) => {
                 if let vim::Action::Move(vim::Motion::Left(_)) = action {
                     self.pane = Pane::Sidebar;
                 }
@@ -1616,15 +1739,31 @@ impl App {
                 .lines
                 .rows
                 .iter()
-                .filter(|l| l.group_id == g.id && !l.hidden && has(&l.name))
-                .map(|l| item(l.name.clone(), Some(amount::money(l.available)), Choice::Category(Some(l.category_id))))
+                .filter(|l| l.group_id == g.id && !l.hidden)
+                .flat_map(|l| {
+                    // The envelope, then its kinds, each named from it.
+                    let kinds = self
+                        .peer
+                        .tree
+                        .rows
+                        .iter()
+                        .filter(move |n| n.depth >= 2 && !n.hidden && n.path.starts_with(&format!("{} \u{203a} {} \u{203a} ", g.name, l.name)))
+                        .filter_map(|n| self.peer.category_name(n.id).map(|name| (name, n.id)))
+                        .filter(|(name, _)| has(name))
+                        .map(|(name, id)| item(name, None, Choice::Category(Some(id))));
+                    has(&l.name)
+                        .then(|| item(l.name.clone(), Some(amount::money(l.available)), Choice::Category(Some(l.category_id))))
+                        .into_iter()
+                        .chain(kinds)
+                        .collect::<Vec<_>>()
+                })
                 .collect();
             groups.push(arkui::command::Group {
                 heading: g.name.clone(),
                 items,
             });
         }
-        if matches!(d.choosing, Choosing::Txns(_)) && has("No category") {
+        if matches!(d.choosing, Choosing::Txns(_) | Choosing::Items(_) | Choosing::SplitLine(_)) && has("No category") {
             groups.push(arkui::command::Group {
                 heading: "None".into(),
                 items: vec![item("No category".into(), None, Choice::Category(None))],
@@ -1694,6 +1833,16 @@ impl App {
                     };
                 }
             }
+            Choosing::Items(items) => {
+                if let Choice::Category(c) = choice {
+                    self.author("file it", "file_items", &ClassifyItems { items, category_id: c });
+                }
+            }
+            Choosing::SplitLine(i) => {
+                if let (Choice::Category(c), Some(row)) = (choice, self.form.as_mut().and_then(|f| f.split.as_mut()).and_then(|s| s.get_mut(i))) {
+                    row.category = c;
+                }
+            }
             Choosing::Txns(ids) => {
                 if let Choice::Category(c) = choice {
                     self.author("categorize", "categorize", &Categorize { ids, category_id: c });
@@ -1729,6 +1878,9 @@ impl App {
             return;
         };
         let amount = inn - out;
+        if let (Some(lines), Some(id)) = (&f.split, f.editing) {
+            return self.save_split(id, &f, lines, amount);
+        }
         let taken = match f.editing {
             Some(id) => {
                 let e = EditTransaction {
@@ -1762,6 +1914,63 @@ impl App {
         if taken {
             self.form = None;
         }
+    }
+
+    /// A split saved: its lines adding up to the amount, then what else the
+    /// form says. A split whose amount moves is unsplit first, as the
+    /// domain keeps a split's amount to its lines.
+    fn save_split(&mut self, id: Id<Txn>, f: &TxnForm, rows: &[SplitRow], whole: i64) {
+        let sign = if whole < 0 { -1 } else { 1 };
+        let mut lines = Vec::new();
+        for r in rows.iter().filter(|r| !r.amount.trim().is_empty() || r.category.is_some()) {
+            let Some(cents) = amount::parse(&r.amount) else {
+                self.note = format!("{:?} is not an amount", r.amount);
+                return;
+            };
+            lines.push(SplitPart {
+                category_id: r.category,
+                amount: sign * cents.abs(),
+                memo: String::new(),
+            });
+        }
+        let sum: i64 = lines.iter().map(|l| l.amount).sum();
+        if lines.len() > 1 && sum != whole {
+            self.note = format!("the lines come to {}, of {}", amount::money(sum.abs()), amount::money(whole.abs()));
+            return;
+        }
+        let was = self.peer.register.rows.iter().find(|t| t.id == id).map(|t| t.amount);
+        if was != Some(whole) && self.peer.splits.as_ref().is_some_and(|(_, w)| !w.rows.is_empty()) {
+            self.author("unsplit it", "split", &SplitTxn { id, lines: vec![] });
+        }
+        let e = EditTransaction {
+            id,
+            date: f.date.clone(),
+            payee: f.payee.clone(),
+            category_id: None,
+            memo: f.memo.clone(),
+            amount: whole,
+        };
+        if self.author("save the transaction", "edit_transaction", &e) && self.author("split it", "split", &SplitTxn { id, lines }) {
+            self.form = None;
+            self.peer.set_splits(None);
+        }
+    }
+
+    /// The server's settings page, where Amazon is set up: in the browser
+    /// beside the desktop, or a tab of this one.
+    fn set_up_amazon(&mut self) {
+        let Some(s) = &self.server else {
+            self.note = "the demo has no server: Amazon is set up on yours, at /settings".into();
+            return;
+        };
+        let url = format!("{}/settings", s.url.trim_end_matches('/'));
+        #[cfg(target_arch = "wasm32")]
+        if let Some(w) = web_sys::window() {
+            let _ = w.open_with_url_and_target(&url, "_blank");
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        ark_auth::client::open_browser(&url);
+        self.note = format!("opened {url}");
     }
 
     /// The keys no widget took, the window's size, and a clock only while

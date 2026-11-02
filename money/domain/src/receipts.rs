@@ -452,28 +452,41 @@ pub fn items(_: &Ctx, _: &Db<Money>, input: ItemsIn) -> Result<Plan<ItemLine>, R
             (Some(u), Some(c)) => ancestry(db, c).iter().any(|a| a.id == u),
             _ => false,
         })
-        .map_with(|db, i| {
-            let r = db.receipt.get(i.receipt_id.clone()).unwrap_or_default();
-            ItemLine {
-                receipt_id: i.receipt_id.clone(),
-                line: i.line,
-                store: r.store,
-                date: r.date,
-                place: r.place,
-                name: i.name.clone(),
-                sku: i.sku.clone(),
-                quantity: i.quantity,
-                unit: i.unit.clone(),
-                amount: i.amount,
-                unit_price: match i.quantity {
-                    0 => i.amount,
-                    q => (i.amount as i128 * 1000 / q as i128) as i64,
-                },
-                category_id: i.category_id,
-                category: i.category_id.map(|c| path_of(db, c)).unwrap_or_default(),
-            }
-        })
+        .map_with(item_line)
         .sort(|l| (Desc(l.date.clone()), l.receipt_id.clone(), l.line)))
+}
+
+/// An item as a list of them draws it.
+pub fn item_line(db: &Db<Money>, i: &Item) -> ItemLine {
+    let r = db.receipt.get(i.receipt_id.clone()).unwrap_or_default();
+    ItemLine {
+        receipt_id: i.receipt_id.clone(),
+        line: i.line,
+        store: r.store,
+        date: r.date,
+        place: r.place,
+        name: i.name.clone(),
+        sku: i.sku.clone(),
+        quantity: i.quantity,
+        unit: i.unit.clone(),
+        amount: i.amount,
+        unit_price: match i.quantity {
+            0 => i.amount,
+            q => (i.amount as i128 * 1000 / q as i128) as i64,
+        },
+        category_id: i.category_id,
+        category: i.category_id.map(|c| path_of(db, c)).unwrap_or_default(),
+    }
+}
+
+/// One receipt's items, in order.
+#[view("receipts.receipt_items")]
+pub fn receipt_items(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<ItemLine>, Refusal> {
+    let id = input.receipt_id;
+    Ok(scan::<Money, Item>()
+        .filter(move |i| i.receipt_id == id)
+        .map_with(item_line)
+        .sort(|l| l.line))
 }
 
 #[cfg(test)]

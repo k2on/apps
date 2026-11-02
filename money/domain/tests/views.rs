@@ -220,6 +220,7 @@ fn the_budget() {
 fn the_receipts() {
     hold("receipts", &());
     hold("items", &ItemsIn { category_id: None });
+    hold("receipt_items", &OneReceipt { receipt_id: "costco:2113".into() });
 }
 
 #[test]

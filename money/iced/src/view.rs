@@ -12,7 +12,7 @@ use money_domain::*;
 use crate::amount::{money, money_or_blank};
 use crate::look::{self, Tone};
 use crate::peer::Ledger;
-use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, Pane, TxnForm};
+use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, Pane, SplitRow, TxnForm};
 
 pub const SIDEBAR: f32 = 250.0;
 /// How tall a line of the budget is, a group's heading or a category:
@@ -109,6 +109,8 @@ impl App {
             Page::Budget => self.view_budget(),
             Page::Reflect => self.view_reflect(),
             Page::Ledger(l) => self.view_ledger(l),
+            Page::Receipts => self.view_receipts(),
+            Page::Settings => self.view_settings(),
         };
         // A swipe's arrow over the page, not the sidebar.
         let page = self.history.view(page, iced::time::Instant::now());
@@ -181,6 +183,8 @@ impl App {
             (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
             (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
             (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
+            (glyphs::CART, "Receipts".to_string(), None, Page::Receipts),
+            (glyphs::WRENCH, "Settings".to_string(), None, Page::Settings),
         ];
         let sections: [Section; 3] = [
             ("On Budget", |a| a.on_budget && !a.closed),
@@ -221,6 +225,7 @@ impl App {
                 let lit = arkui::sidebar::lit(i, cursor, focused);
                 let trailing = match page {
                     Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
+                    Page::Receipts => (!self.peer.unfiled.rows.is_empty()).then(|| self.badge(self.peer.unfiled.rows.len(), lit)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
                     _ => None,
                 };
@@ -689,13 +694,56 @@ impl App {
         .padding(14)
         .style(look::card);
 
+        let mut kinds = column![
+            bold("Kinds", 14),
+            dim(
+                "Kinds of it, from every store: Eggs under Groceries. Their spending is this category's.",
+                11
+            ),
+        ]
+        .spacing(6);
+        for n in self.peer.tree.rows.iter().filter(|n| n.depth >= 2 && self.is_under(n, l.category_id)) {
+            let indent = 12.0 * (n.depth - 2) as f32;
+            kinds = kinds.push(row![Space::new().width(Length::Fixed(indent)), text(n.name.clone()).size(12)]);
+        }
+        kinds = kinds.push(match &self.new_kind {
+            Some((parent, typed)) if *parent == l.category_id => row![
+                text_input("A kind, as Eggs", typed)
+                    .id(look::NEW_KIND)
+                    .on_input(Message::NewKindTyped)
+                    .on_submit(Message::NewKindDone)
+                    .size(13)
+                    .padding([5, 8])
+                    .style(look::input),
+                quiet("Add", Message::NewKindDone),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into(),
+            _ => link("+ Add a kind", Message::NewKind(l.category_id)),
+        });
+        let kinds = container(kinds).padding(14).style(look::card);
+
         let hidden = l.hidden;
         let manage = row![
             link(if hidden { "Unhide" } else { "Hide" }, Message::HideCategory(l.category_id, !hidden)),
             link("Delete category", Message::DeleteCategory(l.category_id)),
         ]
         .spacing(16);
-        column![head, target, auto, manage]
+        column![head, target, auto, kinds, manage]
+    }
+
+    /// Whether a category of the tree is under `id`, at any depth.
+    fn is_under(&self, n: &CategoryNode, id: Id<Category>) -> bool {
+        let mut at = n.parent_id;
+        for _ in 0..money_domain::budget::DEEPEST {
+            match at {
+                Some(p) if p == id => return true,
+                Some(p) => at = self.peer.node(p).and_then(|n| n.parent_id),
+                None => return false,
+            }
+        }
+        false
     }
 
     fn auto_line<'a>(&self, label: &str, l: &BudgetLine, cents: i64) -> Element<'a, Message> {
@@ -944,7 +992,8 @@ impl App {
         let category_label = match (f.transfer_to, f.category) {
             (Some(a), _) => format!("Transfer : {}", self.peer.account(a).map(|a| a.name.as_str()).unwrap_or("?")),
             (None, Some(c)) if c == ready_to_assign() => "Ready to Assign".into(),
-            (None, Some(c)) => self.peer.line(c).map(|l| l.name.clone()).unwrap_or_else(|| "a category".into()),
+            (None, Some(c)) => self.peer.category_name(c).unwrap_or_else(|| "a category".into()),
+            (None, None) if f.split.is_some() => "Split".into(),
             (None, None) => "Choose a category".into(),
         };
         let mut line = row![].spacing(6).align_y(Alignment::Center);
@@ -959,13 +1008,16 @@ impl App {
                     .id(crate::look::PAYEE)
                     .width(Length::FillPortion(3)),
             )
-            .push(
-                button(text(category_label).size(13))
-                    .on_press(Message::ChooseCategory)
+            .push({
+                let b = button(text(category_label).size(13))
                     .padding([4, 6])
                     .width(Length::FillPortion(3))
-                    .style(look::choice(false)),
-            )
+                    .style(look::choice(false));
+                match f.split.is_some() {
+                    true => b,
+                    false => b.on_press(Message::ChooseCategory),
+                }
+            })
             .push(field("Memo", &f.memo, Field::Memo).width(Length::FillPortion(2)))
             .push(field("Outflow", &f.outflow, Field::Outflow).width(w(94.0)))
             .push(field("Inflow", &f.inflow, Field::Inflow).width(w(94.0)));
@@ -1001,17 +1053,251 @@ impl App {
             under = under.push(dim(format!("Entered by {}", f.by), 11));
         }
         under = under.push(fill());
+        // A transfer's money only moved; a new one is split once it is in.
+        if f.editing.is_some() && f.transfer_to.is_none() {
+            under = under.push(match f.split.is_some() {
+                true => link("Unsplit", Message::Split(false)),
+                false => link("Split", Message::Split(true)),
+            });
+        }
         if let Some(id) = f.editing {
             under = under.push(link("Delete", Message::DeleteTxn(id)));
         }
         under = under.push(quiet("Cancel", Message::CancelTxn)).push(action("Save", Message::SaveTxn));
 
-        container(column![line, under].spacing(8))
+        let mut parts = column![line].spacing(8);
+        if let Some(rows) = &f.split {
+            parts = parts.push(self.view_split(f, rows));
+        }
+        container(parts.push(under))
             .padding([8, 4])
             .style(|theme| container::Style {
                 background: Some(iced::Background::Color(arkui::theme::of(theme).primary.base.color.scale_alpha(0.1))),
                 ..container::Style::default()
             })
+            .into()
+    }
+
+    /// A split's lines, under the form's: each a category and what of the
+    /// amount is for it, and what is left of the amount to give one.
+    fn view_split<'a>(&'a self, f: &'a TxnForm, rows: &'a [SplitRow]) -> Element<'a, Message> {
+        let whole = (crate::amount::parse(&f.outflow).unwrap_or(0) - crate::amount::parse(&f.inflow).unwrap_or(0)).abs();
+        let given: i64 = rows.iter().filter_map(|r| crate::amount::parse(&r.amount)).map(i64::abs).sum();
+        let mut lines = column![].spacing(6);
+        for (i, r) in rows.iter().enumerate() {
+            let label = match r.category {
+                Some(c) => self.peer.category_name(c).unwrap_or_else(|| "a category".into()),
+                None => "Choose a category".into(),
+            };
+            let mut line = row![
+                Space::new().width(Length::Fixed(110.0)),
+                button(text(label).size(12))
+                    .on_press(Message::SplitCategory(i))
+                    .padding([3, 6])
+                    .width(Length::Fixed(240.0))
+                    .style(look::choice(false)),
+                text_input("0.00", &r.amount)
+                    .on_input(move |v| Message::SplitAmount(i, v))
+                    .on_submit(Message::SaveTxn)
+                    .size(12)
+                    .padding([3, 6])
+                    .width(Length::Fixed(94.0))
+                    .style(look::input),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+            if rows.len() > 2 {
+                line = line.push(glyph_button(glyphs::CLOSE, Message::SplitRemove(i)));
+            }
+            lines = lines.push(line);
+        }
+        let left = whole - given;
+        let said = match left {
+            0 => dim("Every cent has a category", 11),
+            l if l > 0 => text(format!("{} left to split", money(l))).size(11).style(Tone::Short.text()),
+            l => text(format!("{} too much", money(-l))).size(11).style(Tone::Over.text()),
+        };
+        lines
+            .push(
+                row![Space::new().width(Length::Fixed(110.0)), link("+ Add a line", Message::SplitAdd), said]
+                    .spacing(16)
+                    .align_y(Alignment::Center),
+            )
+            .into()
+    }
+
+    // * Receipts
+
+    /// The stores' receipts, newest first; one opened shows its items, each
+    /// filed under a category by the same dropdown a transaction's is.
+    fn view_receipts(&self) -> Element<'_, Message> {
+        let receipts = &self.peer.receipts.rows;
+        let unfiled = self.peer.unfiled.rows.len();
+        let subtitle = match (receipts.len(), unfiled) {
+            (0, _) => "None yet. Set up Amazon in Settings, or drop a store's export in the server's receipts folder.".to_string(),
+            (n, 0) => format!("{n} receipt{}, every item filed", if n == 1 { "" } else { "s" }),
+            (n, u) => format!(
+                "{n} receipt{}, {u} item{} not filed yet",
+                if n == 1 { "" } else { "s" },
+                if u == 1 { "" } else { "s" }
+            ),
+        };
+        let w = |n: f32| Length::Fixed(n);
+        let head = row![
+            table::heading("DATE", w(96.0)),
+            table::heading("STORE", w(90.0)),
+            table::heading("WHERE", Length::FillPortion(3)),
+            table::heading("ITEMS", w(90.0)),
+            table::heading("PAID BY", Length::FillPortion(3)),
+            table::heading("TOTAL", w(100.0)),
+        ]
+        .align_y(Alignment::Center);
+        let open = self.peer.receipt.as_ref().map(|(id, _)| id.as_str());
+        let mut body: Column<'_, Message> = Column::new();
+        for (i, r) in receipts.iter().enumerate() {
+            let lit = open == Some(r.id.as_str());
+            let paid = match (&r.txn_id, r.payee.is_empty()) {
+                (Some(_), false) => format!("{} \u{2014} {}", r.payee, r.account),
+                (Some(_), true) => r.account.clone(),
+                (None, _) => "No charge found yet".into(),
+            };
+            let line = row![
+                table::cell(r.date.clone(), w(96.0), lit, false, true),
+                table::cell(store_name(&r.store), w(90.0), lit, false, true),
+                table::cell(r.place.clone(), Length::FillPortion(3), lit, false, true),
+                table::cell(format!("{} of {}", r.filed, r.items), w(90.0), lit, false, true),
+                table::cell(paid, Length::FillPortion(3), lit, r.txn_id.is_none(), true),
+                table::cell(money((-r.total).max(0)), w(100.0), lit, false, false),
+            ]
+            .align_y(Alignment::Center);
+            body = body.push(
+                mouse_area(table::row(line, lit, true, i % 2 == 1).center_y(Length::Fixed(TXN_ROW)))
+                    .on_press(Message::OpenReceipt(Some(r.id.clone()))),
+            );
+            if lit {
+                if let Some((_, items)) = &self.peer.receipt {
+                    body = body.push(self.view_items(&items.rows));
+                }
+            }
+        }
+        if receipts.is_empty() {
+            body = body.push(container(dim("Nothing here.", 13)).padding(20));
+        }
+        let mut page = column![column![bold("Receipts", 22), dim(subtitle, 12)].spacing(2)].spacing(14);
+        if unfiled > 0 {
+            let all: Vec<ItemRef> = self
+                .peer
+                .unfiled
+                .rows
+                .iter()
+                .map(|i| ItemRef {
+                    receipt_id: i.receipt_id.clone(),
+                    line: i.line,
+                })
+                .collect();
+            page = page.push(
+                container(
+                    column![
+                        row![
+                            bold("Not filed yet", 14),
+                            fill(),
+                            quiet(&format!("File all {unfiled}\u{2026}"), Message::FileItems(all))
+                        ]
+                        .align_y(Alignment::Center),
+                        dim("Filing an item files the same item on every receipt, so each is said once.", 11),
+                        self.view_items(&self.peer.unfiled.rows),
+                    ]
+                    .spacing(8),
+                )
+                .padding(14)
+                .style(look::card),
+            );
+        }
+        page.push(column![
+            table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
+            rule::horizontal(1).style(style::hairline),
+            scrollable(body).height(Length::Fill).style(style::bars),
+        ])
+        .padding(PAD)
+        .width(Length::Fill)
+        .into()
+    }
+
+    /// Items, each its name, how many, what it cost, and its category, which
+    /// opens the dropdown to file it.
+    fn view_items<'a>(&'a self, items: &'a [ItemLine]) -> Element<'a, Message> {
+        let w = |n: f32| Length::Fixed(n);
+        let mut list = column![].spacing(2);
+        for i in items {
+            let label = match i.category_id {
+                Some(c) => self.peer.category_name(c).unwrap_or_else(|| i.category.clone()),
+                None => "File it".into(),
+            };
+            let filed = i.category_id.is_some();
+            let file = button(text(label).size(12).style(move |theme| text::Style {
+                color: Some(match filed {
+                    true => arkui::theme::of(theme).background.base.text,
+                    false => arkui::theme::of(theme).warning.base.color,
+                }),
+            }))
+            .on_press(Message::FileItems(vec![ItemRef {
+                receipt_id: i.receipt_id.clone(),
+                line: i.line,
+            }]))
+            .padding([3, 6])
+            .width(Length::FillPortion(3))
+            .style(look::choice(false));
+            list = list.push(
+                row![
+                    Space::new().width(w(24.0)),
+                    text(i.name.clone()).size(12).width(Length::FillPortion(4)).wrapping(text::Wrapping::None),
+                    text(quantity(i.quantity, &i.unit)).size(12).style(style::dim).width(w(90.0)),
+                    text(money((-i.amount).max(0))).size(12).width(w(90.0)),
+                    file,
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            );
+        }
+        container(list).padding([6, 0]).into()
+    }
+
+    // * Settings
+
+    /// Where receipts come from. Amazon's login is the server's to keep and
+    /// never part of the budget, so it is given on the server's own page.
+    fn view_settings(&self) -> Element<'_, Message> {
+        let server = self.server.as_ref().map(|s| s.url.clone());
+        let amazon = container(
+            column![
+                row![icon::tinted(glyphs::CART, icon::SIZE, |p| p.primary.base.color), bold("Amazon", 16)]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                dim(
+                    "At each sync the server signs in to Amazon with amazon-orders and brings the last 30 days of \
+                     orders in as receipts: each item filed, and the card charge split by them.",
+                    12
+                ),
+                dim(
+                    "Your Amazon login is kept on the server, in a file only it reads. It is never part of the budget, \
+                     so it is not synced to this or any device, which is why it is entered on the server's page.",
+                    11
+                ),
+                row![action("Set up Amazon", Message::SetUpAmazon)].spacing(10),
+            ]
+            .spacing(10),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .style(look::card);
+        let about = match server {
+            Some(url) => dim(format!("This window is on {url}."), 11),
+            None => dim("This is the demo: it has no server, so there is nothing to set up.", 11),
+        };
+        column![bold("Settings", 22), amazon, about]
+            .spacing(16)
+            .padding(PAD)
+            .max_width(720)
             .into()
     }
 
@@ -1187,7 +1473,8 @@ impl App {
                 .into()
         };
         let (skip, title) = match choosing {
-            Choosing::Form => (None, "Category".to_string()),
+            Choosing::Form | Choosing::SplitLine(_) => (None, "Category".to_string()),
+            Choosing::Items(items) => (None, format!("File {} item{}", items.len(), if items.len() == 1 { "" } else { "s" })),
             Choosing::Txns(ids) => (
                 None,
                 format!("Categorize {} transaction{}", ids.len(), if ids.len() == 1 { "" } else { "s" }),
@@ -1323,4 +1610,26 @@ fn payee_cell<'a>(t: &'a TxnLine, lit: bool) -> Element<'a, Message> {
     )
     .delay(std::time::Duration::from_millis(500))
     .into()
+}
+
+/// A store as the receipts page names it.
+fn store_name(store: &str) -> String {
+    match store {
+        "amazon" => "Amazon".into(),
+        "target" => "Target".into(),
+        "costco" => "Costco".into(),
+        s => s.to_string(),
+    }
+}
+
+/// How many, in thousandths, as a line says it: `2`, `11.482 gal`.
+fn quantity(thousandths: i64, unit: &str) -> String {
+    let n = match thousandths % 1000 {
+        0 => (thousandths / 1000).to_string(),
+        _ => format!("{:.3}", thousandths as f64 / 1000.0).trim_end_matches('0').to_string(),
+    };
+    match unit {
+        "" | "ea" => format!("\u{00d7}{n}"),
+        u => format!("{n} {u}"),
+    }
 }

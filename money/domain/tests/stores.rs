@@ -61,7 +61,10 @@ fn costco_warehouse_and_gas() {
 fn costco_as_the_receipts_script_saves_them() {
     let got = costco(include_str!("stores/costco-receipts-script.json")).unwrap();
     let r = &got.receipts[0];
-    assert_eq!((r.order_id.as_str(), r.date.as_str(), r.total), ("21134300501232510121504", "2026-10-12", -4_720));
+    assert_eq!(
+        (r.order_id.as_str(), r.date.as_str(), r.total),
+        ("21134300501232510121504", "2026-10-12", -4_720)
+    );
     assert_eq!(
         items(r),
         [

@@ -10,6 +10,8 @@ use iced::{Background, Border, Color, Theme};
 pub const ASSIGNED: &str = "assigned";
 pub const NEW_GROUP: &str = "new-group";
 pub const NEW_CATEGORY: &str = "new-category";
+/// The inspector's box for a new kind of its category.
+pub const NEW_KIND: &str = "new-kind";
 pub const PAYEE: &str = "payee";
 pub const RENAME: &str = "rename";
 /// The category dropdown's box and list.

@@ -40,6 +40,15 @@ pub struct Peer {
     pub inbox: Watched<TxnLine>,
     pub payees: Watched<PayeeLine>,
     pub banks: Watched<BankLine>,
+    /// Every category, the whole tree: the envelopes' kinds too.
+    pub tree: Watched<CategoryNode>,
+    pub receipts: Watched<ReceiptLine>,
+    /// Every item not filed under a category yet.
+    pub unfiled: Watched<ItemLine>,
+    /// The receipt open on the receipts page, and its items.
+    pub receipt: Option<(String, Watched<ItemLine>)>,
+    /// The split transaction open in the form, and its lines.
+    pub splits: Option<(Id<Txn>, Watched<SplitLine>)>,
     seen: ark::hash::StateHash,
 }
 
@@ -71,6 +80,11 @@ impl Peer {
             inbox: Watched::open(c, "inbox", none(), read),
             payees: Watched::open(c, "payees", none(), read),
             banks: Watched::open(c, "banks", none(), read),
+            tree: Watched::open(c, "tree", none(), read),
+            receipts: Watched::open(c, "receipts", none(), read),
+            unfiled: Watched::open(c, "items", ItemsIn { category_id: None }.to_bytes(), read),
+            receipt: None,
+            splits: None,
             ledger: Ledger::All,
             month: month.into(),
             seen: c.state(),
@@ -94,6 +108,11 @@ impl Peer {
             self.inbox.view(),
             self.payees.view(),
             self.banks.view(),
+            self.tree.view(),
+            self.receipts.view(),
+            self.unfiled.view(),
+            self.receipt.as_ref().and_then(|(_, w)| w.view()),
+            self.splits.as_ref().and_then(|(_, w)| w.view()),
         ]
         .into_iter()
         .flatten()
@@ -118,6 +137,15 @@ impl Peer {
         note(self.inbox.settle(c, moved));
         note(self.payees.settle(c, moved));
         note(self.banks.settle(c, moved));
+        note(self.tree.settle(c, moved));
+        note(self.receipts.settle(c, moved));
+        note(self.unfiled.settle(c, moved));
+        if let Some((_, w)) = &mut self.receipt {
+            note(w.settle(c, moved));
+        }
+        if let Some((_, w)) = &mut self.splits {
+            note(w.settle(c, moved));
+        }
         any
     }
 
@@ -146,6 +174,50 @@ impl Peer {
         let old = std::mem::replace(&mut self.register, Watched::open(c, name, input, read));
         old.close(c);
         self.ledger = ledger;
+    }
+
+    /// One receipt's items on screen, or none.
+    pub fn set_receipt(&mut self, id: Option<&str>) {
+        if self.receipt.as_ref().map(|(r, _)| r.as_str()) == id {
+            return;
+        }
+        let c = &mut self.client;
+        if let Some((_, old)) = self.receipt.take() {
+            old.close(c);
+        }
+        if let Some(id) = id {
+            let input = OneReceipt { receipt_id: id.into() }.to_bytes();
+            self.receipt = Some((id.into(), Watched::open(c, "receipt_items", input, read)));
+        }
+    }
+
+    /// One transaction's split lines, or none.
+    pub fn set_splits(&mut self, id: Option<Id<Txn>>) {
+        if self.splits.as_ref().map(|(t, _)| *t) == id {
+            return;
+        }
+        let c = &mut self.client;
+        if let Some((_, old)) = self.splits.take() {
+            old.close(c);
+        }
+        if let Some(id) = id {
+            self.splits = Some((id, Watched::open(c, "splits", OneTxn { id }.to_bytes(), read)));
+        }
+    }
+
+    /// A category of the tree.
+    pub fn node(&self, id: Id<Category>) -> Option<&CategoryNode> {
+        self.tree.rows.iter().find(|n| n.id == id)
+    }
+
+    /// A category's name as a form shows it: an envelope's own, a kind's
+    /// with the envelope it is a kind of.
+    pub fn category_name(&self, id: Id<Category>) -> Option<String> {
+        let n = self.node(id)?;
+        Some(match n.depth {
+            0 | 1 => n.name.clone(),
+            _ => n.path.split(" \u{203a} ").skip(1).collect::<Vec<_>>().join(" \u{203a} "),
+        })
     }
 
     pub fn summary(&self) -> Summary {

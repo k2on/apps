@@ -430,6 +430,15 @@ data class MoveMoney(val month: String, val from: Id?, val to: Id?, val amount: 
     }
 }
 
+/** The record `OneReceipt`. */
+data class OneReceipt(val receiptId: String) {
+    fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "}"
+
+    companion object {
+        fun of(j: Any?): OneReceipt = (j as JSONObject).let { o -> OneReceipt(J.text(o.opt("receipt_id"))) }
+    }
+}
+
 /** The record `OneTxn`. */
 data class OneTxn(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
@@ -763,6 +772,9 @@ class Money(val peer: Peer) {
 
     /** `receipts.pay`: its intent's id. */
     fun pay(input: MatchReceipt): String = peer.mutate("receipts.pay", input.json())
+
+    /** `receipts.receipt_items`, kept. */
+    fun receiptItems(input: OneReceipt): View<ItemLine> = View(peer.view("receipts.receipt_items", input.json())) { j -> ItemLine.of(j) }
 
     /** `receipts.receipts`, kept. */
     fun receipts(): View<ReceiptLine> = View(peer.view("receipts.receipts", "null")) { j -> ReceiptLine.of(j) }

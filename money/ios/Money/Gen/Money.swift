@@ -736,6 +736,20 @@ public struct MoveMoney: Equatable {
     public var json: String { J.obj(["\"month\":" + J.q(month), "\"from\":" + J.wopt(from) { v0 in J.q(v0.hex) }, "\"to\":" + J.wopt(to) { v0 in J.q(v0.hex) }, "\"amount\":" + String(amount)]) }
 }
 
+/// The record `OneReceipt`.
+public struct OneReceipt: Equatable {
+    public var receiptId: String
+
+    public init(receiptId: String) { self.receiptId = receiptId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(receiptId: J.text(o["receipt_id"]))
+    }
+
+    public var json: String { J.obj(["\"receipt_id\":" + J.q(receiptId)]) }
+}
+
 /// The record `OneTxn`.
 public struct OneTxn: Equatable {
     public var id: Id
@@ -1282,6 +1296,9 @@ public struct Money {
 
     /// `receipts.pay`: its intent's id.
     @discardableResult public func pay(_ input: MatchReceipt) throws -> String { try peer.mutate(name: "receipts.pay", input: input.json) }
+
+    /// `receipts.receipt_items`, kept.
+    public func receiptItems(_ input: OneReceipt) throws -> LiveView<ItemLine> { LiveView(try peer.view(name: "receipts.receipt_items", input: input.json)) { j in ItemLine(json: j) } }
 
     /// `receipts.receipts`, kept.
     public func receipts() throws -> LiveView<ReceiptLine> { LiveView(try peer.view(name: "receipts.receipts", input: "null")) { j in ReceiptLine(json: j) } }

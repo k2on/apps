@@ -439,6 +439,12 @@ pub struct ItemsIn {
     pub category_id: Option<Id<Category>>,
 }
 
+/// One receipt, by id.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct OneReceipt {
+    pub receipt_id: String,
+}
+
 // * The views' rows
 
 /// An account as the sidebar and its own page draw it.

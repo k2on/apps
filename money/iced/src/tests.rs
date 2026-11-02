@@ -10,7 +10,7 @@ use money_domain::dates::{add_months, month_of};
 use money_domain::*;
 
 use crate::peer::Ledger;
-use crate::{seed, App, Choice, Choosing, Field, Message, Modal, Page, Pane};
+use crate::{seed, App, Choice, Choosing, Field, Message, Modal, Page, Pane, SplitRow};
 
 /// A day the demo is seeded for: late in a month, so every habit has
 /// happened at least once in it.
@@ -445,7 +445,30 @@ fn the_budget_drawn() {
     let _ = form.update(Message::Go(Page::Ledger(Ledger::All)));
     let _ = form.register_act(Action::Move(Motion::First));
     let _ = form.register_act(Action::Activate);
+    let mut receipts = app();
+    let _ = receipts.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = receipts.update(Message::Go(Page::Receipts));
+    let open = receipts.peer.receipts.rows.iter().find(|r| r.store == "target").map(|r| r.id.clone());
+    let _ = receipts.update(Message::OpenReceipt(open));
+    let mut settings = app();
+    let _ = settings.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = settings.update(Message::Go(Page::Settings));
+    let mut split = app();
+    let _ = split.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let _ = split.update(Message::Go(Page::Ledger(Ledger::All)));
+    let paid = split.peer.receipts.rows.iter().find(|r| r.store == "target").and_then(|r| r.txn_id);
+    if let Some(id) = paid {
+        let _ = split.update(Message::EditTxn(id));
+    }
+    let mut kinds = app();
+    let _ = kinds.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
+    let groceries = category(&kinds, "Groceries").category_id;
+    let _ = kinds.update(Message::Select(Some(groceries)));
     for (app, scene, theme, side) in [
+        (&receipts, "receipts", iced::Theme::Dark, "dark"),
+        (&settings, "settings", iced::Theme::Light, "light"),
+        (&split, "split", iced::Theme::Dark, "dark"),
+        (&kinds, "kinds", iced::Theme::Light, "light"),
         (&form, "form", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Dark, "dark"),
         (&budget, "budget", iced::Theme::Light, "light"),
@@ -518,7 +541,8 @@ fn the_register_categorizes_a_selection_from_the_keys() {
     let _ = app.update(Message::DropTyped("groc".into()));
     let groups = app.drop_groups();
     let found: Vec<&str> = groups.iter().flat_map(|g| g.items.iter().map(|i| i.label.as_str())).collect();
-    assert_eq!(found, ["Groceries"]);
+    // The category, then its kinds, named from it.
+    assert_eq!(found, ["Groceries", "Groceries \u{203a} Eggs", "Groceries \u{203a} Produce"]);
     let choose = groups[0].items[0].choose.clone();
     let _ = app.update(choose);
     assert!(app.dropdown.is_none());
@@ -545,4 +569,138 @@ fn the_bank_says_what_the_payee_does_not() {
     t.imported_payee = "CHIPOTLE 1234".into();
     t.imported = false;
     assert_eq!(crate::bank_said(&t), "", "typed in");
+}
+
+/// The demo's Target and Costco receipts are on the receipts page, matched
+/// to the charges that paid for them; the chips wait to be filed, and
+/// filing them from the dropdown files them, splits the charge again, and
+/// takes the badge away.
+#[test]
+fn receipts_are_filed_from_their_page() {
+    let mut app = app();
+    let _ = app.update(Message::Go(Page::Receipts));
+    let stores: Vec<&str> = app.peer.receipts.rows.iter().map(|r| r.store.as_str()).collect();
+    assert_eq!(stores.len(), 2, "{stores:?}");
+    assert!(stores.contains(&"target") && stores.contains(&"costco"));
+    assert!(app.peer.receipts.rows.iter().all(|r| r.txn_id.is_some()), "each matched to its charge");
+    let unfiled: Vec<&str> = app.peer.unfiled.rows.iter().map(|i| i.name.as_str()).collect();
+    assert!(unfiled.contains(&"GG TORTILLA CHIPS"));
+    let target = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap().clone();
+    let _ = app.update(Message::OpenReceipt(Some(target.id.clone())));
+    let items: Vec<(String, String)> = app
+        .peer
+        .receipt
+        .as_ref()
+        .unwrap()
+        .1
+        .rows
+        .iter()
+        .map(|i| (i.name.clone(), i.category.clone()))
+        .collect();
+    assert_eq!(items[0].1, "Everyday \u{203a} Groceries \u{203a} Eggs", "eggs filed by their name");
+    assert_eq!(items[1].1, "Everyday \u{203a} Household \u{203a} Cleaning", "the cleaner by its");
+    // Its charge is split by them.
+    let paid = app.peer.register.rows.iter().find(|t| Some(t.id) == target.txn_id).unwrap().clone();
+    assert!(paid.category.starts_with("Split"), "{}", paid.category);
+    // The chips, filed under Groceries from the dropdown.
+    let chips = vec![ItemRef {
+        receipt_id: target.id.clone(),
+        line: 3,
+    }];
+    let _ = app.update(Message::FileItems(chips.clone()));
+    assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Items(i)) if *i == chips));
+    let _ = app.update(Message::DropTyped("snack".into()));
+    assert!(app.drop_groups().is_empty(), "nothing called snack");
+    let groceries = category(&app, "Groceries").category_id;
+    let _ = app.update(Message::Chose(Choice::Category(Some(groceries))));
+    assert!(app.peer.unfiled.rows.iter().all(|i| i.name != "GG TORTILLA CHIPS"));
+    let r = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap();
+    assert_eq!((r.filed, r.items), (3, 3));
+    // Opened again, it closes.
+    let _ = app.update(Message::OpenReceipt(Some(target.id)));
+    assert!(app.peer.receipt.is_none());
+}
+
+/// A transaction split in the form: two lines, a category each, adding up
+/// to its amount; short, it is said and nothing changes; unsplit again by
+/// giving it one category.
+#[test]
+fn a_transaction_is_split_in_the_form() {
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let t = app
+        .peer
+        .register
+        .rows
+        .iter()
+        .find(|t| t.amount < -5_000 && !t.transfer && t.category_id.is_some())
+        .unwrap()
+        .clone();
+    let (groceries, household) = (category(&app, "Groceries").category_id, category(&app, "Household").category_id);
+    let _ = app.update(Message::EditTxn(t.id));
+    let _ = app.update(Message::Split(true));
+    let rows = app.form.as_ref().unwrap().split.clone().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].amount, crate::amount::editable(-t.amount), "the whole on the first line");
+    let half = -t.amount / 2;
+    let _ = app.update(Message::SplitAmount(0, crate::amount::editable(half)));
+    let _ = app.update(Message::SplitCategory(1));
+    let _ = app.update(Message::Chose(Choice::Category(Some(household))));
+    let _ = app.update(Message::SplitAmount(1, "1.00".into()));
+    let _ = app.update(Message::SaveTxn);
+    assert!(app.note.contains("the lines come to"), "{}", app.note);
+    assert!(app.form.is_some());
+    let _ = app.update(Message::SplitCategory(0));
+    let _ = app.update(Message::Chose(Choice::Category(Some(groceries))));
+    let _ = app.update(Message::SplitAmount(1, crate::amount::editable(-t.amount - half)));
+    let _ = app.update(Message::SaveTxn);
+    assert!(app.form.is_none(), "{}", app.note);
+    let now = app.peer.register.rows.iter().find(|r| r.id == t.id).unwrap().clone();
+    assert_eq!(now.category, "Split (2)");
+    // Opened again, it opens on its lines.
+    let _ = app.update(Message::EditTxn(t.id));
+    let rows = app.form.as_ref().unwrap().split.clone().unwrap();
+    assert_eq!(
+        rows,
+        [
+            SplitRow {
+                category: Some(groceries),
+                amount: crate::amount::editable(half)
+            },
+            SplitRow {
+                category: Some(household),
+                amount: crate::amount::editable(-t.amount - half)
+            },
+        ]
+    );
+    // One category again.
+    let _ = app.update(Message::Split(false));
+    let _ = app.update(Message::ChooseCategory);
+    let _ = app.update(Message::Chose(Choice::Category(Some(household))));
+    let _ = app.update(Message::SaveTxn);
+    let now = app.peer.register.rows.iter().find(|r| r.id == t.id).unwrap().clone();
+    assert_eq!((now.category.as_str(), now.category_id), ("Household", Some(household)));
+}
+
+/// A kind added in the inspector is in the dropdown under its category;
+/// the settings page in the demo says there is no server to set up.
+#[test]
+fn a_kind_is_added_and_settings_say_where_amazon_is_set_up() {
+    let mut app = app();
+    let dining = category(&app, "Dining Out").category_id;
+    let _ = app.update(Message::Select(Some(dining)));
+    let _ = app.update(Message::NewKind(dining));
+    let _ = app.update(Message::NewKindTyped("Coffee".into()));
+    let _ = app.update(Message::NewKindDone);
+    assert!(app.peer.tree.rows.iter().any(|n| n.name == "Coffee" && n.parent_id == Some(dining)));
+    let _ = app.update(Message::Categorize(vec![]));
+    let _ = app.update(Message::DropTyped("coffee".into()));
+    let found: Vec<String> = app.drop_groups().iter().flat_map(|g| g.items.iter().map(|i| i.label.clone())).collect();
+    assert_eq!(found, ["Dining Out \u{203a} Coffee"]);
+    let _ = app.update(Message::CloseDrop);
+    let _ = app.update(Message::Go(Page::Settings));
+    assert_eq!(app.place(), crate::Place::Settings);
+    let _ = app.update(Message::SetUpAmazon);
+    assert!(app.note.contains("the demo has no server"), "{}", app.note);
 }
