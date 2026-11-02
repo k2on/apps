@@ -1804,6 +1804,24 @@ impl App {
                 items,
             });
         }
+        // A card's own payment category, for its own transactions only: a
+        // payment into it from outside the budget is debt paid and nothing
+        // else, as its starting balance is.
+        if let Some(l) = self
+            .own_card(&d.choosing)
+            .and_then(|c| self.peer.line(money_domain::cards::payment_category(c)))
+        {
+            if !moving && has(&l.name) {
+                groups.push(arkui::command::Group {
+                    heading: money_domain::cards::CARD_GROUP.into(),
+                    items: vec![item(
+                        l.name.clone(),
+                        Some(amount::money(l.available)),
+                        Choice::Category(Some(l.category_id)),
+                    )],
+                });
+            }
+        }
         if matches!(d.choosing, Choosing::Txns(_) | Choosing::Filter) && has("No category") {
             groups.push(arkui::command::Group {
                 heading: "None".into(),
@@ -1812,6 +1830,26 @@ impl App {
         }
         groups.retain(|g| !g.items.is_empty());
         groups
+    }
+
+    /// The card every transaction being categorised is on, when they are
+    /// all on one card on the budget.
+    fn own_card(&self, choosing: &Choosing) -> Option<Id<Account>> {
+        let account = match choosing {
+            Choosing::Form => self.form.as_ref()?.account?,
+            Choosing::Txns(ids) => {
+                let mut on = ids
+                    .iter()
+                    .map(|id| self.peer.register.rows.iter().find(|t| t.id == *id).map(|t| t.account_id));
+                let first = on.next()??;
+                if !on.all(|a| a == Some(first)) {
+                    return None;
+                }
+                first
+            }
+            _ => return None,
+        };
+        self.peer.account(account).filter(|a| a.kind == "credit" && a.on_budget).map(|a| a.id)
     }
 
     /// Keep row `n` in view.

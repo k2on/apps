@@ -427,6 +427,40 @@ fn shift_j_and_k_move_a_category() {
     assert_eq!(group_rows(&app, 1).last(), Some(&moved), "back to the end of its own");
 }
 
+/// A payment into a card from outside the budget is filed under the card's
+/// own payment category, offered for that card's transactions alone: the
+/// debt goes down, and the payment category's money stays as it was.
+#[test]
+fn a_cards_payment_from_outside_is_its_own() {
+    let mut app = app();
+    let card = account(&app, "Chase Sapphire").clone();
+    let pay = category(&app, "Chase Sapphire");
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(card.id))));
+    let _ = app.update(Message::AddTxn);
+    let _ = app.update(Message::Form(Field::Payee, "DirectPay".into()));
+    let _ = app.update(Message::Form(Field::Inflow, "40".into()));
+    let _ = app.update(Message::ChooseCategory);
+    let groups = app.drop_groups();
+    let cards: Vec<&str> = groups
+        .iter()
+        .filter(|g| g.heading == "Credit Card Payments")
+        .flat_map(|g| g.items.iter().map(|i| i.label.as_str()))
+        .collect();
+    assert_eq!(cards, ["Chase Sapphire"]);
+    let _ = app.update(Message::Chose(Choice::Category(Some(pay.category_id))));
+    let _ = app.update(Message::SaveTxn);
+    assert!(app.form.is_none(), "saved: {}", app.note);
+    assert_eq!(account(&app, "Chase Sapphire").balance, card.balance + 4_000);
+    assert_eq!(category(&app, "Chase Sapphire").available, pay.available);
+
+    // Checking's transactions are offered no card's payments.
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let _ = app.update(Message::AddTxn);
+    let _ = app.update(Message::ChooseCategory);
+    assert!(!app.drop_groups().iter().any(|g| g.heading == "Credit Card Payments"));
+}
+
 /// The cards' payments are the cards': `K` off the top of the household's
 /// first group, into the cards' group, is refused, and said.
 #[test]
