@@ -130,8 +130,12 @@ impl App {
         .style(style::page);
 
         // Everything above the page is a layer of one stack, and the pointer
-        // is tracked on the root so that `pin` shares its origin.
-        let mut layers = stack![mouse_area(base).on_move(Message::Hover)];
+        // is tracked around the whole of it (below), so that `pin` shares its
+        // origin — and so that it is tracked over a layer too: the stack hides
+        // the pointer from the layers under the one it is over, and a row of
+        // the queue grabbed would start its drag from wherever it last was
+        // over the page.
+        let mut layers = stack![base];
         let focus = self.focus();
 
         // Following a show: the dialog fading in over the page as it dims,
@@ -194,7 +198,12 @@ impl App {
                 .push(self.view_queue(self.queue_panel, arkui::sheet::open(&sheet, now)));
             if self.queue_drag.is_some() {
                 layers = layers.push(
+                    // Grabbing, so the stack hides the pointer from the
+                    // sheet under it: let go over "Now playing", its row
+                    // would hear the release as a click, and play from the
+                    // start what is playing.
                     mouse_area(container(text("")).width(Length::Fill).height(Length::Fill))
+                        .interaction(iced::mouse::Interaction::Grabbing)
                         .on_move(Message::QueueDrag)
                         .on_release(Message::QueueDrop)
                         .on_scroll(|_| Message::Swallow),
@@ -236,7 +245,7 @@ impl App {
         }
 
         // Every text box copies, cuts and pastes in a browser too.
-        arkui::clipboard::view(layers)
+        arkui::clipboard::view(mouse_area(layers).on_move(Message::Hover))
     }
 
     /// Music, then the lists somebody made — each read back by the domain.

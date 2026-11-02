@@ -553,6 +553,18 @@ impl harken_player::Sound for Sounding<'_> {
     fn load(&mut self, queue: &[listening::Track], at: usize, position_ms: i64, playing: bool, from: &str) {
         *self.queue = queue.to_vec();
         *self.from = from.into();
+        // The track it holds is the one wanted, in a queue reordered or added
+        // to around it: it plays on. Put again, the element would fetch the
+        // file from its start, and the gap be heard — and said — as a stall.
+        if self.player.track().zip(queue.get(at)).is_some_and(|(t, q)| t.id == q.id.0) {
+            self.player.requeue(at);
+            match (playing, self.player.asked()) {
+                (true, false) => self.player.resume(),
+                (false, true) => self.player.pause(),
+                _ => {}
+            }
+            return;
+        }
         play_at(self.player, self.server, self.queue, at, position_ms, playing);
     }
     fn jump(&mut self, at: usize, position_ms: i64) {
