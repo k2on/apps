@@ -1,5 +1,5 @@
 //! What the server keeps of the stores that is nobody's to sync: Amazon's
-//! login and Costco's, given in the app's Settings. One file in the data directory (`stores.json`), written
+//! login, given in the app's Settings. One file in the data directory (`stores.json`), written
 //! readable by the server alone; never a row, so never in the log, on a
 //! device, or in a backup of the budget.
 
@@ -25,28 +25,6 @@ impl std::fmt::Debug for AmazonLogin {
     }
 }
 
-/// Costco's sign-in, as its app keeps one: who, and the refresh token,
-/// which Costco replaces at every use ([`crate::costco`]); and, when the
-/// server signed in itself, the email and password it signs in with again
-/// should Costco stop taking the token.
-#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct CostcoLogin {
-    /// The account's email, for the page; blank when the token named none.
-    #[serde(default)]
-    pub who: String,
-    pub refresh_token: String,
-    #[serde(default)]
-    pub email: String,
-    #[serde(default)]
-    pub password: Option<String>,
-}
-
-impl std::fmt::Debug for CostcoLogin {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "CostcoLogin({})", masked(&self.who))
-    }
-}
-
 /// An email as the page shows it: `m••••@example.com`.
 pub fn masked(email: &str) -> String {
     match email.split_once('@') {
@@ -55,20 +33,19 @@ pub fn masked(email: &str) -> String {
     }
 }
 
+/// The vault. Anything else a file holds (Costco's sign-in, which an
+/// earlier server kept here) is read past and gone at the next save.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Vault {
     #[serde(default)]
     pub amazon: Option<AmazonLogin>,
-    #[serde(default)]
-    pub costco: Option<CostcoLogin>,
 }
 
 pub fn vault_file(data: &Path) -> PathBuf {
     data.join("stores.json")
 }
 
-/// One writer of the vault at a time: Settings' calls, and the importer
-/// keeping Costco's new refresh token.
+/// One writer of the vault at a time.
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl Vault {
@@ -123,12 +100,6 @@ mod tests {
                 password: "hunter2".into(),
                 otp_secret: None,
             }),
-            costco: Some(CostcoLogin {
-                who: "me@example.com".into(),
-                refresh_token: "the-refresh-token".into(),
-                email: "me@example.com".into(),
-                password: Some("costco-pass".into()),
-            }),
         };
         v.save(dir.path()).unwrap();
         assert_eq!(Vault::load(dir.path()).unwrap(), v);
@@ -139,7 +110,18 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         assert!(!format!("{:?}", v).contains("hunter2"));
-        assert!(!format!("{:?}", v).contains("the-refresh-token") && !format!("{:?}", v).contains("costco-pass"));
         assert_eq!(masked("me@example.com"), "m••••@example.com");
+    }
+
+    /// The Costco sign-in an earlier server kept reads past, and is gone
+    /// once the vault is written again.
+    #[test]
+    fn an_old_costco_sign_in_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = r#"{"amazon":null,"costco":{"who":"me@example.com","refresh_token":"old-token","password":"costco-pass"}}"#;
+        std::fs::write(vault_file(dir.path()), old).unwrap();
+        Vault::change(dir.path(), |_| Ok(())).unwrap();
+        let now = std::fs::read_to_string(vault_file(dir.path())).unwrap();
+        assert!(!now.contains("old-token") && !now.contains("costco-pass"), "{now}");
     }
 }

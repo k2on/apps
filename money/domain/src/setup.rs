@@ -1,19 +1,17 @@
 //! Setting up where receipts come from: functions of the server's own that
 //! a device calls over its link (ark-peer's `Config::calls`), never
-//! intents. What they carry — Amazon's password, Costco's sign-in — is the
-//! server's alone: it is kept in the server's vault and never in a row, so
-//! it is in no log, on no device, and in no backup of the budget. Each
-//! answers with the stores as the server has them now ([`Stores`]), told
-//! who is signed in, masked, and never a secret.
+//! intents. What they carry — Amazon's password — is the server's alone:
+//! it is kept in the server's vault and never in a row, so it is in no
+//! log, on no device, and in no backup of the budget. Each answers with
+//! the stores as the server has them now ([`Stores`]), told who is signed
+//! in, masked, and never a secret.
 //!
 //! - **Amazon** ([`AMAZON`], [`FORGET_AMAZON`]): the login `amazon-orders`
 //!   signs in with at each sync.
-//! - **Costco** ([`COSTCO_PASSWORD`], [`FORGET_COSTCO`]): the email and
-//!   password the server signs in with itself, as Costco's page does; or,
-//!   when Costco asks for more than the password ([`COSTCO_SIGN_IN`],
-//!   [`COSTCO`]), a sign-in on Costco's own page, begun by the server (its
-//!   answer is the page to open) and finished with the address Costco sent
-//!   the browser to, whose code the server trades for the sign-in it keeps.
+//! - **Costco** ([`COSTCO_SIGN_IN`]): costco.com's sign-in opened in the
+//!   server's browser, where a person signs in on its page; the server
+//!   reads the receipts there at each sync, and keeps nothing of the
+//!   sign-in itself.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,15 +21,9 @@ pub const STATUS: &str = "stores.status";
 pub const AMAZON: &str = "stores.amazon";
 /// Amazon's login forgotten: `()`.
 pub const FORGET_AMAZON: &str = "stores.forget_amazon";
-/// A Costco sign-in begun: `()`, answered with a [`CostcoPage`] and not a
-/// [`Stores`].
+/// costco.com's sign-in opened in the server's browser: `()`, answered
+/// with the browser's page to open ([`BrowserPage`]), not a [`Stores`].
 pub const COSTCO_SIGN_IN: &str = "stores.costco_sign_in";
-/// The Costco sign-in finished: a [`CostcoAddress`].
-pub const COSTCO: &str = "stores.costco";
-/// Costco signed in to by the server itself: a [`CostcoPassword`].
-pub const COSTCO_PASSWORD: &str = "stores.costco_password";
-/// Costco's sign-in forgotten: `()`.
-pub const FORGET_COSTCO: &str = "stores.forget_costco";
 
 /// The Amazon account `amazon-orders` signs in as.
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,30 +41,9 @@ impl std::fmt::Debug for AmazonLogin {
     }
 }
 
-/// Costco's email and password, for the server to sign in with as its
-/// page does, and again should Costco stop taking its sign-in.
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CostcoPassword {
-    pub email: String,
-    pub password: String,
-}
-
-impl std::fmt::Debug for CostcoPassword {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "CostcoPassword({})", self.email)
-    }
-}
-
-/// Where Costco's sign-in sent the browser: `msauth://…?code=…`, or the
-/// code alone.
+/// The server's browser's page, where a person sees it and signs in.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CostcoAddress {
-    pub address: String,
-}
-
-/// Costco's sign-in page, for the device to open.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CostcoPage {
+pub struct BrowserPage {
     pub url: String,
 }
 
@@ -98,13 +69,8 @@ pub struct AmazonState {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CostcoState {
-    /// Whether someone has signed in.
-    pub signed_in: bool,
-    /// Who, masked, when Costco said.
-    pub who: Option<String>,
-    /// Whether the server keeps the password, to sign in again by itself.
-    pub password: bool,
-    /// Whether the server was given a refresh token's file, which it signs
-    /// in with in place of the sign-in kept.
-    pub file: bool,
+    /// Whether the server has a browser to read Costco in.
+    pub browser: bool,
+    /// The browser's page, where costco.com is signed in to.
+    pub page: Option<String>,
 }

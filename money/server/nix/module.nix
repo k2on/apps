@@ -232,12 +232,31 @@ in
       };
     };
 
-    # Costco is signed in to from the app's Settings, and the sign-in kept
-    # in the data directory, so there is nothing to give it here.
+    # Costco is read in the browser below, signed in to there by a person.
     costco.days = lib.mkOption {
       type = lib.types.ints.positive;
       default = 90;
       description = "How many days back Costco's warehouse and gas receipts are asked for at each sync.";
+    };
+
+    browser = {
+      devtools = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "http://192.168.77.2:9223";
+        description = ''
+          A headed browser's DevTools address, which the server drives: it
+          reads Costco's receipts on costco.com's own page there, in the
+          sign-in a person made, and amazon-orders runs Amazon's JavaScript
+          sign-in challenge in it. Null reads nothing from Costco.
+        '';
+      };
+      page = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "https://sivrad.example.com/browser";
+        description = "The page where people see that browser and sign in to costco.com, which Settings opens.";
+      };
     };
 
     receiptsDir = lib.mkOption {
@@ -357,6 +376,10 @@ in
         MONEY_AMAZON_OTP_SECRET_FILE = "%d/amazon-otp-secret";
       } // {
         MONEY_COSTCO_DAYS = toString cfg.costco.days;
+      } // lib.optionalAttrs (cfg.browser.devtools != null) {
+        MONEY_BROWSER = cfg.browser.devtools;
+      } // lib.optionalAttrs (cfg.browser.page != null) {
+        MONEY_BROWSER_PAGE = cfg.browser.page;
       } // lib.optionalAttrs (cfg.receiptsDir != null) {
         MONEY_RECEIPTS_DIR = cfg.receiptsDir;
       };
@@ -392,7 +415,9 @@ in
         ProtectKernelModules = true;
         ProtectKernelTunables = true;
         ProtectSystem = "strict";
-        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+        # amazon-orders' browser challenge runs Playwright's Node driver,
+        # which talks to it over Unix sockets.
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ] ++ lib.optional (amazon.package != null) "AF_UNIX";
         RestrictNamespaces = true;
         RestrictRealtime = true;
         SystemCallArchitectures = "native";

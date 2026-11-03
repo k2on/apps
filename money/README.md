@@ -133,40 +133,45 @@ They are calls of the server's own over the sync socket
 (`domain/src/setup.rs`, ark-peer's `Config::calls`), not intents: a `Call`
 frame answered by a `Reply` to that connection alone, never logged, journaled
 or told to anyone else. Amazon's login, with an authenticator secret for an
-account with two-step verification, and Costco's sign-in are kept in
-`<data>/stores.json`, readable by the server alone (`server/src/vault.rs`).
-Neither is ever a row, so neither is in the log or on a device. Settings
-are told only who, masked.
+account with two-step verification, is kept in `<data>/stores.json`,
+readable by the server alone (`server/src/vault.rs`). It is never a row, so
+it is never in the log or on a device. Settings are told only who, masked.
 
-**Costco is signed in to as its app is** (`server/src/costco.rs`), with the
-Android app's client and PKCE. Settings take an email and password, and
-the server sends them through Costco's sign-in page as a browser does,
-reading the redirect to the app's address,
-`msauth://com.costco.app.android/…?code=…`, rather than following it, and
-trading its code for a refresh token. It keeps the password, to sign in
-again should Costco stop taking the token, and forgets it if Costco refuses
-it. When Costco asks for more than the password, Settings open Costco's own
-page instead, and the `msauth://` address it ends at is pasted back.
+**A browser for the stores that want one** (`server/src/browser.rs`,
+`MONEY_BROWSER`, the module's `browser.devtools`): a real, headed browser,
+which people sign in to themselves from its page (`MONEY_BROWSER_PAGE`,
+`browser.page`) and the server drives over the DevTools protocol. Costco's
+sign-in is behind bot protection that only such a browser, with a person at
+it, passes, and Amazon answers a sign-in from somewhere new with a
+JavaScript challenge.
+
+**Costco is read on its own page** (`server/src/costco.rs`). "Sign in to
+Costco" in Settings opens costco.com's sign-in in the browser, and the
+browser's page; a person signs in there once, and the browser stays signed
+in. At each sync the server opens costco.com's Orders & Purchases in a tab
+of its own, which signs itself in from that session and keeps its token in
+the page; the page then asks Costco's GraphQL for the warehouse and gas
+receipts of the last `MONEY_COSTCO_DAYS` (90), item by item, and the tab is
+closed. Nothing of the sign-in comes to the server. A browser signed out is
+said so in Settings' last sync.
 
 **The server gathers them** (`server/src/stores.rs`) on each importer run
 (at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`), for the orders and then
 for how they were charged (`MONEY_AMAZON_TRANSACTIONS_ARGS`, `transactions
 --days 60 -o json`), signed in by the login given in Settings, or by
 `MONEY_AMAZON_USERNAME_FILE`, `MONEY_AMAZON_PASSWORD_FILE` and
-`MONEY_AMAZON_OTP_SECRET_FILE` when the server is given them. The login
-goes to that program alone, with its session kept in `<data>/amazon-orders`.
-It signs in to Costco with the refresh token kept (or one in
-`MONEY_COSTCO_REFRESH_TOKEN_FILE`), keeps the new one Costco answers with in
-its place, and asks the Orders & Purchases page's GraphQL for the
-warehouse and gas receipts of the last `MONEY_COSTCO_DAYS` (90), item by
-item. It reads a folder of exports (`MONEY_RECEIPTS_DIR`, else
+`MONEY_AMAZON_OTP_SECRET_FILE` when the server is given them, and told the
+browser (`AMAZON_ORDERS_CDP`) for Amazon's challenge. The login goes to
+that program alone, with its session kept in `<data>/amazon-orders`; what
+Amazon asked or refused is said, not `Aborted!`. It reads Costco in the
+browser, as above. It reads a folder of exports (`MONEY_RECEIPTS_DIR`, else
 `<data>/receipts`: `target/`, `costco/`, `amazon/`), moving each file to
 `imported/`, or to `failed/` when it does not read. Every server runs it,
 for that folder. The module's options are `amazon.{package, args,
 usernameFile, passwordFile, otpSecretFile, transactionsArgs}`,
-`costco.days` and `receiptsDir`. Target has no program like
-`amazon-orders`, so its exports are saved from the browser into the
-folder, as Costco's may be. For Costco, `download/download_costco_receipts.js` in
+`browser.{devtools, page}`, `costco.days` and `receiptsDir`. Target has no
+program like `amazon-orders`, so its exports are saved from the browser
+into the folder, as Costco's may be. For Costco, `download/download_costco_receipts.js` in
 ankurdave/beancount_import_sources, run in the console of a signed-in
 costco.com page, saves the array the adapter reads
 (`domain/tests/stores/costco-receipts-script.json` is its shape).

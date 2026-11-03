@@ -51,6 +51,7 @@ fn the_stores_receipts_are_imported() {
             username_file: Some(file("u", "me@example.com")),
             password_file: Some(file("p", "hunter2")),
             otp_secret_file: None,
+            browser: None,
         }),
         costco: Default::default(),
         dir: Some(drop.path().to_path_buf()),
@@ -87,7 +88,7 @@ fn the_stores_receipts_are_imported() {
 /// and the importer's own account sets up nothing.
 #[test]
 fn settings_keep_amazons_login_off_the_budget() {
-    use money_domain::setup::{self as calls, AmazonLogin, CostcoPage, Stores};
+    use money_domain::setup::{self as calls, AmazonLogin, BrowserPage, Stores};
     let rt = runtime();
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |_| {});
@@ -125,20 +126,10 @@ fn settings_keep_amazons_login_off_the_budget() {
     assert!(bad.contains("email and password"), "{bad}");
     assert_eq!(alice.call::<Stores>(calls::STATUS, &()).unwrap(), s);
 
-    // Costco's sign-in begins on Costco's own page, as its app's does.
-    let page: CostcoPage = alice.call(calls::COSTCO_SIGN_IN, &()).unwrap();
-    assert!(
-        page.url.starts_with("https://signin.costco.com/") && page.url.contains("code_challenge="),
-        "{}",
-        page.url
-    );
-    let none = alice.call::<Stores>(
-        calls::COSTCO,
-        &calls::CostcoAddress {
-            address: "https://www.costco.com/".into(),
-        },
-    );
-    assert!(none.unwrap_err().contains("no code"));
+    // A server with no browser has nowhere to sign in to Costco, and says so.
+    assert!(!s.costco.browser);
+    let none = alice.call::<BrowserPage>(calls::COSTCO_SIGN_IN, &()).unwrap_err();
+    assert!(none.contains("no browser"), "{none}");
 
     // Somebody in the household makes a change, so the log has entries.
     let mut bob = signed_in(&server, "bob");

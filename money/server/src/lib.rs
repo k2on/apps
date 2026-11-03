@@ -29,6 +29,7 @@
 //! `banks.import` asks for it, and so do the importer's answers about
 //! connections (`banks.answer`, `banks.failed`).
 
+pub mod browser;
 pub mod costco;
 pub mod importer;
 pub mod plaid;
@@ -116,10 +117,11 @@ impl Config {
     /// MONEY_AMAZON_OTP_SECRET_FILE
     ///                         the one-time code's secret, when the account
     ///                         has one
+    /// MONEY_BROWSER           a browser's DevTools address (`http://host:port`):
+    ///                         Costco's receipts are read in it, and Amazon's
+    ///                         sign-in challenge is run in it ([`browser`])
+    /// MONEY_BROWSER_PAGE      the page where people see that browser and sign in
     /// MONEY_COSTCO_DAYS       how far back Costco's receipts are asked for (90)
-    /// MONEY_COSTCO_REFRESH_TOKEN_FILE
-    ///                         a refresh token for Costco, kept in that file
-    ///                         in place of Settings' sign-in
     /// MONEY_RECEIPTS_DIR      a folder of exports: `<store>/*.json`
     /// ```
     ///
@@ -281,7 +283,6 @@ pub async fn start(config: Config) -> Result<Server> {
             amazon_program: stores.amazon.is_some(),
             costco: stores.costco.clone(),
             importer: importer_slot.clone(),
-            signing_in: Arc::new(std::sync::Mutex::new(None)),
         }),
         ..ark_peer::Config::of(money_domain::shared())
     };

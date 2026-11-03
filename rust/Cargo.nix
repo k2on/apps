@@ -10661,18 +10661,10 @@ rec {
             packageId = "axum";
           }
           {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
             name = "chrono";
             packageId = "chrono";
             usesDefaultFeatures = false;
             features = [ "clock" ];
-          }
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
           }
           {
             name = "money-domain";
@@ -10689,14 +10681,15 @@ rec {
             features = [ "raw_value" ];
           }
           {
-            name = "sha2";
-            packageId = "sha2";
-            usesDefaultFeatures = false;
-          }
-          {
             name = "tokio";
             packageId = "tokio";
             features = [ "rt-multi-thread" "macros" "net" "sync" "time" "signal" ];
+          }
+          {
+            name = "tungstenite";
+            packageId = "tungstenite";
+            usesDefaultFeatures = false;
+            features = [ "handshake" ];
           }
           {
             name = "ureq";

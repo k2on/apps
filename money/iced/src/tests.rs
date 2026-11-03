@@ -1569,9 +1569,9 @@ fn a_payment_category_is_not_assigned_by_formula() {
 /// The live window's Settings set Amazon and Costco up over its link, as
 /// calls of the server's own: the stores are asked for as Settings opens;
 /// Amazon's login is saved, said back masked, and not kept typed; a bad
-/// one is said under its section; "Sign in to Costco" opens Costco's own
-/// sign-in and asks for the address it ends at. Falsified by sending the
-/// login as an intent: the server's vault would not have it.
+/// one is said under its section; "Sign in to Costco" on a server with no
+/// browser is refused, and opens nothing. Falsified by sending the login
+/// as an intent: the server's vault would not have it.
 #[test]
 fn on_a_server_settings_set_up_amazon_and_costco() {
     use crate::stores::Msg as S;
@@ -1617,18 +1617,15 @@ fn on_a_server_settings_set_up_amazon_and_costco() {
     assert_eq!(app.peer.client.log.store.rows("bank_ask").count(), 0);
     drop(app.view());
 
+    // Costco is read in the server's browser; this one has none, and says so.
+    assert!(!app.settings.stores.as_ref().unwrap().costco.browser);
     let _ = app.update(Message::Stores(S::SignInCostco));
-    settle(&mut app, &|a| a.settings.signing_in);
-    assert!(
-        app.opened.last().is_some_and(|u| u.starts_with("https://signin.costco.com/")),
-        "{:?}",
-        app.opened
-    );
-    drop(app.view());
-
-    // The server signs in itself with an email and password; none is said.
-    let _ = app.update(Message::Stores(S::SaveCostcoPassword));
     settle(&mut app, &|a| a.settings.refused.is_some());
-    assert!(app.settings.refused.as_ref().unwrap().1.contains("Costco's email and password, both"));
+    assert!(
+        app.settings.refused.as_ref().unwrap().1.contains("no browser"),
+        "{:?}",
+        app.settings.refused
+    );
+    assert!(app.opened.is_empty(), "nothing opened");
     drop(app.view());
 }

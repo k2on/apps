@@ -5,11 +5,9 @@
 //! and what they answer is [`Stores`]: who, masked, and no secret.
 //!
 //! - **Amazon**: the login `amazon-orders` signs in with, or none.
-//! - **Costco**: the email and password the server signs in with itself,
-//!   as Costco's page does, and keeps to sign in again; or, when Costco asks
-//!   for more, a sign-in begun, which answers with Costco's page for the
-//!   device to open, and finished with the address Costco sent the browser
-//!   to; either traded for a refresh token ([`crate::costco`]); or none.
+//! - **Costco**: costco.com's sign-in opened in the server's browser
+//!   ([`crate::costco`]), answered with the browser's page, where a person
+//!   signs in; the server keeps nothing of it.
 //!
 //! A call comes in on a connection its token proved (the sync socket's
 //! sign-in), so it is the household's; the importer's own account sets up
@@ -18,20 +16,15 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use ark::format::Encode;
 use ark::peer::Who;
-use money_domain::setup::{self as calls, AmazonState, CostcoAddress, CostcoPage, CostcoPassword, CostcoState, Stores};
+use money_domain::setup::{self as calls, AmazonState, BrowserPage, CostcoState, Stores};
 
-use crate::costco::{Costco, SignIn};
+use crate::costco::Costco;
 use crate::importer::ImporterHandle;
 use crate::vault::{masked, AmazonLogin, Vault};
-
-/// How long a Costco sign-in may take from its page opening to its address
-/// given back: Costco's code lasts minutes.
-const SIGN_IN_TIME: Duration = Duration::from_secs(15 * 60);
 
 /// What the calls share.
 #[derive(Clone)]
@@ -41,8 +34,6 @@ pub struct Setup {
     pub costco: Costco,
     /// Filled once the importer has started.
     pub importer: Arc<Mutex<Option<ImporterHandle>>>,
-    /// The Costco sign-in under way, the latest begun.
-    pub signing_in: Arc<Mutex<Option<(SignIn, Instant)>>>,
 }
 
 /// The calls, by name, for the hub's `Config::calls`.
@@ -62,9 +53,6 @@ pub fn calls(setup: Setup) -> BTreeMap<String, ark_peer::Call> {
     add(calls::AMAZON, Setup::set_amazon);
     add(calls::FORGET_AMAZON, |s, _| s.forget_amazon());
     add(calls::COSTCO_SIGN_IN, |s, _| s.sign_in_costco());
-    add(calls::COSTCO, Setup::set_costco);
-    add(calls::COSTCO_PASSWORD, Setup::sign_in_costco_with_password);
-    add(calls::FORGET_COSTCO, |s, _| s.forget_costco());
     out
 }
 
@@ -92,10 +80,8 @@ impl Setup {
                 otp: v.amazon.as_ref().is_some_and(|a| a.otp_secret.is_some()),
             },
             costco: CostcoState {
-                signed_in: v.costco.is_some(),
-                who: v.costco.as_ref().filter(|c| !c.who.is_empty()).map(|c| masked(&c.who)),
-                password: v.costco.as_ref().is_some_and(|c| c.password.is_some()),
-                file: self.costco.token_file.is_some(),
+                browser: self.costco.browser.is_some(),
+                page: self.costco.page.clone(),
             },
             last,
         }
@@ -131,51 +117,16 @@ impl Setup {
         self.status()
     }
 
+    /// costco.com's sign-in opened in the browser; the browser's page, for
+    /// the device to open.
     fn sign_in_costco(&self) -> Result<Vec<u8>> {
-        let started = self.costco.sign_in()?;
-        let url = started.url.clone();
-        *self.signing_in.lock().unwrap_or_else(|e| e.into_inner()) = Some((started, Instant::now()));
-        Ok(CostcoPage { url }.to_bytes())
-    }
-
-    fn set_costco(&self, input: &[u8]) -> Result<Vec<u8>> {
-        let f: CostcoAddress = read(input)?;
-        let started = match self.signing_in.lock().unwrap_or_else(|e| e.into_inner()).clone() {
-            Some((started, at)) if at.elapsed() < SIGN_IN_TIME => started,
-            _ => bail!("no Costco sign-in under way: sign in to Costco again"),
-        };
-        let login = self.costco.finish(&started, &f.address)?;
-        Vault::change(&self.data, |v| {
-            v.costco = Some(login);
-            Ok(())
-        })?;
-        // A code is good once.
-        *self.signing_in.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        self.nudge();
-        self.status()
-    }
-
-    fn sign_in_costco_with_password(&self, input: &[u8]) -> Result<Vec<u8>> {
-        let f: CostcoPassword = read(input)?;
-        let email = f.email.trim();
-        if email.is_empty() || f.password.is_empty() {
-            bail!("Costco's email and password, both");
-        }
-        let login = self.costco.sign_in_with_password(email, &f.password)?;
-        Vault::change(&self.data, |v| {
-            v.costco = Some(login);
-            Ok(())
-        })?;
-        self.nudge();
-        self.status()
-    }
-
-    fn forget_costco(&self) -> Result<Vec<u8>> {
-        Vault::change(&self.data, |v| {
-            v.costco = None;
-            Ok(())
-        })?;
-        self.status()
+        let page = self
+            .costco
+            .page
+            .clone()
+            .ok_or_else(|| anyhow!("this server has no browser page for signing in to Costco (services.money.browser)"))?;
+        self.costco.show_sign_in()?;
+        Ok(BrowserPage { url: page }.to_bytes())
     }
 }
 

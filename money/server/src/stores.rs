@@ -17,10 +17,11 @@
 //!   Settings ([`crate::vault`]). Its home is
 //!   `<data>/amazon-orders`, so the session it keeps there spares Amazon a
 //!   login each run.
-//! - **Costco, through its web API** ([`crate::costco`]): signed in to on
-//!   Settings, or by a refresh token in
-//!   `MONEY_COSTCO_REFRESH_TOKEN_FILE`; the receipts of the last
-//!   `MONEY_COSTCO_DAYS` (90), item by item.
+//!   Amazon's JavaScript sign-in challenge it runs in the browser the
+//!   server is told of (`MONEY_BROWSER`, given it as `AMAZON_ORDERS_CDP`).
+//! - **Costco, in that browser** ([`crate::costco`]): costco.com's own page,
+//!   signed in to there by a person (`MONEY_BROWSER_PAGE`), asked for the
+//!   receipts of the last `MONEY_COSTCO_DAYS` (90), item by item.
 //! - **A folder of exports** (`MONEY_RECEIPTS_DIR`): a file in
 //!   `<dir>/<store>/` (`target/`, `costco/`, `amazon/`) is read by that
 //!   store's adapter, then moved to `imported/` beside it once the import
@@ -43,7 +44,7 @@ const AMAZON_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stores {
     pub amazon: Option<AmazonOrders>,
-    /// Costco: it reads nothing until someone signs in.
+    /// Costco: it reads nothing without a browser.
     pub costco: Costco,
     /// The folder of exports.
     pub dir: Option<PathBuf>,
@@ -51,13 +52,12 @@ pub struct Stores {
 
 impl Stores {
     pub fn any(&self) -> bool {
-        // Costco signed in from Settings needs no telling: the
-        // receipts folder every server has runs the importer that reads it.
-        self.amazon.is_some() || self.costco.token_file.is_some() || self.dir.is_some()
+        self.amazon.is_some() || self.costco.browser.is_some() || self.dir.is_some()
     }
 
     /// Read the environment (blank is unset).
     pub fn from_env(env: &impl Fn(&str) -> Option<String>) -> Result<Stores> {
+        let browser = env("MONEY_BROWSER");
         let amazon = match env("MONEY_AMAZON_ORDERS") {
             None => None,
             Some(program) => {
@@ -78,6 +78,7 @@ impl Stores {
                     username_file: u.map(PathBuf::from),
                     password_file: p.map(PathBuf::from),
                     otp_secret_file: env("MONEY_AMAZON_OTP_SECRET_FILE").map(PathBuf::from),
+                    browser: browser.clone(),
                 })
             }
         };
@@ -89,9 +90,9 @@ impl Stores {
         Ok(Stores {
             amazon,
             costco: Costco {
-                token_file: env("MONEY_COSTCO_REFRESH_TOKEN_FILE").map(PathBuf::from),
+                browser: browser.map(|devtools| crate::browser::Browser { devtools }),
+                page: env("MONEY_BROWSER_PAGE"),
                 days: costco_days,
-                ..Costco::default()
             },
             dir: env("MONEY_RECEIPTS_DIR").map(PathBuf::from),
         })
@@ -117,6 +118,9 @@ pub struct AmazonOrders {
     pub username_file: Option<PathBuf>,
     pub password_file: Option<PathBuf>,
     pub otp_secret_file: Option<PathBuf>,
+    /// The browser's DevTools address, for Amazon's JavaScript sign-in
+    /// challenge (`AMAZON_ORDERS_CDP`).
+    pub browser: Option<String>,
 }
 
 /// A secret's file, trimmed; its contents never in an error.
@@ -169,6 +173,9 @@ impl AmazonOrders {
             .stderr(Stdio::piped());
         if let Some(otp) = &login.otp_secret {
             cmd.env("AMAZON_OTP_SECRET_KEY", otp);
+        }
+        if let Some(b) = &self.browser {
+            cmd.env("AMAZON_ORDERS_CDP", b);
         }
         let mut child = cmd.spawn().with_context(|| format!("running {}", self.program.display()))?;
         // Read as it is written, so a long history does not fill the pipe
@@ -293,7 +300,7 @@ mod tests {
             ("MONEY_AMAZON_USERNAME_FILE", "/c/u"),
         ]))
         .unwrap_err();
-        assert_eq!(Stores::from_env(&vars(&[])).unwrap().costco, Costco::default(), "nobody signed in yet");
+        assert_eq!(Stores::from_env(&vars(&[])).unwrap().costco, Costco::default(), "no browser, no Costco");
         assert!(e.to_string().contains("go together"), "{e}");
         let s = Stores::from_env(&vars(&[
             ("MONEY_AMAZON_ORDERS", "/bin/amazon-orders"),
@@ -308,15 +315,21 @@ mod tests {
         assert_eq!(a.otp_secret_file, None);
         assert_eq!(s.dir, Some(PathBuf::from("/var/lib/money/receipts")));
         let s = Stores::from_env(&vars(&[
-            ("MONEY_COSTCO_REFRESH_TOKEN_FILE", "/var/lib/money/costco-refresh-token"),
+            ("MONEY_AMAZON_ORDERS", "/bin/amazon-orders"),
+            ("MONEY_BROWSER", "http://192.168.77.2:9223"),
+            ("MONEY_BROWSER_PAGE", "https://sivrad.example.com/browser"),
             ("MONEY_COSTCO_DAYS", "30"),
         ]))
         .unwrap();
+        assert_eq!(
+            s.amazon.unwrap().browser.as_deref(),
+            Some("http://192.168.77.2:9223"),
+            "the challenge's browser"
+        );
         let c = s.costco;
-        assert_eq!(c.token_file, Some(PathBuf::from("/var/lib/money/costco-refresh-token")));
+        assert_eq!(c.browser.map(|b| b.devtools).as_deref(), Some("http://192.168.77.2:9223"));
+        assert_eq!(c.page.as_deref(), Some("https://sivrad.example.com/browser"));
         assert_eq!(c.days, 30);
-        assert_eq!(c.token_url, Costco::default().token_url);
-        assert_eq!(c.receipts_url, Costco::default().receipts_url);
     }
 
     /// The program's output is what it printed; its sign-in reaches it in
@@ -342,6 +355,7 @@ mod tests {
             username_file: Some(write("u", "me@example.com\n")),
             password_file: Some(write("p", "hunter2\n")),
             otp_secret_file: None,
+            browser: None,
         };
         let out = a.run(dir.path()).unwrap();
         assert!(out.contains("\"order_number\":\"orders\""), "{out}");
@@ -365,7 +379,6 @@ mod tests {
                 password: "hunter2".into(),
                 otp_secret: None,
             }),
-            costco: None,
         };
         v.save(dir.path()).unwrap();
         assert!(page.run(dir.path()).unwrap().contains("order_number"));
@@ -401,6 +414,7 @@ mod tests {
             username_file: Some(file("u", "me@example.com")),
             password_file: Some(file("p", "hunter2")),
             otp_secret_file: None,
+            browser: None,
         };
         let e = a.run(dir.path()).unwrap_err().to_string();
         assert!(e.contains("by text or email") && e.contains("authenticator"), "{e}");

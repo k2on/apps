@@ -3,27 +3,23 @@
 //!
 //! Each is a call of the server's own over this window's link
 //! (`money_domain::setup`), never an intent: what it carries — Amazon's
-//! password, Costco's sign-in — goes to the server and nowhere else, and is
-//! in no row, so no device has it, this one included. Every answer is the
-//! stores as the server has them, who masked, which the sections draw.
+//! password — goes to the server and nowhere else, and is in no row, so no
+//! device has it, this one included. Every answer is the stores as the
+//! server has them, who masked, which the sections draw.
 //!
 //! - **Amazon**: an email, a password and, for two-step verification, the
 //!   authenticator's secret, saved for `amazon-orders`; or removed.
-//! - **Costco**: an email and a password, which the server signs in with
-//!   itself as Costco's page does, and keeps to sign in again. When Costco
-//!   asks for more, "Sign in on Costco's page instead" asks the server for
-//!   Costco's own sign-in page and opens it (a tab reserved at the click in
-//!   a browser, [`crate::browser`]). Signed in there, Costco sends the
-//!   browser on to the address its app takes, `msauth://…?code=…`, which a
-//!   browser cannot open; that address is pasted here, and the server
-//!   trades it for the sign-in it keeps.
+//! - **Costco**: read in the server's browser, signed in to costco.com by a
+//!   person. "Sign in to Costco" has the server open costco.com's sign-in
+//!   there and answers with the browser's page, which this window opens (a
+//!   tab reserved at the click in a browser, [`crate::browser`]).
 //!
 //! The sections ask the server how the stores are each time Settings opens.
 
 use ark::format::Encode;
 use iced::widget::{column, container, row, text, text_input};
 use iced::{Alignment, Element, Length};
-use money_domain::setup::{self as calls, AmazonLogin, CostcoAddress, CostcoPage, CostcoPassword, Stores};
+use money_domain::setup::{self as calls, AmazonLogin, BrowserPage, Stores};
 
 use crate::view::{action, bold, dim, quiet};
 use crate::{browser, look, App, Message};
@@ -36,22 +32,15 @@ pub enum Msg {
     Otp(String),
     SaveAmazon,
     ForgetAmazon,
-    CostcoEmail(String),
-    CostcoPassword(String),
-    /// The server signs in with the email and password.
-    SaveCostcoPassword,
-    /// Costco's own page instead, its address pasted back.
+    /// costco.com's sign-in opened in the server's browser, and its page here.
     SignInCostco,
-    Address(String),
-    SaveCostco,
-    ForgetCostco,
 }
 
 /// A call made, waiting for its answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Asked {
     Stores,
-    CostcoPage,
+    BrowserPage,
 }
 
 /// What the sections hold: the stores as the server last said, what is
@@ -62,11 +51,6 @@ pub struct Settings {
     pub user: String,
     pub password: String,
     pub otp: String,
-    pub costco_email: String,
-    pub costco_password: String,
-    pub address: String,
-    /// A Costco sign-in begun here: the address is asked for.
-    pub signing_in: bool,
     /// What the server last refused, said under its section.
     pub refused: Option<(&'static str, String)>,
     waiting: Vec<(u64, Asked, &'static str)>,
@@ -89,25 +73,10 @@ impl App {
                 self.call("amazon", calls::AMAZON, &login, Asked::Stores);
             }
             Msg::ForgetAmazon => self.call("amazon", calls::FORGET_AMAZON, &(), Asked::Stores),
-            Msg::CostcoEmail(v) => s.costco_email = v,
-            Msg::CostcoPassword(v) => s.costco_password = v,
-            Msg::SaveCostcoPassword => {
-                let login = CostcoPassword {
-                    email: s.costco_email.clone(),
-                    password: s.costco_password.clone(),
-                };
-                self.call("costco", calls::COSTCO_PASSWORD, &login, Asked::Stores);
-            }
             Msg::SignInCostco => {
                 browser::reserve();
-                self.call("costco", calls::COSTCO_SIGN_IN, &(), Asked::CostcoPage);
+                self.call("costco", calls::COSTCO_SIGN_IN, &(), Asked::BrowserPage);
             }
-            Msg::Address(v) => s.address = v,
-            Msg::SaveCostco => {
-                let address = CostcoAddress { address: s.address.clone() };
-                self.call("costco", calls::COSTCO, &address, Asked::Stores);
-            }
-            Msg::ForgetCostco => self.call("costco", calls::FORGET_COSTCO, &(), Asked::Stores),
         }
     }
 
@@ -129,7 +98,7 @@ impl App {
                 self.settings.waiting.push((id, asked, section));
             }
             Err(why) => {
-                if asked == Asked::CostcoPage {
+                if asked == Asked::BrowserPage {
                     browser::release();
                 }
                 self.settings.refused = Some((section, why));
@@ -153,7 +122,7 @@ impl App {
             let read = answer.and_then(|b| {
                 match asked {
                     Asked::Stores => Stores::from_bytes(&b).map(|s| (Some(s), None)),
-                    Asked::CostcoPage => CostcoPage::from_bytes(&b).map(|p| (None, Some(p.url))),
+                    Asked::BrowserPage => BrowserPage::from_bytes(&b).map(|p| (None, Some(p.url))),
                 }
                 .map_err(|e| format!("an answer this window does not read: {e}"))
             });
@@ -165,22 +134,18 @@ impl App {
                         if new.amazon.who.is_some() && section == "amazon" {
                             (s.password, s.otp) = (String::new(), String::new());
                         }
-                        if new.costco.signed_in && section == "costco" {
-                            (s.address, s.signing_in, s.costco_password) = (String::new(), false, String::new());
-                        }
                         s.stores = Some(new);
                     }
                     if let Some(url) = page {
-                        self.settings.signing_in = true;
                         self.note = match browser::open(&url) {
-                            true => "Costco's sign-in is open in your browser".into(),
-                            false => "open Costco's sign-in from Settings".into(),
+                            true => "the server's browser is open: sign in to costco.com there".into(),
+                            false => format!("open the server's browser at {url} and sign in to costco.com there"),
                         };
                         self.opened.push(url);
                     }
                 }
                 Err(why) => {
-                    if asked == Asked::CostcoPage {
+                    if asked == Asked::BrowserPage {
                         browser::release();
                     }
                     self.settings.refused = Some((section, why));
@@ -192,6 +157,16 @@ impl App {
     fn refused_in(&self, section: &str) -> Option<Element<'_, Message>> {
         let (s, why) = self.settings.refused.as_ref()?;
         (*s == section || s.is_empty()).then(|| text(why.as_str()).size(12).style(look::Tone::Over.text()).into())
+    }
+
+    /// What `store`'s last import did, when there was one.
+    fn last(&self, store: &str) -> Option<Element<'_, Message>> {
+        let (_, how) = self.settings.stores.as_ref()?.last.iter().find(|(s, _)| s == store)?;
+        let line = text(format!("Last sync: {how}")).size(12);
+        Some(match how.starts_with("failed") {
+            true => line.style(look::Tone::Over.text()).into(),
+            false => line.into(),
+        })
     }
 
     pub fn amazon_section(&self) -> Element<'_, Message> {
@@ -248,94 +223,49 @@ impl App {
             }
             c = c.push(buttons);
         }
+        if let Some(l) = self.last("amazon") {
+            c = c.push(l);
+        }
         if let Some(e) = self.refused_in("amazon") {
             c = c.push(e);
         }
         c = c.push(dim(
             "Your Amazon login goes to the server and is kept there, in a file only it reads. It is never part of \
-             the budget, so it is not synced to this or any device.",
+             the budget, so it is not synced to this or any device. When Amazon checks the sign-in with a \
+             challenge, the server's browser runs it.",
             11,
         ));
         card(c)
     }
 
     pub fn costco_section(&self) -> Element<'_, Message> {
-        let s = &self.settings;
-        let co = s.stores.as_ref().map(|s| &s.costco);
+        let co = self.settings.stores.as_ref().map(|s| &s.costco);
         let state = match co {
             _ if self.server.is_none() => "This is the demo: it has no server, so there is nothing to set up.".to_string(),
             None => "Asking the server\u{2026}".into(),
-            Some(c) if c.file => "Signed in by a token file the server was given.".into(),
-            Some(c) => match (&c.who, c.signed_in) {
-                (Some(who), true) => format!("Signed in as {who}."),
-                (None, true) => "Signed in.".into(),
-                _ => "Not set up.".into(),
-            },
+            Some(c) if !c.browser => "This server has no browser for Costco yet (services.money.browser).".into(),
+            Some(_) => "Read in the server's browser, signed in to costco.com there.".into(),
         };
         let mut c = column![
             dim(
-                "At each sync the server reads the last 90 days of warehouse and gas receipts from Costco. It signs \
-                 in with your Costco email and password, as costco.com's sign-in page does.",
+                "At each sync the server opens costco.com's Orders & Purchases in its browser and reads the last 90 \
+                 days of warehouse and gas receipts there, item by item.",
                 12
             ),
             bold(state, 13),
         ]
         .spacing(10);
-        if self.server.is_some() {
-            let field = |placeholder: &str, value: &str, on: fn(String) -> Msg, secure: bool| {
-                text_input(placeholder, value)
-                    .on_input(move |v| Message::Stores(on(v)))
-                    .on_submit(Message::Stores(Msg::SaveCostcoPassword))
-                    .secure(secure)
-                    .size(13)
-                    .padding([6, 8])
-                    .style(look::input)
-            };
-            let signed_in = co.is_some_and(|c| c.signed_in);
-            let mut buttons = row![
-                action(
-                    if signed_in { "Sign in again" } else { "Sign in" },
-                    Message::Stores(Msg::SaveCostcoPassword)
-                ),
-                quiet("Sign in on Costco's page instead", Message::Stores(Msg::SignInCostco)),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center);
-            if signed_in {
-                buttons = buttons.push(quiet("Sign out", Message::Stores(Msg::ForgetCostco)));
-            }
+        if co.is_some_and(|c| c.browser) {
             c = c
-                .push(field("Email", &s.costco_email, Msg::CostcoEmail, false))
-                .push(field("Password", &s.costco_password, Msg::CostcoPassword, true))
-                .push(buttons)
+                .push(row![action("Sign in to Costco", Message::Stores(Msg::SignInCostco))].align_y(Alignment::Center))
                 .push(dim(
-                    "The password is kept on the server, in a file only it reads, so it can sign in again if Costco \
-                     ends the sign-in. If Costco asks for a code as well, sign in on Costco's page instead: then the \
-                     password never reaches the server.",
+                    "This opens costco.com's sign-in in the server's browser, and that browser's page here. Sign in \
+                     there once: the browser stays signed in to Costco, and your password goes to Costco alone.",
                     11,
                 ));
         }
-        if s.signing_in {
-            c = c
-                .push(dim(
-                    "Before you sign in on the Costco tab, open its developer tools (F12, or \u{2325}\u{2318}I on a Mac). \
-                     Once you're signed in, Costco tries to hand you to its app and the page seems to stop. In Chrome \
-                     or Edge, the Console says Failed to launch 'msauth://com.costco.app.android/\u{2026}code=\u{2026}': \
-                     copy that address. In Firefox, open Network, click the request named confirmed (the one that \
-                     failed with an unknown protocol), and copy the location from its response headers \u{2014} or \
-                     right-click it, Copy Value, Copy Response Headers. Paste it here within a few minutes; the server \
-                     finds the code in whatever you paste.",
-                    11,
-                ))
-                .push(
-                    text_input("msauth://com.costco.app.android/\u{2026}?code=\u{2026}", &s.address)
-                        .on_input(|v| Message::Stores(Msg::Address(v)))
-                        .on_submit(Message::Stores(Msg::SaveCostco))
-                        .size(13)
-                        .padding([6, 8])
-                        .style(look::input),
-                )
-                .push(action("Save", Message::Stores(Msg::SaveCostco)));
+        if let Some(l) = self.last("costco") {
+            c = c.push(l);
         }
         if let Some(e) = self.refused_in("costco") {
             c = c.push(e);
@@ -353,7 +283,6 @@ impl std::fmt::Debug for Settings {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("Settings")
             .field("stores", &self.stores)
-            .field("signing_in", &self.signing_in)
             .field("refused", &self.refused)
             .field("waiting", &self.waiting.len())
             .finish()

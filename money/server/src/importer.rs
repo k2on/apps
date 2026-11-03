@@ -794,7 +794,7 @@ impl Job {
     }
 
     /// Every store's receipts, from `amazon-orders` and the folder of
-    /// exports, and Costco's API: each on its own, one failing said and
+    /// exports, and Costco's page in the browser: each on its own, one failing said and
     /// the rest going on.
     fn import_stores(&mut self, stop: &AtomicBool) -> BTreeMap<String, Outcome> {
         let mut out = BTreeMap::new();
@@ -814,8 +814,8 @@ impl Job {
                 out.insert("amazon charges".to_string(), self.outcome_charges("amazon charges", got));
             }
         }
-        // Nothing from Costco, said or not, until someone signs in.
-        if let Some(got) = self.stores.costco.receipts(&self.data).transpose() {
+        // Nothing from Costco, said or not, on a server with no browser.
+        if let Some(got) = self.stores.costco.receipts().transpose() {
             let got = got
                 .and_then(|text| money_domain::stores::costco(&text).map_err(|e| anyhow!(e)))
                 .and_then(|import| self.author_receipts(&import));
