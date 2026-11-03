@@ -198,12 +198,35 @@ impl AmazonOrders {
         let out = reader.join().map_err(|_| anyhow!("reading amazon-orders"))??;
         let err = errs.join().unwrap_or_default();
         if !status.success() {
+            if let Some(why) = asked(&out) {
+                bail!("{why}");
+            }
             let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
             let last: String = last.chars().take(300).collect();
             bail!("amazon-orders failed ({status}): {last}");
         }
         Ok(out)
     }
+}
+
+/// What Amazon asked that nobody was there to answer: `amazon-orders`
+/// prints a question as `--> …:` and, its input closed, gives up. Each is
+/// said with what can be done.
+fn asked(out: &str) -> Option<String> {
+    let at = out.rfind("--> ")?;
+    let question = out[at + 4..].lines().next().unwrap_or("").trim().trim_end_matches(':').trim();
+    let q = question.to_lowercase();
+    let what = if q.contains("one-time passcode sent") {
+        "Amazon sends this account's one-time codes by text or email, which the server cannot read. \
+         Add an authenticator app on Amazon (Login & security \u{2192} 2-Step Verification) and give its secret in Settings"
+    } else if q.contains("one-time passcode") {
+        "Amazon asked for a one-time code. Give the authenticator app's secret in Settings, so the server can make its own"
+    } else if q.contains("characters shown") {
+        "Amazon showed a captcha, which the server cannot answer. It tries again at the next sync"
+    } else {
+        "Amazon asked for something the server cannot answer"
+    };
+    Some(format!("{what} (amazon-orders asked: {question})"))
 }
 
 /// One export waiting in the folder: its store, and the file.
@@ -332,6 +355,48 @@ mod tests {
         };
         v.save(dir.path()).unwrap();
         assert!(page.run(dir.path()).unwrap().contains("order_number"));
+    }
+
+    /// A question Amazon asked mid-sign-in, which nobody answers, is said
+    /// with what to do, not as amazon-orders' `Aborted!`.
+    #[test]
+    fn what_amazon_asked_is_said() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("asks");
+        // As click prompts: the question on stdout, no newline; then, its
+        // input closed, `Aborted!` on stderr.
+        std::fs::write(
+            &program,
+            "#!/bin/sh\nprintf 'Info: signing in\\n--> Choose where you would like your one-time passcode sent: '\necho 'Aborted!' >&2\nexit 1\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let file = |name: &str, text: &str| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, text).unwrap();
+            p
+        };
+        let a = AmazonOrders {
+            program,
+            args: vec!["orders".into()],
+            charges_args: vec![],
+            username_file: Some(file("u", "me@example.com")),
+            password_file: Some(file("p", "hunter2")),
+            otp_secret_file: None,
+        };
+        let e = a.run(dir.path()).unwrap_err().to_string();
+        assert!(e.contains("by text or email") && e.contains("authenticator"), "{e}");
+        assert!(e.contains("asked: Choose where you would like your one-time passcode sent)"), "{e}");
+        assert!(!e.contains("Aborted"), "{e}");
+        assert!(asked("--> Enter the one-time passcode from your preferred 2FA method: ")
+            .unwrap()
+            .contains("authenticator app's secret"));
+        assert!(asked("--> Enter the characters shown in the image: ").unwrap().contains("captcha"));
+        assert_eq!(asked("[]"), None);
     }
 
     #[test]
