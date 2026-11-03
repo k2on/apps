@@ -806,6 +806,8 @@ impl Peer {
             }
             .enc(),
         );
+        // Out now, as a change is: nobody pumps for an answer not yet asked.
+        self.flush();
         Ok(id)
     }
 

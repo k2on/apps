@@ -128,3 +128,37 @@ fn the_servers_thread_runs_calls_and_answers() {
     );
     handle.stop();
 }
+
+/// A call is sent as it is made, as a change is: the server runs it with
+/// the device not pumped since. Falsified by queuing the frame for the
+/// next pump, when a window waits for an answer that never left.
+#[test]
+fn a_call_goes_out_as_it_is_made() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let ran = Arc::new(AtomicBool::new(false));
+    let mut server = config();
+    let seen = ran.clone();
+    let mark: Call = Arc::new(move |_, _| {
+        seen.store(true, Ordering::SeqCst);
+        Ok(vec![])
+    });
+    server.calls.insert("mark".into(), mark);
+    let hub = Handle::spawn(Peer::serve(server, Box::new(Memory::default()), 0));
+    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()), false);
+    d.set_token(Some("alice@phone".into()));
+    d.connect_with("", hub.dialer(Arc::new(dev)));
+    let up = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(5), || {
+        d.pump();
+        d.linked
+    });
+    assert!(up, "linked");
+    let id = d.request("mark", vec![]).unwrap();
+    let ran_unpumped = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(5), || ran.load(Ordering::SeqCst));
+    assert!(ran_unpumped, "the call reached the server without another pump");
+    let answered = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(5), || {
+        d.pump();
+        d.take_reply(id).is_some()
+    });
+    assert!(answered);
+    hub.stop();
+}
