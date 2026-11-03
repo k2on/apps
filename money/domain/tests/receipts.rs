@@ -717,14 +717,25 @@ fn a_receipt_never_overrides_a_category_somebody_confirmed() {
     let line = |b: &Book, amount| b.register(None).into_iter().find(|t| t.amount == amount).unwrap();
     b.run("add_receipts", &fillup("2103771660808261016", "2026-10-16", -4_590)).unwrap();
     let t = line(&b, -4_590);
-    assert_eq!((t.category.as_str(), t.receipt.as_str()), ("Groceries", "costco:2103771660808261016"), "paid by it, its category kept");
+    assert_eq!(
+        (t.category.as_str(), t.receipt.as_str()),
+        ("Groceries", "costco:2103771660808261016"),
+        "paid by it, its category kept"
+    );
     assert_eq!(b.line("2026-10", gas).activity, 0, "nothing spent from Gas");
     b.run("add_receipts", &fillup("2103771660808261016", "2026-10-16", -4_590)).unwrap();
     let item = vec![ItemRef {
         receipt_id: "costco:2103771660808261016".into(),
         line: 1,
     }];
-    b.run("file_items", &ClassifyItems { items: item, category_id: Some(gas) }).unwrap();
+    b.run(
+        "file_items",
+        &ClassifyItems {
+            items: item,
+            category_id: Some(gas),
+        },
+    )
+    .unwrap();
     assert_eq!(line(&b, -4_590).category, "Groceries", "an item filed leaves it");
 
     // Said to be the receipt's: it is.
