@@ -3,7 +3,10 @@
 //! gives money to; under an envelope, at any depth, kinds of it
 //! ("Groceries › Eggs"), whose spending is the envelope's. Anybody in the
 //! household changes it; the budget's own heading and its one category
-//! ([`crate::budget::ready_to_assign`]) are not anybody's to change.
+//! ([`crate::budget::ready_to_assign`]) are not anybody's to change, and
+//! the card payments' group and its categories ([`crate::cards`]) are the
+//! cards': hidden or put in order, but named, made and deleted as the
+//! cards are.
 //!
 //! The mutators keep the names they had when groups were a table of their
 //! own: a group is a heading, and `group_id` is the heading a category is
@@ -12,6 +15,7 @@
 use ark::prelude::*;
 
 use crate::budget::{depth, ensure_setup, inflow, is_income, ready_to_assign, subtree};
+use crate::cards::card_group;
 use crate::schema::*;
 use crate::types::*;
 
@@ -22,6 +26,24 @@ fn group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, Refusal> {
         Some(g) if g.parent_id.is_none() => Ok(g),
         Some(g) => Err(Refusal::new(format!("{} is a category, not a group", g.name))),
         None => Err(Refusal::new("no such group")),
+    }
+}
+
+/// A group whose name and categories are people's: not the budget's own,
+/// nor the card payments' — those are the cards' (hidden or moved, yes).
+fn named_group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, Refusal> {
+    match group_of(db, id)? {
+        g if g.id == card_group() => Err(Refusal::new("the card payments' group is the cards': it changes as they do")),
+        g => Ok(g),
+    }
+}
+
+/// A category people name and keep: not a card's payment category, which
+/// is named as its card is and goes when the card does.
+fn named_category_of(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
+    match category_of(db, id)? {
+        c if c.parent_id == Some(card_group()) => Err(Refusal::new("a card's payment category is the card's: rename or close the card")),
+        c => Ok(c),
     }
 }
 
@@ -66,7 +88,7 @@ pub fn add_group(ctx: &Ctx, db: &mut Db<Money>, input: AddGroup) -> Result<(), R
 
 #[mutator("categories.rename_group")]
 pub fn rename_group(_: &Ctx, db: &mut Db<Money>, input: RenameGroup) -> Result<(), Refusal> {
-    let g = group_of(db, input.id)?;
+    let g = named_group_of(db, input.id)?;
     db.category.update(Category { name: input.name, ..g })
 }
 
@@ -80,14 +102,14 @@ pub fn hide_group(_: &Ctx, db: &mut Db<Money>, input: HideGroup) -> Result<(), R
 /// does it.
 #[mutator("categories.delete_group")]
 pub fn delete_group(ctx: &Ctx, db: &mut Db<Money>, input: DeleteGroup) -> Result<(), Refusal> {
-    let g = group_of(db, input.id)?;
+    let g = named_group_of(db, input.id)?;
     delete(ctx, db, g, input.move_to)
 }
 
 /// A category, at the end of its group.
 #[mutator("categories.add_category")]
 pub fn add_category(ctx: &Ctx, db: &mut Db<Money>, input: AddCategory) -> Result<(), Refusal> {
-    let g = group_of(db, input.group_id)?;
+    let g = named_group_of(db, input.group_id)?;
     let pos = last_pos(db);
     db.category.insert(Category {
         id: ctx.new_id(),
@@ -104,7 +126,7 @@ pub fn add_category(ctx: &Ctx, db: &mut Db<Money>, input: AddCategory) -> Result
 /// another kind. Its spending is the envelope's; nothing is assigned to it.
 #[mutator("categories.add_subcategory")]
 pub fn add_subcategory(ctx: &Ctx, db: &mut Db<Money>, input: AddSubcategory) -> Result<(), Refusal> {
-    let parent = category_of(db, input.parent_id)?;
+    let parent = named_category_of(db, input.parent_id)?;
     if depth(db, parent.id).unwrap_or(0) + 1 >= crate::budget::DEEPEST {
         return Err(Refusal::new("that is as deep as categories go"));
     }
@@ -122,7 +144,7 @@ pub fn add_subcategory(ctx: &Ctx, db: &mut Db<Money>, input: AddSubcategory) -> 
 
 #[mutator("categories.rename_category")]
 pub fn rename_category(_: &Ctx, db: &mut Db<Money>, input: RenameCategory) -> Result<(), Refusal> {
-    let c = category_of(db, input.id)?;
+    let c = named_category_of(db, input.id)?;
     db.category.update(Category { name: input.name, ..c })
 }
 
@@ -142,6 +164,11 @@ pub fn hide_category(_: &Ctx, db: &mut Db<Money>, input: HideCategory) -> Result
 pub fn move_category(_: &Ctx, db: &mut Db<Money>, input: MoveCategory) -> Result<(), Refusal> {
     let c = category_of(db, input.id)?;
     let envelope = depth(db, c.id) == Some(1);
+    // The cards' payment categories are put in order among themselves,
+    // and nothing else is put among them.
+    if envelope && (c.parent_id == Some(card_group())) != (input.group_id == card_group()) {
+        return Err(Refusal::new("a card's payment category stays with the cards"));
+    }
     let parent = match envelope {
         true => group_of(db, input.group_id)?,
         false => {
@@ -224,7 +251,7 @@ pub fn set_target(_: &Ctx, db: &mut Db<Money>, input: SetTarget) -> Result<(), R
 /// assigned).
 #[mutator("categories.delete_category")]
 pub fn delete_category(ctx: &Ctx, db: &mut Db<Money>, input: DeleteCategory) -> Result<(), Refusal> {
-    let c = category_of(db, input.id)?;
+    let c = named_category_of(db, input.id)?;
     delete(ctx, db, c, input.move_to)
 }
 
@@ -249,6 +276,10 @@ fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Categor
         .map(|e| e.id);
     // The deepest first, so that no row is left naming a parent gone.
     for c in gone.into_iter().rev() {
+        // What each month gave it — typed, or its formula's, read before
+        // its transactions move — is what moves: its formula goes with it,
+        // and what it gave stays given.
+        let gave = crate::formulas::assignments(db, c.id);
         for t in db.txn.by(Txn::CATEGORY_ID_DATE).from(Some(c.id)).all() {
             db.txn.update(Txn { category_id: move_to, ..t })?;
         }
@@ -259,17 +290,40 @@ fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Categor
             db.item.update(Item { category_id: move_to, ..i })?;
         }
         for a in db.assigned.by(Assigned::CATEGORY_ID_MONTH).from(c.id).all() {
-            if let Some(to) = into {
-                let had = crate::budget::assigned_in(db, &a.month, to);
+            db.assigned.remove(&a)?;
+        }
+        for f in db.formula.by(Formula::CATEGORY_ID_FROM).from(c.id).all() {
+            db.formula.remove(&f)?;
+        }
+        // A rule from before formulas is read by nothing, but it names the
+        // category: it goes with it, or the category could not.
+        for r in db.rule.by(Rule::CATEGORY_ID_FROM).from(c.id).all() {
+            db.rule.remove(&r)?;
+        }
+        // A saved filter that asked for it asks for where its transactions
+        // went instead: the category they moved to, or none.
+        for s in db.saved_filter.scan() {
+            if s.filter.categories.contains(&Some(c.id)) {
+                let mut filter = s.filter.clone();
+                for x in &mut filter.categories {
+                    if *x == Some(c.id) {
+                        *x = move_to;
+                    }
+                }
+                db.saved_filter.update(SavedFilter { filter: filter.tidy(), ..s })?;
+            }
+        }
+        if let Some(to) = into {
+            for (month, amount) in gave {
+                let had = crate::budget::assigned_in(db, &month, to);
                 db.assigned.put(Assigned {
-                    month: a.month.clone(),
+                    month,
                     category_id: to,
-                    amount: had + a.amount,
+                    amount: had + amount,
                     at_ms: ctx.now,
                     user_id: ctx.user().into(),
                 })?;
             }
-            db.assigned.remove(&a)?;
         }
         db.category.remove(&c)?;
     }

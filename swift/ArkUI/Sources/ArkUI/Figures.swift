@@ -1,5 +1,6 @@
 // Figures, as Apple's own apps draw them: an amount in the locale's currency
-// (`CentsText`), the one figure a screen is about, large on glass the way
+// (`CentsText`) and one something else sets, with its mark (`MarkedCents`),
+// the one figure a screen is about, large on glass the way
 // Wallet draws a card's balance (`HeroFigure`), a figure's state in a tinted
 // capsule (`Pill`), an amount typed on the keypad the way Apple Cash takes
 // one (`AmountEntry`), and a step back and forth through something ordered —
@@ -33,6 +34,32 @@ public struct CentsText: View {
     public static func string(_ cents: Int64, code: String = CentsText.code, signed: Bool = false) -> String {
         let style = Decimal.FormatStyle.Currency(code: code).sign(strategy: signed ? .always() : .automatic)
         return Cents.decimal(cents).formatted(style)
+    }
+}
+
+/// An amount nobody types here — something else sets it — with a small
+/// mark before it (an SF Symbol: `repeat`, `function`, `lock`), read aloud
+/// as the amount and then `says`.
+public struct MarkedCents: View {
+    let cents: Int64
+    let mark: String
+    let says: String
+
+    public init(_ cents: Int64, mark: String, says: String) {
+        self.cents = cents
+        self.mark = mark
+        self.says = says
+    }
+
+    public var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: mark)
+                .imageScale(.small)
+                .foregroundStyle(.secondary)
+            CentsText(cents)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(CentsText.string(cents) + ", " + says)
     }
 }
 

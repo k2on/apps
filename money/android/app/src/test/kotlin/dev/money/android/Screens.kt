@@ -66,5 +66,5 @@ class Screens {
         shot("register") { RegisterScreen(book.state.value, card.id, onBack = none) }
     }
 
-    @Test fun banks() = shot("banks") { BanksScreen(book.state.value, onBack = none) }
+    @Test fun settings() = shot("settings") { SettingsScreen(book.state.value, onBack = none) }
 }

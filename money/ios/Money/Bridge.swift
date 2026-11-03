@@ -11,12 +11,13 @@
 //
 // **The lists are spliced, not re-read.** The accounts, the groups, the
 // month's lines and its summary, what the month spent, what needs a look,
-// the payees and the banks are the kernel's maintained views (`LiveView<T>`
-// over UniFFI's records, no JSON per row), read once and, after every
-// change, asked what they did and their patches spliced into the lists the
-// screens hold. The month's three are opened again when the month on screen
-// changes. A register is a view too, held by its account while a screen
-// shows it ([hold]) and let go when the last one leaves.
+// the payees, the banks, what their accounts feed and the reader's asks
+// of them are the kernel's maintained views (`LiveView<T>` over UniFFI's
+// records, no JSON per row), read once and, after every change, asked what
+// they did and their patches spliced into the lists the screens hold. The
+// month's three are opened again when the month on screen changes. A
+// register is a view too, held by its account while a screen shows it
+// ([hold]) and let go when the last one leaves.
 //
 // What the screens see goes to `deliver` (the main queue in the app) as a
 // [Snapshot] after a drain that moved something.
@@ -35,6 +36,10 @@ struct Snapshot {
     var inbox = [TxnLine]()
     var payees = [PayeeLine]()
     var banks = [BankLine]()
+    /// What each bank's accounts feed, or wait to.
+    var linked = [LinkedLine]()
+    /// The reader's own asks about banks, newest first.
+    var asks = [AskLine]()
     /// The registers held, by account — `Registers.all` for every account's.
     var registers = [String: [TxnLine]]()
     var status: Status? = nil
@@ -115,6 +120,8 @@ final class Bridge {
     private let inbox = Held<TxnLine> { try $0.inbox() }
     private let payees = Held<PayeeLine> { try $0.payees() }
     private let banks = Held<BankLine> { try $0.banks() }
+    private let linked = Held<LinkedLine> { try $0.linked() }
+    private let asks = Held<AskLine> { try $0.asks() }
     private var lines: Held<BudgetLine>
     private var summary: Held<Summary>
     private var spending: Held<SpendingLine>
@@ -186,6 +193,8 @@ final class Bridge {
         inbox.hydrate(m)
         payees.hydrate(m)
         banks.hydrate(m)
+        linked.hydrate(m)
+        asks.hydrate(m)
         for (_, r) in registers { r.held.hydrate(m) }
         copyAll()
         snap.loaded = true
@@ -201,6 +210,8 @@ final class Bridge {
         snap.inbox = inbox.rows
         snap.payees = payees.rows
         snap.banks = banks.rows
+        snap.linked = linked.rows
+        snap.asks = asks.rows
         for (k, r) in registers { snap.registers[k] = r.held.rows }
     }
 
@@ -240,6 +251,8 @@ final class Bridge {
         if inbox.update() { snap.inbox = inbox.rows }
         if payees.update() { snap.payees = payees.rows }
         if banks.update() { snap.banks = banks.rows }
+        if linked.update() { snap.linked = linked.rows }
+        if asks.update() { snap.asks = asks.rows }
         for (k, r) in registers where r.held.update() { snap.registers[k] = r.held.rows }
     }
 

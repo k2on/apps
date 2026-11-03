@@ -6,7 +6,7 @@
 //!   MONEY_OIDC_CLIENT_SECRET_FILE=/run/credentials/money.service/oidc-secret \
 //!   MONEY_PUBLIC_URL=https://money.example.com MONEY_WEB=/path/to/money-web-server \
 //!   MONEY_DATA=/var/lib/money \
-//!   MONEY_PLAID_CLIENT_ID_FILE=… MONEY_PLAID_SECRET_FILE=… MONEY_PLAID_ITEMS=chase=… \
+//!   MONEY_PLAID_CLIENT_ID_FILE=… MONEY_PLAID_SECRET_FILE=… \
 //!   money-server 127.0.0.1:8788              # what the NixOS module runs
 //! ```
 //!
@@ -22,7 +22,9 @@ Everything else is the environment:
   MONEY_DEV_AUTH=1, or MONEY_OIDC_ISSUER + MONEY_OIDC_CLIENT_ID + MONEY_OIDC_CLIENT_SECRET_FILE
   MONEY_DATA  MONEY_PUBLIC_URL  MONEY_REDIRECTS  MONEY_PICTURE_HOSTS  MONEY_WEB  MONEY_ROLES
   MONEY_PLAID_CLIENT_ID_FILE + MONEY_PLAID_SECRET_FILE  MONEY_PLAID_ENV  MONEY_PLAID_URL
-  MONEY_PLAID_ITEMS  MONEY_PLAID_HISTORY  MONEY_ACCOUNTS
+  MONEY_PLAID_HISTORY
+
+The banks are connected from the app and kept in $MONEY_DATA/banks.json.
 
 kill -USR1 asks the bank importer to run now.";
 

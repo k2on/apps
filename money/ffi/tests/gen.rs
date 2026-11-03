@@ -23,6 +23,8 @@ fn held(path: &str, now: String) {
 /// JSON, and their views are read typed.
 const TYPED: &[&str] = &[
     "AccountLine",
+    "AskLine",
+    "AskState",
     "BankLine",
     "BudgetLine",
     "Cleared",

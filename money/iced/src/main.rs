@@ -25,11 +25,16 @@
 //! messages, its forms.
 
 mod amount;
+mod banks;
+mod browser;
 mod client;
+mod filter;
+mod formula;
 mod live;
 mod look;
 mod palette;
 mod peer;
+mod settings;
 mod view;
 
 #[cfg(test)]
@@ -59,10 +64,14 @@ pub enum Place {
     Budget,
     Reflect,
     Accounts,
+    Settings,
     Inbox,
     Account(String),
+    /// A saved filter's register, by its name.
+    Filter(String),
+    /// A register for conditions not saved.
+    Filtered,
     Receipts,
-    Settings,
 }
 
 impl arkui::route::Route for Place {
@@ -71,10 +80,12 @@ impl arkui::route::Route for Place {
             Place::Budget => arkui::route::join("budget", None),
             Place::Reflect => arkui::route::join("reflect", None),
             Place::Accounts => arkui::route::join("accounts", None),
+            Place::Settings => arkui::route::join("settings", None),
             Place::Inbox => arkui::route::join("inbox", None),
             Place::Account(name) => arkui::route::join("account", Some(name)),
+            Place::Filter(name) => arkui::route::join("filter", Some(name)),
+            Place::Filtered => arkui::route::join("filtered", None),
             Place::Receipts => arkui::route::join("receipts", None),
-            Place::Settings => arkui::route::join("settings", None),
         }
     }
 
@@ -82,10 +93,12 @@ impl arkui::route::Route for Place {
         match arkui::route::split(fragment) {
             ("reflect", _) => Place::Reflect,
             ("accounts", _) => Place::Accounts,
+            ("settings", _) => Place::Settings,
             ("inbox", _) => Place::Inbox,
             ("account", Some(name)) => Place::Account(name),
+            ("filter", Some(name)) => Place::Filter(name),
+            ("filtered", _) => Place::Filtered,
             ("receipts", _) => Place::Receipts,
-            ("settings", _) => Place::Settings,
             _ => Place::Budget,
         }
     }
@@ -96,11 +109,10 @@ impl arkui::route::Route for Place {
 pub enum Page {
     Budget,
     Reflect,
+    Settings,
     Ledger(Ledger),
     /// The stores' receipts, and the items on them.
     Receipts,
-    /// Where receipts come from: Amazon, set up on the server.
-    Settings,
 }
 
 /// A field of the transaction form.
@@ -153,6 +165,8 @@ pub enum Choosing {
     Txns(Vec<Id<Txn>>),
     /// Where the inspector's category's money goes (or comes from).
     Move { from: Option<Id<Category>>, amount: String },
+    /// The register's filter's categories: one chosen is ticked or not.
+    Filter,
     /// Receipts' items: what they are filed under.
     Items(Vec<ItemRef>),
     /// A line of the form's split.
@@ -166,6 +180,8 @@ pub enum Choosing {
 pub enum Choice {
     Category(Option<Id<Category>>),
     Transfer(Id<Account>),
+    /// For a filter: any category at all.
+    AnyCategory,
     /// What paid a receipt or a charge; none for nothing found.
     Paid(Option<Id<Txn>>),
 }
@@ -175,8 +191,11 @@ pub enum Choice {
 pub struct Dropdown {
     pub choosing: Choosing,
     pub search: arkui::command::Command,
-    /// Its top left corner, under the cell.
+    /// Its corner: its top left under the cell, or, `above` it where
+    /// there is no room under, its bottom left -- so a list that narrows as
+    /// it is typed into shrinks toward the cell, not away from it.
     pub at: Point,
+    pub above: bool,
 }
 
 /// A name being typed over.
@@ -184,6 +203,8 @@ pub struct Dropdown {
 pub enum Naming {
     Category(Id<Category>),
     Group(Id<Group>),
+    Account(Id<Account>),
+    Filter(Id<SavedFilter>),
 }
 
 /// A panel over the page.
@@ -202,6 +223,12 @@ pub enum Modal {
         balance: String,
     },
     Choose(Choosing),
+    /// A bank to disconnect, asked twice.
+    Disconnect(String),
+    /// The register's filter, being named to keep.
+    SaveFilter {
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -218,6 +245,12 @@ pub enum Message {
     /// Assign a category exactly this much this month.
     AssignTo(Id<Category>, i64),
     TargetTyped(String),
+    /// The inspector's formula: its terms, saved from the month on
+    /// screen, or removed from it (`formula.rs`).
+    Formula(formula::Msg),
+    /// The register's filter: its conditions changed, kept, opened
+    /// (`filter.rs`).
+    Filter(filter::Msg),
     TargetDone,
     Collapse(Id<Group>),
     NewGroup,
@@ -245,6 +278,12 @@ pub enum Message {
     ChooseCategory,
     Chose(Choice),
     Sync,
+    /// Settings' Banks section: connecting, and what each account feeds.
+    Banks(banks::Msg),
+    /// The account button at the top right: its menu, whose entries open
+    /// Settings and sign out.
+    AccountMenu,
+    SignOut,
     AddAccount,
     AccountName(String),
     AccountKind(&'static str),
@@ -276,12 +315,17 @@ pub enum Message {
     /// A row's category clicked: the dropdown under it.
     CategorizeRow(Id<Txn>),
     RegisterScrolled(f32),
+    /// The budget scrolled; and a page opened scrolled to where it was left.
+    PageScrolled(f32),
+    ScrollPage(f32),
     /// The category dropdown: typed into, the pointer on a row, its list
     /// scrolled, its keys, closed.
     DropTyped(String),
     DropAt(usize),
     DropScrolled(f32),
     DropKey(arkui::command::Press),
+    /// `<Enter>` in the box: the row with the keys chosen.
+    DropChoose,
     CloseDrop,
     /// A row or a heading of the budget right-clicked: its menu.
     Menu(Grab),
@@ -327,6 +371,8 @@ pub struct App {
     pub assigning: Option<(Id<Category>, String)>,
     /// The inspector's target, as typed.
     pub target: String,
+    /// The inspector's formula, as typed.
+    pub formula: formula::Form,
     pub collapsed: Vec<Id<Group>>,
     pub show_hidden: bool,
     pub new_group: Option<String>,
@@ -361,6 +407,8 @@ pub struct App {
     pub txn_anchor: Option<Id<Txn>>,
     /// How far down the register is scrolled, for where a row is.
     pub register_scroll: f32,
+    /// Where the page just opened is to be scrolled, once it is drawn.
+    pub scroll_due: Option<f32>,
     /// A category being chosen, in a searchable dropdown.
     pub dropdown: Option<Dropdown>,
     /// The last click on a row or a heading, and when: a second on the same
@@ -368,6 +416,13 @@ pub struct App {
     pub last_click: Option<(Grab, iced::time::Instant)>,
     /// The last thing worth saying: a refusal, a sync.
     pub note: String,
+    /// A Plaid page asked for here, and when: opened as soon as the
+    /// server answers with its address.
+    pub awaiting: Option<i64>,
+    /// Every page this window opened, in order.
+    pub opened: Vec<String>,
+    /// The ask whose answer was put away.
+    pub dismissed: Option<Id<BankAsk>>,
     /// A kind of the inspector's category, being named.
     pub new_kind: Option<(Id<Category>, String)>,
 }
@@ -381,6 +436,7 @@ impl App {
             selected: None,
             assigning: None,
             target: String::new(),
+            formula: formula::Form::default(),
             collapsed: Vec::new(),
             show_hidden: false,
             new_group: None,
@@ -405,8 +461,12 @@ impl App {
             txn_at: None,
             txn_anchor: None,
             register_scroll: 0.0,
+            scroll_due: None,
             dropdown: None,
             last_click: None,
+            awaiting: None,
+            opened: Vec::new(),
+            dismissed: None,
             new_kind: None,
         };
         // A link the window was opened with, read before anything is drawn;
@@ -528,6 +588,7 @@ impl App {
             self.note = format!("the server refused a change: {why}");
         }
         self.peer.refresh();
+        self.follow_ask();
         let Some(why) = p.denied else { return Task::none() };
         if let Some(s) = &mut self.server {
             if let Some(logins) = &s.logins {
@@ -574,7 +635,17 @@ impl App {
             }
         }
         self.history.sync(&self.place());
-        task
+        // A page just opened is drawn before this comes back, so the scroll
+        // lands on its list rather than the one it replaced.
+        match self.scroll_due.take() {
+            Some(y) => {
+                if let Page::Ledger(_) = self.page {
+                    self.register_scroll = y;
+                }
+                Task::batch([task, Task::done(Message::ScrollPage(y))])
+            }
+            None => task,
+        }
     }
 
     /// Where the window is, as the bar spells it.
@@ -583,23 +654,28 @@ impl App {
             Page::Budget => Place::Budget,
             Page::Reflect => Place::Reflect,
             Page::Ledger(Ledger::All) => Place::Accounts,
+            Page::Settings => Place::Settings,
             Page::Ledger(Ledger::Inbox) => Place::Inbox,
             Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
+            Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map_or(Place::Accounts, |f| Place::Filter(f.name.clone())),
+            Page::Ledger(Ledger::Adhoc) => Place::Filtered,
             Page::Receipts => Place::Receipts,
-            Page::Settings => Place::Settings,
         }
     }
 
-    /// The page a place is, if it is one here: an account by its name.
+    /// The page a place is, if it is one here: an account or a saved filter
+    /// by its name; conditions not saved, the last ones this window had.
     fn page_of(&self, place: &Place) -> Option<Page> {
         Some(match place {
             Place::Budget => Page::Budget,
             Place::Reflect => Page::Reflect,
             Place::Accounts => Page::Ledger(Ledger::All),
+            Place::Settings => Page::Settings,
             Place::Inbox => Page::Ledger(Ledger::Inbox),
             Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
+            Place::Filter(name) => Page::Ledger(Ledger::Saved(self.peer.filters.rows.iter().find(|f| &f.name == name)?.id)),
+            Place::Filtered => Page::Ledger(Ledger::Adhoc),
             Place::Receipts => Page::Receipts,
-            Place::Settings => Page::Settings,
         })
     }
 
@@ -609,17 +685,47 @@ impl App {
                 self.page = page;
                 self.form = None;
                 if let Page::Ledger(l) = page {
-                    self.peer.set_ledger(l);
+                    // A register opened as itself is what its conditions are
+                    // changed from, later.
+                    if l != Ledger::Adhoc {
+                        self.peer.base = l;
+                    }
+                    let adhoc = self.peer.adhoc.clone();
+                    self.peer.set_ledger(l, adhoc);
+                    self.txn_anchor = None;
                 }
+                // A new visit opens at the top; back and forward where it was.
+                self.scroll_due = Some(self.history.arrive(&self.place()));
+            }
+            Message::PageScrolled(y) => self.history.scrolled(&self.place(), y),
+            Message::ScrollPage(y) => {
+                let id = match self.page {
+                    Page::Ledger(_) => {
+                        self.register_scroll = y;
+                        look::REGISTER
+                    }
+                    _ => look::BUDGET,
+                };
+                return iced::widget::operation::scroll_to(id, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y });
             }
             Message::Month(n) => {
                 let m = add_months(&self.peer.month, n);
                 self.peer.set_month(&m);
                 self.assigning = None;
+                self.load_formula();
             }
-            Message::ThisMonth => self.peer.set_month(&month_of(&self.today)),
+            Message::ThisMonth => {
+                self.peer.set_month(&month_of(&self.today));
+                self.load_formula();
+            }
             Message::Select(c) => self.select(if self.selected == c { None } else { c }),
             Message::EditAssigned(c) => {
+                // A month that follows its formula is not typed into: why not
+                // is said, and the inspector, where the formula is, follows.
+                if self.follows(c) {
+                    self.select(Some(c));
+                    return Task::none();
+                }
                 let had = self.peer.line(c).map_or(0, |l| l.assigned);
                 self.assigning = Some((c, amount::editable(had)));
                 self.select(Some(c));
@@ -646,6 +752,9 @@ impl App {
                 }
             }
             Message::AssignTo(c, cents) => {
+                if self.follows(c) {
+                    return Task::none();
+                }
                 let a = Assign {
                     month: self.peer.month.clone(),
                     category_id: c,
@@ -662,6 +771,8 @@ impl App {
                 self.author("assign the month", "auto_assign", &a);
             }
             Message::TargetTyped(t) => self.target = t,
+            Message::Formula(m) => return self.formula_msg(m),
+            Message::Filter(m) => return self.filter_msg(m),
             Message::TargetDone => {
                 if let (Some(c), Some(cents)) = (self.selected, amount::parse(&self.target)) {
                     self.author("set the target", "set_target", &SetTarget { id: c, target: cents.max(0) });
@@ -707,6 +818,9 @@ impl App {
             Message::ShowHidden(on) => self.show_hidden = on,
             Message::MoveMoney => {
                 let from = self.selected;
+                if from.is_some_and(|c| self.follows(c)) {
+                    return Task::none();
+                }
                 let available = from.and_then(|c| self.peer.line(c)).map_or(0, |l| l.available);
                 self.modal = Some(Modal::Choose(Choosing::Move {
                     from,
@@ -719,10 +833,10 @@ impl App {
                 }
             }
             Message::AddTxn => {
-                let account = match self.peer.ledger {
-                    Ledger::Account(a) => Some(a),
-                    _ => self.peer.accounts.rows.iter().find(|a| a.on_budget && !a.closed).map(|a| a.id),
-                };
+                // The register's account, when it is one account's.
+                let account = self
+                    .register_account()
+                    .or_else(|| self.peer.accounts.rows.iter().find(|a| a.on_budget && !a.closed).map(|a| a.id));
                 self.form = Some(TxnForm {
                     account,
                     date: self.today.clone(),
@@ -814,8 +928,15 @@ impl App {
             Message::Approve(ids) => {
                 self.author("approve", "approve", &Txns { ids });
             }
-            Message::Categorize(ids) => return self.open_dropdown(Choosing::Txns(ids), self.pointer),
-            Message::ChooseCategory => return self.open_dropdown(Choosing::Form, self.pointer),
+            Message::Categorize(ids) => return self.open_dropdown(Choosing::Txns(ids), (self.pointer, false)),
+            Message::ChooseCategory => return self.open_dropdown(Choosing::Form, self.form_category_at()),
+            // `<Enter>` in the box: the row with the keys.
+            Message::DropChoose => {
+                let groups = self.drop_groups();
+                if let Some(m) = self.dropdown.as_ref().and_then(|d| d.search.chosen(&groups)) {
+                    return self.update(m);
+                }
+            }
             Message::CategorizeRow(id) => {
                 // The selection, when the row is in it; the row alone when not.
                 let ids = match self.txn_selected().contains(&id) {
@@ -834,7 +955,10 @@ impl App {
                 }
                 self.txn_at = Some(id);
             }
-            Message::RegisterScrolled(y) => self.register_scroll = y,
+            Message::RegisterScrolled(y) => {
+                self.register_scroll = y;
+                self.history.scrolled(&self.place(), y);
+            }
             Message::DropTyped(q) => {
                 if let Some(d) = &mut self.dropdown {
                     return d.search.typed(q, look::DROP_LIST);
@@ -863,8 +987,16 @@ impl App {
                 self.dropdown = None;
                 self.peer.set_candidates(None);
             }
-            Message::Chose(choice) => self.chose(choice),
+            Message::Chose(choice) => return self.chose(choice),
             Message::Sync => self.sync(),
+            Message::Banks(m) => return self.banks(m),
+            Message::AccountMenu => {
+                if let Some(account) = self.account() {
+                    let right = self.window.width - view::PAD;
+                    self.ctx.open_menu(account.menu(right, view::PAD + arkui::account::HEIGHT, self.window));
+                }
+            }
+            Message::SignOut => self.sign_out(),
             Message::AddAccount => {
                 self.modal = Some(Modal::AddAccount {
                     name: String::new(),
@@ -1010,6 +1142,8 @@ impl App {
                 let name = match named {
                     Naming::Category(c) => self.peer.line(c).map(|l| l.name.clone()),
                     Naming::Group(g) => self.peer.groups.rows.iter().find(|r| r.id == g).map(|r| r.name.clone()),
+                    Naming::Account(a) => self.peer.account(a).map(|a| a.name.clone()),
+                    Naming::Filter(f) => self.peer.saved(f).map(|f| f.name.clone()),
                 };
                 if let Some(name) = name {
                     self.renaming = Some((named, name));
@@ -1028,6 +1162,12 @@ impl App {
                 Some((Naming::Group(id), name)) => {
                     self.author("rename the group", "rename_group", &RenameGroup { id, name });
                 }
+                Some((Naming::Account(id), name)) => {
+                    self.author("rename the account", "rename_account", &RenameAccount { id, name });
+                }
+                Some((Naming::Filter(id), name)) => {
+                    self.author("rename the filter", "rename_filter", &RenameFilter { id, name });
+                }
                 None => {}
             },
             Message::OpenReceipt(id) => {
@@ -1037,7 +1177,7 @@ impl App {
                 };
                 self.peer.set_receipt(id.as_deref());
             }
-            Message::FileItems(items) => return self.open_dropdown(Choosing::Items(items), self.pointer),
+            Message::FileItems(items) => return self.open_dropdown(Choosing::Items(items), (self.pointer, false)),
             Message::Split(on) => {
                 if let Some(f) = &mut self.form {
                     f.split = match on {
@@ -1063,7 +1203,7 @@ impl App {
                     row.amount = typed;
                 }
             }
-            Message::SplitCategory(i) => return self.open_dropdown(Choosing::SplitLine(i), self.pointer),
+            Message::SplitCategory(i) => return self.open_dropdown(Choosing::SplitLine(i), (self.pointer, false)),
             Message::SplitAdd => {
                 if let Some(lines) = self.form.as_mut().and_then(|f| f.split.as_mut()) {
                     lines.push(SplitRow::default());
@@ -1093,7 +1233,7 @@ impl App {
             Message::SetUpAmazon => self.set_up_amazon(),
             Message::ChoosePayer(of) => {
                 self.peer.set_candidates(Some(of.clone()));
-                return self.open_dropdown(Choosing::Payer(of), self.pointer);
+                return self.open_dropdown(Choosing::Payer(of), (self.pointer, false));
             }
             Message::Swallow => {}
             Message::Wake => return self.wake(),
@@ -1635,7 +1775,7 @@ impl App {
 
     /// How tall the register's list is on screen.
     fn register_view(&self) -> f32 {
-        (self.window.height - view::PAD * 2.0 - view::LEDGER_TOP - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
+        (self.window.height - view::PAD * 2.0 - self.ledger_top() - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
     }
 
     /// Scroll the register just far enough that row `i` is in sight.
@@ -1656,51 +1796,67 @@ impl App {
             return Task::none();
         };
         self.register_scroll = y;
+        self.history.scrolled(&self.place(), y);
         iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
     }
 
     /// Where the category of transaction `id`'s row is on screen: the
     /// dropdown's corner, under it. The register's columns are the ones
     /// `view_ledger` lays out, worked out for this window's width.
-    fn category_at(&self, id: Id<Txn>) -> Point {
-        let all = !matches!(self.page, Page::Ledger(Ledger::Account(_)));
+    fn category_at(&self, id: Id<Txn>) -> (Point, bool) {
         let i = self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0);
-        let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
-        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 90.0;
-        let width = self.window.width - view::SIDEBAR - 1.0 - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
-        let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
-        let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
         let above = if self.form.as_ref().is_some_and(|f| f.editing.is_none()) {
             view::TXN_ROW
         } else {
             0.0
         };
-        let top = view::PAD + view::LEDGER_TOP + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
-        let y = top + above + (i + 1) as f32 * view::TXN_ROW - self.register_scroll;
-        // Kept on screen: above the row, if there is no room under it.
-        let tall = arkui::command::INPUT + arkui::command::LIST_HEIGHT;
-        let y = if y + tall > self.window.height {
-            (y - view::TXN_ROW - tall).max(0.0)
-        } else {
-            y
+        self.under(above + (i + 1) as f32 * view::TXN_ROW)
+    }
+
+    /// Where the form's category box is on screen: its list hangs under it.
+    fn form_category_at(&self) -> (Point, bool) {
+        let i = match self.form.as_ref().and_then(|f| f.editing) {
+            Some(id) => self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0),
+            None => 0,
         };
-        Point::new(x.min(self.window.width - DROP_WIDTH).max(0.0), y)
+        self.under(i as f32 * view::TXN_ROW + FORM_LINE)
+    }
+
+    /// The register's category column at `y` down its list (scrolled), as
+    /// a dropdown's corner: above, if there is no room under it.
+    fn under(&self, y: f32) -> (Point, bool) {
+        let all = self.register_account().is_none();
+        let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
+        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 90.0;
+        let width = self.window.width - view::SIDEBAR - 1.0 - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
+        let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
+        let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
+        let top = view::PAD + self.ledger_top() + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
+        let y = top + y - self.register_scroll;
+        let above = y + arkui::command::LIST_HEIGHT > self.window.height;
+        // Above: its bottom on the cell's top.
+        let y = if above { y - view::TXN_ROW } else { y };
+        (Point::new(x.min(self.window.width - DROP_WIDTH).max(0.0), y), above)
     }
 
     /// The dropdown, for `choosing`, its corner at `at`, its box with the keys.
-    fn open_dropdown(&mut self, choosing: Choosing, at: Point) -> Task<Message> {
+    fn open_dropdown(&mut self, choosing: Choosing, (at, above): (Point, bool)) -> Task<Message> {
         self.dropdown = Some(Dropdown {
             choosing,
             search: arkui::command::Command::new(iced::time::Instant::now()),
             at,
+            above,
         });
         iced::widget::operation::focus(look::DROP_INPUT)
     }
 
-    /// What the dropdown offers for what is typed: transfers (for a new
-    /// transaction), Ready to Assign, each group's categories with what they
-    /// have, and no category at all — every one whose name has the typed
-    /// in it.
+    /// What the dropdown offers for what is typed: transfers (for the
+    /// form's transaction, new or not — an existing one made a transfer is
+    /// paired with its match in the other account), Ready to Assign, each
+    /// group's categories with what they have, and no category at all —
+    /// every one whose name has the typed in it. A card's payment category
+    /// is money moved to, not a transaction's category: paying a card is a
+    /// transfer to it, so the cards' group is offered only to move money.
     pub fn drop_groups(&self) -> Vec<arkui::command::Group<Message>> {
         let Some(d) = &self.dropdown else {
             return Vec::new();
@@ -1739,8 +1895,19 @@ impl App {
             groups.retain(|g| !g.items.is_empty());
             return groups;
         }
+        // For a filter, each category is ticked or not.
+        let ticking = d.choosing == Choosing::Filter;
+        let ticked = match ticking {
+            true => self.register_filter().categories,
+            false => Vec::new(),
+        };
         let item = |label: String, detail: Option<String>, choice: Choice| arkui::command::Item {
             glyph: match choice {
+                Choice::Category(c) if ticking => match ticked.contains(&c) {
+                    true => glyphs::TICKED,
+                    false => glyphs::UNTICK,
+                },
+                Choice::AnyCategory => glyphs::CLOSE,
                 Choice::Transfer(_) => glyphs::SEND,
                 Choice::Paid(_) => glyphs::CARD,
                 Choice::Category(Some(c)) if c == money_domain::budget::ready_to_assign() => glyphs::GROWTH,
@@ -1752,21 +1919,25 @@ impl App {
             choose: Message::Chose(choice),
         };
         let mut groups = Vec::new();
+        if ticking && has("Any category") {
+            groups.push(arkui::command::Group {
+                heading: "Any".into(),
+                items: vec![item("Any category".into(), None, Choice::AnyCategory)],
+            });
+        }
         if let (Choosing::Form, Some(f)) = (&d.choosing, &self.form) {
-            if f.editing.is_none() {
-                let transfers = self
-                    .peer
-                    .accounts
-                    .rows
-                    .iter()
-                    .filter(|a| !a.closed && Some(a.id) != f.account && has(&a.name))
-                    .map(|a| item(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)))
-                    .collect();
-                groups.push(arkui::command::Group {
-                    heading: "Transfer to".into(),
-                    items: transfers,
-                });
-            }
+            let transfers = self
+                .peer
+                .accounts
+                .rows
+                .iter()
+                .filter(|a| !a.closed && Some(a.id) != f.account && has(&a.name))
+                .map(|a| item(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)))
+                .collect();
+            groups.push(arkui::command::Group {
+                heading: "Transfer to".into(),
+                items: transfers,
+            });
         }
         if has("Ready to Assign") {
             let rta = self.peer.summary().ready_to_assign;
@@ -1779,7 +1950,9 @@ impl App {
                 )],
             });
         }
-        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden) {
+        let moving = matches!(d.choosing, Choosing::Move { .. });
+        let cards = money_domain::cards::card_group();
+        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden && (moving || g.id != cards)) {
             let items = self
                 .peer
                 .lines
@@ -1809,7 +1982,29 @@ impl App {
                 items,
             });
         }
-        if matches!(d.choosing, Choosing::Txns(_) | Choosing::Items(_) | Choosing::SplitLine(_)) && has("No category") {
+        // A card's own payment category, for its own transactions only: a
+        // payment into it from outside the budget is debt paid and nothing
+        // else, as its starting balance is.
+        if let Some(l) = self
+            .own_card(&d.choosing)
+            .and_then(|c| self.peer.line(money_domain::cards::payment_category(c)))
+        {
+            if !moving && has(&l.name) {
+                groups.push(arkui::command::Group {
+                    heading: money_domain::cards::CARD_GROUP.into(),
+                    items: vec![item(
+                        l.name.clone(),
+                        Some(amount::money(l.available)),
+                        Choice::Category(Some(l.category_id)),
+                    )],
+                });
+            }
+        }
+        if matches!(
+            d.choosing,
+            Choosing::Txns(_) | Choosing::Filter | Choosing::Items(_) | Choosing::SplitLine(_)
+        ) && has("No category")
+        {
             groups.push(arkui::command::Group {
                 heading: "None".into(),
                 items: vec![item("No category".into(), None, Choice::Category(None))],
@@ -1817,6 +2012,26 @@ impl App {
         }
         groups.retain(|g| !g.items.is_empty());
         groups
+    }
+
+    /// The card every transaction being categorised is on, when they are
+    /// all on one card on the budget.
+    fn own_card(&self, choosing: &Choosing) -> Option<Id<Account>> {
+        let account = match choosing {
+            Choosing::Form => self.form.as_ref()?.account?,
+            Choosing::Txns(ids) => {
+                let mut on = ids
+                    .iter()
+                    .map(|id| self.peer.register.rows.iter().find(|t| t.id == *id).map(|t| t.account_id));
+                let first = on.next()??;
+                if !on.all(|a| a == Some(first)) {
+                    return None;
+                }
+                first
+            }
+            _ => return None,
+        };
+        self.peer.account(account).filter(|a| a.kind == "credit" && a.on_budget).map(|a| a.id)
     }
 
     /// Keep row `n` in view.
@@ -1836,6 +2051,17 @@ impl App {
     fn select(&mut self, c: Option<Id<Category>>) {
         self.selected = c;
         self.target = c.and_then(|c| self.peer.line(c)).map(|l| amount::editable(l.target)).unwrap_or_default();
+        self.load_formula();
+    }
+
+    /// Whether a category's month follows its formula, which is then said:
+    /// nothing typed or moved by hand lands on it.
+    fn follows(&mut self, c: Id<Category>) -> bool {
+        let ruled = self.peer.line(c).is_some_and(|l| l.ruled);
+        if ruled {
+            self.note = format!("could not assign: {}", money_domain::formulas::FOLLOWS);
+        }
+        ruled
     }
 
     /// The other account of a transfer.
@@ -1857,7 +2083,7 @@ impl App {
         }
     }
 
-    fn chose(&mut self, choice: Choice) {
+    fn chose(&mut self, choice: Choice) -> Task<Message> {
         // The dropdown, if one is up; the panel moving money, if not.
         let choosing = match (self.dropdown.take(), self.modal.take()) {
             (Some(d), modal) => {
@@ -1867,7 +2093,7 @@ impl App {
             (None, Some(Modal::Choose(c))) => c,
             (None, other) => {
                 self.modal = other;
-                return;
+                return Task::none();
             }
         };
         match choosing {
@@ -1877,6 +2103,7 @@ impl App {
                         Choice::Category(c) => (c, None),
                         Choice::Transfer(a) => (None, Some(a)),
                         Choice::Paid(_) => (f.category, f.transfer_to),
+                        Choice::AnyCategory => (None, None),
                     };
                     if f.transfer_to.is_some() {
                         f.split = None;
@@ -1909,6 +2136,13 @@ impl App {
                     row.category = c;
                 }
             }
+            Choosing::Filter => {
+                let edit = match choice {
+                    Choice::Category(c) => filter::Edit::Category(c),
+                    _ => filter::Edit::AnyCategory,
+                };
+                return self.edit_filter(edit);
+            }
             Choosing::Txns(ids) => {
                 if let Choice::Category(c) = choice {
                     self.author("categorize", "categorize", &Categorize { ids, category_id: c });
@@ -1916,7 +2150,7 @@ impl App {
                 }
             }
             Choosing::Move { from, amount: typed } => {
-                let Choice::Category(to) = choice else { return };
+                let Choice::Category(to) = choice else { return Task::none() };
                 match amount::parse(&typed) {
                     Some(cents) if cents > 0 => {
                         // An overspent category's money comes *from* the one
@@ -1935,6 +2169,7 @@ impl App {
                 }
             }
         }
+        Task::none()
     }
 
     fn save_txn(&mut self) {
@@ -1966,6 +2201,7 @@ impl App {
                     category_id: f.category,
                     memo: f.memo,
                     amount,
+                    transfer_to: f.transfer_to,
                 };
                 self.author("save the transaction", "edit_transaction", &e)
             }
@@ -2020,6 +2256,7 @@ impl App {
             category_id: None,
             memo: f.memo.clone(),
             amount: whole,
+            transfer_to: None,
         };
         if self.author("save the transaction", "edit_transaction", &e) && self.author("split it", "split", &SplitTxn { id, lines }) {
             self.form = None;
@@ -2055,8 +2292,8 @@ impl App {
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
             // The wheel, sideways: perhaps a swipe back or forward.
             arkui::history::wheel().map(Message::Wheel),
-            // A paste the browser handed over: a frame, and the box takes it.
-            arkui::clipboard::pastes().map(|()| Message::Swallow),
+            // Something under the window's root wants a frame of its own.
+            arkui::window::wakes().map(|()| Message::Swallow),
         ];
         if self.dropdown.is_some() {
             subs.push(arkui::command::keys(true).map(Message::DropKey));
@@ -2167,3 +2404,6 @@ pub fn bank_said(t: &TxnLine) -> String {
         false => String::new(),
     }
 }
+
+/// How far down the register's form its category box ends.
+const FORM_LINE: f32 = 40.0;

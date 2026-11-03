@@ -1,8 +1,12 @@
 //! money's domain in plain Rust (`docs/plan-v5.md` §1.16): a household's
 //! budget. The schema ([`schema`]), the types ([`types`]), days and months
 //! ([`dates`]); the accounts ([`accounts`]), the budget's shape
-//! ([`categories`]), the budget itself ([`budget`]), the transactions
-//! ([`transactions`]) and the banks, through Plaid ([`plaid`]) — one file
+//! ([`categories`]), the budget itself ([`budget`]), its assignments by
+//! formula ([`formulas`]) and its credit cards
+//! ([`cards`]), the transactions ([`transactions`]), the filters that say
+//! which ([`filters`]), and transfers made of
+//! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
+//! from the app ([`banks`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
 //! [`feed`]. [`domain`] registers every function by its name. Behind
 //! features: the demo's household (`seed`), and the rows the
@@ -21,9 +25,13 @@ use ark::peer::Ctx;
 use ark::prelude::scope;
 
 pub mod accounts;
+pub mod banks;
 pub mod budget;
+pub mod cards;
 pub mod categories;
 pub mod dates;
+pub mod filters;
+pub mod formulas;
 pub mod migrations;
 pub mod plaid;
 pub mod receipts;
@@ -32,6 +40,7 @@ pub mod schema;
 pub mod seed;
 pub mod stores;
 pub mod transactions;
+pub mod transfers;
 pub mod types;
 
 #[cfg(feature = "ffi")]
@@ -57,13 +66,17 @@ pub fn domain() -> Domain {
         categories::add_group, categories::rename_group, categories::hide_group, categories::delete_group,
         categories::add_category, categories::rename_category, categories::hide_category, categories::move_category, categories::move_group,
         categories::set_target, categories::delete_category, categories::add_subcategory, categories::tree,
+        formulas::set_formula, formulas::clear_formula, formulas::formulas, formulas::preview_formula, formulas::set_rule,
+        filters::save_filter, filters::rename_filter, filters::change_filter, filters::delete_filter, filters::move_filter,
+        filters::saved, filters::filtered, filters::filtered_total,
         accounts::open_account, accounts::rename_account, accounts::close_account, accounts::accounts,
         transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
         transactions::register, transactions::inbox, transactions::payees, transactions::split, transactions::add_split, transactions::splits,
         receipts::add_receipts, receipts::file_items, receipts::pay, receipts::receipts, receipts::items, receipts::receipt_items,
         receipts::add_charges, receipts::pay_charge, receipts::charges, receipts::candidates,
-        plaid::import, plaid::link, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, feed)
+        plaid::import, plaid::link, plaid::open, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, plaid::retired,
+        banks::connect, banks::reconnect, banks::add_accounts, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
     .with(ark_auth::register::<Money>)
     .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
 }
@@ -84,6 +97,10 @@ pub fn feed() -> Scope<Money> {
             .on::<Bank>(all)
             .on::<Linked>(all)
             .on::<Asked>(all)
+            .on::<BankAsk>(all)
+            .on::<Rule>(all)
+            .on::<SavedFilter>(all)
+            .on::<Formula>(all)
             .on::<Split>(all)
             .on::<Receipt>(all)
             .on::<Item>(all)

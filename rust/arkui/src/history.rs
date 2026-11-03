@@ -13,11 +13,16 @@
 //!   the router's answer to "is there a back, a forward" ([`History::wheel`]).
 //! - **The wheel, sideways, whatever took it** ([`wheel`]): a list scrolls
 //!   down and a swipe is sideways, so the two never fight over an event.
+//! - **A page comes back where it was left.** A new visit opens at the top;
+//!   back and forward land where that page was scrolled, as a browser's do
+//!   ([`History::scrolled`], [`History::arrive`]).
 //!
 //! An app keeps one, records where it is after every update
 //! ([`History::sync`]), asks [`History::poll`] where the bar went, feeds it
 //! [`wheel`], ticks it on a frame clock while [`History::active`], and draws
 //! its page through [`History::view`] for the arrow.
+use std::collections::HashMap;
+
 use iced::mouse::ScrollDelta;
 use iced::time::Instant;
 use iced::{Element, Subscription};
@@ -29,6 +34,10 @@ use crate::swipe::{self, Swipe};
 pub struct History<R> {
     router: Router<R>,
     swipe: Swipe,
+    /// How far down each place was scrolled, by its fragment.
+    scrolls: HashMap<String, f32>,
+    /// The place being arrived at is a step back or forward, not a visit.
+    travelling: bool,
 }
 
 impl<R: Route> Default for History<R> {
@@ -36,6 +45,8 @@ impl<R: Route> Default for History<R> {
         History {
             router: Router::new(),
             swipe: Swipe::default(),
+            scrolls: HashMap::new(),
+            travelling: false,
         }
     }
 }
@@ -88,7 +99,24 @@ impl<R: Route> History<R> {
     /// Where the bar went, once there is something to resolve it against
     /// (`ready`): back, forward, or a link somebody was sent.
     pub fn poll(&mut self, ready: bool) -> Option<R> {
-        self.router.poll(ready)
+        let went = self.router.poll(ready);
+        self.travelling |= went.is_some();
+        went
+    }
+
+    /// The page at `at` was scrolled `y` down.
+    pub fn scrolled(&mut self, at: &R, y: f32) {
+        self.scrolls.insert(at.fragment(), y);
+    }
+
+    /// The app opened `at`: how far down to scroll it once it is drawn:
+    /// where it was left, when it is come back to by back or forward (a
+    /// [`History::poll`]), and the top of a new visit.
+    pub fn arrive(&mut self, at: &R) -> f32 {
+        match std::mem::take(&mut self.travelling) {
+            true => self.scrolls.get(&at.fragment()).copied().unwrap_or(0.0),
+            false => 0.0,
+        }
     }
 
     pub fn router(&self) -> &Router<R> {
@@ -114,4 +142,40 @@ pub fn wheel() -> Subscription<ScrollDelta> {
         }
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct Here(String);
+
+    impl Route for Here {
+        fn fragment(&self) -> String {
+            crate::route::join(&self.0, None)
+        }
+        fn parse(fragment: &str) -> Self {
+            Here(crate::route::split(fragment).0.to_string())
+        }
+    }
+
+    /// A page visited opens at the top; one come back to by back or forward
+    /// opens where it was left. Falsified by restoring on every arrival: the
+    /// second visit to `a` landed at 120.
+    #[test]
+    fn back_lands_where_the_page_was_left() {
+        let (a, b) = (Here("a".into()), Here("b".into()));
+        let mut h = History::new();
+        h.sync(&a);
+        assert_eq!(h.arrive(&a), 0.0, "a new visit is the top");
+        h.scrolled(&a, 120.0);
+        h.sync(&b);
+        assert_eq!(h.arrive(&b), 0.0);
+        h.go(-1);
+        assert_eq!(h.poll(true), Some(a.clone()));
+        assert_eq!(h.arrive(&a), 120.0, "back is where it was left");
+        h.sync(&b);
+        assert_eq!(h.arrive(&b), 0.0, "and a click to b is a visit again");
+    }
 }

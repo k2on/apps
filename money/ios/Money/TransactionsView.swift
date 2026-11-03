@@ -64,7 +64,7 @@ struct TransactionsView: View {
                 ForEach(rows) { t in
                     Button {
                         if Registers.needsCategory(t) { present(.categorize([t.id], approve: true)) }
-                        else { present(.transaction(Draft(t))) }
+                        else { present(.transaction(Draft(t, accounts: model.snapshot.accounts))) }
                     } label: {
                         TxnRow(txn: t, showAccount: true)
                     }
@@ -81,7 +81,7 @@ struct TransactionsView: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button { present(.categorize([t.id], approve: true)) } label: { Label("Categorize", systemImage: "folder") }
                             .tint(.orange)
-                        Button { present(.transaction(Draft(t))) } label: { Label("Edit", systemImage: "pencil") }
+                        Button { present(.transaction(Draft(t, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
                             .tint(.gray)
                     }
                     .contextMenu {
@@ -89,7 +89,7 @@ struct TransactionsView: View {
                         if !Registers.needsCategory(t) && !t.approved {
                             Button { model.approve([t.id]); approved += 1 } label: { Label("Approve", systemImage: "checkmark.circle") }
                         }
-                        Button { present(.transaction(Draft(t))) } label: { Label("Edit", systemImage: "pencil") }
+                        Button { present(.transaction(Draft(t, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
                         Divider()
                         Button(role: .destructive) { model.delete([t.id]) } label: { Label("Delete", systemImage: "trash") }
                     }

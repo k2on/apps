@@ -115,6 +115,16 @@ pub fn month_end(month: &str) -> String {
     format!("{month}-~")
 }
 
+/// A month's first day, `2026-10-01`, and its last, `2026-10-31`.
+pub fn first_day(month: &str) -> String {
+    format!("{month}-01")
+}
+
+pub fn last_day(month: &str) -> String {
+    let (y, m) = parse_month(month).unwrap_or((1970, 1));
+    day(y, m, days_in_month(y, m))
+}
+
 /// `October 2026`.
 pub fn month_name(month: &str) -> String {
     const NAMES: [&str; 12] = [

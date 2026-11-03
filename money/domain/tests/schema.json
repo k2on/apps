@@ -355,6 +355,11 @@
           "name": "user_id",
           "ty": "Text",
           "default": null
+        },
+        {
+          "name": "imported_by",
+          "ty": "Text",
+          "default": ""
         }
       ],
       "key": 1,
@@ -456,6 +461,46 @@
           "name": "user_id",
           "ty": "Text",
           "default": null
+        },
+        {
+          "name": "error_code",
+          "ty": "Text",
+          "default": ""
+        },
+        {
+          "name": "error",
+          "ty": "Text",
+          "default": ""
+        },
+        {
+          "name": "failed_ms",
+          "ty": "Int",
+          "default": 0
+        },
+        {
+          "name": "repull",
+          "ty": "Bool",
+          "default": false
+        },
+        {
+          "name": "institution_id",
+          "ty": "Text",
+          "default": ""
+        },
+        {
+          "name": "fresh",
+          "ty": "Bool",
+          "default": false
+        },
+        {
+          "name": "adding",
+          "ty": "Bool",
+          "default": false
+        },
+        {
+          "name": "replaced_by",
+          "ty": "Text",
+          "default": ""
         }
       ],
       "key": 1,
@@ -511,6 +556,31 @@
           "name": "ignored",
           "ty": "Bool",
           "default": null
+        },
+        {
+          "name": "subtype",
+          "ty": "Text",
+          "default": ""
+        },
+        {
+          "name": "seen",
+          "ty": "Text",
+          "default": ""
+        },
+        {
+          "name": "since",
+          "ty": "Text",
+          "default": ""
+        },
+        {
+          "name": "opening",
+          "ty": "Bool",
+          "default": false
+        },
+        {
+          "name": "seam",
+          "ty": "Bool",
+          "default": false
         }
       ],
       "key": 1,
@@ -638,6 +708,374 @@
       "key": 2,
       "indexes": [],
       "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "bank_ask",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "bank_ask"
+          },
+          "default": null
+        },
+        {
+          "name": "what",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "bank",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "institution",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "AskState",
+              [
+                [
+                  "Asked",
+                  []
+                ],
+                [
+                  "Waiting",
+                  []
+                ],
+                [
+                  "Done",
+                  []
+                ],
+                [
+                  "Failed",
+                  []
+                ],
+                [
+                  "Expired",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        },
+        {
+          "name": "url",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "message",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "expires_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "asked_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "answered_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "rule",
+      "columns": [
+        {
+          "name": "from",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "category_id",
+          "ty": {
+            "Id": "category"
+          },
+          "default": null
+        },
+        {
+          "name": "manual",
+          "ty": "Bool",
+          "default": null
+        },
+        {
+          "name": "matching",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "accounts",
+          "ty": {
+            "List": {
+              "Id": "account"
+            }
+          },
+          "default": null
+        },
+        {
+          "name": "times",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "per",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "at_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [
+        {
+          "columns": [
+            1,
+            0
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 1,
+          "table": "category"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "saved_filter",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "saved_filter"
+          },
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "pos",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "filter",
+          "ty": {
+            "Record": [
+              "Filter",
+              [
+                [
+                  "accounts",
+                  {
+                    "List": {
+                      "Id": "account"
+                    }
+                  }
+                ],
+                [
+                  "on_budget",
+                  "Bool"
+                ],
+                [
+                  "text",
+                  "Text"
+                ],
+                [
+                  "categories",
+                  {
+                    "List": {
+                      "Option": {
+                        "Id": "category"
+                      }
+                    }
+                  }
+                ],
+                [
+                  "direction",
+                  {
+                    "Sum": [
+                      "Direction",
+                      [
+                        [
+                          "Either",
+                          []
+                        ],
+                        [
+                          "In",
+                          []
+                        ],
+                        [
+                          "Out",
+                          []
+                        ]
+                      ]
+                    ]
+                  }
+                ],
+                [
+                  "no_transfers",
+                  "Bool"
+                ],
+                [
+                  "needs_look",
+                  "Bool"
+                ],
+                [
+                  "from",
+                  {
+                    "Option": "Text"
+                  }
+                ],
+                [
+                  "through",
+                  {
+                    "Option": "Text"
+                  }
+                ]
+              ]
+            ]
+          },
+          "default": null
+        },
+        {
+          "name": "created_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            2
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "formula",
+      "columns": [
+        {
+          "name": "from",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "category_id",
+          "ty": {
+            "Id": "category"
+          },
+          "default": null
+        },
+        {
+          "name": "manual",
+          "ty": "Bool",
+          "default": null
+        },
+        {
+          "name": "terms",
+          "ty": {
+            "List": {
+              "Record": [
+                "Term",
+                [
+                  [
+                    "filter_id",
+                    {
+                      "Id": "saved_filter"
+                    }
+                  ],
+                  [
+                    "times",
+                    "Int"
+                  ],
+                  [
+                    "per",
+                    "Int"
+                  ]
+                ]
+              ]
+            }
+          },
+          "default": null
+        },
+        {
+          "name": "said",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "at_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [
+        {
+          "columns": [
+            1,
+            0
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 1,
+          "table": "category"
+        }
+      ],
       "space": "durable"
     }
   ]

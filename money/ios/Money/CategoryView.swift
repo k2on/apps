@@ -5,7 +5,18 @@
 // target with a ring of how far the month is toward it and the button that
 // meets it, Auto-Assign's three amounts as one-tap choices, the month's
 // transactions in it, and managing it (rename, hide, delete) at the end,
-// as Settings' rows put the destructive one last.
+// as Settings' rows put the destructive one last. Spending on a card beyond
+// what it had is said apart, in amber: debt, not cash gone.
+//
+// A month its rule assigns says the rule ("Assigned by rule: …") where
+// Move Money would be, its assigned amount wears the rule's mark and opens
+// nothing, and there is no meeting the target or Auto-Assign: the domain
+// refuses all of it. The rule itself is the desktop's to change.
+//
+// A card's payment category is the desktop's card inspector: what is set
+// aside for the card, "Assign $X" at a tap when that falls short of what
+// the card owes, the debt and what of it is not covered, and the card's
+// month.
 import ArkUI
 import SwiftUI
 
@@ -21,7 +32,7 @@ struct CategoryView: View {
 
     var body: some View {
         if let l = model.snapshot.line(id) {
-            page(l)
+            if Cards.isPayment(l) { payment(l) } else { page(l) }
         } else {
             ContentUnavailableView("No Category", systemImage: "questionmark.folder", description: Text("It may have been deleted on another device."))
         }
@@ -33,16 +44,23 @@ struct CategoryView: View {
         return List {
             Section {
                 HeroFigure("Available", cents: l.available, tint: tone.tint, note: model.monthName) {
-                    Button {
-                        present(.move(l.categoryId))
-                    } label: {
-                        Label(l.available < 0 ? "Cover Overspending" : "Move Money", systemImage: "arrow.left.arrow.right")
-                            .frame(maxWidth: .infinity)
+                    if let words = Ruled.words(l) {
+                        Label(words, systemImage: Ruled.symbol)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Button {
+                            present(.move(l.categoryId))
+                        } label: {
+                            Label(l.available < 0 ? "Cover Overspending" : "Move Money", systemImage: "arrow.left.arrow.right")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(l.available < 0 ? tone.tint.color : Color.money)
+                        .controlSize(.large)
+                        .disabled(l.available == 0)
                     }
-                    .buttonStyle(.glassProminent)
-                    .tint(l.available < 0 ? Color.red : Color.money)
-                    .controlSize(.large)
-                    .disabled(l.available == 0)
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -50,12 +68,27 @@ struct CategoryView: View {
 
             Section {
                 figure("Left Over from Last Month", l.carried)
-                Button { present(.assign(l.categoryId)) } label: {
-                    LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.primary) }
+                if Ruled.editable(l) {
+                    Button { present(.assign(l.categoryId)) } label: {
+                        LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.primary) }
+                    }
+                    .foregroundStyle(.primary)
+                    .accessibilityHint("Changes what this month assigns it")
+                } else {
+                    LabeledContent("Assigned This Month") { MarkedCents(l.assigned, mark: Ruled.symbol, says: "assigned by its rule") }
                 }
-                .foregroundStyle(.primary)
-                .accessibilityHint("Changes what this month assigns it")
                 figure("Activity", l.activity)
+                if l.creditOverspent > 0 {
+                    LabeledContent("Spent on a Card, Not Covered") {
+                        CentsText(l.creditOverspent).foregroundStyle(Color.orange)
+                    }
+                }
+            } footer: {
+                if l.creditOverspent > 0 {
+                    Text("What the card bought beyond what \(l.name) had is new debt on the card, not cash gone: next month's money doesn't pay for it. Cover it here, or assign to the card's payment.")
+                } else if l.ruled {
+                    Text("This month's assignment is its rule's share of the income it matches. Change or remove the rule on the desktop.")
+                }
             }
 
             Section("Target") {
@@ -77,7 +110,7 @@ struct CategoryView: View {
                     }
                     .padding(.vertical, Space.xs)
                     .accessibilityElement(children: .combine)
-                    if l.assigned < l.target {
+                    if l.assigned < l.target && Ruled.editable(l) {
                         Button {
                             model.assign(l.categoryId, l.target)
                             assigned += 1
@@ -96,14 +129,16 @@ struct CategoryView: View {
                 }
             }
 
-            Section {
-                quick("Assigned Last Month", l.assignedLastMonth, l)
-                quick("Spent Last Month", -l.spentLastMonth, l)
-                quick("Average Spent", -l.averageSpent, l)
-            } header: {
-                Text("Auto-Assign")
-            } footer: {
-                Text("Tap one to assign that much this month.")
+            if Ruled.editable(l) {
+                Section {
+                    quick("Assigned Last Month", l.assignedLastMonth, l)
+                    quick("Spent Last Month", -l.spentLastMonth, l)
+                    quick("Average Spent", -l.averageSpent, l)
+                } header: {
+                    Text("Auto-Assign")
+                } footer: {
+                    Text("Tap one to assign that much this month.")
+                }
             }
 
             if !spentHere.isEmpty {
@@ -140,6 +175,104 @@ struct CategoryView: View {
         } message: {
             Text("Its transactions will need a category again.")
         }
+    }
+
+    /// A card's payment category: the money set aside for the card large,
+    /// with the one tap that covers what the card owes when it falls short;
+    /// what the card owes and what of it is not covered; how the money got
+    /// here; what went on the card this month; and the card's register. Its
+    /// name is the card's and it goes when the card does: nothing to rename
+    /// or delete, and no target — the debt is its target.
+    private func payment(_ l: BudgetLine) -> some View {
+        let tone = Tone.of(l)
+        let onCard = (model.register(nil) ?? []).filter { $0.accountId == l.card && Months.of($0.date) == model.month }
+        return List {
+            Section {
+                HeroFigure("Available for Payment", cents: l.available, tint: tone.tint, note: model.monthName) {
+                    if let cover = Cards.toCover(l) {
+                        Button {
+                            model.assign(l.categoryId, cover)
+                            assigned += 1
+                        } label: {
+                            Label("Assign \(CentsText.string(l.underfunded))", systemImage: "creditcard.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(Color.orange)
+                        .controlSize(.large)
+                        .accessibilityHint("Assigns what covers the card's debt")
+                    } else {
+                        Button {
+                            present(.move(l.categoryId))
+                        } label: {
+                            Label("Move Money", systemImage: "arrow.left.arrow.right").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(Color.money)
+                        .controlSize(.large)
+                        .disabled(l.available <= 0)
+                    }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+
+            Section {
+                LabeledContent("Owed at the Month's End") { CentsText(l.debt) }
+                LabeledContent("Not Covered") {
+                    CentsText(l.underfunded).foregroundStyle(l.underfunded > 0 ? Color.orange : Color.green)
+                }
+                if let c = Cards.covered(l) {
+                    ProgressView(value: c) {
+                        EmptyView()
+                    } currentValueLabel: {
+                        Text(c >= 1 ? "All of it set aside" : "\(Int((c * 100).rounded()))% set aside")
+                    }
+                    .tint(c >= 1 ? Color.green : Color.orange)
+                }
+            } header: {
+                Text("The Card")
+            } footer: {
+                Text(l.underfunded > 0 ? "What the card bought beyond what its categories had is debt. Assign money here to cover it."
+                     : l.debt > 0 ? "Enough is set aside to pay the card." : "Nothing is owed on the card.")
+            }
+
+            Section {
+                figure("Left Over from Last Month", l.carried)
+                Button { present(.assign(l.categoryId)) } label: {
+                    LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.primary) }
+                }
+                .foregroundStyle(.primary)
+                .accessibilityHint("Changes what this month assigns it")
+                figure("Spending Covered, Less Payments", l.activity)
+            } footer: {
+                Text("Spending on the card moves what each category had for it here; paying the card spends from here.")
+            }
+
+            if !onCard.isEmpty {
+                Section("On the Card This Month") {
+                    ForEach(onCard) { t in TxnButton(txn: t) }
+                }
+            }
+
+            Section {
+                if let card = l.card {
+                    NavigationLink(value: Route.register(card)) { Label("Card's Transactions", systemImage: "creditcard") }
+                }
+                Button { model.hide(category: l.categoryId, !l.hidden) } label: {
+                    Label(l.hidden ? "Show in Budget" : "Hide from Budget", systemImage: l.hidden ? "eye" : "eye.slash")
+                }
+            } footer: {
+                Text("Named as the card is, it goes when the card is closed.")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(l.name)
+        .navigationSubtitle(l.group)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { AddTransactionButton(account: l.card) } }
+        .onAppear { model.hold(register: nil) }
+        .onDisappear { model.release(register: nil) }
+        .sensoryFeedback(.success, trigger: assigned)
     }
 
     private func figure(_ label: String, _ cents: Int64) -> some View {

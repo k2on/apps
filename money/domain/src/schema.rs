@@ -111,6 +111,12 @@ pub struct Txn {
     pub imported_payee: String,
     pub created_ms: i64,
     pub user_id: String,
+    /// The bank whose import last told of it (its `bank` row), blank for
+    /// one typed in or imported before this was kept: what tells one
+    /// connection's copy of a transaction from another's, where two feed
+    /// one account ([`crate::plaid`]).
+    #[serde(default)]
+    pub imported_by: String,
     /// Split: what it was for is its [`Split`] lines, and `category_id`
     /// is none. Defaulted, for the rows written before splits.
     #[serde(default)]
@@ -134,11 +140,45 @@ pub struct Bank {
     /// Reconciled transactions the last import left alone.
     pub locked: i64,
     pub user_id: String,
+    /// What Plaid said the last time the importer asked and it failed —
+    /// `ITEM_LOGIN_REQUIRED` and its sentence — and when; blank since the
+    /// last import that worked.
+    #[serde(default)]
+    pub error_code: String,
+    #[serde(default)]
+    pub error: String,
+    #[serde(default)]
+    pub failed_ms: i64,
+    /// Somebody chose what one of its accounts feeds: the next import asks
+    /// for the bank's whole history again, so what the choice follows
+    /// arrives from the start (`crate::banks`).
+    #[serde(default)]
+    pub repull: bool,
+    /// Plaid's id for its institution (`ins_127991`), when an import has
+    /// said it: two logins to one bank share it.
+    #[serde(default)]
+    pub institution_id: String,
+    /// Connected from the app and not imported yet: its first import folds
+    /// it into another login to the same bank, if there is one
+    /// ([`crate::plaid`]).
+    #[serde(default)]
+    pub fresh: bool,
+    /// Accounts were just added to it at Plaid (`banks.add_accounts`): its
+    /// next import opens every account it has not seen before.
+    #[serde(default)]
+    pub adding: bool,
+    /// Another login to the same bank, connected since, carries every
+    /// account this one fed or ignored: the importer removes this one at
+    /// Plaid and drops it (`banks.retired`). Its imports change nothing.
+    #[serde(default)]
+    pub replaced_by: String,
 }
 
 /// One of a bank's accounts, as Plaid names it, and the account here it
 /// feeds — made by the first import that saw it. `ignored` is an account
-/// somebody said not to follow; its transactions are dropped.
+/// somebody said not to follow; its transactions are dropped. Neither
+/// feeding nor ignored, it waits for somebody to say which
+/// ([`crate::banks`]), and its transactions are dropped until then.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
 #[ark(index(account_id))]
 pub struct Linked {
@@ -154,6 +194,65 @@ pub struct Linked {
     /// The bank's own balance at the last import, in cents, our sign.
     pub balance: Option<i64>,
     pub ignored: bool,
+    /// Plaid's subtype: `checking`, `savings`, `credit card`.
+    #[serde(default)]
+    pub subtype: String,
+    /// The day an import first saw it.
+    #[serde(default)]
+    pub seen: String,
+    /// Transactions dated before this day are not imported into the
+    /// account it feeds: an account kept by hand before it was linked
+    /// already has them. Blank is every one.
+    #[serde(default)]
+    pub since: String,
+    /// The account it feeds was opened for it and is owed its starting
+    /// balance, which the next import from the bank's start brings.
+    #[serde(default)]
+    pub opening: bool,
+    /// It feeds an account another connection fed before it, or feeds
+    /// still: what it imports is matched to what that one imported
+    /// rather than doubled ([`crate::plaid`]).
+    #[serde(default)]
+    pub seam: bool,
+}
+
+/// Where an ask about a bank connection stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
+pub enum AskState {
+    /// Nobody has answered it yet: the server's importer will.
+    #[default]
+    Asked,
+    /// A Plaid page is open for it at `url`, until `expires_ms`.
+    Waiting,
+    /// Done: the bank connected, logged in again, or disconnected.
+    Done,
+    /// It could not be done; `message` says why.
+    Failed,
+    /// Nobody finished Plaid's page in time.
+    Expired,
+}
+
+/// Somebody asking the server to connect a bank, log in to one again
+/// (Plaid's update mode) or disconnect one: what the server's importer
+/// answers, here, since the bank's login is the server's alone. `what` is
+/// `connect`, `reconnect`, `add_accounts` or `disconnect`.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+pub struct BankAsk {
+    #[ark(key)]
+    pub id: Id<BankAsk>,
+    pub what: String,
+    /// The bank asked about; for a connection, the one it made.
+    pub bank: String,
+    pub institution: String,
+    pub state: AskState,
+    /// Plaid's page, while it waits.
+    pub url: String,
+    pub message: String,
+    pub expires_ms: i64,
+    pub asked_ms: i64,
+    pub answered_ms: i64,
+    pub user_id: String,
 }
 
 /// Somebody asking the server's importer to ask the banks now, rather
@@ -266,6 +365,123 @@ pub struct Charge {
     pub user_id: String,
 }
 
+/// **No longer read** — kept because the schema only grows: what
+/// assignment by rule stored before formulas ([`Formula`]) replaced it. A
+/// row here assigns nothing now, and nothing writes one. It said how a
+/// category's assignment was worked out from a month on: a share of what came
+/// in, in that month, matching `matching` in the chosen accounts — or,
+/// `manual`, what people assign it by hand again. One row per category and
+/// the month it starts; a month reads the latest that starts at or before
+/// it, so every month before the first is assigned by hand as it was.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(category_id, from))]
+pub struct Rule {
+    #[ark(key)]
+    pub from: String,
+    #[ark(key, refs(Category))]
+    pub category_id: Id<Category>,
+    /// From this month the category is assigned by hand again: the rule
+    /// before it stops.
+    pub manual: bool,
+    /// What a transaction's payee or the bank's own line for it holds,
+    /// any case.
+    pub matching: String,
+    /// The on-budget accounts whose inflows count; none is every one.
+    pub accounts: Vec<Id<Account>>,
+    /// The share, exactly: `times / per` of what matched (10% is 10/100,
+    /// 1.5 is 15/10).
+    pub times: i64,
+    pub per: i64,
+    pub at_ms: i64,
+    pub user_id: String,
+}
+
+/// Which way money moved: either, in, or out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+pub enum Direction {
+    #[default]
+    /// Either way (not `Any`, which a Kotlin binding could not name).
+    Either,
+    /// Money in: a positive amount.
+    In,
+    /// Money out: a negative amount.
+    Out,
+}
+
+/// Which transactions: conditions every one of which a transaction meets
+/// ([`crate::filters`]); the default is every transaction. One type for
+/// the register on screen, a saved filter, the built-in ones (every
+/// account, what needs a look, one account) and what a formula sums — and
+/// one matcher for all of them, [`Filter::matches`].
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct Filter {
+    /// The accounts it reads; none is every account.
+    pub accounts: Vec<Id<Account>>,
+    /// Only accounts on the budget.
+    pub on_budget: bool,
+    /// What the payee or the bank's own line for it holds, any case; blank
+    /// is anything.
+    pub text: String,
+    /// The categories; none is any. `None` among them is "no category".
+    pub categories: Vec<Option<Id<Category>>>,
+    pub direction: Direction,
+    /// Transfers left out.
+    pub no_transfers: bool,
+    /// Only what needs a look: not yet approved, or on the budget and for
+    /// no category (the inbox's condition).
+    pub needs_look: bool,
+    /// Dated on or after this day, and on or before this one, when said.
+    pub from: Option<String>,
+    pub through: Option<String>,
+}
+
+/// A filter somebody named and kept: in the sidebar under Filters, in
+/// `pos` order, and what a formula's term sums ([`crate::formulas`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(pos))]
+pub struct SavedFilter {
+    #[ark(key)]
+    pub id: Id<SavedFilter>,
+    pub name: String,
+    pub pos: i64,
+    pub filter: Filter,
+    pub created_ms: i64,
+    pub user_id: String,
+}
+
+/// One term of a formula: `times / per` (kept exactly: 10% is 1/10) of
+/// what a saved filter's transactions add up to in the month.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct Term {
+    pub filter_id: Id<SavedFilter>,
+    pub times: i64,
+    pub per: i64,
+}
+
+/// How a category's assignment is worked out from a month on, until a
+/// later version says otherwise ([`crate::formulas`]): the sum of its
+/// terms over the month, rounded once to the cent — or, `manual`, what
+/// people assign it by hand again. One row per category and the month it
+/// starts; a month reads the latest that starts at or before it, so every
+/// month before the first is assigned by hand as it was.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(category_id, from))]
+pub struct Formula {
+    #[ark(key)]
+    pub from: String,
+    #[ark(key, refs(Category))]
+    pub category_id: Id<Category>,
+    /// From this month the category is assigned by hand again.
+    pub manual: bool,
+    pub terms: Vec<Term>,
+    /// What it is said as, when it was set through the phones' old
+    /// `categories.set_rule` ("10% of income matching ACME in Checking");
+    /// blank for one set as a formula, which is said by its terms.
+    pub said: String,
+    pub at_ms: i64,
+    pub user_id: String,
+}
+
 /// money's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Money {
@@ -278,6 +494,11 @@ pub struct Money {
     pub asked: Asked,
     pub sign_in: ark_auth::SignIn,
     pub role: ark_auth::Role,
+    pub bank_ask: BankAsk,
+    /// No longer read: assignment by rule became formulas.
+    pub rule: Rule,
+    pub saved_filter: SavedFilter,
+    pub formula: Formula,
     pub split: Split,
     pub receipt: Receipt,
     pub item: Item,

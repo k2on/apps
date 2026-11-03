@@ -3,8 +3,9 @@
 // went is a donut of its groups, the most first, which a finger on it
 // selects — the middle then says that group and its share — and a legend
 // of amounts under it. Then the month as a whole (income, spent, what was
-// left), and each group's assigned against spent as paired bars, the way
-// Screen Time compares days.
+// left, and what of the cards' debt is not covered), and each group's
+// assigned against spent as paired bars, the way Screen Time compares
+// days — the cards' group not among them: paying a card is no spending.
 import ArkUI
 import Charts
 import SwiftUI
@@ -53,9 +54,18 @@ struct InsightsView: View {
                         CentsText(m.income - total).foregroundStyle(m.income - total < 0 ? Color.red : Color.primary)
                     }
                     .fontWeight(.semibold)
+                    // Paying a card is not spending (what it bought was), so
+                    // it is in neither figure; what the cards owe beyond
+                    // what is set aside for them is said apart.
+                    if s.lines.contains(where: Cards.isPayment) {
+                        let short = Cards.uncovered(s.lines)
+                        LabeledContent("Card Debt Not Covered") {
+                            CentsText(short).foregroundStyle(short > 0 ? Color.orange : Color.green)
+                        }
+                    }
                 }
             }
-            let groups = Months.groups(s.groups, s.lines, hidden: false).filter { $0.assigned != 0 || $0.activity != 0 }
+            let groups = Months.groups(s.groups, s.lines, hidden: false).filter { !$0.isCards && ($0.assigned != 0 || $0.activity != 0) }
             if !groups.isEmpty {
                 Section {
                     bars(groups)

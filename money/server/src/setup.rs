@@ -102,6 +102,7 @@ fn outcome(o: &crate::importer::Outcome) -> String {
         Charges { charges } => format!("{charges} charge{}", if *charges == 1 { "" } else { "s" }),
         Imported { upserts, removed } => format!("{upserts} changed, {removed} removed"),
         NotReady => "not ready".into(),
+        Replaced => "replaced by another login".into(),
         Failed(why) => format!("failed: {why}"),
     }
 }

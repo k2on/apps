@@ -47,7 +47,6 @@ mod wake;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use ark::log::EntryId;
@@ -554,6 +553,18 @@ impl harken_player::Sound for Sounding<'_> {
     fn load(&mut self, queue: &[listening::Track], at: usize, position_ms: i64, playing: bool, from: &str) {
         *self.queue = queue.to_vec();
         *self.from = from.into();
+        // The track it holds is the one wanted, in a queue reordered or added
+        // to around it: it plays on. Put again, the element would fetch the
+        // file from its start, and the gap be heard — and said — as a stall.
+        if self.player.track().zip(queue.get(at)).is_some_and(|(t, q)| t.id == q.id.0) {
+            self.player.requeue(at);
+            match (playing, self.player.asked()) {
+                (true, false) => self.player.resume(),
+                (false, true) => self.player.pause(),
+                _ => {}
+            }
+            return;
+        }
         play_at(self.player, self.server, self.queue, at, position_ms, playing);
     }
     fn jump(&mut self, at: usize, position_ms: i64) {
@@ -749,13 +760,9 @@ pub struct App {
     /// update, and back and forward by `^O`/`^I` and a swipe
     /// ([`arkui::history`]).
     pub history: arkui::history::History<Place>,
-    /// How far down each page was scrolled when it was left, so back and
-    /// forward land where it was, as a browser's do.
-    pub scrolls: HashMap<Place, f32>,
-    /// Where the page just opened is to be scrolled, once it is drawn.
+    /// Where the page just opened is to be scrolled, once it is drawn: where
+    /// it was left, for back and forward (`history`), or its top.
     pub scroll_due: Option<f32>,
-    /// The page being opened is a step back or forward, not a new visit.
-    pub travelling: bool,
     /// Where the pointer is.
     pub cursor: Point,
     /// Where the pointer was when a key last moved the cursor, until it
@@ -855,9 +862,7 @@ impl App {
             queue_settle: None,
             window: Size::new(860.0, 600.0),
             history: arkui::history::History::new(),
-            scrolls: HashMap::new(),
             scroll_due: None,
-            travelling: false,
             keyed: None,
             cursor: Point::ORIGIN,
             player: Player::new(),
@@ -3158,11 +3163,7 @@ impl App {
                 // is a cursor that remembers the wrong list.
                 self.cursors[Pane::Tracks as usize] = 0;
                 // A new visit opens at the top; back and forward where it was.
-                let back_to = match std::mem::take(&mut self.travelling) {
-                    true => self.scrolls.get(&self.peer.source.place()).copied(),
-                    false => None,
-                };
-                self.scroll_due = Some(back_to.unwrap_or(0.0));
+                self.scroll_due = Some(self.history.arrive(&self.peer.source.place()));
                 // A transcript opens following the line being said, its
                 // cursor on it — put in the middle once the page is drawn,
                 // as any page's scroll is.
@@ -3175,7 +3176,7 @@ impl App {
                 }
             }
             Message::PageScrolled(y) => {
-                self.scrolls.insert(self.peer.source.place(), y);
+                self.history.scrolled(&self.peer.source.place(), y);
             }
             Message::ScrollPage(y) => {
                 return iced::widget::operation::scroll_to(TRACKS, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y });
@@ -3261,7 +3262,6 @@ impl App {
         if let Some(place) = self.history.poll(ready) {
             let wanted = self.peer.source_of(&place);
             if wanted != self.peer.source {
-                self.travelling = true;
                 tasks.push(self.update(Message::Select(wanted)));
             }
         }
@@ -3357,8 +3357,8 @@ impl App {
             // The socket, and in a browser the page's own events.
             self.bell.subscription().map(|()| Message::Wake),
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
-            // A paste the browser handed over: a frame, and the box takes it.
-            arkui::clipboard::pastes().map(|()| Message::Swallow),
+            // Something under the window's root wants a frame of its own.
+            arkui::window::wakes().map(|()| Message::Swallow),
             // Only the presses no widget took: a focused text box consumes its
             // own, so typing a playlist's name cannot walk the cursor.
             vim::presses().map(|(key, mods)| Message::Key(key, mods)),

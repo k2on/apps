@@ -51,6 +51,25 @@ final class FormTests: XCTestCase {
         XCTAssertEqual(d.problem, "Choose a day.")
     }
 
+    /// An imported line's form shows what the bank called it, whole, when
+    /// that says more than the payee; one typed in, one the bank said
+    /// nothing of, and one whose payee says the same in other case show none.
+    func testTheFormShowsTheBanksDescription() {
+        func line(_ payee: String, bank: String, imported: Bool = true) -> TxnLine {
+            TxnLine(id: Fx.id(1), accountId: Fx.id(2), account: "Checking", date: "2026-10-26", payee: payee,
+                    categoryId: nil, category: "Needs a category", group: "", memo: "", amount: -1_250,
+                    cleared: .cleared, approved: false, transfer: false, imported: imported,
+                    importedPayee: bank, createdMs: 0, userId: "alex")
+        }
+        let full = "CHIPOTLE 1234 SAN FRANCISCO CA"
+        XCTAssertEqual(Registers.bankDescription(line("Chipotle", bank: full)), full)
+        XCTAssertEqual(Draft(line("Chipotle", bank: "  \(full) ")).bank, full)
+        XCTAssertNil(Registers.bankDescription(line("Chipotle", bank: full, imported: false)))
+        XCTAssertNil(Registers.bankDescription(line("Chipotle", bank: " ")))
+        XCTAssertNil(Registers.bankDescription(line("Chipotle", bank: "CHIPOTLE")))
+        XCTAssertNil(Draft(account: Fx.id(2), date: "2026-10-26").bank)
+    }
+
     func testPayeesAreOfferedAsTheyAreTyped() {
         let p = [PayeeLine(name: "Safeway", count: 9, categoryId: nil),
                  PayeeLine(name: "Blue Bottle", count: 3, categoryId: nil),

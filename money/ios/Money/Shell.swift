@@ -3,8 +3,9 @@
 // look) and Insights — which shrinks as a list scrolls
 // (`tabBarMinimizeBehavior(.onScrollDown)`); each tab its own
 // `NavigationStack`, so a tab switch finds the tab as it was left; the
-// sheets a screen raises, each with its detents, one at a time; and what
-// the app says once, on glass at the top. This file wires; what each
+// sheets a screen raises, each with its detents, one at a time; Plaid's
+// page in Safari's view when a bank is being connected; and what the app
+// says once, on glass at the top. This file wires; what each
 // screen draws is the screen's.
 import ArkUI
 import SwiftUI
@@ -15,7 +16,10 @@ enum Route: Hashable {
     case category(Id)
     /// An account's register; none is every account's.
     case register(Id?)
+    /// The banks, as Settings lists them, from the Accounts tab.
     case banks
+    /// One connected bank, by the name the server keeps it under.
+    case bank(String)
     case settings
 }
 
@@ -99,6 +103,9 @@ struct Shell: View {
                 .environment(\.present) { next in present(next) }
         }
         .toast($model.notice)
+        // Plaid's page, as soon as the server answers with it, wherever the
+        // person is; closed by its Done, or once the server is finished.
+        .safari(model.bankPage, tint: Color.money) { model.bankPageClosed() }
     }
 
     private func present(_ s: Sheet) {
@@ -119,6 +126,7 @@ struct Shell: View {
                     case let .category(id): CategoryView(id: id)
                     case let .register(account): RegisterView(account: account)
                     case .banks: BanksView()
+                    case let .bank(name): BankView(name: name)
                     case .settings: SettingsView()
                     }
                 }
@@ -139,15 +147,19 @@ struct Shell: View {
     }
 }
 
-/// The toolbar's account button: who is using the budget, where, and the way out.
+/// The toolbar's account button: who is using the budget, where, and the
+/// way out — marked when a bank wants somebody in Settings.
 struct AccountButton: View {
     @EnvironmentObject private var model: Model
 
     var body: some View {
+        let wanting = Banks.wanting(model.snapshot.banks)
         NavigationLink(value: Route.settings) {
-            Image(systemName: model.isDemo ? "person.crop.circle.badge.questionmark" : "person.crop.circle")
+            Image(systemName: wanting > 0 ? "person.crop.circle.badge.exclamationmark"
+                : model.isDemo ? "person.crop.circle.badge.questionmark" : "person.crop.circle")
         }
         .accessibilityLabel("Account and settings")
+        .accessibilityValue(wanting > 0 ? "Banks need a look" : "")
     }
 }
 

@@ -19,6 +19,9 @@ pub const DROP_INPUT: &str = "drop-input";
 pub const DROP_LIST: &str = "drop-list";
 /// The register's scrollable.
 pub const REGISTER: &str = "register";
+/// The register's filter's text, and a filter's name as it is saved.
+pub const FILTER_TEXT: &str = "filter-text";
+pub const FILTER_NAME: &str = "filter-name";
 
 /// The budget's scrollable, which the cursor keeps itself in.
 pub const BUDGET: &str = "budget";

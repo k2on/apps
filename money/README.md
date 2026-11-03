@@ -152,6 +152,52 @@ ankurdave/beancount_import_sources, run in the console of a signed-in
 costco.com page, saves the array the adapter reads
 (`domain/tests/stores/costco-receipts-script.json` is its shape).
 
+## Filters and formulas
+
+**A filter says which transactions** (`domain/src/filters.rs`): conditions
+every one of which must hold — the accounts (none is every account; or
+only those on the budget), text the payee or the bank's line holds (any
+case), the categories ("no category" among them), which way the money
+went (either, in, out), transfers in or left out, only what needs a look
+(not approved, or on budget for no category), and optionally a range of
+days. `Filter::matches` is the only matcher: every register is the
+register for a filter (`transactions.filtered {saved | filter, month}`,
+with `transactions.filtered_total` its sum), and the built-in ones are
+filters too — All Accounts (no conditions), Needs a Look (the inbox's
+condition) and one per account. The phones' `transactions.register` and
+`transactions.inbox` are those built-in filters through the same matcher.
+
+**Saved filters** (`SavedFilter`, appended to the schema) have a name,
+unique in any case, and a place: `filters.save_filter`, `rename_filter`,
+`change_filter`, `move_filter`, `delete_filter`, and `filters.saved`,
+which lists them with what each adds up to (ever, within its own days).
+A category deleted is replaced in a filter's conditions by the one its
+transactions moved to (or "no category").
+
+**A formula assigns a category** (`domain/src/formulas.rs`), as a
+spreadsheet's cell is worked out: a sum of terms, each `factor ×
+SUM(saved filter over the month)` — "10% × SUM(ACME paychecks)". A factor
+is kept exactly as a ratio (typed "10%", "0.1" or "1.5x"); the terms are
+added exactly and the month's total rounded once, to the cent, half away
+from zero. A formula is a version from a month on (`Formula`, appended to
+the schema; `categories.set_formula`, `categories.clear_formula`, the
+views `categories.formulas` and `categories.preview_formula`): months
+before keep what was typed, and removing one is a manual version. While a
+month follows one, `assign` and `move_money` refuse it, auto-assign
+passes it by, and everything else counts its amount as assigned. Ready to
+Assign and a card's payment category have none. A saved filter a formula
+sums (in any version) is not deleted — the deletion is refused, naming
+the categories; were one gone anyway, its term would count nothing.
+Changing a filter's conditions moves every month the formula covers.
+
+**Formulas replaced rules.** The `Rule` table is still in the schema and
+is read by nothing: a rule saved before this assigns nothing now (none
+are migrated), and a category deleted takes its old rows with it. The
+phones read `BudgetLine.rule` (the formula said) and `ruled` unchanged.
+A phone built before still sends `categories.set_rule`, kept for it: it
+saves (or reuses) a filter of the rule's conditions — "Income matching
+acme in Checking" — and a one-term formula over it, said as the rule was.
+
 ## The bank, through Plaid
 
 `domain/src/plaid.rs` is ArkOS's `money-sync` with Actual Budget
@@ -167,13 +213,50 @@ replaced by the domain:
   in place, so a category given to it while pending survives. A
   transaction someone typed in first is matched (same account, same
   amount, within three days) instead of doubled. A reconciled one is left
-  alone. The first import that sees an account opens it under the bank's
-  name, with a starting balance equal to the bank's balance minus the
-  imported history. A new transaction from a payee seen before gets that
-  payee's last category and waits to be approved.
-- `banks.link` points a bank's account at an existing account, and
-  `banks.ignore` stops following one.
+  alone. An account the server's import is the first to see waits for
+  somebody to choose what it feeds (the demo's bank opens its card at
+  once, under the bank's name). A new transaction from a payee seen
+  before gets that payee's last category and waits to be approved.
+- What a bank's account feeds is the household's choice, on the Banks
+  page: `banks.open` opens an account for it of the right kind (a card is
+  a credit account), whose starting balance is the bank's balance minus
+  the whole history the next import brings; `banks.link` points it at an
+  account kept by hand, which takes what the bank has from the day the
+  bank was first seen; `banks.ignore` stops following it. A choice for a
+  waiting account has the next import ask Plaid from the start
+  (`Bank.repull`), so nothing between the first import and the choice is
+  lost, and nothing already imported doubles.
 - `banks.sync` is anybody's ask that the importer run now.
+- Connecting is an ask too (`domain/src/banks.rs`): `banks.connect`,
+  `banks.reconnect {bank}` (Plaid's update mode, for a login that ran
+  out) and `banks.disconnect {bank}`, which anybody may author and only
+  the importer answers (`banks.answer`: waiting with a Plaid page's
+  address, done, failed with a sentence, expired). `banks.asks` is the
+  reader's own asks, newest first. `banks.failed` is what Plaid said when
+  a bank's import failed, shown beside the bank (`needs_login` for
+  `ITEM_LOGIN_REQUIRED` and its kin) until an import works.
+- `banks.add_accounts {bank}` is Plaid's update mode with its account
+  picker, for an account a connected bank did not share at first: each
+  account picked there opens at the next import as `banks.open` would.
+- A bank connected (`banks.connect`) for an institution already here is
+  a second login to it, and folds into the first at its first import:
+  each of its accounts whose twin (same type, subtype and last digits)
+  at the other login has a choice takes that choice (it feeds the same
+  account from the day it was first seen, or is ignored); its accounts
+  with no twin were picked in Plaid's picker and open with their whole
+  history; and the login every choice of which it now carries is
+  replaced (`Bank.replaced_by`): the importer removes it at Plaid, drops
+  it from `banks.json` and says `banks.retired`, which forgets it as a
+  disconnection does. Only that first import folds; a bank whose
+  accounts have no twin, or another institution's, is never touched.
+- Where two connections feed one account (that fold, or a waiting
+  account linked by hand to an account another login feeds, which
+  `banks.link` allows), a transaction one imports that the other already
+  imported (same amount, within three days, not yet matched by the
+  importing one) takes the importer's id instead of being doubled
+  (`Txn.imported_by` says whose copy a row is). Before the day the
+  account was taken over, only a copy still pending is matched (it
+  posts through the new login).
 
 The importer is the server's (below). Its tokens are secrets and never go
 in the log. `domain/tests/import.rs` walks the three phases ArkOS's
@@ -208,43 +291,88 @@ household.
 **The importer** (`server/src/importer.rs`) is a peer in the server's
 process, signed in as the account `bank` and holding the `bank` role,
 which the server grants it and nobody else unless `MONEY_ROLES` says so.
-For each bank it holds a token for, a run reads the token from its file,
-asks Plaid's `/accounts/get` and every page of `/transactions/sync` from
-the bank's cursor (`has_more` followed; started over if Plaid says the
-data moved mid-way), makes one import (`import_of`) and authors
-`banks.import`. The cursor is kept in `importer.json` in the data
-directory only once the hub has confirmed the entry, which it does once
-the entry is on its disk: a run cut short anywhere before that is asked
-again from the old cursor, and an import said twice changes nothing.
-Keys and tokens are read at each run, go to Plaid alone, and are in no
-line the importer says.
+For each bank in the server's store (below), a run asks Plaid's
+`/accounts/get` and every page of `/transactions/sync` from the bank's
+cursor (`has_more` followed; started over if Plaid says the data moved
+mid-way), makes one import (`import_of`) and authors `banks.import`. The
+cursor is kept in the store only once the hub has confirmed the entry,
+which it does once the entry is on its disk: a run cut short anywhere
+before that is asked again from the old cursor, and an import said twice
+changes nothing. Keys are read from their files whenever they are
+needed, tokens from the store; both go to Plaid alone and are in no line
+the importer says, no row, no view.
 
 It runs once at start, on `SIGUSR1` (the module's timer, twice a day by
-default), and whenever somebody in the household presses **Sync**:
-`banks.sync` writes their ask as a row, the importer holds the log like
-any peer, and an ask newer than the last it answered is answered by a
-run. What it answered is kept beside the cursors.
+default), whenever somebody in the household presses **Sync** or chooses
+what an account feeds (`banks.sync` writes their ask as a row, the
+importer holds the log like any peer, and an ask newer than the last it
+answered is answered by a run), and for one bank at once when it has just
+been connected or logged in to again.
 
-**Which accounts.** `MONEY_ACCOUNTS` (the module's `accounts`) names the
-banks' accounts the way the household had them in Actual — by mask, or
-Plaid's account id when two share one. A bank with any account named
-follows those alone: the first import opens each under its name, and the
-bank's other accounts are known (a `Linked` row, ignored) and opened
-nowhere, until somebody links one to an account (`banks.link`). A bank
-with none named follows every account under the bank's name. Either way
-it is the first sight's say only: after that, which account a bank's
-feeds is the household's. This is ArkOS's rule (unmapped accounts are
-not imported) kept, with the accounts still reachable from the app.
+**Connecting a bank** is Plaid's Hosted Link, as ArkOS's laptop CLI did
+it, run by the server: for `banks.connect` the importer creates a link
+token with `hosted_link` (`/link/token/create`, products `transactions`,
+`days_requested` the configured history) and answers the asker with the
+page's address; it asks `/link/token/get` every five seconds until the
+page is finished, trades the session's public token at
+`/item/public_token/exchange`, keeps the login in the store under a name
+made from the institution's (`wells-fargo`), answers done, and imports
+the bank at once. Nothing has to reach the server from the browser, and
+there is no redirect to register. A page lasts 30 minutes; one open when
+the server stops is answered expired at the next start (the link token
+is held in memory only). `banks.reconnect` is the same page in update
+mode (the item's access token instead of products); `banks.disconnect`
+calls `/item/remove` and drops the login.
+
+**The store** (`server/src/store.rs`) is `banks.json` in the data
+directory, written whole and moved in, mode 0600, never in the log:
+
+```json
+{
+  "version": 1,
+  "banks": {
+    "wellsfargo": {
+      "access_token": "access-production-…",
+      "cursor": "…",
+      "item_id": "…",
+      "institution_id": "ins_…",
+      "institution": "Wells Fargo",
+      "added_ms": 1793000000000
+    }
+  },
+  "answered_ms": 1793000000000
+}
+```
+
+Each connection is keyed by the name the budget knows the bank by (its
+`bank` row, `Linked.bank`). Only `access_token` is required: the
+importer fills in `item_id`, `institution_id` and `institution` from
+Plaid at its next run. Without `cursor` the next import asks from the
+start (idempotent, but it brings back transactions somebody deleted); a
+connection without one takes the cursor `importer.json` (where the
+importer kept cursors before, `{"cursors": {"<name>": "…"}}`) has under
+its name. **Back up the whole data directory**: the log, the session
+key and `banks.json` together are the server, and a restore here or on
+another machine with the same Plaid keys keeps every bank connected.
+
+**Moving a connection in by hand** (a bank linked before this, its token
+a secret elsewhere), with the server stopped: write `banks.json` as
+above with the bank's existing name, its `access_token` and the `cursor`
+from `importer.json` (or leave the cursor out and keep `importer.json`),
+give it the data directory's owner and mode 0600, and start the server.
+It imports only what is new since that cursor.
 
 **`services.money`** (`server/nix/module.nix`, the flake's
 `nixosModules.money`): `enable`, `package`, `web`, `port` (8788),
 `address` (loopback), `publicUrl`, `oidc.{issuer, clientId,
 clientSecretFile, scopes}`, `devAuth`, `redirects`, `roles`,
-`plaid.{env, clientIdFile, secretFile, items.<name>.accessTokenFile,
-history}`, `accounts.<name>.{item, mask, accountId}`, `schedule`
-(OnCalendar, `*-*-* 06,18:00:00`), `dataDir` (`/var/lib/money`, the
-StateDirectory of a DynamicUser), `retainEntries`, `openFirewall`. Every
-secret is a systemd credential, read from `%d`.
+`plaid.{env, clientIdFile, secretFile, history}`, `schedule` (OnCalendar,
+`*-*-* 06,18:00:00`), `dataDir` (`/var/lib/money`, the StateDirectory of
+a DynamicUser — `/var/lib/private/money` on disk), `retainEntries`,
+`openFirewall`. Every secret of the deployment's is a systemd
+credential, read from `%d`. `plaid.items` and `accounts` are gone: a
+configuration that still sets them fails to evaluate, saying where banks
+and their accounts' choices live now.
 
 ## The window on a server
 
@@ -252,8 +380,19 @@ secret is a systemd credential, read from `%d`.
 is (`iced/src/live.rs`): it opens this device's replica of the server's
 budget (`--server`, `?server=`, or whoever served the page), signs in as
 above, remembers the login per server, and pumps the socket when it
-rings. **Sync** there is `banks.sync`. `money-web-server` is that page,
-which `services.money` serves at `/`; `money-web` is the demo.
+rings. **Sync** there is `banks.sync`. **Settings**, as harken has them
+(the account button at the top right: its menu opens Settings and signs
+out; `#settings`), has two sections. **Banks** (also reached by **Connect
+a Bank** on All Accounts, and **Banks need a look** there when one does)
+lists each connection with how its last import went (a dim line), Reconnect (only when its login ran out), Add accounts and Disconnect, and each of its accounts
+with one control for what it feeds, a menu: a new account of its kind (the cursor on the account another login to the bank feeds from the same last digits, when there is one), every account here, or
+nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
+with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
+the server answers: in the system's browser on the desktop; in a browser,
+in a tab opened empty at the click (a browser opens tabs only right after
+one) and pointed at the page when the answer arrives, with the page's
+link in Settings if the tab was blocked. `money-web-server` is that
+page, which `services.money` serves at `/`; `money-web` is the demo.
 
 ## The demo
 
@@ -280,21 +419,36 @@ and the sidebar counts them. A transaction opened in the register can be
 give one. The inspector lists a category's kinds and adds one.
 An opened receipt lists its charges too, and "Paid by" (a receipt's, or a
 charge's) opens what could have paid it, to say which did.
-**Settings** sends you to the server's own page to set up Amazon. The
+**Settings** has an Amazon section beside its banks, which sends you to
+the server's own page to set up Amazon. The
 demo's household has kinds (Eggs, Produce, Cleaning) and a Target and a
 Costco receipt, matched and split.
 
-The layout follows YNAB: accounts down the side; the month's categories
+The layout follows YNAB: down the side, Budget and Reflect, All
+Accounts (with what needs a look), each account under On Budget,
+Tracking and Closed, and the saved filters under Filters with their
+totals; the month's categories
 with Assigned, Activity and Available, and Ready to Assign across the
 top; the selected category's story on the right (its target, Move Money
-or Cover Overspending, Auto-Assign); a register per account with cleared,
-uncleared and working balances; and Reflect, where the month's spending
-went.
+or Cover Overspending, Auto-Assign, Assign by formula: a row per term,
+each a saved filter picked from a menu and a factor, Open for the
+filter's register in the month, a live preview, Save and Remove); a
+register for any filter — an account's is the filter for that account,
+with its cleared, uncleared and working balances, Reconcile, Rename and
+Sync — whose bar shows its conditions as chips to change (the address bar
+says `#account/Checking`, `#accounts`, `#inbox`, `#filter/<name>`, or
+`#filtered` for one not saved), what it adds up to, and "Save as filter…";
+and Reflect, where the month's spending went.
 
-**What is verified:** the domain's rules, transfers, reconciliation, the
+**What is verified:** the domain's rules, transfers, reconciliation,
+every filter condition alone and together, the built-in filters against
+what the registers and the inbox showed, saved filters and their totals,
+formulas (terms, factors, rounding once, history, refusals, cards, a
+filter in use), the
 import's phases, the accounts a server names and does not follow, the
-tree, splits, receipts and their adapters, the migration of groups into
-the tree, and every view against a fresh evaluation (`domain/tests/`); the demo's
+tree, splits, receipts, charges and their adapters, the migration of
+groups into the tree (from the schema a server stands on, and one older),
+and every view against a fresh evaluation (`domain/tests/`); the demo's
 seed, and every button the tests press (`iced/src/tests.rs`). The server
 in the process on a real port (`server/tests/`): signing in through the
 routes and syncing on the socket, a phone's code sent back to
@@ -304,8 +458,18 @@ and the importer against ArkOS's mock Plaid answers on loopback: the
 three phases, an ask from a member on the socket answered, the cursor
 resumed across a restart and kept only after the import is in, a run
 said twice changing nothing, a failed page keeping no cursor, and no key
-or token in anything it says or in the log. The live window signs in to
-a server in the process and its Sync lands as an ask
+or token in anything it says or in the log; and connecting from the app
+against its scripted Hosted Link: the page's address answered to the asker
+alone, the page finished, the login kept in `banks.json` (0600) and the
+bank imported at once, accounts chosen for and the history asked again,
+a page given up on or left to expire, a login given again in update
+mode, a bank disconnected, a `banks.json` written by hand (token and
+cursor alone, or the cursor in `importer.json`) importing only what is
+new, and a copy of the data directory imported from on a fresh server.
+The live window signs in to
+a server in the process; its Sync lands as an ask, and its Settings (from the account menu)
+connects, opens the page the server answers with once, chooses, and asks
+to reconnect and disconnect
 (`iced/src/tests.rs`). `services.money` is evaluated under its
 configurations (`checks.money-module`). The desktop demo window has been
 opened under Xvfb and each page looked at.
@@ -316,6 +480,8 @@ provider in front of this server (the routes are ark-auth's, which
 harken's deployment uses); the module on a booted machine (the timer's
 signal, the credentials, the hardening); the live window drawn, on the
 desktop or in a browser (the browser build compiles for wasm32 with and
-without `demo`), and the desktop's hand-off to a browser to sign in;
+without `demo`), and the desktop's hand-off to a browser to sign in
+or to Plaid's page (the browser build's tab opened at the click is
+unverified in a real browser);
 typing into the demo's fields under Xvfb; and a phone, which does not
 exist yet.

@@ -128,6 +128,7 @@ fn a_transaction_splits_by_amounts() {
     assert_eq!(txn(&b, "Target").category, "Split (2)");
     // Its amount is its lines'; a category for it is no split.
     let edit = |category_id, amount| EditTransaction {
+        transfer_to: None,
         id,
         date: "2026-10-26".into(),
         payee: "Target".into(),

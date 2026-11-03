@@ -109,7 +109,19 @@ fn record(out: &mut String, n: &str, fields: &[(String, Type)], q: Q) {
     let _ = writeln!(out, "\n/** The record `{n}`. */");
     match fields.is_empty() {
         true => drop(writeln!(out, "class {n} {{")),
-        false => drop(writeln!(out, "data class {n}({}) {{", params(fields, q.bare()))),
+        false => {
+            // Trailing optional fields default to null, as a missing one
+            // reads (`super::optional_from`).
+            let ps: Vec<String> = fields
+                .iter()
+                .enumerate()
+                .map(|(i, (f, t))| {
+                    let default = if i >= super::optional_from(fields) { " = null" } else { "" };
+                    format!("val {}: {}{default}", LANG.ident(f), ty(t, q.bare()))
+                })
+                .collect();
+            let _ = writeln!(out, "data class {n}({}) {{", ps.join(", "));
+        }
     }
     let _ = writeln!(out, "    fun json(): String = {}\n", object(fields));
     let _ = writeln!(out, "    companion object {{");

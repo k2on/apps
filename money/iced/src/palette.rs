@@ -75,3 +75,7 @@ pub const TILES: [Color; 8] = [
 
 /// The glyph on a tile: white, on every one of them.
 pub const TILE_GLYPH: Color = Color::WHITE;
+
+/// A card's payment category's tile: every card's the same slate, so the
+/// cards' group reads as the cards and not as what money is for.
+pub const CARD_TILE: Color = rgb(0x47, 0x55, 0x69);

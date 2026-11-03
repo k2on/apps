@@ -21,3 +21,15 @@ fn the_schema_reads_what_the_last_one_wrote() {
     let read = ark::migrate::migrate(&was, &vec![], &now, &domain().migrations);
     assert!(read.is_ok(), "{read:?}");
 }
+
+/// A server older still — before credit cards, banks connected from the
+/// app and formulas (`tests/older-schema.json`) — reads through the same
+/// steps: its schema grows into the one the first step reads.
+#[test]
+fn an_older_server_reads_too() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/older-schema.json");
+    let was: ark::schema::Schema = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let now = domain().schema.clone();
+    let read = ark::migrate::migrate(&was, &vec![], &now, &domain().migrations);
+    assert!(read.is_ok(), "{read:?}");
+}

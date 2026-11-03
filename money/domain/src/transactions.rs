@@ -19,7 +19,7 @@ pub const ADJUSTMENT: &str = "Reconciliation Balance Adjustment";
 
 /// A category a transaction in `account` may be for: on budget, any that
 /// is (or none yet); off budget, none — it is only tracked.
-fn category_for(db: &Db<Money>, account: &Account, category: Option<Id<Category>>) -> Result<Option<Id<Category>>, Refusal> {
+pub(crate) fn category_for(db: &Db<Money>, account: &Account, category: Option<Id<Category>>) -> Result<Option<Id<Category>>, Refusal> {
     match category {
         None => Ok(None),
         Some(_) if !account.on_budget => Err(Refusal::new("an account off the budget is only tracked: its money is for no category")),
@@ -32,7 +32,7 @@ fn category_for(db: &Db<Money>, account: &Account, category: Option<Id<Category>
 }
 
 /// An account money may be written into.
-fn open_account(db: &Db<Money>, id: Id<Account>) -> Result<Account, Refusal> {
+pub(crate) fn open_account(db: &Db<Money>, id: Id<Account>) -> Result<Account, Refusal> {
     let a = account_of(db, id)?;
     if a.closed {
         return Err(Refusal::new(format!("{} is closed", a.name)));
@@ -229,23 +229,30 @@ pub fn split(_: &Ctx, db: &mut Db<Money>, input: SplitTxn) -> Result<(), Refusal
 
 /// A transaction as somebody corrected it; a transfer's other half follows
 /// its date, amount and memo. A reconciled one keeps its amount: the bank
-/// agreed to it. A split one given a category is no longer split; left for
-/// none, it stays split, and keeps its amount — its lines say what the
-/// amount is for.
+/// agreed to it. Said to be a transfer to another account (`transfer_to`),
+/// it becomes one, paired with the matching transaction there or given its
+/// other half there ([`crate::transfers::make`]); a split one is unsplit
+/// first, a transfer's money having only moved. A split one given a
+/// category is no longer split; left for none, it stays split, and keeps
+/// its amount — its lines say what the amount is for.
 #[mutator("transactions.edit_transaction")]
-pub fn edit_transaction(_: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> Result<(), Refusal> {
+pub fn edit_transaction(ctx: &Ctx, db: &mut Db<Money>, input: EditTransaction) -> Result<(), Refusal> {
     let mut t = txn_of(db, input.id)?;
     if t.cleared == Cleared::Reconciled && t.amount != input.amount {
         return Err(Refusal::new("reconciled: its amount is agreed with the bank"));
     }
     if t.split {
         match input.category_id {
+            _ if input.transfer_to.is_some_and(|to| t.transfer_account != Some(to)) => t = unsplit(db, t)?,
             Some(_) => t = unsplit(db, t)?,
             None if t.amount != input.amount => return Err(Refusal::new("split: change its lines with its amount, or give it one category")),
             None => {}
         }
     }
     let account = account_of(db, t.account_id)?;
+    if let Some(to) = input.transfer_to.filter(|to| t.transfer_account != Some(*to)) {
+        return crate::transfers::make(ctx, db, t, &account, to, &input);
+    }
     let category_id = match t.transfer_account.and_then(|a| db.account.get(a)) {
         Some(other) if !(account.on_budget && !other.on_budget) => None,
         _ => category_for(db, &account, input.category_id)?,
@@ -434,23 +441,27 @@ pub fn txn_line(db: &Db<Money>, t: &Txn) -> TxnLine {
     }
 }
 
-/// One account's transactions, or every account's, the newest first.
+/// One account's transactions, or every account's, the newest first: the
+/// register for [`Filter::account`] or [`Filter::all`], kept for the
+/// phones, through the one matcher ([`crate::filters`]).
 #[view("transactions.register")]
 pub fn register(_: &Ctx, _: &Db<Money>, input: Register) -> Result<Plan<TxnLine>, Refusal> {
-    let only = input.account_id;
+    let f = input.account_id.map_or_else(Filter::all, Filter::account);
     Ok(scan::<Money, Txn>()
-        .filter(move |t| only.is_none_or(|a| t.account_id == a))
+        .filter_with(move |db, t| f.matches(db, t))
         .map_with(txn_line)
         .sort(|l| (Desc(l.date.clone()), Desc(l.created_ms), l.id)))
 }
 
 /// What needs somebody to look at it: imported and not yet approved, or
-/// on budget and for no category.
+/// on budget and for no category — the register for
+/// [`Filter::needs_a_look`], kept for the phones.
 #[view("transactions.inbox")]
 pub fn inbox(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<TxnLine>, Refusal> {
+    let f = Filter::needs_a_look();
     Ok(scan::<Money, Txn>()
+        .filter_with(move |db, t| f.matches(db, t))
         .map_with(txn_line)
-        .filter(|l| !l.approved || l.category == "Needs a category")
         .sort(|l| (Desc(l.date.clone()), Desc(l.created_ms), l.id)))
 }
 

@@ -1,6 +1,7 @@
 // The sheets, each at the height its work needs (Shell.swift gives the
 // detents): a transaction typed or corrected, as Wallet's and Reminders'
-// forms are laid out; an amount assigned, a target set or a balance
+// forms are laid out, and one already there made a transfer from its
+// category's list (Transfer To); an amount assigned, a target set or a balance
 // reconciled on the keypad Apple Cash takes an amount on (ArkUI's
 // `AmountEntry`); money moved between categories, its amount first and then
 // where; transactions given a category from the budget's own list; an
@@ -38,10 +39,20 @@ struct TransactionSheet: View {
                         .listRowBackground(Color.clear)
                 }
                 Section {
-                    TextField("Payee", text: $draft.payee)
+                    // Wrapped, never cut: a long payee is read whole. Return
+                    // ends it, as it would a one-line field.
+                    TextField("Payee", text: $draft.payee, axis: .vertical)
+                        .lineLimit(1...4)
                         .focused($payeeFocused)
                         .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
                         .disabled(draft.transferTo != nil)
+                        .onChange(of: draft.payee) { _, p in
+                            if p.contains("\n") {
+                                draft.payee = p.replacingOccurrences(of: "\n", with: "")
+                                payeeFocused = false
+                            }
+                        }
                     if payeeFocused {
                         ForEach(Payees.suggest(draft.payee, s.payees)) { p in
                             Button {
@@ -58,9 +69,28 @@ struct TransactionSheet: View {
                             .foregroundStyle(.primary)
                         }
                     }
+                    // What the bank called it, under the payee as Wallet
+                    // shows a merchant's statement name: whole, and copyable.
+                    if let bank = draft.bank {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Bank Description").font(.caption).foregroundStyle(.secondary)
+                            Text(bank)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                     NavigationLink {
+                        // A transaction already there is made a transfer here
+                        // too (the domain pairs it with the matching one in the
+                        // other account, or adds its other half); a transfer
+                        // stays one, and only its other account is chosen.
                         CategoryPicker(chosen: draft.transferTo == nil ? draft.category : nil,
-                                       transfers: draft.editing == nil ? s.accounts.filter { !$0.closed && $0.id != draft.account } : [],
+                                       transfers: s.accounts.filter { !$0.closed && $0.id != draft.account },
+                                       categories: !draft.transfer, transferred: draft.transferTo,
+                                       transferNote: draft.editing != nil && !draft.transfer
+                                           ? "Made a transfer, it pairs with the matching transaction in that account, or one is added there." : nil,
                                        inflow: true) { choice in
                             switch choice {
                             case let .category(c): draft.choose(category: c)
@@ -141,10 +171,17 @@ enum Choice {
 /// The budget's categories under their groups, each with what it has, to
 /// choose one from: Ready to Assign first when money can come in, and the
 /// other accounts when a transfer can go to one. Searchable, as a long
-/// list in a system sheet is.
+/// list in a system sheet is. Never a card's payment category: money goes
+/// there by a transfer to the card (`Cards.choosable`).
 struct CategoryPicker: View {
     let chosen: Id?
     var transfers: [AccountLine] = []
+    /// Whether categories are offered at all: not for a transfer, which stays one.
+    var categories = true
+    /// The account a transfer is with now, marked.
+    var transferred: Id? = nil
+    /// What choosing an account does, said under them.
+    var transferNote: String? = nil
     var inflow = false
     var allowNone = false
     var skip: Id? = nil
@@ -157,12 +194,12 @@ struct CategoryPicker: View {
         let s = model.snapshot
         let n = needle.lowercased()
         List {
-            if inflow && (n.isEmpty || "ready to assign".contains(n)) {
+            if categories && inflow && (n.isEmpty || "ready to assign".contains(n)) {
                 Section("Inflow") {
                     row("Ready to Assign", s.summary?.readyToAssign, chosen == Fixed.readyToAssign) { pick(.category(Fixed.readyToAssign)) }
                 }
             }
-            ForEach(Months.groups(s.groups, s.lines, hidden: false)) { g in
+            ForEach(categories ? Cards.choosable(Months.groups(s.groups, s.lines, hidden: false)) : []) { g in
                 let lines = g.lines.filter { $0.categoryId != skip && (n.isEmpty || $0.name.lowercased().contains(n)) }
                 if !lines.isEmpty {
                     Section(g.group.name) {
@@ -174,13 +211,17 @@ struct CategoryPicker: View {
             }
             let accounts = transfers.filter { n.isEmpty || $0.name.lowercased().contains(n) }
             if !accounts.isEmpty {
-                Section("Transfer To") {
+                Section {
                     ForEach(accounts) { a in
-                        row(a.name, nil, false) { pick(.transfer(a.id)) }
+                        row(a.name, nil, transferred == a.id) { pick(.transfer(a.id)) }
                     }
+                } header: {
+                    Text("Transfer To")
+                } footer: {
+                    if let transferNote { Text(transferNote) }
                 }
             }
-            if allowNone {
+            if categories && allowNone {
                 Section { row("No Category", nil, chosen == nil) { pick(.category(nil)) } }
             }
         }
@@ -234,17 +275,34 @@ struct AssignSheet: View {
 
     var body: some View {
         let l = model.snapshot.line(id)
+        let ruled = l.map { !Ruled.editable($0) } ?? false
         NavigationStack {
             VStack(spacing: Space.l) {
-                AmountEntry(cents: $cents, prompt: "Assigned in \(model.monthName)", tint: Color.money)
-                if let l {
+                if let l, let words = Ruled.words(l) {
+                    // Its rule assigns this month: the amount shown, never typed.
+                    VStack(spacing: Space.s) {
+                        MarkedCents(l.assigned, mark: Ruled.symbol, says: "assigned by its rule")
+                            .font(.system(size: 56, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.4)
+                            .lineLimit(1)
+                        Text(words)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    AmountEntry(cents: $cents, prompt: "Assigned in \(model.monthName)", tint: Color.money)
+                }
+                if let l, !ruled {
                     HStack(spacing: Space.s) {
+                        if let cover = Cards.toCover(l) { chip("Covers the Card", cover) }
                         if l.target > 0 { chip("Target", l.target) }
                         if l.assignedLastMonth > 0 { chip("Last Month", l.assignedLastMonth) }
                         if l.averageSpent > 0 { chip("Average Spent", l.averageSpent) }
                     }
                 }
-                if let s = model.snapshot.summary {
+                if let s = model.snapshot.summary, !ruled {
                     Text("\(CentsText.string(s.readyToAssign - (cents - (l?.assigned ?? 0)))) left to assign")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -259,11 +317,13 @@ struct AssignSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(role: .confirm) {
-                        model.assign(id, cents) { if $0 { dismiss() } }
-                    } label: { Image(systemName: "checkmark") }
-                        .accessibilityLabel("Assign")
+                if !ruled {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(role: .confirm) {
+                            model.assign(id, cents) { if $0 { dismiss() } }
+                        } label: { Image(systemName: "checkmark") }
+                            .accessibilityLabel("Assign")
+                    }
                 }
             }
             .onAppear {
@@ -307,11 +367,15 @@ struct MoveSheet: View {
                         .listRowBackground(Color.clear)
                 }
                 Section(covering ? "Cover It From" : "Move It To") {
-                    if id != nil {
-                        target("Ready to Assign", model.snapshot.summary?.readyToAssign, nil, l)
-                    }
-                    ForEach(Months.groups(model.snapshot.groups, model.snapshot.lines, hidden: false)) { g in
-                        ForEach(g.lines.filter { $0.categoryId != id }) { o in
+                    if let l, let words = Ruled.words(l) {
+                        // Its rule assigns this month: nothing moves to or from it.
+                        Label(words, systemImage: Ruled.symbol).foregroundStyle(.secondary)
+                    } else {
+                        if id != nil {
+                            target("Ready to Assign", model.snapshot.summary?.readyToAssign, nil, l)
+                        }
+                        // A category its rule assigns is neither a source nor a target.
+                        ForEach(Moves.others(Months.groups(model.snapshot.groups, model.snapshot.lines, hidden: false), besides: id)) { o in
                             target(o.name, o.available, o.categoryId, l)
                         }
                     }
@@ -550,7 +614,8 @@ struct NewCategorySheet: View {
                     .submitLabel(.done)
                     .onSubmit(add)
                 Picker("Group", selection: $chosen) {
-                    ForEach(model.snapshot.groups) { g in Text(g.name).tag(Optional(g.id)) }
+                    // Not the cards' group: its categories come with the cards.
+                    ForEach(model.snapshot.groups.filter { !Cards.isGroup($0.id) }) { g in Text(g.name).tag(Optional(g.id)) }
                 }
             }
             .navigationTitle("New Category")
@@ -566,7 +631,7 @@ struct NewCategorySheet: View {
                 }
             }
             .onAppear {
-                chosen = group ?? model.snapshot.groups.first?.id
+                chosen = group ?? model.snapshot.groups.first { !Cards.isGroup($0.id) }?.id
                 focused = true
             }
         }

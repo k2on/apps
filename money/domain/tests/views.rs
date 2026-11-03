@@ -15,6 +15,11 @@ use money_domain::*;
 
 type Step = Box<dyn Fn(&mut Book)>;
 
+/// A saved filter's id, by its name.
+fn saved(b: &Book, name: &str) -> Id<SavedFilter> {
+    b.rows::<SavedFilter>("saved_filter").into_iter().find(|f| f.name == name).unwrap().id
+}
+
 /// A month of a household, one change at a time.
 fn script(b: &mut Book) -> Vec<Step> {
     let checking = b.account("Checking", "checking", 300_000);
@@ -52,6 +57,99 @@ fn script(b: &mut Book) -> Vec<Step> {
                 amount: 5_000,
             };
             b.run("move_money", &m).unwrap();
+        }),
+        // Rent assigned by formula from October: a share of ACME's pay into
+        // checking, which comes before and after the formula does; then
+        // half of what food spent with it, and the pay filter widened.
+        Box::new(move |b| b.spend(checking, "2026-10-02", "ACME Payroll", Some(budget::ready_to_assign()), 200_000)),
+        Box::new(move |b| {
+            let f = SaveFilter {
+                name: "Pay".into(),
+                filter: Filter {
+                    accounts: vec![checking],
+                    text: "acme".into(),
+                    direction: Direction::In,
+                    ..Filter::default()
+                },
+            };
+            b.run("save_filter", &f).unwrap();
+        }),
+        Box::new(move |b| {
+            let f = SetFormula {
+                category_id: rent,
+                from: Some("2026-10".into()),
+                terms: vec![Term {
+                    filter_id: saved(b, "Pay"),
+                    times: 3,
+                    per: 4,
+                }],
+            };
+            b.run("set_formula", &f).unwrap();
+        }),
+        Box::new(move |b| b.spend(checking, "2026-11-02", "ACME Payroll", Some(budget::ready_to_assign()), 210_000)),
+        Box::new(move |b| {
+            let f = SaveFilter {
+                name: "Food".into(),
+                filter: Filter {
+                    categories: vec![Some(food)],
+                    ..Filter::default()
+                },
+            };
+            b.run("save_filter", &f).unwrap();
+        }),
+        Box::new(move |b| {
+            let terms = vec![
+                Term {
+                    filter_id: saved(b, "Pay"),
+                    times: 3,
+                    per: 4,
+                },
+                Term {
+                    filter_id: saved(b, "Food"),
+                    times: 1,
+                    per: 2,
+                },
+            ];
+            let f = SetFormula {
+                category_id: rent,
+                from: Some("2026-11".into()),
+                terms,
+            };
+            b.run("set_formula", &f).unwrap();
+        }),
+        Box::new(move |b| {
+            let f = ChangeFilter {
+                id: saved(b, "Pay"),
+                filter: Filter {
+                    text: "acme".into(),
+                    direction: Direction::In,
+                    ..Filter::default()
+                },
+            };
+            b.run("change_filter", &f).unwrap();
+        }),
+        Box::new(move |b| {
+            let c = ClearFormula {
+                category_id: rent,
+                from: Some("2026-12".into()),
+            };
+            b.run("clear_formula", &c).unwrap();
+        }),
+        // One change a step: what a view is pushed is the last change.
+        Box::new(move |b| {
+            let id = saved(b, "Food");
+            b.run(
+                "move_filter",
+                &MoveFilter {
+                    id,
+                    before: Some(saved(b, "Pay")),
+                },
+            )
+            .unwrap();
+        }),
+        Box::new(move |b| {
+            let id = saved(b, "Food");
+            b.run("rename_filter", &RenameFilter { id, name: "Eating".into() }).unwrap();
         }),
         Box::new(|b| {
             let accounts: Vec<PlaidAccount> = serde_json::from_str(
@@ -183,6 +281,22 @@ fn script(b: &mut Book) -> Vec<Step> {
             )
             .unwrap();
         }),
+        // A card that comes with debt, and a payment typed as spending
+        // made a transfer to the card.
+        Box::new(|b| {
+            b.account("Amex", "credit", -20_000);
+        }),
+        Box::new(move |b| {
+            let t = b.register(Some(checking)).into_iter().find(|t| t.amount == -1_000).unwrap();
+            let e = EditTransaction {
+                id: t.id,
+                date: t.date,
+                amount: t.amount,
+                transfer_to: Some(card),
+                ..EditTransaction::default()
+            };
+            b.run("edit_transaction", &e).unwrap();
+        }),
         Box::new(move |b| {
             let ids = b.register(Some(card)).iter().filter(|t| t.transfer).map(|t| t.id).collect();
             b.run("delete_transactions", &Txns { ids }).unwrap();
@@ -230,6 +344,64 @@ fn the_budget() {
     hold("groups", &());
     hold("spending", &month("2026-10"));
     hold("tree", &());
+    hold("formulas", &month("2026-10"));
+    hold("formulas", &month("2026-11"));
+    // A preview's filter is whichever the script saves first.
+    let mut b = Book::new();
+    for step in script(&mut b) {
+        step(&mut b);
+    }
+    let pay = b.rows::<SavedFilter>("saved_filter").into_iter().find(|f| f.name == "Pay").unwrap().id;
+    let preview = PreviewFormula {
+        month: "2026-11".into(),
+        terms: vec![Term {
+            filter_id: pay,
+            times: 1,
+            per: 10,
+        }],
+    };
+    hold("preview_formula", &preview);
+}
+
+/// The saved filters, and the register for one, by its id and by its
+/// conditions, in a month and not.
+#[test]
+fn the_filters() {
+    hold("saved", &());
+    let mut b = Book::new();
+    for step in script(&mut b) {
+        step(&mut b);
+    }
+    let pay = b.rows::<SavedFilter>("saved_filter").into_iter().find(|f| f.name == "Pay").unwrap().id;
+    let by_id = Filtered {
+        saved: Some(pay),
+        ..Filtered::default()
+    };
+    hold("filtered", &by_id);
+    hold("filtered_total", &by_id);
+    let october = Filtered {
+        month: Some("2026-10".into()),
+        ..by_id
+    };
+    hold("filtered", &october);
+    hold("filtered_total", &october);
+    let spent = Filtered {
+        filter: Filter {
+            direction: Direction::Out,
+            no_transfers: true,
+            on_budget: true,
+            ..Filter::default()
+        },
+        ..Filtered::default()
+    };
+    hold("filtered", &spent);
+    hold("filtered_total", &spent);
+    let look = Filtered {
+        filter: Filter::needs_a_look(),
+        ..Filtered::default()
+    };
+    hold("filtered", &look);
+    hold("filtered_total", &look);
 }
 
 #[test]
@@ -240,6 +412,19 @@ fn the_receipts() {
         "receipt_items",
         &OneReceipt {
             receipt_id: "costco:2113".into(),
+        },
+    );
+    hold(
+        "charges",
+        &OneReceipt {
+            receipt_id: "costco:2113".into(),
+        },
+    );
+    hold(
+        "candidates",
+        &PaidFor {
+            receipt_id: "costco:2113".into(),
+            charge_id: None,
         },
     );
 }

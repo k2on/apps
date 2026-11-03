@@ -84,6 +84,11 @@ final class SessionTests: XCTestCase {
                               "Chase: nothing new at the bank"])
         XCTAssertTrue(s.snap.inbox.count > before)
         XCTAssertFalse(s.snap.banks.isEmpty)
+        // What the bank brought is opened with what the bank called it.
+        guard let t = s.snap.inbox.first(where: { $0.imported }) else { return XCTFail("an imported line") }
+        XCTAssertFalse(t.importedPayee.isEmpty)
+        XCTAssertEqual(Draft(t).bank, Registers.bankDescription(t))
+        XCTAssertNotNil(Draft(t).bank, "\(t.payee) / \(t.importedPayee)")
     }
 
     /// A refusal is the domain's sentence, said once.

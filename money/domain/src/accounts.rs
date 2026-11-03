@@ -4,7 +4,8 @@
 
 use ark::prelude::*;
 
-use crate::budget::{ensure_setup, ready_to_assign, Plan};
+use crate::budget::{ensure_setup, Plan};
+use crate::cards;
 use crate::schema::*;
 use crate::types::*;
 
@@ -21,7 +22,8 @@ pub fn on_budget_by_default(kind: &str) -> bool {
 pub const STARTING_BALANCE: &str = "Starting Balance";
 
 /// An account, after every other, and its first transaction: `balance` on
-/// `date`. On budget, that money is ready to assign.
+/// `date`. On budget, that money is ready to assign — but a card's debt,
+/// which is its payment category's to cover ([`cards::starting_category`]).
 #[allow(clippy::too_many_arguments)]
 pub fn open(
     ctx: &Ctx,
@@ -35,7 +37,7 @@ pub fn open(
 ) -> Result<(), Refusal> {
     ensure_setup(ctx, db)?;
     let pos = db.account.by(Account::POS).whole().last().map_or(0, |a| a.pos) + 1;
-    db.account.insert(Account {
+    let account = Account {
         id,
         name: name.into(),
         kind: kind.into(),
@@ -45,13 +47,15 @@ pub fn open(
         note: String::new(),
         created_ms: ctx.now,
         user_id: ctx.user().into(),
-    })?;
+    };
+    db.account.insert(account.clone())?;
+    cards::keep(ctx, db, &account)?;
     db.txn.insert(Txn {
         id: ctx.new_id(),
         account_id: id,
         date: date.into(),
         payee: STARTING_BALANCE.into(),
-        category_id: on_budget.then(ready_to_assign),
+        category_id: cards::starting_category(&account, balance),
         amount: balance,
         cleared: Cleared::Cleared,
         approved: true,
@@ -79,21 +83,29 @@ pub fn account_of(db: &Db<Money>, id: Id<Account>) -> Result<Account, Refusal> {
     db.account.get(id).ok_or_else(|| Refusal::new("no such account"))
 }
 
+/// An account named again — a card's payment category with it.
 #[mutator("accounts.rename_account")]
-pub fn rename_account(_: &Ctx, db: &mut Db<Money>, input: RenameAccount) -> Result<(), Refusal> {
-    let a = account_of(db, input.id)?;
-    db.account.update(Account { name: input.name, ..a })
+pub fn rename_account(ctx: &Ctx, db: &mut Db<Money>, input: RenameAccount) -> Result<(), Refusal> {
+    let a = Account {
+        name: input.name,
+        ..account_of(db, input.id)?
+    };
+    db.account.update(a.clone())?;
+    cards::keep(ctx, db, &a)
 }
 
 /// An account closed, or open again. One with money in it stays open: the
-/// money has to go somewhere first.
+/// money has to go somewhere first. A closed card's payment category is
+/// hidden, and back when it opens again.
 #[mutator("accounts.close_account")]
-pub fn close_account(_: &Ctx, db: &mut Db<Money>, input: CloseAccount) -> Result<(), Refusal> {
+pub fn close_account(ctx: &Ctx, db: &mut Db<Money>, input: CloseAccount) -> Result<(), Refusal> {
     let a = account_of(db, input.id)?;
     if input.closed && balances(db, a.id).0 != 0 {
         return Err(Refusal::new("an account is closed with nothing in it"));
     }
-    db.account.update(Account { closed: input.closed, ..a })
+    let a = Account { closed: input.closed, ..a };
+    db.account.update(a.clone())?;
+    cards::keep(ctx, db, &a)
 }
 
 /// An account's balance, what of it has cleared, and how many of its

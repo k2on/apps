@@ -3,7 +3,7 @@
 //! the month's money went — with a panel over it when one is open.
 
 use arkui::{glyphs, icon, layer, menu, outline, panel, style, table};
-use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, tooltip, Column, Space};
+use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::budget::ready_to_assign;
 use money_domain::dates::{month_name, month_of};
@@ -21,7 +21,9 @@ pub const LINE: f32 = 54.0;
 /// The register's geometry: the top above its table, the table's heading,
 /// the gap between them, and every row — one height each, so where a row
 /// is on screen is arithmetic (`App::category_at`).
-pub const LEDGER_TOP: f32 = 150.0;
+/// The top above the register: an account's has its balances too.
+pub const LEDGER_TOP: f32 = 160.0;
+pub const LEDGER_BALANCES: f32 = 52.0;
 pub const LEDGER_HEAD: f32 = 28.0;
 pub const LEDGER_GAP: f32 = 14.0;
 pub const TXN_ROW: f32 = 34.0;
@@ -39,20 +41,20 @@ const PILL_COL: f32 = 140.0;
 /// How far in from a row's edge its first and last things sit.
 const ROW_INSET: f32 = 12.0;
 
-fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
+pub(crate) fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).font(arkui::hero::BOLD)
 }
 
-fn dim<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
+pub(crate) fn dim<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).style(style::dim)
 }
 
-fn fill() -> Space {
+pub(crate) fn fill() -> Space {
     Space::new().width(Length::Fill)
 }
 
 /// A button of the accent: something somebody is meant to press.
-fn action<'a>(label: &str, msg: Message) -> Element<'a, Message> {
+pub(crate) fn action<'a>(label: &str, msg: Message) -> Element<'a, Message> {
     button(text(label.to_string()).size(13))
         .on_press(msg)
         .padding([5, 12])
@@ -61,7 +63,7 @@ fn action<'a>(label: &str, msg: Message) -> Element<'a, Message> {
 }
 
 /// A button that is a word until pointed at.
-fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
+pub(crate) fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
     button(text(label.to_string()).size(13))
         .on_press(msg)
         .padding([5, 10])
@@ -69,7 +71,7 @@ fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
         .into()
 }
 
-fn link<'a>(label: impl Into<String>, msg: Message) -> Element<'a, Message> {
+pub(crate) fn link<'a>(label: impl Into<String>, msg: Message) -> Element<'a, Message> {
     button(text(label.into()).size(12)).on_press(msg).padding(0).style(look::link).into()
 }
 
@@ -108,9 +110,9 @@ impl App {
         let page: Element<'_, Message> = match self.page {
             Page::Budget => self.view_budget(),
             Page::Reflect => self.view_reflect(),
+            Page::Settings => self.view_settings(),
             Page::Ledger(l) => self.view_ledger(l),
             Page::Receipts => self.view_receipts(),
-            Page::Settings => self.view_settings(),
         };
         // A swipe's arrow over the page, not the sidebar.
         let page = self.history.view(page, iced::time::Instant::now());
@@ -146,6 +148,16 @@ impl App {
                     .align_y(Alignment::End),
             );
         }
+        // The account at the top right, over the page, as harken's: its menu
+        // opens Settings and signs out.
+        if let Some(account) = self.account() {
+            layers = layers.push(
+                container(arkui::account::button(&account, None, Message::AccountMenu))
+                    .width(Length::Fill)
+                    .padding(PAD)
+                    .align_x(Alignment::End),
+            );
+        }
         if let Some(m) = &self.modal {
             layers = layers
                 .push(layer::dimmed(Message::CloseModal, Message::Swallow))
@@ -160,24 +172,38 @@ impl App {
                 at: Box::new(Message::DropAt),
                 scrolled: Box::new(Message::DropScrolled),
             };
-            let panel = arkui::command::panel(&d.search, "Find a category", self.drop_groups(), messages, crate::DROP_WIDTH);
+            let groups = self.drop_groups();
+            // Above the cell, it stands on the cell: its bottom where its
+            // corner is, however tall what is found makes it.
+            let at = match d.above {
+                true => {
+                    let tall = match arkui::command::rows(&groups) {
+                        0 => arkui::command::EMPTY_HEIGHT,
+                        _ => arkui::command::list_height(&groups),
+                    };
+                    iced::Point::new(d.at.x, (d.at.y - tall - 2.0).max(0.0))
+                }
+                false => d.at,
+            };
+            let panel = arkui::command::list(&d.search, groups, messages, crate::DROP_WIDTH);
             layers = layers
                 .push(layer::backdrop(Message::CloseDrop, Message::Swallow))
-                .push(layer::pinned(panel, d.at));
+                .push(layer::pinned(panel, at));
         }
         if let Some(m) = &self.ctx.menu {
             layers = layers
                 .push(layer::backdrop(Message::CloseMenu, Message::Swallow))
                 .push(layer::pinned(menu::view(m, true, Message::MenuAt, Message::MenuActivate), m.origin));
         }
-        // Every text box copies, cuts and pastes in a browser too.
-        arkui::clipboard::view(layers)
+        // The window's root: arkui's own needs of the platform.
+        arkui::window::view(layers)
     }
 
     // * The sidebar
 
-    /// The sidebar's places, in order: the pages, then the accounts under
-    /// their headings. What the keys walk is what is drawn.
+    /// The sidebar's places, in order: the pages, All Accounts, the accounts
+    /// under their headings, then the saved filters — every register one is
+    /// a filter's. What the keys walk is what is drawn.
     pub fn places(&self) -> Vec<(&'static [u8], String, Option<&'static str>, Page)> {
         let pages = [
             (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
@@ -200,14 +226,26 @@ impl App {
                 (glyph(a), label, Some(name), Page::Ledger(Ledger::Account(a.id)))
             })
         });
-        pages.into_iter().chain(accounts).collect()
+        // The saved filters, after the accounts: registers like theirs.
+        let saved = self
+            .peer
+            .filters
+            .rows
+            .iter()
+            .map(|f| (glyphs::SEARCH, f.name.clone(), Some("Filters"), Page::Ledger(Ledger::Saved(f.id))));
+        pages.into_iter().chain(accounts).chain(saved).collect()
     }
 
     /// The sidebar's cursor: the page shown. The inbox is All Accounts,
-    /// filtered, so its row stays the one lit.
+    /// filtered, and a register changed here is what it was changed from,
+    /// so their rows stay the ones lit.
     pub fn sidebar_at(&self) -> usize {
         let here = match self.page {
             Page::Ledger(Ledger::Inbox) => Page::Ledger(Ledger::All),
+            Page::Ledger(Ledger::Adhoc) => match self.peer.base {
+                Ledger::Inbox | Ledger::Adhoc => Page::Ledger(Ledger::All),
+                b => Page::Ledger(b),
+            },
             p => p,
         };
         self.places().iter().position(|p| p.3 == here).unwrap_or(0)
@@ -227,6 +265,7 @@ impl App {
                     Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
                     Page::Receipts => (!self.peer.unfiled.rows.is_empty()).then(|| self.badge(self.peer.unfiled.rows.len(), lit)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
+                    Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map(|f| balance(f.total, lit)),
                     _ => None,
                 };
                 arkui::sidebar::Item {
@@ -421,7 +460,11 @@ impl App {
                 header,
                 rule::horizontal(1).style(style::hairline),
                 new_group,
-                scrollable(body).id(look::BUDGET).height(Length::Fill).style(style::bars)
+                scrollable(body)
+                    .id(look::BUDGET)
+                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                    .height(Length::Fill)
+                    .style(style::bars)
             ],
         ]
         .spacing(12)
@@ -448,30 +491,44 @@ impl App {
     }
 
     /// A group's heading, a card the rows hang under: its name, and what
-    /// its categories were given and spent.
+    /// its categories were given and spent. The cards' group is the
+    /// cards' — its categories come and go with them, so it offers no new
+    /// one — and says what of their debt is not covered.
     fn group_row<'a>(&self, g: &GroupLine, lines: &[&BudgetLine]) -> Element<'a, Message> {
         let sum = |f: fn(&BudgetLine) -> i64| lines.iter().map(|l| f(l)).sum::<i64>();
         let collapsed = self.collapsed.contains(&g.id);
-        let name = row![
-            button(icon::faint(if collapsed { glyphs::CHEVRON } else { glyphs::DOWN }, false))
-                .on_press(Message::Collapse(g.id))
-                .padding(2)
-                .style(style::quiet),
-            self.name_or_box(Naming::Group(g.id), bold(g.name.clone(), 14).into()),
-            button(icon::faint(glyphs::PLUS, false))
-                .on_press(Message::NewCategory(g.id))
-                .padding(2)
-                .style(style::quiet),
-        ]
+        let cards = g.id == money_domain::cards::card_group();
+        let mut name = row![button(icon::faint(if collapsed { glyphs::CHEVRON } else { glyphs::DOWN }, false))
+            .on_press(Message::Collapse(g.id))
+            .padding(2)
+            .style(style::quiet),]
         .spacing(8)
         .align_y(Alignment::Center);
+        if cards {
+            name = name.push(bold(g.name.clone(), 14));
+        } else {
+            name = name.push(self.name_or_box(Naming::Group(g.id), bold(g.name.clone(), 14).into())).push(
+                button(icon::faint(glyphs::PLUS, false))
+                    .on_press(Message::NewCategory(g.id))
+                    .padding(2)
+                    .style(style::quiet),
+            );
+        }
         let total = |c: i64| right(bold(money(c), 14).into(), MONEY_COL);
+        let short = sum(|l| l.underfunded);
+        let note: Element<'a, Message> = match cards && short > 0 {
+            true => right(
+                text(format!("{} not covered", money(short))).size(12).style(Tone::Short.text()).into(),
+                GOAL_COL + PILL_COL,
+            ),
+            false => Space::new().width(Length::Fixed(GOAL_COL + PILL_COL)).into(),
+        };
         let card = container(
             row![
                 container(name).width(Length::Fill),
                 total(sum(|l| l.assigned)),
                 total(sum(|l| l.activity)),
-                Space::new().width(Length::Fixed(GOAL_COL + PILL_COL)),
+                note,
             ]
             .align_y(Alignment::Center),
         )
@@ -488,12 +545,12 @@ impl App {
     /// `style::on_row` — the pill too, which on the accent is the accent's
     /// text on a wash of it.
     fn category_row<'a>(&'a self, l: &'a BudgetLine, lit: bool) -> Element<'a, Message> {
-        let tone = Tone::of(l.available, l.target, l.assigned);
+        let tone = tone(l);
         let hidden = l.hidden;
         let label = text(l.name.clone()).size(14).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, hidden)),
         });
-        let name = row![tile(&l.name), self.name_or_box(Naming::Category(l.category_id), label.into())]
+        let name = row![tile(l), self.name_or_box(Naming::Category(l.category_id), label.into())]
             .spacing(12)
             .align_y(Alignment::Center);
         let assigned: Element<'a, Message> = match &self.assigning {
@@ -506,6 +563,22 @@ impl App {
                 .width(Length::Fixed(MONEY_COL - 14.0))
                 .style(look::input)
                 .into(),
+            // Worked out by its formula: the amount, with the formula's mark, and
+            // pressing it says why it does not open.
+            _ if l.ruled => button(
+                row![
+                    icon::faint(glyphs::REPEAT, lit).width(12.0).height(12.0),
+                    text(money(l.assigned)).size(14).style(move |theme| text::Style {
+                        color: Some(style::on_row(theme, lit, false, false)),
+                    })
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .on_press(Message::EditAssigned(l.category_id))
+            .padding([3, 0])
+            .style(style::quiet)
+            .into(),
             _ => button(text(money(l.assigned)).size(14).style(move |theme| text::Style {
                 color: Some(style::on_row(theme, lit, false, false)),
             }))
@@ -550,14 +623,19 @@ impl App {
             Some(l) => self.inspect_category(l),
             None => self.inspect_month(),
         };
-        container(scrollable(body.spacing(12).padding(PAD)).height(Length::Fill).style(style::bars))
+        // Its top clear of the account button, which floats over the corner.
+        let pad = Padding {
+            top: PAD + arkui::account::HEIGHT + 6.0,
+            ..Padding::new(PAD)
+        };
+        container(scrollable(body.spacing(12).padding(pad)).height(Length::Fill).style(style::bars))
             .width(Length::Fixed(INSPECTOR))
             .height(Length::Fill)
             .style(style::surface)
             .into()
     }
 
-    fn figure<'a>(label: &str, cents: i64) -> Element<'a, Message> {
+    pub(crate) fn figure<'a>(label: &str, cents: i64) -> Element<'a, Message> {
         row![text(label.to_string()).size(12).width(Length::Fill), text(money(cents)).size(12)]
             .align_y(Alignment::Center)
             .into()
@@ -613,35 +691,52 @@ impl App {
     }
 
     fn inspect_category<'a>(&'a self, l: &'a BudgetLine) -> Column<'a, Message> {
-        let tone = Tone::of(l.available, l.target, l.assigned);
-        let head = container(
-            column![
-                row![
-                    column![bold(l.name.clone(), 16), dim(l.group.clone(), 11)].spacing(2).width(Length::Fill),
-                    glyph_button(glyphs::CLOSE, Message::Select(None)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    text("Available Balance").size(12).width(Length::Fill),
-                    container(text(money(l.available)).size(14))
-                        .padding([3, 10])
-                        .style(look::pill(tone, false)),
-                ]
-                .align_y(Alignment::Center),
-                rule::horizontal(1).style(style::hairline),
-                App::figure("Cash left over from last month", l.carried),
-                App::figure("Assigned this month", l.assigned),
-                App::figure("Cash spending", l.activity),
-                if l.available < 0 {
-                    action("Cover overspending", Message::MoveMoney)
-                } else {
-                    quiet("Move money", Message::MoveMoney)
-                },
+        let tone = tone(l);
+        let spent = match l.card {
+            Some(_) => "Spending covered, less payments",
+            None => "Cash spending",
+        };
+        let mut figures = column![
+            row![
+                column![bold(l.name.clone(), 16), dim(l.group.clone(), 11)].spacing(2).width(Length::Fill),
+                glyph_button(glyphs::CLOSE, Message::Select(None)),
             ]
-            .spacing(8),
-        )
-        .padding(14)
-        .style(look::card);
+            .align_y(Alignment::Center),
+            row![
+                text("Available Balance").size(12).width(Length::Fill),
+                container(text(money(l.available)).size(14))
+                    .padding([3, 10])
+                    .style(look::pill(tone, false)),
+            ]
+            .align_y(Alignment::Center),
+            rule::horizontal(1).style(style::hairline),
+            App::figure("Cash left over from last month", l.carried),
+            App::figure("Assigned this month", l.assigned),
+            App::figure(spent, l.activity),
+        ]
+        .spacing(8);
+        if l.credit_overspent > 0 {
+            // Debt now, not next month's money: amber, as YNAB has it.
+            figures = figures.push(
+                row![
+                    text("Spent on a card, not covered").size(12).width(Length::Fill),
+                    text(money(l.credit_overspent)).size(12).style(Tone::Short.text()),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+        figures = figures.push(if l.ruled {
+            dim("Assigned by its formula this month: money is not moved to or from it by hand.", 11).into()
+        } else if l.available < 0 {
+            action("Cover overspending", Message::MoveMoney)
+        } else {
+            quiet("Move money", Message::MoveMoney)
+        });
+        let head = container(figures).padding(14).style(look::card);
+
+        if l.card.is_some() {
+            return column![head, self.inspect_card(l)];
+        }
 
         let mut target = column![bold("Target", 14)].spacing(8);
         if l.target > 0 {
@@ -655,7 +750,9 @@ impl App {
                 .align_y(Alignment::Center),
             );
             target = target.push(progress_bar(0.0..=1.0, funded).girth(Length::Fixed(6.0)).style(look::progress(tone)));
-            if have < l.target {
+            if have < l.target && l.ruled {
+                target = target.push(dim("Its formula assigns it: what its filters add up to decides.", 11));
+            } else if have < l.target {
                 let need = l.target - have;
                 target = target.push(action(
                     &format!("Assign {} to meet target", money(need)),
@@ -730,7 +827,51 @@ impl App {
             link("Delete category", Message::DeleteCategory(l.category_id)),
         ]
         .spacing(16);
-        column![head, target, auto, kinds, manage]
+        match l.ruled {
+            // Its formula before the hand's buttons, which it has no use for.
+            true => column![head, self.inspect_formula(l), target, kinds, manage],
+            false => column![head, target, auto, self.inspect_formula(l), kinds, manage],
+        }
+    }
+
+    /// A card's payment category: what the card owes, what of it the
+    /// category does not cover, and the money to cover it. Its name is the
+    /// card's, and it goes when the card is closed: nothing to rename or
+    /// delete here.
+    fn inspect_card<'a>(&'a self, l: &'a BudgetLine) -> Element<'a, Message> {
+        let mut card = column![
+            bold("Card balance", 14),
+            App::figure("Owed at the end of the month", l.debt),
+            row![
+                text("Not covered").size(12).width(Length::Fill),
+                text(money(l.underfunded))
+                    .size(12)
+                    .style(if l.underfunded > 0 { Tone::Short } else { Tone::Funded }.text()),
+            ]
+            .align_y(Alignment::Center),
+        ]
+        .spacing(8);
+        if l.underfunded > 0 {
+            card = card.push(action(
+                &format!("Assign {} to cover the debt", money(l.underfunded)),
+                Message::AssignTo(l.category_id, l.assigned + l.underfunded),
+            ));
+        } else if l.debt > 0 {
+            card = card.push(text("Enough set aside to pay it").size(12).style(Tone::Funded.text()));
+        } else {
+            card = card.push(dim("Nothing owed on it.", 11));
+        }
+        card = card.push(dim(
+            "Spending on the card moves what its category had here; what a category could not cover is debt to assign money to.",
+            11,
+        ));
+        let hidden = l.hidden;
+        column![
+            container(card).padding(14).style(look::card),
+            link(if hidden { "Unhide" } else { "Hide" }, Message::HideCategory(l.category_id, !hidden)),
+        ]
+        .spacing(12)
+        .into()
     }
 
     /// Whether a category of the tree is under `id`, at any depth.
@@ -757,29 +898,39 @@ impl App {
 
     // * The registers
 
+    /// How tall the top above the register is: taller by the balances when
+    /// it is one account's.
+    pub fn ledger_top(&self) -> f32 {
+        match self.register_account() {
+            Some(_) => LEDGER_TOP + LEDGER_BALANCES,
+            None => LEDGER_TOP,
+        }
+    }
+
+    /// The register for a filter: its name and what it adds up to, the
+    /// account's balances and tools when it is exactly one account's, the
+    /// household's tools on every account's, the bar of its conditions,
+    /// and its transactions.
     fn view_ledger(&self, ledger: Ledger) -> Element<'_, Message> {
         let rows = &self.peer.register.rows;
-        let all = !matches!(ledger, Ledger::Account(_));
-        let (title, subtitle, account) = match ledger {
-            Ledger::Account(id) => {
-                let a = self.peer.account(id);
-                let name = a.map(|a| a.name.clone()).unwrap_or_default();
-                let sub = match a {
-                    Some(a) if !a.bank.is_empty() => format!(
-                        "{} \u{2022}\u{2022}{} \u{2014} linked through Plaid{}",
-                        a.kind,
-                        a.mask,
-                        a.bank_balance.map(|b| format!(", the bank says {}", money(b))).unwrap_or_default()
-                    ),
-                    Some(a) => format!("{} \u{2014} {}", a.kind, if a.on_budget { "on budget" } else { "tracking" }),
-                    None => String::new(),
-                };
-                (name, sub, a)
-            }
-            Ledger::All => ("All Accounts".into(), "Every transaction in the household".into(), None),
-            Ledger::Inbox => ("Needs a Look".into(), "Imported and not yet approved, or for no category".into(), None),
-        };
+        let account = self.register_account().and_then(|a| self.peer.account(a));
+        // The account column, unless every row is one account's.
+        let all = account.is_none();
+        let (title, subtitle) = self.register_title();
 
+        // An account's name is renamed where it stands, as a category's is,
+        // and so is a saved filter's.
+        let title: Element<'_, Message> = match (ledger, account) {
+            (Ledger::Account(id), _) => self.name_or_box(Naming::Account(id), bold(title, 22).into()),
+            (Ledger::Saved(id), _) => self.name_or_box(Naming::Filter(id), bold(title, 22).into()),
+            _ => bold(title, 22).into(),
+        };
+        let head_line = column![title, dim(subtitle, 12)].spacing(2);
+        // The conditions, and what they come to at their end.
+        let bar = row![self.view_filter_bar(), fill(), self.view_filter_total()].align_y(Alignment::Center);
+
+        // One slot whatever the register, so the bar under it keeps its
+        // place (and the text box its focus) as the filter changes.
         let balances: Element<'_, Message> = match account {
             Some(a) => row![
                 self.balance_box("Cleared Balance", a.cleared),
@@ -791,23 +942,26 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center)
             .into(),
-            None => {
-                let on: i64 = self.peer.accounts.rows.iter().filter(|a| a.on_budget).map(|a| a.balance).sum();
-                row![self.balance_box("On Budget", on)].into()
-            }
+            None => Space::new().height(Length::Fixed(0.0)).into(),
         };
 
         let unapproved: Vec<Id<Txn>> = rows.iter().filter(|t| !t.approved).map(|t| t.id).collect();
         let mut tools = row![action("+ Add Transaction", Message::AddTxn)].spacing(10).align_y(Alignment::Center);
         if let Some(a) = account {
             tools = tools.push(quiet("Reconcile", Message::Reconcile(a.id)));
+            tools = tools.push(quiet("Rename", Message::Rename(Naming::Account(a.id))));
             if !a.bank.is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
-        } else {
+        } else if ledger == Ledger::All {
             // Every account's register is where accounts are added, and every
             // bank asked for what it has.
             tools = tools.push(quiet("Add Account", Message::AddAccount));
+            tools = tools.push(quiet("Connect a Bank", Message::Banks(crate::banks::Msg::Connect)));
+            if self.banks_wanting() > 0 {
+                let n = self.banks_wanting();
+                tools = tools.push(quiet(&format!("Banks need a look ({n})"), Message::Go(Page::Settings)));
+            }
             if !self.peer.banks.rows.is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
@@ -815,20 +969,9 @@ impl App {
         if !unapproved.is_empty() {
             tools = tools.push(quiet(&format!("Approve all ({})", unapproved.len()), Message::Approve(unapproved)));
         }
-        if all {
-            tools = tools.push(fill());
-            tools = tools.push(
-                button(text("All").size(12))
-                    .on_press(Message::Go(Page::Ledger(Ledger::All)))
-                    .padding([4, 10])
-                    .style(look::choice(ledger == Ledger::All)),
-            );
-            tools = tools.push(
-                button(text(format!("Needs a look ({})", self.peer.inbox.rows.len())).size(12))
-                    .on_press(Message::Go(Page::Ledger(Ledger::Inbox)))
-                    .padding([4, 10])
-                    .style(look::choice(ledger == Ledger::Inbox)),
-            );
+        tools = tools.push(fill());
+        for t in self.filter_tools() {
+            tools = tools.push(t);
         }
 
         let w = |n: f32| Length::Fixed(n);
@@ -861,15 +1004,15 @@ impl App {
             }
         }
         if rows.is_empty() {
-            body = body.push(container(dim("Nothing here.", 13)).padding(20));
+            body = body.push(container(dim("Nothing here matches.", 13)).padding(20));
         }
 
         // The top is one height, and so is every row, so where a row's
         // category is on screen is arithmetic (`App::category_at`): the
         // dropdown opens under it, keys or pointer.
         column![
-            container(column![column![bold(title, 22), dim(subtitle, 12)].spacing(2), balances, tools].spacing(14))
-                .height(Length::Fixed(LEDGER_TOP))
+            container(column![head_line, balances, tools, bar].spacing(12))
+                .height(Length::Fixed(self.ledger_top()))
                 .clip(true),
             column![
                 table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
@@ -923,9 +1066,19 @@ impl App {
                     _ => style::on_row(theme, lit, false, t.category_id == Some(ready_to_assign())),
                 }),
             });
-        let category: Element<'a, Message> = match t.transfer {
-            true => table::cell(t.category.clone(), Length::FillPortion(3), lit, false, true),
-            false => container(mouse_area(label).on_press(Message::CategorizeRow(t.id)))
+        // While its category is being chosen, the cell is the box it is typed
+        // into, the list hanging under it.
+        let choosing = matches!(&self.dropdown, Some(d) if matches!(d.choosing, Choosing::Txns(_))) && self.txn_at == Some(t.id);
+        let category: Element<'a, Message> = match (t.transfer, choosing) {
+            (_, true) => container(self.drop_box(&t.category))
+                .width(Length::FillPortion(3))
+                .padding(Padding {
+                    right: table::SPACING,
+                    ..Padding::ZERO
+                })
+                .into(),
+            (true, false) => table::cell(t.category.clone(), Length::FillPortion(3), lit, false, true),
+            (false, false) => container(mouse_area(label).on_press(Message::CategorizeRow(t.id)))
                 .width(Length::FillPortion(3))
                 .padding(Padding {
                     right: table::SPACING,
@@ -936,7 +1089,7 @@ impl App {
         };
         line = line
             .push(table::cell(t.date.clone(), w(96.0), lit, false, true))
-            .push(payee_cell(t, lit))
+            .push(table::cell(t.payee.clone(), Length::FillPortion(3), lit, !t.approved, false))
             .push(category)
             .push(table::cell(t.memo.clone(), Length::FillPortion(2), lit, false, true))
             .push(table::cell(money_or_blank((-t.amount).max(0)), w(100.0), lit, false, false))
@@ -1008,15 +1161,22 @@ impl App {
                     .id(crate::look::PAYEE)
                     .width(Length::FillPortion(3)),
             )
-            .push({
-                let b = button(text(category_label).size(13))
-                    .padding([4, 6])
-                    .width(Length::FillPortion(3))
-                    .style(look::choice(false));
-                match f.split.is_some() {
-                    true => b,
-                    false => b.on_press(Message::ChooseCategory),
-                }
+            .push(match &self.dropdown {
+                Some(d) if d.choosing == Choosing::Form => container(self.drop_box(&category_label)).width(Length::FillPortion(3)).into(),
+                // A split's categories are its lines'.
+                _ if f.split.is_some() => Element::from(
+                    button(text(category_label.clone()).size(13))
+                        .padding([4, 6])
+                        .width(Length::FillPortion(3))
+                        .style(look::choice(false)),
+                ),
+                _ => Element::from(
+                    button(text(category_label).size(13))
+                        .on_press(Message::ChooseCategory)
+                        .padding([4, 6])
+                        .width(Length::FillPortion(3))
+                        .style(look::choice(false)),
+                ),
             })
             .push(field("Memo", &f.memo, Field::Memo).width(Length::FillPortion(2)))
             .push(field("Outflow", &f.outflow, Field::Outflow).width(w(94.0)))
@@ -1350,18 +1510,19 @@ impl App {
 
     // * Settings
 
-    /// Where receipts come from. Amazon's login is the server's to keep and
-    /// never part of the budget, so it is given on the server's own page.
-    fn view_settings(&self) -> Element<'_, Message> {
-        let server = self.server.as_ref().map(|s| s.url.clone());
-        let amazon = container(
+    /// Settings' Amazon section: where receipts come from. Amazon's login is
+    /// the server's to keep and never part of the budget, so it is given on
+    /// the server's own page.
+    pub fn amazon_section(&self) -> Element<'_, Message> {
+        let about = match &self.server {
+            Some(s) => format!("Set up on {}/settings.", s.url.trim_end_matches('/')),
+            None => "This is the demo: it has no server, so there is nothing to set up.".into(),
+        };
+        container(
             column![
-                row![icon::tinted(glyphs::CART, icon::SIZE, |p| p.primary.base.color), bold("Amazon", 16)]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
                 dim(
                     "At each sync the server signs in to Amazon with amazon-orders and brings the last 30 days of \
-                     orders in as receipts: each item filed, and the card charge split by them.",
+                     orders in as receipts, and how each was charged: each item filed, and each card charge split by them.",
                     12
                 ),
                 dim(
@@ -1369,22 +1530,16 @@ impl App {
                      so it is not synced to this or any device, which is why it is entered on the server's page.",
                     11
                 ),
-                row![action("Set up Amazon", Message::SetUpAmazon)].spacing(10),
+                row![action("Set up Amazon", Message::SetUpAmazon), dim(about, 11)]
+                    .spacing(12)
+                    .align_y(Alignment::Center),
             ]
             .spacing(10),
         )
         .padding(16)
         .width(Length::Fill)
-        .style(look::card);
-        let about = match server {
-            Some(url) => dim(format!("This window is on {url}."), 11),
-            None => dim("This is the demo: it has no server, so there is nothing to set up.", 11),
-        };
-        column![bold("Settings", 22), amazon, about]
-            .spacing(16)
-            .padding(PAD)
-            .max_width(720)
-            .into()
+        .style(look::card)
+        .into()
     }
 
     // * Reflect
@@ -1422,12 +1577,19 @@ impl App {
         ]
         .spacing(6)
         .align_y(Alignment::Center);
-        let tiles = row![
+        let mut tiles = row![
             self.tile("Income", s.income, Tone::Funded),
             self.tile("Spent", total, Tone::Zero),
             self.tile("Net", s.income - total, if s.income >= total { Tone::Funded } else { Tone::Over }),
         ]
         .spacing(12);
+        // Paying a card is not spending (what it bought was), so it is not
+        // in the bars; what the cards owe beyond what is set aside is.
+        let cards: Vec<&BudgetLine> = self.peer.lines.rows.iter().filter(|l| l.card.is_some()).collect();
+        if !cards.is_empty() {
+            let short: i64 = cards.iter().map(|l| l.underfunded).sum();
+            tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
+        }
         column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
             .spacing(16)
             .padding(PAD)
@@ -1538,6 +1700,8 @@ impl App {
                 c.into()
             }
             Modal::Choose(choosing) => self.view_chooser(choosing),
+            Modal::Disconnect(bank) => self.view_disconnect(bank),
+            Modal::SaveFilter { name } => self.view_save_filter(name),
         };
         panel::panel(container(body).padding(14), 440.0).into()
     }
@@ -1562,6 +1726,7 @@ impl App {
             Choosing::Form | Choosing::SplitLine(_) => (None, "Category".to_string()),
             Choosing::Payer(_) => (None, "Paid by".to_string()),
             Choosing::Items(items) => (None, format!("File {} item{}", items.len(), if items.len() == 1 { "" } else { "s" })),
+            Choosing::Filter => (None, "Categories".to_string()),
             Choosing::Txns(ids) => (
                 None,
                 format!("Categorize {} transaction{}", ids.len(), if ids.len() == 1 { "" } else { "s" }),
@@ -1623,10 +1788,17 @@ fn right<'a>(content: Element<'a, Message>, width: f32) -> Element<'a, Message> 
         .into()
 }
 
-/// A category's tile: what it is for, drawn on a colour its name picks.
-fn tile<'a>(name: &str) -> Element<'a, Message> {
-    let colour = crate::palette::TILES[arkui::art::hash(name) as usize % crate::palette::TILES.len()];
-    container(icon::tinted(category_glyph(name), 16.0, |_| crate::palette::TILE_GLYPH))
+/// A category's tile: what it is for, drawn on a colour its name picks —
+/// a card's payment category, a card on the cards' slate.
+fn tile<'a>(l: &BudgetLine) -> Element<'a, Message> {
+    let (glyph, colour) = match l.card {
+        Some(_) => (glyphs::CARD, crate::palette::CARD_TILE),
+        None => (
+            category_glyph(&l.name),
+            crate::palette::TILES[arkui::art::hash(&l.name) as usize % crate::palette::TILES.len()],
+        ),
+    };
+    container(icon::tinted(glyph, 16.0, |_| crate::palette::TILE_GLYPH))
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(28.0))
         .center_x(Length::Fixed(28.0))
@@ -1669,34 +1841,49 @@ pub fn category_glyph(name: &str) -> &'static [u8] {
     }
 }
 
+/// What a category's pill says by its colour, as YNAB's does: red for cash
+/// overspent (next month pays for it), amber for overspending that was
+/// all on a card (it is debt now) and for a card's payment that does not
+/// cover what the card owes, else as its target reads it.
+pub fn tone(l: &BudgetLine) -> Tone {
+    match () {
+        _ if l.available < 0 && l.credit_overspent >= -l.available => Tone::Short,
+        _ if l.available >= 0 && l.card.is_some() && l.underfunded > 0 => Tone::Short,
+        _ => Tone::of(l.available, l.target, l.assigned),
+    }
+}
+
 /// How far along a category is: the share of its goal given this month,
 /// as the inspector counts it; for one with no goal, the share of what it
 /// had that was spent; blank for neither.
 fn progress(l: &BudgetLine) -> String {
     let had = l.carried + l.assigned;
     match () {
+        // A card's: what of its debt is not covered yet.
+        _ if l.card.is_some() && l.underfunded > 0 => format!("{} short", money(l.underfunded)),
+        _ if l.card.is_some() && l.debt > 0 => "Covered".into(),
+        _ if l.card.is_some() => String::new(),
+        _ if l.credit_overspent > 0 => format!("{} on card", money(l.credit_overspent)),
         _ if l.target > 0 => format!("{}% goal", (l.assigned.max(0) * 100 / l.target).min(999)),
         _ if l.activity < 0 && had > 0 => format!("{}% used", (-l.activity * 100 / had).min(999)),
         _ => String::new(),
     }
 }
 
-/// A register row's payee, cut to its column, and the whole of it on a
-/// hover — with what the bank called it, where it said more.
-fn payee_cell<'a>(t: &'a TxnLine, lit: bool) -> Element<'a, Message> {
-    let cell = table::cell(t.payee.clone(), Length::FillPortion(3), lit, !t.approved, false);
-    let mut tip = column![text(t.payee.clone()).size(13)].spacing(2);
-    let bank = crate::bank_said(t);
-    if !bank.is_empty() {
-        tip = tip.push(dim(bank, 11));
+impl App {
+    /// The box a category is typed into: the cell itself, what it says now
+    /// greyed under what is typed, `<Enter>` choosing the row with the keys.
+    fn drop_box<'a>(&'a self, now: &str) -> Element<'a, Message> {
+        let query = self.dropdown.as_ref().map(|d| d.search.query.as_str()).unwrap_or_default();
+        text_input(now, query)
+            .id(look::DROP_INPUT)
+            .on_input(Message::DropTyped)
+            .on_submit(Message::DropChoose)
+            .size(13)
+            .padding([4, 6])
+            .style(look::input)
+            .into()
     }
-    tooltip(
-        cell,
-        container(tip).padding([6, 10]).style(arkui::dialog::style),
-        tooltip::Position::Bottom,
-    )
-    .delay(std::time::Duration::from_millis(500))
-    .into()
 }
 
 /// A store as the receipts page names it.

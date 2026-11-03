@@ -45,6 +45,21 @@ pub fn asked(attrs: &[syn::Attribute]) -> (bool, bool) {
 
 type Field = (Ident, Type, Option<Index>);
 
+/// Whether a field says `#[serde(default)]`.
+fn serde_default(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().filter(|a| a.path().is_ident("serde")).any(|a| {
+        let mut found = false;
+        let _ = a.parse_nested_meta(|m| {
+            found |= m.path.is_ident("default");
+            if m.input.peek(syn::Token![=]) {
+                let _: syn::Expr = m.value()?.parse()?;
+            }
+            Ok(())
+        });
+        found
+    })
+}
+
 /// A variant's or a struct's fields as `(name, type)`: a lone unnamed field
 /// is `value` (as `Job::Done`'s is), more than one is refused.
 fn named(fields: &Fields, span: Span) -> syn::Result<Vec<Field>> {
@@ -74,9 +89,23 @@ pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
             let ns: Vec<&Ident> = fs.iter().map(|(f, _, _)| f).collect();
             let (tys, tos) = (fs.iter().map(|(_, t, _)| ffi_ty(t)), fs.iter().map(|(f, t, _)| to(t, quote!(self.#f))));
             let froms = fs.iter().map(|(f, t, _)| from(t, quote!(t.#f)));
+            // A field added with a default (`#[serde(default)]`) has its
+            // type's default in Swift's and Kotlin's constructors too, so
+            // what built the record before still does.
+            let defaults: Vec<TokenStream> = match &s.fields {
+                Fields::Named(n) => n
+                    .named
+                    .iter()
+                    .map(|f| match serde_default(&f.attrs) {
+                        true => quote!(#[uniffi(default)]),
+                        false => quote!(),
+                    })
+                    .collect(),
+                _ => fs.iter().map(|_| quote!()).collect(),
+            };
             (
                 quote!(::uniffi::Record),
-                quote!(struct #tw { #(pub #ns: #tys,)* }),
+                quote!(struct #tw { #(#defaults pub #ns: #tys,)* }),
                 quote!(#tw { #(#ns: #tos,)* }),
                 quote!(#name { #(#ns: #froms,)* }),
             )

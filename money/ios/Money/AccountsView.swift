@@ -119,43 +119,17 @@ struct AccountRow: View {
     }
 }
 
-/// The banks Plaid feeds the household's accounts from: each one's
-/// institution, when it last synced and what that brought, and the accounts
-/// it feeds. Asking for a sync is the button, or pulling down.
+/// The banks Plaid feeds the household's accounts from, as Settings lists
+/// them (`BanksSection`: each bank, how it is doing and when it last
+/// synced, and Connect a Bank), and Sync Now. Asking for a sync is the
+/// button, or pulling down.
 struct BanksView: View {
     @EnvironmentObject private var model: Model
     @State private var syncing = false
 
     var body: some View {
-        let banks = model.snapshot.banks
-        let fed = model.snapshot.accounts.filter { !$0.bank.isEmpty }
         List {
-            if banks.isEmpty {
-                ContentUnavailableView("No Banks Connected", systemImage: "building.columns",
-                                       description: Text("A bank is connected on the server, through Plaid. Its accounts appear here once it has synced."))
-                    .listRowBackground(Color.clear)
-            }
-            ForEach(banks) { b in
-                Section {
-                    LabeledContent("Last Synced") {
-                        if b.syncedMs > 0 {
-                            Text(Date(timeIntervalSince1970: Double(b.syncedMs) / 1000), format: .relative(presentation: .named))
-                        } else {
-                            Text("Never")
-                        }
-                    }
-                    LabeledContent("Brought In", value: "\(b.added) new, \(b.updated) changed")
-                    if b.deleted > 0 { LabeledContent("Removed", value: "\(b.deleted)") }
-                    if b.locked > 0 { LabeledContent("Left as Reconciled", value: "\(b.locked)") }
-                    ForEach(fed.filter { $0.bank == b.name }) { a in
-                        NavigationLink(value: Route.register(a.id)) { AccountRow(account: a) }
-                    }
-                } header: {
-                    Label(b.institution.isEmpty ? b.name.capitalized : b.institution, systemImage: "building.columns")
-                } footer: {
-                    Text("\(b.accounts) account\(b.accounts == 1 ? "" : "s") followed")
-                }
-            }
+            BanksSection()
             Section {
                 Button {
                     syncing = true
@@ -170,7 +144,7 @@ struct BanksView: View {
                         if syncing { ProgressView() }
                     }
                 }
-                .disabled(syncing)
+                .disabled(syncing || model.snapshot.banks.isEmpty)
             } footer: {
                 Text(model.isDemo ? "The demo's bank has a few days of news for its first two syncs." : "The server asks the bank every hour; this asks it now.")
             }

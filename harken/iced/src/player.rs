@@ -507,6 +507,12 @@ impl Player {
         self.track.as_ref()
     }
 
+    /// The track it holds is now at `at` in its queue — the queue reordered
+    /// around it. Nothing is fetched again: the sound plays on.
+    pub fn requeue(&mut self, at: usize) {
+        self.at = at;
+    }
+
     /// Where in its queue it was put.
     pub fn at(&self) -> usize {
         self.at
