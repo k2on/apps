@@ -52,7 +52,7 @@ jobs:
           set -o pipefail
           start=$(date +%s)
           status=0
-          nix build .#money-ios-xcframework .#harken-ios-xcframework -L 2>&1 | tee "$RUNNER_TEMP/build.log" || status=$?
+          nix build .#money-ios-xcframework .#harken-ios-xcframework -L --keep-going 2>&1 | tee "$RUNNER_TEMP/build.log" || status=$?
           echo "took $(( $(date +%s) - start ))s"
           echo "crates compiled this run: $(grep -c "^building '/nix/store/.*-rust_" "$RUNNER_TEMP/build.log" || true)"
           echo "crates from the cache: $(grep -c "^copying path '/nix/store/.*-rust_" "$RUNNER_TEMP/build.log" || true)"

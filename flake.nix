@@ -746,8 +746,14 @@
                 cp $TMPDIR/bindings/swift/*.h headers/
                 cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
                 export DEVELOPER_DIR=${xcode.developerDir}
+                # buildRustCrate names the archive after its metadata too
+                # (lib<name>-<hash>.a): each slice's, under its own name.
+                ${lib.concatMapStrings (t: ''
+                  mkdir -p slices/${t}
+                  cp ${(slice t).lib}/lib/lib${so}*.a slices/${t}/lib${so}.a
+                '') iosTargets}
                 /usr/bin/xcodebuild -create-xcframework \
-                  ${lib.concatMapStringsSep " " (t: "-library ${(slice t).lib}/lib/lib${so}.a -headers headers") iosTargets} \
+                  ${lib.concatMapStringsSep " " (t: "-library slices/${t}/lib${so}.a -headers headers") iosTargets} \
                   -output ${framework}.xcframework
                 runHook postBuild
               '';
