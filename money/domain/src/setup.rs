@@ -8,10 +8,12 @@
 //!
 //! - **Amazon** ([`AMAZON`], [`FORGET_AMAZON`]): the login `amazon-orders`
 //!   signs in with at each sync.
-//! - **Costco** ([`COSTCO_SIGN_IN`], [`COSTCO`], [`FORGET_COSTCO`]): a
-//!   sign-in on Costco's own page, begun by the server (its answer is the
-//!   page to open) and finished with the address Costco sent the browser
-//!   to, whose code the server trades for the sign-in it keeps.
+//! - **Costco** ([`COSTCO_PASSWORD`], [`FORGET_COSTCO`]): the email and
+//!   password the server signs in with itself, as Costco's page does; or,
+//!   when Costco asks for more than the password ([`COSTCO_SIGN_IN`],
+//!   [`COSTCO`]), a sign-in on Costco's own page, begun by the server (its
+//!   answer is the page to open) and finished with the address Costco sent
+//!   the browser to, whose code the server trades for the sign-in it keeps.
 
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +28,8 @@ pub const FORGET_AMAZON: &str = "stores.forget_amazon";
 pub const COSTCO_SIGN_IN: &str = "stores.costco_sign_in";
 /// The Costco sign-in finished: a [`CostcoAddress`].
 pub const COSTCO: &str = "stores.costco";
+/// Costco signed in to by the server itself: a [`CostcoPassword`].
+pub const COSTCO_PASSWORD: &str = "stores.costco_password";
 /// Costco's sign-in forgotten: `()`.
 pub const FORGET_COSTCO: &str = "stores.forget_costco";
 
@@ -42,6 +46,20 @@ pub struct AmazonLogin {
 impl std::fmt::Debug for AmazonLogin {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "AmazonLogin({})", self.username)
+    }
+}
+
+/// Costco's email and password, for the server to sign in with as its
+/// page does, and again should Costco stop taking its sign-in.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CostcoPassword {
+    pub email: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for CostcoPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "CostcoPassword({})", self.email)
     }
 }
 
@@ -84,6 +102,8 @@ pub struct CostcoState {
     pub signed_in: bool,
     /// Who, masked, when Costco said.
     pub who: Option<String>,
+    /// Whether the server keeps the password, to sign in again by itself.
+    pub password: bool,
     /// Whether the server was given a refresh token's file, which it signs
     /// in with in place of the sign-in kept.
     pub file: bool,

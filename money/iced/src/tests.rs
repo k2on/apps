@@ -1625,4 +1625,10 @@ fn on_a_server_settings_set_up_amazon_and_costco() {
         app.opened
     );
     drop(app.view());
+
+    // The server signs in itself with an email and password; none is said.
+    let _ = app.update(Message::Stores(S::SaveCostcoPassword));
+    settle(&mut app, &|a| a.settings.refused.is_some());
+    assert!(app.settings.refused.as_ref().unwrap().1.contains("Costco's email and password, both"));
+    drop(app.view());
 }

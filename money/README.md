@@ -138,13 +138,15 @@ account with two-step verification, and Costco's sign-in are kept in
 Neither is ever a row, so neither is in the log or on a device. Settings
 are told only who, masked.
 
-**Costco is signed in to as its app is** (`server/src/costco.rs`): "Sign
-in to Costco" has the server open a sign-in on Costco's own page with the
-Android app's client and PKCE, so the password and any codes go to Costco
-alone. Costco then sends the browser to the app's address,
-`msauth://com.costco.app.android/…?code=…`, which a browser cannot open;
-that address is pasted into Settings, and the server trades its code,
-worthless without the verifier it kept, for a refresh token.
+**Costco is signed in to as its app is** (`server/src/costco.rs`), with the
+Android app's client and PKCE. Settings take an email and password, and
+the server sends them through Costco's sign-in page as a browser does,
+reading the redirect to the app's address,
+`msauth://com.costco.app.android/…?code=…`, rather than following it, and
+trading its code for a refresh token. It keeps the password, to sign in
+again should Costco stop taking the token, and forgets it if Costco refuses
+it. When Costco asks for more than the password, Settings open Costco's own
+page instead, and the `msauth://` address it ends at is pasted back.
 
 **The server gathers them** (`server/src/stores.rs`) on each importer run
 (at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`), for the orders and then

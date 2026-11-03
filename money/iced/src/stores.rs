@@ -1,4 +1,4 @@
-//! SettingAsked::Stores => Stores::from_bytes(&b).map(|s| (Some(s), None::<String>)),' Amazon and Costco sections: where receipts come from, set up
+//! Settings' Amazon and Costco sections: where receipts come from, set up
 //! from here and kept on the server alone.
 //!
 //! Each is a call of the server's own over this window's link
@@ -9,19 +9,21 @@
 //!
 //! - **Amazon**: an email, a password and, for two-step verification, the
 //!   authenticator's secret, saved for `amazon-orders`; or removed.
-//! - **Costco**: "Sign in to Costco" asks the server for Costco's own
-//!   sign-in page and opens it (a tab reserved at the click in a browser,
-//!   [`crate::browser`]). Signed in there, Costco sends the browser on to
-//!   the address its app takes, `msauth://…?code=…`, which a browser cannot
-//!   open; that address is pasted here, and the server trades it for the
-//!   sign-in it keeps.
+//! - **Costco**: an email and a password, which the server signs in with
+//!   itself as Costco's page does, and keeps to sign in again. When Costco
+//!   asks for more, "Sign in on Costco's page instead" asks the server for
+//!   Costco's own sign-in page and opens it (a tab reserved at the click in
+//!   a browser, [`crate::browser`]). Signed in there, Costco sends the
+//!   browser on to the address its app takes, `msauth://…?code=…`, which a
+//!   browser cannot open; that address is pasted here, and the server
+//!   trades it for the sign-in it keeps.
 //!
 //! The sections ask the server how the stores are each time Settings opens.
 
 use ark::format::Encode;
 use iced::widget::{column, container, row, text, text_input};
 use iced::{Alignment, Element, Length};
-use money_domain::setup::{self as calls, AmazonLogin, CostcoAddress, CostcoPage, Stores};
+use money_domain::setup::{self as calls, AmazonLogin, CostcoAddress, CostcoPage, CostcoPassword, Stores};
 
 use crate::view::{action, bold, dim, quiet};
 use crate::{browser, look, App, Message};
@@ -34,6 +36,11 @@ pub enum Msg {
     Otp(String),
     SaveAmazon,
     ForgetAmazon,
+    CostcoEmail(String),
+    CostcoPassword(String),
+    /// The server signs in with the email and password.
+    SaveCostcoPassword,
+    /// Costco's own page instead, its address pasted back.
     SignInCostco,
     Address(String),
     SaveCostco,
@@ -55,6 +62,8 @@ pub struct Settings {
     pub user: String,
     pub password: String,
     pub otp: String,
+    pub costco_email: String,
+    pub costco_password: String,
     pub address: String,
     /// A Costco sign-in begun here: the address is asked for.
     pub signing_in: bool,
@@ -80,6 +89,15 @@ impl App {
                 self.call("amazon", calls::AMAZON, &login, Asked::Stores);
             }
             Msg::ForgetAmazon => self.call("amazon", calls::FORGET_AMAZON, &(), Asked::Stores),
+            Msg::CostcoEmail(v) => s.costco_email = v,
+            Msg::CostcoPassword(v) => s.costco_password = v,
+            Msg::SaveCostcoPassword => {
+                let login = CostcoPassword {
+                    email: s.costco_email.clone(),
+                    password: s.costco_password.clone(),
+                };
+                self.call("costco", calls::COSTCO_PASSWORD, &login, Asked::Stores);
+            }
             Msg::SignInCostco => {
                 browser::reserve();
                 self.call("costco", calls::COSTCO_SIGN_IN, &(), Asked::CostcoPage);
@@ -148,7 +166,7 @@ impl App {
                             (s.password, s.otp) = (String::new(), String::new());
                         }
                         if new.costco.signed_in && section == "costco" {
-                            (s.address, s.signing_in) = (String::new(), false);
+                            (s.address, s.signing_in, s.costco_password) = (String::new(), false, String::new());
                         }
                         s.stores = Some(new);
                     }
@@ -256,25 +274,46 @@ impl App {
         };
         let mut c = column![
             dim(
-                "At each sync the server reads the last 90 days of warehouse and gas receipts from Costco. You sign in \
-                 on Costco's own page, so your password and any codes go to Costco and never to the server.",
+                "At each sync the server reads the last 90 days of warehouse and gas receipts from Costco. It signs \
+                 in with your Costco email and password, as costco.com's sign-in page does.",
                 12
             ),
             bold(state, 13),
         ]
         .spacing(10);
         if self.server.is_some() {
+            let field = |placeholder: &str, value: &str, on: fn(String) -> Msg, secure: bool| {
+                text_input(placeholder, value)
+                    .on_input(move |v| Message::Stores(on(v)))
+                    .on_submit(Message::Stores(Msg::SaveCostcoPassword))
+                    .secure(secure)
+                    .size(13)
+                    .padding([6, 8])
+                    .style(look::input)
+            };
             let signed_in = co.is_some_and(|c| c.signed_in);
-            let mut buttons = row![action(
-                if signed_in { "Sign in again" } else { "Sign in to Costco" },
-                Message::Stores(Msg::SignInCostco)
-            )]
+            let mut buttons = row![
+                action(
+                    if signed_in { "Sign in again" } else { "Sign in" },
+                    Message::Stores(Msg::SaveCostcoPassword)
+                ),
+                quiet("Sign in on Costco's page instead", Message::Stores(Msg::SignInCostco)),
+            ]
             .spacing(12)
             .align_y(Alignment::Center);
             if signed_in {
                 buttons = buttons.push(quiet("Sign out", Message::Stores(Msg::ForgetCostco)));
             }
-            c = c.push(buttons);
+            c = c
+                .push(field("Email", &s.costco_email, Msg::CostcoEmail, false))
+                .push(field("Password", &s.costco_password, Msg::CostcoPassword, true))
+                .push(buttons)
+                .push(dim(
+                    "The password is kept on the server, in a file only it reads, so it can sign in again if Costco \
+                     ends the sign-in. If Costco asks for a code as well, sign in on Costco's page instead: then the \
+                     password never reaches the server.",
+                    11,
+                ));
         }
         if s.signing_in {
             c = c

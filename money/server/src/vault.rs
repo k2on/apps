@@ -26,13 +26,19 @@ impl std::fmt::Debug for AmazonLogin {
 }
 
 /// Costco's sign-in, as its app keeps one: who, and the refresh token,
-/// which Costco replaces at every use ([`crate::costco`]).
+/// which Costco replaces at every use ([`crate::costco`]); and, when the
+/// server signed in itself, the email and password it signs in with again
+/// should Costco stop taking the token.
 #[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CostcoLogin {
     /// The account's email, for the page; blank when the token named none.
     #[serde(default)]
     pub who: String,
     pub refresh_token: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 impl std::fmt::Debug for CostcoLogin {
@@ -120,6 +126,8 @@ mod tests {
             costco: Some(CostcoLogin {
                 who: "me@example.com".into(),
                 refresh_token: "the-refresh-token".into(),
+                email: "me@example.com".into(),
+                password: Some("costco-pass".into()),
             }),
         };
         v.save(dir.path()).unwrap();
@@ -131,7 +139,7 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         assert!(!format!("{:?}", v).contains("hunter2"));
-        assert!(!format!("{:?}", v).contains("the-refresh-token"));
+        assert!(!format!("{:?}", v).contains("the-refresh-token") && !format!("{:?}", v).contains("costco-pass"));
         assert_eq!(masked("me@example.com"), "m••••@example.com");
     }
 }

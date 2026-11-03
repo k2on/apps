@@ -5,10 +5,11 @@
 //! and what they answer is [`Stores`]: who, masked, and no secret.
 //!
 //! - **Amazon**: the login `amazon-orders` signs in with, or none.
-//! - **Costco**: a sign-in begun, which answers with Costco's page for the
+//! - **Costco**: the email and password the server signs in with itself,
+//!   as Costco's page does, and keeps to sign in again; or, when Costco asks
+//!   for more, a sign-in begun, which answers with Costco's page for the
 //!   device to open, and finished with the address Costco sent the browser
-//!   to, which the server trades for a refresh token ([`crate::costco`]);
-//!   or none.
+//!   to; either traded for a refresh token ([`crate::costco`]); or none.
 //!
 //! A call comes in on a connection its token proved (the sync socket's
 //! sign-in), so it is the household's; the importer's own account sets up
@@ -22,7 +23,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Result};
 use ark::format::Encode;
 use ark::peer::Who;
-use money_domain::setup::{self as calls, AmazonState, CostcoAddress, CostcoPage, CostcoState, Stores};
+use money_domain::setup::{self as calls, AmazonState, CostcoAddress, CostcoPage, CostcoPassword, CostcoState, Stores};
 
 use crate::costco::{Costco, SignIn};
 use crate::importer::ImporterHandle;
@@ -62,6 +63,7 @@ pub fn calls(setup: Setup) -> BTreeMap<String, ark_peer::Call> {
     add(calls::FORGET_AMAZON, |s, _| s.forget_amazon());
     add(calls::COSTCO_SIGN_IN, |s, _| s.sign_in_costco());
     add(calls::COSTCO, Setup::set_costco);
+    add(calls::COSTCO_PASSWORD, Setup::sign_in_costco_with_password);
     add(calls::FORGET_COSTCO, |s, _| s.forget_costco());
     out
 }
@@ -92,6 +94,7 @@ impl Setup {
             costco: CostcoState {
                 signed_in: v.costco.is_some(),
                 who: v.costco.as_ref().filter(|c| !c.who.is_empty()).map(|c| masked(&c.who)),
+                password: v.costco.as_ref().is_some_and(|c| c.password.is_some()),
                 file: self.costco.token_file.is_some(),
             },
             last,
@@ -148,6 +151,21 @@ impl Setup {
         })?;
         // A code is good once.
         *self.signing_in.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.nudge();
+        self.status()
+    }
+
+    fn sign_in_costco_with_password(&self, input: &[u8]) -> Result<Vec<u8>> {
+        let f: CostcoPassword = read(input)?;
+        let email = f.email.trim();
+        if email.is_empty() || f.password.is_empty() {
+            bail!("Costco's email and password, both");
+        }
+        let login = self.costco.sign_in_with_password(email, &f.password)?;
+        Vault::change(&self.data, |v| {
+            v.costco = Some(login);
+            Ok(())
+        })?;
         self.nudge();
         self.status()
     }
