@@ -641,3 +641,45 @@ fn a_receipt_written_by_hand_pays_for_its_transaction() {
     assert_eq!((again.len(), again[0].items), (1, 1), "put right, not another");
     let _ = (eggs, improvement);
 }
+
+/// A split transaction needs a look while a line of it has no category, and
+/// not once every line has one. Falsified by asking a split transaction for
+/// its own category, which it never has: it stayed in the inbox for good.
+#[test]
+fn a_split_transaction_needs_a_look_only_while_a_line_has_no_category() {
+    let (mut b, checking, groceries, _, improvement) = household();
+    b.spend(checking, "2026-10-25", "Hardware Store", Some(groceries), -5_000);
+    let id = txn(&b, "Hardware Store").id;
+    let inbox = |b: &Book| -> Vec<Id<Txn>> {
+        let f = Filtered {
+            saved: None,
+            filter: Filter::needs_a_look(),
+            month: None,
+        };
+        b.list::<TxnLine>("filtered", &f).into_iter().map(|t| t.id).collect()
+    };
+    let part = |c, amount| SplitPart {
+        category_id: c,
+        amount,
+        memo: String::new(),
+    };
+    b.run("approve", &Txns { ids: vec![id] }).unwrap();
+    b.run(
+        "split",
+        &SplitTxn {
+            id,
+            lines: vec![part(Some(groceries), -2_000), part(None, -3_000)],
+        },
+    )
+    .unwrap();
+    assert!(inbox(&b).contains(&id), "a line for no category");
+    b.run(
+        "split",
+        &SplitTxn {
+            id,
+            lines: vec![part(Some(groceries), -2_000), part(Some(improvement), -3_000)],
+        },
+    )
+    .unwrap();
+    assert!(!inbox(&b).contains(&id), "every line has one");
+}

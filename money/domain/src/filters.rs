@@ -238,10 +238,16 @@ pub fn is_transfer(t: &Txn) -> bool {
 }
 
 /// Whether a transaction is waiting for a category: on the budget, for no
-/// category here, and not a transfer to an account still here — what a
-/// register says "Needs a category" of ([`txn_line`]).
+/// category here — or, split, a line for none — and not a transfer to an
+/// account still here; what a register says "Needs a category" of
+/// ([`txn_line`]).
 pub fn needs_category(db: &Db<Money>, t: &Txn, on_budget: bool) -> bool {
-    on_budget && t.category_id.and_then(|c| db.category.get(c)).is_none() && t.transfer_account.and_then(|a| db.account.get(a)).is_none()
+    let none = |c: Option<Id<Category>>| c.and_then(|c| db.category.get(c)).is_none();
+    let wanting = match t.split {
+        true => crate::transactions::splits_of(db, t.id).iter().any(|l| none(l.category_id)),
+        false => none(t.category_id),
+    };
+    on_budget && wanting && t.transfer_account.and_then(|a| db.account.get(a)).is_none()
 }
 
 /// A saved filter, or no such filter.
