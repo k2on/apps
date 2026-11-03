@@ -2312,6 +2312,19 @@ impl App {
         }
     }
 
+    /// A track's cover, as the log names it: its album's, or, for an
+    /// episode, which has no album, its show's — the show its creator
+    /// names. Blank for none.
+    pub fn art_of(&self, track: &listening::Track) -> &str {
+        if track.album.is_empty() {
+            if let Some(s) = self.peer.shows().iter().find(|s| s.title == track.creator) {
+                return &s.art;
+            }
+        }
+        let album = self.peer.detail_of(track.id.0).album_id;
+        self.peer.albums().iter().find(|a| a.id == album).map_or("", |a| a.art.as_str())
+    }
+
     /// Ask for every cover the index pages would draw — all of them, because
     /// scrolling does not go through `update` and a cover that starts loading
     /// only once visible is never there when you look. `want` is idempotent.
@@ -3274,7 +3287,12 @@ impl App {
         tasks.push(self.follow());
         #[cfg(target_arch = "wasm32")]
         {
-            let now = self.now().map(|n| (n.track().clone(), n.playing, n.duration, n.position));
+            // The cover too, for the controller the system draws (the
+            // lock screen, Windows' media flyout, the browser's own).
+            let now = self.now().map(|n| {
+                let art = self.art_url(self.art_of(n.track()));
+                (n.track().clone(), art, n.playing, n.duration, n.position)
+            });
             self.player.announce(&self.title(), now);
         }
         Task::batch(tasks)

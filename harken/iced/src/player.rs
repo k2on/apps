@@ -127,14 +127,18 @@ function wire() {
   });
 }
 
-export function announce(heading, title, artist, album, playing) {
+export function announce(heading, title, artist, album, art, playing) {
   // Windows draws the tab's title in its own window list, so the tab is the
   // one place this has to be right even where there is no media session.
   document.title = heading;
   if (!("mediaSession" in navigator)) return;
   wire();
+  // The cover, for the controller: an address the page's own origin
+  // resolves, so a relative one is made whole first; no type or size, so
+  // the system reads them from the picture.
+  const artwork = art ? [{ src: new URL(art, document.baseURI).href }] : [];
   navigator.mediaSession.metadata = title
-    ? new MediaMetadata({ title: title, artist: artist, album: album })
+    ? new MediaMetadata({ title: title, artist: artist, album: album, artwork: artwork })
     : null;
   navigator.mediaSession.playbackState = !title
     ? "none"
@@ -168,7 +172,7 @@ export function take_remote() {
 "#)]
     extern "C" {
         #[wasm_bindgen(js_name = announce)]
-        fn announce_js(heading: &str, title: &str, artist: &str, album: &str, playing: bool);
+        fn announce_js(heading: &str, title: &str, artist: &str, album: &str, art: &str, playing: bool);
         #[wasm_bindgen(js_name = position)]
         fn position_js(duration: f64, at: f64);
         #[wasm_bindgen(js_name = take_remote)]
@@ -190,8 +194,9 @@ export function take_remote() {
         /// does not rebuild the metadata. The element
         /// decides on its own when it is playing — buffering, a stall, the
         /// end of a stream — so this cannot be kept only where the app
-        /// changes something.
-        said: Option<(Id, bool)>,
+        /// changes something. The cover is in it too: it can arrive after
+        /// the track does (the library still filling).
+        said: Option<(Id, bool, String)>,
         /// …and the whole second the controller's scrubber was last moved to,
         /// which moves once a second where the rest of it moves on a tap.
         timed: i64,
@@ -351,14 +356,14 @@ export function take_remote() {
         /// Say what is playing: the tab's title, `heading`, and the
         /// controller the operating system draws over the lock screen or
         /// beside the clock.
-        pub fn announce(&mut self, heading: &str, track: Option<&Track>, playing: bool, duration: f64, at: f64) {
-            let now = track.map(|t| (t.id.0, playing));
+        pub fn announce(&mut self, heading: &str, track: Option<&Track>, art: &str, playing: bool, duration: f64, at: f64) {
+            let now = track.map(|t| (t.id.0, playing, art.to_string()));
             if now != self.said {
                 self.said = now;
                 self.timed = -1;
                 match track {
-                    Some(t) => announce_js(heading, &t.title, &t.creator, &t.album, playing),
-                    None => announce_js(heading, "", "", "", false),
+                    Some(t) => announce_js(heading, &t.title, &t.creator, &t.album, art, playing),
+                    None => announce_js(heading, "", "", "", "", false),
                 }
             }
             let whole = at as i64;
@@ -490,10 +495,10 @@ impl Player {
     /// element rings the window when it does (`watch` above), and while it
     /// plays the window's clock moves the controller's scrubber.
     #[cfg(target_arch = "wasm32")]
-    pub fn announce(&mut self, heading: &str, now: Option<(crate::listening::Track, bool, f64, f64)>) {
+    pub fn announce(&mut self, heading: &str, now: Option<(crate::listening::Track, String, bool, f64, f64)>) {
         match &now {
-            Some((track, playing, duration, at)) => self.sink.announce(heading, Some(track), *playing, *duration, *at),
-            None => self.sink.announce(heading, None, false, 0.0, 0.0),
+            Some((track, art, playing, duration, at)) => self.sink.announce(heading, Some(track), art, *playing, *duration, *at),
+            None => self.sink.announce(heading, None, "", false, 0.0, 0.0),
         }
     }
 

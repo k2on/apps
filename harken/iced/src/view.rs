@@ -2473,10 +2473,7 @@ impl App {
             false => None,
         };
         let album = self.peer.detail_of(track.id.0);
-        let art = match show {
-            Some(s) => s.art.as_str(),
-            None => self.peer.albums().iter().find(|a| a.id == album.album_id).map_or("", |a| a.art.as_str()),
-        };
+        let art = self.art_of(track);
         let playing = row![
             self.picture(&track.album, art, BAR_ART, 4.0),
             // The title opens its album and the name its person's page, as the
