@@ -706,7 +706,10 @@
             preConfigure = (old.preConfigure or "") + ''
               export PATH="$PATH:/usr/bin"
               export DEVELOPER_DIR=${xcode.developerDir}
-              said="$(/usr/bin/xcodebuild -version | head -1)"
+              # Read whole, its first line kept: `| head -1` closes the pipe on
+              # it, and the build's pipefail fails on that.
+              said="$(/usr/bin/xcodebuild -version)"
+              said="''${said%%$'\n'*}"
               if [ "$said" != "Xcode ${xcode.version}" ]; then
                 echo "built with $said at $DEVELOPER_DIR, not $XCODE: the flake's xcode says which" >&2
                 exit 1
