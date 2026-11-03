@@ -212,8 +212,22 @@ impl AmazonOrders {
             let last: String = last.chars().take(300).collect();
             bail!("amazon-orders failed ({status}): {last}");
         }
-        Ok(out)
+        Ok(json_of(&out).to_string())
     }
+}
+
+/// The JSON amazon-orders printed, past what it says of itself before it
+/// on the same output (`Info: A browser is handling a JavaScript sign-in
+/// challenge.`): from the first line that begins an array or an object.
+fn json_of(out: &str) -> &str {
+    let mut at = 0;
+    for line in out.split_inclusive('\n') {
+        if line.trim_start().starts_with(['[', '{']) {
+            return &out[at..];
+        }
+        at += line.len();
+    }
+    out
 }
 
 /// Why Amazon refused the sign-in: `amazon-orders` prints Amazon's error,
@@ -430,6 +444,16 @@ mod tests {
                    wait a minute before retrying with a new OTP.\n\nPassword: ";
         assert_eq!(refused(out).unwrap(), "Amazon refused the sign-in: Your password is incorrect");
         assert_eq!(refused("--> Enter the characters shown in the image: "), None);
+    }
+
+    /// What amazon-orders says of itself before its JSON is left out.
+    #[test]
+    fn the_json_is_found_past_what_it_says() {
+        let out = "Info: A browser is handling a JavaScript sign-in challenge.\n\n[{\"order_number\":\"1\"}]\n";
+        assert_eq!(json_of(out), "[{\"order_number\":\"1\"}]\n");
+        assert_eq!(json_of("  {\"a\":1}"), "  {\"a\":1}");
+        assert_eq!(json_of("[]"), "[]");
+        assert_eq!(json_of("nothing"), "nothing", "no JSON: as it was, for the adapter to say so");
     }
 
     #[test]
