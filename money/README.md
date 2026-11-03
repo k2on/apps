@@ -159,6 +159,20 @@ clears. Nothing of the sign-in comes to the server. A browser signed out is
 said so in Settings' last sync. The banks' own first pull is Plaid's
 history (`plaid.history`), set when a bank is connected.
 
+**A paper receipt is read from its photo** (`server/src/paper.rs`, the call
+`stores.read_receipt`), with no model doing the reading. `receipt-ocr`
+(`MONEY_RECEIPT_OCR`, the module's `ocr.package`; RapidOCR on PaddleOCR's
+PP-OCRv5 models) gives what it sees at three sizes of its text detector, and
+rules read each into lines, items with their quantity and weight lines,
+prices paired with them in order, a "You saved" section, and the subtotal
+or the balance due less tax. The readings vote on each price. What adds up
+is `sure`, or `settled` by the readings' own other answers; what does not
+is `check`, for a person. No digit is guessed to make it add up. Nothing is
+kept: the device files the receipt as it was checked, with `add_receipts`.
+The module has it on wherever the system's nixpkgs has RapidOCR
+(`money/server/ocr`). `tests/paper/` is four real receipts, what named a
+person or a card taken out.
+
 **The server gathers them** (`server/src/stores.rs`) on each importer run
 (at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`), for the orders and then
 for how they were charged (`MONEY_AMAZON_TRANSACTIONS_ARGS`, `transactions

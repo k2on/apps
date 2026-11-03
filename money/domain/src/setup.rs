@@ -74,3 +74,56 @@ pub struct CostcoState {
     /// The browser's page, where costco.com is signed in to.
     pub page: Option<String>,
 }
+
+// * A paper receipt, read
+
+/// A photo of a paper receipt read into its items: a [`ReceiptPhoto`],
+/// answered with a [`PaperReceipt`]. Nothing is kept; the device files what
+/// was read, as a person checked it, with `add_receipts`.
+pub const READ_RECEIPT: &str = "stores.read_receipt";
+
+/// The photo, its bytes (JPEG, PNG or HEIC) as base64.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceiptPhoto {
+    pub image: String,
+}
+
+impl std::fmt::Debug for ReceiptPhoto {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "ReceiptPhoto({} bytes of base64)", self.image.len())
+    }
+}
+
+/// What was read of a receipt: its lines and its totals, in cents, and how
+/// far to trust them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaperReceipt {
+    pub store: String,
+    /// `YYYY-MM-DD`, when a date was read.
+    pub date: Option<String>,
+    pub items: Vec<PaperLine>,
+    /// What was saved ("You saved"), each below zero.
+    pub discounts: Vec<PaperLine>,
+    pub subtotal: Option<i64>,
+    pub tax: i64,
+    /// What was due (the total, the balance due).
+    pub due: Option<i64>,
+    /// What the items and discounts must add up to.
+    pub target: Option<i64>,
+    pub sum: i64,
+    /// `sure`: it adds up as read; `settled`: it adds up after the
+    /// readings' other answers; `check`: it does not add up.
+    pub state: String,
+    /// What the readings' other answers changed, said.
+    pub changed: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaperLine {
+    pub name: String,
+    pub sku: String,
+    pub cents: i64,
+    pub qty: Option<u32>,
+    /// The quantity or weight lines under it, as read.
+    pub detail: String,
+}

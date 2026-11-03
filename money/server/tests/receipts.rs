@@ -55,6 +55,7 @@ fn the_stores_receipts_are_imported() {
         }),
         costco: Default::default(),
         dir: Some(drop.path().to_path_buf()),
+        ocr: None,
     };
     let server = serve(&rt, data.path(), |c| c.stores = stores);
     let r = runs(&server, 1);
@@ -169,4 +170,36 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
         }
     }
     out
+}
+
+/// A photo of a paper receipt, read over the socket: the server's
+/// receipt-ocr (a stand-in that prints what the real one saw of a Food Lion
+/// receipt) and its reader give the items, sure of them; nothing is kept,
+/// and a server with no receipt-ocr says so.
+#[test]
+fn a_paper_receipt_is_read_from_its_photo() {
+    use money_domain::setup::{self as calls, PaperReceipt, ReceiptPhoto};
+    let rt = runtime();
+    let (data, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/paper/foodlion-2025-06-15");
+    let readings = format!(r#"{{"readings":[$(cat {dir}.736.json),$(cat {dir}.1280.json),$(cat {dir}.1920.json)]}}"#);
+    let ocr = bin.path().join("receipt-ocr");
+    std::fs::write(&ocr, format!("#!/bin/sh\n[ -s \"$1\" ] || exit 2\ncat <<EOF\n{readings}\nEOF\n")).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&ocr, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let server = serve(&rt, data.path(), |c| c.stores.ocr = Some(ocr.clone()));
+    let mut alice = signed_in(&server, "alice");
+    let photo = ReceiptPhoto { image: "/9j/4AAQSkZJRgABAQ==".into() };
+    let p: PaperReceipt = alice.call(calls::READ_RECEIPT, &photo).unwrap();
+    assert_eq!(p.state, "sure", "{p:?}");
+    assert_eq!((p.items.len(), p.discounts.len(), p.sum, p.tax, p.due), (9, 1, 3217, 23, Some(3240)));
+    assert_eq!(p.items[6].cents, 1511, "the ground beef");
+    assert!(std::fs::read_dir(data.path().join("receipt-photos")).unwrap().next().is_none(), "the photo is not kept");
+    let bad = alice.call::<PaperReceipt>(calls::READ_RECEIPT, &ReceiptPhoto { image: "not base64!".into() });
+    assert!(bad.unwrap_err().contains("not base64"));
+
+    let bare = serve(&rt, tempfile::tempdir().unwrap().path(), |_| {});
+    let mut bob = signed_in(&bare, "bob");
+    let none = bob.call::<PaperReceipt>(calls::READ_RECEIPT, &photo).unwrap_err();
+    assert!(none.contains("no receipt-ocr"), "{none}");
 }

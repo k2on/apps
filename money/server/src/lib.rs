@@ -123,6 +123,7 @@ impl Config {
     ///                         sign-in challenge is run in it ([`browser`])
     /// MONEY_BROWSER_PAGE      the page where people see that browser and sign in
     /// MONEY_COSTCO_DAYS       how far back Costco's receipts are asked for (90)
+    /// MONEY_RECEIPT_OCR       receipt-ocr, which reads a paper receipt's photo ([`paper`])
     /// MONEY_RECEIPTS_DIR      a folder of exports: `<store>/*.json`
     /// ```
     ///
@@ -283,6 +284,7 @@ pub async fn start(config: Config) -> Result<Server> {
             data: config.data.clone(),
             amazon_program: stores.amazon.is_some(),
             costco: stores.costco.clone(),
+            ocr: stores.ocr.clone(),
             importer: importer_slot.clone(),
         }),
         ..ark_peer::Config::of(money_domain::shared())

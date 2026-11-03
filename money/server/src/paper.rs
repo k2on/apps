@@ -842,6 +842,113 @@ fn dollars(cents: i64) -> String {
     format!("{}{}.{:02}", if cents < 0 { "-" } else { "" }, cents.abs() / 100, cents.abs() % 100)
 }
 
+// * The OCR
+
+/// How long `receipt-ocr` may take: three readings of a photo, on the CPU.
+const OCR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A photo's readings, from `program` (`receipt-ocr`), the photo written
+/// beside the data for it to read and gone after.
+pub fn ocr(program: &std::path::Path, data: &std::path::Path, photo: &[u8]) -> anyhow::Result<Vec<Reading>> {
+    use anyhow::{anyhow, bail, Context};
+    use std::io::Read as _;
+    let dir = data.join("receipt-photos");
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let mut name = [0u8; 8];
+    for (k, b) in name.iter_mut().enumerate() {
+        *b = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            >> (k * 8)) as u8;
+    }
+    let file = dir.join(format!("{}.jpg", name.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+    std::fs::write(&file, photo).with_context(|| format!("writing {}", file.display()))?;
+    let gone = scopeguard(&file);
+    let mut child = std::process::Command::new(program)
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("running {}", program.display()))?;
+    let (mut out, mut err) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
+    let reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        out.read_to_string(&mut s).map(|_| s)
+    });
+    let errs = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = err.read_to_string(&mut s);
+        s
+    });
+    let deadline = std::time::Instant::now() + OCR_TIMEOUT;
+    let status = loop {
+        if let Some(s) = child.try_wait()? {
+            break s;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("reading the photo took more than {} seconds", OCR_TIMEOUT.as_secs());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    let out = reader.join().map_err(|_| anyhow!("reading receipt-ocr"))??;
+    let err = errs.join().unwrap_or_default();
+    drop(gone);
+    if !status.success() {
+        let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+        bail!("the photo could not be read ({status}): {last}");
+    }
+    let doc: serde_json::Value = serde_json::from_str(&out).map_err(|e| anyhow!("receipt-ocr's output is not JSON: {e}"))?;
+    serde_json::from_value(doc["readings"].clone()).map_err(|e| anyhow!("receipt-ocr's readings do not read: {e}"))
+}
+
+/// The photo's file, removed however the reading ends.
+struct Gone(std::path::PathBuf);
+
+impl Drop for Gone {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn scopeguard(file: &std::path::Path) -> Gone {
+    Gone(file.to_path_buf())
+}
+
+impl Paper {
+    /// As the app is told it.
+    pub fn told(&self) -> money_domain::setup::PaperReceipt {
+        let line = |l: &Line| money_domain::setup::PaperLine {
+            name: l.name.clone(),
+            sku: l.sku.clone(),
+            cents: l.cents,
+            qty: l.qty,
+            detail: l.detail.clone(),
+        };
+        money_domain::setup::PaperReceipt {
+            store: self.store.clone(),
+            date: self.date.clone(),
+            items: self.items.iter().map(line).collect(),
+            discounts: self.discounts.iter().map(line).collect(),
+            subtotal: self.subtotal,
+            tax: self.tax,
+            due: self.due,
+            target: self.target,
+            sum: self.sum,
+            state: match self.state {
+                State::Sure => "sure",
+                State::Settled => "settled",
+                State::Check => "check",
+            }
+            .into(),
+            changed: self.changed.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

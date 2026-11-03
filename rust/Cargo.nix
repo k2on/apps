@@ -10661,6 +10661,10 @@ rec {
             packageId = "axum";
           }
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
             name = "chrono";
             packageId = "chrono";
             usesDefaultFeatures = false;

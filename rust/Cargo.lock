@@ -3378,6 +3378,7 @@ dependencies = [
  "ark-auth",
  "ark-peer",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "money-domain",
  "serde",

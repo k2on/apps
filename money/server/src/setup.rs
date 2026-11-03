@@ -32,9 +32,14 @@ pub struct Setup {
     pub data: PathBuf,
     pub amazon_program: bool,
     pub costco: Costco,
+    /// `receipt-ocr`, for a paper receipt's photo.
+    pub ocr: Option<PathBuf>,
     /// Filled once the importer has started.
     pub importer: Arc<Mutex<Option<ImporterHandle>>>,
 }
+
+/// The largest photo taken, decoded.
+const PHOTO_LIMIT: usize = 12 << 20;
 
 /// The calls, by name, for the hub's `Config::calls`.
 pub fn calls(setup: Setup) -> BTreeMap<String, ark_peer::Call> {
@@ -53,6 +58,7 @@ pub fn calls(setup: Setup) -> BTreeMap<String, ark_peer::Call> {
     add(calls::AMAZON, Setup::set_amazon);
     add(calls::FORGET_AMAZON, |s, _| s.forget_amazon());
     add(calls::COSTCO_SIGN_IN, |s, _| s.sign_in_costco());
+    add(calls::READ_RECEIPT, Setup::read_receipt);
     out
 }
 
@@ -124,6 +130,24 @@ impl Setup {
         // The session amazon-orders kept goes with the login.
         let _ = std::fs::remove_dir_all(self.data.join("amazon-orders"));
         self.status()
+    }
+
+    /// A paper receipt's photo read into its items, kept nowhere.
+    fn read_receipt(&self, input: &[u8]) -> Result<Vec<u8>> {
+        use base64::Engine;
+        let program = self
+            .ocr
+            .as_ref()
+            .ok_or_else(|| anyhow!("this server has no receipt-ocr to read a photo with (services.money.ocr)"))?;
+        let f: calls::ReceiptPhoto = read(input)?;
+        let photo = base64::engine::general_purpose::STANDARD
+            .decode(f.image.trim())
+            .map_err(|e| anyhow!("the photo is not base64: {e}"))?;
+        if photo.is_empty() || photo.len() > PHOTO_LIMIT {
+            bail!("a photo of up to {} MB", PHOTO_LIMIT >> 20);
+        }
+        let readings = crate::paper::ocr(program, &self.data, &photo)?;
+        Ok(crate::paper::read(&readings).told().to_bytes())
     }
 
     /// costco.com's sign-in opened in the browser; the browser's page, for

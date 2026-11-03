@@ -239,6 +239,19 @@ in
       description = "How many days back Costco's warehouse and gas receipts are asked for at each sync.";
     };
 
+    ocr.package = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      # On wherever the system's nixpkgs has RapidOCR (built from the
+      # host's packages: this repository's pinned nixpkgs predates it).
+      default = if pkgs.python3Packages ? rapidocr then pkgs.callPackage ../ocr/package.nix { } else null;
+      defaultText = lib.literalExpression "pkgs.callPackage money/server/ocr/package.nix { } (null where nixpkgs has no rapidocr)";
+      description = ''
+        receipt-ocr (money/server/ocr), which reads a paper receipt's photo for the app
+        (`receipt-ocr PHOTO` printing what OCR saw, as money/server/src/paper.rs reads it).
+        Null reads no photos.
+      '';
+    };
+
     browser = {
       devtools = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -380,6 +393,8 @@ in
         MONEY_BROWSER = cfg.browser.devtools;
       } // lib.optionalAttrs (cfg.browser.page != null) {
         MONEY_BROWSER_PAGE = cfg.browser.page;
+      } // lib.optionalAttrs (cfg.ocr.package != null) {
+        MONEY_RECEIPT_OCR = lib.getExe cfg.ocr.package;
       } // lib.optionalAttrs (cfg.receiptsDir != null) {
         MONEY_RECEIPTS_DIR = cfg.receiptsDir;
       };

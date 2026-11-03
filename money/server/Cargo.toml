@@ -22,6 +22,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# A paper receipt's photo, sent over the socket as base64 (`paper`).
+base64 = "0.22"
 # The browser Costco is read in, over the DevTools protocol's WebSocket:
 # plain, blocking, on the importer's thread. ark-peer's already.
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }

@@ -48,6 +48,8 @@ pub struct Stores {
     pub costco: Costco,
     /// The folder of exports.
     pub dir: Option<PathBuf>,
+    /// `receipt-ocr`, which reads a paper receipt's photo (`paper`).
+    pub ocr: Option<PathBuf>,
 }
 
 impl Stores {
@@ -95,6 +97,7 @@ impl Stores {
                 days: costco_days,
             },
             dir: env("MONEY_RECEIPTS_DIR").map(PathBuf::from),
+            ocr: env("MONEY_RECEIPT_OCR").map(PathBuf::from),
         })
     }
 }
