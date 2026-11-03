@@ -120,6 +120,7 @@ pub fn authority() -> Who {
 impl Peer {
     /// A server opened from what `disk` holds: the authority of each space.
     pub fn serve(config: Config, disk: Box<dyn Disk>, now: i64) -> Peer {
+        let files = disk.files();
         let (disk, local) = crate::local::beside(disk);
         let me = authority();
         let auth = || Role::Authority { journal: Journal::default() };
@@ -146,6 +147,7 @@ impl Peer {
             ..machine(&l.module, auth(), &me, Some((l.origin)()), Space::Volatile)
         });
         let mut p = Peer::with(config, log, live, local);
+        p.keep_files(files);
         (p.hub.serving, p.hub.next) = (true, 1);
         if let (false, Some(live)) = (kept.is_empty(), &mut p.live) {
             let mut rows: Vec<(String, Vec<Vec<u8>>)> = vec![];
@@ -210,6 +212,11 @@ impl Peer {
         self.hub.conns.iter().map(|(c, conn)| (*c, &conn.who))
     }
 
+    /// Who a connection is.
+    pub(crate) fn who(&self, c: ConnId) -> Option<Who> {
+        self.hub.conns.get(&c).map(|conn| conn.who.clone())
+    }
+
     /// The connections of a session, to close when it is revoked.
     pub fn of_session(&self, session: &str) -> Vec<ConnId> {
         self.connections().filter(|(_, w)| w.session == session).map(|(c, _)| c).collect()
@@ -235,6 +242,9 @@ impl Peer {
         }
         if let Frame::Reply { .. } = f {
             return vec![];
+        }
+        if f.is_file() {
+            return self.file_frame(c, f);
         }
         if let Frame::Telemetry { events } = f {
             // What a device says of itself, kept with what this server says,
@@ -291,6 +301,7 @@ impl Peer {
 
     /// A connection gone; the device's `on_leave` when it was its last.
     pub fn leave(&mut self, c: ConnId, now: i64) -> Vec<Deliver> {
+        self.files_left(c);
         if let Some(Conn { who, device: Some(_), .. }) = self.hub.conns.remove(&c) {
             let (n, input) = self.hub.devices.get_mut(&who.session).expect("a device counted");
             *n -= 1;

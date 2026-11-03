@@ -13,6 +13,11 @@
 //! Parts   { space, most }
 //! Call    { id, name, input }
 //! Reply   { id, reply: Ok { output } | Refused { why } }
+//! Offer   { hash, size }
+//! Want    { hash, at }
+//! Chunk   { hash, at, size, bytes }
+//! Have    { hash }
+//! Absent  { hash, why }
 //! ```
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
@@ -41,6 +46,14 @@
 //! or told to any other connection, so it can carry what must stay off the
 //! log (a password for the server alone). It is answered once, while the
 //! connection that made it is up, and is not sent again.
+//!
+//! `Offer`, `Want`, `Chunk`, `Have` and `Absent` are no machine's either:
+//! the bytes of the files rows name (`crate::file`, docs/plan-files.md),
+//! which never enter the log. A device offers a file it made; a `Want`
+//! asks for a file's bytes from `at`, answered by one `Chunk` of them (or
+//! `Absent`: not for this connection, or not on the server yet); `Have`
+//! says the server holds a file whole — an upload done, or one wanted
+//! arrived.
 //!
 //! **No code crosses the wire.** An entry names its function by name; an
 //! authority runs exactly the functions its program was built with, and
@@ -112,6 +125,27 @@ pub enum Frame {
         id: u64,
         reply: Reply,
     },
+    Offer {
+        hash: String,
+        size: u64,
+    },
+    Want {
+        hash: String,
+        at: u64,
+    },
+    Chunk {
+        hash: String,
+        at: u64,
+        size: u64,
+        bytes: Vec<u8>,
+    },
+    Have {
+        hash: String,
+    },
+    Absent {
+        hash: String,
+        why: String,
+    },
 }
 
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
@@ -155,8 +189,23 @@ impl Frame {
             | Frame::More { space, .. }
             | Frame::Parts { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
-            Frame::Telemetry { .. } | Frame::Call { .. } | Frame::Reply { .. } => Space::Durable,
+            Frame::Telemetry { .. }
+            | Frame::Call { .. }
+            | Frame::Reply { .. }
+            | Frame::Offer { .. }
+            | Frame::Want { .. }
+            | Frame::Chunk { .. }
+            | Frame::Have { .. }
+            | Frame::Absent { .. } => Space::Durable,
         }
+    }
+
+    /// Whether it is a file's (docs/plan-files.md): no machine's.
+    pub fn is_file(&self) -> bool {
+        matches!(
+            self,
+            Frame::Offer { .. } | Frame::Want { .. } | Frame::Chunk { .. } | Frame::Have { .. } | Frame::Absent { .. }
+        )
     }
 
     /// A peer's intents, not yet sequenced, as a page.

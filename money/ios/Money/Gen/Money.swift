@@ -63,6 +63,21 @@ public struct AddGroup: Equatable {
     public var json: String { J.obj(["\"name\":" + J.q(name)]) }
 }
 
+/// The record `AddPhoto`.
+public struct AddPhoto: Equatable {
+    public var file: FileRef
+    public var txnId: Id?
+
+    public init(file: FileRef, txnId: Id? = nil) { self.file = file; self.txnId = txnId; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(file: FileRef(json: o["file"]), txnId: J.opt(o["txn_id"]) { v0 in Id(J.text(v0)) })
+    }
+
+    public var json: String { J.obj(["\"file\":" + file.json, "\"txn_id\":" + J.wopt(txnId) { v0 in J.q(v0.hex) }]) }
+}
+
 /// The record `AddSplit`.
 public struct AddSplit: Equatable {
     public var accountId: Id
@@ -717,6 +732,22 @@ public struct EditTransaction: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"transfer_to\":" + J.wopt(transferTo) { v0 in J.q(v0.hex) }]) }
 }
 
+/// The record `FileRef`.
+public struct FileRef: Equatable {
+    public var hash: String
+    public var size: Int64
+    public var media: String
+
+    public init(hash: String, size: Int64, media: String) { self.hash = hash; self.size = size; self.media = media; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(hash: J.text(o["hash"]), size: J.int(o["size"]), media: J.text(o["media"]))
+    }
+
+    public var json: String { J.obj(["\"hash\":" + J.q(hash), "\"size\":" + String(size), "\"media\":" + J.q(media)]) }
+}
+
 /// The record `Filter`.
 public struct Filter: Equatable {
     public var accounts: [Id]
@@ -1031,6 +1062,37 @@ public struct ItemsIn: Equatable {
     public var json: String { J.obj(["\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }]) }
 }
 
+/// The sum `JobPhotoRead`.
+public indirect enum JobPhotoRead: Equatable {
+    case pending(dueMs: Int64)
+    case claimed(by: String, atMs: Int64)
+    case done(value: PhotoRead)
+    case failed(why: String, retryMs: Int64)
+    case cancelled
+
+    public init(json j: Any?) {
+        let (t, o) = J.sum(j)
+        switch t {
+        case "Pending": self = .pending(dueMs: J.int(o!["due_ms"]))
+        case "Claimed": self = .claimed(by: J.text(o!["by"]), atMs: J.int(o!["at_ms"]))
+        case "Done": self = .done(value: PhotoRead(json: o!["value"]))
+        case "Failed": self = .failed(why: J.text(o!["why"]), retryMs: J.int(o!["retry_ms"]))
+        case "Cancelled": self = .cancelled
+        default: fatalError("JobPhotoRead: no variant \(t)")
+        }
+    }
+
+    public var json: String {
+        switch self {
+        case let .pending(dueMs): return "{\"Pending\":" + J.obj(["\"due_ms\":" + String(dueMs)]) + "}"
+        case let .claimed(by, atMs): return "{\"Claimed\":" + J.obj(["\"by\":" + J.q(by), "\"at_ms\":" + String(atMs)]) + "}"
+        case let .done(value): return "{\"Done\":" + J.obj(["\"value\":" + value.json]) + "}"
+        case let .failed(why, retryMs): return "{\"Failed\":" + J.obj(["\"why\":" + J.q(why), "\"retry_ms\":" + String(retryMs)]) + "}"
+        case .cancelled: return "\"Cancelled\""
+        }
+    }
+}
+
 /// The record `LinkAccount`.
 public struct LinkAccount: Equatable {
     public var plaidAccountId: String
@@ -1273,6 +1335,143 @@ extension PayeeLine {
     }
 
     public var json: String { J.obj(["\"name\":" + J.q(name), "\"count\":" + String(count), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }]) }
+}
+
+/// The record `Photo`.
+public struct Photo: Equatable {
+    public var id: Id
+    public var file: FileRef
+    public var txnId: Id?
+    public var takenMs: Int64
+    public var userId: String
+    public var state: JobPhotoRead
+
+    public init(id: Id, file: FileRef, txnId: Id?, takenMs: Int64, userId: String, state: JobPhotoRead) { self.id = id; self.file = file; self.txnId = txnId; self.takenMs = takenMs; self.userId = userId; self.state = state; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), file: FileRef(json: o["file"]), txnId: J.opt(o["txn_id"]) { v0 in Id(J.text(v0)) }, takenMs: J.int(o["taken_ms"]), userId: J.text(o["user_id"]), state: JobPhotoRead(json: o["state"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"file\":" + file.json, "\"txn_id\":" + J.wopt(txnId) { v0 in J.q(v0.hex) }, "\"taken_ms\":" + String(takenMs), "\"user_id\":" + J.q(userId), "\"state\":" + state.json]) }
+}
+
+/// The record `PhotoCancel`.
+public struct PhotoCancel: Equatable {
+    public var id: Id
+
+    public init(id: Id) { self.id = id; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex)]) }
+}
+
+/// The record `PhotoClaim`.
+public struct PhotoClaim: Equatable {
+    public var id: Id
+    public var by: String
+
+    public init(id: Id, by: String) { self.id = id; self.by = by; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), by: J.text(o["by"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by)]) }
+}
+
+/// The record `PhotoDue`.
+public struct PhotoDue: Equatable {
+    public var rows: [Photo]
+    public var nextMs: Int64?
+
+    public init(rows: [Photo], nextMs: Int64? = nil) { self.rows = rows; self.nextMs = nextMs; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(rows: J.list(o["rows"]) { v0 in Photo(json: v0) }, nextMs: J.opt(o["next_ms"]) { v0 in J.int(v0) })
+    }
+
+    public var json: String { J.obj(["\"rows\":" + J.wlist(rows) { v0 in v0.json }, "\"next_ms\":" + J.wopt(nextMs) { v0 in String(v0) }]) }
+}
+
+/// The record `PhotoFinish`.
+public struct PhotoFinish: Equatable {
+    public var id: Id
+    public var by: String
+    public var outcome: PhotoOutcome
+
+    public init(id: Id, by: String, outcome: PhotoOutcome) { self.id = id; self.by = by; self.outcome = outcome; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), by: J.text(o["by"]), outcome: PhotoOutcome(json: o["outcome"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by), "\"outcome\":" + outcome.json]) }
+}
+
+/// The record `PhotoLine`.
+public struct PhotoLine: Equatable {
+    public var id: Id
+    public var file: FileRef
+    public var txnId: Id?
+    public var receiptId: String
+    public var takenMs: Int64
+    public var state: String
+    public var why: String
+
+    public init(id: Id, file: FileRef, txnId: Id?, receiptId: String, takenMs: Int64, state: String, why: String) { self.id = id; self.file = file; self.txnId = txnId; self.receiptId = receiptId; self.takenMs = takenMs; self.state = state; self.why = why; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(id: Id(J.text(o["id"])), file: FileRef(json: o["file"]), txnId: J.opt(o["txn_id"]) { v0 in Id(J.text(v0)) }, receiptId: J.text(o["receipt_id"]), takenMs: J.int(o["taken_ms"]), state: J.text(o["state"]), why: J.text(o["why"]))
+    }
+
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"file\":" + file.json, "\"txn_id\":" + J.wopt(txnId) { v0 in J.q(v0.hex) }, "\"receipt_id\":" + J.q(receiptId), "\"taken_ms\":" + String(takenMs), "\"state\":" + J.q(state), "\"why\":" + J.q(why)]) }
+}
+
+/// The sum `PhotoOutcome`.
+public indirect enum PhotoOutcome: Equatable {
+    case ok(value: PhotoRead)
+    case err(why: String)
+
+    public init(json j: Any?) {
+        let (t, o) = J.sum(j)
+        switch t {
+        case "Ok": self = .ok(value: PhotoRead(json: o!["value"]))
+        case "Err": self = .err(why: J.text(o!["why"]))
+        default: fatalError("PhotoOutcome: no variant \(t)")
+        }
+    }
+
+    public var json: String {
+        switch self {
+        case let .ok(value): return "{\"Ok\":" + J.obj(["\"value\":" + value.json]) + "}"
+        case let .err(why): return "{\"Err\":" + J.obj(["\"why\":" + J.q(why)]) + "}"
+        }
+    }
+}
+
+/// The record `PhotoRead`.
+public struct PhotoRead: Equatable {
+    public var receiptId: String
+    public var state: String
+    public var changed: [String]
+
+    public init(receiptId: String, state: String, changed: [String]) { self.receiptId = receiptId; self.state = state; self.changed = changed; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(receiptId: J.text(o["receipt_id"]), state: J.text(o["state"]), changed: J.list(o["changed"]) { v0 in J.text(v0) })
+    }
+
+    public var json: String { J.obj(["\"receipt_id\":" + J.q(receiptId), "\"state\":" + J.q(state), "\"changed\":" + J.wlist(changed) { v0 in J.q(v0) }]) }
 }
 
 /// The record `PreviewFormula`.
@@ -2004,8 +2203,23 @@ public struct Money {
     /// `filters.saved`, kept.
     public func saved() throws -> LiveView<FilterLine> { LiveView(try peer.view(name: "filters.saved", input: "null")) { j in FilterLine(json: j) } }
 
+    /// `photo.cancel`: its intent's id.
+    @discardableResult public func cancel(_ input: PhotoCancel) throws -> String { try peer.mutate(name: "photo.cancel", input: input.json) }
+
+    /// `photo.claim`: its intent's id.
+    @discardableResult public func claim(_ input: PhotoClaim) throws -> String { try peer.mutate(name: "photo.claim", input: input.json) }
+
+    /// `photo.due`.
+    public func due() throws -> PhotoDue { PhotoDue(json: J.parse(try peer.query(name: "photo.due", input: "null"))) }
+
+    /// `photo.finish`: its intent's id.
+    @discardableResult public func finish(_ input: PhotoFinish) throws -> String { try peer.mutate(name: "photo.finish", input: input.json) }
+
     /// `receipts.add_charges`: its intent's id.
     @discardableResult public func addCharges(_ input: ChargeImport) throws -> String { try peer.mutate(name: "receipts.add_charges", input: input.json) }
+
+    /// `receipts.add_photo`: its intent's id.
+    @discardableResult public func addPhoto(_ input: AddPhoto) throws -> String { try peer.mutate(name: "receipts.add_photo", input: input.json) }
 
     /// `receipts.add_receipts`: its intent's id.
     @discardableResult public func addReceipts(_ input: ReceiptImport) throws -> String { try peer.mutate(name: "receipts.add_receipts", input: input.json) }
@@ -2027,6 +2241,9 @@ public struct Money {
 
     /// `receipts.pay_charge`: its intent's id.
     @discardableResult public func payCharge(_ input: PayCharge) throws -> String { try peer.mutate(name: "receipts.pay_charge", input: input.json) }
+
+    /// `receipts.photos`, kept.
+    public func photos() throws -> LiveView<PhotoLine> { LiveView(try peer.view(name: "receipts.photos", input: "null")) { j in PhotoLine(json: j) } }
 
     /// `receipts.receipt_items`, kept.
     public func receiptItems(_ input: OneReceipt) throws -> LiveView<ItemLine> { LiveView(try peer.view(name: "receipts.receipt_items", input: input.json)) { j in ItemLine(json: j) } }

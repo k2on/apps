@@ -62,6 +62,7 @@
 pub mod app;
 pub mod disk;
 pub mod driven;
+pub mod files;
 mod hub;
 pub mod instance;
 mod jobs;
@@ -95,7 +96,9 @@ use ark::store::Change;
 use ark::{Domain, Refusal};
 
 pub use app::{nobody, Standing, Status, Update};
+pub use ark::file::FileRef;
 pub use disk::{Disk, Files, Memory};
+pub use files::{Dir, Store};
 #[cfg(not(target_arch = "wasm32"))]
 pub use handle::{dev, Authenticate, Handle};
 pub use hub::{Called, ConnId, Deliver};
@@ -314,6 +317,8 @@ pub struct Peer {
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
     missed: Option<Vec<Told>>,
+    /// The files rows name, and where each transfer is (`files`).
+    pub(crate) files: files::Files,
     /// The reconcilers, by their view.
     reconcilers: BTreeMap<usize, jobs::Reconciler>,
 }
@@ -427,13 +432,17 @@ impl Peer {
             runners: vec![],
             missed: None,
             reconcilers: BTreeMap::new(),
+            files: files::Files::default(),
         }
     }
 
     /// A device opened as `me` from what `disk` holds.
     pub fn open(config: Config, me: Who, disk: Box<dyn Disk>, record: bool) -> Peer {
+        let files = disk.files();
         let (disk, local) = local::beside(disk);
-        Peer::opened(config, me, disk, local, record.then(Vec::new), link::Link::default())
+        let mut p = Peer::opened(config, me, disk, local, record.then(Vec::new), link::Link::default());
+        p.keep_files(files);
+        p
     }
 
     pub(crate) fn opened(
@@ -497,7 +506,10 @@ impl Peer {
         let mut link = self.link;
         link.wire = None;
         let local = Instance::open::<Local>(self.local.into_disk());
-        Peer::opened(self.config, me, self.log.into_disk(), local, self.record, link)
+        let files = self.files.store;
+        let mut p = Peer::opened(self.config, me, self.log.into_disk(), local, self.record, link);
+        p.keep_files(files);
+        p
     }
 
     pub fn machine(&self, space: Space) -> Option<&Machine> {
@@ -781,6 +793,7 @@ impl Peer {
         self.frames.clear();
         self.step(Space::Durable, Input::Connected);
         self.step(Space::Volatile, Input::Connected);
+        self.files_connected();
     }
 
     pub fn disconnected(&mut self) {
@@ -816,6 +829,7 @@ impl Peer {
     pub fn receive(&mut self, bytes: Vec<u8>) {
         let space = match Frame::dec(&bytes) {
             Ok(Frame::Reply { id, reply }) => return self.told.replied(id, reply),
+            Ok(f) if f.is_file() => return self.file_told(f),
             f => f.map_or(Space::Durable, |f| f.space()),
         };
         self.step(space, Input::Frame { from: None, bytes });

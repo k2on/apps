@@ -75,10 +75,11 @@ pub fn domain() -> Domain {
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
         transactions::register, transactions::inbox, transactions::payees, transactions::split, transactions::add_split, transactions::splits,
         receipts::add_receipts, receipts::file_items, receipts::pay, receipts::receipts, receipts::items, receipts::receipt_items,
-        receipts::add_charges, receipts::pay_charge, receipts::charges, receipts::candidates,
+        receipts::add_charges, receipts::pay_charge, receipts::charges, receipts::candidates, receipts::add_photo, receipts::photos,
         plaid::import, plaid::link, plaid::open, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, plaid::retired,
         banks::connect, banks::reconnect, banks::add_accounts, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
     .with(ark_auth::register::<Money>)
+    .with(<Photo as ark::effect::Effect>::register::<Money>)
     .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
 }
 
@@ -105,7 +106,8 @@ pub fn feed() -> Scope<Money> {
             .on::<Split>(all)
             .on::<Receipt>(all)
             .on::<Item>(all)
-            .on::<Charge>(all),
+            .on::<Charge>(all)
+            .on::<Photo>(all),
     )
 }
 

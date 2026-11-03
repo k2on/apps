@@ -255,6 +255,7 @@ impl Peer {
     pub fn pump(&mut self) -> Pumped {
         let now = crate::monotonic_ms();
         let mut p = Pumped::default();
+        let arrived = self.files.arrived;
         self.dial_if_due(now);
         let l = &mut self.link;
         l.backlog.extend(l.wire.as_mut().map(|w| w.events()).unwrap_or_default());
@@ -315,7 +316,7 @@ impl Peer {
         self.tick(crate::now_ms());
         self.jobs(crate::now_ms());
         self.flush();
-        p.shown |= !self.told.updates.is_empty();
+        p.shown |= !self.told.updates.is_empty() || self.files.arrived != arrived;
         p
     }
 

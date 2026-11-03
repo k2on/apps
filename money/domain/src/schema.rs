@@ -365,6 +365,34 @@ pub struct Charge {
     pub user_id: String,
 }
 
+/// A photo of a paper receipt, kept for good (docs/plan-files.md): its
+/// file, the transaction it was taken for when it was, and reading it — a
+/// job (`ark::effect`) the server's importer claims, runs `receipt-ocr`
+/// on and finishes with the receipt it wrote.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+#[ark(index(txn_id))]
+#[effect(role = crate::BANK, lease_ms = 600_000, retry_ms = 60_000)]
+pub struct Photo {
+    #[ark(key)]
+    pub id: Id<Photo>,
+    pub file: ark::file::FileRef,
+    #[ark(refs(Txn))]
+    pub txn_id: Option<Id<Txn>>,
+    pub taken_ms: i64,
+    pub user_id: String,
+    pub state: Job<PhotoRead>,
+}
+
+/// What reading a photo came to: the receipt written from it, and how
+/// sure the reading is — `sure`, it adds up as read; `settled`, after the
+/// readings' other answers; `check`, it does not add up.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct PhotoRead {
+    pub receipt_id: String,
+    pub state: String,
+    pub changed: Vec<String>,
+}
+
 /// **No longer read** — kept because the schema only grows: what
 /// assignment by rule stored before formulas ([`Formula`]) replaced it. A
 /// row here assigns nothing now, and nothing writes one. It said how a
@@ -503,6 +531,7 @@ pub struct Money {
     pub receipt: Receipt,
     pub item: Item,
     pub charge: Charge,
+    pub photo: Photo,
 }
 
 ark_auth::install!(Money);

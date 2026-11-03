@@ -88,6 +88,14 @@ fn frame(peer: &str, sp: Space, dir: &str, conn: Option<ConnId>, bytes: &[u8]) {
         Frame::Telemetry { events } => debug!(target: "ark", peer, dir, conn, events = events.len(), "telemetry"),
         // A call's input is what must stay off the log: its name alone.
         Frame::Call { id, name, .. } => debug!(target: "ark", peer, dir, conn, call = id, name = %name, "call"),
+        // A file's frames: which file and where, never its bytes.
+        Frame::Offer { hash, size } => debug!(target: "ark", peer, dir, conn, file = %hash, size, "offer"),
+        Frame::Want { hash, at } => debug!(target: "ark", peer, dir, conn, file = %hash, at, "want"),
+        Frame::Chunk { hash, at, size, bytes } => {
+            debug!(target: "ark", peer, dir, conn, file = %hash, at, size, len = bytes.len(), "chunk")
+        }
+        Frame::Have { hash } => debug!(target: "ark", peer, dir, conn, file = %hash, "have"),
+        Frame::Absent { hash, why } => debug!(target: "ark", peer, dir, conn, file = %hash, why = %why, "absent"),
         Frame::Reply { id, reply } => {
             let ok = matches!(reply, ark::frames::Reply::Ok { .. });
             debug!(target: "ark", peer, dir, conn, call = id, ok, "reply")

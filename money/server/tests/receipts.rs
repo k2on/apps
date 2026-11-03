@@ -189,12 +189,17 @@ fn a_paper_receipt_is_read_from_its_photo() {
     std::fs::set_permissions(&ocr, std::fs::Permissions::from_mode(0o755)).unwrap();
     let server = serve(&rt, data.path(), |c| c.stores.ocr = Some(ocr.clone()));
     let mut alice = signed_in(&server, "alice");
-    let photo = ReceiptPhoto { image: "/9j/4AAQSkZJRgABAQ==".into() };
+    let photo = ReceiptPhoto {
+        image: "/9j/4AAQSkZJRgABAQ==".into(),
+    };
     let p: PaperReceipt = alice.call(calls::READ_RECEIPT, &photo).unwrap();
     assert_eq!(p.state, "sure", "{p:?}");
     assert_eq!((p.items.len(), p.discounts.len(), p.sum, p.tax, p.due), (9, 1, 3217, 23, Some(3240)));
     assert_eq!(p.items[6].cents, 1511, "the ground beef");
-    assert!(std::fs::read_dir(data.path().join("receipt-photos")).unwrap().next().is_none(), "the photo is not kept");
+    assert!(
+        std::fs::read_dir(data.path().join("receipt-photos")).unwrap().next().is_none(),
+        "the photo is not kept"
+    );
     let bad = alice.call::<PaperReceipt>(calls::READ_RECEIPT, &ReceiptPhoto { image: "not base64!".into() });
     assert!(bad.unwrap_err().contains("not base64"));
 
@@ -202,4 +207,66 @@ fn a_paper_receipt_is_read_from_its_photo() {
     let mut bob = signed_in(&bare, "bob");
     let none = bob.call::<PaperReceipt>(calls::READ_RECEIPT, &photo).unwrap_err();
     assert!(none.contains("no receipt-ocr"), "{none}");
+}
+
+/// A photo of a paper receipt taken offline (docs/plan-files.md): kept on
+/// the device and pending; on the next connection its file goes up beside
+/// its row, the server's importer reads it with receipt-ocr and writes the
+/// receipt, and the photo is kept — on the server, and for another device
+/// that opens it.
+#[test]
+fn a_receipt_photo_taken_offline_is_read_by_the_server_once_it_arrives() {
+    use money_domain::types::{AddPhoto, PhotoLine, ReceiptLine};
+    let rt = runtime();
+    let (data, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/paper/foodlion-2025-06-15");
+    let readings = format!(r#"{{"readings":[$(cat {dir}.736.json),$(cat {dir}.1280.json),$(cat {dir}.1920.json)]}}"#);
+    let ocr = bin.path().join("receipt-ocr");
+    std::fs::write(&ocr, format!("#!/bin/sh\n[ -s \"$1\" ] || exit 2\ncat <<EOF\n{readings}\nEOF\n")).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&ocr, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let server = serve(&rt, data.path(), |c| c.stores.ocr = Some(ocr.clone()));
+
+    // Offline.
+    let l = login(&server, "alice");
+    let mut alice = open(ark_peer::who(&l));
+    let jpeg = [&b"\xff\xd8\xff\xe0 a food lion receipt "[..], &[7u8; 3 << 20][..]].concat();
+    let file = alice.client.put_file(&jpeg, "image/jpeg").unwrap();
+    alice.mutate(
+        "receipts.add_photo",
+        &AddPhoto {
+            file: file.clone(),
+            txn_id: None,
+        },
+    );
+    let photos: Vec<PhotoLine> = alice.query("receipts.photos", &()).unwrap();
+    assert_eq!(photos.iter().map(|p| p.state.as_str()).collect::<Vec<_>>(), ["reading"], "there at once");
+
+    alice.connect(&server.url(), &l.token);
+    let mut read = vec![];
+    pump_until(&mut [&mut alice], 30, |ps| {
+        read = ps[0].query::<Vec<PhotoLine>>("receipts.photos", &()).unwrap();
+        read.first().is_some_and(|p| p.state != "reading" && p.state != "failed")
+    });
+    let p = &read[0];
+    assert_eq!(p.state, "sure", "{p:?}");
+    assert!(alice.client.files_unsent().is_empty(), "sent");
+    pump_until(&mut [&mut alice], 10, |ps| {
+        let rs: Vec<ReceiptLine> = ps[0].query("receipts.receipts", &()).unwrap();
+        rs.iter().any(|r| r.id == p.receipt_id)
+    });
+    let receipts: Vec<ReceiptLine> = alice.query("receipts.receipts", &()).unwrap();
+    let r = receipts.iter().find(|r| r.id == p.receipt_id).unwrap();
+    assert_eq!((r.store.as_str(), r.total, r.items), ("paper", -3240, 10), "{r:?}");
+    let kept = data.path().join("log").join("files").join(&file.hash);
+    assert_eq!(std::fs::read(kept).unwrap(), jpeg, "the server keeps the photo");
+
+    let mut bob = signed_in(&server, "bob");
+    pump_until(&mut [&mut bob], 10, |ps| {
+        let ps: Vec<PhotoLine> = ps[0].query("receipts.photos", &()).unwrap();
+        !ps.is_empty()
+    });
+    assert_eq!(bob.client.open_file(&file), None, "fetched when opened");
+    pump_until(&mut [&mut bob], 10, |ps| ps[0].client.file(&file).is_some());
+    assert_eq!(bob.client.file(&file).unwrap(), jpeg);
 }

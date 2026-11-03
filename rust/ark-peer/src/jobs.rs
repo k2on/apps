@@ -48,6 +48,9 @@ struct Handler<R: Effect, F> {
     open: BTreeMap<Vec<u8>, (R, i64, Option<Span>)>,
     /// The claims made, until their verdict: each the claim's id, and its span.
     claims: BTreeMap<Vec<u8>, (EntryId, Span)>,
+    /// The rows due whose files are not here yet (`crate::files`): not
+    /// claimed, nor waited on by the clock, until they arrive.
+    waiting: std::collections::BTreeSet<Vec<u8>>,
 }
 
 impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable> Runner for Handler<R, F> {
@@ -71,15 +74,22 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
     fn next(&self) -> Option<i64> {
         self.open
             .iter()
-            .filter(|(k, _)| !self.claims.contains_key(*k))
+            .filter(|(k, _)| !self.claims.contains_key(*k) && !self.waiting.contains(*k))
             .map(|(_, (_, d, _))| *d)
             .min()
     }
 
     fn run(&mut self, p: &mut Peer, now: i64) {
         let due = self.open.iter().filter(|(k, (_, d, _))| *d <= now && !self.claims.contains_key(*k));
-        let due: Vec<(Vec<u8>, R::Id, Option<Span>)> = due.map(|(k, (r, _, by))| (k.clone(), r.id(), *by)).collect();
-        for (k, id, by) in due {
+        type Due<I> = (Vec<u8>, I, Option<Span>, Vec<String>);
+        let due: Vec<Due<R::Id>> = due.map(|(k, (r, _, by))| (k.clone(), r.id(), *by, crate::files::named(r))).collect();
+        self.waiting.clear();
+        for (k, id, by, files) in due {
+            // A job runs with what its row names: its files fetched first.
+            if !p.have_files(&files) {
+                self.waiting.insert(k);
+                continue;
+            }
             // The claim is a child of what made the row due.
             let claim = Claim::<R> { id, by: self.by.clone() };
             if let Ok(e) = p.under(by, |p| p.mutate(&format!("{}.claim", R::TABLE), &claim)) {
@@ -133,6 +143,7 @@ impl Peer {
             by,
             open: BTreeMap::new(),
             claims: BTreeMap::new(),
+            waiting: Default::default(),
         };
         let rows: Vec<Told> = self
             .log

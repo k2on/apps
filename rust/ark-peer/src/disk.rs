@@ -62,6 +62,12 @@ pub trait Disk: Send {
     /// Bytes added at the end of a blob.
     fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()>;
 
+    /// Where the files its rows name are kept (`crate::files`): in memory,
+    /// unless the disk is a directory.
+    fn files(&self) -> Box<dyn crate::files::Store> {
+        Box::new(crate::files::Memory::default())
+    }
+
     /// The store's rows and the log's rows after them, read; a torn tail
     /// of `log` cut.
     fn load(&mut self) -> io::Result<Stored> {
@@ -168,6 +174,13 @@ impl Files {
 }
 
 impl Disk for Files {
+    fn files(&self) -> Box<dyn crate::files::Store> {
+        match crate::files::Dir::new(self.dir.join("files")) {
+            Ok(d) => Box::new(d),
+            Err(_) => Box::new(crate::files::Memory::default()),
+        }
+    }
+
     fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>> {
         match fs::read(self.dir.join(name)) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),

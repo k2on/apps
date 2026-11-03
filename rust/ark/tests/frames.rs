@@ -130,6 +130,25 @@ fn every_frame() -> Vec<Frame> {
             id: 8,
             reply: Reply::Refused { why: "no".into() },
         },
+        Frame::Offer {
+            hash: "ab".repeat(32),
+            size: 3 << 20,
+        },
+        Frame::Want {
+            hash: "ab".repeat(32),
+            at: 1 << 20,
+        },
+        Frame::Chunk {
+            hash: "ab".repeat(32),
+            at: 1 << 20,
+            size: 3 << 20,
+            bytes: vec![0, 255, 7],
+        },
+        Frame::Have { hash: "ab".repeat(32) },
+        Frame::Absent {
+            hash: "ab".repeat(32),
+            why: "not here yet".into(),
+        },
     ]
 }
 

@@ -62,6 +62,15 @@ data class AddGroup(val name: String) {
     }
 }
 
+/** The record `AddPhoto`. */
+data class AddPhoto(val file: FileRef, val txnId: Id? = null) {
+    fun json(): String = "{" + "\"file\":" + file.json() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "}"
+
+    companion object {
+        fun of(j: Any?): AddPhoto = (j as JSONObject).let { o -> AddPhoto(FileRef.of(o.opt("file")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
+
 /** The record `AddSplit`. */
 data class AddSplit(val accountId: Id, val date: String, val payee: String, val memo: String, val amount: Long, val cleared: Boolean, val lines: List<SplitPart>) {
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"lines\":" + J.wlist(lines) { v0 -> v0.json() } + "}"
@@ -432,6 +441,15 @@ data class EditTransaction(val id: Id, val date: String, val payee: String, val 
     }
 }
 
+/** The record `FileRef`. */
+data class FileRef(val hash: String, val size: Long, val media: String) {
+    fun json(): String = "{" + "\"hash\":" + J.q(hash) + "," + "\"size\":" + size.toString() + "," + "\"media\":" + J.q(media) + "}"
+
+    companion object {
+        fun of(j: Any?): FileRef = (j as JSONObject).let { o -> FileRef(J.text(o.opt("hash")), J.int(o.opt("size")), J.text(o.opt("media"))) }
+    }
+}
+
 /** The record `Filter`. */
 data class Filter(val accounts: List<Id>, val onBudget: Boolean, val text: String, val categories: List<Id?>, val direction: Direction, val noTransfers: Boolean, val needsLook: Boolean, val from: String? = null, val through: String? = null) {
     fun json(): String = "{" + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"on_budget\":" + onBudget.toString() + "," + "\"text\":" + J.q(text) + "," + "\"categories\":" + J.wlist(categories) { v0 -> J.wopt(v0) { v1 -> J.q(v1.hex) } } + "," + "\"direction\":" + direction.json() + "," + "\"no_transfers\":" + noTransfers.toString() + "," + "\"needs_look\":" + needsLook.toString() + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0) } + "," + "\"through\":" + J.wopt(through) { v0 -> J.q(v0) } + "}"
@@ -590,6 +608,44 @@ data class ItemsIn(val categoryId: Id? = null) {
     }
 }
 
+/** The sum `JobPhotoRead`. */
+sealed class JobPhotoRead {
+    abstract fun json(): String
+
+    data class Pending(val dueMs: Long) : JobPhotoRead() {
+        override fun json(): String = "{\"Pending\":" + "{" + "\"due_ms\":" + dueMs.toString() + "}" + "}"
+    }
+
+    data class Claimed(val by: String, val atMs: Long) : JobPhotoRead() {
+        override fun json(): String = "{\"Claimed\":" + "{" + "\"by\":" + J.q(by) + "," + "\"at_ms\":" + atMs.toString() + "}" + "}"
+    }
+
+    data class Done(val value: dev.money.android.gen.PhotoRead) : JobPhotoRead() {
+        override fun json(): String = "{\"Done\":" + "{" + "\"value\":" + value.json() + "}" + "}"
+    }
+
+    data class Failed(val why: String, val retryMs: Long) : JobPhotoRead() {
+        override fun json(): String = "{\"Failed\":" + "{" + "\"why\":" + J.q(why) + "," + "\"retry_ms\":" + retryMs.toString() + "}" + "}"
+    }
+
+    data object Cancelled : JobPhotoRead() {
+        override fun json(): String = "\"Cancelled\""
+    }
+
+    companion object {
+        fun of(j: Any?): JobPhotoRead = J.sum(j) { t, o ->
+            when (t) {
+                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
+                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+                "Done" -> Done(dev.money.android.gen.PhotoRead.of(o!!.opt("value")))
+                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+                "Cancelled" -> Cancelled
+                else -> throw IllegalArgumentException("JobPhotoRead: no variant $t")
+            }
+        }
+    }
+}
+
 /** The record `LinkAccount`. */
 data class LinkAccount(val plaidAccountId: String, val accountId: Id) {
     fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"account_id\":" + J.q(accountId.hex) + "}"
@@ -725,6 +781,92 @@ data class PayCharge(val chargeId: String, val txnId: Id? = null) {
 fun PayeeLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"count\":" + count.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
 fun PayeeLine.Companion.of(j: Any?): PayeeLine = (j as JSONObject).let { o -> PayeeLine(J.text(o.opt("name")), J.int(o.opt("count")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
+
+/** The record `Photo`. */
+data class Photo(val id: Id, val file: FileRef, val txnId: Id?, val takenMs: Long, val userId: String, val state: JobPhotoRead) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"file\":" + file.json() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"taken_ms\":" + takenMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"state\":" + state.json() + "}"
+
+    companion object {
+        fun of(j: Any?): Photo = (j as JSONObject).let { o -> Photo(Id(J.text(o.opt("id"))), FileRef.of(o.opt("file")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("taken_ms")), J.text(o.opt("user_id")), JobPhotoRead.of(o.opt("state"))) }
+    }
+}
+
+/** The record `PhotoCancel`. */
+data class PhotoCancel(val id: Id) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
+
+    companion object {
+        fun of(j: Any?): PhotoCancel = (j as JSONObject).let { o -> PhotoCancel(Id(J.text(o.opt("id")))) }
+    }
+}
+
+/** The record `PhotoClaim`. */
+data class PhotoClaim(val id: Id, val by: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
+
+    companion object {
+        fun of(j: Any?): PhotoClaim = (j as JSONObject).let { o -> PhotoClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
+    }
+}
+
+/** The record `PhotoDue`. */
+data class PhotoDue(val rows: List<Photo>, val nextMs: Long? = null) {
+    fun json(): String = "{" + "\"rows\":" + J.wlist(rows) { v0 -> v0.json() } + "," + "\"next_ms\":" + J.wopt(nextMs) { v0 -> v0.toString() } + "}"
+
+    companion object {
+        fun of(j: Any?): PhotoDue = (j as JSONObject).let { o -> PhotoDue(J.list(o.opt("rows")) { v0 -> Photo.of(v0) }, J.opt(o.opt("next_ms")) { v0 -> J.int(v0) }) }
+    }
+}
+
+/** The record `PhotoFinish`. */
+data class PhotoFinish(val id: Id, val by: String, val outcome: PhotoOutcome) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "}"
+
+    companion object {
+        fun of(j: Any?): PhotoFinish = (j as JSONObject).let { o -> PhotoFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), PhotoOutcome.of(o.opt("outcome"))) }
+    }
+}
+
+/** The record `PhotoLine`. */
+data class PhotoLine(val id: Id, val file: FileRef, val txnId: Id?, val receiptId: String, val takenMs: Long, val state: String, val why: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"file\":" + file.json() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"receipt_id\":" + J.q(receiptId) + "," + "\"taken_ms\":" + takenMs.toString() + "," + "\"state\":" + J.q(state) + "," + "\"why\":" + J.q(why) + "}"
+
+    companion object {
+        fun of(j: Any?): PhotoLine = (j as JSONObject).let { o -> PhotoLine(Id(J.text(o.opt("id"))), FileRef.of(o.opt("file")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("receipt_id")), J.int(o.opt("taken_ms")), J.text(o.opt("state")), J.text(o.opt("why"))) }
+    }
+}
+
+/** The sum `PhotoOutcome`. */
+sealed class PhotoOutcome {
+    abstract fun json(): String
+
+    data class Ok(val value: dev.money.android.gen.PhotoRead) : PhotoOutcome() {
+        override fun json(): String = "{\"Ok\":" + "{" + "\"value\":" + value.json() + "}" + "}"
+    }
+
+    data class Err(val why: String) : PhotoOutcome() {
+        override fun json(): String = "{\"Err\":" + "{" + "\"why\":" + J.q(why) + "}" + "}"
+    }
+
+    companion object {
+        fun of(j: Any?): PhotoOutcome = J.sum(j) { t, o ->
+            when (t) {
+                "Ok" -> Ok(dev.money.android.gen.PhotoRead.of(o!!.opt("value")))
+                "Err" -> Err(J.text(o!!.opt("why")))
+                else -> throw IllegalArgumentException("PhotoOutcome: no variant $t")
+            }
+        }
+    }
+}
+
+/** The record `PhotoRead`. */
+data class PhotoRead(val receiptId: String, val state: String, val changed: List<String>) {
+    fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"state\":" + J.q(state) + "," + "\"changed\":" + J.wlist(changed) { v0 -> J.q(v0) } + "}"
+
+    companion object {
+        fun of(j: Any?): PhotoRead = (j as JSONObject).let { o -> PhotoRead(J.text(o.opt("receipt_id")), J.text(o.opt("state")), J.list(o.opt("changed")) { v0 -> J.text(v0) }) }
+    }
+}
 
 /** The record `PreviewFormula`. */
 data class PreviewFormula(val month: String, val terms: List<Term>) {
@@ -1175,8 +1317,23 @@ class Money(val peer: Peer) {
     /** `filters.saved`, kept. */
     fun saved(): View<FilterLine> = View(peer.view("filters.saved", "null")) { j -> FilterLine.of(j) }
 
+    /** `photo.cancel`: its intent's id. */
+    fun cancel(input: PhotoCancel): String = peer.mutate("photo.cancel", input.json())
+
+    /** `photo.claim`: its intent's id. */
+    fun claim(input: PhotoClaim): String = peer.mutate("photo.claim", input.json())
+
+    /** `photo.due`. */
+    fun due(): PhotoDue = PhotoDue.of(J.parse(peer.query("photo.due", "null")))
+
+    /** `photo.finish`: its intent's id. */
+    fun finish(input: PhotoFinish): String = peer.mutate("photo.finish", input.json())
+
     /** `receipts.add_charges`: its intent's id. */
     fun addCharges(input: ChargeImport): String = peer.mutate("receipts.add_charges", input.json())
+
+    /** `receipts.add_photo`: its intent's id. */
+    fun addPhoto(input: AddPhoto): String = peer.mutate("receipts.add_photo", input.json())
 
     /** `receipts.add_receipts`: its intent's id. */
     fun addReceipts(input: ReceiptImport): String = peer.mutate("receipts.add_receipts", input.json())
@@ -1198,6 +1355,9 @@ class Money(val peer: Peer) {
 
     /** `receipts.pay_charge`: its intent's id. */
     fun payCharge(input: PayCharge): String = peer.mutate("receipts.pay_charge", input.json())
+
+    /** `receipts.photos`, kept. */
+    fun photos(): View<PhotoLine> = View(peer.view("receipts.photos", "null")) { j -> PhotoLine.of(j) }
 
     /** `receipts.receipt_items`, kept. */
     fun receiptItems(input: OneReceipt): View<ItemLine> = View(peer.view("receipts.receipt_items", input.json())) { j -> ItemLine.of(j) }

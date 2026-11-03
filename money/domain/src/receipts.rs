@@ -133,6 +133,18 @@ fn the_stores(store: &str, t: &Txn) -> bool {
     aliases(store).iter().any(|w| a.contains(w) || b.contains(w))
 }
 
+/// Whether `t` is from the store a paper receipt names: its name's first
+/// word of three letters or more in the payee (`ALDI` in `ALDI 72031`,
+/// `food` in `FOOD LION #1234`).
+fn the_place(place: &str, t: &Txn) -> bool {
+    let (a, b) = (t.payee.to_lowercase(), t.imported_payee.to_lowercase());
+    let w = place.to_lowercase();
+    match w.split(|c: char| !c.is_alphanumeric()).find(|w| w.len() >= 3) {
+        Some(w) => a.contains(w) || b.contains(w),
+        None => false,
+    }
+}
+
 /// Whether `t` can be what paid for `r`.
 fn could_pay(db: &Db<Money>, r: &Receipt, t: &Txn) -> bool {
     let on_budget = db.account.get(t.account_id).is_some_and(|a| a.on_budget);
@@ -143,7 +155,7 @@ fn could_pay(db: &Db<Money>, r: &Receipt, t: &Txn) -> bool {
         && t.amount == r.total
         && t.date >= lo
         && t.date <= hi
-        && the_stores(&r.store, t)
+        && (the_stores(&r.store, t) || r.store == crate::stores::PAPER && the_place(&r.place, t))
         && db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).all().iter().all(|o| o.id == r.id)
         && !db.charge.by(Charge::TXN_ID).from(Some(t.id)).any()
 }
@@ -734,4 +746,52 @@ mod tests {
         assert_eq!(key_of("costco", "", "KS Eggs, 24ct"), "costco:~ks egg 24ct");
         assert_eq!(key_of("amazon", "B07X", "x"), "amazon:B07X");
     }
+}
+
+// * Photos
+
+/// A photo of a paper receipt, kept, and read by the server: a [`Photo`]
+/// due now, which the importer's handler claims, reads and finishes with
+/// the receipt it wrote (`paper:<photo>`), paid by the transaction it was
+/// taken for or, like any receipt, the one that did.
+#[mutator("receipts.add_photo")]
+pub fn add_photo(ctx: &Ctx, db: &mut Db<Money>, input: AddPhoto) -> Result<(), Refusal> {
+    if !ark::file::is_hash(&input.file.hash) || input.file.size <= 0 {
+        return Err(Refusal::new("not a photo's file"));
+    }
+    if let Some(t) = input.txn_id {
+        db.txn.get(t).ok_or_else(|| Refusal::new("no such transaction"))?;
+    }
+    db.photo.insert(Photo {
+        id: ctx.new_id(),
+        file: input.file,
+        txn_id: input.txn_id,
+        taken_ms: ctx.now,
+        user_id: ctx.user().to_string(),
+        state: Job::Pending { due_ms: ctx.now },
+    })
+}
+
+/// Every receipt photo, the newest first, and where reading it stands.
+#[view("receipts.photos")]
+pub fn photos(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<PhotoLine>, Refusal> {
+    Ok(scan::<Money, Photo>()
+        .map(|p| {
+            let (receipt_id, state, why) = match &p.state {
+                Job::Done(r) => (r.receipt_id.clone(), r.state.clone(), r.changed.join("; ")),
+                Job::Failed { why, .. } => (String::new(), "failed".into(), why.clone()),
+                Job::Cancelled => (String::new(), "cancelled".into(), String::new()),
+                Job::Pending { .. } | Job::Claimed { .. } => (String::new(), "reading".into(), String::new()),
+            };
+            PhotoLine {
+                id: p.id,
+                file: p.file.clone(),
+                txn_id: p.txn_id,
+                receipt_id,
+                taken_ms: p.taken_ms,
+                state,
+                why,
+            }
+        })
+        .sort(|l| (Desc(l.taken_ms), l.id)))
 }

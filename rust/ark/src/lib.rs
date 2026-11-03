@@ -26,6 +26,7 @@ pub use domain::{effect, Domain};
 pub mod db;
 pub mod domain;
 pub mod dynamic;
+pub mod file;
 pub mod format;
 pub mod frames;
 pub mod hash;

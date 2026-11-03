@@ -124,6 +124,14 @@ pub enum Patch {
     },
 }
 
+/// The server's answer to a call ([`Peer::request`]): what its function
+/// gave back, as bytes, or why not.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum Reply {
+    Ok { output: Vec<u8> },
+    Refused { why: String },
+}
+
 /// What a view did since it was last taken.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ViewUpdate {
@@ -195,12 +203,16 @@ struct State {
     hurry: u64,
     /// Why the server last turned the login away.
     denied: Option<String>,
+    /// The calls' answers waiting when the app was last told.
+    replies: usize,
+    /// The files that had arrived when the app was last told.
+    files: u64,
 }
 
 impl State {
     /// Every view's updates taken from the peer into what the app has not
     /// taken; a view opened for another login, or refused, opened again.
-    /// Whether any moved.
+    /// Whether any moved — or a call's answer came.
     fn settle(&mut self) -> bool {
         let mut moved = false;
         for k in self.views.values_mut() {
@@ -211,6 +223,12 @@ impl State {
             }
             moved = true;
         }
+        let replies = self.peer.replies_waiting();
+        moved |= replies > self.replies;
+        self.replies = replies;
+        let files = self.peer.files_arrived();
+        moved |= files != self.files;
+        self.files = files;
         moved
     }
 
@@ -357,6 +375,8 @@ impl Peer {
             next: 0,
             hurry: 0,
             denied: None,
+            replies: 0,
+            files: 0,
         };
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
@@ -460,6 +480,43 @@ impl Peer {
             out
         })?;
         Ok(ark::hash::hex(&id.0))
+    }
+
+    /// A call of one of the server's own functions (`ark_peer::Config::calls`)
+    /// on its input's bytes, sent now: its id, for [`Peer::take_reply`]; never
+    /// logged, and refused while not connected. The listener rings when its
+    /// answer comes.
+    pub fn request(&self, name: String, input: Vec<u8>) -> Result<u64, Refusal> {
+        Ok(self.shared.act(|s| s.peer.request(&name, input))?)
+    }
+
+    /// What the server answered the call `id`, once it has; told once.
+    pub fn take_reply(&self, id: u64) -> Option<Reply> {
+        self.shared.act(|s| s.peer.take_reply(id)).map(|r| match r {
+            Ok(output) => Reply::Ok { output },
+            Err(why) => Reply::Refused { why },
+        })
+    }
+
+    /// A file made on this device (docs/plan-files.md): kept in its
+    /// `files/`, sent to the server on this or the next connection; its
+    /// name (the hex sha256 of `bytes`), for the `FileRef` a mutation
+    /// names it by.
+    pub fn put_file(&self, bytes: Vec<u8>, media: String) -> Result<String, Refusal> {
+        Ok(self.shared.act(|s| s.peer.put_file(&bytes, &media))?.hash)
+    }
+
+    /// A file's bytes when this device holds them; when not, fetched from
+    /// the server, and the listener rings when they arrive.
+    pub fn file(&self, hash: String, size: i64, media: String) -> Option<Vec<u8>> {
+        let f = ark_peer::FileRef { hash, size, media };
+        self.shared.act(|s| s.peer.open_file(&f))
+    }
+
+    /// Why the server would not give a file, when it said.
+    pub fn file_absent(&self, hash: String) -> Option<String> {
+        let f = ark_peer::FileRef { hash, ..Default::default() };
+        self.shared.lock().peer.file_absent(&f).map(String::from)
     }
 
     /// The first of an input's refinements that fails, as a form says it.

@@ -5,7 +5,7 @@
 use ark::prelude::*;
 
 use crate::dates::{is_day, is_month};
-use crate::schema::{Account, AskState, BankAsk, Category, Filter, Group, SavedFilter, Term, Txn};
+use crate::schema::{Account, AskState, BankAsk, Category, Filter, Group, Photo, SavedFilter, Term, Txn};
 
 /// How far the bank and the household agree on a transaction: not yet seen
 /// at the bank, seen there, or agreed to as part of a reconciled balance —
@@ -397,7 +397,7 @@ pub struct IgnoreLinked {
 // * Receipts
 
 fn is_store(s: &str) -> bool {
-    crate::stores::STORES.contains(&s)
+    crate::stores::STORES.contains(&s) || s == crate::stores::PAPER
 }
 
 /// A thing bought, as a store's adapter read it.
@@ -1032,4 +1032,27 @@ pub struct ItemLine {
     pub unit_price: i64,
     pub category_id: Option<Id<Category>>,
     pub category: String,
+}
+
+/// A photo of a paper receipt taken (docs/plan-files.md): its file, made on
+/// the device ([`ark_peer::Peer::put_file`]), and the transaction it was
+/// taken for, when it was.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct AddPhoto {
+    pub file: ark::file::FileRef,
+    pub txn_id: Option<Id<Txn>>,
+}
+
+/// A receipt's photo, and where reading it stands: `reading` until the
+/// server has, then the reading's `sure`, `settled` or `check`; `failed`
+/// with why, while it is tried again.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct PhotoLine {
+    pub id: Id<Photo>,
+    pub file: ark::file::FileRef,
+    pub txn_id: Option<Id<Txn>>,
+    pub receipt_id: String,
+    pub taken_ms: i64,
+    pub state: String,
+    pub why: String,
 }

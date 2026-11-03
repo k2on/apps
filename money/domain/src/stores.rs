@@ -27,6 +27,10 @@ use crate::types::{ChargeImport, ReceiptImport, StoreCharge, StoreItem, StoreRec
 /// The stores there are adapters for.
 pub const STORES: [&str; 3] = ["amazon", "target", "costco"];
 
+/// The store of a receipt read from its photo: its `place` is the store
+/// the paper names.
+pub const PAPER: &str = "paper";
+
 /// One export read by its store's adapter.
 pub fn read(store: &str, text: &str) -> Result<ReceiptImport, String> {
     match store {

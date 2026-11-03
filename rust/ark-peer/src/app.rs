@@ -156,6 +156,7 @@ impl Peer {
     /// login and its token, as that login, its pending intents made the
     /// login's when they were somebody else's.
     pub fn open_as(config: Config, disk: Box<dyn Disk>, login: Option<(Who, String)>) -> Peer {
+        let files = disk.files();
         let (disk, mut local) = crate::local::beside(disk);
         let kept = local.read::<crate::Local, _>(crate::local::replica).unwrap_or_default();
         let me = match kept.actor {
@@ -172,6 +173,7 @@ impl Peer {
             }
         };
         let mut p = Peer::opened(config, me, disk, local, None, crate::link::Link::default());
+        p.keep_files(files);
         match login {
             Some((who, token)) if (&who.actor, &who.session) != (&p.log.me.actor, &p.log.me.session) => p.login(who, token),
             Some((who, token)) => {
@@ -371,6 +373,12 @@ impl Peer {
     /// what its function gave back, or why not. Taken, so it is told once.
     pub fn take_reply(&mut self, id: u64) -> Option<Result<Vec<u8>, String>> {
         self.told.replies.remove(&id)
+    }
+
+    /// How many calls' answers wait to be taken: a driver tells its app when
+    /// this grows.
+    pub fn replies_waiting(&self) -> usize {
+        self.told.replies.len()
     }
 
     pub fn is_alone(&self) -> bool {

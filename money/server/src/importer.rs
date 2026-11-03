@@ -190,6 +190,10 @@ impl Importer {
         peer.set_token(Some(login.token));
         let (wake, rx) = ark_peer::link::bell();
         peer.set_waker(wake.clone());
+        // Receipt photos read here, from the server's own files.
+        if let Some(program) = stores.ocr.clone() {
+            crate::photos::handle(&mut peer, program, data.clone()).map_err(|e| anyhow!("the server's files: {e}"))?;
+        }
         peer.connect_with("", dial);
 
         let store = Store::load(&data)?;
