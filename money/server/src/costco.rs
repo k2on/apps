@@ -122,12 +122,15 @@ const QUERY: &str = r#"query receiptsWithCounts($startDate: String!, $endDate: S
 
 impl Costco {
     /// A new sign-in: Costco's page for it, with a fresh verifier and state.
+    /// Its form every time (`prompt=login`): a browser Costco remembers
+    /// would otherwise be sent straight on to the app's address, which it
+    /// cannot open, and be left on a blank page with nothing to do.
     pub fn sign_in(&self) -> Result<SignIn> {
         let verifier = random(32)?;
         let state = random(16)?;
         let challenge = b64(&Sha256::digest(verifier.as_bytes()));
         let url = format!(
-            "{}?client_id={CLIENT_ID}&redirect_uri={}&scope={}&response_type=code&code_challenge={challenge}&code_challenge_method=S256&state={state}",
+            "{}?client_id={CLIENT_ID}&redirect_uri={}&scope={}&response_type=code&prompt=login&code_challenge={challenge}&code_challenge_method=S256&state={state}",
             self.authorize_url,
             urlencode(REDIRECT_URI),
             urlencode(SCOPE),
@@ -672,6 +675,7 @@ mod tests {
         let challenge = b64(&Sha256::digest(s.verifier.as_bytes()));
         assert!(s.url.contains(&format!("code_challenge={challenge}&code_challenge_method=S256")));
         assert!(s.url.contains(&format!("state={}", s.state)));
+        assert!(s.url.contains("&prompt=login&"), "the form every time: {}", s.url);
         assert_ne!(s.state, Costco::default().sign_in().unwrap().state, "each sign-in its own");
     }
 
