@@ -1242,7 +1242,7 @@ impl App {
                 }
             }
             Message::Stores(m) => self.stores(m),
-            Message::Receipt(m) => self.receipt(m),
+            Message::Receipt(m) => return self.receipt(m),
             Message::ChoosePayer(of) => {
                 self.peer.set_candidates(Some(of.clone()));
                 return self.open_dropdown(Choosing::Payer(of), (self.pointer, false));
@@ -2290,10 +2290,9 @@ impl App {
             // Something under the window's root wants a frame of its own.
             arkui::window::wakes().map(|()| Message::Swallow),
             // A photo dropped on the window: the open transaction's receipt.
-            iced::event::listen_with(|e, _, _| match e {
-                iced::Event::Window(iced::window::Event::FileDropped(path)) => Some(Message::Receipt(receipt::Msg::Dropped(path))),
-                _ => None,
-            }),
+            // A photo dropped on the window (or the page): the open
+            // transaction's receipt.
+            arkui::files::dropped().map(|p| Message::Receipt(receipt::Msg::Given(p))),
         ];
         if self.dropdown.is_some() {
             subs.push(arkui::command::keys(true).map(Message::DropKey));

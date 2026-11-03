@@ -26,6 +26,7 @@ mod clipboard;
 pub mod command;
 pub mod context;
 pub mod dialog;
+pub mod files;
 pub mod fit;
 pub mod format;
 pub mod glyphs;

@@ -6,16 +6,15 @@
 //! this" when what it read does not add up.
 //!
 //! A receipt is added to a transaction three ways: a photo dropped on the
-//! window (kept on this device and sent to the server, which reads it,
-//! `docs/plan-files.md`), one typed by hand, or one of the receipts that
+//! window or the page, or chosen (`arkui::files`; kept on this device and
+//! sent to the server, which reads it, `docs/plan-files.md`), one typed by
+//! hand, or one of the receipts that
 //! paid for nothing yet, attached. One already there is edited by hand, or
 //! detached.
 
-use std::path::PathBuf;
-
 use arkui::style;
 use iced::widget::{button, column, container, image, mouse_area, row, text, text_input, Column, Space};
-use iced::{Alignment, Color, Element, Font, Length};
+use iced::{Alignment, Color, Element, Font, Length, Task};
 use money_domain::*;
 
 use crate::amount::{self, money};
@@ -25,8 +24,11 @@ use crate::{look, App, Message, Modal};
 /// What the receipt panel does.
 #[derive(Debug, Clone)]
 pub enum Msg {
-    /// A photo dropped on the window: the open transaction's receipt.
-    Dropped(PathBuf),
+    /// A photo dropped on the window or chosen: the open transaction's
+    /// receipt.
+    Given(arkui::files::Picked),
+    /// The chooser opened for one.
+    Choose,
     /// A receipt that paid for nothing, said to have paid for this one.
     Attach(String),
     /// This one's receipt said to have paid for nothing.
@@ -55,17 +57,8 @@ pub struct Paper {
     pub items: Vec<(String, String)>,
 }
 
-/// The photos a window takes: what a file is by its name.
-fn media_of(path: &std::path::Path) -> Option<&'static str> {
-    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    match ext.as_str() {
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "png" => Some("image/png"),
-        "heic" => Some("image/heic"),
-        "webp" => Some("image/webp"),
-        _ => None,
-    }
-}
+/// What a receipt's photo may be, for the chooser.
+const PHOTOS: &[&str] = &["image/jpeg", "image/png", "image/heic", "image/webp"];
 
 /// The receipts that paid for nothing yet, nearest this transaction in
 /// amount and then in days first.
@@ -83,26 +76,25 @@ impl App {
         self.peer.register.rows.iter().find(|t| t.id == id)
     }
 
-    pub fn receipt(&mut self, m: Msg) {
+    pub fn receipt(&mut self, m: Msg) -> Task<Message> {
         let txn = self.open_txn().map(|t| t.id);
         match m {
-            Msg::Dropped(path) => {
+            Msg::Choose => {
+                return arkui::files::choose("A photo of the receipt", PHOTOS).map(|p| match p {
+                    Some(p) => Message::Receipt(Msg::Given(p)),
+                    None => Message::Swallow,
+                });
+            }
+            Msg::Given(p) => {
                 let Some(txn_id) = txn else {
                     self.note = "open a transaction, then drop its receipt's photo on it".into();
-                    return;
+                    return Task::none();
                 };
-                let Some(media) = media_of(&path) else {
-                    self.note = format!("{} is not a photo", path.display());
-                    return;
+                let Some(media) = p.media().filter(|m| m.starts_with("image/")) else {
+                    self.note = format!("{} is not a photo", p.name);
+                    return Task::none();
                 };
-                let bytes = match std::fs::read(&path) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        self.note = format!("could not read {}: {e}", path.display());
-                        return;
-                    }
-                };
-                match self.peer.client.put_file(&bytes, media) {
+                match self.peer.client.put_file(&p.bytes, &media) {
                     Ok(file) => {
                         self.author("add the photo", "add_photo", &AddPhoto { file, txn_id: Some(txn_id) });
                     }
@@ -158,12 +150,12 @@ impl App {
             }
             Msg::Cancel => self.paper = None,
             Msg::Save => {
-                let Some(p) = self.paper.clone() else { return };
+                let Some(p) = self.paper.clone() else { return Task::none() };
                 let mut items = vec![];
                 for (name, cost) in p.items.iter().filter(|(n, c)| !n.trim().is_empty() || !c.trim().is_empty()) {
                     let Some(cents) = amount::parse(cost) else {
                         self.note = format!("{cost:?} is not an amount");
-                        return;
+                        return Task::none();
                     };
                     items.push(StoreItem {
                         name: name.trim().into(),
@@ -191,6 +183,7 @@ impl App {
                 self.load_photo();
             }
         }
+        Task::none()
     }
 
     /// The photo the modal shows, once its bytes are here: fetched from the
@@ -245,8 +238,14 @@ impl App {
                     };
                     side = side.push(row![dim(said, 12), link("Show", Message::Receipt(Msg::Photo(p.file.clone())))].spacing(10));
                 }
-                side = side.push(dim("Drop a photo of its receipt on the window, or", 12));
-                side = side.push(link("Type the receipt", Message::Receipt(Msg::Write(None))));
+                side = side.push(dim("Drop a photo of its receipt here, or", 12));
+                side = side.push(
+                    row![
+                        link("Choose a photo\u{2026}", Message::Receipt(Msg::Choose)),
+                        link("Type the receipt", Message::Receipt(Msg::Write(None))),
+                    ]
+                    .spacing(16),
+                );
                 let free = unmatched(&self.peer.receipts.rows, t);
                 if !free.is_empty() {
                     side = side.push(dim("Or attach one that paid for nothing yet:", 12));

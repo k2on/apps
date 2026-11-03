@@ -27,6 +27,11 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # runtime on the desktop and one picture is not a reason to start one.
 ureq = { version = "2", default-features = false, features = ["tls"] }
 
+# A file chosen on Linux: the desktop's chooser through its portal, over the
+# session bus the theme is already read from (mundy's zbus; `files.rs`).
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # A window driven by hand in a test: a click at a point, and the messages
 # it gave.
@@ -37,8 +42,9 @@ iced_test = "0.14"
 # the software fallback cannot have the canvas WebGL already claimed.
 iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
 # The address bar: reading the fragment and writing it through the history,
-# and hearing the browser move it (`wake::page_changes`).
-web-sys = { version = "0.3", features = ["Window", "History", "Location", "EventTarget", "Navigator", "Clipboard"] }
+# and hearing the browser move it (`wake::page_changes`); a file dropped on the
+# page or chosen with a file input (`files.rs`).
+web-sys = { version = "0.3", features = ["Window", "History", "Location", "EventTarget", "Navigator", "Clipboard", "Document", "Element", "HtmlElement", "HtmlInputElement", "Event", "DragEvent", "DataTransfer", "FileList", "File", "Blob"] }
 wasm-bindgen = "0.2"
 # The browser half of the picture fetch: a promise from the snippet in
 # `images.rs`, awaited, and the `Uint8Array` it resolves to copied out.

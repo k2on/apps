@@ -909,15 +909,22 @@ fn a_photo_dropped_on_a_transaction_is_its_receipt() {
         .find(|t| t.amount < 0 && t.receipt.is_empty())
         .unwrap()
         .clone();
-    let dir = tempfile::tempdir().unwrap();
-    let jpeg = dir.path().join("receipt.JPG");
-    std::fs::write(&jpeg, b"\xff\xd8\xff\xe0 a receipt").unwrap();
-    let _ = app.update(Message::Receipt(Msg::Dropped(jpeg.clone())));
+    let given = |name: &str, media: &str| {
+        Message::Receipt(Msg::Given(arkui::files::Picked {
+            name: name.into(),
+            media: media.into(),
+            bytes: b"\xff\xd8\xff\xe0 a receipt".to_vec(),
+        }))
+    };
+    let _ = app.update(given("receipt.JPG", ""));
     assert!(app.note.contains("open a transaction"), "{}", app.note);
     let _ = app.update(Message::EditTxn(t.id));
-    let _ = app.update(Message::Receipt(Msg::Dropped(dir.path().join("notes.txt"))));
+    let _ = app.update(given("notes.txt", ""));
     assert!(app.note.contains("is not a photo"), "{}", app.note);
-    let _ = app.update(Message::Receipt(Msg::Dropped(jpeg)));
+    let _ = app.update(given("notes", "text/plain"));
+    assert!(app.note.contains("is not a photo"), "the browser's word: {}", app.note);
+    // Dropped on the desktop (its name says) or in a browser (it says).
+    let _ = app.update(given("receipt.JPG", ""));
     let photo = app.peer.photos.rows.iter().find(|p| p.txn_id == Some(t.id)).unwrap().clone();
     assert_eq!((photo.state.as_str(), photo.file.media.as_str()), ("reading", "image/jpeg"));
     assert_eq!(app.peer.register.rows.iter().find(|x| x.id == t.id).unwrap().photos, 1);
