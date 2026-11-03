@@ -906,7 +906,7 @@ fn a_kind_is_added_and_settings_say_where_amazon_is_set_up() {
     let _ = app.update(Message::CloseDrop);
     let _ = app.update(Message::Go(Page::Settings));
     assert_eq!(app.place(), crate::Place::Settings);
-    let _ = app.update(Message::SetUpAmazon);
+    let _ = app.update(Message::Stores(crate::stores::Msg::SaveAmazon));
     assert!(app.note.contains("the demo has no server"), "{}", app.note);
 }
 
@@ -1564,4 +1564,65 @@ fn a_payment_category_is_not_assigned_by_formula() {
     let _ = app.update(Message::Formula(formula::Msg::Save));
     assert!(app.note.contains("payment category"), "{}", app.note);
     assert!(!category(&app, "Chase Sapphire").ruled);
+}
+
+/// The live window's Settings set Amazon and Costco up over its link, as
+/// calls of the server's own: the stores are asked for as Settings opens;
+/// Amazon's login is saved, said back masked, and not kept typed; a bad
+/// one is said under its section; "Sign in to Costco" opens Costco's own
+/// sign-in and asks for the address it ends at. Falsified by sending the
+/// login as an intent: the server's vault would not have it.
+#[test]
+fn on_a_server_settings_set_up_amazon_and_costco() {
+    use crate::stores::Msg as S;
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let server = rt
+        .block_on(money_server::start(money_server::Config::dev("127.0.0.1:0", data.path())))
+        .unwrap();
+    let url = format!("http://{}", server.running.addr);
+    let account = ark_auth::Account {
+        id: "alice".into(),
+        ..Default::default()
+    };
+    let mut client = crate::client::open(Box::new(ark_peer::Memory::default()));
+    client.connect(&ark_auth::socket_url(&url));
+    let mut app = App::on_server(client, TODAY, url, None);
+    app.signed_in(server.auth.issue(&account, "a test").unwrap());
+    let settle = |app: &mut App, done: &dyn Fn(&App) -> bool| {
+        let held = ark_peer::link::until(std::time::Duration::from_secs(10), std::time::Duration::from_millis(10), || {
+            let _ = app.update(Message::Wake);
+            done(app)
+        });
+        assert!(held, "{} {:?}", app.note, app.settings);
+    };
+    // Settings opened before the link is up ask once it is.
+    let _ = app.update(Message::Go(Page::Settings));
+    settle(&mut app, &|a| a.settings.stores.is_some());
+    assert_eq!(app.settings.stores.as_ref().unwrap().amazon.who, None);
+    drop(app.view());
+
+    let _ = app.update(Message::Stores(S::SaveAmazon));
+    settle(&mut app, &|a| a.settings.refused.is_some());
+    assert!(app.settings.refused.as_ref().unwrap().1.contains("email and password"));
+
+    let _ = app.update(Message::Stores(S::User("me@example.com".into())));
+    let _ = app.update(Message::Stores(S::Password("hunter2".into())));
+    let _ = app.update(Message::Stores(S::SaveAmazon));
+    settle(&mut app, &|a| a.settings.stores.as_ref().is_some_and(|s| s.amazon.who.is_some()));
+    assert_eq!(app.settings.stores.as_ref().unwrap().amazon.who.as_deref(), Some("m••••@example.com"));
+    assert!(app.settings.password.is_empty() && app.settings.refused.is_none());
+    let vault = money_server::vault::Vault::load(data.path()).unwrap();
+    assert_eq!(vault.amazon.map(|a| a.password), Some("hunter2".into()));
+    assert_eq!(app.peer.client.log.store.rows("bank_ask").count(), 0);
+    drop(app.view());
+
+    let _ = app.update(Message::Stores(S::SignInCostco));
+    settle(&mut app, &|a| a.settings.signing_in);
+    assert!(
+        app.opened.last().is_some_and(|u| u.starts_with("https://signin.costco.com/")),
+        "{:?}",
+        app.opened
+    );
+    drop(app.view());
 }

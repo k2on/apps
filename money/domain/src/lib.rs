@@ -38,6 +38,7 @@ pub mod receipts;
 pub mod schema;
 #[cfg(feature = "seed")]
 pub mod seed;
+pub mod setup;
 pub mod stores;
 pub mod transactions;
 pub mod transfers;

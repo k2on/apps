@@ -22,6 +22,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Costco's sign-in: PKCE's challenge and verifier, and its id token's
+# email. All three are ark-auth's already.
+sha2 = { workspace = true }
+base64 = "0.22"
+getrandom = "0.2"
 # Plaid, over its HTTP API: blocking, on the importer's thread. The same
 # ureq ark-auth talks to an identity provider with.
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }

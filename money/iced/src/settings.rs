@@ -1,7 +1,7 @@
 //! Settings, as harken has them: reached from the account button at the
 //! top right (its menu's first entry), a page of sections under one title
-//! — the account this window is signed in as and the server it is on, and
-//! the banks (`crate::banks`).
+//! — the account this window is signed in as and the server it is on, the
+//! banks (`crate::banks`), and Amazon and Costco (`crate::stores`).
 
 use arkui::account::{Account, Who};
 use arkui::{hero, style};
@@ -69,6 +69,8 @@ impl App {
             self.banks_section(),
             hero::heading("Amazon"),
             self.amazon_section(),
+            hero::heading("Costco"),
+            self.costco_section(),
             hero::heading("Account"),
             account,
         ]

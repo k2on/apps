@@ -1,97 +1,163 @@
-//! The settings page: setting up where receipts come from, kept off the
-//! budget. `/stores` is a page of the server's own, signed in to the way
-//! the browser client is (to `/auth/login`, back with a code, the code
-//! traded at `/auth/exchange`), whose answers are the server's and go
-//! nowhere else: what it is told is kept in the vault ([`crate::vault`]),
-//! never a row.
+//! Setting up where receipts come from, from the app's Settings: the
+//! functions of the server's own a device calls over its link
+//! (`money_domain::setup`, ark-peer's `Config::calls`), outside the log.
+//! What they are told is kept in the vault ([`crate::vault`]), never a row,
+//! and what they answer is [`Stores`]: who, masked, and no secret.
 //!
-//! - **Amazon**: the login `amazon-orders` signs in with (`PUT
-//!   /stores/api/amazon`), or none (`DELETE`); the page is told only who,
-//!   masked, and whether it has a one-time-code secret.
+//! - **Amazon**: the login `amazon-orders` signs in with, or none.
+//! - **Costco**: a sign-in begun, which answers with Costco's page for the
+//!   device to open, and finished with the address Costco sent the browser
+//!   to, which the server trades for a refresh token ([`crate::costco`]);
+//!   or none.
 //!
-//! Everything under `/stores/api` asks for a household member's token
-//! (`Authorization: Bearer`), as the socket does. The page is served at
-//! `/settings` and `/stores` alike.
+//! A call comes in on a connection its token proved (the sync socket's
+//! sign-in), so it is the household's; the importer's own account sets up
+//! nothing.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
-use axum::response::Html;
-use axum::routing::{get, put};
-use axum::{Json, Router};
-use serde::Deserialize;
-use serde_json::json;
+use anyhow::{anyhow, bail, Result};
+use ark::format::Encode;
+use ark::peer::Who;
+use money_domain::setup::{self as calls, AmazonState, CostcoAddress, CostcoPage, CostcoState, Stores};
 
+use crate::costco::{Costco, SignIn};
 use crate::importer::ImporterHandle;
 use crate::vault::{masked, AmazonLogin, Vault};
 
-/// What the routes share.
+/// How long a Costco sign-in may take from its page opening to its address
+/// given back: Costco's code lasts minutes.
+const SIGN_IN_TIME: Duration = Duration::from_secs(15 * 60);
+
+/// What the calls share.
 #[derive(Clone)]
 pub struct Setup {
     pub data: PathBuf,
     pub amazon_program: bool,
-    pub authenticate: ark_auth::server::Authenticate,
+    pub costco: Costco,
     /// Filled once the importer has started.
     pub importer: Arc<Mutex<Option<ImporterHandle>>>,
-    /// One writer of the vault at a time.
-    pub lock: Arc<Mutex<()>>,
+    /// The Costco sign-in under way, the latest begun.
+    pub signing_in: Arc<Mutex<Option<(SignIn, Instant)>>>,
 }
 
-type Fail = (StatusCode, String);
+/// The calls, by name, for the hub's `Config::calls`.
+pub fn calls(setup: Setup) -> BTreeMap<String, ark_peer::Call> {
+    let mut out = BTreeMap::new();
+    let mut add = |name: &str, f: fn(&Setup, &[u8]) -> Result<Vec<u8>>| {
+        let s = setup.clone();
+        let call: ark_peer::Call = Arc::new(move |who: &Who, input: &[u8]| {
+            if who.actor == crate::importer::ACCOUNT {
+                return Err("the importer sets up nothing".into());
+            }
+            f(&s, input).map_err(|e| format!("{e:#}"))
+        });
+        out.insert(name.to_string(), call);
+    };
+    add(calls::STATUS, |s, _| s.status());
+    add(calls::AMAZON, Setup::set_amazon);
+    add(calls::FORGET_AMAZON, |s, _| s.forget_amazon());
+    add(calls::COSTCO_SIGN_IN, |s, _| s.sign_in_costco());
+    add(calls::COSTCO, Setup::set_costco);
+    add(calls::FORGET_COSTCO, |s, _| s.forget_costco());
+    out
+}
 
-fn fail(code: StatusCode, why: impl std::fmt::Display) -> Fail {
-    (code, why.to_string())
+fn read<T: Encode>(input: &[u8]) -> Result<T> {
+    T::from_bytes(input).map_err(|e| anyhow!("a call this server does not read: {e}"))
 }
 
 impl Setup {
-    async fn who(&self, headers: &HeaderMap) -> Result<String, Fail> {
-        let token = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .map(str::to_string)
-            .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "sign in"))?;
-        let auth = self.authenticate.clone();
-        let who = tokio::task::spawn_blocking(move || auth(&token))
-            .await
-            .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, e))?
-            .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "sign in again"))?;
-        if who.actor == crate::importer::ACCOUNT {
-            return Err(fail(StatusCode::FORBIDDEN, "the importer sets up nothing"));
-        }
-        Ok(who.actor)
-    }
-
-    fn change(&self, f: impl FnOnce(&mut Vault) -> anyhow::Result<()>) -> Result<Vault, Fail> {
-        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut v = Vault::load(&self.data).map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
-        f(&mut v).map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
-        v.save(&self.data)
-            .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
-        Ok(v)
-    }
-
     fn nudge(&self) {
         if let Some(i) = self.importer.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             i.nudge();
         }
     }
 
-    fn status(&self) -> Result<serde_json::Value, Fail> {
-        let v = Vault::load(&self.data).map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
+    fn status(&self) -> Result<Vec<u8>> {
+        let v = Vault::load(&self.data)?;
         let last = self.importer.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|i| i.last());
-        let said: serde_json::Map<String, serde_json::Value> = last
-            .map(|r| r.stores.into_iter().map(|(k, o)| (k, json!(outcome(&o)))).collect())
+        let last = last
+            .map(|r| r.stores.into_iter().map(|(k, o)| (k, outcome(&o))).collect())
             .unwrap_or_default();
-        Ok(json!({
-            "amazon": {
-                "program": self.amazon_program,
-                "login": v.amazon.as_ref().map(|a| json!({"who": masked(&a.username), "otp": a.otp_secret.is_some()})),
+        Ok(Stores {
+            amazon: AmazonState {
+                program: self.amazon_program,
+                who: v.amazon.as_ref().map(|a| masked(&a.username)),
+                otp: v.amazon.as_ref().is_some_and(|a| a.otp_secret.is_some()),
             },
-            "last": said,
-        }))
+            costco: CostcoState {
+                signed_in: v.costco.is_some(),
+                who: v.costco.as_ref().filter(|c| !c.who.is_empty()).map(|c| masked(&c.who)),
+                file: self.costco.token_file.is_some(),
+            },
+            last,
+        }
+        .to_bytes())
+    }
+
+    fn set_amazon(&self, input: &[u8]) -> Result<Vec<u8>> {
+        let f: calls::AmazonLogin = read(input)?;
+        let (username, password) = (f.username.trim().to_string(), f.password);
+        if username.is_empty() || password.is_empty() {
+            bail!("Amazon's email and password, both");
+        }
+        let otp: String = f.otp_secret.chars().filter(|c| !c.is_whitespace()).collect();
+        Vault::change(&self.data, |v| {
+            v.amazon = Some(AmazonLogin {
+                username,
+                password,
+                otp_secret: (!otp.is_empty()).then_some(otp),
+            });
+            Ok(())
+        })?;
+        self.nudge();
+        self.status()
+    }
+
+    fn forget_amazon(&self) -> Result<Vec<u8>> {
+        Vault::change(&self.data, |v| {
+            v.amazon = None;
+            Ok(())
+        })?;
+        // The session amazon-orders kept goes with the login.
+        let _ = std::fs::remove_dir_all(self.data.join("amazon-orders"));
+        self.status()
+    }
+
+    fn sign_in_costco(&self) -> Result<Vec<u8>> {
+        let started = self.costco.sign_in()?;
+        let url = started.url.clone();
+        *self.signing_in.lock().unwrap_or_else(|e| e.into_inner()) = Some((started, Instant::now()));
+        Ok(CostcoPage { url }.to_bytes())
+    }
+
+    fn set_costco(&self, input: &[u8]) -> Result<Vec<u8>> {
+        let f: CostcoAddress = read(input)?;
+        let started = match self.signing_in.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            Some((started, at)) if at.elapsed() < SIGN_IN_TIME => started,
+            _ => bail!("no Costco sign-in under way: sign in to Costco again"),
+        };
+        let login = self.costco.finish(&started, &f.address)?;
+        Vault::change(&self.data, |v| {
+            v.costco = Some(login);
+            Ok(())
+        })?;
+        // A code is good once.
+        *self.signing_in.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.nudge();
+        self.status()
+    }
+
+    fn forget_costco(&self) -> Result<Vec<u8>> {
+        Vault::change(&self.data, |v| {
+            v.costco = None;
+            Ok(())
+        })?;
+        self.status()
     }
 }
 
@@ -106,59 +172,3 @@ fn outcome(o: &crate::importer::Outcome) -> String {
         Failed(why) => format!("failed: {why}"),
     }
 }
-
-/// The routes, under `/stores`.
-pub fn routes(setup: Setup) -> Router {
-    Router::new()
-        .route("/settings", get(|| async { Html(PAGE) }))
-        .route("/stores", get(|| async { Html(PAGE) }))
-        .route("/stores/api/status", get(status))
-        .route("/stores/api/amazon", put(set_amazon).delete(forget_amazon))
-        .with_state(setup)
-}
-
-async fn status(State(s): State<Setup>, headers: HeaderMap) -> Result<Json<serde_json::Value>, Fail> {
-    s.who(&headers).await?;
-    Ok(Json(s.status()?))
-}
-
-#[derive(Deserialize)]
-struct AmazonForm {
-    username: String,
-    password: String,
-    #[serde(default)]
-    otp_secret: String,
-}
-
-async fn set_amazon(State(s): State<Setup>, headers: HeaderMap, Json(f): Json<AmazonForm>) -> Result<Json<serde_json::Value>, Fail> {
-    s.who(&headers).await?;
-    let (username, password) = (f.username.trim().to_string(), f.password.to_string());
-    if username.is_empty() || password.is_empty() {
-        return Err(fail(StatusCode::UNPROCESSABLE_ENTITY, "Amazon's email and password, both"));
-    }
-    let otp: String = f.otp_secret.chars().filter(|c| !c.is_whitespace()).collect();
-    s.change(|v| {
-        v.amazon = Some(AmazonLogin {
-            username,
-            password,
-            otp_secret: (!otp.is_empty()).then_some(otp),
-        });
-        Ok(())
-    })?;
-    s.nudge();
-    Ok(Json(s.status()?))
-}
-
-async fn forget_amazon(State(s): State<Setup>, headers: HeaderMap) -> Result<Json<serde_json::Value>, Fail> {
-    s.who(&headers).await?;
-    s.change(|v| {
-        v.amazon = None;
-        Ok(())
-    })?;
-    // The session amazon-orders kept goes with the login.
-    let _ = std::fs::remove_dir_all(s.data.join("amazon-orders"));
-    Ok(Json(s.status()?))
-}
-
-/// The page.
-const PAGE: &str = include_str!("stores.html");

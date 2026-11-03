@@ -52,7 +52,7 @@ fn the_stores_receipts_are_imported() {
             password_file: Some(file("p", "hunter2")),
             otp_secret_file: None,
         }),
-        costco: None,
+        costco: Default::default(),
         dir: Some(drop.path().to_path_buf()),
     };
     let server = serve(&rt, data.path(), |c| c.stores = stores);
@@ -80,68 +80,73 @@ fn the_stores_receipts_are_imported() {
     assert!(!said.contains("hunter2") && !said.contains("me@example.com"), "{said}");
 }
 
-/// The stores page's answers, over HTTP as the page asks them.
-fn call(server: &money_server::Server, method: &str, path: &str, token: Option<&str>, body: Option<&str>) -> (u16, String) {
-    let url = format!("{}{path}", server.url());
-    let mut r = ureq::request(method, &url);
-    if let Some(t) = token {
-        r = r.set("Authorization", &format!("Bearer {t}"));
-    }
-    let got = match body {
-        Some(b) => r.set("Content-Type", "application/json").send_string(b),
-        None => r.call(),
-    };
-    match got {
-        Ok(resp) => (resp.status(), resp.into_string().unwrap()),
-        Err(ureq::Error::Status(code, resp)) => (code, resp.into_string().unwrap()),
-        Err(e) => panic!("{method} {path}: {e}"),
-    }
-}
-
-/// Amazon's login given on the settings page is kept in the server's own
-/// file and in no row; the page is told who, masked; nobody signed out is
-/// answered anything; and the login, removed, is gone.
+/// Amazon's login given in the app's Settings goes over the socket as a
+/// call of the server's own and is kept in the server's own file, in no
+/// row; the app is told who, masked, and never the password; a bad one is
+/// refused; and the login, removed, is gone. Nothing of it is in the log,
+/// and the importer's own account sets up nothing.
 #[test]
-fn the_settings_page_keeps_amazons_login_off_the_budget() {
+fn settings_keep_amazons_login_off_the_budget() {
+    use money_domain::setup::{self as calls, AmazonLogin, CostcoPage, Stores};
     let rt = runtime();
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |_| {});
     for path in ["/settings", "/stores"] {
-        let page = call(&server, "GET", path, None, None);
-        assert!(page.0 == 200 && page.1.contains("Amazon") && !page.1.contains("Costco"), "{path}");
+        let code = match ureq::get(&format!("{}{path}", server.url())).call() {
+            Ok(r) => r.status(),
+            Err(ureq::Error::Status(code, _)) => code,
+            Err(e) => panic!("{path}: {e}"),
+        };
+        assert_ne!(code, 200, "{path}: the server has no page of its own for it");
     }
-    assert_eq!(call(&server, "GET", "/stores/api/status", None, None).0, 401);
-    assert_eq!(call(&server, "GET", "/stores/api/status", Some("forged.00"), None).0, 401);
 
-    let alice = login(&server, "alice");
-    let t = Some(alice.token.as_str());
-    let (code, said) = call(
-        &server,
-        "PUT",
-        "/stores/api/amazon",
-        t,
-        Some(r#"{"username":"me@example.com","password":"hunter2","otp_secret":"ABCD EFGH"}"#),
+    let mut alice = signed_in(&server, "alice");
+    let s: Stores = alice
+        .call(
+            calls::AMAZON,
+            &AmazonLogin {
+                username: "me@example.com".into(),
+                password: "hunter2".into(),
+                otp_secret: "ABCD EFGH".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        (s.amazon.who.as_deref(), s.amazon.otp, s.amazon.program),
+        (Some("m••••@example.com"), true, false)
     );
-    assert_eq!(code, 200, "{said}");
-    let status: serde_json::Value = serde_json::from_str(&said).unwrap();
-    assert_eq!(status["amazon"]["login"]["who"], "m••••@example.com");
-    assert_eq!(status["amazon"]["login"]["otp"], true);
-    assert_eq!(status["amazon"]["program"], false);
-    assert!(!said.contains("hunter2") && !said.contains("ABCD"), "{said}");
+    assert!(!format!("{s:?}").contains("hunter2"));
     let vault = money_server::vault::Vault::load(data.path()).unwrap();
     assert_eq!(
         vault.amazon.as_ref().map(|a| (a.password.as_str(), a.otp_secret.as_deref())),
         Some(("hunter2", Some("ABCDEFGH")))
     );
-    let (code, said) = call(&server, "PUT", "/stores/api/amazon", t, Some(r#"{"username":"","password":""}"#));
-    assert_eq!(code, 422, "{said}");
+    let bad = alice.call::<Stores>(calls::AMAZON, &AmazonLogin::default()).unwrap_err();
+    assert!(bad.contains("email and password"), "{bad}");
+    assert_eq!(alice.call::<Stores>(calls::STATUS, &()).unwrap(), s);
+
+    // Costco's sign-in begins on Costco's own page, as its app's does.
+    let page: CostcoPage = alice.call(calls::COSTCO_SIGN_IN, &()).unwrap();
+    assert!(
+        page.url.starts_with("https://signin.costco.com/") && page.url.contains("code_challenge="),
+        "{}",
+        page.url
+    );
+    let none = alice.call::<Stores>(
+        calls::COSTCO,
+        &calls::CostcoAddress {
+            address: "https://www.costco.com/".into(),
+        },
+    );
+    assert!(none.unwrap_err().contains("no code"));
 
     // Somebody in the household makes a change, so the log has entries.
     let mut bob = signed_in(&server, "bob");
     bob.mutate("setup", &());
     pump_until(&mut [&mut bob], 10, |ps| ps[0].pending() == 0);
 
-    call(&server, "DELETE", "/stores/api/amazon", t, None);
+    let s: Stores = alice.call(calls::FORGET_AMAZON, &()).unwrap();
+    assert_eq!(s.amazon.who, None);
     assert_eq!(money_server::vault::Vault::load(data.path()).unwrap().amazon, None);
 
     let mut seen = vec![];

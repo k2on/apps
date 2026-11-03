@@ -92,6 +92,25 @@ impl Peer {
         id
     }
 
+    /// One of the server's own functions called over the link
+    /// (`money_domain::setup`), once it is up, and its answer.
+    pub fn call<T: Encode>(&mut self, name: &str, input: &impl Encode) -> Result<T, String> {
+        let linked = ark_peer::link::until(Duration::from_secs(10), Duration::from_millis(5), || {
+            self.pump();
+            self.client.linked
+        });
+        assert!(linked, "the link came up");
+        let id = self.client.request(name, input.to_bytes())?;
+        let mut got = None;
+        let answered = ark_peer::link::until(Duration::from_secs(10), Duration::from_millis(5), || {
+            self.pump();
+            got = self.client.take_reply(id);
+            got.is_some()
+        });
+        assert!(answered, "{name} was answered");
+        got.unwrap().map(|b| T::from_bytes(&b).unwrap())
+    }
+
     pub fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> Result<T, String> {
         self.client.query(name, input)
     }

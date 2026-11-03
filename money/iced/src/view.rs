@@ -1510,38 +1510,6 @@ impl App {
 
     // * Settings
 
-    /// Settings' Amazon section: where receipts come from. Amazon's login is
-    /// the server's to keep and never part of the budget, so it is given on
-    /// the server's own page.
-    pub fn amazon_section(&self) -> Element<'_, Message> {
-        let about = match &self.server {
-            Some(s) => format!("Set up on {}/settings.", s.url.trim_end_matches('/')),
-            None => "This is the demo: it has no server, so there is nothing to set up.".into(),
-        };
-        container(
-            column![
-                dim(
-                    "At each sync the server signs in to Amazon with amazon-orders and brings the last 30 days of \
-                     orders in as receipts, and how each was charged: each item filed, and each card charge split by them.",
-                    12
-                ),
-                dim(
-                    "Your Amazon login is kept on the server, in a file only it reads. It is never part of the budget, \
-                     so it is not synced to this or any device, which is why it is entered on the server's page.",
-                    11
-                ),
-                row![action("Set up Amazon", Message::SetUpAmazon), dim(about, 11)]
-                    .spacing(12)
-                    .align_y(Alignment::Center),
-            ]
-            .spacing(10),
-        )
-        .padding(16)
-        .width(Length::Fill)
-        .style(look::card)
-        .into()
-    }
-
     // * Reflect
 
     fn view_reflect(&self) -> Element<'_, Message> {

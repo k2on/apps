@@ -218,7 +218,7 @@ in
       usernameFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
-        description = "A file holding the Amazon account's email. Null (and passwordFile null): the login given on the server's settings page, /settings.";
+        description = "A file holding the Amazon account's email. Null (and passwordFile null): the login given in the app's Settings.";
       };
       passwordFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
@@ -232,20 +232,12 @@ in
       };
     };
 
-    costco = {
-      enable = lib.mkEnableOption ''
-        Costco's warehouse and gas receipts, read from its web API at each
-        sync. It signs in with a refresh token kept in
-        `<dataDir>/costco-refresh-token`, which Costco replaces at every
-        sign-in, so it is state and not a credential: write the first one
-        there by hand (the `refresh_token` costco.com's sign-in answers
-        with) and restart the service, which takes the file as its own
-      '';
-      days = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 90;
-        description = "How many days back Costco's receipts are asked for at each sync.";
-      };
+    # Costco is signed in to from the app's Settings, and the sign-in kept
+    # in the data directory, so there is nothing to give it here.
+    costco.days = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 90;
+      description = "How many days back Costco's warehouse and gas receipts are asked for at each sync.";
     };
 
     receiptsDir = lib.mkOption {
@@ -320,7 +312,7 @@ in
     ] ++ [
       {
         assertion = (amazon.usernameFile == null) == (amazon.passwordFile == null);
-        message = "services.money.amazon: usernameFile and passwordFile go together; set both, or neither and sign in on the settings page.";
+        message = "services.money.amazon: usernameFile and passwordFile go together; set both, or neither and give the login in the app's Settings.";
       }
     ];
 
@@ -363,8 +355,7 @@ in
         MONEY_AMAZON_PASSWORD_FILE = "%d/amazon-password";
       } // lib.optionalAttrs (amazon.package != null && amazon.otpSecretFile != null) {
         MONEY_AMAZON_OTP_SECRET_FILE = "%d/amazon-otp-secret";
-      } // lib.optionalAttrs cfg.costco.enable {
-        MONEY_COSTCO_REFRESH_TOKEN_FILE = "${cfg.dataDir}/costco-refresh-token";
+      } // {
         MONEY_COSTCO_DAYS = toString cfg.costco.days;
       } // lib.optionalAttrs (cfg.receiptsDir != null) {
         MONEY_RECEIPTS_DIR = cfg.receiptsDir;

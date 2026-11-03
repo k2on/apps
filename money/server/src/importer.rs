@@ -236,7 +236,7 @@ impl Importer {
         (self.wake)();
     }
 
-    /// A handle the settings page asks a run with, and reads the last of.
+    /// A handle Settings' calls ask a run with, and read the last of.
     pub fn handle(&self) -> ImporterHandle {
         ImporterHandle {
             wake: self.wake.clone(),
@@ -814,9 +814,9 @@ impl Job {
                 out.insert("amazon charges".to_string(), self.outcome_charges("amazon charges", got));
             }
         }
-        if let Some(costco) = self.stores.costco.clone() {
-            let got = costco
-                .receipts()
+        // Nothing from Costco, said or not, until someone signs in.
+        if let Some(got) = self.stores.costco.receipts(&self.data).transpose() {
+            let got = got
                 .and_then(|text| money_domain::stores::costco(&text).map_err(|e| anyhow!(e)))
                 .and_then(|import| self.author_receipts(&import));
             out.insert("costco".to_string(), self.outcome("costco", got));

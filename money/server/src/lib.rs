@@ -29,6 +29,7 @@
 //! `banks.import` asks for it, and so do the importer's answers about
 //! connections (`banks.answer`, `banks.failed`).
 
+pub mod costco;
 pub mod importer;
 pub mod plaid;
 pub mod setup;
@@ -64,7 +65,7 @@ pub struct Config {
     pub serve: ark_peer::Serve,
     /// The banks, when the server holds Plaid's keys.
     pub banks: Option<Banks>,
-    /// The stores' receipts: `amazon-orders`, and a folder of exports.
+    /// The stores' receipts: `amazon-orders`, Costco, and a folder of exports.
     pub stores: stores::Stores,
 }
 
@@ -111,10 +112,14 @@ impl Config {
     ///                         and for the charges (`transactions --days 60 -o json`)
     /// MONEY_AMAZON_USERNAME_FILE, MONEY_AMAZON_PASSWORD_FILE
     ///                         its sign-in, a file each; neither, and it is the
-    ///                         settings page's
+    ///                         Settings'
     /// MONEY_AMAZON_OTP_SECRET_FILE
     ///                         the one-time code's secret, when the account
     ///                         has one
+    /// MONEY_COSTCO_DAYS       how far back Costco's receipts are asked for (90)
+    /// MONEY_COSTCO_REFRESH_TOKEN_FILE
+    ///                         a refresh token for Costco, kept in that file
+    ///                         in place of Settings' sign-in
     /// MONEY_RECEIPTS_DIR      a folder of exports: `<store>/*.json`
     /// ```
     ///
@@ -263,8 +268,21 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let auth = Arc::new(auth);
 
+    // The receipts folder anybody's exports wait in: the server's own
+    // unless told another.
+    let mut stores = config.stores.clone();
+    stores.dir.get_or_insert_with(|| config.data.join("receipts"));
+    let importer_slot = Arc::new(std::sync::Mutex::new(None));
     let mut hub = ark_peer::Config {
         keep: Some(config.retain.entries),
+        // Settings' stores, called over the socket and kept off the log.
+        calls: setup::calls(setup::Setup {
+            data: config.data.clone(),
+            amazon_program: stores.amazon.is_some(),
+            costco: stores.costco.clone(),
+            importer: importer_slot.clone(),
+            signing_in: Arc::new(std::sync::Mutex::new(None)),
+        }),
         ..ark_peer::Config::of(money_domain::shared())
     };
     if config.scoped {
@@ -275,18 +293,6 @@ pub async fn start(config: Config) -> Result<Server> {
     if let Some(dir) = &config.web {
         server.web = Some((dir.clone(), config.web_module.clone()));
     }
-    // The settings page, and the receipts folder anybody's exports
-    // wait in: the server's own receipts folder unless told another.
-    let mut stores = config.stores.clone();
-    stores.dir.get_or_insert_with(|| config.data.join("receipts"));
-    let importer_slot = Arc::new(std::sync::Mutex::new(None));
-    server.routes = std::mem::take(&mut server.routes).merge(setup::routes(setup::Setup {
-        data: config.data.clone(),
-        amazon_program: stores.amazon.is_some(),
-        authenticate: auth.authenticate(),
-        importer: importer_slot.clone(),
-        lock: Arc::new(std::sync::Mutex::new(())),
-    }));
     let (hub, router) = server.build()?;
     let router = router.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz));
     let running = Running::listen(hub.clone(), router, &config.listen).await?;
@@ -338,7 +344,6 @@ pub async fn start(config: Config) -> Result<Server> {
     if let Some(i) = &importer {
         *importer_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(i.handle());
     }
-    eprintln!("money-server: settings at {public_url}/settings");
 
     Ok(Server { running, auth, importer })
 }

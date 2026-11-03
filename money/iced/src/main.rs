@@ -35,6 +35,7 @@ mod look;
 mod palette;
 mod peer;
 mod settings;
+mod stores;
 mod view;
 
 #[cfg(test)]
@@ -355,8 +356,8 @@ pub enum Message {
     NewKind(Id<Category>),
     NewKindTyped(String),
     NewKindDone,
-    /// The server's settings page, in a browser.
-    SetUpAmazon,
+    /// Settings' Amazon and Costco sections.
+    Stores(stores::Msg),
     /// What paid a receipt or a charge: the dropdown of what could have.
     ChoosePayer(PaidFor),
 }
@@ -425,6 +426,8 @@ pub struct App {
     pub dismissed: Option<Id<BankAsk>>,
     /// A kind of the inspector's category, being named.
     pub new_kind: Option<(Id<Category>, String)>,
+    /// Settings' Amazon and Costco: what the server said, what is typed.
+    pub settings: stores::Settings,
 }
 
 impl App {
@@ -468,6 +471,7 @@ impl App {
             opened: Vec::new(),
             dismissed: None,
             new_kind: None,
+            settings: stores::Settings::default(),
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -589,6 +593,7 @@ impl App {
         }
         self.peer.refresh();
         self.follow_ask();
+        self.stores_answered();
         let Some(why) = p.denied else { return Task::none() };
         if let Some(s) = &mut self.server {
             if let Some(logins) = &s.logins {
@@ -684,6 +689,9 @@ impl App {
             Message::Go(page) => {
                 self.page = page;
                 self.form = None;
+                if page == Page::Settings {
+                    self.ask_stores();
+                }
                 if let Page::Ledger(l) = page {
                     // A register opened as itself is what its conditions are
                     // changed from, later.
@@ -1230,7 +1238,7 @@ impl App {
                     self.author("add the kind", "add_subcategory", &AddSubcategory { parent_id, name });
                 }
             }
-            Message::SetUpAmazon => self.set_up_amazon(),
+            Message::Stores(m) => self.stores(m),
             Message::ChoosePayer(of) => {
                 self.peer.set_candidates(Some(of.clone()));
                 return self.open_dropdown(Choosing::Payer(of), (self.pointer, false));
@@ -2262,23 +2270,6 @@ impl App {
             self.form = None;
             self.peer.set_splits(None);
         }
-    }
-
-    /// The server's settings page, where Amazon is set up: in the browser
-    /// beside the desktop, or a tab of this one.
-    fn set_up_amazon(&mut self) {
-        let Some(s) = &self.server else {
-            self.note = "the demo has no server: Amazon is set up on yours, at /settings".into();
-            return;
-        };
-        let url = format!("{}/settings", s.url.trim_end_matches('/'));
-        #[cfg(target_arch = "wasm32")]
-        if let Some(w) = web_sys::window() {
-            let _ = w.open_with_url_and_target(&url, "_blank");
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        ark_auth::client::open_browser(&url);
-        self.note = format!("opened {url}");
     }
 
     /// The keys no widget took, the window's size, and a clock only while
