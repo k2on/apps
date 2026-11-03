@@ -214,3 +214,85 @@ fn a_log_reopened_under_its_own_schema_is_its_own() {
         assert_eq!(p.store.state_hash(), server.store.state_hash());
     }
 }
+
+/// Frames carried between a replica and an authority until neither has
+/// more, from the replica's Hello: how many rounds it took, at most `n`.
+fn settle(server: &mut Peer, name: &str, replica: &mut Peer, n: usize) -> usize {
+    let mut up_frames = sends(&replica.step(Input::Connected));
+    for round in 0..n {
+        let mut back = vec![];
+        for f in up_frames.drain(..) {
+            let o = server.step(up(&who(name), &f));
+            back.extend(fanouts(&o));
+            back.extend(sends(&o));
+        }
+        if back.is_empty() {
+            return round;
+        }
+        for f in back {
+            up_frames.extend(sends(&replica.step(down(&f))));
+        }
+    }
+    n
+}
+
+/// An app a schema behind its server, whose log is compacted so it is
+/// filled rather than paged: the fill names a table the app lacks, its
+/// state is not one the app can make, and it is taken on faith, the rows
+/// it knows kept. Falsified by the fill's last part checking the state
+/// alone: the app filled, diverged and filled again for ever, showing
+/// nothing (a phone on the old money, against the new server).
+#[test]
+fn an_older_app_filled_by_a_newer_server_keeps_what_it_knows() {
+    let mut server = Peer::new(appended(), server_cas(), Role::Authority { journal: Journal::default() }, who("server"));
+    let mut bob = Peer::new(appended(), server_cas(), Role::Replica, who("bob"));
+    let tag = ark::dynamic::row_bytes(&appended().tables[2], &serde_json::json!({"name": "loud"})).unwrap();
+    for (i, (f, input)) in [(CREATE, create_input("Road")), (TAG, tag)].into_iter().enumerate() {
+        let o = bob.step(mutate(f, input, i as i64 + 1));
+        deliver_up(&mut server, &who("bob"), &o);
+    }
+    let head = server.log().head().0;
+    server.step(Input::Compact(head));
+    let mut alice = replica("alice", demo::cas());
+    let rounds = settle(&mut server, "alice", &mut alice, 12);
+    assert!(rounds < 12, "settled");
+    assert!(alice.faith, "on faith");
+    assert_eq!(alice.log().head(), server.log().head());
+    assert_eq!(alice.store.rows("playlist").count(), 1, "what it knows kept");
+}
+
+/// An app a schema ahead of its server, filled by it: every row is one it
+/// knows, so nothing says the schemas differ but the state, which the app
+/// cannot make; filled to the same head twice and still another state, it
+/// takes the server's on faith. Falsified by the same, for an app that
+/// updated before its server: it filled for ever.
+#[test]
+fn a_newer_app_filled_by_an_older_server_keeps_its_rows() {
+    let mut server = authority(demo::cas());
+    let mut bob = replica("bob", demo::cas());
+    let o = bob.step(mutate(CREATE, create_input("Road"), 1));
+    deliver_up(&mut server, &who("bob"), &o);
+    let head = server.log().head().0;
+    server.step(Input::Compact(head));
+    let mut carol = Peer::new(appended(), demo::cas(), Role::Replica, who("carol"));
+    let rounds = settle(&mut server, "carol", &mut carol, 12);
+    assert!(rounds < 12, "settled");
+    assert!(carol.faith, "on faith");
+    assert_eq!(carol.log().head(), server.log().head());
+    assert_eq!(carol.store.rows("playlist").count(), 1, "its rows kept");
+}
+
+/// The demo's functions and the wider schema's tag.
+fn server_cas() -> ark::peer::Functions {
+    let mut cas = demo::cas();
+    cas.insert(TAG, Arc::new(TagIt));
+    cas
+}
+
+/// The demo's schema with a table appended and nothing else: as money's
+/// receipt photos grew it.
+fn appended() -> Arc<Schema> {
+    let mut s = demo::schema();
+    s.tables.push(Table::new("tag").col("name", Type::Text));
+    Arc::new(s)
+}

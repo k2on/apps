@@ -471,6 +471,10 @@ pub struct Peer {
     /// A replica whose authority runs another schema: the state a
     /// confirmed entry carries is taken as it says.
     pub faith: bool,
+    /// Whether the fill under way was asked for at a divergence met twice
+    /// (a `Hello` at -1): its state, if not one this schema makes, is taken
+    /// as it says, as a snapshot asked so is ([`Peer::close_fill`]).
+    pub fill_on_faith: bool,
     /// The tables an authority sends last in a fill, after every other:
     /// what a replica can be without for a while.
     pub later: Vec<String>,
@@ -583,6 +587,7 @@ impl Peer {
             version: String::new(),
             foreign: None,
             faith: false,
+            fill_on_faith: false,
             later: vec![],
             fill: None,
             more: None,
@@ -1331,6 +1336,7 @@ impl Peer {
             o.tell(None, self.store.diff(&fresh));
             self.store = fresh;
             (self.faith, self.foreign) = (false, None);
+            self.fill_on_faith = self.asked == Some(-1);
             self.fill = Some(Fill {
                 next: Cursor::default(),
                 other: false,
@@ -1396,7 +1402,7 @@ impl Peer {
             (self.faith, self.foreign) = (false, None);
             return Ok(false);
         }
-        if !other {
+        if !other && !std::mem::take(&mut self.fill_on_faith) {
             return Err(());
         }
         let (log, rows): (Rows, Rows) = self.store.kv_rows().into_iter().partition(|(t, _)| t == LOG);
