@@ -143,11 +143,16 @@ and `MONEY_AMAZON_OTP_SECRET_FILE` when the server is given them. The login
 goes to that program alone, with its session kept in `<data>/amazon-orders`.
 It reads a folder of exports (`MONEY_RECEIPTS_DIR`, else `<data>/receipts`:
 `target/`, `costco/`, `amazon/`), moving each file to `imported/`, or to
-`failed/` when it does not read. Every server runs it, for that folder. The module's
+`failed/` when it does not read. Every server runs it, for that folder. It asks Costco's web API itself (`MONEY_COSTCO_REFRESH_TOKEN_FILE`, the
+module's `costco.enable`): the refresh token in `<data>/costco-refresh-token`
+signs in, Costco answers with a new one, written back over it, and the
+Orders & Purchases page's GraphQL gives the warehouse and gas receipts of
+the last `MONEY_COSTCO_DAYS` (`costco.days`, 90), item by item. The first
+token is put there by hand, from costco.com's sign-in. The module's
 options are `amazon.{package, args, usernameFile, passwordFile,
-otpSecretFile, transactionsArgs}` and `receiptsDir`. Target and Costco have no program like
-`amazon-orders`, so their exports are saved from the browser into the
-folder. For Costco, `download/download_costco_receipts.js` in
+otpSecretFile, transactionsArgs}`, `costco.{enable, days}` and
+`receiptsDir`. Target has no program like `amazon-orders`, so its exports
+are saved from the browser into the folder, as Costco's may be. For Costco, `download/download_costco_receipts.js` in
 ankurdave/beancount_import_sources, run in the console of a signed-in
 costco.com page, saves the array the adapter reads
 (`domain/tests/stores/costco-receipts-script.json` is its shape).

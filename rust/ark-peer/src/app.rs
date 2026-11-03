@@ -19,6 +19,7 @@
 use std::collections::BTreeMap;
 
 use ark::format::Encode;
+use ark::frames::Reply;
 use ark::hash::StateHash;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
@@ -64,9 +65,39 @@ pub(crate) struct Told {
     rejections: Vec<(EntryId, String)>,
     live_refused: Vec<(EntryId, String)>,
     pub updates: BTreeMap<usize, Update>,
+    /// The calls of its server's functions sent and not yet answered, the
+    /// next one's id, and the answers not yet taken.
+    asking: std::collections::BTreeSet<u64>,
+    calls: u64,
+    replies: BTreeMap<u64, Result<Vec<u8>, String>>,
 }
 
 impl Told {
+    /// A call sent: its id.
+    pub fn asked(&mut self) -> u64 {
+        self.calls += 1;
+        self.asking.insert(self.calls);
+        self.calls
+    }
+
+    /// A call's answer; one nobody asked for is dropped.
+    pub fn replied(&mut self, id: u64, reply: Reply) {
+        if self.asking.remove(&id) {
+            let r = match reply {
+                Reply::Ok { output } => Ok(output),
+                Reply::Refused { why } => Err(why),
+            };
+            self.replies.insert(id, r);
+        }
+    }
+
+    /// Every call still waiting, answered `why` not.
+    pub fn unanswered(&mut self, why: &str) {
+        for id in std::mem::take(&mut self.asking) {
+            self.replies.insert(id, Err(why.into()));
+        }
+    }
+
     pub fn refused(&mut self, space: Space, id: EntryId, why: &str) {
         if space == Space::Volatile {
             return self.live_refused.push((id, why.into()));
@@ -334,6 +365,12 @@ impl Peer {
     /// ask.
     pub fn take_live_refusals(&mut self) -> Vec<String> {
         std::mem::take(&mut self.told.live_refused).into_iter().map(|(_, w)| w).collect()
+    }
+
+    /// What the server answered a call ([`Peer::request`]), once it has:
+    /// what its function gave back, or why not. Taken, so it is told once.
+    pub fn take_reply(&mut self, id: u64) -> Option<Result<Vec<u8>, String>> {
+        self.told.replies.remove(&id)
     }
 
     pub fn is_alone(&self) -> bool {

@@ -11,6 +11,8 @@
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
 //! More    { space, from: { table, key } }
 //! Parts   { space, most }
+//! Call    { id, name, input }
+//! Reply   { id, reply: Ok { output } | Refused { why } }
 //! ```
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
@@ -31,6 +33,14 @@
 //! `Telemetry` is no machine's: what a device says of itself
 //! (docs/plan-observe.md), sent to its server beside the frames, which a
 //! server collects and a machine never reads.
+//!
+//! `Call` and `Reply` are no machine's either: a device's call of a
+//! function its server's program registered by name (ark-peer's
+//! `Config::calls`) and the server's answer, matched by the device's `id`.
+//! A call is never an entry: its input is not logged, journaled, recorded
+//! or told to any other connection, so it can carry what must stay off the
+//! log (a password for the server alone). It is answered once, while the
+//! connection that made it is up, and is not sent again.
 //!
 //! **No code crosses the wire.** An entry names its function by name; an
 //! authority runs exactly the functions its program was built with, and
@@ -93,6 +103,15 @@ pub enum Frame {
         space: Space,
         most: u64,
     },
+    Call {
+        id: u64,
+        name: String,
+        input: Vec<u8>,
+    },
+    Reply {
+        id: u64,
+        reply: Reply,
+    },
 }
 
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
@@ -116,6 +135,14 @@ pub enum Verdict {
     Held { func: String },
 }
 
+/// A server's answer to one `Call`: what its function gave back, or why
+/// it would not.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Reply {
+    Ok { output: Vec<u8> },
+    Refused { why: String },
+}
+
 impl Frame {
     /// The space whose log the frame is about.
     pub fn space(&self) -> Space {
@@ -128,7 +155,7 @@ impl Frame {
             | Frame::More { space, .. }
             | Frame::Parts { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
-            Frame::Telemetry { .. } => Space::Durable,
+            Frame::Telemetry { .. } | Frame::Call { .. } | Frame::Reply { .. } => Space::Durable,
         }
     }
 

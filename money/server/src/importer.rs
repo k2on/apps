@@ -794,7 +794,8 @@ impl Job {
     }
 
     /// Every store's receipts, from `amazon-orders` and the folder of
-    /// exports: each on its own, one failing said and the rest going on.
+    /// exports, and Costco's API: each on its own, one failing said and
+    /// the rest going on.
     fn import_stores(&mut self, stop: &AtomicBool) -> BTreeMap<String, Outcome> {
         let mut out = BTreeMap::new();
         if let Some(amazon) = self.stores.amazon.clone() {
@@ -812,6 +813,13 @@ impl Job {
                     .and_then(|import| self.author_charges(&import));
                 out.insert("amazon charges".to_string(), self.outcome_charges("amazon charges", got));
             }
+        }
+        if let Some(costco) = self.stores.costco.clone() {
+            let got = costco
+                .receipts()
+                .and_then(|text| money_domain::stores::costco(&text).map_err(|e| anyhow!(e)))
+                .and_then(|import| self.author_receipts(&import));
+            out.insert("costco".to_string(), self.outcome("costco", got));
         }
         let Some(dir) = self.stores.dir.clone() else { return out };
         for w in waiting(&dir) {

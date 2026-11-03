@@ -52,6 +52,7 @@ fn the_stores_receipts_are_imported() {
             password_file: Some(file("p", "hunter2")),
             otp_secret_file: None,
         }),
+        costco: None,
         dir: Some(drop.path().to_path_buf()),
     };
     let server = serve(&rt, data.path(), |c| c.stores = stores);

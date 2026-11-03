@@ -98,7 +98,7 @@ pub use app::{nobody, Standing, Status, Update};
 pub use disk::{Disk, Files, Memory};
 #[cfg(not(target_arch = "wasm32"))]
 pub use handle::{dev, Authenticate, Handle};
-pub use hub::{ConnId, Deliver};
+pub use hub::{Called, ConnId, Deliver};
 pub use instance::{Fold, Instance};
 pub use link::{Event, Pumped, Wake};
 pub use local::{Local, Logins, Shared};
@@ -191,7 +191,8 @@ impl Live {
 /// What a peer is made of: the log's module and the live one; the domain
 /// its functions are called by name in, when there is one (`app`); and, as
 /// a server, how each connection is fed (§1.8) and the entries kept above
-/// the horizon (all of them when none).
+/// the horizon (all of them when none); and the functions of its own a
+/// device may call over its link (`calls`).
 #[derive(Clone)]
 pub struct Config {
     pub log: Module,
@@ -199,7 +200,16 @@ pub struct Config {
     pub domain: Option<Arc<Domain>>,
     pub feed: Arc<dyn Fn(&Who) -> Feed + Send + Sync>,
     pub keep: Option<usize>,
+    /// A server's functions a device calls by name over its link, outside
+    /// both machines ([`Frame::Call`](ark::frames::Frame)): never logged,
+    /// journaled, recorded or told to another connection.
+    pub calls: BTreeMap<String, Call>,
 }
+
+/// One of a server's [`Config::calls`]: given the caller, verified as its
+/// connection is, and the call's input; what it gives back, or why not. It
+/// runs on a thread of its own ([`Handle`]), so it may take its time.
+pub type Call = Arc<dyn Fn(&Who, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
 
 impl Config {
     pub fn new(log: Module) -> Config {
@@ -209,6 +219,7 @@ impl Config {
             domain: None,
             feed: Arc::new(|_| Feed::Whole),
             keep: None,
+            calls: BTreeMap::new(),
         }
     }
 
@@ -775,11 +786,36 @@ impl Peer {
     pub fn disconnected(&mut self) {
         self.linked = false;
         self.frames.clear();
+        // A call is answered on the connection it went out on, or never.
+        self.told.unanswered("the connection to the server closed before it answered");
     }
 
-    /// A frame from its server, to the machine of its space.
+    /// A call of one of its server's own functions ([`Config::calls`]),
+    /// sent now: its id, for [`Peer::take_reply`]. Only while linked — a
+    /// call is never kept to send later.
+    pub fn request(&mut self, name: &str, input: Vec<u8>) -> Result<u64, String> {
+        if !self.linked {
+            return Err("not connected to the server".into());
+        }
+        let id = self.told.asked();
+        self.frames.push(
+            Frame::Call {
+                id,
+                name: name.into(),
+                input,
+            }
+            .enc(),
+        );
+        Ok(id)
+    }
+
+    /// A frame from its server, to the machine of its space; a call's
+    /// reply, to what it was asked.
     pub fn receive(&mut self, bytes: Vec<u8>) {
-        let space = Frame::dec(&bytes).map_or(Space::Durable, |f| f.space());
+        let space = match Frame::dec(&bytes) {
+            Ok(Frame::Reply { id, reply }) => return self.told.replied(id, reply),
+            f => f.map_or(Space::Durable, |f| f.space()),
+        };
         self.step(space, Input::Frame { from: None, bytes });
     }
 

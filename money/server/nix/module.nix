@@ -232,6 +232,22 @@ in
       };
     };
 
+    costco = {
+      enable = lib.mkEnableOption ''
+        Costco's warehouse and gas receipts, read from its web API at each
+        sync. It signs in with a refresh token kept in
+        `<dataDir>/costco-refresh-token`, which Costco replaces at every
+        sign-in, so it is state and not a credential: write the first one
+        there by hand (the `refresh_token` costco.com's sign-in answers
+        with) and restart the service, which takes the file as its own
+      '';
+      days = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 90;
+        description = "How many days back Costco's receipts are asked for at each sync.";
+      };
+    };
+
     receiptsDir = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -347,6 +363,9 @@ in
         MONEY_AMAZON_PASSWORD_FILE = "%d/amazon-password";
       } // lib.optionalAttrs (amazon.package != null && amazon.otpSecretFile != null) {
         MONEY_AMAZON_OTP_SECRET_FILE = "%d/amazon-otp-secret";
+      } // lib.optionalAttrs cfg.costco.enable {
+        MONEY_COSTCO_REFRESH_TOKEN_FILE = "${cfg.dataDir}/costco-refresh-token";
+        MONEY_COSTCO_DAYS = toString cfg.costco.days;
       } // lib.optionalAttrs (cfg.receiptsDir != null) {
         MONEY_RECEIPTS_DIR = cfg.receiptsDir;
       };

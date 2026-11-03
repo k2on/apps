@@ -4,7 +4,7 @@
 mod demo;
 
 use ark::format::Encode;
-use ark::frames::{Frame, Verdict};
+use ark::frames::{Frame, Reply, Verdict};
 use ark::hash::{EntryHash, SchemaHash, StateHash};
 use ark::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Snapshot, Span, TraceId};
 use ark::schema::Space;
@@ -116,6 +116,19 @@ fn every_frame() -> Vec<Frame> {
         Frame::Parts {
             space: Space::Durable,
             most: 16 << 10,
+        },
+        Frame::Call {
+            id: 7,
+            name: "stores.amazon".into(),
+            input: br#"{"password":"a\u0000b"}"#.to_vec(),
+        },
+        Frame::Reply {
+            id: 7,
+            reply: Reply::Ok { output: b"{}".to_vec() },
+        },
+        Frame::Reply {
+            id: 8,
+            reply: Reply::Refused { why: "no".into() },
         },
     ]
 }

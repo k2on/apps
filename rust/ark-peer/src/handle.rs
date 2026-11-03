@@ -54,7 +54,7 @@ enum Cmd {
 
 #[derive(Clone)]
 pub struct Handle {
-    tx: Sender<Cmd>,
+    tx: Arc<Sender<Cmd>>,
     next: Arc<AtomicU64>,
 }
 
@@ -71,6 +71,10 @@ impl Handle {
     /// their connections closed (`ark_auth::server::Auth::watcher`).
     pub fn watched(mut peer: Peer, mut watch: Option<Watch>) -> Handle {
         let (tx, rx) = channel::<Cmd>();
+        let tx = Arc::new(tx);
+        // A call's thread answers through this; held weakly here, so the
+        // thread still ends when the last handle goes.
+        let calls = Arc::downgrade(&tx);
         peer.hub.watched = watch.is_some();
         std::thread::spawn(move || {
             let mut sinks = BTreeMap::new();
@@ -87,6 +91,19 @@ impl Handle {
                     Err(RecvTimeoutError::Disconnected) => break,
                 };
                 out.extend(peer.release());
+                for (call, f) in peer.take_calls() {
+                    let (c, id) = (call.conn, call.id);
+                    let (Some(f), Some(tx)) = (f, calls.upgrade()) else {
+                        out.extend(peer.reply(c, id, Err(format!("this server has no function {}", call.name))));
+                        continue;
+                    };
+                    // Its own thread: a call may take its time (another
+                    // service's sign-in) and the log does not wait for it.
+                    std::thread::spawn(move || {
+                        let answer = f(&call.who, &call.input);
+                        let _ = tx.send(Cmd::Run(Box::new(move |p, _| p.reply(c, id, answer))));
+                    });
+                }
                 deliver(&mut sinks, out);
                 let Some(w) = watch.as_mut() else { continue };
                 // Delivered first: a sign-out's own confirmation, then the close.

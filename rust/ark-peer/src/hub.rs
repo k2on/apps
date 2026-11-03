@@ -71,6 +71,19 @@ pub(crate) struct Hub {
     /// kept while one watches (`serve`).
     pub watched: bool,
     pub seen: Vec<ark::store::Change>,
+    /// The calls connections made, not yet run.
+    called: Vec<Called>,
+}
+
+/// A call of one of the server's functions ([`crate::Config::calls`]) a
+/// connection made: who, verified as the connection is, and what.
+#[derive(Clone, Debug)]
+pub struct Called {
+    pub conn: ConnId,
+    pub who: Who,
+    pub id: u64,
+    pub name: String,
+    pub input: Vec<u8>,
 }
 
 impl Hub {
@@ -207,6 +220,22 @@ impl Peer {
     pub fn frame(&mut self, c: ConnId, bytes: Vec<u8>, now: i64) -> Vec<Deliver> {
         let Some(conn) = self.hub.conns.get_mut(&c) else { return vec![] };
         let Ok(f) = Frame::dec(&bytes) else { return vec![] };
+        if let Frame::Call { id, name, input } = f {
+            // No machine's: whoever drives the server runs it
+            // ([`Peer::take_calls`]) and answers this connection alone.
+            let who = conn.who.clone();
+            self.hub.called.push(Called {
+                conn: c,
+                who,
+                id,
+                name,
+                input,
+            });
+            return vec![];
+        }
+        if let Frame::Reply { .. } = f {
+            return vec![];
+        }
         if let Frame::Telemetry { events } = f {
             // What a device says of itself, kept with what this server says,
             // each named by the login that sent it: a device says which of
@@ -232,6 +261,32 @@ impl Peer {
             self.arrive(c, &d, now);
         }
         self.release()
+    }
+
+    /// The calls connections made since, taken, each with the function
+    /// it names, none when the server has no such function: for whoever
+    /// drives the server to run and answer ([`Peer::reply`]).
+    pub fn take_calls(&mut self) -> Vec<(Called, Option<crate::Call>)> {
+        let called = std::mem::take(&mut self.hub.called);
+        called
+            .into_iter()
+            .map(|c| {
+                let f = self.config.calls.get(&c.name).cloned();
+                (c, f)
+            })
+            .collect()
+    }
+
+    /// A call's answer, for the connection that made it if it is open still.
+    pub fn reply(&mut self, c: ConnId, id: u64, answer: Result<Vec<u8>, String>) -> Vec<Deliver> {
+        if !self.hub.conns.contains_key(&c) {
+            return vec![];
+        }
+        let reply = match answer {
+            Ok(output) => ark::frames::Reply::Ok { output },
+            Err(why) => ark::frames::Reply::Refused { why },
+        };
+        vec![(c, Frame::Reply { id, reply }.enc())]
     }
 
     /// A connection gone; the device's `on_leave` when it was its last.

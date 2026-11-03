@@ -17,6 +17,11 @@
 //!   settings page ([`crate::vault`]). Its home is
 //!   `<data>/amazon-orders`, so the session it keeps there spares Amazon a
 //!   login each run.
+//! - **Costco, through its web API** (`MONEY_COSTCO_REFRESH_TOKEN_FILE`):
+//!   the refresh token in that file signs in to Costco's sign-in (Azure AD
+//!   B2C), which answers with a new one, written back over it; the id token
+//!   then asks the Orders & Purchases page's GraphQL for the warehouse and
+//!   gas receipts of the last `MONEY_COSTCO_DAYS` (90), item by item.
 //! - **A folder of exports** (`MONEY_RECEIPTS_DIR`): a file in
 //!   `<dir>/<store>/` (`target/`, `costco/`, `amazon/`) is read by that
 //!   store's adapter, then moved to `imported/` beside it once the import
@@ -37,13 +42,15 @@ const AMAZON_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Stores {
     pub amazon: Option<AmazonOrders>,
+    /// Costco, signed in by the refresh token in its file.
+    pub costco: Option<Costco>,
     /// The folder of exports.
     pub dir: Option<PathBuf>,
 }
 
 impl Stores {
     pub fn any(&self) -> bool {
-        self.amazon.is_some() || self.dir.is_some()
+        self.amazon.is_some() || self.costco.is_some() || self.dir.is_some()
     }
 
     /// Read the environment (blank is unset).
@@ -73,8 +80,18 @@ impl Stores {
                 })
             }
         };
+        let costco_days = env("MONEY_COSTCO_DAYS")
+            .map(|days| days.parse::<u32>())
+            .transpose()
+            .map_err(|e| anyhow!("MONEY_COSTCO_DAYS is not a number: {e}"))?
+            .unwrap_or(90);
         Ok(Stores {
             amazon,
+            costco: env("MONEY_COSTCO_REFRESH_TOKEN_FILE").map(|file| Costco {
+                refresh_token_file: PathBuf::from(file),
+                days: costco_days,
+                ..Costco::default()
+            }),
             dir: env("MONEY_RECEIPTS_DIR").map(PathBuf::from),
         })
     }
@@ -99,6 +116,122 @@ pub struct AmazonOrders {
     pub username_file: Option<PathBuf>,
     pub password_file: Option<PathBuf>,
     pub otp_secret_file: Option<PathBuf>,
+}
+
+/// Costco's own receipts, from its web API: a refresh token signs in, then
+/// GraphQL asks for the warehouse and gas receipts since [`Costco::days`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Costco {
+    pub refresh_token_file: PathBuf,
+    /// How far back receipts are asked for.
+    pub days: u32,
+    /// The token endpoint; defaults to Costco's.
+    pub token_url: String,
+    /// The receipts endpoint; defaults to Costco's.
+    pub receipts_url: String,
+}
+
+impl Default for Costco {
+    fn default() -> Self {
+        Costco {
+            refresh_token_file: PathBuf::new(),
+            days: 90,
+            token_url: "https://signin.costco.com/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_219/oauth2/v2.0/token".into(),
+            receipts_url: "https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql".into(),
+        }
+    }
+}
+
+/// The GraphQL query Costco's web app lists receipts with, but asking for
+/// each item's lines as its single receipt's page does: the list's own
+/// asks for item numbers alone, and the adapter needs every line's amount.
+const COSTCO_QUERY: &str = r#"query receiptsWithCounts($startDate: String!, $endDate: String!,$documentType:String!,$documentSubType:String!) {
+    receiptsWithCounts(startDate: $startDate, endDate: $endDate,documentType:$documentType,documentSubType:$documentSubType) {
+    inWarehouse
+    gasStation
+    carWash
+    gasAndCarWash
+    receipts{
+    warehouseName warehouseShortName receiptType documentType transactionDateTime transactionDate transactionBarcode transactionType total
+    totalItemCount
+    itemArray {
+      itemNumber
+      itemDescription01
+      itemDescription02
+      itemIdentifier
+      unit
+      amount
+      fuelUnitQuantity
+      itemUnitPriceAmount
+    }
+    tenderArray {
+      tenderTypeCode
+      tenderDescription
+      amountTender
+    }
+    couponArray {
+      upcnumberCoupon
+    }
+  }
+}
+  }"#;
+
+impl Costco {
+    /// The receipts since `days`, as the adapter expects them.
+    pub fn receipts(&self) -> Result<String> {
+        let refresh_token = secret(&self.refresh_token_file)?;
+        let token: serde_json::Value = ureq::post(&self.token_url)
+            .set("Content-Type", "application/x-www-form-urlencoded")
+            .send_string(&format!(
+                "grant_type=refresh_token&refresh_token={}&client_id={}&scope=openid%20offline_access",
+                urlencode(&refresh_token),
+                "a3a5186b-7c89-4b4c-93a8-dd604e930757"
+            ))?
+            .into_json()
+            .map_err(|e| anyhow!("Costco sign-in failed: {e}"))?;
+        let id_token = token["id_token"].as_str().ok_or_else(|| anyhow!("Costco sign-in gave no token"))?;
+        let new_refresh_token = token["refresh_token"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Costco sign-in gave no refresh token"))?;
+        let tmp = self.refresh_token_file.with_extension("tmp");
+        std::fs::write(&tmp, new_refresh_token).with_context(|| format!("writing {}", tmp.display()))?;
+        std::fs::rename(&tmp, &self.refresh_token_file).with_context(|| format!("replacing {}", self.refresh_token_file.display()))?;
+
+        let start = chrono::Utc::now() - chrono::Duration::days(self.days as i64);
+        let request = serde_json::json!({
+            "query": COSTCO_QUERY,
+            "variables": {
+                "startDate": start.format("%-m/%-d/%Y").to_string(),
+                "endDate": chrono::Utc::now().format("%-m/%-d/%Y").to_string(),
+                "documentType": "all",
+                "documentSubType": "all"
+            }
+        });
+        let response = ureq::post(&self.receipts_url)
+            .set("Content-Type", "application/json-patch+json")
+            .set("costco.env", "PROD")
+            .set("costco-x-authorization", &format!("Bearer {id_token}"))
+            .set("costco-x-wcs-clientId", "4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf")
+            .set("client-identifier", "481b1aec-aa3b-454b-b81b-48187e28f205")
+            .set("costco.service", "restOrders")
+            .send_string(&request.to_string())?;
+        let body: serde_json::Value = response.into_json().map_err(|e| anyhow!("reading Costco's receipts: {e}"))?;
+        if !body["data"]["receiptsWithCounts"].is_object() {
+            bail!("Costco did not return receipts");
+        }
+        serde_json::to_string(&body["data"]).map_err(|e| anyhow!("serializing Costco's receipts: {e}"))
+    }
+}
+
+/// A body field in a form, escaped the way a browser does.
+fn urlencode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b' ' => "%20".into(),
+            b => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// A secret's file, trimmed; its contents never in an error.
@@ -222,6 +355,7 @@ pub fn put_away(w: &Waiting, under: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let m: std::collections::BTreeMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
@@ -251,6 +385,101 @@ mod tests {
         assert_eq!(a.args, ["orders", "--year", "2026", "--full-details", "-o", "json"]);
         assert_eq!(a.otp_secret_file, None);
         assert_eq!(s.dir, Some(PathBuf::from("/var/lib/money/receipts")));
+        let s = Stores::from_env(&vars(&[
+            ("MONEY_COSTCO_REFRESH_TOKEN_FILE", "/var/lib/money/costco-refresh-token"),
+            ("MONEY_COSTCO_DAYS", "30"),
+        ]))
+        .unwrap();
+        let c = s.costco.unwrap();
+        assert_eq!(c.refresh_token_file, PathBuf::from("/var/lib/money/costco-refresh-token"));
+        assert_eq!(c.days, 30);
+        assert_eq!(c.token_url, Costco::default().token_url);
+        assert_eq!(c.receipts_url, Costco::default().receipts_url);
+    }
+
+    #[test]
+    fn costco_signs_in_rotates_its_refresh_token_and_reads_receipts() {
+        let dir = tempfile::tempdir().unwrap();
+        let token_file = dir.path().join("refresh-token");
+        std::fs::write(&token_file, "old refresh token").unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let costco = Costco {
+            refresh_token_file: token_file.clone(),
+            days: 0,
+            token_url: format!("http://127.0.0.1:{port}/token"),
+            receipts_url: format!("http://127.0.0.1:{port}/graphql"),
+        };
+        let (sent, got) = std::sync::mpsc::channel();
+        let serve = std::thread::spawn(move || {
+            for n in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                // The headers, then as much body as they say.
+                let mut request = vec![];
+                let mut buf = [0; 8192];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let read = stream.read(&mut buf).unwrap();
+                    assert!(read > 0, "the request ended early");
+                    request.extend_from_slice(&buf[..read]);
+                }
+                let head = request.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+                let length = String::from_utf8_lossy(&request[..head])
+                    .lines()
+                    .find_map(|l| {
+                        l.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                while request.len() < head + length {
+                    let read = stream.read(&mut buf).unwrap();
+                    assert!(read > 0, "the body ended early");
+                    request.extend_from_slice(&buf[..read]);
+                }
+                let request = String::from_utf8_lossy(&request).to_string();
+                let body = if n == 0 {
+                    r#"{"id_token":"the id token","refresh_token":"the new refresh token"}"#
+                } else {
+                    r#"{"data":{"receiptsWithCounts":{"inWarehouse":1,"gasStation":0,"carWash":0,"gasAndCarWash":0,"receipts":[
+                        {"warehouseName":"SEATTLE","receiptType":"In-Warehouse","documentType":"WarehouseReceiptDetail",
+                         "transactionDateTime":"2026-10-25T14:33:00","transactionBarcode":"21134300501862310251433","total":10.83,
+                         "itemArray":[{"itemNumber":"1234","itemDescription01":"KS ORGANIC EGGS","itemDescription02":"24 CT","unit":1,"amount":10.83}]}
+                    ]}}}"#
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                sent.send(request).unwrap();
+            }
+        });
+        let out = costco.receipts().unwrap();
+        let token_request = got.recv().unwrap();
+        let receipts_request = got.recv().unwrap();
+        serve.join().unwrap();
+
+        assert!(token_request.contains("grant_type=refresh_token"), "{token_request}");
+        assert!(token_request.contains("refresh_token=old%20refresh%20token"), "{token_request}");
+        assert!(
+            token_request.contains("client_id=a3a5186b-7c89-4b4c-93a8-dd604e930757"),
+            "{token_request}"
+        );
+        assert!(
+            receipts_request.contains("costco-x-authorization: Bearer the id token"),
+            "{receipts_request}"
+        );
+        assert!(receipts_request.contains("costco.service: restOrders"), "{receipts_request}");
+        assert!(receipts_request.contains("amount"), "the items' lines are asked for: {receipts_request}");
+        // What it gives back is what the domain's adapter reads.
+        let import = money_domain::stores::costco(&out).unwrap();
+        assert_eq!(import.receipts.len(), 1);
+        let r = &import.receipts[0];
+        assert_eq!((r.date.as_str(), r.place.as_str(), r.total), ("2026-10-25", "Costco SEATTLE", -1083));
+        assert_eq!(r.items[0].name, "KS ORGANIC EGGS 24 CT");
+        assert_eq!(r.items[0].amount, -1083);
+        assert_eq!(std::fs::read_to_string(&token_file).unwrap(), "the new refresh token");
     }
 
     /// The program's output is what it printed; its sign-in reaches it in

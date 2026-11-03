@@ -86,6 +86,12 @@ fn frame(peer: &str, sp: Space, dir: &str, conn: Option<ConnId>, bytes: &[u8]) {
         Frame::Parts { most, .. } => debug!(target: "ark", peer, space = space(sp), dir, conn, most, "parts"),
         Frame::Verdict { id: e, verdict, .. } => verdict_of(peer, sp, dir, conn, &e, &verdict),
         Frame::Telemetry { events } => debug!(target: "ark", peer, dir, conn, events = events.len(), "telemetry"),
+        // A call's input is what must stay off the log: its name alone.
+        Frame::Call { id, name, .. } => debug!(target: "ark", peer, dir, conn, call = id, name = %name, "call"),
+        Frame::Reply { id, reply } => {
+            let ok = matches!(reply, ark::frames::Reply::Ok { .. });
+            debug!(target: "ark", peer, dir, conn, call = id, ok, "reply")
+        }
     }
 }
 
