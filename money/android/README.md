@@ -179,6 +179,24 @@ does.
   correction says who entered it, can delete it, and can make it a
   transfer (`transfer_to`: paired with the matching one in the other
   account, or given its other half there).
+- **Its receipt** (`Receipts.kt`) — at the foot of a correction's sheet,
+  and a receipt glyph on its row in every register: what paid for it drawn
+  as the paper — monospace on white in light and dark, the store, the day,
+  each item and its price, the total — with "Check this" when the
+  server's reading of its photo doesn't add up. **Scan**, **Choose
+  photo**, **Type it**, and **Attach one** (a receipt nothing pays for yet,
+  the nearest in amount first); a receipt is edited (a reading put right),
+  shown as its photo, or taken off. A photo is kept on the phone at once
+  (`putFile`, docs/plan-files.md) and read by the server when it gets
+  there, so a receipt scanned offline is read once the phone is online.
+- **The scanner** (`Scanner.kt`, `Vision.kt`) — as Notes scans a document:
+  the camera full screen (Camera2, no library), a translucent blue quad
+  gliding to the paper's edges, and the picture taking itself once the page
+  has held still and sharp for a second — a flash, the page made flat (a
+  homography from its corners), and it shrinks away. The eyes are plain
+  Kotlin over each frame's luminance (Otsu's threshold, the largest bright
+  region, its outline's four corners, the Laplacian's variance), held to
+  drawn frames by `VisionTests`.
 
 **Motion.** Between tabs, Material's fade through; into a register or the
 bank's page and back, the shared X axis, which the system's back gesture

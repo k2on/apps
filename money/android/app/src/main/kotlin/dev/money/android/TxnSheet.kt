@@ -244,6 +244,11 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(vertical = Space.m))
                             }
+                            // What it bought, as the paper says: a transfer buys nothing.
+                            val editing = f.editing
+                            if (editing != null && f.transferTo == null) {
+                                ReceiptSection(ledger, editing, f.receipt, start.amount, f.date)
+                            }
                             Spacer(Modifier.height(Space.xl))
                         }
             }

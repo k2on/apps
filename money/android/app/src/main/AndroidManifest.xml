@@ -4,6 +4,11 @@
     <!-- The sync socket and the sign-in. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Scanning a receipt (Scanner.kt), asked for when it is first opened; a
+         phone with no camera still installs it and types or chooses one. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <!-- enableOnBackInvokedCallback: the back gesture is predictive (Android 14
          and later): a page slides back toward the one beneath it under the
          finger, and a sheet shrinks as it goes. -->

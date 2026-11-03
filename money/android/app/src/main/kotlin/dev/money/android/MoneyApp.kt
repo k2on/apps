@@ -241,6 +241,7 @@ fun formOf(t: TxnLine, l: Ledger): TxnForm =
         cleared = t.cleared != uniffi.money_domain.Cleared.UNCLEARED,
         by = t.userId,
         bankSaid = bankSaid(t),
+        receipt = t.receipt,
     )
 
 /**

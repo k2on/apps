@@ -75,6 +75,25 @@ object Glyphs {
     /** Assigned by rule: a share of what came in. */
     val Rule: ImageVector = glyph("percent", "M19 5 5 19", circle(6.5f, 6.5f, 2.5f), circle(17.5f, 17.5f, 2.5f))
 
+    private const val SLIP = "M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"
+
+    /** A receipt: a slip with a torn edge, and its lines. */
+    val Receipt: ImageVector = glyph("receipt", SLIP, "M8 8h8", "M8 12h8", "M8 16h5")
+
+    /** Scanning: a page in a viewfinder's corners. */
+    val Scan: ImageVector =
+        glyph("scan", "M3 7V5a2 2 0 0 1 2-2h2", "M17 3h2a2 2 0 0 1 2 2v2", "M21 17v2a2 2 0 0 1-2 2h-2", "M7 21H5a2 2 0 0 1-2-2v-2", "M7 12h10")
+
+    /** A photo from the library. */
+    val Photo: ImageVector = glyph("image", rect(3f, 3f, 18f, 18f), circle(9f, 9f, 2f), "m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21")
+
+    /** Typed by hand: a pencil. */
+    val Write: ImageVector =
+        glyph(
+            "pencil",
+            "M21.17 6.81a1 1 0 0 0-3.98-3.98L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z",
+            "m15 5 4 4")
+
     /** The glyph an account of `kind` is drawn with. */
     fun account(kind: String): ImageVector =
         when (kind) {

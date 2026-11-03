@@ -30,6 +30,14 @@ import dev.arkdb.ffi.Update
 import dev.arkdb.ffi.View
 import dev.arkdb.ffi.splice
 import dev.money.android.gen.AddCategory
+import dev.money.android.gen.AddPhoto
+import dev.money.android.gen.FileRef
+import dev.money.android.gen.ItemLine
+import dev.money.android.gen.MatchReceipt
+import dev.money.android.gen.OneReceipt
+import dev.money.android.gen.PhotoLine
+import dev.money.android.gen.ReceiptLine
+import dev.money.android.gen.WriteReceipt
 import dev.money.android.gen.AddGroup
 import dev.money.android.gen.AddTransaction
 import dev.money.android.gen.Assign
@@ -121,12 +129,37 @@ data class Ledger(
     val ready: Boolean = false,
     /** Why the server turned this login away, when it did. */
     val denied: String? = null,
+    /** Every receipt photo, the newest first, and where reading it stands. */
+    val photos: List<PhotoLine> = emptyList(),
+    /** Every receipt, the newest first. */
+    val receipts: List<ReceiptLine> = emptyList(),
+    /** The items of each receipt a screen holds, by its id. */
+    val items: Map<String, List<ItemLine>> = emptyMap(),
 ) {
     fun line(category: Id): BudgetLine? = lines.firstOrNull { it.categoryId == category }
 
     fun account(id: Id): AccountLine? = accounts.firstOrNull { it.id == id }
 
     fun register(account: Id?): List<TxnLine> = registers[key(account)] ?: emptyList()
+
+    /**
+     * The receipts that paid for `txn` (`receipt` the one its line names) — whole, or by one of their
+     * charges — and those read from its photos.
+     */
+    fun receiptsOf(txn: Id, receipt: String): List<ReceiptLine> {
+        val read = photos.filter { it.txnId == txn && it.receiptId.isNotEmpty() }.map { it.receiptId }.toSet()
+        return receipts.filter { it.txnId == txn || (receipt.isNotEmpty() && it.id == receipt) || it.id in read }
+    }
+
+    /** The photos taken for `txn`, the newest first. */
+    fun photosOf(txn: Id): List<PhotoLine> = photos.filter { it.txnId == txn }
+
+    /** The photo a receipt was read from, when it was. */
+    fun photoOf(receipt: String): PhotoLine? = photos.firstOrNull { it.receiptId == receipt }
+
+    /** The receipts nothing pays for yet, for somebody to say which transaction did. */
+    val unmatched: List<ReceiptLine>
+        get() = receipts.filter { it.txnId == null && it.charges == 0L }
 
     /** The month's categories, by group in the budget's order, the hidden left out unless `hidden`. */
     fun byGroup(hidden: Boolean = false): List<Pair<GroupLine, List<BudgetLine>>> =
@@ -202,6 +235,8 @@ data class TxnForm(
      * the payee does: `CHIPOTLE 1234 SAN FRANCISCO CA` for Chipotle. Shown, never sent.
      */
     val bankSaid: String = "",
+    /** The receipt its line says paid for the one corrected (`TxnLine.receipt`), blank for none. */
+    val receipt: String = "",
 )
 
 class Book
@@ -252,6 +287,9 @@ private constructor(
     private var banks: Held<BankLine>? = null
     private var linked: Held<LinkedLine>? = null
     private var asks: Held<AskLine>? = null
+    private var photos: Held<PhotoLine>? = null
+    private var receipts: Held<ReceiptLine>? = null
+    private val items = HashMap<String, Pair<Held<ItemLine>, Int>>()
     private val registers = HashMap<String, Pair<Held<TxnLine>, Int>>()
     private var syncing = false
 
@@ -272,6 +310,8 @@ private constructor(
         banks = Held(money.banks())
         linked = Held(money.linked())
         asks = Held(money.asks())
+        photos = Held(money.photos())
+        receipts = Held(money.receipts())
         if (listen) {
             peer.setListener(
                 object : Listener {
@@ -315,7 +355,8 @@ private constructor(
     private fun drain() {
         draining.set(false)
         if (closed) return
-        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks)) h?.settle()
+        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.settle()
+        for ((h, _) in items.values) h.settle()
         for ((h, _) in registers.values) h.settle()
         for (r in peer.takeRejections()) say("The server didn't take a change: ${r.why}")
         awaiting?.let { w ->
@@ -353,8 +394,14 @@ private constructor(
                 syncing = syncing,
                 ready = true,
                 denied = s.denied,
+                photos = photos?.rows?.toList().orEmpty(),
+                receipts = receipts?.rows?.toList().orEmpty(),
+                items = items.mapValues { it.value.first.rows.toList() },
             )
     }
+
+    /** A sentence for the snackbar, from a screen. */
+    fun tell(note: String) = say(note)
 
     private fun say(note: String) {
         said.add(note)
@@ -591,6 +638,46 @@ private constructor(
         } else registers[k] = had.first to had.second - 1
     }
 
+    // * Receipts
+
+    /** Hold a receipt's items while a screen shows it. */
+    fun holdItems(receipt: String) = post {
+        val had = items[receipt]
+        items[receipt] = if (had != null) had.first to had.second + 1 else Held(money.receiptItems(OneReceipt(receipt))) to 1
+    }
+
+    fun releaseItems(receipt: String) = post {
+        val had = items[receipt] ?: return@post
+        if (had.second <= 1) {
+            items.remove(receipt)
+            had.first.close()
+        } else items[receipt] = had.first to had.second - 1
+    }
+
+    /**
+     * A photo of a receipt, for `txn` when it was taken for one: kept on this phone at once, sent to the
+     * server now or on its next connection, where it is read.
+     */
+    fun addPhoto(jpeg: ByteArray, txn: Id?, media: String = "image/jpeg") =
+        act("keep the photo") { m ->
+            val hash = peer.putFile(jpeg, media)
+            m.addPhoto(AddPhoto(FileRef(hash, jpeg.size.toLong(), media), txn))
+            say(if (state.value.link.linked) "Photo kept: reading it" else "Photo kept: it's read once you're online")
+        }
+
+    /** A receipt typed by hand, or one already read put right. */
+    fun writeReceipt(w: WriteReceipt) = act("save the receipt") { it.writeReceipt(w) }
+
+    /** `receipt` paid for by `txn`, or (none) by nothing. */
+    fun pay(receipt: String, txn: Id?) =
+        act(if (txn == null) "take the receipt off" else "attach the receipt") { it.pay(MatchReceipt(receipt, txn)) }
+
+    /**
+     * A photo's bytes when this phone holds them; when not, fetched from the server, and the state moves
+     * when they arrive. Safe from any thread: the peer guards itself.
+     */
+    fun photo(f: FileRef): ByteArray? = if (closed) null else peer.file(f.hash, f.size, f.media)
+
     /** Dial the server now: the app came to the front. */
     fun dialNow() {
         if (!demo) post { peer.dialNow() }
@@ -607,7 +694,9 @@ private constructor(
         val shut = {
             closed = true
             peer.setListener(null)
-            for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks)) h?.close()
+            for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.close()
+            for ((h, _) in items.values) h.close()
+            items.clear()
             for ((h, _) in registers.values) h.close()
             registers.clear()
             peer.close()

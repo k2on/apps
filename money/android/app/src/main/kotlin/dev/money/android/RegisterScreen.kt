@@ -184,7 +184,15 @@ fun TxnRow(t: TxnLine, showAccount: Boolean, swipe: Boolean = true, modifier: Mo
                         Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
                         Spacer(Modifier.size(Space.s))
                     }
-                    Text(t.payee.ifEmpty { "No payee" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(t.payee.ifEmpty { "No payee" }, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (t.receipt.isNotEmpty() || t.photos > 0) {
+                        Spacer(Modifier.size(Space.xs))
+                        Icon(
+                            Glyphs.Receipt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp))
+                    }
                 }
             },
             supportingContent = {
@@ -207,6 +215,7 @@ fun TxnRow(t: TxnLine, showAccount: Boolean, swipe: Boolean = true, modifier: Mo
                 Modifier.clickable(onClickLabel = "Edit", onClick = { shell.onEdit(t) }).semantics(mergeDescendants = true) {
                     contentDescription =
                         "${t.payee}, ${a.signed(t.amount)}, ${t.category}" + (if (!t.approved) ", new" else "") +
+                            (if (t.receipt.isNotEmpty() || t.photos > 0) ", has a receipt" else "") +
                             when (t.cleared) {
                                 Cleared.RECONCILED -> ", reconciled"
                                 Cleared.CLEARED -> ", cleared"
