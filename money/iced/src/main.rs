@@ -157,6 +157,8 @@ pub enum Choosing {
     Items(Vec<ItemRef>),
     /// A line of the form's split.
     SplitLine(usize),
+    /// What paid a receipt whole, or one of its charges.
+    Payer(PaidFor),
 }
 
 /// What a chooser offers.
@@ -164,6 +166,8 @@ pub enum Choosing {
 pub enum Choice {
     Category(Option<Id<Category>>),
     Transfer(Id<Account>),
+    /// What paid a receipt or a charge; none for nothing found.
+    Paid(Option<Id<Txn>>),
 }
 
 /// A category being chosen, as YNAB has it: a search box dropped under
@@ -309,6 +313,8 @@ pub enum Message {
     NewKindDone,
     /// The server's settings page, in a browser.
     SetUpAmazon,
+    /// What paid a receipt or a charge: the dropdown of what could have.
+    ChoosePayer(PaidFor),
 }
 
 pub struct App {
@@ -853,7 +859,10 @@ impl App {
                     _ => {}
                 }
             }
-            Message::CloseDrop => self.dropdown = None,
+            Message::CloseDrop => {
+                self.dropdown = None;
+                self.peer.set_candidates(None);
+            }
             Message::Chose(choice) => self.chose(choice),
             Message::Sync => self.sync(),
             Message::AddAccount => {
@@ -1082,6 +1091,10 @@ impl App {
                 }
             }
             Message::SetUpAmazon => self.set_up_amazon(),
+            Message::ChoosePayer(of) => {
+                self.peer.set_candidates(Some(of.clone()));
+                return self.open_dropdown(Choosing::Payer(of), self.pointer);
+            }
             Message::Swallow => {}
             Message::Wake => return self.wake(),
             Message::SignedIn(Ok(login)) => self.signed_in(login),
@@ -1694,9 +1707,42 @@ impl App {
         };
         let query = d.search.query.to_lowercase();
         let has = |name: &str| query.is_empty() || name.to_lowercase().contains(&query);
+        if let Choosing::Payer(_) = &d.choosing {
+            let rows = self.peer.candidates.as_ref().map(|(_, w)| w.rows.clone()).unwrap_or_default();
+            let txns = rows
+                .iter()
+                .map(|c| (format!("{} \u{2014} {}", c.payee, c.date), c))
+                .filter(|(label, c)| has(label) || has(&c.account))
+                .map(|(label, c)| arkui::command::Item {
+                    glyph: glyphs::CARD,
+                    label,
+                    detail: Some(format!("{} \u{00b7} {}", amount::money(c.amount), c.account)),
+                    choose: Message::Chose(Choice::Paid(Some(c.txn_id))),
+                })
+                .collect();
+            let none = arkui::command::Item {
+                glyph: glyphs::CLOSE,
+                label: "Nothing found yet".into(),
+                detail: None,
+                choose: Message::Chose(Choice::Paid(None)),
+            };
+            let mut groups = vec![arkui::command::Group {
+                heading: "Paid by".into(),
+                items: txns,
+            }];
+            if has("nothing found yet") {
+                groups.push(arkui::command::Group {
+                    heading: "None".into(),
+                    items: vec![none],
+                });
+            }
+            groups.retain(|g| !g.items.is_empty());
+            return groups;
+        }
         let item = |label: String, detail: Option<String>, choice: Choice| arkui::command::Item {
             glyph: match choice {
                 Choice::Transfer(_) => glyphs::SEND,
+                Choice::Paid(_) => glyphs::CARD,
                 Choice::Category(Some(c)) if c == money_domain::budget::ready_to_assign() => glyphs::GROWTH,
                 Choice::Category(Some(_)) => view::category_glyph(&label),
                 Choice::Category(None) => glyphs::CLOSE,
@@ -1830,10 +1876,27 @@ impl App {
                     (f.category, f.transfer_to) = match choice {
                         Choice::Category(c) => (c, None),
                         Choice::Transfer(a) => (None, Some(a)),
+                        Choice::Paid(_) => (f.category, f.transfer_to),
                     };
                     if f.transfer_to.is_some() {
                         f.split = None;
                     }
+                }
+            }
+            Choosing::Payer(of) => {
+                self.peer.set_candidates(None);
+                if let Choice::Paid(txn_id) = choice {
+                    match of.charge_id {
+                        Some(charge_id) => self.author("say what paid it", "pay_charge", &PayCharge { charge_id, txn_id }),
+                        None => self.author(
+                            "say what paid it",
+                            "pay",
+                            &MatchReceipt {
+                                receipt_id: of.receipt_id,
+                                txn_id,
+                            },
+                        ),
+                    };
                 }
             }
             Choosing::Items(items) => {

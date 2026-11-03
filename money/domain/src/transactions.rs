@@ -284,6 +284,9 @@ pub fn remove_txn(db: &mut Db<Money>, t: &Txn) -> Result<(), Refusal> {
     for r in db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).all() {
         db.receipt.update(Receipt { txn_id: None, ..r })?;
     }
+    for c in db.charge.by(Charge::TXN_ID).from(Some(t.id)).all() {
+        db.charge.update(Charge { txn_id: None, ..c })?;
+    }
     db.txn.remove(t)
 }
 

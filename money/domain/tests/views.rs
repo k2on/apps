@@ -130,6 +130,22 @@ fn script(b: &mut Book) -> Vec<Step> {
         }),
         Box::new(move |b| b.spend(card, "2026-10-10", "Costco", Some(food), -4_000)),
         Box::new(move |b| {
+            let charges = vec![StoreCharge {
+                order_id: "2113".into(),
+                date: "2026-10-10".into(),
+                amount: -4_000,
+                card: String::new(),
+            }];
+            b.run(
+                "add_charges",
+                &ChargeImport {
+                    store: "costco".into(),
+                    charges,
+                },
+            )
+            .unwrap();
+        }),
+        Box::new(move |b| {
             let items = vec![ItemRef {
                 receipt_id: "costco:2113".into(),
                 line: 2,

@@ -191,6 +191,10 @@ pub enum Outcome {
     Receipts {
         receipts: usize,
     },
+    /// A store's charges, imported and confirmed.
+    Charges {
+        charges: usize,
+    },
     Failed(String),
 }
 
@@ -482,7 +486,16 @@ impl Job {
                 .run(&self.data)
                 .and_then(|text| money_domain::stores::amazon(&text).map_err(|e| anyhow!(e)))
                 .and_then(|import| self.author_receipts(&import));
+            let ordered = got.is_ok();
             out.insert("amazon".to_string(), self.outcome("amazon", got));
+            // How each order was charged, once its orders are in.
+            if ordered {
+                let got = amazon
+                    .charges(&self.data)
+                    .and_then(|text| money_domain::stores::amazon_charges(&text).map_err(|e| anyhow!(e)))
+                    .and_then(|import| self.author_charges(&import));
+                out.insert("amazon charges".to_string(), self.outcome_charges("amazon charges", got));
+            }
         }
         let Some(dir) = self.stores.dir.clone() else { return out };
         for w in waiting(&dir) {
@@ -523,6 +536,29 @@ impl Job {
                 Outcome::Failed(format!("{e:#}"))
             }
         }
+    }
+
+    fn outcome_charges(&self, what: &str, got: Result<usize>) -> Outcome {
+        match got {
+            Ok(n) => {
+                self.say(format!("{what}: {n} charge{}", if n == 1 { "" } else { "s" }));
+                Outcome::Charges { charges: n }
+            }
+            Err(e) => {
+                self.say(format!("{what}: failed: {e:#}"));
+                Outcome::Failed(format!("{e:#}"))
+            }
+        }
+    }
+
+    /// A store's charges authored as `receipts.add_charges`, and
+    /// confirmed: how many.
+    fn author_charges(&mut self, import: &money_domain::ChargeImport) -> Result<usize> {
+        if import.charges.is_empty() {
+            return Ok(0);
+        }
+        self.author("add_charges", import.to_bytes())?;
+        Ok(import.charges.len())
     }
 
     /// A store's receipts authored as `receipts.add_receipts`, and

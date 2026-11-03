@@ -47,6 +47,10 @@ pub struct Peer {
     pub unfiled: Watched<ItemLine>,
     /// The receipt open on the receipts page, and its items.
     pub receipt: Option<(String, Watched<ItemLine>)>,
+    /// Its charges, when the store said how it charged it.
+    pub charges: Option<Watched<ChargeLine>>,
+    /// What could have paid a receipt or a charge, while somebody says.
+    pub candidates: Option<(PaidFor, Watched<CandidateLine>)>,
     /// The split transaction open in the form, and its lines.
     pub splits: Option<(Id<Txn>, Watched<SplitLine>)>,
     seen: ark::hash::StateHash,
@@ -84,6 +88,8 @@ impl Peer {
             receipts: Watched::open(c, "receipts", none(), read),
             unfiled: Watched::open(c, "items", ItemsIn { category_id: None }.to_bytes(), read),
             receipt: None,
+            charges: None,
+            candidates: None,
             splits: None,
             ledger: Ledger::All,
             month: month.into(),
@@ -112,6 +118,8 @@ impl Peer {
             self.receipts.view(),
             self.unfiled.view(),
             self.receipt.as_ref().and_then(|(_, w)| w.view()),
+            self.charges.as_ref().and_then(|w| w.view()),
+            self.candidates.as_ref().and_then(|(_, w)| w.view()),
             self.splits.as_ref().and_then(|(_, w)| w.view()),
         ]
         .into_iter()
@@ -141,6 +149,12 @@ impl Peer {
         note(self.receipts.settle(c, moved));
         note(self.unfiled.settle(c, moved));
         if let Some((_, w)) = &mut self.receipt {
+            note(w.settle(c, moved));
+        }
+        if let Some(w) = &mut self.charges {
+            note(w.settle(c, moved));
+        }
+        if let Some((_, w)) = &mut self.candidates {
             note(w.settle(c, moved));
         }
         if let Some((_, w)) = &mut self.splits {
@@ -185,9 +199,28 @@ impl Peer {
         if let Some((_, old)) = self.receipt.take() {
             old.close(c);
         }
+        if let Some(old) = self.charges.take() {
+            old.close(c);
+        }
         if let Some(id) = id {
             let input = OneReceipt { receipt_id: id.into() }.to_bytes();
-            self.receipt = Some((id.into(), Watched::open(c, "receipt_items", input, read)));
+            self.receipt = Some((id.into(), Watched::open(c, "receipt_items", input.clone(), read)));
+            self.charges = Some(Watched::open(c, "charges", input, read));
+        }
+    }
+
+    /// What could have paid for `of`, or nothing open.
+    pub fn set_candidates(&mut self, of: Option<PaidFor>) {
+        if self.candidates.as_ref().map(|(p, _)| p) == of.as_ref() {
+            return;
+        }
+        let c = &mut self.client;
+        if let Some((_, old)) = self.candidates.take() {
+            old.close(c);
+        }
+        if let Some(p) = of {
+            let input = p.to_bytes();
+            self.candidates = Some((p, Watched::open(c, "candidates", input, read)));
         }
     }
 

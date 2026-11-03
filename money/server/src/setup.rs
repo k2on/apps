@@ -99,6 +99,7 @@ fn outcome(o: &crate::importer::Outcome) -> String {
     use crate::importer::Outcome::*;
     match o {
         Receipts { receipts } => format!("{receipts} receipt{}", if *receipts == 1 { "" } else { "s" }),
+        Charges { charges } => format!("{charges} charge{}", if *charges == 1 { "" } else { "s" }),
         Imported { upserts, removed } => format!("{upserts} changed, {removed} removed"),
         NotReady => "not ready".into(),
         Failed(why) => format!("failed: {why}"),

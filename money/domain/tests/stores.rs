@@ -3,7 +3,7 @@
 //! and Target's are their pages' JSON as community scripts have recorded
 //! it, and as near as is known — the adapters read the spellings seen.
 
-use money_domain::stores::{amazon, costco, read, target};
+use money_domain::stores::{amazon, amazon_charges, costco, read, target};
 
 fn items(r: &money_domain::StoreReceipt) -> Vec<(&str, &str, i64, i64)> {
     r.items.iter().map(|i| (i.name.as_str(), i.sku.as_str(), i.quantity, i.amount)).collect()
@@ -95,4 +95,21 @@ fn target_orders() {
     );
     assert!(target("not json").unwrap_err().contains("not JSON"));
     assert!(read("walmart", "").is_err());
+}
+
+/// Every charge and refund with an order, in our sign; a gift card's
+/// reload, with none, left out.
+#[test]
+fn amazon_orders_prints_charges() {
+    let got = amazon_charges(include_str!("stores/amazon-transactions.json")).unwrap();
+    let seen: Vec<(&str, &str, i64)> = got.charges.iter().map(|c| (c.order_id.as_str(), c.date.as_str(), c.amount)).collect();
+    assert_eq!(
+        seen,
+        [
+            ("112-1234567-1234567", "2026-10-03", -1_003),
+            ("112-1234567-1234567", "2026-10-05", -650),
+            ("112-1234567-1234567", "2026-10-20", 450),
+        ]
+    );
+    assert_eq!(got.charges[0].card, "Visa ending in 4417");
 }

@@ -11,6 +11,14 @@
 //! every unfiled item with the same key, so a Costco item number is said
 //! once.
 //!
+//! **Charges.** A store that says how it charged an order — Amazon,
+//! through `amazon-orders transactions`: shipment by shipment, a gift card
+//! taking some, a refund — gives each charge ([`add_charges`]). A receipt
+//! with charges is paid by them and not whole: each finds the bank's
+//! transaction of its own amount, a few days either side of its day, and
+//! each of those is split by the receipt's items, its own amount shared as
+//! a whole one would be.
+//!
 //! **Paid by.** A receipt is paid by the bank's transaction of the same
 //! amount, in an account on budget, from a payee that is the store's, dated
 //! from a couple of days before it to a few after (two weeks for Amazon,
@@ -137,11 +145,50 @@ fn could_pay(db: &Db<Money>, r: &Receipt, t: &Txn) -> bool {
         && t.date <= hi
         && the_stores(&r.store, t)
         && db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).all().iter().all(|o| o.id == r.id)
+        && !db.charge.by(Charge::TXN_ID).from(Some(t.id)).any()
+}
+
+/// Whether a receipt is paid by its charges rather than whole.
+fn charged(db: &Db<Money>, receipt_id: &str) -> bool {
+    db.charge.by(Charge::RECEIPT_ID).from(receipt_id.to_string()).any()
+}
+
+fn store_of(id: &str) -> &str {
+    id.split(':').next().unwrap_or("")
+}
+
+/// Whether `t` can be what paid a charge: its amount, the store's payee,
+/// from three days before the charge's day to five after, and paying for
+/// nothing else.
+fn could_pay_charge(db: &Db<Money>, c: &Charge, t: &Txn) -> bool {
+    let on_budget = db.account.get(t.account_id).is_some_and(|a| a.on_budget);
+    on_budget
+        && t.transfer_id.is_none()
+        && t.amount == c.amount
+        && t.date >= add_days(&c.date, -3)
+        && t.date <= add_days(&c.date, 5)
+        && the_stores(store_of(&c.receipt_id), t)
+        && !db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).any()
+        && db.charge.by(Charge::TXN_ID).from(Some(t.id)).all().iter().all(|o| o.id == c.id)
+}
+
+/// The transaction that paid a charge: the nearest in days.
+fn charge_payer(db: &Db<Money>, c: &Charge) -> Option<Txn> {
+    db.txn
+        .by(Txn::DATE)
+        .between(add_days(&c.date, -3), add_days(&c.date, 6))
+        .all()
+        .into_iter()
+        .filter(|t| could_pay_charge(db, c, t))
+        .min_by_key(|t| (crate::dates::days_between(&c.date, &t.date).abs(), t.id))
 }
 
 /// The transaction that paid for `r`, of those that could: the nearest in
 /// days.
 fn payer(db: &Db<Money>, r: &Receipt) -> Option<Txn> {
+    if charged(db, &r.id) {
+        return None;
+    }
     let lo = add_days(&r.date, -2);
     let hi = add_days(&r.date, days_after(&r.store) + 1);
     db.txn
@@ -157,6 +204,22 @@ fn payer(db: &Db<Money>, r: &Receipt) -> Option<Txn> {
 /// one; its split written when it does.
 pub fn pay_waiting(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
     let Some(t) = db.txn.get(id) else { return Ok(()) };
+    let mut charges: Vec<Charge> = db
+        .charge
+        .by(Charge::TXN_ID)
+        .from(None)
+        .all()
+        .into_iter()
+        .filter(|c| could_pay_charge(db, c, &t))
+        .collect();
+    charges.sort_by_key(|c| (crate::dates::days_between(&c.date, &t.date).abs(), c.id.clone()));
+    if let Some(c) = charges.into_iter().next() {
+        db.charge.update(Charge {
+            txn_id: Some(t.id),
+            ..c.clone()
+        })?;
+        return split_by(db, &c.receipt_id);
+    }
     let waiting = db.receipt.by(Receipt::TXN_ID).from(None).all();
     let mut fits: Vec<Receipt> = waiting.into_iter().filter(|r| could_pay(db, r, &t)).collect();
     fits.sort_by_key(|r| (crate::dates::days_between(&r.date, &t.date).abs(), r.id.clone()));
@@ -206,14 +269,29 @@ pub fn shares(total: i64, parts: &[i64]) -> Vec<i64> {
     out
 }
 
-/// A receipt's transaction split by its items, as this module's head says.
+/// A receipt's transactions split by its items, as this module's head
+/// says: what paid it whole, and what paid each of its charges.
 pub fn split_by(db: &mut Db<Money>, receipt_id: &str) -> Result<(), Refusal> {
     let Some(r) = db.receipt.get(receipt_id.to_string()) else {
         return Ok(());
     };
-    let Some(t) = r.txn_id.and_then(|id| db.txn.get(id)) else {
-        return Ok(());
-    };
+    let mut paying: Vec<Id<Txn>> = r.txn_id.into_iter().collect();
+    for c in db.charge.by(Charge::RECEIPT_ID).from(r.id.clone()).all() {
+        if let Some(t) = c.txn_id.filter(|t| !paying.contains(t)) {
+            paying.push(t);
+        }
+    }
+    for t in paying {
+        if let Some(t) = db.txn.get(t) {
+            split_txn(db, &r, t)?;
+        }
+    }
+    Ok(())
+}
+
+/// One transaction split by a receipt's items: its own amount shared over
+/// them.
+fn split_txn(db: &mut Db<Money>, r: &Receipt, t: Txn) -> Result<(), Refusal> {
     let on_budget = db.account.get(t.account_id).is_some_and(|a| a.on_budget);
     if !on_budget || t.transfer_id.is_some() {
         return Ok(());
@@ -264,7 +342,10 @@ pub fn split_by(db: &mut Db<Money>, receipt_id: &str) -> Result<(), Refusal> {
 /// one.
 pub fn resplit_txn(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
     if let Some(r) = db.receipt.by(Receipt::TXN_ID).from(Some(id)).first() {
-        split_by(db, &r.id)?;
+        return split_by(db, &r.id);
+    }
+    if let Some(c) = db.charge.by(Charge::TXN_ID).from(Some(id)).first() {
+        return split_by(db, &c.receipt_id);
     }
     Ok(())
 }
@@ -330,7 +411,7 @@ pub fn add_receipts(ctx: &Ctx, db: &mut Db<Money>, input: ReceiptImport) -> Resu
             items_changed = true;
         }
         let paid = match r.txn_id.and_then(|t| db.txn.get(t)) {
-            Some(t) if t.amount == r.total => Some(t),
+            Some(t) if t.amount == r.total && !charged(db, &r.id) => Some(t),
             _ => payer(db, &r),
         };
         if paid.as_ref().map(|t| t.id) != r.txn_id {
@@ -340,7 +421,8 @@ pub fn add_receipts(ctx: &Ctx, db: &mut Db<Money>, input: ReceiptImport) -> Resu
             })?;
             items_changed = true;
         }
-        if paid.is_some() && (changed || items_changed) {
+        let by_charges = db.charge.by(Charge::RECEIPT_ID).from(id.clone()).all().iter().any(|c| c.txn_id.is_some());
+        if (paid.is_some() || by_charges) && (changed || items_changed) {
             split_by(db, &id)?;
         }
     }
@@ -414,7 +496,144 @@ pub fn pay(_: &Ctx, db: &mut Db<Money>, input: MatchReceipt) -> Result<(), Refus
     split_by(db, &r.id)
 }
 
+/// One store's charges, as its history says them: each new one kept and
+/// paid by the transaction that did, once there is one, and its receipt's
+/// transactions split again. A charge said again changes nothing; one
+/// somebody paid by hand stays so.
+#[mutator("receipts.add_charges")]
+pub fn add_charges(ctx: &Ctx, db: &mut Db<Money>, input: ChargeImport) -> Result<(), Refusal> {
+    let mut seen: BTreeMap<String, i64> = BTreeMap::new();
+    let mut touched: Vec<String> = vec![];
+    for c in &input.charges {
+        if !is_day(&c.date) {
+            return Err(Refusal::new(format!("{}: {} is not a day", c.order_id, c.date)));
+        }
+        if c.order_id.trim().is_empty() {
+            continue;
+        }
+        let receipt_id = format!("{}:{}", input.store, c.order_id.trim());
+        let base = format!("{receipt_id}:{}:{}", c.date, c.amount);
+        let n = seen.entry(base.clone()).or_default();
+        *n += 1;
+        let id = format!("{base}:{n}");
+        if db.charge.has(id.clone()) {
+            continue;
+        }
+        let mut charge = Charge {
+            id,
+            receipt_id: receipt_id.clone(),
+            date: c.date.clone(),
+            amount: c.amount,
+            card: c.card.clone(),
+            txn_id: None,
+            user_id: ctx.user().into(),
+        };
+        // What paid the order whole, when it is this charge's.
+        if let Some(r) = db.receipt.get(receipt_id.clone()) {
+            if let Some(t) = r.txn_id.and_then(|t| db.txn.get(t)).filter(|t| t.amount == c.amount) {
+                db.receipt.update(Receipt { txn_id: None, ..r })?;
+                charge.txn_id = Some(t.id);
+            }
+        }
+        db.charge.insert(charge.clone())?;
+        if charge.txn_id.is_none() {
+            if let Some(t) = charge_payer(db, &charge) {
+                db.charge.update(Charge {
+                    txn_id: Some(t.id),
+                    ..charge
+                })?;
+            }
+        }
+        if !touched.contains(&receipt_id) {
+            touched.push(receipt_id);
+        }
+    }
+    for r in touched {
+        split_by(db, &r)?;
+    }
+    Ok(())
+}
+
+/// A charge said to be paid by a transaction, or by none; its receipt's
+/// transactions split again.
+#[mutator("receipts.pay_charge")]
+pub fn pay_charge(_: &Ctx, db: &mut Db<Money>, input: PayCharge) -> Result<(), Refusal> {
+    let c = db.charge.get(input.charge_id.clone()).ok_or_else(|| Refusal::new("no such charge"))?;
+    if let Some(t) = input.txn_id {
+        let t = db.txn.get(t).ok_or_else(|| Refusal::new("no such transaction"))?;
+        if t.transfer_id.is_some() {
+            return Err(Refusal::new("a transfer pays for no receipt"));
+        }
+        if db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).any() || db.charge.by(Charge::TXN_ID).from(Some(t.id)).all().iter().any(|o| o.id != c.id) {
+            return Err(Refusal::new("that transaction paid for another receipt already"));
+        }
+    }
+    db.charge.update(Charge {
+        txn_id: input.txn_id,
+        ..c.clone()
+    })?;
+    split_by(db, &c.receipt_id)
+}
+
 // * The views
+
+/// A receipt's charges, by day.
+#[view("receipts.charges")]
+pub fn charges(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<ChargeLine>, Refusal> {
+    let id = input.receipt_id;
+    Ok(scan::<Money, Charge>()
+        .filter(move |c| c.receipt_id == id)
+        .map_with(|db, c| {
+            let t = c.txn_id.and_then(|t| db.txn.get(t));
+            ChargeLine {
+                id: c.id.clone(),
+                receipt_id: c.receipt_id.clone(),
+                date: c.date.clone(),
+                amount: c.amount,
+                card: c.card.clone(),
+                txn_id: c.txn_id,
+                payee: t.as_ref().map(|t| t.payee.clone()).unwrap_or_default(),
+                account: t.and_then(|t| db.account.get(t.account_id)).map(|a| a.name).unwrap_or_default(),
+            }
+        })
+        .sort(|l| (l.date.clone(), l.id.clone())))
+}
+
+/// The transactions that could have paid a receipt, or one of its
+/// charges, for somebody to say which did: on budget, not a transfer, a
+/// week before to three after, paying for nothing else; the nearest in
+/// amount, then in days, first, and at most twenty.
+#[view("receipts.candidates")]
+pub fn candidates(_: &Ctx, _: &Db<Money>, input: PaidFor) -> Result<Plan<CandidateLine>, Refusal> {
+    Ok(scan::<Money, Txn>()
+        .map_with(move |db, t| {
+            let (date, amount, paying) = match &input.charge_id {
+                Some(c) => db.charge.get(c.clone()).map(|c| (c.date, c.amount, c.txn_id)).unwrap_or_default(),
+                None => db
+                    .receipt
+                    .get(input.receipt_id.clone())
+                    .map(|r| (r.date, r.total, r.txn_id))
+                    .unwrap_or_default(),
+            };
+            let on_budget = db.account.get(t.account_id).is_some_and(|a| a.on_budget);
+            let free = paying == Some(t.id)
+                || (!db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).any() && !db.charge.by(Charge::TXN_ID).from(Some(t.id)).any());
+            let near = !date.is_empty() && t.date >= add_days(&date, -7) && t.date <= add_days(&date, 21);
+            (on_budget && free && near && t.transfer_id.is_none()).then(|| CandidateLine {
+                txn_id: t.id,
+                date: t.date.clone(),
+                payee: t.payee.clone(),
+                account: db.account.get(t.account_id).map(|a| a.name).unwrap_or_default(),
+                amount: t.amount,
+                off_by: (t.amount - amount).abs(),
+                days: crate::dates::days_between(&date, &t.date).abs(),
+            })
+        })
+        .filter(|c| c.is_some())
+        .map(|c| c.clone().expect("kept"))
+        .sort(|c| (c.off_by, c.days, c.txn_id))
+        .take(20))
+}
 
 /// Every receipt, the newest first, with how many of its items are filed
 /// and what paid for it.
@@ -423,7 +642,8 @@ pub fn receipts(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<ReceiptLine>, Refu
     Ok(scan::<Money, Receipt>()
         .map_with(|db, r| {
             let items = items_of(db, &r.id);
-            let t = r.txn_id.and_then(|t| db.txn.get(t));
+            let charges = db.charge.by(Charge::RECEIPT_ID).from(r.id.clone()).all();
+            let t = r.txn_id.or_else(|| charges.iter().find_map(|c| c.txn_id)).and_then(|t| db.txn.get(t));
             ReceiptLine {
                 id: r.id.clone(),
                 store: r.store.clone(),
@@ -435,6 +655,8 @@ pub fn receipts(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<ReceiptLine>, Refu
                 txn_id: r.txn_id,
                 payee: t.as_ref().map(|t| t.payee.clone()).unwrap_or_default(),
                 account: t.and_then(|t| db.account.get(t.account_id)).map(|a| a.name).unwrap_or_default(),
+                charges: charges.len() as i64,
+                charged: charges.iter().filter(|c| c.txn_id.is_some()).count() as i64,
             }
         })
         .sort(|l| (Desc(l.date.clone()), l.id.clone())))

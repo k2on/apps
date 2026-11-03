@@ -635,6 +635,55 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
         );
     }
 
+    // An Amazon order shipped in two: the first shipment's charge on the
+    // card already, the second the one the demo's second Sync brings.
+    let ordered = add_days(today, -2);
+    s.txn(ME, CARD_NAME, &add_days(today, -1), "Amazon", Some("Household"), -1_798, true);
+    let amazon = ReceiptImport {
+        store: "amazon".into(),
+        receipts: vec![StoreReceipt {
+            order_id: "112-4417120-2026102".into(),
+            date: ordered.clone(),
+            place: "Amazon.com".into(),
+            total: -4_197,
+            items: vec![
+                StoreItem {
+                    name: "Vital Farms Pasture-Raised Eggs, 12 Count".into(),
+                    sku: "B07XYZ".into(),
+                    quantity: 1000,
+                    unit: "ea".into(),
+                    amount: -649,
+                },
+                StoreItem {
+                    name: "Scotch-Brite Sponges, 9 pack".into(),
+                    sku: "B000PCWKV2".into(),
+                    quantity: 1000,
+                    unit: "ea".into(),
+                    amount: -899,
+                },
+                StoreItem {
+                    name: "Anker USB-C Cable, 6 ft".into(),
+                    sku: "B0C1".into(),
+                    quantity: 1000,
+                    unit: "ea".into(),
+                    amount: -2_399,
+                },
+            ],
+        }],
+    };
+    s.run(ME, "add_receipts", &amazon);
+    let charge = |date: String, amount| StoreCharge {
+        order_id: "112-4417120-2026102".into(),
+        date,
+        amount,
+        card: "Visa ending in 4417".into(),
+    };
+    let charges = ChargeImport {
+        store: "amazon".into(),
+        charges: vec![charge(add_days(today, -1), -1_798), charge(today.to_string(), -2_399)],
+    };
+    s.run(ME, "add_charges", &charges);
+
     let snapshot = Snapshot {
         seq: 0,
         hash: Default::default(),

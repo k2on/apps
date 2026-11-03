@@ -11,11 +11,14 @@ use money_server::stores::{AmazonOrders, Stores};
 
 /// A stand-in for `amazon-orders`: what it prints, when signed in.
 fn program(dir: &std::path::Path) -> std::path::PathBuf {
-    let json = include_str!("../../domain/tests/stores/amazon-orders.json").replace('\'', "'\\''");
+    let orders = include_str!("../../domain/tests/stores/amazon-orders.json");
+    let charges = include_str!("../../domain/tests/stores/amazon-transactions.json");
     let p = dir.join("amazon-orders");
     std::fs::write(
         &p,
-        format!("#!/bin/sh\n[ \"$AMAZON_PASSWORD\" = hunter2 ] || exit 3\ncat <<'EOF'\n{json}\nEOF\n"),
+        format!(
+            "#!/bin/sh\n[ \"$AMAZON_PASSWORD\" = hunter2 ] || exit 3\nif [ \"$1\" = transactions ]; then\ncat <<'EOF'\n{charges}\nEOF\nelse\ncat <<'EOF'\n{orders}\nEOF\nfi\n"
+        ),
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -44,6 +47,7 @@ fn the_stores_receipts_are_imported() {
         amazon: Some(AmazonOrders {
             program: program(secrets.path()),
             args: vec!["orders".into()],
+            charges_args: vec!["transactions".into()],
             username_file: Some(file("u", "me@example.com")),
             password_file: Some(file("p", "hunter2")),
             otp_secret_file: None,
@@ -53,6 +57,10 @@ fn the_stores_receipts_are_imported() {
     let server = serve(&rt, data.path(), |c| c.stores = stores);
     let r = runs(&server, 1);
     assert_eq!(r[0].stores["amazon"], Outcome::Receipts { receipts: 2 });
+    assert_eq!(r[0].stores["amazon charges"], Outcome::Charges { charges: 3 });
+    let charges: Vec<Charge> = hub_rows(&server, "charge");
+    assert_eq!(charges.len(), 3);
+    assert!(charges.iter().all(|c| c.receipt_id == "amazon:112-1234567-1234567"));
     assert_eq!(r[0].stores["costco/october.json"], Outcome::Receipts { receipts: 2 });
     assert!(matches!(&r[0].stores["target/broken.json"], Outcome::Failed(why) if why.contains("not JSON")));
     assert!(drop.path().join("costco/imported/october.json").exists());
@@ -65,7 +73,7 @@ fn the_stores_receipts_are_imported() {
     // empty.
     server.importer.as_ref().unwrap().nudge();
     let r = runs(&server, 2);
-    assert_eq!(r[1].stores.len(), 1);
+    assert_eq!(r[1].stores.len(), 2, "amazon's orders and charges, and an empty folder");
     assert_eq!(hub_rows::<Receipt>(&server, "receipt"), receipts);
     let said = server.importer.as_ref().unwrap().said().join("\n");
     assert!(!said.contains("hunter2") && !said.contains("me@example.com"), "{said}");

@@ -428,6 +428,31 @@ pub struct ClassifyItems {
     pub category_id: Option<Id<Category>>,
 }
 
+/// A charge a store made, as its adapter read it: for which order, on
+/// which day, how much (our sign: a refund is positive), on which card.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct StoreCharge {
+    pub order_id: String,
+    pub date: String,
+    pub amount: i64,
+    pub card: String,
+}
+
+/// One store's charges, from one history ([`crate::stores`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct ChargeImport {
+    #[ark(check = "is_store", why = "amazon, target or costco")]
+    pub store: String,
+    pub charges: Vec<StoreCharge>,
+}
+
+/// A charge said to be paid by a transaction, or by none found yet.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct PayCharge {
+    pub charge_id: String,
+    pub txn_id: Option<Id<Txn>>,
+}
+
 /// A receipt said to be paid by a transaction (none: by none found yet).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct MatchReceipt {
@@ -460,6 +485,14 @@ pub struct ItemsIn {
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct OneReceipt {
     pub receipt_id: String,
+}
+
+/// What is to be paid for: a receipt whole, or (`charge_id`) one of its
+/// charges.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct PaidFor {
+    pub receipt_id: String,
+    pub charge_id: Option<String>,
 }
 
 // * The views' rows
@@ -667,6 +700,36 @@ pub struct ReceiptLine {
     /// The paying transaction's payee and account, when found.
     pub payee: String,
     pub account: String,
+    /// The store's charges for it, and how many of them found what paid.
+    pub charges: i64,
+    pub charged: i64,
+}
+
+/// One charge of a receipt, and what paid it.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct ChargeLine {
+    pub id: String,
+    pub receipt_id: String,
+    pub date: String,
+    pub amount: i64,
+    pub card: String,
+    pub txn_id: Option<Id<Txn>>,
+    pub payee: String,
+    pub account: String,
+}
+
+/// A transaction that could be what paid for a receipt or a charge.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+pub struct CandidateLine {
+    pub txn_id: Id<Txn>,
+    pub date: String,
+    pub payee: String,
+    pub account: String,
+    pub amount: i64,
+    /// How far its amount is from what is to be paid, in cents.
+    pub off_by: i64,
+    /// Days from the receipt's or the charge's.
+    pub days: i64,
 }
 
 /// A thing bought, wherever it was bought.

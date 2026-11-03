@@ -111,6 +111,15 @@ beside what the bank says was paid:
   budget, from the store's payee, from two days before it to four days
   after (two weeks for Amazon). Whichever arrives second makes the match,
   and `receipts.pay` says otherwise.
+- **Charges.** A store that says how it charged an order, as Amazon
+  does through `amazon-orders transactions` (shipment by shipment, a gift
+  card taking some, a refund), gives each charge (`receipts.add_charges`).
+  A receipt with charges is paid by them and not whole. Each charge finds
+  the transaction of its own amount from the store's payee, three days
+  before its day to five after, and each of those transactions is split
+  by the receipt's items, its own amount shared. `receipts.pay_charge` and
+  `receipts.pay` say by hand what paid, and `receipts.candidates` is what
+  could have.
 - **The split.** A paid receipt splits its transaction: its items' amounts
   summed by category, and each sum's share of what the bank took. Tax and
   rounding are spread in proportion, and the lines add up to the cent.
@@ -126,7 +135,9 @@ readable by the server alone (`server/src/vault.rs`). It is never a row, so
 it is never in the log or on a device. The page is told only who, masked.
 
 **The server gathers them** (`server/src/stores.rs`) on each importer run
-(at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`) signed in by the settings
+(at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`), for the orders and then
+for how they were charged (`MONEY_AMAZON_TRANSACTIONS_ARGS`, `transactions
+--days 60 -o json`), signed in by the settings
 page's login, or by `MONEY_AMAZON_USERNAME_FILE`, `MONEY_AMAZON_PASSWORD_FILE`
 and `MONEY_AMAZON_OTP_SECRET_FILE` when the server is given them. The login
 goes to that program alone, with its session kept in `<data>/amazon-orders`.
@@ -134,7 +145,7 @@ It reads a folder of exports (`MONEY_RECEIPTS_DIR`, else `<data>/receipts`:
 `target/`, `costco/`, `amazon/`), moving each file to `imported/`, or to
 `failed/` when it does not read. Every server runs it, for that folder. The module's
 options are `amazon.{package, args, usernameFile, passwordFile,
-otpSecretFile}` and `receiptsDir`. Target and Costco have no program like
+otpSecretFile, transactionsArgs}` and `receiptsDir`. Target and Costco have no program like
 `amazon-orders`, so their exports are saved from the browser into the
 folder. For Costco, `download/download_costco_receipts.js` in
 ankurdave/beancount_import_sources, run in the console of a signed-in
@@ -267,6 +278,8 @@ envelope's kinds beneath it. Items not filed yet are gathered at the top,
 and the sidebar counts them. A transaction opened in the register can be
 **split**: lines of a category and an amount each, with what is left to
 give one. The inspector lists a category's kinds and adds one.
+An opened receipt lists its charges too, and "Paid by" (a receipt's, or a
+charge's) opens what could have paid it, to say which did.
 **Settings** sends you to the server's own page to set up Amazon. The
 demo's household has kinds (Eggs, Produce, Cleaning) and a Target and a
 Costco receipt, matched and split.

@@ -1,0 +1,7 @@
+[
+  {"completed_date": "2026-10-03", "payment_method": "Visa ending in 4417", "payment_method_last_4": "4417", "grand_total": -10.03, "is_refund": false, "order_number": "112-1234567-1234567", "order_details_link": "https://www.amazon.com/gp/css/summary/edit.html?orderID=112-1234567-1234567", "seller": "AMZN Mktp US"},
+  {"completed_date": "2026-10-05", "payment_method": "Visa ending in 4417", "payment_method_last_4": "4417", "grand_total": -6.5, "is_refund": false, "order_number": "112-1234567-1234567", "seller": "Amazon.com"},
+  {"completed_date": "2026-10-06", "payment_method": "Gift Card", "grand_total": -25.0, "is_refund": false, "order_number": null, "seller": null},
+  {"completed_date": "2026-10-20", "payment_method": "Visa ending in 4417", "payment_method_last_4": "4417", "grand_total": 4.5, "is_refund": true, "order_number": "112-1234567-1234567", "seller": "Amazon.com"}
+]
+... 4 Transactions parsed in 3 seconds.

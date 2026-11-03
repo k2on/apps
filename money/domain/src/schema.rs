@@ -241,6 +241,31 @@ pub struct Item {
     pub category_id: Option<Id<Category>>,
 }
 
+/// One charge a store made for a receipt, as the store says it: Amazon
+/// charges an order shipment by shipment, and refunds what comes back, so
+/// one order is paid by several transactions. Each finds its own (`txn_id`)
+/// the way a receipt does, and each is split by the receipt's items. A
+/// receipt with charges is paid by them, not whole. Keyed by the store's
+/// order, the day and the amount (and which of a day's same amounts), so
+/// the same history said twice is the same charges; `receipt_id` names a
+/// receipt that may not have arrived yet.
+#[allow(clippy::duplicated_attributes)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(index(receipt_id), index(txn_id), index(date))]
+pub struct Charge {
+    #[ark(key)]
+    pub id: String,
+    pub receipt_id: String,
+    pub date: String,
+    /// Our sign: a charge is negative, a refund positive.
+    pub amount: i64,
+    /// The card, as the store names it: `Visa ending in 4821`.
+    pub card: String,
+    #[ark(refs(Txn))]
+    pub txn_id: Option<Id<Txn>>,
+    pub user_id: String,
+}
+
 /// money's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Money {
@@ -256,6 +281,7 @@ pub struct Money {
     pub split: Split,
     pub receipt: Receipt,
     pub item: Item,
+    pub charge: Charge,
 }
 
 ark_auth::install!(Money);

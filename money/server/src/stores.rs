@@ -6,7 +6,10 @@
 //!
 //! - **Amazon, through `amazon-orders`** (`MONEY_AMAZON_ORDERS`, the
 //!   program): run as `amazon-orders orders --last-30-days --full-details
-//!   -o json` (`MONEY_AMAZON_ARGS` to say otherwise, `--year 2026` for a
+//!   -o json`, then for how each order was charged — shipment by
+//!   shipment, refunds — as `amazon-orders transactions --days 60 -o json`
+//!   (`MONEY_AMAZON_TRANSACTIONS_ARGS`); (`MONEY_AMAZON_ARGS` to say
+//!   otherwise of the orders, `--year 2026` for a
 //!   first pull), signed in by `AMAZON_USERNAME`, `AMAZON_PASSWORD` and,
 //!   for a one-time code, `AMAZON_OTP_SECRET_KEY`, each read at the run and
 //!   given to that program alone: from the files the server was told
@@ -60,6 +63,10 @@ impl Stores {
                         Some(a) => a.split_whitespace().map(String::from).collect(),
                         None => DEFAULT_ARGS.iter().map(|s| s.to_string()).collect(),
                     },
+                    charges_args: match env("MONEY_AMAZON_TRANSACTIONS_ARGS") {
+                        Some(a) => a.split_whitespace().map(String::from).collect(),
+                        None => CHARGES_ARGS.iter().map(|s| s.to_string()).collect(),
+                    },
                     username_file: u.map(PathBuf::from),
                     password_file: p.map(PathBuf::from),
                     otp_secret_file: env("MONEY_AMAZON_OTP_SECRET_FILE").map(PathBuf::from),
@@ -76,11 +83,17 @@ impl Stores {
 /// What `amazon-orders` is run with unless told.
 pub const DEFAULT_ARGS: [&str; 5] = ["orders", "--last-30-days", "--full-details", "-o", "json"];
 
+/// What it is run with for the charges unless told: two months, so a
+/// charge or a refund a while after its order is still seen.
+pub const CHARGES_ARGS: [&str; 5] = ["transactions", "--days", "60", "-o", "json"];
+
 /// The `amazon-orders` program, and the files of its sign-in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AmazonOrders {
     pub program: PathBuf,
     pub args: Vec<String>,
+    /// What it is run with for the charges.
+    pub charges_args: Vec<String>,
     /// The sign-in's files; none, and it is the settings page's
     /// ([`crate::vault`]).
     pub username_file: Option<PathBuf>,
@@ -113,13 +126,23 @@ impl AmazonOrders {
             .ok_or_else(|| anyhow!("no Amazon login: give one on the settings page (/settings)"))
     }
 
-    /// What the program prints, run once with its home in `data`.
+    /// What the program prints of the orders, run once with its home in
+    /// `data`.
     pub fn run(&self, data: &Path) -> Result<String> {
+        self.run_with(data, &self.args)
+    }
+
+    /// What it prints of the charges.
+    pub fn charges(&self, data: &Path) -> Result<String> {
+        self.run_with(data, &self.charges_args)
+    }
+
+    fn run_with(&self, data: &Path, args: &[String]) -> Result<String> {
         let login = self.login(data)?;
         let home = data.join("amazon-orders");
         std::fs::create_dir_all(&home).with_context(|| format!("creating {}", home.display()))?;
         let mut cmd = Command::new(&self.program);
-        cmd.args(&self.args)
+        cmd.args(args)
             .env("HOME", &home)
             .env("AMAZON_USERNAME", &login.username)
             .env("AMAZON_PASSWORD", &login.password)
@@ -249,6 +272,7 @@ mod tests {
         let a = AmazonOrders {
             program,
             args: vec!["orders".into()],
+            charges_args: vec!["transactions".into()],
             username_file: Some(write("u", "me@example.com\n")),
             password_file: Some(write("p", "hunter2\n")),
             otp_secret_file: None,

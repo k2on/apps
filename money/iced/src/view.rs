@@ -1156,17 +1156,31 @@ impl App {
         let mut body: Column<'_, Message> = Column::new();
         for (i, r) in receipts.iter().enumerate() {
             let lit = open == Some(r.id.as_str());
-            let paid = match (&r.txn_id, r.payee.is_empty()) {
-                (Some(_), false) => format!("{} \u{2014} {}", r.payee, r.account),
-                (Some(_), true) => r.account.clone(),
-                (None, _) => "No charge found yet".into(),
+            let paid = match (r.charges, &r.txn_id, r.payee.is_empty()) {
+                (0, Some(_), false) => format!("{} \u{2014} {}", r.payee, r.account),
+                (0, Some(_), true) => r.account.clone(),
+                (0, None, _) => "No charge found yet".into(),
+                (n, ..) if r.charged == n => format!("{n} charge{}, all found", if n == 1 { "" } else { "s" }),
+                (n, ..) => format!("{} of {n} charges found", r.charged),
+            };
+            let unpaid = match r.charges {
+                0 => r.txn_id.is_none(),
+                n => r.charged < n,
             };
             let line = row![
                 table::cell(r.date.clone(), w(96.0), lit, false, true),
                 table::cell(store_name(&r.store), w(90.0), lit, false, true),
                 table::cell(r.place.clone(), Length::FillPortion(3), lit, false, true),
                 table::cell(format!("{} of {}", r.filed, r.items), w(90.0), lit, false, true),
-                table::cell(paid, Length::FillPortion(3), lit, r.txn_id.is_none(), true),
+                self.paid_cell(
+                    paid,
+                    unpaid,
+                    lit,
+                    (r.charges == 0).then(|| PaidFor {
+                        receipt_id: r.id.clone(),
+                        charge_id: None,
+                    })
+                ),
                 table::cell(money((-r.total).max(0)), w(100.0), lit, false, false),
             ]
             .align_y(Alignment::Center);
@@ -1177,6 +1191,9 @@ impl App {
             if lit {
                 if let Some((_, items)) = &self.peer.receipt {
                     body = body.push(self.view_items(&items.rows));
+                }
+                if let Some(charges) = self.peer.charges.as_ref().filter(|w| !w.rows.is_empty()) {
+                    body = body.push(self.view_charges(&charges.rows));
                 }
             }
         }
@@ -1221,6 +1238,75 @@ impl App {
         .padding(PAD)
         .width(Length::Fill)
         .into()
+    }
+
+    /// What paid a receipt: what the cell says, lit where nothing has; one
+    /// that can be said by hand opens the dropdown of what could have.
+    fn paid_cell<'a>(&self, said: String, unpaid: bool, lit: bool, of: Option<PaidFor>) -> Element<'a, Message> {
+        let label = text(said)
+            .size(table::CELL_SIZE)
+            .wrapping(text::Wrapping::None)
+            .style(move |theme| text::Style {
+                color: Some(match (unpaid, lit) {
+                    (true, false) => arkui::theme::of(theme).warning.base.color,
+                    _ => style::on_row(theme, lit, false, false),
+                }),
+            });
+        let cell: Element<'a, Message> = match of {
+            Some(of) => mouse_area(label).on_press(Message::ChoosePayer(of)).into(),
+            None => label.into(),
+        };
+        container(cell)
+            .width(Length::FillPortion(3))
+            .padding(Padding {
+                right: table::SPACING,
+                ..Padding::ZERO
+            })
+            .clip(true)
+            .into()
+    }
+
+    /// A receipt's charges, each its day, amount and card, and what paid it,
+    /// which opens the dropdown of what could have.
+    fn view_charges<'a>(&'a self, charges: &'a [ChargeLine]) -> Element<'a, Message> {
+        let w = |n: f32| Length::Fixed(n);
+        let mut list = column![row![Space::new().width(w(24.0)), dim("Charged", 11)]].spacing(2);
+        for c in charges {
+            let found = c.txn_id.is_some();
+            let label = match found {
+                true => format!("{} \u{2014} {}", c.payee, c.account),
+                false => "Find what paid it".into(),
+            };
+            let pay = button(text(label).size(12).style(move |theme| text::Style {
+                color: Some(match found {
+                    true => arkui::theme::of(theme).background.base.text,
+                    false => arkui::theme::of(theme).warning.base.color,
+                }),
+            }))
+            .on_press(Message::ChoosePayer(PaidFor {
+                receipt_id: c.receipt_id.clone(),
+                charge_id: Some(c.id.clone()),
+            }))
+            .padding([3, 6])
+            .width(Length::FillPortion(3))
+            .style(look::choice(false));
+            let what = match c.amount > 0 {
+                true => format!("refund {}", money(c.amount)),
+                false => money(-c.amount),
+            };
+            list = list.push(
+                row![
+                    Space::new().width(w(24.0)),
+                    text(c.date.clone()).size(12).width(w(96.0)),
+                    text(c.card.clone()).size(12).style(style::dim).width(Length::FillPortion(3)),
+                    text(what).size(12).width(w(110.0)),
+                    pay,
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            );
+        }
+        container(list).padding([6, 0]).into()
     }
 
     /// Items, each its name, how many, what it cost, and its category, which
@@ -1474,6 +1560,7 @@ impl App {
         };
         let (skip, title) = match choosing {
             Choosing::Form | Choosing::SplitLine(_) => (None, "Category".to_string()),
+            Choosing::Payer(_) => (None, "Paid by".to_string()),
             Choosing::Items(items) => (None, format!("File {} item{}", items.len(), if items.len() == 1 { "" } else { "s" })),
             Choosing::Txns(ids) => (
                 None,

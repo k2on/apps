@@ -366,6 +366,189 @@ fn eggs_from_every_store_are_one_category() {
     );
 }
 
+/// An Amazon order of eggs and a sponge, shipped in two and charged as
+/// each shipped, then the sponge sent back: no charge is the order's whole,
+/// so nothing pays it whole; each charge finds its own transaction, the one
+/// that arrives after its charge too, and each is split by the order's
+/// items, its own amount shared. Said again, nothing changes.
+#[test]
+fn an_order_charged_in_pieces_is_paid_by_each() {
+    let (mut b, checking, groceries, eggs, _) = household();
+    let household_cat = b.category(b.line("2026-10", groceries).group_id, "Household");
+    b.spend(checking, "2026-10-04", "AMZN Mktp US", None, -1_003);
+    let order = ReceiptImport {
+        store: "amazon".into(),
+        receipts: vec![StoreReceipt {
+            order_id: "112-1".into(),
+            date: "2026-10-02".into(),
+            place: "Amazon.com".into(),
+            total: -1_653,
+            items: vec![
+                StoreItem {
+                    name: "Vital Farms Eggs, 12ct".into(),
+                    sku: "B07X".into(),
+                    quantity: 1000,
+                    unit: "ea".into(),
+                    amount: -649,
+                },
+                StoreItem {
+                    name: "Scotch-Brite Sponges".into(),
+                    sku: "B000".into(),
+                    quantity: 2000,
+                    unit: "ea".into(),
+                    amount: -900,
+                },
+            ],
+        }],
+    };
+    b.run("add_receipts", &order).unwrap();
+    b.run(
+        "file_items",
+        &ClassifyItems {
+            items: vec![ItemRef {
+                receipt_id: "amazon:112-1".into(),
+                line: 2,
+            }],
+            category_id: Some(household_cat),
+        },
+    )
+    .unwrap();
+    let charge = |date: &str, amount| StoreCharge {
+        order_id: "112-1".into(),
+        date: date.into(),
+        amount,
+        card: "Visa ending in 4417".into(),
+    };
+    let history = ChargeImport {
+        store: "amazon".into(),
+        charges: vec![charge("2026-10-03", -1_003), charge("2026-10-05", -650), charge("2026-10-20", 450)],
+    };
+    b.run("add_charges", &history).unwrap();
+    let r = &b.list::<ReceiptLine>("receipts", &())[0];
+    assert_eq!(
+        (r.txn_id, r.charges, r.charged),
+        (None, 3, 1),
+        "only the first charge's transaction is in yet"
+    );
+    // The second shipment's charge, and the refund, reach the bank.
+    b.spend(checking, "2026-10-06", "Amazon.com", None, -650);
+    let t = |b: &Book, amount| b.register(None).into_iter().find(|t| t.amount == amount).unwrap();
+    let refund = AddTransaction {
+        account_id: checking,
+        date: "2026-10-21".into(),
+        payee: "Amazon".into(),
+        amount: 450,
+        ..AddTransaction::default()
+    };
+    b.run("add_transaction", &refund).unwrap();
+    let r = &b.list::<ReceiptLine>("receipts", &())[0];
+    assert_eq!((r.charges, r.charged), (3, 3));
+    for (amount, lines) in [(-1_003, [-420, -583]), (-650, [-272, -378]), (450, [189, 261])] {
+        let id = t(&b, amount).id;
+        let got: Vec<(String, i64)> = splits(&b, id);
+        assert_eq!(
+            got,
+            [
+                ("Everyday \u{203a} Groceries \u{203a} Eggs".to_string(), lines[0]),
+                ("Everyday \u{203a} Household".to_string(), lines[1])
+            ],
+            "{amount}"
+        );
+    }
+    let _ = eggs;
+    // The same history again changes nothing.
+    b.run("add_charges", &history).unwrap();
+    assert!(b.last.is_empty(), "{:?}", b.last.len());
+    // Somebody says the first was paid by nothing found: its split goes
+    // when they give it a category, and it can be paid again by hand.
+    let first = b.list::<ChargeLine>(
+        "charges",
+        &OneReceipt {
+            receipt_id: "amazon:112-1".into(),
+        },
+    )[0]
+    .clone();
+    assert_eq!((first.payee.as_str(), first.date.as_str()), ("AMZN Mktp US", "2026-10-03"));
+    let cands: Vec<CandidateLine> = b.list(
+        "candidates",
+        &PaidFor {
+            receipt_id: "amazon:112-1".into(),
+            charge_id: Some(first.id.clone()),
+        },
+    );
+    assert_eq!(cands[0].txn_id, first.txn_id.unwrap(), "what paid it is the nearest");
+    assert_eq!(cands[0].off_by, 0);
+    b.run(
+        "pay_charge",
+        &PayCharge {
+            charge_id: first.id.clone(),
+            txn_id: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(b.list::<ReceiptLine>("receipts", &())[0].charged, 2);
+    let other = t(&b, -650).id;
+    let taken = b
+        .run(
+            "pay_charge",
+            &PayCharge {
+                charge_id: first.id,
+                txn_id: Some(other),
+            },
+        )
+        .unwrap_err();
+    assert!(taken.contains("another receipt"), "{taken}");
+}
+
+/// A receipt paid whole before its charges were known gives that payment
+/// to the charge it is.
+#[test]
+fn a_whole_payment_becomes_its_charge() {
+    let (mut b, checking, ..) = household();
+    b.spend(checking, "2026-10-03", "Amazon", None, -1_653);
+    let order = ReceiptImport {
+        store: "amazon".into(),
+        receipts: vec![StoreReceipt {
+            order_id: "112-9".into(),
+            date: "2026-10-02".into(),
+            place: "Amazon.com".into(),
+            total: -1_653,
+            items: vec![StoreItem {
+                name: "A thing".into(),
+                sku: "B1".into(),
+                quantity: 1000,
+                unit: "ea".into(),
+                amount: -1_549,
+            }],
+        }],
+    };
+    b.run("add_receipts", &order).unwrap();
+    let paid = b.list::<ReceiptLine>("receipts", &())[0].txn_id;
+    assert!(paid.is_some());
+    let one = ChargeImport {
+        store: "amazon".into(),
+        charges: vec![StoreCharge {
+            order_id: "112-9".into(),
+            date: "2026-10-03".into(),
+            amount: -1_653,
+            card: String::new(),
+        }],
+    };
+    b.run("add_charges", &one).unwrap();
+    let r = &b.list::<ReceiptLine>("receipts", &())[0];
+    assert_eq!((r.txn_id, r.charged), (None, 1));
+    assert_eq!(
+        b.list::<ChargeLine>(
+            "charges",
+            &OneReceipt {
+                receipt_id: "amazon:112-9".into()
+            }
+        )[0]
+        .txn_id,
+        paid
+    );
+}
+
 /// A category gone takes its kinds with it, and hands their spending,
 /// split lines and items to where its money goes.
 #[test]

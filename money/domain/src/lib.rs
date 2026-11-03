@@ -62,6 +62,7 @@ pub fn domain() -> Domain {
         transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
         transactions::register, transactions::inbox, transactions::payees, transactions::split, transactions::add_split, transactions::splits,
         receipts::add_receipts, receipts::file_items, receipts::pay, receipts::receipts, receipts::items, receipts::receipt_items,
+        receipts::add_charges, receipts::pay_charge, receipts::charges, receipts::candidates,
         plaid::import, plaid::link, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, feed)
     .with(ark_auth::register::<Money>)
     .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
@@ -85,7 +86,8 @@ pub fn feed() -> Scope<Money> {
             .on::<Asked>(all)
             .on::<Split>(all)
             .on::<Receipt>(all)
-            .on::<Item>(all),
+            .on::<Item>(all)
+            .on::<Charge>(all),
     )
 }
 

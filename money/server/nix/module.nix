@@ -214,6 +214,11 @@ in
         default = [ "orders" "--last-30-days" "--full-details" "-o" "json" ];
         description = "What amazon-orders is run with: `--year 2026` in place of `--last-30-days` for a first pull.";
       };
+      transactionsArgs = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ "transactions" "--days" "60" "-o" "json" ];
+        description = "What amazon-orders is run with for how each order was charged: shipment by shipment, and refunds.";
+      };
       usernameFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
@@ -382,6 +387,7 @@ in
       } // lib.optionalAttrs (amazon.package != null) {
         MONEY_AMAZON_ORDERS = "${amazon.package}/bin/amazon-orders";
         MONEY_AMAZON_ARGS = lib.concatStringsSep " " amazon.args;
+        MONEY_AMAZON_TRANSACTIONS_ARGS = lib.concatStringsSep " " amazon.transactionsArgs;
       } // lib.optionalAttrs (amazon.package != null && amazon.usernameFile != null) {
         MONEY_AMAZON_USERNAME_FILE = "%d/amazon-username";
         MONEY_AMAZON_PASSWORD_FILE = "%d/amazon-password";

@@ -75,7 +75,7 @@ let
     [ (lib.hasInfix "kill --signal=SIGUSR1 --kill-whom=main money.service" banks.systemd.services.money-import.serviceConfig.ExecStart) "by telling the server" ]
     [ (daily.systemd.timers.money-import.timerConfig.OnCalendar == "daily") "or when told" ]
     [ (failing stores == [ ]) "the stores evaluate" ]
-    [ (lib.hasSuffix "/bin/amazon-orders" (env stores).MONEY_AMAZON_ORDERS && (env stores).MONEY_AMAZON_ARGS == "orders --last-30-days --full-details -o json") "amazon-orders reaches the server, and what it is run with" ]
+    [ (lib.hasSuffix "/bin/amazon-orders" (env stores).MONEY_AMAZON_ORDERS && (env stores).MONEY_AMAZON_ARGS == "orders --last-30-days --full-details -o json" && (env stores).MONEY_AMAZON_TRANSACTIONS_ARGS == "transactions --days 60 -o json") "amazon-orders reaches the server, and what it is run with" ]
     [ ((env stores).MONEY_AMAZON_PASSWORD_FILE == "%d/amazon-password" && (env stores).MONEY_AMAZON_OTP_SECRET_FILE == "%d/amazon-otp-secret") "Amazon's sign-in is credentials" ]
     [ (lib.all (c: lib.elem c (unit stores).serviceConfig.LoadCredential) [ "amazon-username:/run/secrets/amazon-user" "amazon-password:/run/secrets/amazon-pass" "amazon-otp-secret:/run/secrets/amazon-otp" ]) "loaded from where they live" ]
     [ ((env stores).MONEY_RECEIPTS_DIR == "/var/lib/money/receipts" && stores.systemd.timers ? money-import) "the folder reaches the server, and the timer runs without a bank" ]

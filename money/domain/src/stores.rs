@@ -22,7 +22,7 @@
 
 use serde_json::Value as Json;
 
-use crate::types::{ReceiptImport, StoreItem, StoreReceipt};
+use crate::types::{ChargeImport, ReceiptImport, StoreCharge, StoreItem, StoreReceipt};
 
 /// The stores there are adapters for.
 pub const STORES: [&str; 3] = ["amazon", "target", "costco"];
@@ -190,6 +190,36 @@ pub fn amazon(text: &str) -> Result<ReceiptImport, String> {
     Ok(ReceiptImport {
         store: "amazon".into(),
         receipts,
+    })
+}
+
+/// What `amazon-orders transactions --days N -o json` prints: every
+/// charge and refund, each `completed_date`, `grand_total` (dollars,
+/// negative for a charge, as our sign), `order_number` and
+/// `payment_method`. One with no order (a gift card's reload) is left out.
+pub fn amazon_charges(text: &str) -> Result<ChargeImport, String> {
+    let v = first_json(text).map_err(|e| format!("amazon: not amazon-orders' JSON: {e}"))?;
+    let mut charges = vec![];
+    for (n, t) in list(&v, &["transactions", "items"]).iter().enumerate() {
+        let order_id = field(t, &["order_number"]);
+        if order_id.is_empty() {
+            continue;
+        }
+        let raw = field(t, &["completed_date", "date"]);
+        let date = day_of(&raw).ok_or_else(|| format!("amazon: transaction {}: `{raw}` is not a date", n + 1))?;
+        let amount = dig(t, &["grand_total"])
+            .and_then(cents_of)
+            .ok_or_else(|| format!("amazon: transaction {} of order {order_id}: no amount", n + 1))?;
+        charges.push(StoreCharge {
+            order_id,
+            date,
+            amount,
+            card: field(t, &["payment_method"]),
+        });
+    }
+    Ok(ChargeImport {
+        store: "amazon".into(),
+        charges,
     })
 }
 

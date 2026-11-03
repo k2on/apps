@@ -11,6 +11,8 @@ use money_domain::*;
 
 use crate::peer::Ledger;
 use crate::{seed, App, Choice, Choosing, Field, Message, Modal, Page, Pane, SplitRow};
+#[allow(unused_imports)]
+use money_domain::PaidFor;
 
 /// A day the demo is seeded for: late in a month, so every habit has
 /// happened at least once in it.
@@ -448,7 +450,9 @@ fn the_budget_drawn() {
     let mut receipts = app();
     let _ = receipts.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
     let _ = receipts.update(Message::Go(Page::Receipts));
-    let open = receipts.peer.receipts.rows.iter().find(|r| r.store == "target").map(|r| r.id.clone());
+    let _ = receipts.update(Message::Sync);
+    let _ = receipts.update(Message::Sync);
+    let open = receipts.peer.receipts.rows.iter().find(|r| r.store == "amazon").map(|r| r.id.clone());
     let _ = receipts.update(Message::OpenReceipt(open));
     let mut settings = app();
     let _ = settings.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
@@ -580,9 +584,12 @@ fn receipts_are_filed_from_their_page() {
     let mut app = app();
     let _ = app.update(Message::Go(Page::Receipts));
     let stores: Vec<&str> = app.peer.receipts.rows.iter().map(|r| r.store.as_str()).collect();
-    assert_eq!(stores.len(), 2, "{stores:?}");
-    assert!(stores.contains(&"target") && stores.contains(&"costco"));
-    assert!(app.peer.receipts.rows.iter().all(|r| r.txn_id.is_some()), "each matched to its charge");
+    assert_eq!(stores.len(), 3, "{stores:?}");
+    assert!(stores.contains(&"target") && stores.contains(&"costco") && stores.contains(&"amazon"));
+    assert!(
+        app.peer.receipts.rows.iter().filter(|r| r.store != "amazon").all(|r| r.txn_id.is_some()),
+        "each matched to its charge"
+    );
     let unfiled: Vec<&str> = app.peer.unfiled.rows.iter().map(|i| i.name.as_str()).collect();
     assert!(unfiled.contains(&"GG TORTILLA CHIPS"));
     let target = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap().clone();
@@ -732,4 +739,52 @@ fn a_new_transaction_is_split_as_it_is_entered() {
         rows.iter().map(|r| (r.category, r.amount.clone())).collect::<Vec<_>>(),
         [(Some(groceries), "15.00".to_string()), (Some(household), "25.00".to_string())]
     );
+}
+
+/// The demo's Amazon order was charged in two: the first shipment's charge
+/// found, the second the one the second Sync brings, which pays it and is
+/// split by the order's items. A charge said by hand to be paid by nothing
+/// is found again from the dropdown of what could have paid it.
+#[test]
+fn an_amazon_order_is_paid_charge_by_charge() {
+    let mut app = app();
+    let _ = app.update(Message::Go(Page::Receipts));
+    let amazon = || |app: &App| app.peer.receipts.rows.iter().find(|r| r.store == "amazon").unwrap().clone();
+    let r = amazon()(&app);
+    assert_eq!((r.charges, r.charged, r.txn_id), (2, 1, None));
+    let _ = app.update(Message::Sync);
+    assert_eq!(amazon()(&app).charged, 1, "the first sync brings no Amazon");
+    let _ = app.update(Message::Sync);
+    let r = amazon()(&app);
+    assert_eq!((r.charges, r.charged), (2, 2), "{}", app.note);
+    let _ = app.update(Message::OpenReceipt(Some(r.id.clone())));
+    let charges = app.peer.charges.as_ref().unwrap().rows.clone();
+    assert_eq!(charges.len(), 2);
+    let live = charges.iter().find(|c| c.amount == -2_399).unwrap().clone();
+    let paid = live.txn_id.unwrap();
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    // Split by the order's items: the eggs as Eggs, the rest waiting for a
+    // category, as Amazon's payee has none from before.
+    let _ = app.update(Message::EditTxn(paid));
+    let rows = app.form.as_ref().unwrap().split.clone().expect("split");
+    let eggs = app.peer.tree.rows.iter().find(|n| n.name == "Eggs").unwrap().id;
+    assert_eq!(rows.iter().map(|r| r.category).collect::<Vec<_>>(), [Some(eggs), None]);
+    let _ = app.update(Message::CancelTxn);
+    // Paid by nothing, then found again by hand.
+    let _ = app.update(Message::Go(Page::Receipts));
+    let of = PaidFor {
+        receipt_id: r.id.clone(),
+        charge_id: Some(live.id.clone()),
+    };
+    let _ = app.update(Message::ChoosePayer(of.clone()));
+    let _ = app.update(Message::Chose(Choice::Paid(None)));
+    assert_eq!(amazon()(&app).charged, 1);
+    let _ = app.update(Message::ChoosePayer(of));
+    let groups = app.drop_groups();
+    let first = &groups[0].items[0];
+    assert!(first.label.starts_with("Amazon"), "{}", first.label);
+    let choose = first.choose.clone();
+    let _ = app.update(choose);
+    assert_eq!(amazon()(&app).charged, 2);
+    assert!(app.peer.candidates.is_none(), "closed with the dropdown");
 }
