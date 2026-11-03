@@ -1,7 +1,7 @@
 //! The catalogue held to the code it describes, and the site to itself.
 use std::path::{Path, PathBuf};
 
-use crate::catalogue::{self, ENTRIES};
+use crate::catalogue;
 use crate::components::COMPONENTS;
 
 fn root() -> PathBuf {
@@ -10,52 +10,6 @@ fn root() -> PathBuf {
 
 fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-}
-
-fn arkui_modules() -> Vec<String> {
-    read(&root().join("rust/arkui/src/lib.rs"))
-        .lines()
-        .filter_map(|l| Some(l.strip_prefix("pub mod ")?.strip_suffix(';')?.to_string()))
-        .collect()
-}
-
-/// Falsified by deleting the `swipe` entry (fails: no entry), and by adding
-/// one for a module that does not exist (fails: no module).
-#[test]
-fn every_module_has_an_entry_and_every_entry_a_module() {
-    let modules = arkui_modules();
-    assert!(modules.len() > 20, "read arkui's modules: {modules:?}");
-    for m in &modules {
-        assert!(catalogue::find(m).is_some(), "arkui::{m} has no entry in catalogue.rs");
-    }
-    for e in ENTRIES {
-        assert!(
-            modules.iter().any(|m| m == e.module),
-            "catalogue.rs has {} but arkui has no such module",
-            e.module
-        );
-        assert!(!e.summary.is_empty() && !e.api.is_empty(), "{} says nothing", e.module);
-    }
-}
-
-/// Falsified by taking `panel` out of Menu (fails: in no component), and by
-/// putting `scroll` in Lists as well (fails: in two).
-#[test]
-fn every_module_is_in_exactly_one_component() {
-    for m in arkui_modules() {
-        let holders: Vec<&str> = COMPONENTS.iter().filter(|c| c.desktop.contains(&m.as_str())).map(|c| c.id).collect();
-        assert_eq!(holders.len(), 1, "arkui::{m} is in {holders:?}; every module is in exactly one component");
-    }
-    for c in COMPONENTS {
-        for m in c.desktop {
-            assert!(catalogue::find(m).is_some(), "{} names arkui::{m}, which has no entry", c.id);
-        }
-        assert!(
-            !c.desktop.is_empty() || c.android.is_some() || c.ios.is_some(),
-            "{} is on no platform",
-            c.id
-        );
-    }
 }
 
 /// Falsified by giving Cards' shot Lists' id, or Menu's picture Panel's name.

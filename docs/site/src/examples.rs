@@ -59,6 +59,7 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("PLUS", glyphs::PLUS),
     ("PREVIOUS", glyphs::PREVIOUS),
     ("PULPIT", glyphs::PULPIT),
+    ("RECEIPT", glyphs::RECEIPT),
     ("RENAME", glyphs::RENAME),
     ("REPEAT", glyphs::REPEAT),
     ("SEARCH", glyphs::SEARCH),

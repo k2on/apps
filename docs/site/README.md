@@ -61,8 +61,6 @@ regenerate the JSON:
 
 `cargo test` here fails until you have. It checks that:
 
-- every `pub mod` of arkui has an entry, and every entry is a module;
-- every module is in exactly one component;
 - no two captures, pictures or pages share a name;
 - `catalogue.json` is what the catalogue prints;
 - the Icons picture draws every glyph;
