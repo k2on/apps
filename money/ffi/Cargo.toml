@@ -17,12 +17,15 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-domain = { path = "../domain", features = ["ffi", "seed"] }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
+tract-onnx = { version = "0.22", optional = true }
 
+[features]
+default = ["page"]
 # Where a receipt is in a camera frame (src/page.rs): the corner model on a
-# runtime in Rust, so the phone links none of its own. Not on an iPhone,
-# whose scanner is VisionKit's.
-[target.'cfg(not(target_os = "ios"))'.dependencies]
-tract-onnx = "0.22"
+# runtime in Rust, so the phone links none of its own. Android's: the
+# iPhone's build leaves it out (`--no-default-features`, its Swift written
+# from a Mac build without it too), as VisionKit finds the page there.
+page = ["dep:tract-onnx"]
 
 [dev-dependencies]
 tempfile = "3"

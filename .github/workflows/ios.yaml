@@ -96,7 +96,9 @@ jobs:
 
       # Both libraries for each iOS target and for this Mac (which UniFFI
       # reads the Swift from), each cargo call building both so what they
-      # share compiles once; then each app's two iOS builds bound as one
+      # share compiles once, without their default features (money's `page`,
+      # the scanner's corner model, is Android's: VisionKit finds an iPhone's
+      # pages); then each app's two iOS builds bound as one
       # xcframework with UniFFI's headers, and its Swift beside it with the
       # bridge's typed half.
       - name: Build the kernels
@@ -105,9 +107,9 @@ jobs:
           IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         run: |
           for t in aarch64-apple-ios aarch64-apple-ios-sim; do
-            cargo build --locked --release -p harken-ffi -p money-ffi --lib --target "$t"
+            cargo build --locked --release -p harken-ffi -p money-ffi --lib --no-default-features --target "$t"
           done
-          cargo build --locked --release -p harken-ffi -p money-ffi --lib
+          cargo build --locked --release -p harken-ffi -p money-ffi --lib --no-default-features
           for pair in harken:Harken money:Money; do
             app=${pair%%:*} Name=${pair##*:}
             gen="$RUNNER_TEMP/$app/bindings" heads="$RUNNER_TEMP/$app/headers"

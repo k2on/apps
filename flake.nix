@@ -420,9 +420,10 @@
           uniffiBindgen = crate { packageId = "ark-ffi"; features = [ "default" "bindgen" ]; };
           # An app's library for the host (`crate` its ffi crate, `so` the
           # library's name), which UniFFI reads the bindings from and the
-          # app's JVM tests load.
-          ffiHostLib = { crate, so, ... }:
-            "${(rustCrates.build { inherit pkgs rust; packageId = crate; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
+          # app's JVM tests load; with the crate's `features`, which are the
+          # phone's (none for an iPhone: money's `page` is Android's).
+          ffiHostLib = { crate, so, features ? [ "default" ], ... }:
+            "${(rustCrates.build { inherit pkgs rust features; packageId = crate; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
           harkenFfi = { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; };
           moneyFfi = { name = "money"; crate = "money-ffi"; so = "money_ffi"; };
           # The ABIs the APK carries — a phone, an old phone, an emulator —
@@ -700,9 +701,9 @@
               ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
                 export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
                 export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
-                cargo build --release --offline --locked -p ${crate} --lib --target ${t}
+                cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
               '') iosTargets}
-              ${ffiBindings { lib = ffiHostLib { inherit crate so; }; language = "swift"; }}
+              ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
               cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap

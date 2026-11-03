@@ -10973,7 +10973,7 @@ rec {
           {
             name = "tract-onnx";
             packageId = "tract-onnx";
-            target = { target, features }: (!("ios" == target."os" or null));
+            optional = true;
           }
           {
             name = "uniffi";
@@ -11002,7 +11002,11 @@ rec {
             packageId = "tempfile";
           }
         ];
-
+        features = {
+          "default" = [ "page" ];
+          "page" = [ "dep:tract-onnx" ];
+        };
+        resolvedDefaultFeatures = [ "default" "page" ];
       };
       "money-iced" = rec {
         crateName = "money-iced";

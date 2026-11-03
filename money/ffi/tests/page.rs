@@ -1,3 +1,4 @@
+#![cfg(feature = "page")]
 //! Where a receipt is in a camera frame (src/page.rs): pages drawn on a
 //! table, a counter and clutter (as the scanner's bench drew them: a
 //! printed receipt warped into the scene), each found at the corners it was

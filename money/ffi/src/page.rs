@@ -2,7 +2,8 @@
 //! corner model (`models/README.md`) on tract, in this library so the
 //! phone needs no runtime of its own. The model gives four heatmaps, one a
 //! corner; each corner is the middle of its largest blob where the model is
-//! sure (0.3 and over), and a frame with a corner nowhere is no page.
+//! sure (0.3 and over), and a frame with a corner nowhere is no page. The
+//! `page` feature's: the iPhone, which scans with VisionKit, leaves it out.
 
 use std::sync::OnceLock;
 

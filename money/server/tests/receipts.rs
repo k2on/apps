@@ -9,10 +9,17 @@ use money_domain::*;
 use money_server::importer::Outcome;
 use money_server::stores::{AmazonOrders, Stores};
 
+/// An export the domain's tests read the stores from (money/domain/tests/stores),
+/// read as the test runs: a crate is compiled from its own directory alone.
+fn domain_store(name: &str) -> String {
+    let path = format!("{}/../domain/tests/stores/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
 /// A stand-in for `amazon-orders`: what it prints, when signed in.
 fn program(dir: &std::path::Path) -> std::path::PathBuf {
-    let orders = include_str!("../../domain/tests/stores/amazon-orders.json");
-    let charges = include_str!("../../domain/tests/stores/amazon-transactions.json");
+    let orders = domain_store("amazon-orders.json");
+    let charges = domain_store("amazon-transactions.json");
     let p = dir.join("amazon-orders");
     std::fs::write(
         &p,
@@ -36,11 +43,7 @@ fn the_stores_receipts_are_imported() {
         p
     };
     std::fs::create_dir_all(drop.path().join("costco")).unwrap();
-    std::fs::write(
-        drop.path().join("costco/october.json"),
-        include_str!("../../domain/tests/stores/costco.json"),
-    )
-    .unwrap();
+    std::fs::write(drop.path().join("costco/october.json"), domain_store("costco.json")).unwrap();
     std::fs::create_dir_all(drop.path().join("target")).unwrap();
     std::fs::write(drop.path().join("target/broken.json"), "<html>").unwrap();
     let stores = Stores {
