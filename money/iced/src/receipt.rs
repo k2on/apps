@@ -13,13 +13,16 @@
 //! detached.
 
 use arkui::style;
-use iced::widget::{button, column, container, image, mouse_area, row, text, text_input, Column, Space};
+use iced::widget::{button, column, container, image, mouse_area, row, scrollable, text, text_input, Column, Space};
 use iced::{Alignment, Color, Element, Font, Length, Task};
 use money_domain::*;
 
 use crate::amount::{self, money};
 use crate::view::{action, bold, dim, fill, link, quiet};
-use crate::{look, App, Message, Modal};
+use crate::{look, App, Message, Modal, Page};
+
+/// The width of the panel beside the register.
+pub const SIDE: f32 = 350.0;
 
 /// What the receipt panel does.
 #[derive(Debug, Clone)]
@@ -70,9 +73,15 @@ pub fn unmatched<'a>(receipts: &'a [ReceiptLine], t: &TxnLine) -> Vec<&'a Receip
 }
 
 impl App {
-    /// The transaction open in the form, when it is one already entered.
+    /// The transaction whose receipt is beside the register: the one open
+    /// in the form, else the one under the register's cursor.
+    pub fn receipt_txn(&self) -> Option<Id<Txn>> {
+        let Page::Ledger(_) = self.page else { return None };
+        self.form.as_ref().and_then(|f| f.editing).or(self.txn_at)
+    }
+
     fn open_txn(&self) -> Option<&TxnLine> {
-        let id = self.form.as_ref()?.editing?;
+        let id = self.receipt_txn()?;
         self.peer.register.rows.iter().find(|t| t.id == id)
     }
 
@@ -87,7 +96,7 @@ impl App {
             }
             Msg::Given(p) => {
                 let Some(txn_id) = txn else {
-                    self.note = "open a transaction, then drop its receipt's photo on it".into();
+                    self.note = "select a transaction, then drop its receipt's photo on the window".into();
                     return Task::none();
                 };
                 let Some(media) = p.media().filter(|m| m.starts_with("image/")) else {
@@ -199,20 +208,48 @@ impl App {
         }
     }
 
-    /// The receipt under a transaction's form: drawn as paper, or how one
-    /// is added.
-    pub fn view_receipt_panel<'a>(&'a self, t: &'a TxnLine) -> Element<'a, Message> {
-        if let Some(p) = &self.paper {
-            return self.view_paper_form(p);
-        }
+    /// The panel beside the register, as the inspector is beside the
+    /// budget: the selected transaction's receipt drawn as paper, and what
+    /// can be done with it; or how one is added; or, typing one, its form.
+    pub fn view_receipt_side(&self) -> Element<'_, Message> {
+        let body: Element<'_, Message> = match self.open_txn() {
+            None => dim("Select a transaction to see its receipt.", 12).into(),
+            Some(t) => match &self.paper {
+                Some(p) => self.view_paper_form(p),
+                None => self.view_receipt(t),
+            },
+        };
+        let head = match self.open_txn() {
+            Some(t) => column![
+                bold("Receipt", 15),
+                dim(format!("{} \u{b7} {} \u{b7} {}", t.date, t.payee, money(-t.amount)), 11)
+            ],
+            None => column![bold("Receipt", 15)],
+        };
+        // Its top clear of the account button, which floats over the corner.
+        let pad = iced::Padding {
+            top: crate::view::PAD + arkui::account::HEIGHT + 6.0,
+            ..iced::Padding::new(crate::view::PAD)
+        };
+        container(
+            scrollable(column![head.spacing(2), body].spacing(12).padding(pad))
+                .height(Length::Fill)
+                .style(style::bars),
+        )
+        .width(Length::Fixed(SIDE))
+        .height(Length::Fill)
+        .style(style::surface)
+        .into()
+    }
+
+    /// A transaction's receipt and what is done with it, one under another.
+    fn view_receipt<'a>(&'a self, t: &'a TxnLine) -> Element<'a, Message> {
         let photos: Vec<&PhotoLine> = self.peer.photos.rows.iter().filter(|p| p.txn_id == Some(t.id)).collect();
-        let receipts = self.peer.txn_receipts();
         let mut side = column![].spacing(8);
-        let mut panel = row![].spacing(20);
-        match receipts.first() {
+        match self.peer.txn_receipts().first() {
             Some(r) => {
                 let photo = self.peer.photos.rows.iter().find(|p| p.receipt_id == r.id);
-                panel = panel.push(self.view_paper(r, photo));
+                side = side.push(self.view_paper(r, photo));
                 if photo.is_some_and(|p| p.state == "check") {
                     side = side.push(
                         text("Check this: what was read does not add up to the total.")
@@ -220,14 +257,18 @@ impl App {
                             .style(look::Tone::Short.text()),
                     );
                 }
+                let mut links = row![].spacing(16);
                 if let Some(p) = photo {
-                    side = side.push(link("Show the photo", Message::Receipt(Msg::Photo(p.file.clone()))));
+                    links = links.push(link("Show the photo", Message::Receipt(Msg::Photo(p.file.clone()))));
                 }
-                side = side.push(link("Edit the receipt", Message::Receipt(Msg::Write(Some(r.id.clone())))));
-                match &self.peer.charges {
-                    // Paid shipment by shipment: each charge and what paid it.
-                    Some(c) if r.charges > 0 => side = side.push(self.view_charges(&c.rows)),
-                    _ => side = side.push(link("Detach it", Message::Receipt(Msg::Detach(r.id.clone())))),
+                links = links.push(link("Edit", Message::Receipt(Msg::Write(Some(r.id.clone())))));
+                if r.charges == 0 {
+                    links = links.push(link("Detach", Message::Receipt(Msg::Detach(r.id.clone()))));
+                }
+                side = side.push(links);
+                // Paid shipment by shipment: each charge and what paid it.
+                if let Some(c) = self.peer.charges.as_ref().filter(|_| r.charges > 0) {
+                    side = side.push(self.view_charges(&c.rows));
                 }
             }
             None => {
@@ -236,9 +277,9 @@ impl App {
                         "failed" => format!("The photo could not be read: {}", p.why),
                         _ => "Reading the photo\u{2026}".into(),
                     };
-                    side = side.push(row![dim(said, 12), link("Show", Message::Receipt(Msg::Photo(p.file.clone())))].spacing(10));
+                    side = side.push(column![dim(said, 12), link("Show the photo", Message::Receipt(Msg::Photo(p.file.clone())))].spacing(4));
                 }
-                side = side.push(dim("Drop a photo of its receipt here, or", 12));
+                side = side.push(dim("Drop a photo of its receipt on the window, or", 12));
                 side = side.push(
                     row![
                         link("Choose a photo\u{2026}", Message::Receipt(Msg::Choose)),
@@ -251,12 +292,19 @@ impl App {
                     side = side.push(dim("Or attach one that paid for nothing yet:", 12));
                     for r in free {
                         let what = format!("{} \u{b7} {} \u{b7} {}", r.date, place_of(r), money(-r.total));
-                        side = side.push(row![text(what).size(12), link("Attach", Message::Receipt(Msg::Attach(r.id.clone())))].spacing(10));
+                        side = side.push(
+                            row![
+                                text(what).size(12).width(Length::Fill),
+                                link("Attach", Message::Receipt(Msg::Attach(r.id.clone())))
+                            ]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                        );
                     }
                 }
             }
         }
-        container(panel.push(side.width(Length::Fill))).padding([10, 24]).into()
+        side.into()
     }
 
     /// A receipt as its paper: the place and day, each item and what it
@@ -264,8 +312,10 @@ impl App {
     fn view_paper<'a>(&'a self, r: &'a ReceiptLine, photo: Option<&'a PhotoLine>) -> Element<'a, Message> {
         let ink = Color::from_rgb8(0x1a, 0x1a, 0x1a);
         let faded = Color::from_rgb8(0x77, 0x77, 0x77);
-        let mono = |s: String, size: u32, c: Color| text(s).font(Font::MONOSPACE).size(size).color(c);
-        let rule = || mono("-".repeat(34), 12, faded);
+        // Each line its ink, and the paper its own: the theme's text colour is
+        // the page's, light on a dark one, which white paper would hide.
+        let mono = |s: String, size: u32, c: Color| text(s).font(Font::MONOSPACE).size(size).style(move |_| text::Style { color: Some(c) });
+        let rule = || mono("-".repeat(30), 12, faded);
         let mut paper: Column<'a, Message> = column![
             container(mono(place_of(r).to_uppercase(), 15, ink)).center_x(Length::Fill),
             container(mono(r.date.clone(), 12, faded)).center_x(Length::Fill),
@@ -306,10 +356,11 @@ impl App {
             paper = paper.push(container(mono(format!("read: {}", p.state), 10, faded)).center_x(Length::Fill));
         }
         container(paper)
-            .padding(16)
-            .width(Length::Fixed(320.0))
+            .padding(14)
+            .width(Length::Fill)
             .style(move |_| container::Style {
                 background: Some(iced::Background::Color(Color::WHITE)),
+                text_color: Some(ink),
                 border: iced::Border {
                     color: Color::from_rgb8(0xdd, 0xdd, 0xdd),
                     width: 1.0,
@@ -345,8 +396,8 @@ impl App {
                 14
             ),
             row![
-                input("Store", &p.place, Msg::Place).width(Length::Fixed(220.0)),
-                input("2026-10-26", &p.date, Msg::Date).width(Length::Fixed(110.0)),
+                input("Store", &p.place, Msg::Place).width(Length::Fill),
+                input("2026-10-26", &p.date, Msg::Date).width(Length::Fixed(100.0)),
             ]
             .spacing(8),
         ]
@@ -358,36 +409,43 @@ impl App {
                     .on_submit(Message::Receipt(Msg::Save))
                     .size(12)
                     .padding([3, 6])
-                    .width(Length::Fixed(260.0))
+                    .width(Length::Fill)
                     .style(look::input),
                 text_input("0.00", cost)
                     .on_input(move |v| Message::Receipt(Msg::Amount(i, v)))
                     .on_submit(Message::Receipt(Msg::Save))
                     .size(12)
                     .padding([3, 6])
-                    .width(Length::Fixed(90.0))
+                    .width(Length::Fixed(76.0))
                     .style(look::input),
             ]
             .spacing(8)
             .align_y(Alignment::Center);
             if p.items.len() > 1 {
-                line = line.push(link("Remove", Message::Receipt(Msg::RemoveItem(i))));
+                line = line.push(link("\u{d7}", Message::Receipt(Msg::RemoveItem(i))));
             }
             form = form.push(line);
         }
         let sum: i64 = p.items.iter().filter_map(|(_, c)| amount::parse(c)).sum();
-        form = form.push(
-            row![
-                link("+ Add an item", Message::Receipt(Msg::AddItem)),
-                dim(format!("Total {}", money(sum)), 12),
-                fill(),
-                quiet("Cancel", Message::Receipt(Msg::Cancel)),
-                action("Save receipt", Message::Receipt(Msg::Save)),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        );
-        container(form.width(Length::Fixed(560.0))).padding([10, 24]).into()
+        form = form
+            .push(
+                row![
+                    link("+ Add an item", Message::Receipt(Msg::AddItem)),
+                    fill(),
+                    dim(format!("Total {}", money(sum)), 12)
+                ]
+                .align_y(Alignment::Center),
+            )
+            .push(
+                row![
+                    fill(),
+                    quiet("Cancel", Message::Receipt(Msg::Cancel)),
+                    action("Save receipt", Message::Receipt(Msg::Save))
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            );
+        form.width(Length::Fill).into()
     }
 
     /// The photo modal's body.

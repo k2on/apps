@@ -922,9 +922,10 @@ impl App {
             (Ledger::Saved(id), _) => self.name_or_box(Naming::Filter(id), bold(title, 22).into()),
             _ => bold(title, 22).into(),
         };
-        let head_line = column![title, dim(subtitle, 12)].spacing(2);
-        // The conditions, and what they come to at their end.
-        let bar = row![self.view_filter_bar(), fill(), self.view_filter_total()].align_y(Alignment::Center);
+        // What the conditions come to, beside the title: the bar under it is
+        // as wide as its conditions, and the receipt's panel takes the rest.
+        let head_line = row![column![title, dim(subtitle, 12)].spacing(2), fill(), self.view_filter_total()].align_y(Alignment::Center);
+        let bar = row![self.view_filter_bar()].align_y(Alignment::Center);
 
         // One slot whatever the register, so the bar under it keeps its
         // place (and the text box its focus) as the filter changes.
@@ -1007,7 +1008,7 @@ impl App {
         // The top is one height, and so is every row, so where a row's
         // category is on screen is arithmetic (`App::category_at`): the
         // dropdown opens under it, keys or pointer.
-        column![
+        let register = column![
             container(column![head_line, balances, tools, bar].spacing(12))
                 .height(Length::Fixed(self.ledger_top()))
                 .clip(true),
@@ -1023,8 +1024,10 @@ impl App {
         ]
         .spacing(LEDGER_GAP)
         .padding(PAD)
-        .width(Length::Fill)
-        .into()
+        .width(Length::Fill);
+        // The selected transaction's receipt beside it, as the inspector is
+        // beside the budget.
+        row![register, self.view_receipt_side()].into()
     }
 
     fn balance_box<'a>(&self, label: &str, cents: i64) -> Element<'a, Message> {
@@ -1241,10 +1244,6 @@ impl App {
             parts = parts.push(self.view_split(f, rows));
         }
         parts = parts.push(under);
-        // One entered already has its receipt under it.
-        if let Some(t) = f.editing.and_then(|id| self.peer.register.rows.iter().find(|t| t.id == id)) {
-            parts = parts.push(self.view_receipt_panel(t));
-        }
         container(parts)
             .padding([8, 4])
             .style(|theme| container::Style {
@@ -1304,11 +1303,11 @@ impl App {
 
     // * Receipts
 
-    /// A receipt's charges, each its day, amount and card, and what paid it,
-    /// which opens the dropdown of what could have.
+    /// A receipt's charges, as the panel beside the register has room for:
+    /// each its day and amount, its card, and what paid it under them, which
+    /// opens the dropdown of what could have.
     pub(crate) fn view_charges<'a>(&'a self, charges: &'a [ChargeLine]) -> Element<'a, Message> {
-        let w = |n: f32| Length::Fixed(n);
-        let mut list = column![row![Space::new().width(w(24.0)), dim("Charged", 11)]].spacing(2);
+        let mut list = column![dim("Charged", 11)].spacing(10);
         for c in charges {
             let found = c.txn_id.is_some();
             let label = match found {
@@ -1326,22 +1325,19 @@ impl App {
                 charge_id: Some(c.id.clone()),
             }))
             .padding([3, 6])
-            .width(Length::FillPortion(3))
+            .width(Length::Fill)
             .style(look::choice(false));
             let what = match c.amount > 0 {
                 true => format!("refund {}", money(c.amount)),
                 false => money(-c.amount),
             };
             list = list.push(
-                row![
-                    Space::new().width(w(24.0)),
-                    text(c.date.clone()).size(12).width(w(96.0)),
-                    text(c.card.clone()).size(12).style(style::dim).width(Length::FillPortion(3)),
-                    text(what).size(12).width(w(110.0)),
+                column![
+                    row![text(c.date.clone()).size(12), fill(), text(what).size(12)].align_y(Alignment::Center),
+                    text(c.card.clone()).size(11).style(style::dim),
                     pay,
                 ]
-                .spacing(8)
-                .align_y(Alignment::Center),
+                .spacing(3),
             );
         }
         container(list).padding([6, 0]).into()

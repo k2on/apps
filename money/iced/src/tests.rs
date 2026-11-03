@@ -701,7 +701,9 @@ fn the_budget_drawn() {
         let mut sim = iced_test::Simulator::with_size(settings, (1400.0, 820.0), app.view());
         let shot = sim.snapshot(&theme).expect("a snapshot");
         let file = format!("{path}-{scene}-{side}");
-        let _ = std::fs::remove_file(format!("{file}.png"));
+        // iced_test names the file by its renderer, and compares against one
+        // already there rather than writing it.
+        let _ = std::fs::remove_file(format!("{file}-tiny-skia.png"));
         shot.matches_image(&file).expect("written");
     }
 }
@@ -917,7 +919,7 @@ fn a_photo_dropped_on_a_transaction_is_its_receipt() {
         }))
     };
     let _ = app.update(given("receipt.JPG", ""));
-    assert!(app.note.contains("open a transaction"), "{}", app.note);
+    assert!(app.note.contains("select a transaction"), "{}", app.note);
     let _ = app.update(Message::EditTxn(t.id));
     let _ = app.update(given("notes.txt", ""));
     assert!(app.note.contains("is not a photo"), "{}", app.note);
@@ -1735,4 +1737,25 @@ fn on_a_server_settings_set_up_amazon_and_costco() {
     );
     assert!(app.opened.is_empty(), "nothing opened");
     drop(app.view());
+}
+
+/// The receipt beside the register is the cursor's transaction's, as the
+/// inspector is the selected category's: one click, not the form; off the
+/// register, none. Falsified by following the form alone: the panel stayed
+/// empty until the row was opened.
+#[test]
+fn the_cursors_receipt_is_beside_the_register() {
+    let mut app = app();
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    let target = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap().clone();
+    let paid = target.txn_id.unwrap();
+    let _ = app.update(Message::TxnClick(paid));
+    assert!(app.form.is_none(), "selected, not opened");
+    assert_eq!(
+        app.peer.txn_receipts().iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        [target.id.as_str()]
+    );
+    assert!(!app.peer.receipt_items().is_empty());
+    let _ = app.update(Message::Go(Page::Budget));
+    assert!(app.peer.txn.is_none(), "none off the register");
 }

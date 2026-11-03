@@ -635,10 +635,11 @@ impl App {
     /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
-        // The open transaction's receipts follow the form; a receipt typed
-        // goes with the transaction it was for.
-        let open = self.form.as_ref().and_then(|f| f.editing);
-        if open.is_none() {
+        // The receipt beside the register is the selected transaction's (the
+        // one in the form, else the cursor's); a receipt typed goes with the
+        // transaction it was for.
+        let open = self.receipt_txn();
+        if open != self.peer.txn.as_ref().map(|(t, _)| *t) {
             self.paper = None;
         }
         self.peer.set_txn(open);
@@ -1840,7 +1841,7 @@ impl App {
         let all = self.register_account().is_none();
         let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
         let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 116.0;
-        let width = self.window.width - view::SIDEBAR - 1.0 - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
+        let width = self.window.width - view::SIDEBAR - 1.0 - receipt::SIDE - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
         let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
         let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
         let top = view::PAD + self.ledger_top() + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
