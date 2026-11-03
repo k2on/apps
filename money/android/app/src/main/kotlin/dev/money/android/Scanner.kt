@@ -6,8 +6,11 @@
 // shutter takes it at once, page or not.
 //
 // The camera is the framework's own (Camera2): a preview on a TextureView,
-// a small YUV stream for the eyes (Vision.kt), and a full JPEG for the
-// page, all 4:3 and in the sensor's orientation. The scanner holds the
+// a small YUV stream for the eyes, and a full JPEG for the page, all 4:3
+// and in the sensor's orientation. The eyes are DocAligner's corner model
+// in money's library (`moneyPageCorners`, money/ffi/src/page.rs), on a
+// thread of its own, a frame at a time as fast as it goes; while it has not
+// answered yet, and on a library without it, Vision.kt's bright region. The scanner holds the
 // phone upright while it is open, so the preview and the page are turned by
 // the sensor's orientation alone.
 package dev.money.android
@@ -402,6 +405,11 @@ class PageCamera(private val context: Context, private val listener: Listener) {
     private var preview: Surface? = null
     private var looked = 0L
     @Volatile private var stopped = false
+    /** The model's thread, one frame on it at a time, and the page it last saw. */
+    private val eyes = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val model = java.util.concurrent.Semaphore(1)
+    @Volatile private var seen: Quad? = null
+    @Volatile private var answered = false
 
     /** Quarters clockwise the sensor's frames turn to stand upright, the phone held upright. */
     @Volatile var turns: Int = 1
@@ -501,7 +509,21 @@ class PageCamera(private val context: Context, private val listener: Listener) {
                 buf.get(px, y * w, w)
             }
             val luma = Luma(w, h, px)
-            listener.frame(Vision.page(luma), Vision.sharpness(luma), w, h)
+            // The model's latest answer, and the next frame given to it once
+            // it is free.
+            if (model.tryAcquire()) {
+                val rgb = square(image, Model.SIDE)
+                eyes.execute {
+                    try {
+                        seen = Model.page(rgb, w, h)
+                        answered = true
+                    } finally {
+                        model.release()
+                    }
+                }
+            }
+            val page = if (Model.works && answered) seen else Vision.page(luma)
+            listener.frame(page, Vision.sharpness(luma), w, h)
         } catch (e: Exception) {
             // A frame that does not read is skipped.
         } finally {
@@ -550,6 +572,7 @@ class PageCamera(private val context: Context, private val listener: Listener) {
         handler.post {
             close()
             thread.quitSafely()
+            eyes.shutdown()
         }
     }
 

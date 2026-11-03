@@ -18,8 +18,16 @@ money-domain = { path = "../domain", features = ["ffi", "seed"] }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 
+# Where a receipt is in a camera frame (src/page.rs): the corner model on a
+# runtime in Rust, so the phone links none of its own. Not on an iPhone,
+# whose scanner is VisionKit's.
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+tract-onnx = "0.22"
+
 [dev-dependencies]
 tempfile = "3"
+# The scanner's pages, read (tests/page.rs).
+image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = { workspace = true }
 # The typed Kotlin and Swift the apps call the domain with, held to what the
 # generator writes now (tests/gen.rs).

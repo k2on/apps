@@ -193,10 +193,15 @@ does.
   the camera full screen (Camera2, no library), a translucent blue quad
   gliding to the paper's edges, and the picture taking itself once the page
   has held still and sharp for a second — a flash, the page made flat (a
-  homography from its corners), and it shrinks away. The eyes are plain
-  Kotlin over each frame's luminance (Otsu's threshold, the largest bright
-  region, its outline's four corners, the Laplacian's variance), held to
-  drawn frames by `VisionTests`.
+  homography from its corners), and it shrinks away. The eyes are
+  DocAligner's corner model in money's library (`PageModel.kt`,
+  `../ffi/src/page.rs`, on tract), each frame shrunk to its 256-pixel square
+  in colour, on a thread of its own as fast as it answers; how sharp a frame
+  is (the Laplacian's variance) and, until the model's first answer or on a
+  library without it, the page itself, are plain Kotlin over each frame's
+  luminance (`Vision.kt`, held to drawn frames by `VisionTests`). The model
+  found the page in 94% of 200 generated scenes where the bright region
+  found 49%: a white counter, glare, clutter and shadow are where it wins.
 
 **Motion.** Between tabs, Material's fade through; into a register or the
 bank's page and back, the shared X axis, which the system's back gesture

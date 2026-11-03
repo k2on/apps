@@ -25,8 +25,12 @@ uniffi::setup_scaffolding!();
 
 mod demo;
 mod hall;
+#[cfg(not(target_os = "ios"))]
+mod page;
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
+#[cfg(not(target_os = "ios"))]
+pub use page::money_page_corners;
 
 /// money's peer as a phone is made of it: the domain for the log, and no
 /// live space — a budget has nothing but what was said.
