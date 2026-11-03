@@ -10,15 +10,59 @@ is {text, score, left, right, y, h, rx, rr}: y, rx and rr are its middle
 and its edges with the page's tilt taken off. A box twice a line's height
 holds two lines printed close, and is cut and read again, a line each.
 
-RECEIPT_OCR_MODELS names the directory of the three models (./package.nix).
+First the page is found and made flat (`flat`): DocAligner's corner model
+(lcnet100) says where its four corners are, and a photo of a receipt on a
+table is warped to the paper alone. A photo already of the paper alone (a
+phone's scanner flattened it) has its corners at the photo's own, and is
+read as it is; so is one whose corners the model is not sure of.
+
+RECEIPT_OCR_MODELS names the directory of the four models (./package.nix).
 """
 import json, os, statistics, sys
 
 import cv2
+import numpy as np
+import onnxruntime
 from rapidocr import LangRec, ModelType, OCRVersion, RapidOCR
 
 MODELS = os.environ["RECEIPT_OCR_MODELS"]
 SIDES = (736, 1280, 1920)
+
+
+def corners(picture):
+    """The page's corners, clockwise from the top left, or None: each the
+    middle of the largest blob of its heatmap where the model is sure."""
+    s = onnxruntime.InferenceSession(f"{MODELS}/corners.onnx", providers=["CPUExecutionProvider"])
+    h, w = picture.shape[:2]
+    x = cv2.resize(picture, (256, 256)).astype(np.float32).transpose(2, 0, 1)[None] / 255.0
+    heat = s.run(None, {"img": x})[0][0]
+    pts = []
+    for m in heat[:4]:
+        n, _, st, mid = cv2.connectedComponentsWithStats((m >= 0.3).astype(np.uint8))
+        if n < 2:
+            return None
+        i = 1 + st[1:, cv2.CC_STAT_AREA].argmax()
+        pts.append((mid[i] + 0.5) * [w / m.shape[1], h / m.shape[0]])
+    return np.array(pts, np.float32)
+
+
+def flat(picture):
+    """The paper alone, flattened; or the photo, when it already is or the
+    corners found do not make a page."""
+    q = corners(picture)
+    if q is None:
+        return picture
+    h, w = picture.shape[:2]
+    area = cv2.contourArea(q)
+    if not cv2.isContourConvex(q.reshape(-1, 1, 2)) or area < 0.1 * w * h or area > 0.85 * w * h:
+        return picture
+    # A margin round it, so a corner found a little inside cuts nothing off.
+    q = np.clip(q.mean(0) + (q - q.mean(0)) * 1.04, 0, [w - 1, h - 1]).astype(np.float32)
+    tl, tr, br, bl = q
+    pw = int(max(np.linalg.norm(tr - tl), np.linalg.norm(br - bl)))
+    ph = int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr)))
+    to = np.float32([[0, 0], [pw - 1, 0], [pw - 1, ph - 1], [0, ph - 1]])
+    return cv2.warpPerspective(picture, cv2.getPerspectiveTransform(q, to), (pw, ph), flags=cv2.INTER_CUBIC)
 
 
 def engine(side):
@@ -32,8 +76,8 @@ def engine(side):
     })
 
 
-def reading(ocr, path, picture):
-    r = ocr(path)
+def reading(ocr, picture):
+    r = ocr(picture)
     boxes = []
     none = lambda v: [] if v is None else v
     for box, text, score in zip(none(r.boxes), none(r.txts), none(r.scores)):
@@ -80,7 +124,9 @@ def main():
     picture = cv2.imread(path)
     if picture is None:
         sys.exit(f"receipt-ocr: {path} is not an image this reads")
-    json.dump({"readings": [reading(engine(side), path, picture) for side in SIDES]}, sys.stdout)
+    if os.environ.get("RECEIPT_OCR_FLAT", "1") != "0":
+        picture = flat(picture)
+    json.dump({"readings": [reading(engine(side), picture) for side in SIDES]}, sys.stdout)
 
 
 if __name__ == "__main__":
