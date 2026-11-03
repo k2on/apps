@@ -1,8 +1,8 @@
 # A trial: the iPhone frameworks as the flake builds them, a derivation per
-# Run again with nothing in rust/ moved, every crate is the cache's.
 # crate (flake.nix, `iosPhone`), on a macOS runner with the Xcode the flake
 # pins, every crate pushed to Cachix so the next run builds only what moved.
 # ios.yaml still builds the apps; this builds the frameworks alone.
+# Run again with nothing in rust/ moved, every crate is the cache's.
 name: ios-nix
 
 on:
