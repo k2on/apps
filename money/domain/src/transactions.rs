@@ -438,6 +438,8 @@ pub fn txn_line(db: &Db<Money>, t: &Txn) -> TxnLine {
         imported_payee: t.imported_payee.clone(),
         created_ms: t.created_ms,
         user_id: t.user_id.clone(),
+        receipt: crate::receipts::receipt_of(db, t.id).unwrap_or_default(),
+        photos: db.photo.by(Photo::TXN_ID).from(Some(t.id)).all().len() as i64,
     }
 }
 

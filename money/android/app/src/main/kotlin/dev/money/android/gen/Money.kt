@@ -1149,9 +1149,9 @@ data class Txn(val id: Id, val accountId: Id, val date: String, val payee: Strin
 }
 
 /** The record `TxnLine` (UniFFI's): its JSON, for the functions called by name. */
-fun TxnLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"account\":" + J.q(account) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "," + "\"group\":" + J.q(group) + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer\":" + transfer.toString() + "," + "\"imported\":" + imported.toString() + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+fun TxnLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"account\":" + J.q(account) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "," + "\"group\":" + J.q(group) + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer\":" + transfer.toString() + "," + "\"imported\":" + imported.toString() + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"receipt\":" + J.q(receipt) + "," + "\"photos\":" + photos.toString() + "}"
 
-fun TxnLine.Companion.of(j: Any?): TxnLine = (j as JSONObject).let { o -> TxnLine(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("account")), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category")), J.text(o.opt("group")), J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.bool(o.opt("transfer")), J.bool(o.opt("imported")), J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+fun TxnLine.Companion.of(j: Any?): TxnLine = (j as JSONObject).let { o -> TxnLine(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("account")), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category")), J.text(o.opt("group")), J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.bool(o.opt("transfer")), J.bool(o.opt("imported")), J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id")), J.text(o.opt("receipt")), J.int(o.opt("photos"))) }
 
 /** The record `Txns`. */
 data class Txns(val ids: List<Id>) {
@@ -1159,6 +1159,15 @@ data class Txns(val ids: List<Id>) {
 
     companion object {
         fun of(j: Any?): Txns = (j as JSONObject).let { o -> Txns(J.list(o.opt("ids")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
+
+/** The record `WriteReceipt`. */
+data class WriteReceipt(val receiptId: String, val txnId: Id?, val place: String, val date: String, val total: Long?, val items: List<StoreItem>) {
+    fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"place\":" + J.q(place) + "," + "\"date\":" + J.q(date) + "," + "\"total\":" + J.wopt(total) { v0 -> v0.toString() } + "," + "\"items\":" + J.wlist(items) { v0 -> v0.json() } + "}"
+
+    companion object {
+        fun of(j: Any?): WriteReceipt = (j as JSONObject).let { o -> WriteReceipt(J.text(o.opt("receipt_id")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("place")), J.text(o.opt("date")), J.opt(o.opt("total")) { v0 -> J.int(v0) }, J.list(o.opt("items")) { v0 -> StoreItem.of(v0) }) }
     }
 }
 
@@ -1347,6 +1356,9 @@ class Money(val peer: Peer) {
     /** `receipts.file_items`: its intent's id. */
     fun fileItems(input: ClassifyItems): String = peer.mutate("receipts.file_items", input.json())
 
+    /** `receipts.for_txn`, kept. */
+    fun forTxn(input: OneTxn): View<ReceiptLine> = View(peer.view("receipts.for_txn", input.json())) { j -> ReceiptLine.of(j) }
+
     /** `receipts.items`, kept. */
     fun items(input: ItemsIn): View<ItemLine> = View(peer.view("receipts.items", input.json())) { j -> ItemLine.of(j) }
 
@@ -1364,6 +1376,9 @@ class Money(val peer: Peer) {
 
     /** `receipts.receipts`, kept. */
     fun receipts(): View<ReceiptLine> = View(peer.view("receipts.receipts", "null")) { j -> ReceiptLine.of(j) }
+
+    /** `receipts.write_receipt`: its intent's id. */
+    fun writeReceipt(input: WriteReceipt): String = peer.mutate("receipts.write_receipt", input.json())
 
     /** `role.grant`: its intent's id. */
     fun grant(input: Grant): String = peer.mutate("role.grant", input.json())

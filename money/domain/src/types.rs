@@ -789,6 +789,10 @@ pub struct TxnLine {
     pub imported_payee: String,
     pub created_ms: i64,
     pub user_id: String,
+    /// The receipt that paid for it (or one of whose charges did), blank
+    /// when none; and how many photos of a receipt were taken for it.
+    pub receipt: String,
+    pub photos: i64,
 }
 
 /// Somebody paid, and the category their last transaction was for.
@@ -1055,4 +1059,21 @@ pub struct PhotoLine {
     pub taken_ms: i64,
     pub state: String,
     pub why: String,
+}
+
+/// A receipt written by hand, or one already read put right: its place,
+/// day and items (each amount our sign, spent negative), and the
+/// transaction it is for. `receipt_id` blank is a new one; the total is
+/// the items'.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct WriteReceipt {
+    pub receipt_id: String,
+    pub txn_id: Option<Id<Txn>>,
+    #[ark(trim, len = "0..=80")]
+    pub place: String,
+    #[ark(check = "crate::dates::is_day", why = "a day, YYYY-MM-DD")]
+    pub date: String,
+    /// What was paid, our sign; none, the items' sum.
+    pub total: Option<i64>,
+    pub items: Vec<StoreItem>,
 }

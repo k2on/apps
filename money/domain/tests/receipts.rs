@@ -601,3 +601,43 @@ fn groups_and_categories_become_one_tree() {
     let rent = cats.iter().find(|c| c.name == "Rent").unwrap();
     assert_eq!((bills.parent_id, rent.parent_id, rent.target), (None, Some(bills.id), 150_000));
 }
+
+/// A receipt typed by hand for a transaction pays for it, marks it, and
+/// splits it; written again (a reading put right) its items are replaced
+/// and the transaction split again. Falsified by a hand receipt keyed by
+/// what it says, which a second one alike would overwrite.
+#[test]
+fn a_receipt_written_by_hand_pays_for_its_transaction() {
+    let (mut b, checking, groceries, eggs, improvement) = household();
+    b.spend(checking, "2026-10-25", "ALDI 72031", Some(groceries), -1_000);
+    let t = txn(&b, "ALDI 72031");
+    assert_eq!((t.receipt.as_str(), t.photos), ("", 0));
+    let item = |name: &str, amount| StoreItem {
+        name: name.into(),
+        sku: String::new(),
+        quantity: 1000,
+        unit: "ea".into(),
+        amount,
+    };
+    let write = |id: &str, items| WriteReceipt {
+        receipt_id: id.into(),
+        txn_id: Some(t.id),
+        place: "ALDI".into(),
+        date: "2026-10-25".into(),
+        total: None,
+        items,
+    };
+    b.run("write_receipt", &write("", vec![item("EGGS", -400), item("PAINT", -600)])).unwrap();
+    let r = b.list::<ReceiptLine>("for_txn", &OneTxn { id: t.id });
+    assert_eq!(r.len(), 1);
+    assert!(r[0].id.starts_with("paper:"), "{}", r[0].id);
+    assert_eq!((r[0].total, r[0].items, r[0].txn_id), (-1_000, 2, Some(t.id)));
+    assert_eq!(txn(&b, "ALDI 72031").receipt, r[0].id, "the register marks it");
+
+    let refused = b.run("write_receipt", &write(&r[0].id, vec![item("", -1_000)])).unwrap_err();
+    assert!(refused.contains("needs a name"), "{refused}");
+    b.run("write_receipt", &write(&r[0].id, vec![item("EGGS", -1_000)])).unwrap();
+    let again = b.list::<ReceiptLine>("for_txn", &OneTxn { id: t.id });
+    assert_eq!((again.len(), again[0].items), (1, 1), "put right, not another");
+    let _ = (eggs, improvement);
+}

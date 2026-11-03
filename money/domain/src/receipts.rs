@@ -651,27 +651,30 @@ pub fn candidates(_: &Ctx, _: &Db<Money>, input: PaidFor) -> Result<Plan<Candida
 /// and what paid for it.
 #[view("receipts.receipts")]
 pub fn receipts(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<ReceiptLine>, Refusal> {
-    Ok(scan::<Money, Receipt>()
-        .map_with(|db, r| {
-            let items = items_of(db, &r.id);
-            let charges = db.charge.by(Charge::RECEIPT_ID).from(r.id.clone()).all();
-            let t = r.txn_id.or_else(|| charges.iter().find_map(|c| c.txn_id)).and_then(|t| db.txn.get(t));
-            ReceiptLine {
-                id: r.id.clone(),
-                store: r.store.clone(),
-                date: r.date.clone(),
-                place: r.place.clone(),
-                total: r.total,
-                items: items.len() as i64,
-                filed: items.iter().filter(|i| i.category_id.is_some()).count() as i64,
-                txn_id: r.txn_id,
-                payee: t.as_ref().map(|t| t.payee.clone()).unwrap_or_default(),
-                account: t.and_then(|t| db.account.get(t.account_id)).map(|a| a.name).unwrap_or_default(),
-                charges: charges.len() as i64,
-                charged: charges.iter().filter(|c| c.txn_id.is_some()).count() as i64,
-            }
-        })
-        .sort(|l| (Desc(l.date.clone()), l.id.clone())))
+    Ok(receipt_lines(scan::<Money, Receipt>()))
+}
+
+fn receipt_lines(rows: Plan<Receipt>) -> Plan<ReceiptLine> {
+    rows.map_with(|db, r| {
+        let items = items_of(db, &r.id);
+        let charges = db.charge.by(Charge::RECEIPT_ID).from(r.id.clone()).all();
+        let t = r.txn_id.or_else(|| charges.iter().find_map(|c| c.txn_id)).and_then(|t| db.txn.get(t));
+        ReceiptLine {
+            id: r.id.clone(),
+            store: r.store.clone(),
+            date: r.date.clone(),
+            place: r.place.clone(),
+            total: r.total,
+            items: items.len() as i64,
+            filed: items.iter().filter(|i| i.category_id.is_some()).count() as i64,
+            txn_id: r.txn_id,
+            payee: t.as_ref().map(|t| t.payee.clone()).unwrap_or_default(),
+            account: t.and_then(|t| db.account.get(t.account_id)).map(|a| a.name).unwrap_or_default(),
+            charges: charges.len() as i64,
+            charged: charges.iter().filter(|c| c.txn_id.is_some()).count() as i64,
+        }
+    })
+    .sort(|l| (Desc(l.date.clone()), l.id.clone()))
 }
 
 /// The items filed under a category or any kind of it, from every store —
@@ -794,4 +797,83 @@ pub fn photos(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<PhotoLine>, Refusal>
             }
         })
         .sort(|l| (Desc(l.taken_ms), l.id)))
+}
+
+/// The receipt that paid for a transaction: whole, or by one of its
+/// charges.
+pub fn receipt_of(db: &Db<Money>, txn: Id<Txn>) -> Option<String> {
+    let whole = db.receipt.by(Receipt::TXN_ID).from(Some(txn)).all().into_iter().next().map(|r| r.id);
+    whole.or_else(|| {
+        db.charge
+            .by(Charge::TXN_ID)
+            .from(Some(txn))
+            .all()
+            .into_iter()
+            .next()
+            .map(|c| c.receipt_id)
+    })
+}
+
+/// A receipt typed by hand (`paper:<new id>`), or one already read put
+/// right — its items replaced, each filed as it was when it is the same
+/// thing — and paid by the transaction it is for when one is said.
+#[mutator("receipts.write_receipt")]
+pub fn write_receipt(ctx: &Ctx, db: &mut Db<Money>, input: WriteReceipt) -> Result<(), Refusal> {
+    let (store, order_id) = match input.receipt_id.trim() {
+        "" => (crate::stores::PAPER.to_string(), ctx.new_id::<Receipt>().hex()),
+        id => {
+            db.receipt.get(id.to_string()).ok_or_else(|| Refusal::new("no such receipt"))?;
+            let (s, o) = id.split_once(':').ok_or_else(|| Refusal::new("no such receipt"))?;
+            (s.to_string(), o.to_string())
+        }
+    };
+    if input.items.iter().any(|i| i.name.trim().is_empty()) {
+        return Err(Refusal::new("every item needs a name"));
+    }
+    let total = input.total.unwrap_or_else(|| input.items.iter().map(|i| i.amount).sum());
+    let receipt_id = format!("{store}:{order_id}");
+    let got = StoreReceipt {
+        order_id,
+        date: input.date,
+        place: input.place,
+        total,
+        items: input.items,
+    };
+    add_receipts(ctx, db, ReceiptImport { store, receipts: vec![got] })?;
+    if input.txn_id.is_some() {
+        pay(
+            ctx,
+            db,
+            MatchReceipt {
+                receipt_id,
+                txn_id: input.txn_id,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// The receipts that paid for a transaction (whole or by a charge), and
+/// those of the photos taken for it.
+#[view("receipts.for_txn")]
+pub fn for_txn(_: &Ctx, _: &Db<Money>, input: OneTxn) -> Result<Plan<ReceiptLine>, Refusal> {
+    let t = input.id;
+    let mine = scan::<Money, Receipt>().filter_with(move |db, r| {
+        r.txn_id == Some(t)
+            || db
+                .charge
+                .by(Charge::RECEIPT_ID)
+                .from(r.id.clone())
+                .all()
+                .iter()
+                .any(|c| c.txn_id == Some(t))
+            || db
+                .photo
+                .by(Photo::TXN_ID)
+                .from(Some(t))
+                .all()
+                .iter()
+                .any(|p| matches!(&p.state, Job::Done(d) if d.receipt_id == r.id))
+    });
+    Ok(receipt_lines(mine))
 }

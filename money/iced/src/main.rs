@@ -34,6 +34,7 @@ mod live;
 mod look;
 mod palette;
 mod peer;
+mod receipt;
 mod settings;
 mod stores;
 mod view;
@@ -72,7 +73,6 @@ pub enum Place {
     Filter(String),
     /// A register for conditions not saved.
     Filtered,
-    Receipts,
 }
 
 impl arkui::route::Route for Place {
@@ -86,7 +86,6 @@ impl arkui::route::Route for Place {
             Place::Account(name) => arkui::route::join("account", Some(name)),
             Place::Filter(name) => arkui::route::join("filter", Some(name)),
             Place::Filtered => arkui::route::join("filtered", None),
-            Place::Receipts => arkui::route::join("receipts", None),
         }
     }
 
@@ -99,7 +98,6 @@ impl arkui::route::Route for Place {
             ("account", Some(name)) => Place::Account(name),
             ("filter", Some(name)) => Place::Filter(name),
             ("filtered", _) => Place::Filtered,
-            ("receipts", _) => Place::Receipts,
             _ => Place::Budget,
         }
     }
@@ -112,8 +110,6 @@ pub enum Page {
     Reflect,
     Settings,
     Ledger(Ledger),
-    /// The stores' receipts, and the items on them.
-    Receipts,
 }
 
 /// A field of the transaction form.
@@ -224,6 +220,8 @@ pub enum Modal {
         balance: String,
     },
     Choose(Choosing),
+    /// A receipt's photo.
+    Photo(ark::file::FileRef),
     /// A bank to disconnect, asked twice.
     Disconnect(String),
     /// The register's filter, being named to keep.
@@ -342,8 +340,6 @@ pub enum Message {
     Wake,
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
-    /// A receipt opened on the receipts page, or closed.
-    OpenReceipt(Option<String>),
     /// Items' category: the dropdown, under the pointer.
     FileItems(Vec<ItemRef>),
     /// The form's transaction split: into two lines, or (none) back into one.
@@ -360,6 +356,8 @@ pub enum Message {
     Stores(stores::Msg),
     /// What paid a receipt or a charge: the dropdown of what could have.
     ChoosePayer(PaidFor),
+    /// The open transaction's receipt.
+    Receipt(receipt::Msg),
 }
 
 pub struct App {
@@ -428,6 +426,10 @@ pub struct App {
     pub new_kind: Option<(Id<Category>, String)>,
     /// Settings' Amazon and Costco: what the server said, what is typed.
     pub settings: stores::Settings,
+    /// A receipt being typed under the open transaction.
+    pub paper: Option<receipt::Paper>,
+    /// The photo the photo modal shows, by its file, once decoded.
+    pub photo: Option<(String, iced::widget::image::Handle)>,
 }
 
 impl App {
@@ -472,6 +474,8 @@ impl App {
             dismissed: None,
             new_kind: None,
             settings: stores::Settings::default(),
+            paper: None,
+            photo: None,
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -631,6 +635,14 @@ impl App {
     /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        // The open transaction's receipts follow the form; a receipt typed
+        // goes with the transaction it was for.
+        let open = self.form.as_ref().and_then(|f| f.editing);
+        if open.is_none() {
+            self.paper = None;
+        }
+        self.peer.set_txn(open);
+        self.load_photo();
         // An account is named in the bar, so a link to one waits for the
         // accounts to have arrived.
         let ready = !self.peer.accounts.rows.is_empty();
@@ -664,7 +676,6 @@ impl App {
             Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
             Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map_or(Place::Accounts, |f| Place::Filter(f.name.clone())),
             Page::Ledger(Ledger::Adhoc) => Place::Filtered,
-            Page::Receipts => Place::Receipts,
         }
     }
 
@@ -680,7 +691,6 @@ impl App {
             Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
             Place::Filter(name) => Page::Ledger(Ledger::Saved(self.peer.filters.rows.iter().find(|f| &f.name == name)?.id)),
             Place::Filtered => Page::Ledger(Ledger::Adhoc),
-            Place::Receipts => Page::Receipts,
         })
     }
 
@@ -1178,13 +1188,6 @@ impl App {
                 }
                 None => {}
             },
-            Message::OpenReceipt(id) => {
-                let id = match (&id, self.peer.receipt.as_ref()) {
-                    (Some(a), Some((b, _))) if a == b => None,
-                    _ => id,
-                };
-                self.peer.set_receipt(id.as_deref());
-            }
             Message::FileItems(items) => return self.open_dropdown(Choosing::Items(items), (self.pointer, false)),
             Message::Split(on) => {
                 if let Some(f) = &mut self.form {
@@ -1239,6 +1242,7 @@ impl App {
                 }
             }
             Message::Stores(m) => self.stores(m),
+            Message::Receipt(m) => self.receipt(m),
             Message::ChoosePayer(of) => {
                 self.peer.set_candidates(Some(of.clone()));
                 return self.open_dropdown(Choosing::Payer(of), (self.pointer, false));
@@ -1403,7 +1407,7 @@ impl App {
             (Pane::Sidebar, _) => self.sidebar_act(action),
             (Pane::Page, Page::Budget) => self.act(action),
             (Pane::Page, Page::Ledger(_)) => self.register_act(action),
-            (Pane::Page, Page::Reflect | Page::Receipts | Page::Settings) => {
+            (Pane::Page, Page::Reflect | Page::Settings) => {
                 if let vim::Action::Move(vim::Motion::Left(_)) = action {
                     self.pane = Pane::Sidebar;
                 }
@@ -1835,7 +1839,7 @@ impl App {
     fn under(&self, y: f32) -> (Point, bool) {
         let all = self.register_account().is_none();
         let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
-        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 90.0;
+        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 116.0;
         let width = self.window.width - view::SIDEBAR - 1.0 - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
         let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
         let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
@@ -2285,6 +2289,11 @@ impl App {
             arkui::history::wheel().map(Message::Wheel),
             // Something under the window's root wants a frame of its own.
             arkui::window::wakes().map(|()| Message::Swallow),
+            // A photo dropped on the window: the open transaction's receipt.
+            iced::event::listen_with(|e, _, _| match e {
+                iced::Event::Window(iced::window::Event::FileDropped(path)) => Some(Message::Receipt(receipt::Msg::Dropped(path))),
+                _ => None,
+            }),
         ];
         if self.dropdown.is_some() {
             subs.push(arkui::command::keys(true).map(Message::DropKey));

@@ -70,6 +70,10 @@ pub struct Peer {
     /// Every category, the whole tree: the envelopes' kinds too.
     pub tree: Watched<CategoryNode>,
     pub receipts: Watched<ReceiptLine>,
+    /// Every receipt photo, and where reading each stands.
+    pub photos: Watched<PhotoLine>,
+    /// The transaction open in the form, and the receipts that paid for it.
+    pub txn: Option<(Id<Txn>, Watched<ReceiptLine>)>,
     /// Every item not filed under a category yet.
     pub unfiled: Watched<ItemLine>,
     /// The receipt open on the receipts page, and its items.
@@ -127,6 +131,8 @@ impl Peer {
             banks: Watched::open(c, "banks", none(), read),
             tree: Watched::open(c, "tree", none(), read),
             receipts: Watched::open(c, "receipts", none(), read),
+            photos: Watched::open(c, "photos", none(), read),
+            txn: None,
             unfiled: Watched::open(c, "items", ItemsIn { category_id: None }.to_bytes(), read),
             receipt: None,
             charges: None,
@@ -165,6 +171,8 @@ impl Peer {
             self.banks.view(),
             self.tree.view(),
             self.receipts.view(),
+            self.photos.view(),
+            self.txn.as_ref().and_then(|(_, w)| w.view()),
             self.unfiled.view(),
             self.receipt.as_ref().and_then(|(_, w)| w.view()),
             self.charges.as_ref().and_then(|w| w.view()),
@@ -202,6 +210,10 @@ impl Peer {
         note(self.banks.settle(c, moved));
         note(self.tree.settle(c, moved));
         note(self.receipts.settle(c, moved));
+        note(self.photos.settle(c, moved));
+        if let Some((_, w)) = &mut self.txn {
+            note(w.settle(c, moved));
+        }
         note(self.unfiled.settle(c, moved));
         if let Some((_, w)) = &mut self.receipt {
             note(w.settle(c, moved));
@@ -221,6 +233,10 @@ impl Peer {
         note(self.formulas.settle(c, moved));
         if let Some(p) = &mut self.preview {
             note(p.settle(c, moved));
+        }
+        // A receipt read or attached: its items on screen.
+        if any {
+            self.follow_txn();
         }
         any
     }
@@ -289,6 +305,38 @@ impl Peer {
         self.total.rows.first().cloned().unwrap_or_default()
     }
 
+    /// The receipts of the transaction open in the form, and its photos
+    /// wanted from the server: the first receipt's items on screen.
+    pub fn set_txn(&mut self, id: Option<Id<Txn>>) {
+        if self.txn.as_ref().map(|(t, _)| *t) == id {
+            return;
+        }
+        let c = &mut self.client;
+        if let Some((_, old)) = self.txn.take() {
+            old.close(c);
+        }
+        if let Some(id) = id {
+            let input = OneTxn { id }.to_bytes();
+            self.txn = Some((id, Watched::open(c, "for_txn", input, read)));
+        }
+        self.follow_txn();
+    }
+
+    /// The open transaction's first receipt's items, as its receipts move.
+    fn follow_txn(&mut self) {
+        let first = self.txn_receipts().first().map(|r| r.id.clone());
+        self.set_receipt(first.as_deref());
+    }
+
+    /// The receipts of the transaction open in the form.
+    pub fn txn_receipts(&self) -> &[ReceiptLine] {
+        self.txn.as_ref().map_or(&[], |(_, w)| &w.rows[..])
+    }
+
+    /// The items of the receipt on screen.
+    pub fn receipt_items(&self) -> &[ItemLine] {
+        self.receipt.as_ref().map_or(&[], |(_, w)| &w.rows[..])
+    }
     /// One receipt's items on screen, or none.
     pub fn set_receipt(&mut self, id: Option<&str>) {
         if self.receipt.as_ref().map(|(r, _)| r.as_str()) == id {

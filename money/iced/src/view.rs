@@ -112,7 +112,6 @@ impl App {
             Page::Reflect => self.view_reflect(),
             Page::Settings => self.view_settings(),
             Page::Ledger(l) => self.view_ledger(l),
-            Page::Receipts => self.view_receipts(),
         };
         // A swipe's arrow over the page, not the sidebar.
         let page = self.history.view(page, iced::time::Instant::now());
@@ -209,7 +208,6 @@ impl App {
             (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
             (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
             (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
-            (glyphs::CART, "Receipts".to_string(), None, Page::Receipts),
             (glyphs::WRENCH, "Settings".to_string(), None, Page::Settings),
         ];
         let sections: [Section; 3] = [
@@ -263,7 +261,6 @@ impl App {
                 let lit = arkui::sidebar::lit(i, cursor, focused);
                 let trailing = match page {
                     Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
-                    Page::Receipts => (!self.peer.unfiled.rows.is_empty()).then(|| self.badge(self.peer.unfiled.rows.len(), lit)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
                     Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map(|f| balance(f.total, lit)),
                     _ => None,
@@ -986,7 +983,7 @@ impl App {
             .push(table::heading("MEMO", Length::FillPortion(2)))
             .push(table::heading("OUTFLOW", w(100.0)))
             .push(table::heading("INFLOW", w(100.0)))
-            .push(table::heading("", w(90.0)));
+            .push(table::heading("", w(116.0)));
 
         let mut body: Column<'_, Message> = Column::new();
         if let Some(f) = self.form.as_ref().filter(|f| f.editing.is_none()) {
@@ -1111,10 +1108,24 @@ impl App {
             cleared = cleared.on_press(Message::ToggleCleared(t.id, c));
         }
         let mut end = row![cleared].spacing(4).align_y(Alignment::Center);
+        // A receipt found for it, or a photo of one taken: opened with it.
+        if !t.receipt.is_empty() || t.photos > 0 {
+            let read = !t.receipt.is_empty();
+            end = end.push(
+                button(icon::tinted(glyphs::RECEIPT, icon::SIZE, move |p| match (lit, read) {
+                    (true, _) => p.primary.base.text,
+                    (false, true) => p.background.base.text.scale_alpha(0.7),
+                    (false, false) => p.background.base.text.scale_alpha(0.35),
+                }))
+                .on_press(Message::EditTxn(t.id))
+                .padding(2)
+                .style(style::quiet),
+            );
+        }
         if !t.approved {
             end = end.push(link("Approve", Message::Approve(vec![t.id])));
         }
-        line = line.push(container(end).width(w(90.0)));
+        line = line.push(container(end).width(w(116.0)));
         mouse_area(
             table::row(line, on_cursor, focused, odd)
                 .center_y(Length::Fixed(TXN_ROW))
@@ -1192,7 +1203,7 @@ impl App {
         .on_press(Message::FormCleared(!f.cleared))
         .padding(2)
         .style(style::quiet);
-        line = line.push(container(cleared).width(w(84.0)));
+        line = line.push(container(cleared).width(w(110.0)));
 
         let mut under = row![].spacing(10).align_y(Alignment::Center);
         if f.editing.is_none() && all {
@@ -1229,7 +1240,12 @@ impl App {
         if let Some(rows) = &f.split {
             parts = parts.push(self.view_split(f, rows));
         }
-        container(parts.push(under))
+        parts = parts.push(under);
+        // One entered already has its receipt under it.
+        if let Some(t) = f.editing.and_then(|id| self.peer.register.rows.iter().find(|t| t.id == id)) {
+            parts = parts.push(self.view_receipt_panel(t));
+        }
+        container(parts)
             .padding([8, 4])
             .style(|theme| container::Style {
                 background: Some(iced::Background::Color(arkui::theme::of(theme).primary.base.color.scale_alpha(0.1))),
@@ -1288,147 +1304,9 @@ impl App {
 
     // * Receipts
 
-    /// The stores' receipts, newest first; one opened shows its items, each
-    /// filed under a category by the same dropdown a transaction's is.
-    fn view_receipts(&self) -> Element<'_, Message> {
-        let receipts = &self.peer.receipts.rows;
-        let unfiled = self.peer.unfiled.rows.len();
-        let subtitle = match (receipts.len(), unfiled) {
-            (0, _) => "None yet. Set up Amazon in Settings, or drop a store's export in the server's receipts folder.".to_string(),
-            (n, 0) => format!("{n} receipt{}, every item filed", if n == 1 { "" } else { "s" }),
-            (n, u) => format!(
-                "{n} receipt{}, {u} item{} not filed yet",
-                if n == 1 { "" } else { "s" },
-                if u == 1 { "" } else { "s" }
-            ),
-        };
-        let w = |n: f32| Length::Fixed(n);
-        let head = row![
-            table::heading("DATE", w(96.0)),
-            table::heading("STORE", w(90.0)),
-            table::heading("WHERE", Length::FillPortion(3)),
-            table::heading("ITEMS", w(90.0)),
-            table::heading("PAID BY", Length::FillPortion(3)),
-            table::heading("TOTAL", w(100.0)),
-        ]
-        .align_y(Alignment::Center);
-        let open = self.peer.receipt.as_ref().map(|(id, _)| id.as_str());
-        let mut body: Column<'_, Message> = Column::new();
-        for (i, r) in receipts.iter().enumerate() {
-            let lit = open == Some(r.id.as_str());
-            let paid = match (r.charges, &r.txn_id, r.payee.is_empty()) {
-                (0, Some(_), false) => format!("{} \u{2014} {}", r.payee, r.account),
-                (0, Some(_), true) => r.account.clone(),
-                (0, None, _) => "No charge found yet".into(),
-                (n, ..) if r.charged == n => format!("{n} charge{}, all found", if n == 1 { "" } else { "s" }),
-                (n, ..) => format!("{} of {n} charges found", r.charged),
-            };
-            let unpaid = match r.charges {
-                0 => r.txn_id.is_none(),
-                n => r.charged < n,
-            };
-            let line = row![
-                table::cell(r.date.clone(), w(96.0), lit, false, true),
-                table::cell(store_name(&r.store), w(90.0), lit, false, true),
-                table::cell(r.place.clone(), Length::FillPortion(3), lit, false, true),
-                table::cell(format!("{} of {}", r.filed, r.items), w(90.0), lit, false, true),
-                self.paid_cell(
-                    paid,
-                    unpaid,
-                    lit,
-                    (r.charges == 0).then(|| PaidFor {
-                        receipt_id: r.id.clone(),
-                        charge_id: None,
-                    })
-                ),
-                table::cell(money((-r.total).max(0)), w(100.0), lit, false, false),
-            ]
-            .align_y(Alignment::Center);
-            body = body.push(
-                mouse_area(table::row(line, lit, true, i % 2 == 1).center_y(Length::Fixed(TXN_ROW)))
-                    .on_press(Message::OpenReceipt(Some(r.id.clone()))),
-            );
-            if lit {
-                if let Some((_, items)) = &self.peer.receipt {
-                    body = body.push(self.view_items(&items.rows));
-                }
-                if let Some(charges) = self.peer.charges.as_ref().filter(|w| !w.rows.is_empty()) {
-                    body = body.push(self.view_charges(&charges.rows));
-                }
-            }
-        }
-        if receipts.is_empty() {
-            body = body.push(container(dim("Nothing here.", 13)).padding(20));
-        }
-        let mut page = column![column![bold("Receipts", 22), dim(subtitle, 12)].spacing(2)].spacing(14);
-        if unfiled > 0 {
-            let all: Vec<ItemRef> = self
-                .peer
-                .unfiled
-                .rows
-                .iter()
-                .map(|i| ItemRef {
-                    receipt_id: i.receipt_id.clone(),
-                    line: i.line,
-                })
-                .collect();
-            page = page.push(
-                container(
-                    column![
-                        row![
-                            bold("Not filed yet", 14),
-                            fill(),
-                            quiet(&format!("File all {unfiled}\u{2026}"), Message::FileItems(all))
-                        ]
-                        .align_y(Alignment::Center),
-                        dim("Filing an item files the same item on every receipt, so each is said once.", 11),
-                        self.view_items(&self.peer.unfiled.rows),
-                    ]
-                    .spacing(8),
-                )
-                .padding(14)
-                .style(look::card),
-            );
-        }
-        page.push(column![
-            table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
-            rule::horizontal(1).style(style::hairline),
-            scrollable(body).height(Length::Fill).style(style::bars),
-        ])
-        .padding(PAD)
-        .width(Length::Fill)
-        .into()
-    }
-
-    /// What paid a receipt: what the cell says, lit where nothing has; one
-    /// that can be said by hand opens the dropdown of what could have.
-    fn paid_cell<'a>(&self, said: String, unpaid: bool, lit: bool, of: Option<PaidFor>) -> Element<'a, Message> {
-        let label = text(said)
-            .size(table::CELL_SIZE)
-            .wrapping(text::Wrapping::None)
-            .style(move |theme| text::Style {
-                color: Some(match (unpaid, lit) {
-                    (true, false) => arkui::theme::of(theme).warning.base.color,
-                    _ => style::on_row(theme, lit, false, false),
-                }),
-            });
-        let cell: Element<'a, Message> = match of {
-            Some(of) => mouse_area(label).on_press(Message::ChoosePayer(of)).into(),
-            None => label.into(),
-        };
-        container(cell)
-            .width(Length::FillPortion(3))
-            .padding(Padding {
-                right: table::SPACING,
-                ..Padding::ZERO
-            })
-            .clip(true)
-            .into()
-    }
-
     /// A receipt's charges, each its day, amount and card, and what paid it,
     /// which opens the dropdown of what could have.
-    fn view_charges<'a>(&'a self, charges: &'a [ChargeLine]) -> Element<'a, Message> {
+    pub(crate) fn view_charges<'a>(&'a self, charges: &'a [ChargeLine]) -> Element<'a, Message> {
         let w = |n: f32| Length::Fixed(n);
         let mut list = column![row![Space::new().width(w(24.0)), dim("Charged", 11)]].spacing(2);
         for c in charges {
@@ -1461,45 +1339,6 @@ impl App {
                     text(c.card.clone()).size(12).style(style::dim).width(Length::FillPortion(3)),
                     text(what).size(12).width(w(110.0)),
                     pay,
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-            );
-        }
-        container(list).padding([6, 0]).into()
-    }
-
-    /// Items, each its name, how many, what it cost, and its category, which
-    /// opens the dropdown to file it.
-    fn view_items<'a>(&'a self, items: &'a [ItemLine]) -> Element<'a, Message> {
-        let w = |n: f32| Length::Fixed(n);
-        let mut list = column![].spacing(2);
-        for i in items {
-            let label = match i.category_id {
-                Some(c) => self.peer.category_name(c).unwrap_or_else(|| i.category.clone()),
-                None => "File it".into(),
-            };
-            let filed = i.category_id.is_some();
-            let file = button(text(label).size(12).style(move |theme| text::Style {
-                color: Some(match filed {
-                    true => arkui::theme::of(theme).background.base.text,
-                    false => arkui::theme::of(theme).warning.base.color,
-                }),
-            }))
-            .on_press(Message::FileItems(vec![ItemRef {
-                receipt_id: i.receipt_id.clone(),
-                line: i.line,
-            }]))
-            .padding([3, 6])
-            .width(Length::FillPortion(3))
-            .style(look::choice(false));
-            list = list.push(
-                row![
-                    Space::new().width(w(24.0)),
-                    text(i.name.clone()).size(12).width(Length::FillPortion(4)).wrapping(text::Wrapping::None),
-                    text(quantity(i.quantity, &i.unit)).size(12).style(style::dim).width(w(90.0)),
-                    text(money((-i.amount).max(0))).size(12).width(w(90.0)),
-                    file,
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),
@@ -1576,6 +1415,9 @@ impl App {
     // * Panels
 
     fn view_modal<'a>(&'a self, m: &'a Modal) -> Element<'a, Message> {
+        if let Modal::Photo(_) = m {
+            return panel::panel(container(self.view_photo()).padding(14), 720.0).into();
+        }
         let body: Element<'a, Message> = match m {
             Modal::AddAccount {
                 name,
@@ -1669,6 +1511,7 @@ impl App {
             }
             Modal::Choose(choosing) => self.view_chooser(choosing),
             Modal::Disconnect(bank) => self.view_disconnect(bank),
+            Modal::Photo(_) => self.view_photo(),
             Modal::SaveFilter { name } => self.view_save_filter(name),
         };
         panel::panel(container(body).padding(14), 440.0).into()
@@ -1855,7 +1698,7 @@ impl App {
 }
 
 /// A store as the receipts page names it.
-fn store_name(store: &str) -> String {
+pub(crate) fn store_name(store: &str) -> String {
     match store {
         "amazon" => "Amazon".into(),
         "target" => "Target".into(),
@@ -1865,7 +1708,7 @@ fn store_name(store: &str) -> String {
 }
 
 /// How many, in thousandths, as a line says it: `2`, `11.482 gal`.
-fn quantity(thousandths: i64, unit: &str) -> String {
+pub(crate) fn quantity(thousandths: i64, unit: &str) -> String {
     let n = match thousandths % 1000 {
         0 => (thousandths / 1000).to_string(),
         _ => format!("{:.3}", thousandths as f64 / 1000.0).trim_end_matches('0').to_string(),

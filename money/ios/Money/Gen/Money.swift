@@ -2024,10 +2024,10 @@ public struct Txn: Equatable {
 extension TxnLine {
     public init(json j: Any?) {
         let o = j as! [String: Any]
-        self.init(id: Id(J.text(o["id"])), accountId: Id(J.text(o["account_id"])), account: J.text(o["account"]), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, category: J.text(o["category"]), group: J.text(o["group"]), memo: J.text(o["memo"]), amount: J.int(o["amount"]), cleared: Cleared(json: o["cleared"]), approved: J.bool(o["approved"]), transfer: J.bool(o["transfer"]), imported: J.bool(o["imported"]), importedPayee: J.text(o["imported_payee"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
+        self.init(id: Id(J.text(o["id"])), accountId: Id(J.text(o["account_id"])), account: J.text(o["account"]), date: J.text(o["date"]), payee: J.text(o["payee"]), categoryId: J.opt(o["category_id"]) { v0 in Id(J.text(v0)) }, category: J.text(o["category"]), group: J.text(o["group"]), memo: J.text(o["memo"]), amount: J.int(o["amount"]), cleared: Cleared(json: o["cleared"]), approved: J.bool(o["approved"]), transfer: J.bool(o["transfer"]), imported: J.bool(o["imported"]), importedPayee: J.text(o["imported_payee"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]), receipt: J.text(o["receipt"]), photos: J.int(o["photos"]))
     }
 
-    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"account_id\":" + J.q(accountId.hex), "\"account\":" + J.q(account), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"category\":" + J.q(category), "\"group\":" + J.q(group), "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + cleared.json, "\"approved\":" + String(approved), "\"transfer\":" + String(transfer), "\"imported\":" + String(imported), "\"imported_payee\":" + J.q(importedPayee), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId)]) }
+    public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"account_id\":" + J.q(accountId.hex), "\"account\":" + J.q(account), "\"date\":" + J.q(date), "\"payee\":" + J.q(payee), "\"category_id\":" + J.wopt(categoryId) { v0 in J.q(v0.hex) }, "\"category\":" + J.q(category), "\"group\":" + J.q(group), "\"memo\":" + J.q(memo), "\"amount\":" + String(amount), "\"cleared\":" + cleared.json, "\"approved\":" + String(approved), "\"transfer\":" + String(transfer), "\"imported\":" + String(imported), "\"imported_payee\":" + J.q(importedPayee), "\"created_ms\":" + String(createdMs), "\"user_id\":" + J.q(userId), "\"receipt\":" + J.q(receipt), "\"photos\":" + String(photos)]) }
 }
 
 /// The record `Txns`.
@@ -2042,6 +2042,25 @@ public struct Txns: Equatable {
     }
 
     public var json: String { J.obj(["\"ids\":" + J.wlist(ids) { v0 in J.q(v0.hex) }]) }
+}
+
+/// The record `WriteReceipt`.
+public struct WriteReceipt: Equatable {
+    public var receiptId: String
+    public var txnId: Id?
+    public var place: String
+    public var date: String
+    public var total: Int64?
+    public var items: [StoreItem]
+
+    public init(receiptId: String, txnId: Id?, place: String, date: String, total: Int64?, items: [StoreItem]) { self.receiptId = receiptId; self.txnId = txnId; self.place = place; self.date = date; self.total = total; self.items = items; }
+
+    public init(json j: Any?) {
+        let o = j as! [String: Any]
+        self.init(receiptId: J.text(o["receipt_id"]), txnId: J.opt(o["txn_id"]) { v0 in Id(J.text(v0)) }, place: J.text(o["place"]), date: J.text(o["date"]), total: J.opt(o["total"]) { v0 in J.int(v0) }, items: J.list(o["items"]) { v0 in StoreItem(json: v0) })
+    }
+
+    public var json: String { J.obj(["\"receipt_id\":" + J.q(receiptId), "\"txn_id\":" + J.wopt(txnId) { v0 in J.q(v0.hex) }, "\"place\":" + J.q(place), "\"date\":" + J.q(date), "\"total\":" + J.wopt(total) { v0 in String(v0) }, "\"items\":" + J.wlist(items) { v0 in v0.json }]) }
 }
 
 /// The domain's functions, each called by its name through `peer`.
@@ -2233,6 +2252,9 @@ public struct Money {
     /// `receipts.file_items`: its intent's id.
     @discardableResult public func fileItems(_ input: ClassifyItems) throws -> String { try peer.mutate(name: "receipts.file_items", input: input.json) }
 
+    /// `receipts.for_txn`, kept.
+    public func forTxn(_ input: OneTxn) throws -> LiveView<ReceiptLine> { LiveView(try peer.view(name: "receipts.for_txn", input: input.json)) { j in ReceiptLine(json: j) } }
+
     /// `receipts.items`, kept.
     public func items(_ input: ItemsIn) throws -> LiveView<ItemLine> { LiveView(try peer.view(name: "receipts.items", input: input.json)) { j in ItemLine(json: j) } }
 
@@ -2250,6 +2272,9 @@ public struct Money {
 
     /// `receipts.receipts`, kept.
     public func receipts() throws -> LiveView<ReceiptLine> { LiveView(try peer.view(name: "receipts.receipts", input: "null")) { j in ReceiptLine(json: j) } }
+
+    /// `receipts.write_receipt`: its intent's id.
+    @discardableResult public func writeReceipt(_ input: WriteReceipt) throws -> String { try peer.mutate(name: "receipts.write_receipt", input: input.json) }
 
     /// `role.grant`: its intent's id.
     @discardableResult public func grant(_ input: Grant) throws -> String { try peer.mutate(name: "role.grant", input: input.json) }

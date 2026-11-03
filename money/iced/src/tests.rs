@@ -545,11 +545,29 @@ fn the_budget_drawn() {
     let _ = form.register_act(Action::Activate);
     let mut receipts = app();
     let _ = receipts.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
-    let _ = receipts.update(Message::Go(Page::Receipts));
+    // The Amazon order, both its charges found, open under the second.
+    let _ = receipts.update(Message::Go(Page::Ledger(Ledger::All)));
     let _ = receipts.update(Message::Sync);
     let _ = receipts.update(Message::Sync);
-    let open = receipts.peer.receipts.rows.iter().find(|r| r.store == "amazon").map(|r| r.id.clone());
-    let _ = receipts.update(Message::OpenReceipt(open));
+    let order = receipts
+        .peer
+        .receipts
+        .rows
+        .iter()
+        .find(|r| r.store == "amazon")
+        .map(|r| r.id.clone())
+        .unwrap_or_default();
+    let paid = receipts
+        .peer
+        .register
+        .rows
+        .iter()
+        .filter(|t| t.receipt == order)
+        .map(|t| t.id)
+        .next_back();
+    if let Some(id) = paid {
+        let _ = receipts.update(Message::EditTxn(id));
+    }
     let mut settings = app();
     let _ = settings.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
     let _ = settings.update(Message::Go(Page::Settings));
@@ -773,14 +791,15 @@ fn the_bank_says_what_the_payee_does_not() {
     assert_eq!(crate::bank_said(&t), "", "typed in");
 }
 
-/// The demo's Target and Costco receipts are on the receipts page, matched
-/// to the charges that paid for them; the chips wait to be filed, and
-/// filing them from the dropdown files them, splits the charge again, and
-/// takes the badge away.
+/// The demo's Target and Costco receipts are matched to the charges that
+/// paid for them, and those are marked in the register; one opened shows
+/// its receipt under its form, whose items wait to be filed, and filing
+/// one from the dropdown files it and splits the charge again. There is
+/// no receipts page.
 #[test]
-fn receipts_are_filed_from_their_page() {
+fn receipts_are_filed_from_their_transaction() {
     let mut app = app();
-    let _ = app.update(Message::Go(Page::Receipts));
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
     let stores: Vec<&str> = app.peer.receipts.rows.iter().map(|r| r.store.as_str()).collect();
     assert_eq!(stores.len(), 3, "{stores:?}");
     assert!(stores.contains(&"target") && stores.contains(&"costco") && stores.contains(&"amazon"));
@@ -788,25 +807,19 @@ fn receipts_are_filed_from_their_page() {
         app.peer.receipts.rows.iter().filter(|r| r.store != "amazon").all(|r| r.txn_id.is_some()),
         "each matched to its charge"
     );
-    let unfiled: Vec<&str> = app.peer.unfiled.rows.iter().map(|i| i.name.as_str()).collect();
-    assert!(unfiled.contains(&"GG TORTILLA CHIPS"));
+    assert!(!app.places().iter().any(|(_, label, _, _)| label == "Receipts"), "no receipts page");
     let target = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap().clone();
-    let _ = app.update(Message::OpenReceipt(Some(target.id.clone())));
-    let items: Vec<(String, String)> = app
-        .peer
-        .receipt
-        .as_ref()
-        .unwrap()
-        .1
-        .rows
-        .iter()
-        .map(|i| (i.name.clone(), i.category.clone()))
-        .collect();
+    let paid = app.peer.register.rows.iter().find(|t| Some(t.id) == target.txn_id).unwrap().clone();
+    assert_eq!(paid.receipt, target.id, "marked in the register");
+    assert!(paid.category.starts_with("Split"), "{}", paid.category);
+    let _ = app.update(Message::EditTxn(paid.id));
+    assert_eq!(
+        app.peer.txn_receipts().iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        [target.id.as_str()]
+    );
+    let items: Vec<(String, String)> = app.peer.receipt_items().iter().map(|i| (i.name.clone(), i.category.clone())).collect();
     assert_eq!(items[0].1, "Everyday \u{203a} Groceries \u{203a} Eggs", "eggs filed by their name");
     assert_eq!(items[1].1, "Everyday \u{203a} Household \u{203a} Cleaning", "the cleaner by its");
-    // Its charge is split by them.
-    let paid = app.peer.register.rows.iter().find(|t| Some(t.id) == target.txn_id).unwrap().clone();
-    assert!(paid.category.starts_with("Split"), "{}", paid.category);
     // The chips, filed under Groceries from the dropdown.
     let chips = vec![ItemRef {
         receipt_id: target.id.clone(),
@@ -814,16 +827,103 @@ fn receipts_are_filed_from_their_page() {
     }];
     let _ = app.update(Message::FileItems(chips.clone()));
     assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Items(i)) if *i == chips));
-    let _ = app.update(Message::DropTyped("snack".into()));
-    assert!(app.drop_groups().is_empty(), "nothing called snack");
     let groceries = category(&app, "Groceries").category_id;
     let _ = app.update(Message::Chose(Choice::Category(Some(groceries))));
     assert!(app.peer.unfiled.rows.iter().all(|i| i.name != "GG TORTILLA CHIPS"));
     let r = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap();
     assert_eq!((r.filed, r.items), (3, 3));
-    // Opened again, it closes.
-    let _ = app.update(Message::OpenReceipt(Some(target.id)));
-    assert!(app.peer.receipt.is_none());
+    // Closed, its receipt goes with it.
+    let _ = app.update(Message::CancelTxn);
+    assert!(app.peer.txn.is_none() && app.peer.receipt.is_none());
+}
+
+/// A receipt typed by hand for a transaction with none: it pays for it,
+/// is drawn under its form, and is put right by typing it again — the
+/// same receipt, not another. Detached, it is offered to attach again.
+#[test]
+fn a_receipt_is_typed_put_right_and_attached() {
+    use crate::receipt::Msg;
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let t = app
+        .peer
+        .register
+        .rows
+        .iter()
+        .find(|t| t.amount < 0 && !t.transfer && t.receipt.is_empty())
+        .unwrap()
+        .clone();
+    let _ = app.update(Message::EditTxn(t.id));
+    assert!(app.peer.txn_receipts().is_empty());
+    let _ = app.update(Message::Receipt(Msg::Write(None)));
+    let p = app.paper.clone().unwrap();
+    assert_eq!(
+        (p.place.as_str(), p.date.as_str(), p.items.len()),
+        (t.payee.as_str(), t.date.as_str(), 1),
+        "starts as the transaction"
+    );
+    let _ = app.update(Message::Receipt(Msg::Name(0, "BREAD".into())));
+    let _ = app.update(Message::Receipt(Msg::Amount(0, "1.00".into())));
+    let _ = app.update(Message::Receipt(Msg::AddItem));
+    let _ = app.update(Message::Receipt(Msg::Name(1, "MILK".into())));
+    let rest = crate::amount::editable(-t.amount - 100);
+    let _ = app.update(Message::Receipt(Msg::Amount(1, rest)));
+    let _ = app.update(Message::Receipt(Msg::Save));
+    assert!(app.paper.is_none(), "{}", app.note);
+    let r = app.peer.txn_receipts()[0].clone();
+    assert_eq!((r.total, r.items, r.txn_id), (t.amount, 2, Some(t.id)));
+    assert_eq!(app.peer.register.rows.iter().find(|x| x.id == t.id).unwrap().receipt, r.id);
+
+    let _ = app.update(Message::Receipt(Msg::Write(Some(r.id.clone()))));
+    assert_eq!(app.paper.as_ref().unwrap().items.len(), 2, "what it says, to put right");
+    let _ = app.update(Message::Receipt(Msg::RemoveItem(0)));
+    let _ = app.update(Message::Receipt(Msg::Save));
+    assert_eq!(app.peer.txn_receipts().iter().map(|r| r.items).collect::<Vec<_>>(), [1]);
+
+    let _ = app.update(Message::Receipt(Msg::Detach(r.id.clone())));
+    assert!(app.peer.txn_receipts().is_empty());
+    let line = app.peer.register.rows.iter().find(|x| x.id == t.id).unwrap().clone();
+    assert!(
+        crate::receipt::unmatched(&app.peer.receipts.rows, &line).iter().any(|x| x.id == r.id),
+        "offered again"
+    );
+    let _ = app.update(Message::Receipt(Msg::Attach(r.id.clone())));
+    assert_eq!(app.peer.txn_receipts().len(), 1);
+}
+
+/// A photo dropped on an open transaction is kept on this device and its
+/// reading asked for: the transaction is marked, and its form says the
+/// photo is being read; the photo opens over the window. Something else
+/// dropped is said not to be a photo.
+#[test]
+fn a_photo_dropped_on_a_transaction_is_its_receipt() {
+    use crate::receipt::Msg;
+    let mut app = app();
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
+    let t = app
+        .peer
+        .register
+        .rows
+        .iter()
+        .find(|t| t.amount < 0 && t.receipt.is_empty())
+        .unwrap()
+        .clone();
+    let dir = tempfile::tempdir().unwrap();
+    let jpeg = dir.path().join("receipt.JPG");
+    std::fs::write(&jpeg, b"\xff\xd8\xff\xe0 a receipt").unwrap();
+    let _ = app.update(Message::Receipt(Msg::Dropped(jpeg.clone())));
+    assert!(app.note.contains("open a transaction"), "{}", app.note);
+    let _ = app.update(Message::EditTxn(t.id));
+    let _ = app.update(Message::Receipt(Msg::Dropped(dir.path().join("notes.txt"))));
+    assert!(app.note.contains("is not a photo"), "{}", app.note);
+    let _ = app.update(Message::Receipt(Msg::Dropped(jpeg)));
+    let photo = app.peer.photos.rows.iter().find(|p| p.txn_id == Some(t.id)).unwrap().clone();
+    assert_eq!((photo.state.as_str(), photo.file.media.as_str()), ("reading", "image/jpeg"));
+    assert_eq!(app.peer.register.rows.iter().find(|x| x.id == t.id).unwrap().photos, 1);
+    let _ = app.update(Message::Receipt(Msg::Photo(photo.file.clone())));
+    assert!(matches!(app.modal, Some(Modal::Photo(_))));
+    assert!(app.photo.as_ref().is_some_and(|(h, _)| *h == photo.file.hash), "here already: made here");
 }
 
 /// A transaction split in the form: two lines, a category each, adding up
@@ -946,7 +1046,7 @@ fn a_new_transaction_is_split_as_it_is_entered() {
 #[test]
 fn an_amazon_order_is_paid_charge_by_charge() {
     let mut app = app();
-    let _ = app.update(Message::Go(Page::Receipts));
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
     let amazon = || |app: &App| app.peer.receipts.rows.iter().find(|r| r.store == "amazon").unwrap().clone();
     let r = amazon()(&app);
     assert_eq!((r.charges, r.charged, r.txn_id), (2, 1, None));
@@ -955,7 +1055,8 @@ fn an_amazon_order_is_paid_charge_by_charge() {
     let _ = app.update(Message::Sync);
     let r = amazon()(&app);
     assert_eq!((r.charges, r.charged), (2, 2), "{}", app.note);
-    let _ = app.update(Message::OpenReceipt(Some(r.id.clone())));
+    let first = app.peer.register.rows.iter().find(|t| t.receipt == r.id).unwrap().id;
+    let _ = app.update(Message::EditTxn(first));
     let charges = app.peer.charges.as_ref().unwrap().rows.clone();
     assert_eq!(charges.len(), 2);
     let live = charges.iter().find(|c| c.amount == -2_399).unwrap().clone();
@@ -969,7 +1070,6 @@ fn an_amazon_order_is_paid_charge_by_charge() {
     assert_eq!(rows.iter().map(|r| r.category).collect::<Vec<_>>(), [Some(eggs), None]);
     let _ = app.update(Message::CancelTxn);
     // Paid by nothing, then found again by hand.
-    let _ = app.update(Message::Go(Page::Receipts));
     let of = PaidFor {
         receipt_id: r.id.clone(),
         charge_id: Some(live.id.clone()),
