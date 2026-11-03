@@ -15,14 +15,19 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 # `uniffi-bindgen`, which writes the Kotlin and Swift for an app's library
 # (`cargo run -p ark-ffi --features bindgen --bin uniffi-bindgen -- generate
-# --library libharken_ffi.so --language kotlin --out-dir …`).
+# --library libharken_ffi.so --language kotlin --out-dir …`), finding each
+# crate's `uniffi.toml` through `cargo metadata` in the workspace. The
+# flake's is `bindgen-roots`, which runs no cargo: it is told the crates'
+# directories (`--config` with `[crate-roots]`), so the bindings are made
+# from those files alone, not the whole workspace.
 [features]
-bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
+bindgen = ["bindgen-roots", "uniffi/cargo-metadata"]
+bindgen-roots = ["uniffi/cli"]
 
 [[bin]]
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
-required-features = ["bindgen"]
+required-features = ["bindgen-roots"]
 
 [dev-dependencies]
 arkdb = { path = "../arkdb" }

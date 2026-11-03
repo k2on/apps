@@ -407,17 +407,29 @@
           # library; UniFFI writes its Kotlin and Swift from the library built
           # for the host (`uniffi-bindgen generate <library>`), and beside
           # them goes the bridge's typed half (rust/ark-ffi/{kotlin,swift}).
-          # The bindgen reads each crate's uniffi.toml where `cargo metadata
-          # --no-deps` finds the crate: in the workspace's manifests, which
-          # need nothing fetched.
-          ffiBindings = { lib, language, out ? "$TMPDIR/bindings" }: ''
-            (cd ${only rustDirs}/rust && HOME=$TMPDIR PATH=${rust}/bin:$PATH \
+          # The bindgen reads each crate's uniffi.toml from the directory
+          # `[crate-roots]` names for it: those three files and nothing else of
+          # the workspace, so the bindings (and an APK over them) move only
+          # when the library or one of them does. A crate with none takes
+          # UniFFI's defaults.
+          ffiBindings = { lib, language, out ? "$TMPDIR/bindings" }:
+            let
+              roots = only [ "rust/ark-ffi/uniffi.toml" "money/ffi/uniffi.toml" "harken/ffi/uniffi.toml" ];
+              config = pkgs.writeText "uniffi-roots.toml" ''
+                [crate-roots]
+                ark_ffi = "${roots}/rust/ark-ffi"
+                money_ffi = "${roots}/money/ffi"
+                harken_ffi = "${roots}/harken/ffi"
+              '';
+            in
+            ''
               ${uniffiBindgen}/bin/uniffi-bindgen generate ${lib} --language ${language} --no-format \
-                --metadata-no-deps --out-dir "${out}/${language}")
-          '';
+                --config ${config} --out-dir "${out}/${language}"
+            '';
           # UniFFI's bindgen binary (rust/ark-ffi/src/bin/uniffi-bindgen.rs),
-          # which is UniFFI's main: ark-ffi with its `bindgen` feature.
-          uniffiBindgen = crate { packageId = "ark-ffi"; features = [ "default" "bindgen" ]; };
+          # which is UniFFI's main: ark-ffi with its `bindgen-roots` feature,
+          # which runs no cargo.
+          uniffiBindgen = crate { packageId = "ark-ffi"; features = [ "default" "bindgen-roots" ]; };
           # An app's library for the host (`crate` its ffi crate, `so` the
           # library's name), which UniFFI reads the bindings from and the
           # app's JVM tests load; with the crate's `features`, which are the

@@ -807,7 +807,7 @@ rec {
           {
             name = "uniffi-bindgen";
             path = "src/bin/uniffi-bindgen.rs";
-            requiredFeatures = [ "bindgen" ];
+            requiredFeatures = [ "bindgen-roots" ];
           }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-ffi; };
@@ -860,9 +860,10 @@ rec {
           }
         ];
         features = {
-          "bindgen" = [ "uniffi/cli" "uniffi/cargo-metadata" ];
+          "bindgen" = [ "bindgen-roots" "uniffi/cargo-metadata" ];
+          "bindgen-roots" = [ "uniffi/cli" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" ];
+        resolvedDefaultFeatures = [ "bindgen" "bindgen-roots" ];
       };
       "ark-macros" = rec {
         crateName = "ark-macros";

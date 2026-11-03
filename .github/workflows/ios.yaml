@@ -50,12 +50,19 @@ on:
       - "money/ios/**"
       - "money/ffi/**"
       - "money/domain/**"
-      - "rust/**"
+      # The crates the phones link, not the whole workspace: arkui, arkdb
+      # and the desktop apps are none of an iPhone's.
+      - "rust/ark/**"
+      - "rust/ark-macros/**"
+      - "rust/ark-auth/**"
+      - "rust/ark-peer/**"
+      - "rust/ark-ffi/**"
+      - "rust/Cargo.lock"
+      - "rust/Cargo.toml"
       - "swift/ArkUI/**"
-      - "flake.nix"
-      - "flake.lock"
       - ".github/workflows/ios.yaml"
       - ".github/ios-upload.sh"
+      - ".github/changed.sh"
   workflow_dispatch:
 
 permissions:
@@ -71,8 +78,27 @@ jobs:
   kernel:
     runs-on: macos-15
     timeout-minutes: 90
+    # Which apps this push moved (../changed.sh): an app is built and tested
+    # whatever, and sent to TestFlight only when its own inputs moved, so a
+    # change to the other app, the desktop or the docs publishes nothing.
+    outputs:
+      harken: ${{ steps.changed.outputs.harken }}
+      money: ${{ steps.changed.outputs.money }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Which apps moved
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # What an app is built from; the workflow itself is none of it.
+          kernel="rust/ark rust/ark-macros rust/ark-auth rust/ark-peer rust/ark-ffi rust/Cargo.lock rust/Cargo.toml swift/ArkUI"
+          echo "harken=$(bash .github/changed.sh "$BEFORE" $kernel harken/ios harken/ffi harken/domain harken/player)" >> "$GITHUB_OUTPUT"
+          echo "money=$(bash .github/changed.sh "$BEFORE" $kernel money/ios money/ffi money/domain)" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
 
       # The newest Xcode 26 on the image: Liquid Glass needs the iOS 26 SDK.
       - name: Select Xcode
@@ -143,7 +169,7 @@ jobs:
     timeout-minutes: 90
     env:
       BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'us.koon.harken' }}
-      UPLOAD: ${{ github.ref == 'refs/heads/main' }}
+      UPLOAD: ${{ github.ref == 'refs/heads/main' && needs.kernel.outputs.harken == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -208,7 +234,7 @@ jobs:
     timeout-minutes: 90
     env:
       BUNDLE_ID: ${{ vars.MONEY_IOS_BUNDLE_ID || 'us.koon.money' }}
-      UPLOAD: ${{ github.ref == 'refs/heads/main' && vars.MONEY_IOS_UPLOAD == 'true' }}
+      UPLOAD: ${{ github.ref == 'refs/heads/main' && vars.MONEY_IOS_UPLOAD == 'true' && needs.kernel.outputs.money == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
