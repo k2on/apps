@@ -342,6 +342,16 @@ impl Job {
         ark::db::read::<money_domain::Money, _>(&self.peer.log.store, |db| Ok::<_, ark::Refusal>(f(db))).ok()
     }
 
+    /// The day of the first transaction any bank brought; none before one
+    /// has.
+    fn first_bank_day(&self) -> Option<String> {
+        self.read(|db| {
+            let txns: Vec<money_domain::Txn> = db.txn.scan();
+            txns.into_iter().filter(|t| !t.imported_by.is_empty()).map(|t| t.date).min()
+        })
+        .flatten()
+    }
+
     /// The newest ask the importer holds.
     fn asked(&self) -> i64 {
         self.read(money_domain::plaid::last_asked).flatten().map_or(0, |a: Asked| a.asked_ms)
@@ -799,19 +809,34 @@ impl Job {
     fn import_stores(&mut self, stop: &AtomicBool) -> BTreeMap<String, Outcome> {
         let mut out = BTreeMap::new();
         if let Some(amazon) = self.stores.amazon.clone() {
-            let got = amazon
-                .run(&self.data)
-                .and_then(|text| money_domain::stores::amazon(&text).map_err(|e| anyhow!(e)))
-                .and_then(|import| self.author_receipts(&import));
+            // A login's first pull reaches back to the banks' first day, so
+            // every order the household's transactions show is there; each
+            // sync after, the last days alone.
+            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            let since = (!amazon.pulled(&self.data)).then(|| self.first_bank_day()).flatten();
+            let got = match &since {
+                Some(day) => amazon.orders_since(&self.data, day, &today),
+                None => amazon.run(&self.data),
+            }
+            .and_then(|text| money_domain::stores::amazon(&text).map_err(|e| anyhow!(e)))
+            .and_then(|import| self.author_receipts(&import));
             let ordered = got.is_ok();
             out.insert("amazon".to_string(), self.outcome("amazon", got));
             // How each order was charged, once its orders are in.
             if ordered {
-                let got = amazon
-                    .charges(&self.data)
-                    .and_then(|text| money_domain::stores::amazon_charges(&text).map_err(|e| anyhow!(e)))
-                    .and_then(|import| self.author_charges(&import));
+                let got = match &since {
+                    Some(day) => amazon.charges_since(&self.data, day, &today),
+                    None => amazon.charges(&self.data),
+                }
+                .and_then(|text| money_domain::stores::amazon_charges(&text).map_err(|e| anyhow!(e)))
+                .and_then(|import| self.author_charges(&import));
+                let charged = got.is_ok();
                 out.insert("amazon charges".to_string(), self.outcome_charges("amazon charges", got));
+                if charged && since.is_some() {
+                    if let Err(e) = amazon.mark_pulled(&self.data) {
+                        self.say(format!("amazon: the first pull is in, and could not be marked so: {e:#}"));
+                    }
+                }
             }
         }
         // Nothing from Costco, said or not, on a server with no browser.

@@ -159,6 +159,52 @@ impl AmazonOrders {
         self.run_with(data, &self.charges_args)
     }
 
+    // * The first pull: back to the banks' first day
+
+    /// Whether the first pull is done for the login signed in with: its
+    /// marker, in amazon-orders' home, names the login. A login removed
+    /// takes the home with it; another login pulls again.
+    pub fn pulled(&self, data: &Path) -> bool {
+        let Ok(login) = self.login(data) else { return false };
+        std::fs::read_to_string(pulled_file(data)).is_ok_and(|who| who.trim() == login.username)
+    }
+
+    /// The first pull done, for the login signed in with.
+    pub fn mark_pulled(&self, data: &Path) -> Result<()> {
+        let login = self.login(data)?;
+        let file = pulled_file(data);
+        std::fs::create_dir_all(file.parent().unwrap())?;
+        std::fs::write(&file, login.username).with_context(|| format!("writing {}", file.display()))
+    }
+
+    /// Every order since `since` (a day), to `today`: a year at a time, as
+    /// amazon-orders asks Amazon, one JSON array of them all.
+    pub fn orders_since(&self, data: &Path, since: &str, today: &str) -> Result<String> {
+        let (from, to) = (year_of(since)?, year_of(today)?);
+        let mut all = vec![];
+        for year in from..=to {
+            let args: Vec<String> = ["orders", "--year", &year.to_string(), "--full-details", "-o", "json"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let text = self.run_with(data, &args)?;
+            let orders: serde_json::Value = serde_json::from_str(&text).map_err(|e| anyhow!("amazon-orders' orders of {year} are not JSON: {e}"))?;
+            all.extend(orders.as_array().cloned().unwrap_or_default());
+        }
+        Ok(serde_json::Value::Array(all).to_string())
+    }
+
+    /// How every order since `since` was charged: the days back to it, and
+    /// a week more, for a charge made before the day its bank saw it.
+    pub fn charges_since(&self, data: &Path, since: &str, today: &str) -> Result<String> {
+        let days = (day(today)? - day(since)?).num_days().max(0) + 7;
+        let args: Vec<String> = ["transactions", "--days", &days.to_string(), "-o", "json"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        self.run_with(data, &args)
+    }
+
     fn run_with(&self, data: &Path, args: &[String]) -> Result<String> {
         let login = self.login(data)?;
         let home = data.join("amazon-orders");
@@ -214,6 +260,20 @@ impl AmazonOrders {
         }
         Ok(json_of(&out).to_string())
     }
+}
+
+/// The first pull's marker.
+fn pulled_file(data: &Path) -> PathBuf {
+    data.join("amazon-orders").join("pulled")
+}
+
+fn day(s: &str) -> Result<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| anyhow!("{s} is not a day: {e}"))
+}
+
+fn year_of(s: &str) -> Result<i32> {
+    use chrono::Datelike;
+    Ok(day(s)?.year())
 }
 
 /// The JSON amazon-orders printed, past what it says of itself before it
@@ -454,6 +514,59 @@ mod tests {
         assert_eq!(json_of("  {\"a\":1}"), "  {\"a\":1}");
         assert_eq!(json_of("[]"), "[]");
         assert_eq!(json_of("nothing"), "nothing", "no JSON: as it was, for the adapter to say so");
+    }
+
+    /// The first pull asks for every year back to the banks' first day, and
+    /// the charges as far back; it is marked done for its login, and
+    /// another login pulls again.
+    #[test]
+    fn the_first_pull_reaches_back_to_the_first_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("orders");
+        // Each year's orders, one apiece, and the charges' days said back.
+        std::fs::write(
+            &program,
+            "#!/bin/sh\nif [ \"$1\" = transactions ]; then echo \"[{\\\"days\\\":\\\"$3\\\"}]\"; \
+             else echo \"Info: signing in\"; echo \"[{\\\"order_number\\\":\\\"$3\\\"}]\"; fi\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let file = |name: &str, text: &str| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, text).unwrap();
+            p
+        };
+        let a = AmazonOrders {
+            program,
+            args: vec!["orders".into()],
+            charges_args: vec!["transactions".into()],
+            username_file: Some(file("u", "me@example.com")),
+            password_file: Some(file("p", "hunter2")),
+            otp_secret_file: None,
+            browser: None,
+        };
+        let orders = a.orders_since(dir.path(), "2024-11-20", "2026-11-03").unwrap();
+        let years: Vec<String> = serde_json::from_str::<Vec<serde_json::Value>>(&orders)
+            .unwrap()
+            .iter()
+            .map(|o| o["order_number"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(years, ["2024", "2025", "2026"]);
+        let charges = a.charges_since(dir.path(), "2026-09-01", "2026-11-03").unwrap();
+        assert!(charges.contains(r#""days":"70""#), "63 days back and a week: {charges}");
+
+        assert!(!a.pulled(dir.path()));
+        a.mark_pulled(dir.path()).unwrap();
+        assert!(a.pulled(dir.path()));
+        let other = AmazonOrders {
+            username_file: Some(file("u2", "heather@example.com")),
+            ..a
+        };
+        assert!(!other.pulled(dir.path()), "another login pulls again");
     }
 
     #[test]

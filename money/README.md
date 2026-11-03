@@ -163,7 +163,11 @@ for how they were charged (`MONEY_AMAZON_TRANSACTIONS_ARGS`, `transactions
 `MONEY_AMAZON_OTP_SECRET_FILE` when the server is given them, and told the
 browser (`AMAZON_ORDERS_CDP`) for Amazon's challenge. The login goes to
 that program alone, with its session kept in `<data>/amazon-orders`; what
-Amazon asked or refused is said, not `Aborted!`. It reads Costco in the
+Amazon asked or refused is said, not `Aborted!`. A login's first pull
+reaches back to the banks' first transaction — the orders a year at a time
+(`orders --year`), the charges as many days back — and is marked done for
+that login (`<data>/amazon-orders/pulled`); each sync after asks for the
+last days alone. It reads Costco in the
 browser, as above. It reads a folder of exports (`MONEY_RECEIPTS_DIR`, else
 `<data>/receipts`: `target/`, `costco/`, `amazon/`), moving each file to
 `imported/`, or to `failed/` when it does not read. Every server runs it,
