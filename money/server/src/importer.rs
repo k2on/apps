@@ -839,11 +839,18 @@ impl Job {
                 }
             }
         }
-        // Nothing from Costco, said or not, on a server with no browser.
-        if let Some(got) = self.stores.costco.receipts().transpose() {
+        // Nothing from Costco, said or not, on a server with no browser. Its
+        // first pull reaches back to the banks' first day, as Amazon's does.
+        let since = (!crate::costco::pulled(&self.data)).then(|| self.first_bank_day()).flatten();
+        if let Some(got) = self.stores.costco.receipts(since.as_deref()).transpose() {
             let got = got
                 .and_then(|text| money_domain::stores::costco(&text).map_err(|e| anyhow!(e)))
                 .and_then(|import| self.author_receipts(&import));
+            if got.is_ok() && since.is_some() {
+                if let Err(e) = crate::costco::mark_pulled(&self.data) {
+                    self.say(format!("costco: the first pull is in, and could not be marked so: {e:#}"));
+                }
+            }
             out.insert("costco".to_string(), self.outcome("costco", got));
         }
         let Some(dir) = self.stores.dir.clone() else { return out };

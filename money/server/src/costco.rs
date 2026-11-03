@@ -37,6 +37,46 @@ const RECEIPTS_URL: &str = "https://ecom-api.costco.com/ebusiness/order/v1/order
 /// How long the page may take to sign itself in.
 const SIGNING_IN: Duration = Duration::from_secs(60);
 
+/// How many days a request for receipts covers: costco.com's own list asks
+/// for three months at a time.
+pub const WINDOW: i64 = 90;
+
+/// `since` to `today` in windows of [`WINDOW`] days, first to last.
+fn windows(since: chrono::NaiveDate, today: chrono::NaiveDate) -> Vec<(chrono::NaiveDate, chrono::NaiveDate)> {
+    let mut out = vec![];
+    let mut start = since;
+    while start <= today {
+        let end = (start + chrono::Duration::days(WINDOW - 1)).min(today);
+        out.push((start, end));
+        start = end + chrono::Duration::days(1);
+    }
+    out
+}
+
+fn parse_day(s: &str) -> Result<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| anyhow!("{s} is not a day: {e}"))
+}
+
+/// The first pull's marker, in the data directory: the browser's sign-in is
+/// not the server's to see, so it names no account, and signing in again
+/// from Settings ([`forget_pulled`]) pulls again.
+fn pulled_file(data: &std::path::Path) -> std::path::PathBuf {
+    data.join("costco-pulled")
+}
+
+/// Whether the first pull is done.
+pub fn pulled(data: &std::path::Path) -> bool {
+    pulled_file(data).exists()
+}
+
+pub fn mark_pulled(data: &std::path::Path) -> Result<()> {
+    std::fs::write(pulled_file(data), "").map_err(|e| anyhow!("marking Costco's first pull: {e}"))
+}
+
+pub fn forget_pulled(data: &std::path::Path) {
+    let _ = std::fs::remove_file(pulled_file(data));
+}
+
 /// Costco's receipts, through the browser, and how far back.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Costco {
@@ -120,20 +160,37 @@ impl Costco {
         }
     }
 
-    /// The receipts since `days`, as the adapter reads them; none when the
-    /// server has no browser.
-    pub fn receipts(&self) -> Result<Option<String>> {
+    /// The receipts of the last `days`, or, for the first pull, since the
+    /// day `since` — each window of [`WINDOW`] days asked on its own, as
+    /// costco.com's own list asks them — as the adapter reads them; none
+    /// when the server has no browser.
+    pub fn receipts(&self, since: Option<&str>) -> Result<Option<String>> {
         let Some(browser) = &self.browser else { return Ok(None) };
+        let today = chrono::Utc::now().date_naive();
+        let windows = match since {
+            Some(day) => windows(parse_day(day)?, today),
+            None => vec![(today - chrono::Duration::days(self.days as i64), today)],
+        };
         let mut tab = browser.open(ORDERS)?;
         match tab.until(WHERE, SIGNING_IN) {
             Ok(w) if w == "signed in" => {}
             Ok(_) => bail!("Costco is signed out: {}", self.sign_in_again()),
             Err(e) => bail!("costco.com's Orders & Purchases did not sign itself in ({e:#}): {}", self.sign_in_again()),
         }
+        let mut all = vec![];
+        for (start, end) in windows {
+            let data = self.window(&mut tab, start, end)?;
+            all.extend(data["receiptsWithCounts"]["receipts"].as_array().cloned().unwrap_or_default());
+        }
+        Ok(Some(serde_json::json!({ "receiptsWithCounts": { "receipts": all } }).to_string()))
+    }
+
+    /// One window's receipts, as Costco answered (its `data`).
+    fn window(&self, tab: &mut crate::browser::Tab, start: chrono::NaiveDate, end: chrono::NaiveDate) -> Result<Json> {
         // The page refreshes a token it kept when it opens; one asked
         // with the old one is asked again once it has.
         for attempt in 0..3 {
-            let said = tab.eval(&self.ask())?;
+            let said = tab.eval(&self.ask(start, end))?;
             let status = said["status"].as_u64().unwrap_or(0);
             if status == 401 || status == 403 {
                 if attempt < 2 {
@@ -148,19 +205,17 @@ impl Costco {
             if !body["data"]["receiptsWithCounts"].is_object() {
                 bail!("Costco did not return receipts");
             }
-            return Ok(Some(body["data"].to_string()));
+            return Ok(body["data"].clone());
         }
         bail!("Costco refused the page's sign-in: {}", self.sign_in_again())
     }
 
-    /// The page's own request for the receipts, with its token: what it
-    /// answered, as `{status, body}`.
-    fn ask(&self) -> String {
-        let now = chrono::Utc::now();
-        let start = now - chrono::Duration::days(self.days as i64);
+    /// The page's own request for the receipts from `start` to `end`, with
+    /// its token: what it answered, as `{status, body}`.
+    fn ask(&self, start: chrono::NaiveDate, end: chrono::NaiveDate) -> String {
         let variables = serde_json::json!({
             "startDate": start.format("%-m/%-d/%Y").to_string(),
-            "endDate": now.format("%-m/%-d/%Y").to_string(),
+            "endDate": end.format("%-m/%-d/%Y").to_string(),
             "documentType": "all",
             "documentSubType": "all",
         });
@@ -210,7 +265,7 @@ mod tests {
 
     #[test]
     fn no_browser_reads_nothing() {
-        assert_eq!(Costco::default().receipts().unwrap(), None);
+        assert_eq!(Costco::default().receipts(None).unwrap(), None);
     }
 
     /// The page signs itself in, then asks for the receipts with its own
@@ -229,7 +284,7 @@ mod tests {
                 json!({ "status": 200, "body": RECEIPTS })
             }
         });
-        let out = at(browser).receipts().unwrap().unwrap();
+        let out = at(browser).receipts(None).unwrap().unwrap();
         std::thread::sleep(Duration::from_millis(200));
         let seen = seen.lock().unwrap();
         assert_eq!(seen.opened, [ORDERS]);
@@ -254,7 +309,7 @@ mod tests {
     #[test]
     fn a_browser_signed_out_is_said_with_where_to_sign_in() {
         let (browser, _seen) = fake::serve(|_| json!("signed out"));
-        let e = at(browser).receipts().unwrap_err().to_string();
+        let e = at(browser).receipts(None).unwrap_err().to_string();
         assert!(e.contains("signed out") && e.contains("https://sivrad.example.com/browser"), "{e}");
     }
 
@@ -264,7 +319,7 @@ mod tests {
             true => json!("signed in"),
             false => json!({ "status": 401, "body": "" }),
         });
-        let e = at(browser).receipts().unwrap_err().to_string();
+        let e = at(browser).receipts(None).unwrap_err().to_string();
         assert!(e.contains("refused the page's sign-in"), "{e}");
         let asks = seen.lock().unwrap().scripts.iter().filter(|s| s.contains("fetch(")).count();
         assert_eq!(asks, 3);
@@ -277,5 +332,42 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         let seen = seen.lock().unwrap();
         assert_eq!((seen.opened.as_slice(), seen.closed), ([SIGN_IN.to_string()].as_slice(), 0));
+    }
+
+    #[test]
+    fn the_first_pull_asks_window_by_window_back_to_its_day() {
+        let d = |s: &str| parse_day(s).unwrap();
+        let w = windows(d("2026-01-01"), d("2026-07-15"));
+        assert_eq!(
+            w,
+            [
+                (d("2026-01-01"), d("2026-03-31")),
+                (d("2026-04-01"), d("2026-06-29")),
+                (d("2026-06-30"), d("2026-07-15")),
+            ],
+            "90 days each, touching, the last to today"
+        );
+        assert_eq!(windows(d("2026-07-15"), d("2026-07-15")), [(d("2026-07-15"), d("2026-07-15"))]);
+
+        // Each window asked of the page, and their receipts one import.
+        let (browser, seen) = fake::serve(|script| match script.contains("location.hostname") {
+            true => json!("signed in"),
+            false => json!({ "status": 200, "body": RECEIPTS }),
+        });
+        let since = (chrono::Utc::now().date_naive() - chrono::Duration::days(200))
+            .format("%Y-%m-%d")
+            .to_string();
+        let out = at(browser).receipts(Some(&since)).unwrap().unwrap();
+        let asks = seen.lock().unwrap().scripts.iter().filter(|s| s.contains("fetch(")).count();
+        assert_eq!(asks, 3, "201 days: three windows");
+        let import = money_domain::stores::costco(&out).unwrap();
+        assert_eq!(import.receipts.len(), 3, "a receipt from each window's answer");
+
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!pulled(dir.path()));
+        mark_pulled(dir.path()).unwrap();
+        assert!(pulled(dir.path()));
+        forget_pulled(dir.path());
+        assert!(!pulled(dir.path()), "signed in again: pulled again");
     }
 }

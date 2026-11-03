@@ -152,8 +152,12 @@ in. At each sync the server opens costco.com's Orders & Purchases in a tab
 of its own, which signs itself in from that session and keeps its token in
 the page; the page then asks Costco's GraphQL for the warehouse and gas
 receipts of the last `MONEY_COSTCO_DAYS` (90), item by item, and the tab is
-closed. Nothing of the sign-in comes to the server. A browser signed out is
-said so in Settings' last sync.
+closed. The first pull, as Amazon's, reaches back to the banks' first
+transaction, asked 90 days at a time as costco.com's list asks; it is
+marked done in `<data>/costco-pulled`, which signing in again from Settings
+clears. Nothing of the sign-in comes to the server. A browser signed out is
+said so in Settings' last sync. The banks' own first pull is Plaid's
+history (`plaid.history`), set when a bank is connected.
 
 **The server gathers them** (`server/src/stores.rs`) on each importer run
 (at start, on its timer, on Sync). It runs `amazon-orders` (`MONEY_AMAZON_ORDERS`), for the orders and then

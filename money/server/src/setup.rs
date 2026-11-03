@@ -135,6 +135,9 @@ impl Setup {
             .clone()
             .ok_or_else(|| anyhow!("this server has no browser page for signing in to Costco (services.money.browser)"))?;
         self.costco.show_sign_in()?;
+        // Signed in again, maybe as someone else: the next sync pulls from
+        // the banks' first day again.
+        crate::costco::forget_pulled(&self.data);
         Ok(BrowserPage { url: page }.to_bytes())
     }
 }
