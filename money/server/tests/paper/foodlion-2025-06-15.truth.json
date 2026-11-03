@@ -1,0 +1,6 @@
+{"store":"Food Lion","date":"2025-06-15","tax":0.23,"total":32.40,"items":[
+["","FL 6 LR WH GRADE A",2.19],["","FL SWISS SINGLE SLIC",2.29,{"qty":"1 @ 2 FOR 4.58"}],
+["","DAWN ULT EZ SQZ ORIG",3.29],["","FL HAMBURGER BUNS",2.19],["","FL WHT SANDWCH BREAD",2.39],
+["","FL REAL MAYONNAISE",2.49],["","73% LEAN GROUND BEEF",15.11],
+["","PLUM/ROMA TOMATOES",0.62,{"weight":"0.63 lb","per":0.99}],["","ICEBERG LETTUCE",1.89]],
+"discounts":[["FL SWISS SINGLE SLIC",-0.29]]}

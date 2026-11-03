@@ -32,6 +32,7 @@
 pub mod browser;
 pub mod costco;
 pub mod importer;
+pub mod paper;
 pub mod plaid;
 pub mod setup;
 pub mod store;

@@ -1,0 +1,8 @@
+{"store":"Food Lion","date":"2025-05-27","tax":0.00,"total":37.36,"items":[
+["","FL SOUR CREAM",1.49],["","FL SWISS SINGLE SLIC",2.29],["","FL HAMBURGER BUNS",2.19],
+["","FL WHT SANDWCH BREAD",2.39],["","OEP SEASONING TACO",2.38,{"qty":"2 @ 1.19"}],
+["","MISS 10CT FLOUR TORT",3.59,{"qty":"1 @ 2 FOR 7.18"}],["","80% LEAN GRND CHUCK",11.44],
+["","FL BNLS CHK BRST FPK",9.04],["","PLUM/ROMA TOMATOES",0.83,{"weight":"0.84 lb","per":0.99}],
+["","SWEET ONIONS",1.27,{"weight":"0.85 lb","per":1.49}],["","ICEBERG LETTUCE",1.89],
+["","STRAWBERRIES 1LB",2.99,{"qty":"1 @ 2 FOR 5.98"}]],
+"discounts":[["STRAWBERRIES 1LB",-0.99],["MISS 10CT FLOUR TORT",-1.09],["FL BNLS CHK BRST FPK",-2.35]]}
