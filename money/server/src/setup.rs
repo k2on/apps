@@ -95,6 +95,15 @@ impl Setup {
             bail!("Amazon's email and password, both");
         }
         let otp: String = f.otp_secret.chars().filter(|c| !c.is_whitespace()).collect();
+        // An authenticator's secret is base32 (A–Z, 2–7, maybe `=`);
+        // amazon-orders fails the sync on anything else.
+        let base32 = |c: char| c.is_ascii_alphabetic() || ('2'..='7').contains(&c) || c == '=';
+        if !otp.is_empty() && (otp.len() < 16 || !otp.chars().all(base32)) {
+            bail!(
+                "That isn't an authenticator secret: it's the long key Amazon shows when you add an authenticator app \
+                 (\"Can't scan the barcode?\"), letters and the digits 2\u{2013}7, not a 6-digit code"
+            );
+        }
         Vault::change(&self.data, |v| {
             v.amazon = Some(AmazonLogin {
                 username,

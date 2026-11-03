@@ -108,7 +108,7 @@ fn settings_keep_amazons_login_off_the_budget() {
             &AmazonLogin {
                 username: "me@example.com".into(),
                 password: "hunter2".into(),
-                otp_secret: "ABCD EFGH".into(),
+                otp_secret: "JBSW Y3DP EHPK 3PXP".into(),
             },
         )
         .unwrap();
@@ -120,10 +120,20 @@ fn settings_keep_amazons_login_off_the_budget() {
     let vault = money_server::vault::Vault::load(data.path()).unwrap();
     assert_eq!(
         vault.amazon.as_ref().map(|a| (a.password.as_str(), a.otp_secret.as_deref())),
-        Some(("hunter2", Some("ABCDEFGH")))
+        Some(("hunter2", Some("JBSWY3DPEHPK3PXP")))
     );
     let bad = alice.call::<Stores>(calls::AMAZON, &AmazonLogin::default()).unwrap_err();
     assert!(bad.contains("email and password"), "{bad}");
+    // A one-time code given for the secret is refused, and the secret kept.
+    let code = AmazonLogin {
+        username: "me@example.com".into(),
+        password: "hunter2".into(),
+        otp_secret: "123 456".into(),
+    };
+    let bad = alice.call::<Stores>(calls::AMAZON, &code).unwrap_err();
+    assert!(bad.contains("isn't an authenticator secret"), "{bad}");
+    let kept = money_server::vault::Vault::load(data.path()).unwrap().amazon.unwrap().otp_secret;
+    assert_eq!(kept.as_deref(), Some("JBSWY3DPEHPK3PXP"));
     assert_eq!(alice.call::<Stores>(calls::STATUS, &()).unwrap(), s);
 
     // A server with no browser has nowhere to sign in to Costco, and says so.
