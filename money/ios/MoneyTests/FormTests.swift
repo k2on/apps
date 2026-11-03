@@ -59,7 +59,7 @@ final class FormTests: XCTestCase {
             TxnLine(id: Fx.id(1), accountId: Fx.id(2), account: "Checking", date: "2026-10-26", payee: payee,
                     categoryId: nil, category: "Needs a category", group: "", memo: "", amount: -1_250,
                     cleared: .cleared, approved: false, transfer: false, imported: imported,
-                    importedPayee: bank, createdMs: 0, userId: "alex")
+                    importedPayee: bank, createdMs: 0, userId: "alex", receipt: "", photos: 0)
         }
         let full = "CHIPOTLE 1234 SAN FRANCISCO CA"
         XCTAssertEqual(Registers.bankDescription(line("Chipotle", bank: full)), full)

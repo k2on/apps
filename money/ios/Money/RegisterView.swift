@@ -3,8 +3,9 @@
 // balances across the top, then the transactions a day at a time, newest
 // first. Each row is its payee, its category (or "Needs a category" in
 // orange), its memo, and its amount, an inflow in green, with the cleared
-// mark the bank has seen beside it. Swiping right clears or uncleared it,
-// or approves one waiting for a look; swiping left deletes it; holding it
+// mark the bank has seen beside it, and a receipt's when it has one.
+// Swiping right clears or uncleared it, or approves one waiting for a
+// look; swiping left deletes it; holding it
 // edits, categorizes, approves or deletes it; tapping it edits it. The
 // account's menu reconciles it with the bank, renames or closes it.
 import ArkUI
@@ -197,12 +198,16 @@ struct TxnRow: View {
                 CentsText(txn.amount, signed: txn.amount > 0)
                     .foregroundStyle(txn.amount > 0 ? Color.green : Color.primary)
                     .font(.body.weight(.medium))
-                cleared
+                HStack(spacing: Space.xs) {
+                    // A receipt paid by it, or a photo of one taken for it.
+                    if Receipts.marked(txn) { Image(systemName: "receipt").foregroundStyle(.secondary) }
+                    cleared
+                }
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(txn.payee.isEmpty ? "No payee" : txn.payee)
-        .accessibilityValue("\(CentsText.string(txn.amount)), \(txn.category), \(clearedWords)\(txn.approved ? "" : ", waiting for review")")
+        .accessibilityValue("\(CentsText.string(txn.amount)), \(txn.category), \(clearedWords)\(txn.approved ? "" : ", waiting for review")\(Receipts.marked(txn) ? ", has a receipt" : "")")
     }
 
     @ViewBuilder private var cleared: some View {

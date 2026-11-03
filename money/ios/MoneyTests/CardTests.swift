@@ -158,7 +158,7 @@ final class CardTests: XCTestCase {
             TxnLine(id: Fx.id(1), accountId: Fx.id(2), account: "Checking", date: Fx.today, payee: payee,
                     categoryId: nil, category: "Transfer", group: "", memo: "", amount: -5_000,
                     cleared: .uncleared, approved: true, transfer: transfer, imported: false,
-                    importedPayee: "", createdMs: 0, userId: "alex")
+                    importedPayee: "", createdMs: 0, userId: "alex", receipt: "", photos: 0)
         }
         let accounts = [Fx.account(2, "Checking"), Fx.account(3, "Visa", kind: "credit", closed: true),
                         Fx.account(4, "Visa", kind: "credit"), Fx.account(5, "Savings", kind: "savings")]

@@ -61,6 +61,9 @@ targets:
         # Only the system's TLS and ring's, which are exempt: no export question on upload.
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Money syncs with your own budget server, which may be on this network.
+        # The receipt scanner (VisionKit's document camera), and a receipt's photo chosen from the library.
+        NSCameraUsageDescription: Money scans a paper receipt so your server can read its items.
+        NSPhotoLibraryUsageDescription: Money reads a photo of a receipt you choose so your server can read its items.
         # A server at home often speaks plain http:// and ws://; the person typed its address.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

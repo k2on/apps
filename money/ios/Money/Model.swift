@@ -255,6 +255,39 @@ final class Model: ObservableObject {
     func categorize(_ ids: [Id], _ category: Id?) { write("categorize it", { try $0.categorize(Categorize(ids: ids, categoryId: category)) }) }
     func setCleared(_ id: Id, _ cleared: Bool) { write("mark it", { try $0.setCleared(SetCleared(id: id, cleared: cleared)) }) }
 
+    // MARK: receipts
+
+    func hold(paid txn: Id) { bridge?.hold(paid: txn) }
+    func release(paid txn: Id) { bridge?.release(paid: txn) }
+    func hold(items receipt: String) { bridge?.hold(items: receipt) }
+    func release(items receipt: String) { bridge?.release(items: receipt) }
+    /// A file's bytes, once the phone has them; asked for when it does not.
+    func file(_ f: FileRef) -> Data? {
+        if let d = snapshot.files[f.hash] { return d }
+        bridge?.want(file: f)
+        return nil
+    }
+
+    /// A photo of a receipt kept and sent to be read, for `txn` when it was taken for one.
+    func addPhoto(_ jpeg: Data, txn: Id?, done: @escaping (Bool) -> Void = { _ in }) {
+        guard let b = bridge else { return done(false) }
+        b.addPhoto(jpeg, txn: txn, done: done)
+    }
+
+    /// A receipt typed by hand, or one read put right.
+    func save(_ r: ReceiptDraft, done: @escaping (Bool) -> Void = { _ in }) {
+        if let problem = r.problem {
+            notice = problem
+            return done(false)
+        }
+        write("save the receipt", { try $0.writeReceipt(r.write) }, done: done)
+    }
+
+    /// A receipt said to be what paid for `txn`; none, for nothing.
+    func pay(receipt: String, with txn: Id?) {
+        write(txn == nil ? "take the receipt off" : "match the receipt", { try $0.pay(MatchReceipt(receiptId: receipt, txnId: txn)) })
+    }
+
     // MARK: accounts
 
     func openAccount(name: String, kind: String, onBudget: Bool, balance: Int64, done: @escaping (Bool) -> Void = { _ in }) {

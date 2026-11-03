@@ -116,6 +116,19 @@ selection on the chart. Amounts are the locale's currency format, every
 row has an accessibility label and value, and Dynamic Type and dark mode
 are the system's.
 
+**Receipts** are in a transaction's form (`ReceiptViews.swift`, the
+rules `Receipts.swift`). One that paid for it is drawn as the paper is,
+black monospace on a white slip in light and dark alike, its photo a tap
+away, with "Check this" when its reading did not add up; it can be put
+right or taken off. With none, it can be scanned as Notes scans a
+document (VisionKit's camera: the page's edges found live, taken when
+steady, squared up), chosen from the photo library, typed, or matched
+to one of the receipts nobody has, the nearest in amount and then in days
+first. A photo goes to the phone's files and is sent beside the rows when
+there is a connection (`docs/plan-files.md`); the server reads it and the
+section says it is reading until then. A register row whose transaction
+has a receipt, or a photo of one, carries the receipt mark.
+
 **Pull to refresh** on any list asks the bank for anything new: on a server,
 `banks.sync` (any household member may ask the importer to sync now) with
 the link dialled; in the demo, the demo's bank (`DemoBank`), whose first
@@ -279,7 +292,7 @@ the rule still by hand.
 
 Everything that needs a device or a real server: the screens and their
 Liquid Glass as drawn, the motion and haptics, VoiceOver's reading of
-them, the sign-in sheet and the `money://auth` redirect against
+them, the receipt scanner and the photo picker, the sign-in sheet and the `money://auth` redirect against
 money.koon.us, pull to refresh against a server's importer, connecting,
 reconnecting and disconnecting a bank against a server with Plaid's keys
 (Plaid's page in Safari's view, and its closing when the ask is over),

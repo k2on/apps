@@ -17,7 +17,14 @@
 // they did and their patches spliced into the lists the screens hold. The
 // month's three are opened again when the month on screen changes. A
 // register is a view too, held by its account while a screen shows it
-// ([hold]) and let go when the last one leaves.
+// ([hold]) and let go when the last one leaves; so are what paid for a
+// transaction and a receipt's items, while a sheet shows them. Every
+// receipt and every receipt photo is kept whole.
+//
+// **Files** (docs/plan-files.md) are the peer's: a photo taken is kept on
+// the phone and sent when there is a connection, and one a screen wants is
+// fetched; each drain looks for what is still wanted, and the bytes go into
+// the snapshot by hash.
 //
 // What the screens see goes to `deliver` (the main queue in the app) as a
 // [Snapshot] after a drain that moved something.
@@ -42,6 +49,15 @@ struct Snapshot {
     var asks = [AskLine]()
     /// The registers held, by account — `Registers.all` for every account's.
     var registers = [String: [TxnLine]]()
+    /// Every receipt, and every photo of one with where reading it stands.
+    var receipts = [ReceiptLine]()
+    var photos = [PhotoLine]()
+    /// What paid for each transaction a sheet shows (`receipts.for_txn`), and
+    /// each receipt's items a sheet shows, by transaction and by receipt.
+    var paid = [String: [ReceiptLine]]()
+    var items = [String: [ItemLine]]()
+    /// The files a screen asked for, by hash, once they are on the phone.
+    var files = [String: Data]()
     var status: Status? = nil
     /// How many changes the peer has reported.
     var moved = 0
@@ -126,6 +142,13 @@ final class Bridge {
     private var summary: Held<Summary>
     private var spending: Held<SpendingLine>
     private var registers = [String: (held: Held<TxnLine>, refs: Int)]()
+    private let receipts = Held<ReceiptLine> { try $0.receipts() }
+    private let photos = Held<PhotoLine> { try $0.photos() }
+    private var paid = [String: (held: Held<ReceiptLine>, refs: Int)]()
+    private var items = [String: (held: Held<ItemLine>, refs: Int)]()
+    /// The files asked for and not on the phone yet: the peer fetches them,
+    /// and each drain looks again.
+    private var wanted = [String: FileRef]()
 
     /// The session `opening` says, showing `month`; what it sees told
     /// through `deliver` — the main queue unless a test says otherwise.
@@ -195,7 +218,11 @@ final class Bridge {
         banks.hydrate(m)
         linked.hydrate(m)
         asks.hydrate(m)
+        receipts.hydrate(m)
+        photos.hydrate(m)
         for (_, r) in registers { r.held.hydrate(m) }
+        for (_, r) in paid { r.held.hydrate(m) }
+        for (_, r) in items { r.held.hydrate(m) }
         copyAll()
         snap.loaded = true
         drain()
@@ -212,7 +239,11 @@ final class Bridge {
         snap.banks = banks.rows
         snap.linked = linked.rows
         snap.asks = asks.rows
+        snap.receipts = receipts.rows
+        snap.photos = photos.rows
         for (k, r) in registers { snap.registers[k] = r.held.rows }
+        for (k, r) in paid { snap.paid[k] = r.held.rows }
+        for (k, r) in items { snap.items[k] = r.held.rows }
     }
 
     private func drainSoon() {
@@ -254,6 +285,23 @@ final class Bridge {
         if linked.update() { snap.linked = linked.rows }
         if asks.update() { snap.asks = asks.rows }
         for (k, r) in registers where r.held.update() { snap.registers[k] = r.held.rows }
+        if receipts.update() { snap.receipts = receipts.rows }
+        if photos.update() { snap.photos = photos.rows }
+        for (k, r) in paid where r.held.update() { snap.paid[k] = r.held.rows }
+        for (k, r) in items where r.held.update() { snap.items[k] = r.held.rows }
+        fetch()
+    }
+
+    // On `queue`: every file still wanted looked for again — one arrived rings
+    // the listener, so a drain follows it.
+    private func fetch() {
+        guard let m = money else { return }
+        for (h, f) in wanted {
+            if let d = m.peer.file(hash: f.hash, size: f.size, media: f.media) {
+                snap.files[h] = d
+                wanted[h] = nil
+            }
+        }
     }
 
     private func show() {
@@ -322,6 +370,92 @@ final class Bridge {
                 self.show()
             }
         }
+    }
+
+    /// What paid for a transaction held while a sheet shows it.
+    func hold(paid txn: Id) {
+        let k = txn.hex
+        queue.async {
+            if var e = self.paid[k] {
+                e.refs += 1
+                self.paid[k] = e
+                return
+            }
+            let h = Held<ReceiptLine> { try $0.forTxn(OneTxn(id: txn)) }
+            self.paid[k] = (h, 1)
+            guard let m = self.money else { return }
+            h.hydrate(m)
+            self.snap.paid[k] = h.rows
+            self.show()
+        }
+    }
+
+    func release(paid txn: Id) {
+        let k = txn.hex
+        queue.async {
+            guard var e = self.paid[k] else { return }
+            e.refs -= 1
+            if e.refs > 0 {
+                self.paid[k] = e
+            } else {
+                self.paid[k] = nil
+                self.snap.paid[k] = nil
+                self.show()
+            }
+        }
+    }
+
+    /// A receipt's items held while a sheet shows them.
+    func hold(items receipt: String) {
+        queue.async {
+            if var e = self.items[receipt] {
+                e.refs += 1
+                self.items[receipt] = e
+                return
+            }
+            let h = Held<ItemLine> { try $0.receiptItems(OneReceipt(receiptId: receipt)) }
+            self.items[receipt] = (h, 1)
+            guard let m = self.money else { return }
+            h.hydrate(m)
+            self.snap.items[receipt] = h.rows
+            self.show()
+        }
+    }
+
+    func release(items receipt: String) {
+        queue.async {
+            guard var e = self.items[receipt] else { return }
+            e.refs -= 1
+            if e.refs > 0 {
+                self.items[receipt] = e
+            } else {
+                self.items[receipt] = nil
+                self.snap.items[receipt] = nil
+                self.show()
+            }
+        }
+    }
+
+    /// A file's bytes for a screen: in the snapshot once the peer has them,
+    /// fetched from the server when this phone does not.
+    func want(file f: FileRef) {
+        queue.async {
+            guard self.snap.files[f.hash] == nil, self.wanted[f.hash] == nil else { return }
+            self.wanted[f.hash] = f
+            self.fetch()
+            self.show()
+        }
+    }
+
+    /// A photo of a receipt, taken or chosen: kept on the phone and sent to
+    /// the server on this connection or the next, and read there, for
+    /// `txn` when it was taken for one.
+    func addPhoto(_ jpeg: Data, txn: Id?, done: @escaping (Bool) -> Void = { _ in }) {
+        write("keep the photo", { m in
+            let hash = try m.peer.putFile(bytes: jpeg, media: Receipts.jpeg)
+            self.snap.files[hash] = jpeg
+            try m.addPhoto(AddPhoto(file: FileRef(hash: hash, size: Int64(jpeg.count), media: Receipts.jpeg), txnId: txn))
+        }, done: done)
     }
 
     /// A function of the domain, `what` it does said if it is refused:
@@ -400,6 +534,9 @@ final class Bridge {
             self.closed = true
             self.money?.peer.setListener(listener: nil)
             self.registers = [:]
+            self.paid = [:]
+            self.items = [:]
+            self.wanted = [:]
             self.money = nil
             self.bank = nil
         }

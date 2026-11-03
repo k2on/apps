@@ -20,6 +20,8 @@ struct TransactionSheet: View {
     @FocusState private var payeeFocused: Bool
     @State private var saved = 0
     @State private var deleting = false
+    /// What its receipt section asked for, presented from the form (ReceiptViews.swift).
+    @State private var receiptActs = ReceiptActs()
 
     var body: some View {
         let s = model.snapshot
@@ -119,13 +121,19 @@ struct TransactionSheet: View {
                 } footer: {
                     if !draft.by.isEmpty { Text("Entered by \(draft.by)") }
                 }
-                if draft.editing != nil {
+                if let id = draft.editing {
+                    // Its receipt as the paper is, or the ways to give it one (ReceiptViews.swift).
+                    if !draft.transfer {
+                        ReceiptSection(txn: id, amount: draft.inflow ? draft.cents : -draft.cents, day: draft.date, payee: draft.payee,
+                                       acts: $receiptActs)
+                    }
                     Section {
                         Button("Delete Transaction", role: .destructive) { deleting = true }
                             .frame(maxWidth: .infinity)
                     }
                 }
             }
+            .modifier(ReceiptSheets(txn: draft.editing, acts: $receiptActs))
             .navigationTitle(draft.editing == nil ? "New Transaction" : "Transaction")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
