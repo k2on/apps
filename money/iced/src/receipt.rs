@@ -14,7 +14,7 @@
 
 use arkui::style;
 use iced::widget::{button, column, container, image, mouse_area, row, scrollable, text, text_input, Column, Space};
-use iced::{Alignment, Color, Element, Font, Length, Task};
+use iced::{Alignment, Color, Element, Length, Task};
 use money_domain::*;
 
 use crate::amount::{self, money};
@@ -314,7 +314,7 @@ impl App {
         let faded = Color::from_rgb8(0x77, 0x77, 0x77);
         // Each line its ink, and the paper its own: the theme's text colour is
         // the page's, light on a dark one, which white paper would hide.
-        let mono = |s: String, size: u32, c: Color| text(s).font(Font::MONOSPACE).size(size).style(move |_| text::Style { color: Some(c) });
+        let mono = |s: String, size: u32, c: Color| text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style { color: Some(c) });
         let rule = || mono("-".repeat(30), 12, faded);
         let mut paper: Column<'a, Message> = column![
             container(mono(place_of(r).to_uppercase(), 15, ink)).center_x(Length::Fill),
@@ -336,7 +336,8 @@ impl App {
                 row![mono(i.name.clone(), 12, ink).width(Length::Fill), mono(money(-i.amount), 12, ink)].spacing(8),
                 mono(
                     match i.quantity {
-                        1000 => format!("  {filed}"),
+                        // One, or none said (a coupon is -1): no count.
+                        q if q == 1000 || q <= 0 => format!("  {filed}"),
                         q => format!("  {} \u{b7} {filed}", crate::view::quantity(q, &i.unit)),
                     },
                     10,

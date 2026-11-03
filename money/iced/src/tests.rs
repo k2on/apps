@@ -695,7 +695,7 @@ fn the_budget_drawn() {
         (&picking, "picking", iced::Theme::Dark, "dark"),
     ] {
         let settings = iced::Settings {
-            fonts: vec![arkui::hero::FIRA_SANS_BOLD.into()],
+            fonts: vec![arkui::hero::FIRA_SANS_BOLD.into(), arkui::fonts::FIRA_MONO.into()],
             ..iced::Settings::default()
         };
         let mut sim = iced_test::Simulator::with_size(settings, (1400.0, 820.0), app.view());

@@ -28,6 +28,7 @@ pub mod context;
 pub mod dialog;
 pub mod files;
 pub mod fit;
+pub mod fonts;
 pub mod format;
 pub mod glyphs;
 pub mod hero;

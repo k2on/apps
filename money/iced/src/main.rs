@@ -2366,6 +2366,8 @@ pub fn main() -> iced::Result {
         .title(App::title)
         .window_size((1200.0, 760.0))
         .font(arkui::hero::FIRA_SANS_BOLD)
+        // A receipt's paper is monospace, and the system's may not draw.
+        .font(arkui::fonts::FIRA_MONO)
         .run()
 }
 

@@ -80,7 +80,16 @@ fn a_speaker_is_handed_a_copy_of_what_is_more_than_it_plays() {
     });
     let base = server.url();
 
-    let (status, copy) = get(&base, "/media/.speaker/music/hi.flac.flac");
+    // The copy is made beside the scan, not before the server answers:
+    // asked for until it is there.
+    let ready = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let (status, copy) = loop {
+        let got = get(&base, "/media/.speaker/music/hi.flac.flac");
+        if got.0 == 200 || std::time::Instant::now() > ready {
+            break got;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
     assert_eq!(status, 200);
     assert_eq!(
         rate_of(&copy),
