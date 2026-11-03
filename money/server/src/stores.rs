@@ -198,7 +198,7 @@ impl AmazonOrders {
         let out = reader.join().map_err(|_| anyhow!("reading amazon-orders"))??;
         let err = errs.join().unwrap_or_default();
         if !status.success() {
-            if let Some(why) = asked(&out) {
+            if let Some(why) = refused(&out).or_else(|| asked(&out)) {
                 bail!("{why}");
             }
             let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
@@ -207,6 +207,20 @@ impl AmazonOrders {
         }
         Ok(out)
     }
+}
+
+/// Why Amazon refused the sign-in: `amazon-orders` prints Amazon's error,
+/// then `Info: Authenticating '…' failed`, and asks for the password again
+/// (a bare `Password:`), which, its input closed, ends it. The error is the
+/// line before.
+fn refused(out: &str) -> Option<String> {
+    let lines: Vec<&str> = out.lines().map(str::trim).collect();
+    let at = lines
+        .iter()
+        .position(|l| l.starts_with("Info: Authenticating '") && l.contains("' failed"))?;
+    let why = lines[..at].iter().rev().find(|l| !l.is_empty()).copied().unwrap_or("no reason given");
+    let why: String = why.chars().take(300).collect();
+    Some(format!("Amazon refused the sign-in: {why}"))
 }
 
 /// What Amazon asked that nobody was there to answer: `amazon-orders`
@@ -397,6 +411,11 @@ mod tests {
             .contains("authenticator app's secret"));
         assert!(asked("--> Enter the characters shown in the image: ").unwrap().contains("captcha"));
         assert_eq!(asked("[]"), None);
+        // A refused sign-in: Amazon's error, then its retry's bare prompt.
+        let out = "There was a problem\nYour password is incorrect\n\nInfo: Authenticating 'me@example.com' failed. If using 2FA, \
+                   wait a minute before retrying with a new OTP.\n\nPassword: ";
+        assert_eq!(refused(out).unwrap(), "Amazon refused the sign-in: Your password is incorrect");
+        assert_eq!(refused("--> Enter the characters shown in the image: "), None);
     }
 
     #[test]
