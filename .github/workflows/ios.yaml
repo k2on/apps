@@ -1,48 +1,62 @@
-# harken for iOS, to TestFlight, on every push to main that touches what the
-# app is built from. Its own workflow: nothing here depends on build.yaml.
+# harken and money for iOS: their Rust kernels built once, together, then
+# each app archived (and money's tested) side by side, and sent to
+# TestFlight from main. One workflow so the kernels share one cargo build
+# and one cache: ArkDB and everything else both link is compiled once.
+# Nothing here depends on build.yaml.
 #
-# The Rust kernel with harken's domain linked in is built here with rustup
-# and cargo for a phone and the simulator, bound into HarkenFFI.xcframework
-# with the Swift UniFFI writes for it (the same output as the flake's
-# `.#harken-ios-xcframework`, built natively because a nix build user cannot
-# use the system xcrun the iOS SDK is found through), the Xcode project is
-# generated from harken/ios/project.yml by XcodeGen, and the archive is
-# made unsigned and then signed and uploaded by xcodebuild's export:
-# automatic signing with an App Store Connect API key (cloud signing: the
-# distribution certificate is Apple's, kept in the cloud, and the App Store
-# profile is made or reused there) and `destination: upload`, which sends
-# the exported build straight to App Store Connect, where it appears in
-# TestFlight once Apple has processed it.
+# **kernel** builds harken's and money's libraries with rustup and cargo for
+# a phone and the simulator, in one target directory, and binds each into
+# its xcframework with the Swift UniFFI writes for it (the flake's
+# `.#harken-ios-xcframework` and `.#money-ios-xcframework`, built natively
+# because a nix build user cannot use the system xcrun the iOS SDK is found
+# through). The frameworks go to the app jobs as an artifact.
+#
+# **harken** and **money** generate their Xcode projects (XcodeGen, from
+# each app's project.yml), archive unsigned, and from main sign and upload
+# (../ios-upload.sh) with xcodebuild's export: automatic signing with an App
+# Store Connect API key (cloud signing: the distribution certificate is
+# Apple's, kept in the cloud, and the App Store profile is made or reused
+# there) and `destination: upload`, which sends the build straight to App
+# Store Connect, where it appears in TestFlight once Apple has processed it.
+# money's tests run on a simulator against the demo's household.
 #
 # **The archive is unsigned on purpose.** Signed, it is signed for
 # development, and a fresh runner has no development certificate, so every
 # run had Xcode make one through the API — until the team held as many as
 # Apple allows and the archive failed with "Your account has reached the
 # maximum number of certificates". Unsigned, nothing is made per run; the
-# export signs for the App Store with the cloud's certificate. The app has
-# no entitlements file for an unsigned archive to lose.
+# export signs for the App Store with the cloud's certificate. Neither app
+# has an entitlements file for an unsigned archive to lose.
 #
 # Repository secrets (Settings > Secrets and variables > Actions > Secrets):
 #   ASC_KEY_ID          the API key's Key ID
 #   ASC_ISSUER_ID       the Issuer ID shown above the keys list
 #   ASC_KEY_P8          the .p8 file's whole contents, BEGIN/END lines included
 #   APPLE_TEAM_ID       the ten-character Team ID
-# Repository variable (the Variables tab), optional:
-#   IOS_BUNDLE_ID       the app's bundle ID; us.koon.harken when unset
+# Repository variables (the Variables tab), optional:
+#   IOS_BUNDLE_ID          harken's bundle ID; us.koon.harken when unset
+#   MONEY_IOS_BUNDLE_ID    money's bundle ID; us.koon.money when unset
+#   MONEY_IOS_UPLOAD       `true` to upload money from main (once its App
+#                          Store Connect record exists); else it builds only
 name: ios
 
 on:
   push:
-    branches: [main]
     paths:
       - "harken/ios/**"
       - "harken/ffi/**"
       - "harken/domain/**"
       - "harken/player/**"
+      - "money/ios/**"
+      - "money/ffi/**"
+      - "money/domain/**"
       - "rust/**"
+      - "swift/ArkUI/**"
       - "flake.nix"
       - "flake.lock"
       - ".github/workflows/ios.yaml"
+      - ".github/ios-upload.sh"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -54,11 +68,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  testflight:
+  kernel:
     runs-on: macos-15
-    timeout-minutes: 120
-    env:
-      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'us.koon.harken' }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -76,36 +88,75 @@ jobs:
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
+      # One cache for both kernels: what they share is built once and kept.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+          key: ios-kernels
 
-      # harken's library for each iOS target and for this Mac, which UniFFI
-      # reads the Swift from; then the two iOS builds bound as one
-      # xcframework with UniFFI's headers, and the Swift beside it with the
+      # Both libraries for each iOS target and for this Mac (which UniFFI
+      # reads the Swift from), each cargo call building both so what they
+      # share compiles once; then each app's two iOS builds bound as one
+      # xcframework with UniFFI's headers, and its Swift beside it with the
       # bridge's typed half.
-      - name: Build the kernel for iOS
+      - name: Build the kernels
         working-directory: rust
         env:
           IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         run: |
           for t in aarch64-apple-ios aarch64-apple-ios-sim; do
-            cargo build --locked --release -p harken-ffi --lib --target "$t"
+            cargo build --locked --release -p harken-ffi -p money-ffi --lib --target "$t"
           done
-          cargo build --locked --release -p harken-ffi --lib
-          cargo run --locked --release -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
-            generate --library target/release/libharken_ffi.dylib \
-            --language swift --no-format --out-dir "$RUNNER_TEMP/bindings"
-          mkdir -p "$RUNNER_TEMP/headers"
-          cp "$RUNNER_TEMP"/bindings/*.h "$RUNNER_TEMP/headers/"
-          cat "$RUNNER_TEMP"/bindings/*.modulemap > "$RUNNER_TEMP/headers/module.modulemap"
-          out=../harken/ffi/ios
-          rm -rf "$out" && mkdir -p "$out/swift"
-          xcodebuild -create-xcframework \
-            -library target/aarch64-apple-ios/release/libharken_ffi.a -headers "$RUNNER_TEMP/headers" \
-            -library target/aarch64-apple-ios-sim/release/libharken_ffi.a -headers "$RUNNER_TEMP/headers" \
-            -output "$out/HarkenFFI.xcframework"
-          cp "$RUNNER_TEMP"/bindings/*.swift ark-ffi/swift/Typed.swift "$out/swift/"
+          cargo build --locked --release -p harken-ffi -p money-ffi --lib
+          for pair in harken:Harken money:Money; do
+            app=${pair%%:*} Name=${pair##*:}
+            gen="$RUNNER_TEMP/$app/bindings" heads="$RUNNER_TEMP/$app/headers"
+            cargo run --locked --release -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
+              generate --library "target/release/lib${app}_ffi.dylib" \
+              --language swift --no-format --out-dir "$gen"
+            mkdir -p "$heads"
+            cp "$gen"/*.h "$heads/"
+            cat "$gen"/*.modulemap > "$heads/module.modulemap"
+            out="../$app/ffi/ios"
+            rm -rf "$out" && mkdir -p "$out/swift"
+            xcodebuild -create-xcframework \
+              -library "target/aarch64-apple-ios/release/lib${app}_ffi.a" -headers "$heads" \
+              -library "target/aarch64-apple-ios-sim/release/lib${app}_ffi.a" -headers "$heads" \
+              -output "$out/${Name}FFI.xcframework"
+            cp "$gen"/*.swift ark-ffi/swift/Typed.swift "$out/swift/"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernels
+          path: |
+            harken/ffi/ios
+            money/ffi/ios
+          if-no-files-found: error
+          retention-days: 3
+
+  harken:
+    needs: kernel
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'us.koon.harken' }}
+      UPLOAD: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          if [ -z "$xcode" ]; then
+            echo "::error::no Xcode 26 on this runner image"; exit 1
+          fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernels
 
       - name: Generate the Xcode project
         working-directory: harken/ios
@@ -113,24 +164,13 @@ jobs:
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           xcodegen generate
 
-      - name: Write the API key
-        env:
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/asc"
-          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
-          chmod 600 "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8"
-
       # The build number is the commit's time in seconds: always rising, and
       # never the same twice, which App Store Connect insists on. The
-      # marketing version stays what project.yml says. Unsigned: the export
-      # below signs it (see the top of this file).
+      # marketing version stays what project.yml says. Unsigned: the upload
+      # signs it (see the top of this file).
       - name: Archive
         working-directory: harken/ios
         env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           build=$(git log -1 --format=%ct)
@@ -148,33 +188,101 @@ jobs:
             CURRENT_PROJECT_VERSION="$build"
 
       - name: Upload to TestFlight
+        if: env.UPLOAD == 'true'
         env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash .github/ios-upload.sh Harken
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
+
+  money:
+    needs: kernel
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      BUNDLE_ID: ${{ vars.MONEY_IOS_BUNDLE_ID || 'us.koon.money' }}
+      UPLOAD: ${{ github.ref == 'refs/heads/main' && vars.MONEY_IOS_UPLOAD == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>upload</string>
-            <key>teamID</key><string>$APPLE_TEAM_ID</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>uploadSymbols</key><true/>
-            <key>manageAppVersionAndBuildNumber</key><false/>
-          </dict>
-          </plist>
-          PLIST
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/Harken.xcarchive" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_$ASC_KEY_ID.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          if [ -z "$xcode" ]; then
+            echo "::error::no Xcode 26 on this runner image"; exit 1
+          fi
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernels
+
+      - name: Generate the Xcode project
+        working-directory: money/ios
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate
+
+      - name: Archive
+        working-directory: money/ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          build=$(git log -1 --format=%ct)
+          xcodebuild archive \
+            -project Money.xcodeproj \
+            -scheme Money \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Money.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CURRENT_PROJECT_VERSION="$build"
+
+      # The tests on a simulator: the newest iPhone the image has for the
+      # newest iOS 26 runtime.
+      - name: Test
+        working-directory: money/ios
+        run: |
+          id=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)["devices"]
+          rts = sorted((k for k in d if "iOS-26" in k), key=lambda k: [int(x) for x in k.split("iOS-")[1].split("-")])
+          phones = [x for k in reversed(rts) for x in d[k] if x["name"].startswith("iPhone")]
+          print(phones[0]["udid"] if phones else "")')
+          if [ -z "$id" ]; then echo "::error::no iOS 26 iPhone simulator on this image"; exit 1; fi
+          xcodebuild test \
+            -project Money.xcodeproj \
+            -scheme Money \
+            -destination "id=$id" \
+            -resultBundlePath "$RUNNER_TEMP/MoneyTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Keep the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoneyTests.xcresult
+          path: ${{ runner.temp }}/MoneyTests.xcresult
+          if-no-files-found: ignore
+
+      - name: Upload to TestFlight
+        if: env.UPLOAD == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash .github/ios-upload.sh Money
 
       - name: Remove the API key
         if: always()

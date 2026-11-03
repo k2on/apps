@@ -16,7 +16,7 @@ app (`harken/ios`) is the template: its session, its model, its first run
 and its checks, said again for a budget.
 
 **Built by CI, never run on a device.** It was written on Linux with no
-Mac; `.github/workflows/money-ios.yaml` is where it is compiled, its tests
+Mac; `.github/workflows/ios.yaml` (its `money` job, after the `kernel` job shared with harken) is where it is compiled, its tests
 run on a simulator, and it is archived.
 
 ## The app
@@ -192,7 +192,7 @@ overrides, automatic signing, bundle id `us.koon.money`) over
 `tools/icon.svg` (three bars, a month's plan, white on the accent's green),
 made opaque at 1024 by `tools/icon.sh` with Inkscape.
 
-CI (`.github/workflows/money-ios.yaml`) does the same on `macos-15` for
+CI (`.github/workflows/ios.yaml`) does the same on `macos-15` for
 every push touching `money/ios`, `money/ffi`, `money/domain`, `rust/` or
 `swift/ArkUI`, and on demand: the kernel for the phone, the simulator and
 the Mac, the bindings, the xcframework, the project, the archive, then the
