@@ -1,0 +1,55 @@
+# A trial: the iPhone frameworks as the flake builds them, a derivation per
+# crate (flake.nix, `iosPhone`), on a macOS runner with the Xcode the flake
+# pins, every crate pushed to Cachix so the next run builds only what moved.
+# ios.yaml still builds the apps; this builds the frameworks alone.
+name: ios-nix
+
+on:
+  push:
+    branches: [ios-per-crate]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-nix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frameworks:
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Xcode the flake's `xcode` names: its crates are built with that
+      # one and no other.
+      - name: The pinned Xcode
+        run: |
+          want=$(sed -n 's/.*version = "\(.*\)";.*/\1/p' nix/xcode.nix | head -1)
+          dir=$(sed -n 's/.*developerDir = "\(.*\)";.*/\1/p' nix/xcode.nix | head -1)
+          if [ ! -d "$dir" ]; then
+            echo "::error::no $dir on this runner image; these have: $(ls -d /Applications/Xcode_*.app | tr '\n' ' ')"; exit 1
+          fi
+          DEVELOPER_DIR="$dir" xcodebuild -version
+          [ "$(DEVELOPER_DIR="$dir" xcodebuild -version | head -1)" = "Xcode $want" ]
+
+      # Relaxed: an iPhone crate is `__noChroot`, for the Xcode outside the store.
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            sandbox = relaxed
+
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Build the frameworks
+        run: |
+          start=$(date +%s)
+          nix build .#money-ios-xcframework .#harken-ios-xcframework -L --print-build-logs 2>&1 | tee "$RUNNER_TEMP/build.log"
+          echo "took $(( $(date +%s) - start ))s"
+          echo "crates compiled this run: $(grep -c "^building '/nix/store/.*-rust_" "$RUNNER_TEMP/build.log" || true)"

@@ -127,6 +127,9 @@ let
       # derivation (`overrideAttrs`).
     , root ? { }
     , rootAttrs ? (_: { })
+      # Applied to every crate the target links (`overrideAttrs`), the
+      # root's too: an iPhone's, each built with the builder's Xcode.
+    , targetAttrs ? null
     }:
     let
       split = pkgs.stdenv.buildPlatform != pkgs.stdenv.hostPlatform;
@@ -171,14 +174,17 @@ let
             (_: map (dep: { inherit (dep) rename; inherit (crates.${dep.packageId}) version; }))
             (lib.groupBy (dep: dep.name) (lib.filter (dep: dep ? rename) (buildDeps ++ deps)));
         in
-        builders.${graph} (config // {
-          src = config.src or (fetch pkgsOf.${graph} config);
-          features = sortedUnique features;
-          dependencies = map drvOf deps;
-          buildDependencies = map (dep: built.${buildGraph}.${dep.packageId}) buildDeps;
-          inherit crateRenames;
-          release = true;
-        } // lib.optionalAttrs isRoot ({ buildTests = tests; } // root));
+        let
+          drv = builders.${graph} (config // {
+            src = config.src or (fetch pkgsOf.${graph} config);
+            features = sortedUnique features;
+            dependencies = map drvOf deps;
+            buildDependencies = map (dep: built.${buildGraph}.${dep.packageId}) buildDeps;
+            inherit crateRenames;
+            release = true;
+          } // lib.optionalAttrs isRoot ({ buildTests = tests; } // root));
+        in
+        if graph == "target" && targetAttrs != null then drv.overrideAttrs targetAttrs else drv;
     in
     (crate "target" packageId true).overrideAttrs rootAttrs;
 in

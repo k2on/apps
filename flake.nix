@@ -665,62 +665,99 @@
           # The same library for iOS — `aarch64-apple-ios` for a phone and
           # `aarch64-apple-ios-sim` for the simulator on an Apple-silicon Mac —
           # as `<Framework>.xcframework` (`HarkenFFI`, `MoneyFFI`), with
-          # UniFFI's Swift and the typed half under `swift/`. Linking for iOS
-          # needs Apple's SDK, which only a macOS builder has: on Linux these
-          # derivations evaluate and are not built (meta.platforms), and they
-          # have not been built anywhere yet.
-          # It is cargo's build, over the lockfile's crates vendored, and not
-          # a derivation per crate: nixpkgs has no iOS package set that
-          # compiles with the builder's Xcode (the workflow, ios.yaml, builds
-          # it with cargo too).
+          # UniFFI's Swift and the typed half under `swift/`: a derivation per
+          # crate, as every other target, so a crate whose inputs did not move
+          # (ark, ark-peer, ark-ffi, every crate of the lockfile) is the
+          # cache's and only what changed compiles.
+          #
+          # nixpkgs has no iOS package set this builds with (its iPhone
+          # platforms want an SDK it no longer has), and Rust needs none to
+          # compile for an iPhone: each crate is built by the builder's own
+          # package set, told the target is the iPhone's (`iosPkgs`), so rustc
+          # is given `--target` and the build scripts and proc macros are the
+          # Mac's. What needs Apple's SDK — a build script compiling C for the
+          # iPhone (ring's, tract's kernels), xcodebuild — uses the builder's
+          # Xcode, outside the store: every iPhone crate is `__noChroot`, and
+          # carries the Xcode it was built with (`xcode`), checked as it
+          # builds, so a crate in the cache is never another Xcode's. The
+          # library is the static one alone, which nothing links here.
+          xcode = import ./nix/xcode.nix;
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           iosRust = rust.override { targets = iosTargets; };
-          # One app's: `name`, `crate` and `so` as `androidPhone`'s, and the
-          # framework's name.
-          iosPhone = { name, crate, so, framework }: pkgs.stdenv.mkDerivation {
-            pname = "${name}-ios-xcframework";
-            version = "0.1.0";
-            src = only rustDirs;
-            sourceRoot = "source/rust";
-            cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
-            nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
-            # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
-            # Xcode, outside the store.
+          # The builder's package set with an iPhone for its host: what
+          # buildRustCrate reads the target from (`--target`, `TARGET`, the
+          # `CARGO_CFG_*`); everything it builds with is the builder's.
+          iosPkgs = t:
+            let
+              platform = lib.systems.elaborate { config = "aarch64-apple-ios"; rust.rustcTarget = t; };
+              stdenv = pkgs.stdenv // { hostPlatform = platform; targetPlatform = platform; };
+            in
+            pkgs // {
+              inherit stdenv;
+              buildRustCrate = pkgs.buildRustCrate.override { inherit stdenv; };
+              buildPackages = pkgs;
+            };
+          # Every iPhone crate's: the builder's Xcode, checked, and its clang
+          # and ar for the C a build script compiles for the iPhone; the
+          # Mac's for the build scripts themselves.
+          iosCrate = t: let l = lib.replaceStrings [ "-" ] [ "_" ] t; in old: {
             __noChroot = true;
-            # The iOS targets compile and link with the builder's Xcode: its
-            # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
-            # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
-            # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
-            # fails under them: both are taken back for these two targets. The
-            # Swift is UniFFI's from the library built for this Mac.
-            buildPhase = ''
-              runHook preBuild
-              export PATH=/usr/bin:$PATH
-              export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+            XCODE = "Xcode ${xcode.version} at ${xcode.developerDir}";
+            preConfigure = (old.preConfigure or "") + ''
+              export PATH="$PATH:/usr/bin"
+              export DEVELOPER_DIR=${xcode.developerDir}
+              said="$(/usr/bin/xcodebuild -version | head -1)"
+              if [ "$said" != "Xcode ${xcode.version}" ]; then
+                echo "built with $said at $DEVELOPER_DIR, not $XCODE: the flake's xcode says which" >&2
+                exit 1
+              fi
               unset SDKROOT
-              ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
-                export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
-                export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
-                cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
-              '') iosTargets}
-              ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
-              mkdir -p headers
-              cp $TMPDIR/bindings/swift/*.h headers/
-              cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
-              /usr/bin/xcodebuild -create-xcframework \
-                -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
-                -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
-                -output ${framework}.xcframework
-              runHook postBuild
+              tools="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+              export CC_${l}="$tools/clang" CXX_${l}="$tools/clang++" AR_${l}="$tools/ar"
+              export IPHONEOS_DEPLOYMENT_TARGET=17.0
             '';
-            installPhase = ''
-              mkdir -p $out/swift
-              cp -r ${framework}.xcframework $out/
-              cp $TMPDIR/bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
-            '';
-            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
           };
-          harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
+          # One app's: `name`, `crate` and `so` as `androidPhone`'s, the
+          # framework's name, and its library's features on an iPhone.
+          iosPhone = { name, crate, so, framework, features ? [ ] }:
+            let
+              slice = t: rustCrates.build {
+                pkgs = iosPkgs t;
+                rust = iosRust;
+                packageId = crate;
+                inherit features;
+                root = { type = [ "staticlib" ]; };
+                targetAttrs = iosCrate t;
+              };
+            in
+            pkgs.stdenv.mkDerivation {
+              pname = "${name}-ios-xcframework";
+              version = "0.1.0";
+              dontUnpack = true;
+              __noChroot = true;
+              XCODE = "Xcode ${xcode.version} at ${xcode.developerDir}";
+              buildPhase = ''
+                runHook preBuild
+                ${ffiBindings { lib = ffiHostLib { inherit crate so features; }; language = "swift"; }}
+                mkdir -p headers
+                cp $TMPDIR/bindings/swift/*.h headers/
+                cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
+                export DEVELOPER_DIR=${xcode.developerDir}
+                /usr/bin/xcodebuild -create-xcframework \
+                  ${lib.concatMapStringsSep " " (t: "-library ${(slice t).lib}/lib/lib${so}.a -headers headers") iosTargets} \
+                  -output ${framework}.xcframework
+                runHook postBuild
+              '';
+              installPhase = ''
+                mkdir -p $out/swift
+                cp -r ${framework}.xcframework $out/
+                cp $TMPDIR/bindings/swift/*.swift ${./rust/ark-ffi/swift/Typed.swift} $out/swift/
+              '';
+              passthru.slices = lib.genAttrs iosTargets slice;
+              meta.platforms = [ "aarch64-darwin" ];
+            };
+          harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; features = [ "default" ]; });
+          # Without money's `page`: VisionKit finds an iPhone's pages.
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
