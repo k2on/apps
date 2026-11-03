@@ -227,7 +227,7 @@ fn target_receipt(items: &[(&str, &str, i64)], total: i64) -> ReceiptImport {
 fn a_receipt_splits_what_paid_for_it() {
     let (mut b, checking, groceries, eggs, improvement) = household();
     b.spend(checking, "2026-10-01", "Target", Some(groceries), -2_000);
-    b.spend(checking, "2026-10-25", "Target", Some(groceries), -8_740);
+    b.from_bank(checking, "2026-10-25", "Target", Some(groceries), -8_740);
     let id = b.register(None).into_iter().find(|l| l.amount == -8_740).unwrap().id;
     let r = target_receipt(
         &[
@@ -682,4 +682,61 @@ fn a_split_transaction_needs_a_look_only_while_a_line_has_no_category() {
     )
     .unwrap();
     assert!(!inbox(&b).contains(&id), "every line has one");
+}
+
+/// A Costco fill-up somebody approved under Groceries, and then its
+/// receipt, whose one line ("REGULAR GAS") is filed under Gas by its name:
+/// the receipt is paid by it, and its category stays Groceries — through
+/// the import, the import again, and the line filed by hand. Only saying
+/// the receipt paid it makes it the receipt's. One the bank brought in and
+/// nobody approved yet takes the receipt's. Falsified by a receipt
+/// recategorizing whatever paid it: the fill-up became Gas, and a month
+/// already budgeted went overspent (as money's did on 2026-11-03).
+#[test]
+fn a_receipt_never_overrides_a_category_somebody_confirmed() {
+    let (mut b, checking, groceries, _, _) = household();
+    let fuel = b.group("Car");
+    let gas = b.category(fuel, "Gas");
+    b.spend(checking, "2026-10-16", "Costco", Some(groceries), -4_590);
+    let fillup = |id: &str, date: &str, total| ReceiptImport {
+        store: "costco".into(),
+        receipts: vec![StoreReceipt {
+            order_id: id.into(),
+            date: date.into(),
+            place: "Costco Gas".into(),
+            total,
+            items: vec![StoreItem {
+                name: "REGULAR GAS".into(),
+                sku: String::new(),
+                quantity: 1000,
+                unit: "ea".into(),
+                amount: total,
+            }],
+        }],
+    };
+    let line = |b: &Book, amount| b.register(None).into_iter().find(|t| t.amount == amount).unwrap();
+    b.run("add_receipts", &fillup("2103771660808261016", "2026-10-16", -4_590)).unwrap();
+    let t = line(&b, -4_590);
+    assert_eq!((t.category.as_str(), t.receipt.as_str()), ("Groceries", "costco:2103771660808261016"), "paid by it, its category kept");
+    assert_eq!(b.line("2026-10", gas).activity, 0, "nothing spent from Gas");
+    b.run("add_receipts", &fillup("2103771660808261016", "2026-10-16", -4_590)).unwrap();
+    let item = vec![ItemRef {
+        receipt_id: "costco:2103771660808261016".into(),
+        line: 1,
+    }];
+    b.run("file_items", &ClassifyItems { items: item, category_id: Some(gas) }).unwrap();
+    assert_eq!(line(&b, -4_590).category, "Groceries", "an item filed leaves it");
+
+    // Said to be the receipt's: it is.
+    let pay = MatchReceipt {
+        receipt_id: "costco:2103771660808261016".into(),
+        txn_id: Some(t.id),
+    };
+    b.run("pay", &pay).unwrap();
+    assert_eq!(line(&b, -4_590).category, "Gas");
+
+    // Not approved yet: the receipt's category.
+    b.from_bank(checking, "2026-10-21", "Costco", Some(groceries), -8_578);
+    b.run("add_receipts", &fillup("2103771734395261021", "2026-10-21", -8_578)).unwrap();
+    assert_eq!(line(&b, -8_578).category, "Gas");
 }

@@ -37,6 +37,14 @@
 //! the receipt is matched or one of its items is filed, so it follows the
 //! items; a split typed by hand is a split like any other, and stands
 //! until then.
+//!
+//! **A category somebody confirmed stands.** A transaction somebody
+//! approved with a category (or a split) is never split or recategorized
+//! by a receipt on its own: an import, an item filed, a charge or a receipt matched to it
+//! leaves it as they left it, the receipt paid by it all the same. Only
+//! somebody saying a receipt paid it ([`pay`], [`pay_charge`], a receipt
+//! typed for it) splits it. One the bank brought in and nobody has approved
+//! yet is split, and stands so once approved.
 
 use std::collections::BTreeMap;
 
@@ -230,7 +238,7 @@ pub fn pay_waiting(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
             txn_id: Some(t.id),
             ..c.clone()
         })?;
-        return split_by(db, &c.receipt_id);
+        return split_by(db, &c.receipt_id, None);
     }
     let waiting = db.receipt.by(Receipt::TXN_ID).from(None).all();
     let mut fits: Vec<Receipt> = waiting.into_iter().filter(|r| could_pay(db, r, &t)).collect();
@@ -240,7 +248,7 @@ pub fn pay_waiting(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
             txn_id: Some(t.id),
             ..r.clone()
         })?;
-        split_by(db, &r.id)?;
+        split_by(db, &r.id, None)?;
     }
     Ok(())
 }
@@ -281,9 +289,21 @@ pub fn shares(total: i64, parts: &[i64]) -> Vec<i64> {
     out
 }
 
+/// Whether somebody settled what a transaction was for: approved it with a
+/// category, or with a split, which a receipt then leaves as it is. Approved
+/// and for nothing yet (typed in for no category) is not.
+fn confirmed(t: &Txn) -> bool {
+    t.approved && (t.category_id.is_some() || t.split)
+}
+
 /// A receipt's transactions split by its items, as this module's head
-/// says: what paid it whole, and what paid each of its charges.
-pub fn split_by(db: &mut Db<Money>, receipt_id: &str) -> Result<(), Refusal> {
+/// says: what paid it whole, and what paid each of its charges — but never
+/// one whose category somebody confirmed ([`confirmed`]): a receipt
+/// imported, an item filed or a charge matched leaves it as it is. `chosen` is the
+/// one transaction somebody just said the receipt paid (`pay`,
+/// `pay_charge`, a receipt typed for it), which is split whether approved
+/// or not: saying so is asking for it.
+pub fn split_by(db: &mut Db<Money>, receipt_id: &str, chosen: Option<Id<Txn>>) -> Result<(), Refusal> {
     let Some(r) = db.receipt.get(receipt_id.to_string()) else {
         return Ok(());
     };
@@ -294,7 +314,7 @@ pub fn split_by(db: &mut Db<Money>, receipt_id: &str) -> Result<(), Refusal> {
         }
     }
     for t in paying {
-        if let Some(t) = db.txn.get(t) {
+        if let Some(t) = db.txn.get(t).filter(|t| !confirmed(t) || Some(t.id) == chosen) {
             split_txn(db, &r, t)?;
         }
     }
@@ -354,10 +374,10 @@ fn split_txn(db: &mut Db<Money>, r: &Receipt, t: Txn) -> Result<(), Refusal> {
 /// one.
 pub fn resplit_txn(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
     if let Some(r) = db.receipt.by(Receipt::TXN_ID).from(Some(id)).first() {
-        return split_by(db, &r.id);
+        return split_by(db, &r.id, None);
     }
     if let Some(c) = db.charge.by(Charge::TXN_ID).from(Some(id)).first() {
-        return split_by(db, &c.receipt_id);
+        return split_by(db, &c.receipt_id, None);
     }
     Ok(())
 }
@@ -435,7 +455,7 @@ pub fn add_receipts(ctx: &Ctx, db: &mut Db<Money>, input: ReceiptImport) -> Resu
         }
         let by_charges = db.charge.by(Charge::RECEIPT_ID).from(id.clone()).all().iter().any(|c| c.txn_id.is_some());
         if (paid.is_some() || by_charges) && (changed || items_changed) {
-            split_by(db, &id)?;
+            split_by(db, &id, None)?;
         }
     }
     Ok(())
@@ -482,7 +502,7 @@ pub fn file_items(_: &Ctx, db: &mut Db<Money>, input: ClassifyItems) -> Result<(
         }
     }
     for r in receipts {
-        split_by(db, &r)?;
+        split_by(db, &r, None)?;
     }
     Ok(())
 }
@@ -505,7 +525,7 @@ pub fn pay(_: &Ctx, db: &mut Db<Money>, input: MatchReceipt) -> Result<(), Refus
         txn_id: input.txn_id,
         ..r.clone()
     })?;
-    split_by(db, &r.id)
+    split_by(db, &r.id, input.txn_id)
 }
 
 /// One store's charges, as its history says them: each new one kept and
@@ -561,7 +581,7 @@ pub fn add_charges(ctx: &Ctx, db: &mut Db<Money>, input: ChargeImport) -> Result
         }
     }
     for r in touched {
-        split_by(db, &r)?;
+        split_by(db, &r, None)?;
     }
     Ok(())
 }
@@ -584,7 +604,7 @@ pub fn pay_charge(_: &Ctx, db: &mut Db<Money>, input: PayCharge) -> Result<(), R
         txn_id: input.txn_id,
         ..c.clone()
     })?;
-    split_by(db, &c.receipt_id)
+    split_by(db, &c.receipt_id, input.txn_id)
 }
 
 // * The views

@@ -169,6 +169,20 @@ impl Book {
         self.run("add_transaction", &t).unwrap();
     }
 
+    /// A transaction as the bank brings one in: there, and waiting for
+    /// somebody to approve it — what a receipt may split.
+    pub fn from_bank(&mut self, account: Id<Account>, date: &str, payee: &str, category: Option<Id<Category>>, amount: i64) {
+        self.spend(account, date, payee, category, amount);
+        let t = self.rows::<Txn>("txn").into_iter().rfind(|t| t.payee == payee && t.date == date && t.amount == amount).unwrap();
+        let new = Txn { approved: false, ..t.clone() };
+        let c = Change::Edit {
+            table: "txn".into(),
+            old: t.to_bytes(),
+            new: new.to_bytes(),
+        };
+        self.store.apply(&c).unwrap();
+    }
+
     pub fn assign(&mut self, month: &str, category: Id<Category>, amount: i64) {
         let a = Assign {
             month: month.into(),

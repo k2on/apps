@@ -1071,12 +1071,14 @@ fn an_amazon_order_is_paid_charge_by_charge() {
     let live = charges.iter().find(|c| c.amount == -2_399).unwrap().clone();
     let paid = live.txn_id.unwrap();
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
-    // Split by the order's items: the eggs as Eggs, the rest waiting for a
-    // category, as Amazon's payee has none from before.
+    // Split by the order's items: the eggs as Eggs, the rest as Household,
+    // what Amazon's payee was last approved as (the first shipment, which
+    // its receipt leaves as somebody confirmed it).
     let _ = app.update(Message::EditTxn(paid));
     let rows = app.form.as_ref().unwrap().split.clone().expect("split");
     let eggs = app.peer.tree.rows.iter().find(|n| n.name == "Eggs").unwrap().id;
-    assert_eq!(rows.iter().map(|r| r.category).collect::<Vec<_>>(), [Some(eggs), None]);
+    let household = app.peer.tree.rows.iter().find(|n| n.name == "Household").unwrap().id;
+    assert_eq!(rows.iter().map(|r| r.category).collect::<Vec<_>>(), [Some(eggs), Some(household)]);
     let _ = app.update(Message::CancelTxn);
     // Paid by nothing, then found again by hand.
     let of = PaidFor {

@@ -1119,19 +1119,24 @@
               ];
             };
 
-          devShells = {
-            rust = pkgs.mkShell {
+          # A laptop's cargo builds four crates at a time, not one a core:
+          # iced, wgpu and tract each take a gigabyte or more to compile and
+          # link, and a dozen at once ran a 16 GB laptop out of memory (the
+          # tests themselves stay under 100 MB). `-j` on the command line
+          # still says otherwise.
+          devShells = let cargoJobs = { CARGO_BUILD_JOBS = "4"; }; in {
+            rust = pkgs.mkShell ({
               packages = [ (rust.override { extensions = [ "rust-src" "rust-analyzer" ]; }) pkgs.pkg-config ];
-            };
+            } // cargoJobs);
             # What `nix build .#harken-web` builds with, for doing it by hand
             # (harken/iced/README.md); pages.yml also keeps it as a gc root so
             # the cached store holds the wasm-bindgen CLI it compiled.
             harken-web = pkgs.mkShell {
               packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
             };
-            default = pkgs.mkShell {
+            default = pkgs.mkShell ({
               packages = [ rust pkgs.pkg-config ];
-            };
+            } // cargoJobs);
           };
         };
 
