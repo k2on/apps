@@ -318,11 +318,13 @@ impl App {
         if s.signing_in {
             c = c
                 .push(dim(
-                    "Before you sign in on the Costco tab, open its developer tools (F12, or \u{2325}\u{2318}I on a Mac) at \
-                     Console. Once you're signed in, Costco tries to hand you to its app and the page seems to stop. \
-                     The console then says Failed to launch 'msauth://com.costco.app.android/\u{2026}code=\u{2026}': copy \
-                     that address and paste it here within 15 minutes. If it isn't there, use Network with Preserve log \
-                     on, sign in again, and copy the location of the last redirect.",
+                    "Before you sign in on the Costco tab, open its developer tools (F12, or \u{2325}\u{2318}I on a Mac). \
+                     Once you're signed in, Costco tries to hand you to its app and the page seems to stop. In Chrome \
+                     or Edge, the Console says Failed to launch 'msauth://com.costco.app.android/\u{2026}code=\u{2026}': \
+                     copy that address. In Firefox, open Network, click the request named confirmed (the one that \
+                     failed with an unknown protocol), and copy the location from its response headers \u{2014} or \
+                     right-click it, Copy Value, Copy Response Headers. Paste it here within a few minutes; the server \
+                     finds the code in whatever you paste.",
                     11,
                 ))
                 .push(
