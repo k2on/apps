@@ -315,81 +315,67 @@ pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-/// One field's refinements, attribute by attribute: each a list of rules
-/// and the words for any of them failing.
-fn rules(f: &syn::Field) -> syn::Result<Vec<TokenStream>> {
+/// One field's refinements, attribute by attribute: each rule's check —
+/// the words for its failing the attribute's `why`, or its own — and how a
+/// form says it beside the field.
+fn rules(f: &syn::Field) -> syn::Result<(Vec<TokenStream>, Vec<String>)> {
     let name = f.ident.as_ref().unwrap();
     let label = name.to_string();
-    let mut out = vec![];
+    let (mut out, mut said) = (vec![], vec![]);
+    let lit = |k: &Ident, e: &Expr, form: &str| match e {
+        Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => Ok(s.value()),
+        _ => err(k.span(), &format!("{k} = \"{form}\"")),
+    };
     for group in items(&f.attrs)? {
         let why = group.iter().find_map(|i| match i {
-            Item::Is(n, Expr::Lit(l)) if n == "why" => Some(l.lit.clone()),
+            Item::Is(n, Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. })) if n == "why" => Some(s.value()),
             _ => None,
         });
+        let quoted = why.as_ref().map_or(String::new(), |w| format!(" (\u{201c}{w}\u{201d})"));
         let words = |default: TokenStream| match &why {
             Some(w) => quote!(::std::string::String::from(#w)),
             None => default,
         };
+        // A test's failing, said in its words — the attribute's `why`, or its
+        // own — once per field: a field fails at most once.
+        let w = words(quote!(why));
+        let fail = |test: TokenStream| {
+            quote! {
+                if ok {
+                    if let Some(why) = #test {
+                        fails.push((#label.into(), #w));
+                        ok = false;
+                    }
+                }
+            }
+        };
+        let invalid = |t: TokenStream| quote!((!#t).then(|| ::std::string::String::from("is not valid")));
         for it in &group {
-            let r = match it {
-                Item::Flag(k) if k == "trim" => quote! {
-                    self.#name = ::ark::row::Trim::trimmed(self.#name);
-                },
-                Item::Flag(k) if k == "non_empty" => {
-                    let w = words(quote!(why));
-                    quote! {
-                        if ok {
-                            if let Some(why) = ::ark::row::non_empty(&self.#name) {
-                                fails.push((#label.into(), #w));
-                                ok = false;
-                            }
-                        }
-                    }
+            let (r, s) = match it {
+                Item::Flag(k) if k == "trim" => (quote!(self.#name = ::ark::row::Trim::trimmed(self.#name);), "trimmed".into()),
+                Item::Flag(k) if k == "non_empty" => (fail(quote!(::ark::row::non_empty(&self.#name))), format!("non-empty{quoted}")),
+                Item::Is(k, e) if k == "len" => {
+                    let Some((lo, hi)) = bounds(&lit(k, e, "lo..=hi")?) else {
+                        return err(k.span(), "len = \"lo..=hi\", \"lo..hi\" or \"lo..\"");
+                    };
+                    let chars = |n: usize| if n == 1 { "char" } else { "chars" };
+                    let s = match (lo, hi) {
+                        (lo, usize::MAX) => format!("min {lo} {}{quoted}", chars(lo)),
+                        (0, hi) => format!("max {hi} {}{quoted}", chars(hi)),
+                        (lo, hi) => format!("{lo} to {hi} {}{quoted}", chars(hi)),
+                    };
+                    (fail(quote!(::ark::row::within(&self.#name, #lo, #hi))), s)
                 }
-                Item::Is(k, Expr::Lit(l)) if k == "len" => {
-                    let s = match &l.lit {
-                        syn::Lit::Str(s) => s.value(),
-                        _ => return err(k.span(), "len = \"lo..=hi\""),
-                    };
-                    let (lo, hi) = match bounds(&s) {
-                        Some(b) => b,
-                        None => return err(k.span(), "len = \"lo..=hi\", \"lo..hi\" or \"lo..\""),
-                    };
-                    let w = words(quote!(why));
-                    quote! {
-                        if ok {
-                            if let Some(why) = ::ark::row::within(&self.#name, #lo, #hi) {
-                                fails.push((#label.into(), #w));
-                                ok = false;
-                            }
-                        }
-                    }
+                Item::Is(k, e) if k == "range" => {
+                    let (text, r): (String, Expr) = (lit(k, e, "lo..=hi")?, syn::parse_str(&lit(k, e, "lo..=hi")?)?);
+                    (
+                        fail(invalid(quote!((#r).contains(&self.#name)))),
+                        why.clone().unwrap_or_else(|| format!("in {text}")),
+                    )
                 }
-                Item::Is(k, Expr::Lit(l)) if k == "range" => {
-                    let r: Expr = match &l.lit {
-                        syn::Lit::Str(s) => s.parse()?,
-                        _ => return err(k.span(), "range = \"lo..=hi\""),
-                    };
-                    let w = words(quote!(::std::string::String::from("is not valid")));
-                    quote! {
-                        if ok && !(#r).contains(&self.#name) {
-                            fails.push((#label.into(), #w));
-                            ok = false;
-                        }
-                    }
-                }
-                Item::Is(k, Expr::Lit(l)) if k == "check" => {
-                    let c: Expr = match &l.lit {
-                        syn::Lit::Str(s) => s.parse()?,
-                        _ => return err(k.span(), "check = \"|x| …\""),
-                    };
-                    let w = words(quote!(::std::string::String::from("is not valid")));
-                    quote! {
-                        if ok && !(#c)(&self.#name) {
-                            fails.push((#label.into(), #w));
-                            ok = false;
-                        }
-                    }
+                Item::Is(k, e) if k == "check" => {
+                    let c: Expr = syn::parse_str(&lit(k, e, "|x| …")?)?;
+                    (fail(invalid(quote!((#c)(&self.#name)))), why.clone().unwrap_or_else(|| "refined".into()))
                 }
                 Item::Is(k, _) if k == "why" => continue,
                 _ => {
@@ -400,44 +386,10 @@ fn rules(f: &syn::Field) -> syn::Result<Vec<TokenStream>> {
                 }
             };
             out.push(r);
+            said.push(s);
         }
     }
-    Ok(out)
-}
-
-/// What a field's refinements are, as a form says them beside it.
-fn said(f: &syn::Field) -> syn::Result<Vec<String>> {
-    let mut out = vec![];
-    for group in items(&f.attrs)? {
-        let why = group.iter().find_map(|i| match i {
-            Item::Is(n, Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. })) if n == "why" => Some(s.value()),
-            _ => None,
-        });
-        let quoted = why.as_ref().map_or(String::new(), |w| format!(" (\u{201c}{w}\u{201d})"));
-        for it in &group {
-            let lit = |e: &Expr| match e {
-                Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => s.value(),
-                _ => String::new(),
-            };
-            out.push(match it {
-                Item::Flag(k) if k == "trim" => "trimmed".into(),
-                Item::Flag(k) if k == "non_empty" => format!("non-empty{quoted}"),
-                Item::Is(k, e) if k == "len" => {
-                    let chars = |n: usize| if n == 1 { "char" } else { "chars" };
-                    match bounds(&lit(e)) {
-                        Some((lo, usize::MAX)) => format!("min {lo} {}{quoted}", chars(lo)),
-                        Some((0, hi)) => format!("max {hi} {}{quoted}", chars(hi)),
-                        Some((lo, hi)) => format!("{lo} to {hi} {}{quoted}", chars(hi)),
-                        None => continue,
-                    }
-                }
-                Item::Is(k, e) if k == "range" => why.clone().unwrap_or_else(|| format!("in {}", lit(e))),
-                Item::Is(k, _) if k == "check" => why.clone().unwrap_or_else(|| "refined".into()),
-                _ => continue,
-            });
-        }
-    }
-    Ok(out)
+    Ok((out, said))
 }
 
 /// `"1..=80"`, `"0..120"`, `"1.."` as inclusive bounds.
@@ -461,12 +413,11 @@ pub fn input(input: DeriveInput) -> syn::Result<TokenStream> {
     let mut per = vec![];
     let mut checks = vec![];
     for f in &fields.named {
-        let s = said(f)?;
+        let (r, s) = rules(f)?;
         if !s.is_empty() {
             let n = f.ident.as_ref().unwrap().to_string();
             checks.push(quote!((#n.to_string(), vec![#(#s.to_string()),*])));
         }
-        let r = rules(f)?;
         per.push(quote! {
             #[allow(unused_mut, unused_assignments)]
             let mut ok = true;
