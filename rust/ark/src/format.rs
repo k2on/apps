@@ -13,7 +13,7 @@
 //! columns is a prefix of its bytes and the store is ordered by `memcmp`.
 //!
 //! **JSON is the human form**: what a person reads and edits and the
-//! vectors are written in ([`to_json`], [`from_json`]). In it hashes and
+//! vectors are written in ([`to_json`]). In it hashes and
 //! ids are hex, and bytes that are a value of the format — a row, an input
 //! — are their hex (read as JSON under the schema by [`crate::dynamic`]).
 //!
@@ -68,11 +68,6 @@ impl<T: Serialize + DeserializeOwned> Encode for T {}
 /// A value's human form: JSON, as `serde_json` writes it.
 pub fn to_json<T: Serialize + ?Sized>(v: &T) -> J {
     serde_json::to_value(v).expect("a value is JSON")
-}
-
-/// A value from its human form.
-pub fn from_json<T: DeserializeOwned>(v: J) -> Result<T, Refusal> {
-    serde_json::from_value(v).map_err(no)
 }
 
 /// `v`'s key bytes appended to `out`.
