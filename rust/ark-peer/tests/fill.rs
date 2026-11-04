@@ -76,7 +76,7 @@ fn library(server: &mut Machine) {
         author(server, "demo.add_to_playlist", input.to_bytes());
     }
     let head = server.log().head().0;
-    server.step(Input::Compact(head));
+    server.compact(head);
 }
 
 fn playlists(p: &Machine) -> Vec<Playlist> {

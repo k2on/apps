@@ -190,7 +190,7 @@ fn a_restarted_authority_fills_and_holds_the_gap() {
     assert!(live.pending.is_empty() && live.store == fresh.store);
 }
 
-/// A replica moves its own horizon (`Compact`, at most its head): the
+/// A replica moves its own horizon (`compact`, at most its head): the
 /// entries below it go, a `Hello` from there is answered with no snapshot,
 /// and an intent pending across the fold is rebased under another's entry
 /// and confirmed as before. Falsified by `compact` taking an authority's
@@ -215,7 +215,7 @@ fn a_replica_folds_its_own_log() {
         carry(&mut server, "alice", &o, &mut [&mut alice]);
     }
     let pending = alice.step(waving("laptop"));
-    alice.step(Input::Compact(i64::MAX));
+    alice.compact(i64::MAX);
     assert_eq!((alice.log().entries().len(), alice.log().base_seq()), (0, 5), "it stands on its head");
     let o = bob.step(waving("tablet"));
     let (_, f) = deliver_up(&mut server, &who("bob"), &o);
@@ -239,7 +239,7 @@ fn a_replica_folds_its_confirmed_rows() {
     let o = durable.step(mutate(demo::CREATE, demo::create_input("a"), 1));
     log.step(down(&fanouts(&o)[0]));
     log.step(mutate(demo::CREATE, demo::create_input("Mix"), 1));
-    let o = log.step(Input::Compact(i64::MAX));
+    let o = log.compact(i64::MAX);
     let rows = o.iter().find_map(|x| match x {
         Output::Persist(b) => match ark::log::Record::dec(b) {
             Ok(ark::log::Record::Rows(r)) => Some(r),

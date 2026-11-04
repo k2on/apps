@@ -1,6 +1,6 @@
 //! An instance (§1.7): one machine and what keeps it — a disk or none, the
-//! open from it, every record written in order, the log folded by one rule
-//! ([`Fold`]).
+//! open from it, every record written in order (the machine folds its own
+//! log, as its [`Fold`](ark::peer::Fold) says).
 //!
 //! Two concepts make every kind of instance. A table is durable or
 //! volatile (§1.3). An instance is wired — one of a [`Peer`](crate::Peer)'s
@@ -16,63 +16,29 @@
 //!
 //! Only an unwired instance is written by a closure: what the closure made
 //! is the facts of one entry the machine sequences, logs and makes durable
-//! (`Input::Write`, an entry naming no function, which nothing runs
-//! again). A synced entry names a domain's function.
+//! (an entry naming no function, which nothing runs again). A synced entry
+//! names a domain's function.
 
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use ark::db::{Db, Tables, Writes};
+use ark::format::Encode;
 use ark::log::Durable;
-use ark::peer::{Functions, Input, Output, Peer as Machine, Role, Who};
+use ark::peer::{Fold, Functions, Input, Output, Peer as Machine, Role, Who};
 use ark::schema::{Schema, Space};
 use ark::Refusal;
 
 use crate::{draw_origin, now_ms, Disk};
 
-/// When an instance folds its log into its rows, the one rule: once the
-/// entries above its snapshot outnumber `keep` and `slack` (and the rows it
-/// holds, when `rows`), all but the last `keep` are folded. A server keeps
-/// `keep` entries and folds at twice that; a local instance keeps none and
-/// folds once its entries outnumber its rows (and 64), so a fold, which
-/// writes every row, is paid for by as many writes; a device's live machine
-/// keeps none and folds at 64 ([`Fold::REPLICA`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Fold {
-    pub keep: usize,
-    pub slack: usize,
-    pub rows: bool,
-}
-
-impl Fold {
-    /// A device's live machine's, a replica's: none kept, folded once 64
-    /// are held — a replica reads no entry below its head again.
-    pub const REPLICA: Fold = Fold {
-        keep: 0,
-        slack: 64,
-        rows: false,
-    };
-
-    /// A server's: `keep` entries above the horizon (none kept when none).
-    pub fn keep(keep: Option<usize>) -> Option<Fold> {
-        keep.map(|keep| Fold {
-            keep,
-            slack: keep,
-            rows: false,
-        })
-    }
-}
-
 /// One machine and what keeps it (§1.7): its disk, when it has one —
 /// opened from what the disk holds, every `Persist` written in order (and,
-/// while a write fails, kept to write again, the failure said), its log
-/// folded as its [`Fold`] says. A [`Peer`](crate::Peer) is three of these
+/// while a write fails, kept to write again, the failure said). A [`Peer`](crate::Peer) is three of these
 /// wired together; one alone is a schema's tables on a machine never
 /// linked, read and written through a `Db<S>` of its schema's struct.
 pub struct Instance {
     pub machine: Machine,
     pub disk: Option<Box<dyn Disk>>,
-    pub fold: Option<Fold>,
     /// Records not yet written.
     pub(crate) unwritten: Vec<Vec<u8>>,
     /// The disk's last refusal, while it lasts.
@@ -97,7 +63,6 @@ impl Instance {
         Instance {
             machine,
             disk,
-            fold: None,
             unwritten: vec![],
             failure: None,
         }
@@ -150,16 +115,11 @@ impl Instance {
         })
     }
 
-    /// One input to its machine, what it made durable written, its log
-    /// folded when its rule says; what the machine said.
+    /// One input to its machine, what it made durable written; what the
+    /// machine said.
     pub fn step(&mut self, input: Input) -> Vec<Output> {
         let out = self.machine.step(input);
         self.took(&out);
-        let (head, base, rows) = (self.machine.log().head().0, self.machine.log().base_seq(), self.machine.store.held());
-        if let Some(f) = self.fold.filter(|f| head - base > (f.keep + f.slack + f.rows as usize * rows) as i64) {
-            let folded = self.machine.step(Input::Compact(head - f.keep as i64));
-            self.took(&folded);
-        }
         self.flush();
         out
     }
@@ -201,14 +161,19 @@ impl Instance {
     }
 
     /// `f` over its tables as `S`'s, writing `P`'s: what it made is the
-    /// facts of one entry (`Input::Write`), all or none, and its answer.
+    /// facts of one entry naming no function, all or none, and its answer.
     pub fn write<S: Tables, P: Writes, T>(&mut self, f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, Refusal>) -> Result<T, Refusal> {
         let (t, facts) = ark::db::write_in::<S, P, T>(&mut self.machine.store, f)?;
         if facts.is_empty() {
             return Ok(t);
         }
         self.machine.store.undo(&facts)?;
-        let said = self.step(Input::Write { facts, now: now_ms() });
+        let said = self.step(Input::Mutate {
+            func: String::new(),
+            input: facts.to_bytes(),
+            now: now_ms(),
+            cause: None,
+        });
         match said.into_iter().find_map(|o| match o {
             Output::Settled(_, Err(why)) => Some(why),
             _ => None,

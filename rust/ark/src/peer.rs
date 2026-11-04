@@ -4,7 +4,6 @@
 //! ```text
 //! Role  = Replica | Authority { journal }
 //! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Open | Connected
-//!       | Compact | Write { facts } | Feed { who, scope }
 //! Output= Send(Back | All | Session) | Changes(by span) | Persist | Settled(id, Ok | Err(why))
 //! ```
 //!
@@ -71,8 +70,13 @@
 //! pending unrun. A union fed by a scope, and the volatile space, are sent
 //! as fills too.
 //!
-//! **Partial sync is a view** (§1.8). A connection the driver says is fed
-//! by a scope (`Input::Feed`) is served its union: the rows its scope —
+//! **An authority's own facts** are an intent naming no function, its input
+//! their encoding: run, they are applied as they are, judged by the store as
+//! any write is, and logged with no input — the facts are the entry, and
+//! nothing runs it again. Only an authority's own: one pushed is held.
+//!
+//! **Partial sync is a view** (§1.8). A connection whose identity the
+//! authority's feed ([`Functions::feed`]) gives a scope is served its union: the rows its scope —
 //! a [`Scope`], its own kind of function, asked of a table's row — holds,
 //! under the connection's identity. At
 //! its `Hello` the authority takes the union from its store and sends it as
@@ -108,8 +112,8 @@
 //! It keeps in memory only, so of an origin's refusals it keeps those of
 //! its last [`WINDOW`] `local`s.
 //!
-//! **The horizon** (`Compact`) is moved by its driver, in either role, up
-//! to the head: a replica's pending
+//! **The horizon** is moved by the machine as its [`Fold`] says, after a
+//! step, in either role, up to the head: a replica's pending
 //! intents are rebased by their own changes over the head, never by an
 //! entry below it, so a replica folds as an authority does.
 
@@ -226,12 +230,14 @@ pub type Scope = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, Refusal> + Send +
 
 /// The functions a peer has, by the names entries call them by (§1.16):
 /// its domain's, registered when the program was built — the procedures
-/// it runs, and the scopes it asks of rows. Nothing a peer is sent is ever
-/// run but by a name it already has.
+/// it runs, and the scopes it asks of rows; and, an authority's, which
+/// scope feeds each connection, by who it is (none: every one the log
+/// whole). Nothing a peer is sent is ever run but by a name it already has.
 #[derive(Clone, Default)]
 pub struct Functions {
     procedures: BTreeMap<String, Arc<dyn Procedure>>,
     scopes: BTreeMap<String, Scope>,
+    pub feed: Option<Scoping>,
 }
 
 impl fmt::Debug for Functions {
@@ -331,6 +337,43 @@ pub struct Served {
     pub head: Option<(Seq, EntryHash)>,
 }
 
+/// The scope a connection is fed by, by who it is (§1.8): its union, by
+/// the scope's name; none, the log whole.
+pub type Scoping = Arc<dyn Fn(&Who) -> Option<String> + Send + Sync>;
+
+/// When a machine folds its log into its rows, the one rule, after every
+/// step: once the entries above its horizon outnumber `keep` and `slack`
+/// (and the rows it holds, when `rows`), all but the last `keep` are
+/// folded. A server keeps `keep` entries and folds at twice that; a local
+/// instance keeps none and folds once its entries outnumber its rows (and
+/// 64), so a fold, which writes every row, is paid for by as many writes; a
+/// device's live machine keeps none and folds at 64 ([`Fold::REPLICA`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fold {
+    pub keep: usize,
+    pub slack: usize,
+    pub rows: bool,
+}
+
+impl Fold {
+    /// A device's live machine's, a replica's: none kept, folded once 64
+    /// are held — a replica reads no entry below its head again.
+    pub const REPLICA: Fold = Fold {
+        keep: 0,
+        slack: 64,
+        rows: false,
+    };
+
+    /// A server's: `keep` entries above the horizon (none kept when none).
+    pub fn keep(keep: Option<usize>) -> Option<Fold> {
+        keep.map(|keep| Fold {
+            keep,
+            slack: keep,
+            rows: false,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Input {
     Frame {
@@ -346,20 +389,6 @@ pub enum Input {
     },
     Open(Durable),
     Connected,
-    Compact(Seq),
-    /// An authority's own facts, made by its driver (a closure over an
-    /// unwired instance's tables): logged as an entry naming no function,
-    /// which nothing runs again — a replay applies the facts.
-    Write {
-        facts: Vec<Change>,
-        now: i64,
-    },
-    /// The scope the connection verified as `who` is fed by (§1.8): its
-    /// union, by the scope's name; none, the log whole (an authority's).
-    Feed {
-        who: Who,
-        scope: Option<String>,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -434,8 +463,10 @@ pub struct Peer {
     pub diverged: Vec<Seq>,
     /// The cursor a `Hello` is outstanding at.
     asked: Option<Seq>,
-    /// An authority's connections fed by a scope, by session.
+    /// The connections an authority serves by a scope, by session.
     pub served: BTreeMap<String, Served>,
+    /// When it folds its log (none: never).
+    pub fold: Option<Fold>,
     /// What this device says it is, in every `Hello` (§1.9).
     pub device: Option<Vec<u8>>,
     /// The tables an authority sends last in a fill, after every other:
@@ -497,6 +528,7 @@ impl Peer {
             diverged: vec![],
             asked: None,
             served: BTreeMap::new(),
+            fold: None,
             device: None,
             later: vec![],
             fill: None,
@@ -585,27 +617,10 @@ impl Peer {
             Input::Mutate { func, input, now, cause } => self.mutate(func, input, now, cause, &mut o),
             Input::Open(d) => self.open(d, &mut o),
             Input::Connected => self.connected(&mut o),
-            Input::Compact(n) => self.compact(n, &mut o),
-            Input::Write { facts, now } if self.is_authority() => {
-                let entry = self.entry(String::new(), vec![], now);
-                let given = self.store.apply_all(&facts).map(|_| facts);
-                o.tell(Some(entry.span()), given.iter().flatten().cloned());
-                self.decide(entry, given, &mut o);
-            }
-            Input::Write { .. } => {}
-            Input::Feed { who, scope } => match scope {
-                None => drop(self.served.remove(&who.session)),
-                Some(scope) => {
-                    let union = self.blank();
-                    let s = Served {
-                        who: who.clone(),
-                        scope,
-                        union,
-                        head: None,
-                    };
-                    self.served.insert(who.session, s);
-                }
-            },
+        }
+        let (head, base, rows) = (self.log().head().0, self.log().base_seq(), self.store.held());
+        if let Some(f) = self.fold.filter(|f| head - base > (f.keep + f.slack + f.rows as usize * rows) as i64) {
+            self.compact_to(head - f.keep as i64, &mut o);
         }
         if !o.told.is_empty() {
             o.out.insert(0, Output::Changes(o.told));
@@ -622,6 +637,13 @@ impl Peer {
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
         let p = match self.functions.get(&e.func) {
             Some(p) => p.clone(),
+            // An authority's own facts, as they are.
+            None if e.func.is_empty() && e.origin == self.origin && self.is_authority() => {
+                let facts = Vec::<Change>::from_bytes(&e.input)?;
+                self.store.apply_all(&facts)?;
+                o.tell(Some(e.span()), facts.iter().cloned());
+                return Ok(facts);
+            }
             None if self.functions.has(&e.func) => return Err(Refusal::new("a scope writes nothing")),
             None => return Err(Refusal(format!("no function {}", e.func))),
         };
@@ -672,7 +694,7 @@ impl Peer {
     }
 
     fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, cause: Option<Span>, o: &mut Out) {
-        let entry = Entry {
+        let mut entry = Entry {
             cause,
             ..self.entry(func, input, now)
         };
@@ -680,6 +702,10 @@ impl Peer {
         said!(debug, "entry", &entry);
         if self.is_authority() {
             let run = self.attempt(&entry, o);
+            if entry.func.is_empty() {
+                // Its facts are the entry.
+                entry.input.clear();
+            }
             return self.decide(entry, run, o);
         }
         // Filling, a refusal may be of rows not sent yet: the authority's to
@@ -773,16 +799,22 @@ impl Peer {
         if f.space() != self.space {
             return;
         }
-        let scoped = from.as_ref().filter(|w| self.served.contains_key(&w.session)).map(|w| w.session.clone());
+        let scope = from.as_ref().zip(self.functions.feed.as_ref()).and_then(|(w, feed)| feed(w));
+        let scoped = scope.is_some();
         // Never past [`PART`], nor so small a fill is mostly asking.
         let most = |most: u64| (most as usize).clamp(MIN_PART, PART);
         match (f, self.is_authority(), from) {
-            (Frame::Hello { cursor, hash, .. }, true, _) if scoped.is_some() => self.serve_scoped(&scoped.unwrap(), cursor, hash, o),
-            (Frame::Hello { cursor, hash, most: m, .. }, true, _) => self.serve(cursor, hash, most(m), o),
+            (Frame::Hello { cursor, hash, .. }, true, Some(who)) if scoped => self.serve_scoped(who, scope.unwrap(), cursor, hash, o),
+            (Frame::Hello { cursor, hash, most: m, .. }, true, from) => {
+                if let Some(w) = from {
+                    self.served.remove(&w.session);
+                }
+                self.serve(cursor, hash, most(m), o)
+            }
             // A peer's intents, each a push.
             (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
-            (Frame::More { from, most: m, .. }, true, _) if scoped.is_none() => o.send(Frame::Part {
+            (Frame::More { from, most: m, .. }, true, _) if !scoped => o.send(Frame::Part {
                 space: self.space,
                 part: part(&self.store, &self.fill_order(), self.log().head(), Some(from), most(m)),
             }),
@@ -841,7 +873,18 @@ impl Peer {
     /// A `Hello` from a connection fed by a scope: nothing when it stands at
     /// the head of what it was sent, and otherwise its union, afresh, as a
     /// fill of one part at the head.
-    fn serve_scoped(&mut self, session: &str, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
+    fn serve_scoped(&mut self, who: Who, scope: String, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
+        let session = &who.session.clone();
+        if self.served.get(session).is_none_or(|s| (&s.who, &s.scope) != (&who, &scope)) {
+            let union = self.blank();
+            let s = Served {
+                who,
+                scope,
+                union,
+                head: None,
+            };
+            self.served.insert(session.clone(), s);
+        }
         let head = self.log().head();
         if self.served[session].head == Some(head) && hash == Some(head.1) && cursor == head.0 {
             return;
@@ -1166,13 +1209,21 @@ impl Peer {
         self.ask_more(o);
     }
 
+    /// Moves the horizon to `n` now, whatever its [`Fold`] says: what a
+    /// test or a measurement does by hand.
+    pub fn compact(&mut self, n: Seq) -> Vec<Output> {
+        let mut o = Out::default();
+        self.compact_to(n, &mut o);
+        o.out
+    }
+
     /// Moves the horizon to `n`, at most the head: the log's rows below it
     /// deleted, and the
     /// store as confirmed made durable whole, which folds every write
     /// before. A replica may move its own: its pending intents stand on
     /// the head and are rebased by their own changes, so no entry below
     /// the head is read again; a `Hello` says the head.
-    fn compact(&mut self, n: Seq, o: &mut Out) {
+    fn compact_to(&mut self, n: Seq, o: &mut Out) {
         let (head, base) = (self.log().head().0, self.log().base_seq());
         let n = n.clamp(base, head);
         if n == base || self.fill.is_some() {

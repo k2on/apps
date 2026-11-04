@@ -467,7 +467,7 @@ fn bench_fold() {
     let mut replica = crate::client::open(Box::new(ark_peer::Files::new(&tmp).unwrap()), None, crate::listening::device());
     let head = replica.log.log().head().0;
     let t = Instant::now();
-    let _ = replica.log.step(ark::peer::Input::Compact(head));
+    let _ = replica.log.machine.compact(head);
     eprintln!("a fold at {head}: {:.1?}", t.elapsed());
     let t = Instant::now();
     let rows = replica.log.confirmed_rows();

@@ -86,7 +86,7 @@ fn a_push_below_a_reopened_horizon_is_acknowledged_there() {
     deliver_up(&mut server, &who("bob"), &o);
     let o2 = bob.step(mutate(CREATE, create_input("Two"), 2));
     deliver_up(&mut server, &who("bob"), &o2);
-    server.step(Input::Compact(2));
+    server.compact(2);
     let mut reopened = authority(demo::cas());
     reopened.step(Input::Open(Durable {
         rows: server.confirmed_rows(),

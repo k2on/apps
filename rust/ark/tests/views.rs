@@ -245,9 +245,9 @@ struct Fleet {
     seed: u64,
 }
 
-/// Whether `server` feeds `c` the log whole: it serves it no union.
+/// Whether `server` feeds `c` the log whole: its feed names no scope.
 fn whole(server: &Peer, c: &Peer) -> bool {
-    !server.served.contains_key(&c.me.session)
+    server.functions.feed.as_ref().is_none_or(|f| f(&c.me).is_none())
 }
 
 impl Fleet {
@@ -256,16 +256,12 @@ impl Fleet {
         let h = "demo.mine";
         let auth = Role::Authority { journal: Journal::default() };
         let mut server = Peer::new(demo::shared(), cas.clone(), auth, who_of("server"));
+        // Every client but the first is fed by the scope.
+        let first = who_of("peer-0").session;
+        server.functions.feed = Some(std::sync::Arc::new(move |w: &Who| (w.session != first).then(|| h.into())));
         let mut clients = vec![];
         for i in 0..3 {
-            let c = Peer::new(demo::shared(), cas.clone(), Role::Replica, who_of(&format!("peer-{i}")));
-            if i > 0 {
-                server.step(Input::Feed {
-                    who: c.me.clone(),
-                    scope: Some(h.into()),
-                });
-            }
-            clients.push(c);
+            clients.push(Peer::new(demo::shared(), cas.clone(), Role::Replica, who_of(&format!("peer-{i}"))));
         }
         let mut f = Fleet {
             server,

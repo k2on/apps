@@ -259,7 +259,7 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
 fn compaction_and_the_horizon() {
     let mut server = scenario().server;
     let h2 = server.log().at(2).unwrap().hash;
-    let o = server.step(Input::Compact(2));
+    let o = server.compact(2);
     assert!(o.iter().all(|x| matches!(x, Output::Persist(_))));
     assert_eq!(server.log().base_seq(), 2);
     let hello = |cursor, hash| Frame::Hello {

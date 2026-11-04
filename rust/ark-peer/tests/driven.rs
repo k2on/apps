@@ -80,7 +80,7 @@ fn a_fill_is_taken_in_without_telling_the_app_of_every_part() {
             p.mutate_at("demo.create_playlist", named(&name), 1).unwrap();
         }
         let head = p.log.machine.log().head().0;
-        p.log.machine.step(ark::peer::Input::Compact(head));
+        p.log.machine.compact(head);
     })
     .unwrap();
     let mut p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()));

@@ -125,7 +125,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
 
     let again = wide_authority(durable(&wide));
     assert_eq!((again.log(), &again.store), (wide.log(), &wide.store));
-    wide.step(Input::Compact(3));
+    wide.compact(3);
     let compacted = wide_authority(durable(&wide));
     assert_eq!(compacted.log().head(), wide.log().head());
     assert_eq!(compacted.store, wide.store);

@@ -96,12 +96,13 @@ use ark::{Domain, Refusal};
 
 pub use app::{nobody, Arg, Outcome, Status, Update};
 pub use ark::file::FileRef;
+pub use ark::peer::{Fold, Scoping};
 pub use disk::{Disk, Files, Memory};
 pub use files::{Dir, Store};
 #[cfg(not(target_arch = "wasm32"))]
 pub use handle::{dev, Authenticate, Handle};
 pub use hub::{Called, ConnId, Deliver};
-pub use instance::{Fold, Instance};
+pub use instance::Instance;
 pub use link::{Event, Pumped, Wake};
 pub use local::{Local, Logins};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
@@ -175,9 +176,6 @@ pub struct Config {
     /// journaled, recorded or told to another connection.
     pub calls: BTreeMap<String, Call>,
 }
-
-/// The scope a connection is fed by, by who it is ([`Config::feed`]).
-pub type Scoping = Arc<dyn Fn(&Who) -> Option<String> + Send + Sync>;
 
 /// One of a server's [`Config::calls`]: given the caller, verified as its
 /// connection is, and the call's input; what it gives back, or why not. It
@@ -685,10 +683,19 @@ impl Peer {
         format!("{}/{}", self.log.me.session, ark::hash::hex(&self.log.origin.0[..4]))
     }
 
-    /// Facts the authority writes itself, raw: an entry naming no function
-    /// (`Input::Write`), judged by the store as any write is.
+    /// Facts the authority writes itself, raw: an entry naming no function,
+    /// its input their encoding, judged by the store as any write is.
     pub fn write(&mut self, facts: Vec<Change>, now: i64) -> Result<(), String> {
-        self.verdict(Space::Durable, Input::Write { facts, now })
+        let (func, input) = (String::new(), ark::format::encode(&facts).expect("changes encode"));
+        self.verdict(
+            Space::Durable,
+            Input::Mutate {
+                func,
+                input,
+                now,
+                cause: None,
+            },
+        )
     }
 
     /// One input of this peer's own, routed, and the verdict it was given

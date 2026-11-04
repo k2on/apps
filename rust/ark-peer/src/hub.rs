@@ -12,8 +12,8 @@
 //! order, for a write that succeeds ([`Peer::failure`]).
 //!
 //! **Feeds.** Each connection is fed as the app says of its login
-//! (`Config::feed`): whole, or by a scope (§1.8), told to the authority by
-//! `Input::Feed` before the connection's first frame.
+//! (`Config::feed`): whole, or by a scope (§1.8), which the authority asks
+//! of the same function (`Functions::feed`) at the connection's `Hello`.
 //!
 //! **Devices** (§1.9). A connection's volatile `Hello` may say what its
 //! device is; the app turns that and the login into the input of its
@@ -140,7 +140,7 @@ impl Peer {
         let me = authority();
         let auth = || Role::Authority { journal: Journal::default() };
         let mut log = machine(&config.log, auth(), &me, None, Space::Durable);
-        (log.disk, log.fold) = (Some(disk), Fold::keep(config.keep));
+        (log.disk, log.fold, log.functions.feed) = (Some(disk), Fold::keep(config.keep), Some(config.feed.clone()));
         let stored = log.stored();
         if let Some(e) = &log.failure {
             panic!("the log on disk does not read: {e}");
@@ -157,9 +157,10 @@ impl Peer {
         // The live authority draws an origin at every open, as a device's
         // live machine does: under the session's, the one the log authors
         // from, its first `local` and the log's had one id.
-        let live = config.live.as_ref().map(|l| Instance {
-            fold: Fold::keep(l.keep),
-            ..machine(&l.domain, auth(), &me, Some((l.origin)()), Space::Volatile)
+        let live = config.live.as_ref().map(|l| {
+            let mut m = machine(&l.domain, auth(), &me, Some((l.origin)()), Space::Volatile);
+            m.fold = Fold::keep(l.keep);
+            m
         });
         let mut p = Peer::with(config, log, live, local);
         p.keep_files(files);
@@ -207,17 +208,10 @@ impl Peer {
     /// A connection verified as `who`, numbered by the caller.
     pub fn accept_as(&mut self, c: ConnId, who: Who) {
         self.hub.next = self.hub.next.max(c + 1);
-        let scope = (self.config.feed)(&who);
-        if scope.is_some() {
-            self.log.step(Input::Feed {
-                who: who.clone(),
-                scope: scope.clone(),
-            });
-        }
         let conn = Conn {
+            whole: (self.config.feed)(&who).is_none(),
             who,
             hello: [false; 2],
-            whole: scope.is_none(),
             device: None,
         };
         self.hub.conns.insert(c, conn);
