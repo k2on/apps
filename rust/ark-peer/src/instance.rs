@@ -25,7 +25,7 @@ use std::sync::Arc;
 use ark::db::{Db, Tables, Writes};
 use ark::format::Encode;
 use ark::log::Durable;
-use ark::peer::{Fold, Functions, Input, Output, Peer as Machine, Role, Who};
+use ark::peer::{Fold, Input, Output, Peer as Machine, Role, Who};
 use ark::schema::{Schema, Space};
 use ark::Refusal;
 
@@ -95,7 +95,11 @@ impl Instance {
 
     fn unwired(schema: Arc<Schema>, space: Space, disk: Option<Box<dyn Disk>>) -> Instance {
         let role = Role::Authority { journal: Default::default() };
-        let mut machine = Machine::new(schema, Functions::default(), role, Who::default()).in_space(space);
+        let domain = Arc::new(ark::Domain {
+            schema,
+            ..Default::default()
+        });
+        let mut machine = Machine::new(domain, role, Who::default()).in_space(space);
         // Its own ids, drawn afresh at each open: the log it folds keeps none.
         machine.origin = draw_origin();
         Instance::new(machine, disk)

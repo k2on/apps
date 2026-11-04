@@ -6,6 +6,7 @@
 //! items come before the playlists they name.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use ark::domain::Domain;
 use ark::format::Encode;
@@ -28,19 +29,12 @@ fn who(name: &str) -> Who {
 
 fn server() -> Machine {
     let m = module();
-    let mut p = Machine::new(
-        m.schema.clone(),
-        m.functions(),
-        Role::Authority { journal: Journal::default() },
-        who("server"),
-    );
-    p.later = m.later.clone();
-    p
+    Machine::new(Arc::new(m), Role::Authority { journal: Journal::default() }, who("server"))
 }
 
 fn replica() -> Machine {
     let m = module();
-    Machine::new(m.schema.clone(), m.functions(), Role::Replica, who("alice"))
+    Machine::new(Arc::new(m), Role::Replica, who("alice"))
 }
 
 fn alice() -> Instance {

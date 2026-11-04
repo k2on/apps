@@ -31,7 +31,7 @@ use crate::sim::{Net, Op};
 
 /// The demo, and what a script can do with it.
 pub struct Gen {
-    pub functions: ark::peer::Functions,
+    pub functions: ark::Domain,
     pub scope: String,
 }
 
@@ -41,7 +41,7 @@ const TRACKS: [&str; 6] = ["t1", "t2", "t3", "t4", "t5", ""];
 impl Gen {
     pub fn new() -> Gen {
         Gen {
-            functions: crate::demo::demo().functions(),
+            functions: crate::demo::demo(),
             scope: "demo.top_two".into(),
         }
     }
@@ -212,10 +212,12 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
     s.undo(entries.iter().flat_map(|l| &l.facts))
         .map_err(|r| format!("the log's facts do not undo: {r}"))?;
     for l in &entries {
-        let p = g.functions.get(&l.entry.func).ok_or("an entry of no function")?;
-        let ran = p
-            .apply(&mut s, &Ctx::of(&l.entry), &l.entry.input)
-            .map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
+        let p = g
+            .functions
+            .get(&l.entry.func)
+            .and_then(|f| f.proc.clone())
+            .ok_or("an entry of no function")?;
+        let ran = p(&mut s, &Ctx::of(&l.entry), &l.entry.input).map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
         if ran != l.facts {
             return Err(format!("entry {} runs again to other facts", l.seq));
         }
@@ -228,7 +230,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
         return Err("the log replayed from its facts is not the store".into());
     }
     if let Some(c) = net.clients.get(&0).filter(|_| partial) {
-        let holds = g.functions.scope(&g.scope).expect("the scope");
+        let holds = g.functions.get(&g.scope).and_then(|f| f.scope.clone()).expect("the scope");
         let ctx = ctx_of(&c.log.me);
         let mut rows = vec![];
         for (name, rs) in hub.store.snapshot_rows() {

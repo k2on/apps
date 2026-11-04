@@ -13,7 +13,7 @@
 //!
 //! **Feeds.** Each connection is fed as the app says of its login
 //! (`Config::feed`): whole, or by a scope (§1.8), which the authority asks
-//! of the same function (`Functions::feed`) at the connection's `Hello`.
+//! of the same function (`Peer::feed`) at the connection's `Hello`.
 //!
 //! **Devices** (§1.9). A connection's volatile `Hello` may say what its
 //! device is; the server authors the live domain's `on_join` on what it
@@ -140,7 +140,7 @@ impl Peer {
         let me = authority();
         let auth = || Role::Authority { journal: Journal::default() };
         let mut log = machine(&config.log, auth(), &me, None, Space::Durable);
-        (log.disk, log.fold, log.functions.feed) = (Some(disk), Fold::keep(config.keep), Some(config.feed.clone()));
+        (log.disk, log.fold, log.machine.feed) = (Some(disk), Fold::keep(config.keep), Some(config.feed.clone()));
         let stored = log.stored();
         if let Some(e) = &log.failure {
             panic!("the log on disk does not read: {e}");

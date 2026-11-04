@@ -115,7 +115,7 @@ fn page(a: &Peer) -> Frame {
 /// and the input of its next add.
 fn own(playlists: u64, n: u64) -> (Peer, impl FnMut(&mut Peer) -> Vec<Output>) {
     let role = Role::Authority { journal: Default::default() };
-    let mut p = Peer::new(shared(), cas(), role, who("me", "me-local"));
+    let mut p = Peer::new(cas(), role, who("me", "me-local"));
     for j in 0..playlists {
         p.step(support::wire::mutate(CREATE, create_input(&format!("P{j}")), 0));
     }

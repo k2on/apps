@@ -16,7 +16,7 @@
 //! (§1.6) and holds the entry's facts, or the store's rows whole. `from` on a frame is the identity the driver verified for its
 //! connection; an authority judges and stamps by it.
 //!
-//! **Effects are values.** A [`Procedure`] reads the store and returns its
+//! **Effects are values.** A function (its domain's, §1.16) reads the store and returns its
 //! changes; the machine applies them. A replica runs code for its own
 //! pending intents only (that is the optimistic view) and applies every
 //! confirmed entry by its facts, each a row as it was and as it is: facts
@@ -58,7 +58,7 @@
 //! ([`crate::dynamic`]).
 //!
 //! **A fill** is how a replica the log cannot page is sent the rows: in
-//! parts of about [`PART`] bytes, the tables a domain sends [`Peer::later`]
+//! parts of about [`PART`] bytes, the tables a domain sends later
 //! after the rest, each part asked for (`More`) once the one before is
 //! held, so what the authority logs meanwhile is never behind more than a
 //! part. A part is no frozen snapshot: it is the rows of its key ranges as
@@ -78,8 +78,8 @@
 //! nothing runs it again. Only an authority's own: one pushed is not judged.
 //!
 //! **Partial sync is a view** (§1.8). A connection whose identity the
-//! authority's feed ([`Functions::feed`]) gives a scope is served its union: the rows its scope —
-//! a [`Scope`], its own kind of function, asked of a table's row — holds,
+//! authority's feed ([`Peer::feed`]) gives a scope is served its union: the rows its scope —
+//! a domain's function of its own kind, asked of a table's row — holds,
 //! under the connection's identity. At
 //! its `Hello` the authority takes the union from its store and sends it as
 //! a fill of one part at the head; every entry after is sent to it alone
@@ -119,9 +119,9 @@
 //! entry below it, so a replica folds as an authority does.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::fmt;
 use std::sync::Arc;
 
+use crate::domain::Domain;
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
@@ -207,60 +207,6 @@ impl Ctx {
     /// Whether the intent was judged under `role`.
     pub fn has_role(&self, role: &str) -> bool {
         self.roles.iter().any(|r| r == role)
-    }
-}
-
-/// A function, opaque to the kernel: run over the store and its changes
-/// left applied, all or none — or its refusal. A function reads its own
-/// writes as it makes them (§1.16).
-pub trait Procedure: Send + Sync {
-    fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal>;
-}
-
-/// A scope (§1.8): whether the union of who reads holds a row of the table
-/// named, by the row's bytes. Never run as an intent.
-pub type Scope = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
-
-/// The functions a peer has, by the names entries call them by (§1.16):
-/// its domain's, registered when the program was built — the procedures
-/// it runs, and the scopes it asks of rows; and, an authority's, which
-/// scope feeds each connection, by who it is (none: every one the log
-/// whole). Nothing a peer is sent is ever run but by a name it already has.
-#[derive(Clone, Default)]
-pub struct Functions {
-    procedures: BTreeMap<String, Arc<dyn Procedure>>,
-    scopes: BTreeMap<String, Scope>,
-    pub feed: Option<Scoping>,
-}
-
-impl fmt::Debug for Functions {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_set().entries(self.procedures.keys().chain(self.scopes.keys())).finish()
-    }
-}
-
-impl Functions {
-    pub fn insert(&mut self, name: impl Into<String>, p: Arc<dyn Procedure>) {
-        self.procedures.insert(name.into(), p);
-    }
-
-    pub fn insert_scope(&mut self, name: impl Into<String>, s: Scope) {
-        self.scopes.insert(name.into(), s);
-    }
-
-    /// The procedure `name` is.
-    pub fn get(&self, name: &str) -> Option<&Arc<dyn Procedure>> {
-        self.procedures.get(name)
-    }
-
-    /// The scope `name` is.
-    pub fn scope(&self, name: &str) -> Option<&Scope> {
-        self.scopes.get(name)
-    }
-
-    /// Whether `name` is a function here, of either kind.
-    pub fn has(&self, name: &str) -> bool {
-        self.procedures.contains_key(name) || self.scopes.contains_key(name)
     }
 }
 
@@ -420,12 +366,17 @@ impl Out {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Peer {
     /// The confirmed state with the pending intents' changes applied, and
     /// the log as its table (§1.6).
     pub store: Store,
-    pub functions: Functions,
+    /// What it runs, by name, its schema and which tables a fill sends
+    /// last (§1.16): its domain's.
+    pub domain: Arc<Domain>,
+    /// An authority's: which scope feeds each connection, by who it is
+    /// (none: every one the log whole).
+    pub feed: Option<Scoping>,
     /// This peer's own intents not yet sequenced, each at sequence 0 with
     /// what its last run changed as its facts ([`Logged::intent`]).
     pub pending: VecDeque<Logged>,
@@ -451,9 +402,6 @@ pub struct Peer {
     pub fold: Option<Fold>,
     /// What this device says it is, in every `Hello` (§1.9).
     pub device: Option<Vec<u8>>,
-    /// The tables an authority sends last in a fill, after every other:
-    /// what a replica can be without for a while.
-    pub later: Vec<String>,
     /// A replica filling: where its next part begins. Nothing is made
     /// durable until the fill is done.
     pub fill: Option<Cursor>,
@@ -507,12 +455,13 @@ fn started(mut store: Store) -> Store {
 impl Peer {
     /// A peer from empty; its origin named by its session's bytes until
     /// its driver gives it the one it drew ([`Origin`]).
-    pub fn new(schema: Arc<Schema>, functions: Functions, role: Role, me: Who) -> Peer {
-        let store = started(Store::new(schema, Space::Durable));
+    pub fn new(domain: Arc<Domain>, role: Role, me: Who) -> Peer {
+        let store = started(Store::new(domain.schema.clone(), Space::Durable));
         let origin = Origin::named(&me.session);
         Peer {
             store,
-            functions,
+            domain,
+            feed: None,
             pending: VecDeque::new(),
             reruns: 0,
             role,
@@ -525,7 +474,6 @@ impl Peer {
             served: BTreeMap::new(),
             fold: None,
             device: None,
-            later: vec![],
             fill: None,
             more: None,
             part: None,
@@ -630,8 +578,9 @@ impl Peer {
 
     /// Runs an intent over the store and applies what it did, all or none.
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
-        let p = match self.functions.get(&e.func) {
-            Some(p) => p.clone(),
+        let f = self.domain.fns.get(&e.func);
+        let p = match f.and_then(|f| f.proc.clone()) {
+            Some(p) => p,
             // An authority's own facts, as they are.
             None if e.func.is_empty() && e.origin == self.origin && self.is_authority() => {
                 let facts = Vec::<Change>::from_bytes(&e.input)?;
@@ -639,12 +588,12 @@ impl Peer {
                 o.tell(Some(e.span()), facts.iter().cloned());
                 return Ok(facts);
             }
-            None if self.functions.has(&e.func) => return Err(Refusal::new("a scope writes nothing")),
+            None if f.is_some() => return Err(Refusal(format!("{} writes nothing", e.func))),
             None => return Err(Refusal(format!("no function {}", e.func))),
         };
         let s = e.span();
         let run = tracing::debug_span!(target: "ark", "run", func = %e.func, trace = %crate::hash::hex(&s.trace.0), span = %crate::hash::hex(&s.id));
-        let changes = run.in_scope(|| p.apply(&mut self.store, &Ctx::of(e), &e.input))?;
+        let changes = run.in_scope(|| p(&mut self.store, &Ctx::of(e), &e.input))?;
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
             self.store.undo(&changes).expect("an inverse applies");
@@ -784,7 +733,7 @@ impl Peer {
         if f.space() != self.space {
             return;
         }
-        let scope = from.as_ref().zip(self.functions.feed.as_ref()).and_then(|(w, feed)| feed(w));
+        let scope = from.as_ref().zip(self.feed.as_ref()).and_then(|(w, feed)| feed(w));
         let scoped = scope.is_some();
         // Never past [`PART`].
         let most = |most: u64| (most as usize).clamp(1, PART);
@@ -848,17 +797,18 @@ impl Peer {
     }
 
     /// The tables of this peer's space in the order a fill sends them: the
-    /// schema's, those it sends [`Peer::later`] after the rest.
+    /// schema's, those its domain sends later after the rest.
     fn fill_order(&self) -> Vec<String> {
         let tables = self.store.schema_arc().tables.iter().filter(|t| t.space == self.space);
-        let (later, first): (Vec<_>, Vec<_>) = tables.map(|t| t.name.clone()).partition(|t| self.later.contains(t));
+        let (later, first): (Vec<_>, Vec<_>) = tables.map(|t| t.name.clone()).partition(|t| self.domain.later.contains(t));
         first.into_iter().chain(later).collect()
     }
 
     /// A scope's verdict on a row of `table`, for the connection it serves.
     fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
         let s = &self.served[session];
-        let (scope, ctx) = (self.functions.scope(&s.scope).cloned(), Ctx::new(&s.who, 0));
+        let scope = self.domain.fns.get(&s.scope).and_then(|f| f.scope.clone());
+        let ctx = Ctx::new(&s.who, 0);
         move |table, row| scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?(&ctx, table, row)
     }
 
@@ -965,7 +915,7 @@ impl Peer {
         // log at or below the head — every entry up to which this connection
         // is sent before the verdict; past it, not judged, for a device that
         // lost the ones between to go on from.
-        let known = self.functions.has(&entry.func);
+        let known = self.domain.fns.contains_key(&entry.func);
         if entry.local != last + 1 || !known {
             match entry.local > last {
                 true if entry.local == last + 1 => said!(warn, "held", &entry, last = last),

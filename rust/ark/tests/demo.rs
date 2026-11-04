@@ -20,7 +20,6 @@
 
 use std::sync::Arc;
 
-use ark::peer::Functions;
 use ark::prelude::*;
 use ark::schema::Schema;
 use ark::store::Read;
@@ -230,16 +229,14 @@ pub fn h(name: &str) -> String {
 }
 
 /// Every demo function, as a peer that authors all of them holds them.
-pub fn cas() -> Functions {
-    demo().functions()
+pub fn cas() -> Arc<Domain> {
+    Arc::new(demo())
 }
 
 /// Dave's build: `add_to_playlist`'s name, running a body stepping by two.
-pub fn daves_cas() -> Functions {
-    let mut c = cas();
-    let dave = Domain::new::<Demo>("demo", "1").mutator(ADD, daves_add).functions();
-    c.insert(ADD, dave.get(ADD).unwrap().clone());
-    c
+pub fn daves_cas() -> Arc<Domain> {
+    let dave = Domain::new::<Demo>("demo", "1").mutator(ADD, daves_add);
+    Arc::new(demo().run(ADD, dave.fns[ADD].proc.clone().unwrap()))
 }
 
 fn daves_add(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Refusal> {
@@ -258,11 +255,14 @@ fn daves_add(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Ref
 }
 
 /// Only these demo functions: a peer built without the rest.
-pub fn only(names: &[&str]) -> Functions {
-    let all = cas();
-    let mut f = Functions::default();
-    for n in names {
-        f.insert(*n, all.get(n).unwrap().clone());
-    }
-    f
+pub fn only(names: &[&str]) -> Arc<Domain> {
+    let mut d = demo();
+    d.fns.retain(|n, _| names.contains(&n.as_str()));
+    Arc::new(d)
+}
+
+/// `name`'s function, as `cas` runs it, given `peer` too.
+pub fn give(peer: &mut ark::peer::Peer, name: &str) {
+    let f = demo().fns[name].clone();
+    Arc::make_mut(&mut peer.domain).fns.insert(name.into(), f);
 }

@@ -3262,13 +3262,8 @@ pub mod ha {
             };
             let domain = &self.hosted.domain;
             let peer = self.machines.entry(k.clone()).or_insert_with(|| {
-                let mut p = Peer::new(
-                    domain.schema.clone(),
-                    domain.functions(),
-                    Role::Replica,
-                    who.clone(),
-                )
-                .in_space(Space::Volatile);
+                let mut p =
+                    Peer::new(domain.clone(), Role::Replica, who.clone()).in_space(Space::Volatile);
                 let said = Device {
                     can_play: true,
                     id: entity.into(),

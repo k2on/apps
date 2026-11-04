@@ -70,7 +70,7 @@ impl House {
             .get(&format!("listening.{name}"))
             .and_then(|f| f.proc.clone())
             .ok_or(format!("no function {name}"))?;
-        f.apply(&mut self.store, &ctx, &input.to_bytes()).map_err(|r| r.0)?;
+        f(&mut self.store, &ctx, &input.to_bytes()).map_err(|r| r.0)?;
         Ok(())
     }
 
@@ -89,7 +89,7 @@ impl House {
             .get(&format!("listening.{name}"))
             .and_then(|f| f.proc.clone())
             .ok_or(format!("no function {name}"))?;
-        f.apply(&mut self.store, &ctx, input).map(|_| ()).map_err(|r| r.0)
+        f(&mut self.store, &ctx, input).map(|_| ()).map_err(|r| r.0)
     }
 
     /// A device of `user` connects, saying what it is: `on_join`.

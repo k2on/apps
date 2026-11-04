@@ -20,7 +20,7 @@ use common::{domain, on, App, Memory};
 /// Author `name` as `ctx` over the hub's store: the refusal's text.
 fn run(hub: &Memory, ctx: &ark::peer::Ctx, name: &str, input: &impl Encode) -> Result<(), String> {
     let f = domain().get(name).and_then(|f| f.proc.clone()).unwrap();
-    f.apply(&mut hub.0.lock().unwrap(), ctx, &input.to_bytes()).map(|_| ()).map_err(|r| r.0)
+    f(&mut hub.0.lock().unwrap(), ctx, &input.to_bytes()).map(|_| ()).map_err(|r| r.0)
 }
 
 fn current(hub: &Memory, ctx: &ark::peer::Ctx) -> Option<SignIn> {
@@ -136,7 +136,7 @@ fn nobody_else_s_sessions_are_held_or_listed() {
     signed_in(&hub, "a2", "alice", 10_000);
     signed_in(&hub, "b1", "bob", 10_000);
     let alice = on("alice", "a1", &[], 2_000);
-    let feed = domain().functions().scope("feed").cloned().unwrap();
+    let feed = domain().get("feed").and_then(|f| f.scope.clone()).unwrap();
     let held: Vec<String> = hub
         .sign_ins()
         .into_iter()

@@ -454,7 +454,7 @@ fn run(seed: u64) -> (String, String, usize, usize) {
             ..Default::default()
         };
         let f = native.get(s.name).unwrap_or_else(|| panic!("{}", s.name)).proc.clone().unwrap();
-        match f.apply(&mut a, &ctx, &s.input) {
+        match f(&mut a, &ctx, &s.input) {
             Ok(x) => {
                 moved += !x.is_empty() as usize;
                 said.extend(format!("{} {} changes\n", s.name, x.len()).bytes());

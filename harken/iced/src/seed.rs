@@ -102,8 +102,7 @@ impl Seeder {
             .get(name)
             .and_then(|f| f.proc.clone())
             .unwrap_or_else(|| panic!("{name} writes nothing"));
-        f.apply(&mut self.store, &self.ctx, input)
-            .unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
+        f(&mut self.store, &self.ctx, input).unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
     }
 
     /// One mutation by the name the domain binds it to.

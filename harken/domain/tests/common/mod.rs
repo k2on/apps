@@ -91,7 +91,7 @@ impl Lib {
             .get(&full(name))
             .and_then(|f| f.proc.clone())
             .unwrap_or_else(|| panic!("{name} writes nothing"));
-        self.last = f.apply(&mut self.store, ctx, input).map_err(|r| r.0)?;
+        self.last = f(&mut self.store, ctx, input).map_err(|r| r.0)?;
         Ok(self.last.len())
     }
 

@@ -8,8 +8,8 @@
 //!
 //! - a **mutator** is `fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>`:
 //!   the machine of the space it writes (`P`, durable unless it says
-//!   [`Volatile`](crate::db::Volatile): a live transition, §1.9) runs it as
-//!   a [`Procedure`], its input read and refined first ([`Input`]);
+//!   [`Volatile`](crate::db::Volatile): a live transition, §1.9) runs it
+//!   ([`Run`]), its input read and refined first ([`Input`]);
 //! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>`,
 //!   kept up to date ([`crate::plan::View`]) or answered afresh;
 //! - a **scope** is a [`Scope`]: per table, `fn(&Ctx, &R) -> bool`, which
@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use crate::db::{write_in, Db, Tables, Writes};
 use crate::hash::SchemaHash;
-use crate::peer::{self, Ctx, Functions, Procedure};
+use crate::peer::Ctx;
 use crate::plan::{answer, Maintained, Plan, View};
 use crate::row::{Describe, Input, Row, Type, Value};
 use crate::schema::{Schema, Space};
@@ -44,6 +44,13 @@ pub enum Kind {
     Scope,
 }
 
+/// What the machine runs of a mutator, opaque to it: run over the store,
+/// its changes left applied, all or none — or its refusal. It reads its
+/// own writes as it makes them.
+pub type Run = Arc<dyn Fn(&mut Store, &Ctx, &[u8]) -> Result<Vec<Change>, Refusal> + Send + Sync>;
+/// What a scope holds (§1.8): whether the union of who reads holds a row
+/// of the table named, by the row's bytes.
+pub type Holds = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
 /// A function's answer over a store, encoded.
 pub type Ask = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Vec<u8>, Refusal> + Send + Sync>;
 /// A view of a function, kept.
@@ -64,9 +71,9 @@ pub struct Function {
     /// What it answers: a view's element.
     pub output: Option<Type>,
     /// What the machine runs: a mutator's.
-    pub proc: Option<Arc<dyn Procedure>>,
+    pub proc: Option<Run>,
     /// What a scope holds (§1.8).
-    pub scope: Option<peer::Scope>,
+    pub scope: Option<Holds>,
     pub ask: Option<Ask>,
     pub watch: Option<Watch>,
     pub check: Check,
@@ -95,14 +102,14 @@ impl std::fmt::Debug for Function {
 }
 
 /// A domain: its name and version, its schema, its functions by name.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Domain {
     pub name: String,
     pub version: String,
     pub schema: Arc<Schema>,
     pub fns: BTreeMap<String, Function>,
     /// The tables a server sends a device last when it fills it
-    /// ([`crate::peer::Peer::later`]): what it can be without for a while.
+    /// what it can be without for a while.
     pub later: Vec<String>,
 }
 
@@ -121,22 +128,8 @@ fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
 /// A mutator's function (`P` the space it writes).
 pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>;
 
-struct Mutate<S: Tables, P: Writes, I> {
-    f: WriteFn<S, P, I>,
-}
-
-impl<S: Tables, P: Writes, I: Input> Procedure for Mutate<S, P, I> {
-    fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
-        let input = input_of::<I>(input)?;
-        // Every run draws from the entry's first id: a run again is the
-        // same run (§1.6).
-        ctx.draws.set(0);
-        write_in::<S, P, _>(store, |db| (self.f)(ctx, db, input)).map(|(_, cs)| cs)
-    }
-}
-
 /// A scope's predicate on a row's encoding.
-type Holds = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
+type OnRow = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
 
 /// A view's function, as a domain writes it.
 pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>;
@@ -144,7 +137,7 @@ pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>;
 /// Which rows a connection fed by a scope holds (§1.8): per table, a
 /// predicate on its rows; a table the scope does not name holds none.
 pub struct Scope<S> {
-    tables: BTreeMap<&'static str, Holds>,
+    tables: BTreeMap<&'static str, OnRow>,
     _p: std::marker::PhantomData<fn() -> S>,
 }
 
@@ -198,8 +191,15 @@ impl Domain {
     /// ([`crate::db`]): a durable one an intent on the log, a volatile one a
     /// transition of live state (§1.9).
     pub fn mutator<S: Tables, P: Writes, I: Input>(self, name: &str, f: WriteFn<S, P, I>) -> Domain {
+        let run: Run = Arc::new(move |store, ctx, input| {
+            let input = input_of::<I>(input)?;
+            // Every run draws from the entry's first id: a run again is the
+            // same run (§1.6).
+            ctx.draws.set(0);
+            write_in::<S, P, _>(store, |db| f(ctx, db, input)).map(|(_, cs)| cs)
+        });
         let mut f = Function {
-            proc: Some(Arc::new(Mutate { f })),
+            proc: Some(run),
             ..function::<I>(name, Kind::Mutator, None)
         };
         f.space = P::SPACE;
@@ -222,7 +222,7 @@ impl Domain {
 
     pub fn scope<S: Tables>(self, name: &str, scope: Scope<S>) -> Domain {
         let tables = scope.tables;
-        let holds: peer::Scope = Arc::new(move |ctx, table, row| tables.get(table).map_or(Ok(false), |f| f(ctx, row)));
+        let holds: Holds = Arc::new(move |ctx, table, row| tables.get(table).map_or(Ok(false), |f| f(ctx, row)));
         self.add(Function {
             scope: Some(holds),
             ..function::<()>(name, Kind::Scope, None)
@@ -252,14 +252,13 @@ impl Domain {
         self.schema.hash()
     }
 
-    /// The functions the machine runs, by name.
-    pub fn functions(&self) -> Functions {
-        let mut c = Functions::default();
-        for f in self.fns.values() {
-            f.proc.clone().into_iter().for_each(|p| c.insert(f.name.clone(), p));
-            f.scope.clone().into_iter().for_each(|s| c.insert_scope(f.name.clone(), s));
-        }
-        c
+    /// `name` run by `run` over the store as it is, in place of what it
+    /// ran, or a mutator of no typed input: what an authority's own raw
+    /// write, or a test, registers without a `Db`.
+    pub fn run(mut self, name: &str, run: Run) -> Domain {
+        let f = self.fns.entry(name.into()).or_insert_with(|| function::<()>(name, Kind::Mutator, None));
+        f.proc = Some(run);
+        self
     }
 
     /// A view's answer over a store, as `ctx` reads it.

@@ -252,9 +252,8 @@ struct Kept {
     view: Option<Box<dyn Maintained>>,
 }
 
-fn machine(d: &Domain, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
-    let mut p = Machine::new(d.schema.clone(), d.functions(), role, me.clone()).in_space(space);
-    p.later = d.later.clone();
+fn machine(d: &Arc<Domain>, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
+    let mut p = Machine::new(d.clone(), role, me.clone()).in_space(space);
     if let Some(o) = origin {
         p.origin = o;
     }

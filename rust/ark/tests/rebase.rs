@@ -16,7 +16,7 @@ use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
 use ark::log::{Durable, EntryId, Logged, Origin, Record};
-use ark::peer::{Ctx, Functions, Input, Output, Peer, Procedure, To};
+use ark::peer::{Ctx, Input, Output, Peer, To};
 use ark::store::{Change, LOG};
 use demo::{create_input, pair_input, pos_of, rename_input, ADD, CREATE, REMOVE, RENAME};
 use support::wire::*;
@@ -209,7 +209,7 @@ fn step_2_a_replica_given_the_entries_backwards() {
 #[test]
 fn step_3_by_facts_alone() {
     let s = scenario();
-    let mut r = replica("nobody", Functions::default());
+    let mut r = replica("nobody", demo::only(&[]));
     for f in &s.batches {
         r.step(down(f));
     }
@@ -271,7 +271,7 @@ fn compaction_and_the_horizon() {
         most: ark::peer::PART as u64,
     };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
-    let mut r = replica("x", Functions::default());
+    let mut r = replica("x", demo::only(&[]));
     assert!(matches!(&at0[..], [Frame::Part { part, .. }] if part.first && part.next.is_none()));
     r.step(down(&at0[0]));
     assert_eq!((r.log().head(), r.store.state_hash().hex()), (server.log().head(), FINAL.into()));
@@ -336,7 +336,7 @@ fn held_until_the_authority_has_it() {
         ),
         "held again: {s:?}"
     );
-    server.functions.insert(ADD, demo::cas().get(ADD).unwrap().clone());
+    demo::give(&mut server, ADD);
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
         matches!(verdicts(&s)[..], [.., Some(Verdict::At { seq: 1, .. }), Some(Verdict::At { seq: 2, .. })]),
@@ -437,16 +437,6 @@ fn a_sessions_pushes_are_judged_in_order() {
     assert!(alice.pending.is_empty() && alice.store == server.store);
 }
 
-/// A procedure that counts its runs.
-struct Counted(Arc<dyn Procedure>, Arc<AtomicUsize>);
-
-impl Procedure for Counted {
-    fn apply(&self, store: &mut ark::store::Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, ark::Refusal> {
-        self.1.fetch_add(1, Ordering::Relaxed);
-        self.0.apply(store, ctx, input)
-    }
-}
-
 /// A page is one rebase: bob's N = 4 entries land on alice in one `Batch`
 /// under her K = 3 pending intents, and her intents run K times — not K
 /// for every entry — and she is told her changes undone once, bob's facts,
@@ -456,11 +446,19 @@ impl Procedure for Counted {
 #[test]
 fn a_page_rebases_once() {
     let runs = Arc::new(AtomicUsize::new(0));
-    let mut cas = demo::cas();
+    // Each run counted.
+    let mut cas = demo::demo();
     for n in [CREATE, ADD] {
-        let p = cas.get(&demo::h(n)).unwrap().clone();
-        cas.insert(demo::h(n), Arc::new(Counted(p, runs.clone())));
+        let (p, runs) = (cas.fns[n].proc.clone().unwrap(), runs.clone());
+        cas = cas.run(
+            n,
+            Arc::new(move |store, ctx: &Ctx, input| {
+                runs.fetch_add(1, Ordering::Relaxed);
+                p(store, ctx, input)
+            }),
+        );
     }
+    let cas = Arc::new(cas);
     let (mut server, mut alice, mut bob) = (authority(demo::cas()), replica("alice", cas), replica("bob", demo::cas()));
     let o = alice.step(mutate(CREATE, create_input("Favorites"), 1));
     let (_, f) = deliver_up(&mut server, &who("alice"), &o);
@@ -515,7 +513,7 @@ fn what_comes_behind_a_held_intent_is_a_gap() {
     let ids: Vec<_> = alice.pending.iter().map(|p| p.entry.id).collect();
     assert!(sends(&alice.step(down(&s[0]))).is_empty(), "behind its own held one, the device waits");
     assert_eq!(alice.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
-    server.functions.insert(ADD, demo::cas().get(ADD).unwrap().clone());
+    demo::give(&mut server, ADD);
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
         matches!(

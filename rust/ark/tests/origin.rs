@@ -29,7 +29,7 @@ use support::wire::*;
 fn ids_are_the_origins_whoever_signs_in() {
     let nobody = Who::default();
     let origin = Origin::named(b"a device's sixteen bytes");
-    let mut device = Peer::new(demo::shared(), demo::cas(), Role::Replica, nobody);
+    let mut device = Peer::new(demo::cas(), Role::Replica, nobody);
     device.origin = origin;
     let pid = EntryId::of(origin, 1).draw(0);
     let mut pushes = sends(&device.step(mutate(CREATE, create_input("Road"), 1)));

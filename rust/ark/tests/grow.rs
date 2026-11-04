@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use ark::frames::Frame;
 use ark::log::{Durable, EntryId, Origin};
-use ark::peer::{Ctx, Input, Journal, Peer, Procedure, Role};
+use ark::peer::{Ctx, Input, Journal, Peer, Role};
 use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
 use ark::store::{Change, Store};
@@ -36,17 +36,13 @@ fn wider() -> Arc<Schema> {
 }
 
 /// Tags a row in the appended table: what only the wider schema can log.
-struct TagIt;
-
-impl Procedure for TagIt {
-    fn apply(&self, store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
-        let c = Change::Add {
-            table: "tag".into(),
-            row: input.to_vec(),
-        };
-        store.apply(&c)?;
-        Ok(vec![c])
-    }
+fn tag_it(store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
+    let c = Change::Add {
+        table: "tag".into(),
+        row: input.to_vec(),
+    };
+    store.apply(&c)?;
+    Ok(vec![c])
 }
 
 const TAG: &str = "grow.tag";
@@ -59,9 +55,11 @@ fn durable(p: &Peer) -> Durable {
 }
 
 fn wide_authority(d: Durable) -> Peer {
-    let mut cas = demo::cas();
-    cas.insert(TAG, Arc::new(TagIt));
-    let mut p = Peer::new(wider(), cas, Role::Authority { journal: Journal::default() }, who("server"));
+    let cas = ark::Domain {
+        schema: wider(),
+        ..demo::demo().run(TAG, Arc::new(tag_it))
+    };
+    let mut p = Peer::new(Arc::new(cas), Role::Authority { journal: Journal::default() }, who("server"));
     p.step(Input::Open(d));
     p
 }

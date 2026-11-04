@@ -386,8 +386,7 @@ fn fill(driven: bool) {
     let m = crate::client::domain();
     let mut server = ark_peer::Instance::open_under(m.schema.clone(), Box::new(ark_peer::Files::new(&dir).unwrap()));
     server.machine.role = Role::Authority { journal: Default::default() };
-    server.machine.functions = m.functions();
-    server.machine.later = m.later.clone();
+    server.machine.domain = m.clone();
     let me = super::who("max");
     let peer = match driven {
         true => crate::peer::Peer::open(crate::client::memory(me.clone(), Some("dev"))),

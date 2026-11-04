@@ -79,12 +79,7 @@ fn holds(d: &Domain, name: &str, input: &[u8], v: &dyn Maintained, store: &Store
 /// `top_two`, which then held one of bob's where it should hold hers.
 #[test]
 fn a_view_follows_a_replica_through_a_rebase() {
-    let mut server = Peer::new(
-        demo::shared(),
-        demo::cas(),
-        Role::Authority { journal: Journal::default() },
-        who_of("server"),
-    );
+    let mut server = Peer::new(demo::cas(), Role::Authority { journal: Journal::default() }, who_of("server"));
     let (mut alice, mut bob) = (replica_of("alice"), replica_of("bob"));
     let pid = EntryId::of(Origin::named("alice-session"), 1).draw(0);
     let d = views();
@@ -176,7 +171,7 @@ fn who_of(name: &str) -> Who {
 }
 
 fn replica_of(name: &str) -> Peer {
-    Peer::new(demo::shared(), demo::cas(), Role::Replica, who_of(name))
+    Peer::new(demo::cas(), Role::Replica, who_of(name))
 }
 
 fn mutate_input(name: &str, input: Vec<u8>) -> Input {
@@ -247,7 +242,7 @@ struct Fleet {
 
 /// Whether `server` feeds `c` the log whole: its feed names no scope.
 fn whole(server: &Peer, c: &Peer) -> bool {
-    server.functions.feed.as_ref().is_none_or(|f| f(&c.me).is_none())
+    server.feed.as_ref().is_none_or(|f| f(&c.me).is_none())
 }
 
 impl Fleet {
@@ -255,13 +250,13 @@ impl Fleet {
         let cas = demo::cas();
         let h = "demo.mine";
         let auth = Role::Authority { journal: Journal::default() };
-        let mut server = Peer::new(demo::shared(), cas.clone(), auth, who_of("server"));
+        let mut server = Peer::new(cas.clone(), auth, who_of("server"));
         // Every client but the first is fed by the scope.
         let first = who_of("peer-0").session;
-        server.functions.feed = Some(std::sync::Arc::new(move |w: &Who| (w.session != first).then(|| h.into())));
+        server.feed = Some(std::sync::Arc::new(move |w: &Who| (w.session != first).then(|| h.into())));
         let mut clients = vec![];
         for i in 0..3 {
-            clients.push(Peer::new(demo::shared(), cas.clone(), Role::Replica, who_of(&format!("peer-{i}"))));
+            clients.push(Peer::new(cas.clone(), Role::Replica, who_of(&format!("peer-{i}"))));
         }
         let mut f = Fleet {
             server,

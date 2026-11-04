@@ -15,7 +15,7 @@ mod support {
 use std::sync::Arc;
 
 use ark::frames::{Frame, Verdict};
-use ark::peer::{Functions, Input, Journal, Output, Peer, Role, To};
+use ark::peer::{Input, Journal, Output, Peer, Role, To};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
 use ark::store::Read;
@@ -63,15 +63,18 @@ fn here_key(session: &str) -> Vec<u8> {
     k
 }
 
-fn cas() -> Functions {
-    let mut c = demo::only(&[demo::CREATE]);
-    let waves = ark::register!(Domain::new::<Waves>("waves", "1"); wave).functions();
-    c.insert("waves.wave", waves.get("waves.wave").unwrap().clone());
+fn cas() -> Domain {
+    let mut c = Domain {
+        schema: schema(),
+        ..Arc::unwrap_or_clone(demo::only(&[demo::CREATE]))
+    };
+    let waves = ark::register!(Domain::new::<Waves>("waves", "1"); wave);
+    c.fns.insert("waves.wave".into(), waves.fns["waves.wave"].clone());
     c
 }
 
 fn peer(role: Role, name: &str, space: Space) -> Peer {
-    Peer::new(schema(), cas(), role, who(name)).in_space(space)
+    Peer::new(Arc::new(cas()), role, who(name)).in_space(space)
 }
 
 fn authority() -> Peer {
@@ -291,17 +294,13 @@ fn moody() -> Arc<Schema> {
 }
 
 /// A wave as the newer build writes it, with a mood.
-struct Moody;
-
-impl ark::peer::Procedure for Moody {
-    fn apply(&self, store: &mut ark::store::Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<ark::store::Change>, Refusal> {
-        let Wave { name } = <Wave as ark::format::Encode>::from_bytes(input)?;
-        let t = moody().tables.iter().find(|t| t.name == "here").unwrap().clone();
-        let row = ark::dynamic::row_bytes(&t, &serde_json::json!({"session": ctx.device(), "name": name, "mood": "glad"}))?;
-        let c = ark::store::Change::Add { table: "here".into(), row };
-        store.apply(&c)?;
-        Ok(vec![c])
-    }
+fn moody_wave(store: &mut ark::store::Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<ark::store::Change>, Refusal> {
+    let Wave { name } = <Wave as ark::format::Encode>::from_bytes(input)?;
+    let t = moody().tables.iter().find(|t| t.name == "here").unwrap().clone();
+    let row = ark::dynamic::row_bytes(&t, &serde_json::json!({"session": ctx.device(), "name": name, "mood": "glad"}))?;
+    let c = ark::store::Change::Add { table: "here".into(), row };
+    store.apply(&c)?;
+    Ok(vec![c])
 }
 
 /// Live state is the log's system (§1.2, §1.9): a volatile authority of a
@@ -312,9 +311,11 @@ impl ark::peer::Procedure for Moody {
 /// another schema as they are: the older one diverged at the wave.
 #[test]
 fn live_state_syncs_across_a_schema_that_grew() {
-    let mut fns = cas();
-    fns.insert("waves.wave", Arc::new(Moody));
-    let wider = |role: Role, name: &str| Peer::new(moody(), fns.clone(), role, who(name)).in_space(Space::Volatile);
+    let fns = Arc::new(Domain {
+        schema: moody(),
+        ..cas().run("waves.wave", Arc::new(moody_wave))
+    });
+    let wider = |role: Role, name: &str| Peer::new(fns.clone(), role, who(name)).in_space(Space::Volatile);
     let authority_role = || Role::Authority { journal: Journal::default() };
     for (mut server, mut replica) in [
         (wider(authority_role(), "server"), peer(Role::Replica, "alice", Space::Volatile)),

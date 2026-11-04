@@ -1053,7 +1053,7 @@ fn would(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> Would {
         return Would::Change;
     };
     let mut store = peer.log.store.clone();
-    match f.apply(&mut store, &ctx, input) {
+    match f(&mut store, &ctx, input) {
         Ok(changes) if changes.is_empty() => Would::Nothing,
         Ok(_) => Would::Change,
         Err(_) => Would::Refuse,

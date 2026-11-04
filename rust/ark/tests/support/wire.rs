@@ -5,8 +5,11 @@
 
 use ark::frames::{Frame, Verdict};
 use ark::log::Logged;
-use ark::peer::{Functions, Input, Journal, Output, Peer, Role, To, Who};
+use std::sync::Arc;
+
+use ark::peer::{Input, Journal, Output, Peer, Role, To, Who};
 use ark::store::Change;
+use ark::Domain;
 
 pub fn who(name: &str) -> Who {
     Who {
@@ -16,13 +19,13 @@ pub fn who(name: &str) -> Who {
     }
 }
 
-pub fn replica(name: &str, cas: Functions) -> Peer {
-    Peer::new(super::super::demo::shared(), cas, Role::Replica, who(name))
+pub fn replica(name: &str, cas: Arc<Domain>) -> Peer {
+    Peer::new(cas, Role::Replica, who(name))
 }
 
-pub fn authority(cas: Functions) -> Peer {
+pub fn authority(cas: Arc<Domain>) -> Peer {
     let role = Role::Authority { journal: Journal::default() };
-    Peer::new(super::super::demo::shared(), cas, role, who("server"))
+    Peer::new(cas, role, who("server"))
 }
 
 fn frames(outs: &[Output], fanout: bool) -> Vec<Frame> {

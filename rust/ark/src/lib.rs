@@ -9,8 +9,8 @@
 //! replica or authority (§1.7, [`peer`]); and the frames (§1.11,
 //! [`frames`]).
 //!
-//! The kernel runs a function as a [`peer::Procedure`], found by its name
-//! in a peer's [`peer::Functions`]. A domain is plain Rust (§1.16): rows,
+//! The kernel runs a function by its name in a peer's [`Domain`]: what
+//! it runs of it, a [`domain::Run`]. A domain is plain Rust (§1.16): rows,
 //! inputs and the schema derived ([`row`]), functions registered by name
 //! in a [`Domain`] ([`domain`]), reads and writes through a typed store
 //! ([`db`]) and views as plans maintained per operator ([`plan`]); rows
