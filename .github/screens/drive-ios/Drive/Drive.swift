@@ -75,20 +75,38 @@ final class Drive: XCTestCase {
     }
 
     /// The address typed and checked; the system's "wants to use … to sign
-    /// in" allowed; the server's dev sign-in page given a name and sent.
+    /// in" allowed; the server's dev sign-in page given a name and sent. The
+    /// page is in the system's web sheet, which another process draws
+    /// (Safari's view service), so it is looked for there as well as in the
+    /// app; and an app that waits for a press to open it gets one.
     private func signIn(_ app: XCUIApplication, field: XCUIElement, server: String, user: String) throws {
         field.tap()
         field.typeText(server)
         app.buttons["Continue"].tap()
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
         let allow = springboard.buttons["Continue"]
-        if allow.waitForExistence(timeout: 30) { allow.tap() }
+        let open = app.buttons["Sign In"]
+        let until = Date().addingTimeInterval(30)
+        while Date() < until && !allow.exists {
+            if open.exists && open.isHittable { open.tap() }
+            sleep(1)
+        }
+        if allow.exists { allow.tap() }
         let name = try first(timeout: 30, [
+            safari.webViews.textFields.firstMatch,
             app.webViews.textFields.firstMatch,
-            app.textFields["a name"],
             springboard.webViews.textFields.firstMatch,
+            app.textFields["a name"],
         ])
         name.tap()
-        name.typeText(user + "\n")
+        name.typeText(user)
+        // The page's own button, else the keyboard's Go.
+        let send = try? first(timeout: 3, [
+            safari.webViews.buttons["sign in"],
+            app.webViews.buttons["sign in"],
+            springboard.webViews.buttons["sign in"],
+        ])
+        if let send { send.tap() } else { name.typeText("\n") }
     }
 
     /// A tab, or any button, that says `label`.
