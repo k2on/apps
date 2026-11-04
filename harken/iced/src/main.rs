@@ -3354,7 +3354,7 @@ impl App {
             }
             turned_away = self.sign_in_unasked();
         }
-        for (id, reason) in self.peer.client.lock().take_rejections() {
+        for (id, reason) in self.peer.client.lock().take_refusals(ark::schema::Space::Durable) {
             let what = self
                 .edits
                 .iter()

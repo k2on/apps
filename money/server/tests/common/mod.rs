@@ -66,7 +66,8 @@ impl Peer {
 
     pub fn pump(&mut self) -> ark_peer::Pumped {
         let p = self.client.pump();
-        self.refused.extend(self.client.take_rejections().into_iter().map(|(_, why)| why));
+        self.refused
+            .extend(self.client.take_refusals(ark::schema::Space::Durable).into_iter().map(|(_, why)| why));
         p
     }
 

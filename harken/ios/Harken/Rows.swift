@@ -345,22 +345,17 @@ enum Phone {
 
     /// What a screen writes beside an item: nothing once it is in the log,
     /// the reason word for word when it never will be.
-    static func caption(_ st: Standing) -> String? {
-        switch st {
-        case .pending: return "not synced yet"
-        case .confirmed, .unknown: return nil
-        case .rejected(let why): return "not saved: " + why
-        }
+    static func caption(_ o: Outcome?) -> String? {
+        guard let o = o else { return nil }
+        if o.pending { return "not synced yet" }
+        return o.refused.map { "not saved: " + $0 }
     }
 
     /// The diagnostics' word for where a change stands.
-    static func standing(_ st: Standing) -> String {
-        switch st {
-        case .pending: return "not synced yet"
-        case .confirmed: return "saved"
-        case .unknown: return "unknown"
-        case .rejected(let why): return "not saved: " + why
-        }
+    static func standing(_ o: Outcome?) -> String {
+        guard let o = o else { return "unknown" }
+        if o.pending { return "not synced yet" }
+        return o.refused.map { "not saved: " + $0 } ?? "saved"
     }
 }
 

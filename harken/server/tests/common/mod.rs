@@ -163,18 +163,10 @@ impl Peer {
     pub fn pump(&mut self) -> ark_peer::Pumped {
         let p = self.client.pump();
         self.heard = (self.heard && !p.opened) || p.frames[1] > 0;
-        let durable = self
-            .client
-            .take_rejections()
-            .into_iter()
-            .map(|(_, why)| (Space::Durable, why));
-        self.refused.extend(durable.collect::<Vec<_>>());
-        let live = self
-            .client
-            .take_live_refusals()
-            .into_iter()
-            .map(|why| (Space::Volatile, why));
-        self.refused.extend(live);
+        for space in [Space::Durable, Space::Volatile] {
+            let told = self.client.take_refusals(space).into_iter();
+            self.refused.extend(told.map(|(_, why)| (space, why)));
+        }
         p
     }
 

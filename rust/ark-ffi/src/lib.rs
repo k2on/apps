@@ -6,7 +6,7 @@
 //! whose `harken_open` is the constructor its phones call). Through the
 //! bridge a [`Peer`] is called by function name with JSON — `mutate` (on
 //! the space the function writes), `query`, `view` — and says where it stands
-//! (`status`), what became of each intent (`standing`, `take_rejections`),
+//! (`status`), what became of each intent (`outcome`, `take_refusals`),
 //! which jobs of a kind are due for a handler written in the app (`due`),
 //! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
 //! and whether it is alone (`alone`, `join`).
@@ -144,13 +144,29 @@ pub enum ViewUpdate {
     },
 }
 
-/// What has become of an intent this device authored.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Standing {
-    Pending,
-    Confirmed,
-    Rejected { why: String },
-    Unknown,
+/// What has become of the intent `id` (as [`Peer::mutate`] gave it):
+/// pending, taken by the server (neither `pending` nor `refused`), or
+/// refused and why.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Outcome {
+    pub id: String,
+    pub pending: bool,
+    pub refused: Option<String>,
+}
+
+impl Outcome {
+    fn of(id: EntryId, o: ark_peer::Outcome) -> Outcome {
+        let (pending, refused) = match o {
+            ark_peer::Outcome::Pending => (true, None),
+            ark_peer::Outcome::Ok => (false, None),
+            ark_peer::Outcome::Refused(why) => (false, Some(why)),
+        };
+        Outcome {
+            id: ark::hash::hex(&id.0),
+            pending,
+            refused,
+        }
+    }
 }
 
 /// Where a device stands, as a status line says it.
@@ -172,13 +188,6 @@ pub struct Status {
     /// Why the server last turned this login away (close 4401), until the
     /// next login: the link has stopped dialling.
     pub denied: Option<String>,
-}
-
-/// An intent the server refused: its id and why.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Rejection {
-    pub id: String,
-    pub why: String,
 }
 
 /// What the app is told when anything moved: it takes its views then.
@@ -559,35 +568,19 @@ impl Peer {
         }
     }
 
-    /// Where the intent `id` (as [`Peer::mutate`] gave it) stands.
-    pub fn standing(&self, id: String) -> Standing {
-        let Some(id) = ark::hash::unhex(&id).and_then(|b| b.try_into().ok()).map(EntryId) else {
-            return Standing::Unknown;
-        };
-        match self.shared.lock().peer.standing(&id) {
-            ark_peer::Standing::Pending => Standing::Pending,
-            ark_peer::Standing::Confirmed => Standing::Confirmed,
-            ark_peer::Standing::Rejected(why) => Standing::Rejected { why },
-            ark_peer::Standing::Unknown => Standing::Unknown,
-        }
+    /// What became of the intent `id` on the log (as [`Peer::mutate`] gave
+    /// it): none for one this run did not author.
+    pub fn outcome(&self, id: String) -> Option<Outcome> {
+        let id = ark::hash::unhex(&id).and_then(|b| b.try_into().ok()).map(EntryId)?;
+        let o = self.shared.lock().peer.outcome(&id)?;
+        Some(Outcome::of(id, o))
     }
 
-    /// What the server refused of this device's intents since the last ask.
-    pub fn take_rejections(&self) -> Vec<Rejection> {
-        let mut s = self.shared.lock();
-        let r = s.peer.take_rejections();
-        r.into_iter()
-            .map(|(id, why)| Rejection {
-                id: ark::hash::hex(&id.0),
-                why,
-            })
-            .collect()
-    }
-
-    /// What the server refused of this device's live calls since the last
-    /// ask.
-    pub fn take_live_refusals(&self) -> Vec<String> {
-        self.shared.lock().peer.take_live_refusals()
+    /// What the server refused of this device's intents on the log since
+    /// the last ask.
+    pub fn take_refusals(&self) -> Vec<Outcome> {
+        let r = self.shared.lock().peer.take_refusals(ark::schema::Space::Durable);
+        r.into_iter().map(|(id, why)| Outcome::of(id, ark_peer::Outcome::Refused(why))).collect()
     }
 
     /// Somebody signed in: every pending intent theirs, dialled as them.

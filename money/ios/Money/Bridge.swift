@@ -266,8 +266,8 @@ final class Bridge {
             deniedSaid = true
             main { self.denied(d) }
         }
-        if let last = m.peer.takeRejections().last {
-            let w = last.why
+        if let last = m.peer.takeRefusals().last {
+            let w = last.refused ?? ""
             main { self.notice("Not saved: \(w)") }
         }
         show()

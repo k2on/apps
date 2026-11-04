@@ -64,7 +64,7 @@ use ark::format::Encode;
 use ark::peer::Who;
 use ark::row::Id;
 use ark_auth::Login;
-use ark_peer::{Handle, Memory, Peer, Standing};
+use ark_peer::{Handle, Memory, Peer};
 use money_domain::plaid::import_of;
 use money_domain::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport};
 
@@ -336,7 +336,7 @@ impl Job {
         if let Some(why) = p.denied {
             self.say(format!("the hub turned the importer's sign-in away: {why}"));
         }
-        for (_, why) in self.peer.take_rejections() {
+        for (_, why) in self.peer.take_refusals(ark::schema::Space::Durable) {
             self.say(format!("refused: {why}"));
         }
     }
@@ -939,17 +939,17 @@ impl Job {
         let held = ark_peer::link::until(CONFIRM, Duration::from_millis(0), || {
             ark_peer::link::wait(&self.peer, &self.rx, Duration::from_millis(50));
             let p = self.peer.pump();
-            for (r, w) in self.peer.take_rejections() {
+            for (r, w) in self.peer.take_refusals(ark::schema::Space::Durable) {
                 if r == id {
                     why = Some(w);
                 }
             }
             drop(p);
-            !matches!(self.peer.standing(&id), Standing::Pending)
+            !matches!(self.peer.outcome(&id), Some(ark_peer::Outcome::Pending))
         });
-        match (held, self.peer.standing(&id), why) {
-            (_, Standing::Confirmed, _) => Ok(()),
-            (_, Standing::Rejected(w), _) | (_, _, Some(w)) => bail!("the hub refused it: {w}"),
+        match (held, self.peer.outcome(&id), why) {
+            (_, Some(ark_peer::Outcome::Ok), _) => Ok(()),
+            (_, Some(ark_peer::Outcome::Refused(w)), _) | (_, _, Some(w)) => bail!("the hub refused it: {w}"),
             (false, ..) => bail!("the hub did not confirm it within {}s", CONFIRM.as_secs()),
             (true, s, None) => bail!("it stands {s:?}"),
         }

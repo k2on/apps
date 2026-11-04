@@ -24,7 +24,7 @@ package dev.harken.android
 import dev.arkdb.ffi.Change
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.Refusal
-import dev.arkdb.ffi.Standing
+import dev.arkdb.ffi.Outcome
 import dev.arkdb.ffi.Status
 import dev.arkdb.ffi.Update
 import dev.arkdb.ffi.View
@@ -435,8 +435,8 @@ class Library(private val session: ArkSession) {
         val h = harken ?: return
         movedFlow.value++
         splice()
-        val rejected = h.peer.takeRejections()
-        if (rejected.isNotEmpty()) noticeFlow.value = "Not saved: ${rejected.last().why}"
+        val rejected = h.peer.takeRefusals()
+        if (rejected.isNotEmpty()) noticeFlow.value = "Not saved: ${rejected.last().refused}"
     }
 
     // Pages -------------------------------------------------------------------
@@ -628,15 +628,14 @@ class Library(private val session: ArkSession) {
     suspend fun diagnostics(): Diagnostics =
         session.run { h ->
             val mine = synchronized(changes) { changes.toList() }
-            Diagnostics(status = h.peer.status(), changes = mine.map { it.what to standing(h.peer.standing(it.id)) })
+            Diagnostics(status = h.peer.status(), changes = mine.map { it.what to standing(h.peer.outcome(it.id)) })
         }
 
-    private fun standing(st: Standing): String =
-        when (st) {
-            is Standing.Pending -> "not synced yet"
-            is Standing.Confirmed -> "saved"
-            is Standing.Unknown -> "unknown"
-            is Standing.Rejected -> "not saved: ${st.why}"
+    private fun standing(o: Outcome?): String =
+        when {
+            o == null -> "unknown"
+            o.pending -> "not synced yet"
+            else -> o.refused?.let { "not saved: $it" } ?: "saved"
         }
 
     fun signOut() = session.signOut()

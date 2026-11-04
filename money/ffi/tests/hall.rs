@@ -3,7 +3,6 @@
 //! bank import from anybody but the importer is refused, and the
 //! importer's is the server's.
 
-use ark_ffi::Standing;
 use money_domain::{AccountLineView, TxnLineView};
 use money_ffi::Hall;
 
@@ -36,7 +35,7 @@ fn a_household_shares_one_budget() {
     );
     let id = sam.mutate("add_transaction".into(), coffee).unwrap();
     hall.carry();
-    assert_eq!(sam.standing(id), Standing::Confirmed);
+    assert!(sam.outcome(id).is_some_and(|o| !o.pending && o.refused.is_none()));
     let rows = register.rows();
     assert_eq!(rows.len(), before + 1);
     assert!(rows.iter().any(|t| t.payee == "Blue Bottle" && t.user_id == "sam"));
@@ -46,5 +45,5 @@ fn a_household_shares_one_budget() {
     let importer = hall.device(path(&c), "importer".into(), "plaid".into(), vec!["bank".into()]).unwrap();
     let id = importer.mutate("import".into(), import.into()).unwrap();
     hall.carry();
-    assert_eq!(importer.standing(id), Standing::Confirmed);
+    assert!(importer.outcome(id).is_some_and(|o| !o.pending && o.refused.is_none()));
 }

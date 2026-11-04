@@ -151,7 +151,7 @@ impl Player {
 
     /// What the server refused of this device's calls since the last ask.
     pub fn refusals(&mut self, p: &mut Peer) -> Vec<String> {
-        let out = p.take_live_refusals();
+        let out: Vec<String> = p.take_refusals(ark::schema::Space::Volatile).into_iter().map(|(_, why)| why).collect();
         if let Some(last) = out.last() {
             self.stats.refused += out.len() as u64;
             self.stats.last_refusal = Some(last.clone());

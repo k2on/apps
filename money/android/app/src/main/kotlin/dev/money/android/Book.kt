@@ -358,7 +358,7 @@ private constructor(
         for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.settle()
         for ((h, _) in items.values) h.settle()
         for ((h, _) in registers.values) h.settle()
-        for (r in peer.takeRejections()) say("The server didn't take a change: ${r.why}")
+        for (r in peer.takeRefusals()) say("The server didn't take a change: ${r.refused}")
         awaiting?.let { w ->
             when (val f = follow(asks?.rows.orEmpty(), w.after)) {
                 is Follow.Open -> {

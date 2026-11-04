@@ -6,8 +6,8 @@
 //! `playlists.create_playlist`) — or calls the domain's own
 //! view functions ([`Peer::answer`]) — and holds the
 //! maintained views its lists are, each one's patches handed back as an
-//! [`Update`]. The peer keeps every intent's [`Standing`] and the refusals
-//! its server sent.
+//! [`Update`]. The peer keeps every intent's [`Outcome`] and, per space,
+//! the refusals its server sent until they are taken.
 //!
 //! **Nobody has to be signed in.** A device opened with no login
 //! ([`Peer::open_as`]) authors as whoever last signed in on it — [`nobody`],
@@ -47,13 +47,13 @@ impl Arg for Vec<u8> {
     }
 }
 
-/// What has become of an intent this device authored.
+/// What has become of an intent this device authored: pending, taken by
+/// the authority, or refused by it and why.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Standing {
+pub enum Outcome {
     Pending,
-    Confirmed,
-    Rejected(String),
-    Unknown,
+    Ok,
+    Refused(String),
 }
 
 /// What one view did since it was last asked.
@@ -80,9 +80,10 @@ impl Update {
 /// What became of a device's own intents, and what its views did.
 #[derive(Default)]
 pub(crate) struct Told {
-    standing: BTreeMap<EntryId, Standing>,
-    rejections: Vec<(EntryId, String)>,
-    live_refused: Vec<(EntryId, String)>,
+    /// What the authority said of each intent on the log, and the
+    /// refusals of each space not yet taken.
+    outcomes: BTreeMap<EntryId, Outcome>,
+    pub refused: [Vec<(EntryId, String)>; 2],
     pub updates: BTreeMap<usize, Update>,
     /// The calls of its server's functions sent and not yet answered, the
     /// next one's id, and the answers not yet taken.
@@ -118,16 +119,15 @@ impl Told {
     }
 
     pub fn refused(&mut self, space: Space, id: EntryId, why: &str) {
-        if space == Space::Volatile {
-            return self.live_refused.push((id, why.into()));
+        if space == Space::Durable {
+            self.outcomes.insert(id, Outcome::Refused(why.into()));
         }
-        self.standing.insert(id, Standing::Rejected(why.into()));
-        self.rejections.push((id, why.into()));
+        self.refused[space as usize].push((id, why.into()));
     }
 
     pub fn confirmed(&mut self, space: Space, id: EntryId) {
         if space == Space::Durable {
-            self.standing.insert(id, Standing::Confirmed);
+            self.outcomes.insert(id, Outcome::Ok);
         }
     }
 
@@ -285,8 +285,8 @@ impl Peer {
         let (space, f) = (f.space, f.name.clone());
         let id = self.machine(space).ok_or_else(|| format!("no {space:?} machine here"))?.next_id();
         if let Err(why) = self.author(space, &f, input.bytes(), now) {
-            self.told.rejections.retain(|(r, _)| *r != id);
-            self.told.live_refused.retain(|(r, _)| *r != id);
+            // Said here, as the answer; not again among the refusals.
+            self.told.refused[space as usize].retain(|(r, _)| *r != id);
             return Err(why);
         }
         self.flush();
@@ -353,22 +353,19 @@ impl Peer {
         self.told.updates.remove(&view).unwrap_or(Update::Unchanged)
     }
 
-    pub fn standing(&self, id: &EntryId) -> Standing {
+    /// What became of the intent `id` on the log: none for one this run
+    /// did not author, or of a run before.
+    pub fn outcome(&self, id: &EntryId) -> Option<Outcome> {
         if self.log.pending.iter().any(|p| p.entry.id == *id) {
-            return Standing::Pending;
+            return Some(Outcome::Pending);
         }
-        self.told.standing.get(id).cloned().unwrap_or(Standing::Unknown)
+        self.told.outcomes.get(id).cloned()
     }
 
-    /// What the server refused of this device's intents since the last ask.
-    pub fn take_rejections(&mut self) -> Vec<(EntryId, String)> {
-        std::mem::take(&mut self.told.rejections)
-    }
-
-    /// What the server refused of this device's live calls since the last
-    /// ask.
-    pub fn take_live_refusals(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.told.live_refused).into_iter().map(|(_, w)| w).collect()
+    /// What the authority of `space` refused of this device's intents since
+    /// the last ask: each one's id, and why.
+    pub fn take_refusals(&mut self, space: Space) -> Vec<(EntryId, String)> {
+        std::mem::take(&mut self.told.refused[space as usize])
     }
 
     /// What the server answered a call ([`Peer::request`]), once it has:

@@ -9,7 +9,7 @@ package dev.harken.android
 
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.Refusal
-import dev.arkdb.ffi.Standing
+import dev.arkdb.ffi.Outcome
 import dev.arkdb.ffi.View
 import dev.harken.android.gen.AddToPlaylist
 import dev.harken.android.gen.AlbumInput
@@ -482,12 +482,11 @@ object Phone {
      * What a screen writes beside an item: nothing once it is in the log, the reason word for word
      * when it never will be.
      */
-    fun caption(st: Standing): String? =
-        when (st) {
-            is Standing.Pending -> "not synced yet"
-            is Standing.Confirmed,
-            is Standing.Unknown -> null
-            is Standing.Rejected -> "not saved: ${st.why}"
+    fun caption(o: Outcome?): String? =
+        when {
+            o == null -> null
+            o.pending -> "not synced yet"
+            else -> o.refused?.let { "not saved: $it" }
         }
 }
 

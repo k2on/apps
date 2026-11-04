@@ -693,7 +693,7 @@ impl Scan {
 /// out loud.
 fn pump(peer: &mut ark_peer::Peer) {
     peer.pump();
-    for (_, why) in peer.take_rejections() {
+    for (_, why) in peer.take_refusals(ark::schema::Space::Durable) {
         eprintln!("harken-server: library: an entry was refused: {why}");
     }
 }

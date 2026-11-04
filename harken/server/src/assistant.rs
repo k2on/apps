@@ -3439,7 +3439,7 @@ pub mod ha {
         fn pump_records(&mut self) {
             for (user, p) in self.recorders.iter_mut() {
                 p.pump();
-                for (_, why) in p.take_rejections() {
+                for (_, why) in p.take_refusals(ark::schema::Space::Durable) {
                     eprintln!("harken-server: house: {user}'s entry was refused: {why}");
                 }
             }

@@ -334,8 +334,8 @@ final class Bridge {
             deniedSaid = true
             main { self.denied(d) }
         }
-        if let last = h.peer.takeRejections().last {
-            let w = last.why
+        if let last = h.peer.takeRefusals().last {
+            let w = last.refused ?? ""
             main { self.notice("Not saved: \(w)") }
         }
         step()
@@ -630,7 +630,7 @@ final class Bridge {
     func diagnostics(done: @escaping (Status?, [(String, String)]) -> Void) {
         queue.async {
             let st = self.harken?.peer.status()
-            let list = self.changes.map { c in (c.what, self.harken.map { Phone.standing($0.peer.standing(id: c.id)) } ?? "unknown") }
+            let list = self.changes.map { c in (c.what, self.harken.map { Phone.standing($0.peer.outcome(id: c.id)) } ?? "unknown") }
             self.main { done(st, list) }
         }
     }

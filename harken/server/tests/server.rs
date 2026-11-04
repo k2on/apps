@@ -276,7 +276,12 @@ fn a_clients_raw_write_is_refused() {
     bob.client.log.functions.insert(h.clone(), raw);
     // A function the domain has not: past `mutate`, to the machine itself.
     let (input, now, cause) = (vec![], ark_peer::now_ms(), None);
-    let raw = ark::peer::Input::Mutate { func: h.clone(), input, now, cause };
+    let raw = ark::peer::Input::Mutate {
+        func: h.clone(),
+        input,
+        now,
+        cause,
+    };
     bob.client.step(ark::schema::Space::Durable, raw);
     for _ in 0..100 {
         bob.pump();

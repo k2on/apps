@@ -103,7 +103,6 @@ use ark::log::EntryId;
 use ark::peer::{Journal, Role, Who};
 use ark_auth::client::Patience;
 use ark_auth::Login;
-use ark_ffi::Standing;
 use ark_peer::{Config, Files, Peer};
 use harken_server::domain::host::Listening;
 use harken_server::hosted::Hosted;
@@ -574,8 +573,8 @@ impl Headless {
 
     /// Take the verdicts that arrived, and write each down.
     fn collect(&mut self) {
-        let fresh: Vec<Value> = (self.peer.take_rejections().into_iter())
-            .map(|r| json!({ "id": r.id, "reason": r.why }))
+        let fresh: Vec<Value> = (self.peer.take_refusals().into_iter())
+            .map(|r| json!({ "id": r.id, "reason": r.refused }))
             .collect();
         if fresh.is_empty() {
             return;
@@ -743,12 +742,14 @@ impl Headless {
                             .any(|l| l.entry.id == EntryId(id))
                     })
                 };
-                let (standing, why) = match self.peer.standing(hex(&id)) {
-                    Standing::Pending => ("pending", None),
-                    Standing::Rejected { why } => ("rejected", Some(why)),
-                    Standing::Confirmed => ("confirmed", None),
-                    Standing::Unknown if logged() => ("confirmed", None),
-                    Standing::Unknown => ("unknown", None),
+                let (standing, why) = match self.peer.outcome(hex(&id)) {
+                    Some(o) if o.pending => ("pending", None),
+                    Some(ark_ffi::Outcome {
+                        refused: Some(why), ..
+                    }) => ("rejected", Some(why)),
+                    Some(_) => ("confirmed", None),
+                    None if logged() => ("confirmed", None),
+                    None => ("unknown", None),
                 };
                 match why {
                     Some(why) => Answer::default()
@@ -907,7 +908,11 @@ impl Headless {
                 })
             }
             Cmd::LiveRefusals => {
-                Answer::default().set("refusals", json!(self.peer.take_live_refusals()))
+                let told = self
+                    .peer
+                    .with(|p| p.take_refusals(ark::schema::Space::Volatile));
+                let whys: Vec<String> = told.into_iter().map(|(_, why)| why).collect();
+                Answer::default().set("refusals", json!(whys))
             }
             Cmd::Persist | Cmd::Quit => {
                 self.peer.pump();

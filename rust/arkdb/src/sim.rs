@@ -190,8 +190,8 @@ impl Net {
     fn told_by_client(&mut self, i: i64) {
         let c = self.clients.get_mut(&i).unwrap();
         let frames = c.take_frames();
-        let refused = c.take_rejections().into_iter().map(|(_, why)| why).chain(c.take_live_refusals());
-        self.refused.extend(refused.map(|why| (i, why)));
+        let refused = [Space::Durable, Space::Volatile].map(|s| c.take_refusals(s)).into_iter().flatten();
+        self.refused.extend(refused.map(|(_, why)| (i, why)));
         let mine: Vec<(i64, usize)> = self.views.range((i, 0)..=(i, usize::MAX)).map(|(k, _)| *k).collect();
         for k in mine {
             match c.update(k.1) {

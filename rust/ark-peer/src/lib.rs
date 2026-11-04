@@ -94,7 +94,7 @@ use ark::schema::Space;
 use ark::store::Change;
 use ark::{Domain, Refusal};
 
-pub use app::{nobody, Arg, Standing, Status, Update};
+pub use app::{nobody, Arg, Outcome, Status, Update};
 pub use ark::file::FileRef;
 pub use disk::{Disk, Files, Memory};
 pub use files::{Dir, Store};

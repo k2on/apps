@@ -2235,11 +2235,11 @@ impl App {
         // What this window did, and what became of each: pending, in the log,
         // or refused and why — the sentence every replica reaches.
         for e in self.edits.iter().rev().take(12) {
-            let standing = match client.standing(&e.id) {
-                crate::client::Standing::Pending => "pending".to_string(),
-                crate::client::Standing::Confirmed => "in the log".to_string(),
-                crate::client::Standing::Rejected(why) => format!("refused: {why}"),
-                crate::client::Standing::Unknown => "unknown".to_string(),
+            let standing = match client.outcome(&e.id) {
+                Some(crate::client::Outcome::Pending) => "pending".to_string(),
+                Some(crate::client::Outcome::Ok) => "in the log".to_string(),
+                Some(crate::client::Outcome::Refused(why)) => format!("refused: {why}"),
+                None => "unknown".to_string(),
             };
             rows.push((format!("  {}", fit::tail(&e.what, 34)), standing));
         }

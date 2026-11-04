@@ -1159,7 +1159,7 @@ mod tests {
         // playlist made alone keeps its id through the sign-in, and the item
         // put on it names it still.
         assert_eq!(hub.log.log().head().0, 5, "the playlist, the three songs and the add");
-        assert!(peer.client.lock().take_rejections().is_empty());
+        assert!(peer.client.lock().take_refusals(ark::schema::Space::Durable).is_empty());
         assert!(peer.items()[1].on_playlist());
     }
 

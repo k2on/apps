@@ -21,7 +21,8 @@ fn money_opens_and_is_called_by_name() {
     let Sent::Intent { id } = money_send(p.clone(), "open_account".into(), open.into()) else {
         panic!("opened")
     };
-    assert_eq!(p.standing(id), ark_ffi::Standing::Confirmed, "alone, its own authority");
+    let o = p.outcome(id).unwrap();
+    assert!(!o.pending && o.refused.is_none(), "alone, its own authority");
     let t = accounts.take();
     assert!(matches!(t.update, Taken::Patched { .. }), "{t:?}");
     assert_eq!(t.rows.len(), 1);

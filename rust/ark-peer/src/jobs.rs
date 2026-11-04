@@ -28,7 +28,7 @@ use ark::row::Value;
 use ark::schema::Space;
 use ark::store::Change;
 
-use crate::app::Standing;
+use crate::app::Outcome;
 use crate::link::Sendable;
 use crate::{monotonic_ms, now_ms, Peer};
 
@@ -103,9 +103,9 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
         }
         for (k, (e, span)) in std::mem::take(&mut self.claims) {
             // An authority's own claim is decided as it is made.
-            match if p.hub.serving { Standing::Confirmed } else { p.standing(&e) } {
-                Standing::Pending => drop(self.claims.insert(k, (e, span))),
-                Standing::Confirmed => {
+            match if p.hub.serving { Some(Outcome::Ok) } else { p.outcome(&e) } {
+                Some(Outcome::Pending) => drop(self.claims.insert(k, (e, span))),
+                Some(Outcome::Ok) => {
                     let Some((r, _, _)) = self.open.get(&k) else { continue };
                     // The run, and all it authors, under the claim.
                     let run = tracing::info_span!(target: "ark", "job", peer = %p.label(), table = R::TABLE, trace = %ark::hash::hex(&span.trace.0), span = %ark::hash::hex(&span.id));

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_ffi::{Listener, Login, Patch, Peer, Refusal, Standing, ViewUpdate};
+use ark_ffi::{Listener, Login, Patch, Peer, Refusal, ViewUpdate};
 use ark_peer::{dev, Config, Handle, Live, Memory};
 use arkdb::demo::{arrival, demo, live, room, Playlist};
 
@@ -103,7 +103,9 @@ fn the_bridge_does_what_the_kit_does() {
     );
     assert_eq!(alice.check("create_playlist".into(), r#"{"name":"x"}"#.into()), None);
     assert!(alice.mutate("nothing".into(), "null".into()).is_err());
-    until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
+    until("confirmed", || {
+        alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
+    });
     let road = playlists(&alice)[0].id.hex();
 
     // A view and its patches; a query answering the same.
@@ -160,7 +162,7 @@ fn the_bridge_does_what_the_kit_does() {
     alice.logout();
     assert_eq!(alice.status().link, "signed out");
     assert_eq!(alice.query("items".into(), args).unwrap(), format!("[{row}]"));
-    assert!(alice.take_rejections().is_empty());
+    assert!(alice.take_refusals().is_empty());
 }
 
 /// A device opened again reads what its disk held.
@@ -311,7 +313,9 @@ fn a_tap_begun_through_the_bridge_is_the_servers_cause() {
     let span = alice.begin("tap new playlist".into());
     let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
     alice.end();
-    until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
+    until("confirmed", || {
+        alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
+    });
     let cause = hub
         .with(move |p| {
             p.log
@@ -338,7 +342,9 @@ fn an_apps_mutate_is_the_root_of_its_trace() {
     alice.connect_with("", hub.dialer(Arc::new(dev)));
     until("alice linked", || alice.status().linked);
     let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
-    until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
+    until("confirmed", || {
+        alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
+    });
     let entry = hub
         .with(move |p| {
             p.log
