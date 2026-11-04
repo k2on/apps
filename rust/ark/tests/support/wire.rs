@@ -5,7 +5,7 @@
 
 use ark::frames::{Frame, Verdict};
 use ark::log::Logged;
-use ark::peer::{Functions, Input, Journal, Output, Peer, Role, Who};
+use ark::peer::{Functions, Input, Journal, Output, Peer, Role, To, Who};
 use ark::store::Change;
 
 pub fn who(name: &str) -> Who {
@@ -28,8 +28,8 @@ pub fn authority(cas: Functions) -> Peer {
 fn frames(outs: &[Output], fanout: bool) -> Vec<Frame> {
     outs.iter()
         .filter_map(|o| match o {
-            Output::Send(b) if !fanout => Some(Frame::dec(b).unwrap()),
-            Output::Fanout(b) if fanout => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::Back, b) if !fanout => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::All, b) if fanout => Some(Frame::dec(b).unwrap()),
             _ => None,
         })
         .collect()

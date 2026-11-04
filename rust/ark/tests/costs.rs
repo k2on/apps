@@ -155,7 +155,7 @@ fn an_own_step_allocates_the_same_as_the_log_grows() {
     let per = |n: u64| {
         let (mut p, mut add) = own(10, n);
         let (o, a) = allocs(|| add(&mut p));
-        assert!(matches!(o.last(), Some(Output::Confirmed(_))), "{o:?}");
+        assert!(matches!(o.last(), Some(Output::Settled(_, Ok(())))), "{o:?}");
         a
     };
     let (small, big) = (per(500), per(8000));

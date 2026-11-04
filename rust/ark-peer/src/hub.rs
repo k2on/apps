@@ -4,9 +4,9 @@
 //!
 //! **Routing.** A frame from a connection goes to the machine of its space
 //! with the connection's verified identity. What the machine says goes:
-//! `Send` back to that connection; `Fanout` to every connection fed the log
-//! whole, or, for the volatile space, every connection that said `Hello`
-//! in it; `To` to the connections of that session; and `Persist` to the
+//! a frame `Send` back to that connection, to all — every connection fed
+//! the log whole, or, for the volatile space, every connection that said
+//! `Hello` in it — or to the connections of a session; and `Persist` to the
 //! disk **first** — nothing a step says is delivered until its records are
 //! written, and while a write fails every delivery waits with it, in
 //! order, for a write that succeeds ([`Peer::failure`]).

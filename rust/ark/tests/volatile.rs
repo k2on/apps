@@ -15,7 +15,7 @@ mod support {
 use std::sync::Arc;
 
 use ark::frames::{Frame, Verdict};
-use ark::peer::{Functions, Input, Journal, Output, Peer, Role};
+use ark::peer::{Functions, Input, Journal, Output, Peer, Role, To};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
 use ark::store::Read;
@@ -146,13 +146,13 @@ fn a_change_to_the_other_space_is_refused() {
     let mut live = peer(Role::Replica, "alice", Space::Volatile);
     let o = live.step(mutate(demo::CREATE, demo::create_input("Mix"), 1));
     assert!(
-        matches!(&o[..], [Output::Refused { why, .. }] if why == "playlist is not in this space"),
+        matches!(&o[..], [Output::Settled(_, Err(why))] if why == "playlist is not in this space"),
         "{o:?}"
     );
     let mut log = peer(Role::Replica, "alice", Space::Durable);
     let o = log.step(waving("phone"));
     assert!(
-        matches!(&o[..], [Output::Refused { why, .. }] if why == "here is not in this space"),
+        matches!(&o[..], [Output::Settled(_, Err(why))] if why == "here is not in this space"),
         "{o:?}"
     );
 }
@@ -225,7 +225,7 @@ fn a_replica_folds_its_own_log() {
     carry(&mut server, "alice", &pending, &mut [&mut alice]);
     assert!(alice.pending.is_empty() && alice.store == server.store);
     let hello = sends(&alice.step(Input::Connected));
-    let (s, _) = deliver_up(&mut server, &who("alice"), &[Output::Send(hello[0].enc())]);
+    let (s, _) = deliver_up(&mut server, &who("alice"), &[Output::Send(To::Back, hello[0].enc())]);
     assert!(s.is_empty(), "nothing to send from its head: {s:?}");
 }
 

@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use ark::domain::Domain;
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::peer::{Input, Journal, Output, Peer as Machine, Role, Who};
+use ark::peer::{Input, Journal, Output, Peer as Machine, Role, To, Who};
 use ark_peer::{Instance, Memory};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Playlist, RemoveFromPlaylist, RenamePlaylist};
 
@@ -55,7 +55,7 @@ fn author(server: &mut Machine, func: &str, input: Vec<u8>) -> Vec<Output> {
         now: 1,
         cause: None,
     });
-    assert!(o.iter().any(|x| matches!(x, Output::Confirmed(_))), "{func} refused: {o:?}");
+    assert!(o.iter().any(|x| matches!(x, Output::Settled(_, Ok(())))), "{func} refused: {o:?}");
     o
 }
 
@@ -92,7 +92,7 @@ fn items(p: &Machine) -> usize {
 fn frames(outs: &[Output]) -> Vec<Frame> {
     outs.iter()
         .filter_map(|o| match o {
-            Output::Send(b) | Output::Fanout(b) => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::Back | To::All, b) => Some(Frame::dec(b).unwrap()),
             _ => None,
         })
         .collect()
@@ -328,7 +328,7 @@ fn an_intent_during_a_fill_is_the_authoritys_to_judge() {
             now: 2,
             cause: None,
         });
-        assert!(!o.iter().any(|x| matches!(x, Output::Refused { .. })), "{func}: {o:?}");
+        assert!(!o.iter().any(|x| matches!(x, Output::Settled(_, Err(_)))), "{func}: {o:?}");
         wire.up.extend(frames(&o));
     }
     wire.run(&mut server, &mut alice, None);

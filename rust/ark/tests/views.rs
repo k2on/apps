@@ -9,7 +9,7 @@ mod demo;
 
 use ark::format::Encode;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, Who};
+use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To, Who};
 use ark::plan::{splice, Maintained};
 use ark::prelude::{scan, Db, Desc, Id, Plan, Refusal};
 use ark::store::{Change, Store};
@@ -122,12 +122,15 @@ fn a_view_follows_a_replica_through_a_rebase() {
     };
     let up = |server: &mut Peer, w: &str, o: &[Output]| -> Vec<Vec<u8>> {
         let mut down = vec![];
-        for b in o.iter().filter_map(|x| if let Output::Send(b) = x { Some(b.clone()) } else { None }) {
+        for b in o
+            .iter()
+            .filter_map(|x| if let Output::Send(To::Back, b) = x { Some(b.clone()) } else { None })
+        {
             for r in server.step(Input::Frame {
                 from: Some(who_of(w)),
                 bytes: b,
             }) {
-                if let Output::Fanout(b) = r {
+                if let Output::Send(To::All, b) = r {
                     down.push(b);
                 }
             }
@@ -278,7 +281,7 @@ impl Fleet {
 
     fn heard(&mut self, i: usize, o: Vec<Output>) {
         for x in o {
-            if let (Output::Send(b), true) = (x, self.linked[i]) {
+            if let (Output::Send(To::Back, b), true) = (x, self.linked[i]) {
                 self.up[i].push(b);
             }
         }
@@ -292,9 +295,9 @@ impl Fleet {
         let whole: Vec<bool> = self.clients.iter().map(|c| whole(&self.server, c)).collect();
         for x in o {
             match x {
-                Output::Send(b) => self.down[i].push(b),
-                Output::Fanout(b) => (0..3).filter(|j| self.linked[*j] && whole[*j]).for_each(|j| self.down[j].push(b.clone())),
-                Output::To { session, bytes } => {
+                Output::Send(To::Back, b) => self.down[i].push(b),
+                Output::Send(To::All, b) => (0..3).filter(|j| self.linked[*j] && whole[*j]).for_each(|j| self.down[j].push(b.clone())),
+                Output::Send(To::Session(session), bytes) => {
                     let j = self.clients.iter().position(|c| c.me.session == session).unwrap();
                     if self.linked[j] {
                         self.down[j].push(bytes);

@@ -210,7 +210,7 @@ impl Instance {
         self.machine.store.undo(&facts)?;
         let said = self.step(Input::Write { facts, now: now_ms() });
         match said.into_iter().find_map(|o| match o {
-            Output::Refused { why, .. } => Some(why),
+            Output::Settled(_, Err(why)) => Some(why),
             _ => None,
         }) {
             Some(why) => Err(Refusal::new(why)),

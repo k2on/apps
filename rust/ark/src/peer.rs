@@ -5,14 +5,14 @@
 //! Role  = Replica | Authority { journal }
 //! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Open | Connected
 //!       | Compact | Write { facts } | Feed { who, scope }
-//! Output= Send | Fanout | To { session } | Changes(by span) | Persist | Refused { id, why } | Confirmed(id)
+//! Output= Send(Back | All | Session) | Changes(by span) | Persist | Settled(id, Ok | Err(why))
 //! ```
 //!
 //! Sans-io: [`Peer::step`] takes one input and says what to do — no
 //! socket, clock or file is inside. A hub, a client, a simulator and a
-//! trace player are drivers that feed it and route what it says: `Send`
-//! goes back where the frame came from (a replica's upstream), `Fanout` to
-//! every connection, `Persist` to the disk before anything after it is
+//! trace player are drivers that feed it and route what it says: a frame
+//! `Send` back where the input came from (a replica's upstream), to every
+//! connection, or to one session's; `Persist` to the disk before anything after it is
 //! sent: a row appended to the store's `_log` table, which is the log
 //! (§1.6) and holds the entry's facts, or the store's rows whole. `from` on a frame is the identity the driver verified for its
 //! connection; an authority judges and stamps by it.
@@ -77,9 +77,9 @@
 //! under the connection's identity. At
 //! its `Hello` the authority takes the union from its store and sends it as
 //! a fill of one part at the head; every entry after is sent to it alone
-//! (`Output::To`) with the facts the scope's filter makes of the entry's
+//! (`To::Session`) with the facts the scope's filter makes of the entry's
 //! ([`scoped`]), the union's state hash after them, and a
-//! chain of its own from that fill. `Fanout` is for connections fed
+//! chain of its own from that fill. `To::All` is for connections fed
 //! whole. The replica is the same machine: it applies facts like every
 //! replica, its own intents previewed over what it holds and confirmed by
 //! the authority's facts, a difference being the authority's answer. A
@@ -364,21 +364,24 @@ pub enum Input {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Output {
-    Send(Vec<u8>),
-    Fanout(Vec<u8>),
-    /// A frame for one connection fed by a scope, by its session.
-    To {
-        session: String,
-        bytes: Vec<u8>,
-    },
+    /// A frame, and where it goes.
+    Send(To, Vec<u8>),
     /// What changed, each change with the span of the entry that made it.
     Changes(Vec<Told>),
     Persist(Vec<u8>),
-    Refused {
-        id: EntryId,
-        why: String,
-    },
-    Confirmed(EntryId),
+    /// What became of an intent of this peer's own: confirmed, or refused
+    /// and why.
+    Settled(EntryId, Result<(), String>),
+}
+
+/// Where a frame goes: back where the input came from (a replica's
+/// upstream, or the connection a frame came on), to every connection fed
+/// the log whole, or to the connections of one session fed by a scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum To {
+    Back,
+    All,
+    Session(String),
 }
 
 /// A change as a machine tells it: with the span of the entry that made it
@@ -398,7 +401,7 @@ struct Out {
 
 impl Out {
     fn send(&mut self, f: Frame) {
-        self.out.push(Output::Send(f.enc()));
+        self.out.push(Output::Send(To::Back, f.enc()));
     }
     fn tell(&mut self, by: Option<Span>, changes: impl IntoIterator<Item = Change>) {
         self.told.extend(changes.into_iter().map(|change| Told { by, change }));
@@ -684,7 +687,7 @@ impl Peer {
         match self.attempt(&entry, o) {
             Err(why) if self.fill.is_none() => {
                 said!(warn, "refused", &entry, why = why.0.as_str());
-                o.out.push(Output::Refused { id, why: why.0 })
+                o.out.push(Output::Settled(id, Err(why.0)))
             }
             run => {
                 self.local = local;
@@ -702,9 +705,9 @@ impl Peer {
         match self.judged(entry, run, o) {
             Ok(_) => {
                 self.local = self.local.max(local);
-                o.out.push(Output::Confirmed(id));
+                o.out.push(Output::Settled(id, Ok(())));
             }
-            Err(why) => o.out.push(Output::Refused { id, why }),
+            Err(why) => o.out.push(Output::Settled(id, Err(why))),
         }
     }
 
@@ -724,7 +727,8 @@ impl Peer {
                     hash,
                 };
                 self.logged(&l, o);
-                o.out.push(Output::Fanout(
+                o.out.push(Output::Send(
+                    To::All,
                     Frame::Page {
                         space: self.space,
                         from: l.seq - 1,
@@ -786,10 +790,10 @@ impl Peer {
             (Frame::Verdict { id, verdict, .. }, false, _) => match verdict {
                 // At or below where this peer stands, an intent still pending
                 // here is in the state it holds (a fill carried it).
-                Verdict::Ok { seq } if seq <= self.log().head().0 && self.settle(&id, o) => o.out.push(Output::Confirmed(id)),
+                Verdict::Ok { seq } if seq <= self.log().head().0 && self.settle(&id, o) => o.out.push(Output::Settled(id, Ok(()))),
                 Verdict::Refused { why } if self.settle(&id, o) => {
                     tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
-                    o.out.push(Output::Refused { id, why })
+                    o.out.push(Output::Settled(id, Err(why)))
                 }
                 Verdict::Held { last } => self.close_gap(last, o),
                 _ => {}
@@ -862,10 +866,7 @@ impl Peer {
         let s = self.served.get_mut(session).unwrap();
         (s.union, s.head) = (union, Some(head));
         let bytes = Frame::Part { space: self.space, part }.enc();
-        o.out.push(Output::To {
-            session: session.into(),
-            bytes,
-        });
+        o.out.push(Output::Send(To::Session(session.into()), bytes));
     }
 
     /// A logged entry to every connection fed by a scope that stands just
@@ -897,7 +898,7 @@ impl Peer {
                 logged,
             }
             .enc();
-            o.out.push(Output::To { session, bytes });
+            o.out.push(Output::Send(To::Session(session), bytes));
         }
     }
 
@@ -995,7 +996,7 @@ impl Peer {
             let mine = l.entry.origin == self.origin;
             said!(debug, if mine { "confirmed" } else { "applied" }, &l.entry, seq = l.seq);
             if mine {
-                o.out.push(Output::Confirmed(l.entry.id));
+                o.out.push(Output::Settled(l.entry.id, Ok(())));
             }
             self.asked = None;
             self.logged(&l, o);
@@ -1121,8 +1122,10 @@ impl Peer {
 
     fn repush(&mut self, o: &mut Out) {
         for page in self.pending.make_contiguous().chunks(PAGE) {
-            o.out
-                .push(Output::Send(Frame::push(self.space, page.iter().map(|p| p.entry.clone())).enc()));
+            o.out.push(Output::Send(
+                To::Back,
+                Frame::push(self.space, page.iter().map(|p| p.entry.clone())).enc(),
+            ));
         }
     }
 

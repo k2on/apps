@@ -379,7 +379,7 @@ fn bench_fill_driven() {
 
 fn fill(driven: bool) {
     use ark::frames::Frame;
-    use ark::peer::{Input, Output, Role};
+    use ark::peer::{Input, Output, Role, To};
     let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
         return eprintln!("HARKEN_BENCH_LOG names no log");
     };
@@ -435,7 +435,7 @@ fn fill(driven: bool) {
                 from: Some(me.clone()),
                 bytes: b,
             }) {
-                if let Output::Send(b) | Output::Fanout(b) = o {
+                if let Output::Send(To::Back | To::All, b) = o {
                     q.push(ark_peer::Event::Frame(b));
                 }
             }

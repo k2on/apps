@@ -2957,7 +2957,7 @@ pub mod ha {
     use crate::domain::{Device, Output as Sound};
     use crate::domain::{Listening as Row, ListeningDevice};
     use ark::format::Encode;
-    use ark::peer::{Input, Output, Peer, Role, Who};
+    use ark::peer::{Input, Output, Peer, Role, To, Who};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
     use ark_peer::Handle;
@@ -3305,8 +3305,8 @@ pub mod ha {
         fn send(&self, c: ConnId, out: Vec<Output>) {
             for o in out {
                 match o {
-                    Output::Send(b) => self.hub.frame(c, b),
-                    Output::Refused { why, .. } => {
+                    Output::Send(To::Back, b) => self.hub.frame(c, b),
+                    Output::Settled(_, Err(why)) => {
                         eprintln!("harken-server: house: a speaker's transition was refused: {why}")
                     }
                     _ => {}

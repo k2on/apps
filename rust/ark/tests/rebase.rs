@@ -16,7 +16,7 @@ use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
 use ark::log::{Durable, EntryId, Logged, Origin, Record};
-use ark::peer::{Ctx, Functions, Input, Output, Peer, Procedure};
+use ark::peer::{Ctx, Functions, Input, Output, Peer, Procedure, To};
 use ark::store::{Change, LOG};
 use demo::{create_input, pair_input, pos_of, rename_input, ADD, CREATE, REMOVE, RENAME};
 use support::wire::*;
@@ -87,7 +87,7 @@ fn scenario() -> Scenario {
     );
     let o = alice.step(down(&f[0]));
     assert!(
-        changes(&o).is_empty() && o.contains(&Output::Confirmed(l4.entry.id)),
+        changes(&o).is_empty() && o.contains(&Output::Settled(l4.entry.id, Ok(()))),
         "her own entry, as previewed: nothing moves"
     );
     assert!(alice.step(down(&s[0])).is_empty(), "the ack of what landed is nothing more");
@@ -168,7 +168,7 @@ fn step_1_an_authority_sequences_the_transcript() {
         let (acks, f) = deliver_up(
             &mut fresh,
             &who(&l.entry.actor),
-            &[Output::Send(Frame::push(ark::schema::Space::Durable, [l.entry.clone()]).enc())],
+            &[Output::Send(To::Back, Frame::push(ark::schema::Space::Durable, [l.entry.clone()]).enc())],
         );
         assert!(matches!(verdicts(&acks)[..], [Some(Verdict::Ok { seq })] if seq == l.seq));
         assert_eq!(&logged(&f[0]), l, "entry {}: its facts, state and hash", l.seq);

@@ -88,7 +88,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::frames::Frame;
 use ark::log::{Durable, Entry, EntryId, Origin, Record, Span};
-use ark::peer::{Ctx, Input, Output, Peer as Machine, Pending, Role, Told, Who};
+use ark::peer::{Ctx, Input, Output, Peer as Machine, Pending, Role, To, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::Space;
 use ark::store::Change;
@@ -475,13 +475,13 @@ impl Peer {
         let out = tracing::debug_span!(target: "ark", "step", peer = %label, space = space_name, conn = from).in_scope(|| m.step(input));
         for o in &out {
             match o {
-                Output::Send(b) => match from {
+                Output::Send(To::Back, b) => match from {
                     Some(c) => self.hub.held.push((c, b.clone())),
                     None if self.linked => self.frames.push(b.clone()),
                     None => {}
                 },
-                Output::Fanout(b) => self.hub.fanout(space, b),
-                Output::To { session, bytes } => self.hub.to(session, bytes),
+                Output::Send(To::All, b) => self.hub.fanout(space, b),
+                Output::Send(To::Session(session), bytes) => self.hub.to(session, bytes),
                 Output::Changes(told) => {
                     if let Some(by) = told.iter().rev().find_map(|t| t.by) {
                         self.woke[space as usize] = Some(by);
@@ -497,8 +497,8 @@ impl Peer {
                         }
                     }
                 }
-                Output::Refused { id, why } if !self.hub.serving => self.told.refused(space, *id, why),
-                Output::Confirmed(id) if !self.hub.serving => self.told.confirmed(space, *id),
+                Output::Settled(id, Err(why)) if !self.hub.serving => self.told.refused(space, *id, why),
+                Output::Settled(id, Ok(())) if !self.hub.serving => self.told.confirmed(space, *id),
                 _ => {}
             }
         }
@@ -699,8 +699,7 @@ impl Peer {
         }
         let said = self.route(space, None, input);
         let verdict = said.into_iter().find_map(|o| match o {
-            Output::Refused { why, .. } => Some(Err(why)),
-            Output::Confirmed(_) => Some(Ok(())),
+            Output::Settled(_, r) => Some(r),
             _ => None,
         });
         verdict.unwrap_or(if self.hub.serving { Err("no verdict".into()) } else { Ok(()) })
