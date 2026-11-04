@@ -6,7 +6,7 @@
 //! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version }
 //! Page    { space, from, logged: [Logged] }
 //! Snapshot{ space, snapshot }
-//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } }
+//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } | Gap { last } }
 //! Telemetry { events: [Event] }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
 //! More    { space, from: { table, key } }
@@ -23,8 +23,9 @@
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
 //! is its intents not yet sequenced, each at sequence 0 with no facts and
 //! zero hashes ([`Logged::intent`]) — a push being a page of one; a chain
-//! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers one intent: sequenced at `seq`, refused, or
-//! `Held` — a function the authority does not run.
+//! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers one intent: sequenced at `seq`, refused,
+//! `Held` — a function the authority does not run — or `Gap`: past one of
+//! its origin's the authority has not judged, and the last it has.
 //!
 //! A `Part` is a part of a fill (§1.7): the authority's answer to a
 //! `Hello` its log cannot page — the first, from its rows' start — and to
@@ -161,12 +162,24 @@ pub struct Event {
 }
 
 /// An authority's answer to one intent; what its journal keeps of each it
-/// judged (never `Held`, which is not a judgment).
+/// judged (never `Held` or `Gap`, which are not judgments).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
-    Ok { seq: Seq },
-    Refused { why: String },
-    Held { func: String },
+    Ok {
+        seq: Seq,
+    },
+    Refused {
+        why: String,
+    },
+    Held {
+        func: String,
+    },
+    /// Past a `local` of its origin the authority has not judged: `last`,
+    /// the last it has. A device that no longer holds the ones between
+    /// numbers its pending intents on from there (§1.7).
+    Gap {
+        last: i64,
+    },
 }
 
 /// A server's answer to one `Call`: what its function gave back, or why

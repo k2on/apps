@@ -188,3 +188,43 @@ fn a_migrated_server_takes_new_entries() {
     assert_eq!(titles(&store), ["Hymns", "Psalms"]);
     hub.stop();
 }
+
+/// A log long past its rows when it migrates — edits, as a budget's mostly
+/// are — keeps every origin's last in the journal too: the device's next
+/// intent is the one after its last. Falsified by `migrate` reading the
+/// origins from the old log opened as an instance, which folds it as it
+/// opens: every entry was folded into the rows, the journal was written
+/// empty, and the server had the device at 0 (a money server forgot every
+/// device so on 2026-11-03, and a phone's 18th intent waited a day).
+#[test]
+fn a_long_log_migrated_keeps_every_origins_last() {
+    let dir = tempfile::tempdir().unwrap();
+    let (data, phone) = (dir.path().join("server"), dir.path().join("phone"));
+    let hub = server(support::config(), &data).unwrap();
+    let mut p = synced(support::config(), &phone, &hub, &["Hymns"], |p| {
+        p.log.pending.is_empty() && p.log.log().head().0 >= 1
+    });
+    let playlist_id = ark::row::Id::new(ark::log::EntryId::of(p.log.origin, 1).draw(0));
+    for n in 0..100 {
+        let name = format!("Hymns {n}");
+        let input = arkdb::demo::RenamePlaylist { playlist_id, name }.to_bytes();
+        p.author(Space::Durable, "demo.rename_playlist", input, 1).unwrap();
+    }
+    let sent = ark_peer::link::until(std::time::Duration::from_secs(10), std::time::Duration::ZERO, || {
+        p.pump();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        p.log.pending.is_empty()
+    });
+    assert!(sent, "never synced");
+    let (origin, local) = (p.log.origin, p.log.local);
+    assert_eq!(local, 101);
+    drop(p);
+    hub.stop();
+    let hub = server(retitled(true), &data).unwrap();
+    let last = hub.with(move |s| match &s.log.role {
+        ark::peer::Role::Authority { journal } => journal.last_of(&origin),
+        _ => -1,
+    });
+    assert_eq!(last, Some(local), "the journal has the device where it was");
+    hub.stop();
+}

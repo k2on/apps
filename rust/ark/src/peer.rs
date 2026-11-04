@@ -40,8 +40,13 @@
 //! was built with, by name (§1.16): nothing it is sent is code. An intent naming any other is `Held` — the device keeps
 //! it pending and pushes it again on its next connection. The authority
 //! keeps nothing of a held intent: its `local` is not passed, so one
-//! pushed after it from its origin is a gap, answered by nothing and
-//! pushed again, after it, on the next connection.
+//! pushed after it from its origin is a gap. **Every push is answered**:
+//! one past a gap with `Gap { last }`, where its origin stands. A device
+//! pushing the ones between (a held one first) waits; one that no longer
+//! holds them — its disk lost them, or the authority's log is older than
+//! the one that judged them — numbers its pending intents on from `last`
+//! and pushes them again ([`Peer::close_gap`]). A device is never stuck
+//! behind an intent nobody holds.
 //!
 //! **A schema grows** (§1.2). Facts and snapshot rows another schema of a
 //! table wrote are read under this one ([`crate::schema::Table::fit`]). A
@@ -892,6 +897,7 @@ impl Peer {
                 // here is in the state it holds (a snapshot carried it).
                 Verdict::Ok { seq } if seq <= self.log().head().0 && self.settle(&id, o) => o.out.push(Output::Confirmed(id)),
                 Verdict::Refused { why } if self.settle(&id, o) => o.out.push(Output::Refused { id, why }),
+                Verdict::Gap { last } => self.close_gap(last, o),
                 _ => {}
             },
             _ => {}
@@ -1075,54 +1081,51 @@ impl Peer {
         }
     }
 
-    /// A pushed intent judged, and the verdict sent back; nothing for one
-    /// past a gap.
+    /// A pushed intent judged, and the verdict sent back: every push is
+    /// answered.
     fn push(&mut self, who: &Who, entry: Entry, o: &mut Out) {
         let id = entry.id;
-        if let Some(verdict) = self.verdict_on(who, entry, o) {
-            o.send(Frame::Verdict {
-                space: self.space,
-                id,
-                verdict,
-            });
-        }
+        let verdict = self.verdict_on(who, entry, o);
+        o.send(Frame::Verdict {
+            space: self.space,
+            id,
+            verdict,
+        });
     }
 
-    fn verdict_on(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Option<Verdict> {
+    fn verdict_on(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Verdict {
         let (space, j) = (self.space, self.journal());
         if let Some(verdict) = j.verdicts.get(&entry.id) {
-            return Some(verdict.clone());
+            return verdict.clone();
         }
         if !entry.id_checks() || j.others(&entry.origin, &who.actor) {
             let why = "an id that is not its own, or from an origin of another actor".into();
-            return Some(Verdict::Refused { why });
+            return Verdict::Refused { why };
         }
         let last = j.last_of(&entry.origin);
         // At or below the last and judged by no verdict here: in the log's
         // space, sequenced below the horizon by a log opened since (a
         // refusal's verdict is journaled); in the volatile, overtaken.
         if entry.local <= last {
-            return Some(match space {
+            return match space {
                 Space::Durable => Verdict::Ok { seq: self.log().base_seq() },
                 Space::Volatile => Verdict::Refused {
                     why: "overtaken by a later one of its origin".into(),
                 },
-            });
+            };
         }
-        // Past a gap (behind a held one, too): nothing, until it is pushed
-        // again after the ones before it, after a `Hello`.
+        // Past a gap (behind a held one, too): where its origin stands
+        // here, for a device that lost the ones between to go on from.
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
-            return None;
+            return Verdict::Gap { last };
         }
         if self.functions.of(&entry.func).is_none() {
-            return Some(Verdict::Held { func: entry.func });
+            return Verdict::Held { func: entry.func };
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
         let run = self.attempt(&entry, o);
-        Some(
-            self.judged(entry, run, o)
-                .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq }),
-        )
+        self.judged(entry, run, o)
+            .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq })
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.
@@ -1430,6 +1433,29 @@ impl Peer {
         for page in self.pending.chunks(PAGE) {
             o.send(Frame::push(self.space, page.iter().map(|p| p.entry.clone())));
         }
+    }
+
+    /// The authority has judged this origin's intents up to `last` and no
+    /// further. Pending from `last + 1` on, this device is pushing them in
+    /// order (or the authority holds the first): it waits. Pending from
+    /// past it, the ones between are nowhere — lost from this device's
+    /// disk, or judged by a log the authority no longer is — and nothing
+    /// would ever fill them: the intents pending are this origin's from
+    /// `last + 1` on, run again (an intent's ids are drawn from its own),
+    /// and pushed again. None of them has been judged: the authority's last
+    /// is below them all.
+    fn close_gap(&mut self, last: i64, o: &mut Out) {
+        if self.pending.first().is_none_or(|p| p.entry.local <= last + 1) {
+            return;
+        }
+        self.undo_pending(o);
+        for (n, p) in self.pending.iter_mut().enumerate() {
+            p.entry.local = last + 1 + n as i64;
+            p.entry.id = EntryId::of(self.origin, p.entry.local);
+        }
+        self.local = last + self.pending.len() as i64;
+        self.redo_pending(o);
+        self.repush(o);
     }
 
     // * Lifecycle

@@ -791,6 +791,11 @@ impl Peer {
         (self.link.epoch, self.link.wait, self.link.opened) = (self.link.epoch + 1, self.link.backoff.0, true);
         self.linked = true;
         self.frames.clear();
+        // Where this device's own intents stand, beside where the server
+        // has them (`arkdb origins`): a first pending past the server's
+        // last + 1 is a gap, answered and closed (`Verdict::Gap`).
+        let first = self.log.pending.first().map(|p| p.entry.local);
+        tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending.len(), first, "replica");
         self.step(Space::Durable, Input::Connected);
         self.step(Space::Volatile, Input::Connected);
         self.files_connected();

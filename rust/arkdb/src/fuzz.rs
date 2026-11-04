@@ -194,6 +194,7 @@ pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
             20 if whole && r.one_in(2) => Op::Alone(i),
             21 => Op::Join(i),
             22 => Op::Wait(r.below(80) as i64),
+            23 if r.one_in(3) => Op::LosePending(i),
             _ => Op::Step,
         };
         net.run(&op);

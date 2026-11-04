@@ -403,9 +403,9 @@ fn a_peer_opens_from_what_it_persisted() {
 }
 
 /// A session's pushes are judged in its order: one that arrives ahead of
-/// the one before it waits, unanswered, and is pushed again after the next
-/// hello. Falsified by dropping the gap check in `push`: the add was judged
-/// before the playlist it adds to existed, and refused.
+/// the one before it is answered with the gap, waits, and is pushed again
+/// after the next hello. Falsified by dropping the gap check in `push`: the
+/// add was judged before the playlist it adds to existed, and refused.
 #[test]
 fn a_sessions_pushes_are_judged_in_order() {
     let (mut server, mut alice) = (authority(demo::cas()), replica("alice", demo::cas()));
@@ -420,7 +420,7 @@ fn a_sessions_pushes_are_judged_in_order() {
         }
     }
     assert!(
-        matches!(verdicts(&answers)[..], [Some(Verdict::Ok { seq: 1 })]),
+        matches!(verdicts(&answers)[..], [Some(Verdict::Gap { last: 0 }), Some(Verdict::Ok { seq: 1 })]),
         "the add waits: {answers:?}"
     );
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
@@ -490,10 +490,12 @@ fn a_page_rebases_once() {
 }
 
 /// What a session pushes behind a held intent is a gap: the authority
-/// keeps nothing of the held one, answers what comes after it with
-/// nothing, and once it runs the function the next connection's pushes
+/// keeps nothing of the held one and answers what comes after it with the
+/// gap. The device holds the held one, so it waits, its numbers as they
+/// are; once the authority runs the function the next connection's pushes
 /// are judged in order. Falsified by a `Held` passing its `local`: the
-/// playlist after it was sequenced at 2, before the track.
+/// playlist after it was sequenced at 2, before the track. And by
+/// `close_gap` renumbering whenever told of a gap: the held one moved.
 #[test]
 fn what_comes_behind_a_held_intent_is_a_gap() {
     let mut server = authority(demo::only(&[CREATE]));
@@ -505,8 +507,14 @@ fn what_comes_behind_a_held_intent_is_a_gap() {
     assert!(matches!(verdicts(&s)[..], [Some(Verdict::Held { .. })]), "{s:?}");
     let o = alice.step(mutate(CREATE, create_input("Sea"), 3));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(s.is_empty() && f.is_empty(), "a gap: {s:?}");
+    assert!(
+        matches!(verdicts(&s)[..], [Some(Verdict::Gap { last: 1 })]) && f.is_empty(),
+        "a gap: {s:?}"
+    );
     assert_eq!(server.log().head().0, 1);
+    let ids: Vec<_> = alice.pending.iter().map(|p| p.entry.id).collect();
+    assert!(sends(&alice.step(down(&s[0]))).is_empty(), "behind its own held one, the device waits");
+    assert_eq!(alice.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
     server.functions.insert(ADD, demo::cas().get(ADD).unwrap().clone());
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(

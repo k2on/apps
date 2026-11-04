@@ -73,6 +73,10 @@ pub fn migrate(disk: &mut dyn Disk, to: &Arc<Schema>, steps: &[Migration]) -> io
     let mut copy = Memory::default();
     copy.0.extend(kv.clone().map(|b| ("kv".to_string(), b)));
     copy.0.extend(log.clone().map(|b| ("log".to_string(), b)));
+    // Each origin's last, from the log's records as they are: the instance
+    // below folds a log long past its rows as it opens, and its entries
+    // are then none.
+    let entries = copy.clone().load()?.logged;
     let old = Instance::open_under(Arc::new(was.clone()), Box::new(copy));
     if let Some(why) = &old.failure {
         return Err(io::Error::other(format!(
@@ -93,7 +97,7 @@ pub fn migrate(disk: &mut dyn Disk, to: &Arc<Schema>, steps: &[Migration]) -> io
     // The journal rebuilt each origin's last from the entries; the snapshot
     // holds none, so the journal keeps them, or every device's next intent
     // is past a gap.
-    let last = old.log().entries().into_iter().map(|l| (l.entry.origin, l.entry.actor, l.entry.local));
+    let last = entries.into_iter().map(|l| (l.entry.origin, l.entry.actor, l.entry.local));
     crate::local::passed(disk, last)?;
     let before = &was.hash().hex()[..12];
     for (name, bytes) in [("kv", kv), ("log", log)] {

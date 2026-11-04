@@ -959,7 +959,10 @@ stays; `Input::Loaded` (no sender but a test), the authority's queue
 behind a held intent and `Local`'s `waiting` table go: what comes after a
 held intent from its origin is a gap, answered by nothing and pushed again,
 after it, on the next connection (`connected` re-pushes every pending
-intent). Then one path for an authority's own intent (`decide`); the
+intent). (Since 2026-11-04 a gap is answered, `Verdict::Gap { last }`, and a
+device that no longer holds the intents between numbers its own on from
+`last`: a server that forgot an origin had left a phone waiting a day.)
+Then one path for an authority's own intent (`decide`); the
 `values-json` build (35 cfg sites) and the JSON-only serializer arms of
 `ark::json`; uncalled API (`encode_into`, `db::write`, `Ctx::draw`,
 `Log::len`/`is_empty`, `Functions::forget`, `Peer::who`), `Store::new`

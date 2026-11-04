@@ -70,6 +70,12 @@ pub enum Op {
     SignIn(i64, Who),
     Alone(i64),
     Join(i64),
+    /// A device's disk loses its pending intents but keeps the last
+    /// `local` it drew, as a phone's did whose intents before its 18th
+    /// were nowhere: what was lost is gone, and the next one is pushed
+    /// past a gap, which the authority answers (`Verdict::Gap`) and the
+    /// device numbers on from. A device alone keeps its chain.
+    LosePending(i64),
     /// The clock moves on this many milliseconds.
     Wait(i64),
     Step,
@@ -223,6 +229,20 @@ impl Net {
             Op::Partition(i) => self.partition(i),
             Op::Heal(i) => self.heal(i),
             Op::Restart => self.restart(),
+            Op::LosePending(i) if !self.alone.contains(&i) => {
+                self.partition(i);
+                let c = self.client(i);
+                let lost = ark::log::Durable {
+                    rows: c.log.confirmed_rows(),
+                    logged: vec![],
+                    parts: vec![],
+                    local: c.log.local,
+                    pending: vec![],
+                };
+                c.step(Space::Durable, ark::peer::Input::Open(lost));
+                self.heal(i);
+            }
+            Op::LosePending(_) => {}
             Op::Reopen(i) => {
                 self.partition(i);
                 self.views.retain(|k, _| k.0 != i);
