@@ -26,7 +26,6 @@ use ark::db::{Db, Tables, Writes};
 use ark::log::Durable;
 use ark::peer::{Functions, Input, Output, Peer as Machine, Who};
 use ark::schema::{Schema, Space};
-use ark::store::{Change, LOG};
 use ark::Refusal;
 
 use crate::{alone_at, draw_origin, now_ms, Disk};
@@ -76,8 +75,6 @@ pub struct Instance {
     pub fold: Option<Fold>,
     /// Records not yet written.
     pub(crate) unwritten: Vec<Vec<u8>>,
-    /// The rows it holds, which a fold by rows is measured against.
-    pub(crate) rows: usize,
     /// The disk's last refusal, while it lasts.
     pub failure: Option<String>,
 }
@@ -102,7 +99,6 @@ impl Instance {
             disk,
             fold: None,
             unwritten: vec![],
-            rows: 0,
             failure: None,
         }
     }
@@ -160,11 +156,8 @@ impl Instance {
     pub fn step(&mut self, input: Input) -> Vec<Output> {
         let out = self.machine.step(input);
         self.took(&out);
-        let (head, base) = (self.machine.log().head().0, self.machine.log().base_seq());
-        if let Some(f) = self
-            .fold
-            .filter(|f| head - base > (f.keep + f.slack + f.rows as usize * self.rows) as i64)
-        {
+        let (head, base, rows) = (self.machine.log().head().0, self.machine.log().base_seq(), self.machine.store.held());
+        if let Some(f) = self.fold.filter(|f| head - base > (f.keep + f.slack + f.rows as usize * rows) as i64) {
             let folded = self.machine.step(Input::Compact(head - f.keep as i64));
             self.took(&folded);
         }
@@ -174,19 +167,8 @@ impl Instance {
 
     fn took(&mut self, out: &[Output]) {
         for o in out {
-            match o {
-                Output::Persist(b) => self.unwritten.push(b.clone()),
-                Output::Changes(cs) => {
-                    let n = |c: &Change| match c {
-                        Change::Add { .. } => 1,
-                        Change::Remove { .. } => -1,
-                        Change::Edit { .. } => 0,
-                    };
-                    self.rows = self
-                        .rows
-                        .saturating_add_signed(cs.iter().map(|t| &t.change).filter(|c| c.table() != LOG).map(n).sum());
-                }
-                _ => {}
+            if let Output::Persist(b) = o {
+                self.unwritten.push(b.clone());
             }
         }
     }

@@ -364,6 +364,11 @@ impl Store {
             .flat_map(move |t| self.tables[t].rows.values().map(|r| &r[..]))
     }
 
+    /// How many rows its tables hold, the log's not among them.
+    pub fn held(&self) -> usize {
+        self.tables.iter().map(|t| t.rows.len()).sum()
+    }
+
     /// `sha256(table ‖ row)`, read as a 256-bit integer.
     pub fn leaf(table: &str, row: &[u8]) -> [u8; 32] {
         sha256(&[table.as_bytes(), row])
