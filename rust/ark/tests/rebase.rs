@@ -421,7 +421,7 @@ fn a_sessions_pushes_are_judged_in_order() {
         }
     }
     assert!(
-        matches!(verdicts(&answers)[..], [Some(Verdict::Gap { last: 0 }), Some(Verdict::Ok { seq: 1 })]),
+        matches!(verdicts(&answers)[..], [Some(Verdict::Held { last: 0 }), Some(Verdict::Ok { seq: 1 })]),
         "the add waits: {answers:?}"
     );
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
@@ -482,9 +482,9 @@ fn a_page_rebases_once() {
     assert_eq!(pos_of(&alice.store, &pid(), "a1"), Some(5), "hers after bob's four");
 }
 
-/// What a session pushes behind a held intent is a gap: the authority
+/// What a session pushes behind a held intent is held too: the authority
 /// keeps nothing of the held one and answers what comes after it with the
-/// gap. The device holds the held one, so it waits, its numbers as they
+/// same `last`. The device holds the held one, so it waits, its numbers as they
 /// are; once the authority runs the function the next connection's pushes
 /// are judged in order. Falsified by a `Held` passing its `local`: the
 /// playlist after it was sequenced at 2, before the track. And by
@@ -501,7 +501,7 @@ fn what_comes_behind_a_held_intent_is_a_gap() {
     let o = alice.step(mutate(CREATE, create_input("Sea"), 3));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(
-        matches!(verdicts(&s)[..], [Some(Verdict::Gap { last: 1 })]) && f.is_empty(),
+        matches!(verdicts(&s)[..], [Some(Verdict::Held { last: 1 })]) && f.is_empty(),
         "a gap: {s:?}"
     );
     assert_eq!(server.log().head().0, 1);

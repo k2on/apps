@@ -5,7 +5,7 @@
 //! ```text
 //! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version }
 //! Page    { space, from, logged: [Logged] }
-//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } | Gap { last } }
+//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { last } }
 //! Telemetry { events: [Event] }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
 //! More    { space, from: { table, key } }
@@ -22,9 +22,10 @@
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
 //! is its intents not yet sequenced, each at sequence 0 with no facts and
 //! zero hashes ([`Logged::intent`]) — a push being a page of one; a chain
-//! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers one intent: sequenced at `seq`, refused,
-//! `Held` — a function the authority does not run — or `Gap`: past one of
-//! its origin's the authority has not judged, and the last it has.
+//! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers
+//! one intent: sequenced at `seq`, refused, or `Held` — not judged, past
+//! one of its origin's the authority has not judged or naming a function
+//! it does not run — with the last of its origin it has.
 //!
 //! A `Part` is a part of a fill (§1.7): the authority's answer to a
 //! `Hello` its log cannot page — the first, from its rows' start — and to
@@ -57,8 +58,8 @@
 //!
 //! **No code crosses the wire.** An entry names its function by name; an
 //! authority runs exactly the functions its program was built with, and
-//! `Held` says an intent names one it does not run, and the intent stays pending on the device, pushed
-//! again on its next connection. Nothing a client sends is ever loaded.
+//! an intent naming one it does not run is `Held`: it stays pending on the
+//! device, pushed again on its next connection. Nothing a client sends is ever loaded.
 //!
 //! Every frame names its space, so two machines share a connection (§1.9):
 //! a verdict's id is `(origin, local)`'s, and each space counts its own.
@@ -156,8 +157,9 @@ pub struct Event {
     pub fields: Vec<(String, String)>,
 }
 
-/// An authority's answer to one intent; what its journal keeps of each it
-/// judged (never `Held` or `Gap`, which are not judgments).
+/// An authority's answer to one intent: judged — sequenced at `seq`, or
+/// refused — or held: not judged here, and `last` the last `local` of its
+/// origin that is. What its journal keeps is the refusals.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
     Ok {
@@ -166,13 +168,11 @@ pub enum Verdict {
     Refused {
         why: String,
     },
+    /// Not judged: past a `local` of its origin the authority has not
+    /// judged, or naming a function it does not run. The device keeps it
+    /// pending; one that no longer holds the intents between numbers its
+    /// pending on from `last` (§1.7).
     Held {
-        func: String,
-    },
-    /// Past a `local` of its origin the authority has not judged: `last`,
-    /// the last it has. A device that no longer holds the ones between
-    /// numbers its pending intents on from there (§1.7).
-    Gap {
         last: i64,
     },
 }

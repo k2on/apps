@@ -37,15 +37,17 @@
 //! with the actor, session and roles of the connection it judged it on,
 //! runs it, and logs it with its facts. An origin is bound to the actor
 //! whose intents first came from it; another's pushed from it is refused. It runs exactly the functions its program
-//! was built with, by name (§1.16): nothing it is sent is code. An intent naming any other is `Held` — the device keeps
-//! it pending and pushes it again on its next connection. The authority
-//! keeps nothing of a held intent: its `local` is not passed, so one
-//! pushed after it from its origin is a gap. **Every push is answered**:
-//! one past a gap with `Gap { last }`, where its origin stands. A device
-//! pushing the ones between (a held one first) waits; one that no longer
-//! holds them — its disk lost them, or the authority's log is older than
-//! the one that judged them — numbers its pending intents on from `last`
-//! and pushes them again ([`Peer::close_gap`]). A device is never stuck
+//! was built with, by name (§1.16): nothing it is sent is code. **Every
+//! push is answered**: judged — `Ok` or `Refused` — or `Held { last }`,
+//! not judged, with the last `local` of its origin the authority has
+//! judged: an intent past a gap, or naming a function the authority does
+//! not run. A held intent's `local` is not passed, so one pushed after it
+//! from its origin is held too. A device whose oldest pending intent is
+//! `last + 1` waits, and pushes it again on its next connection; one past
+//! it no longer holds the ones between — its disk lost them, or the
+//! authority's log is older than the one that judged them — and numbers its
+//! pending intents on from `last` and pushes them again
+//! ([`Peer::close_gap`]). A device is never stuck
 //! behind an intent nobody holds.
 //!
 //! **A schema grows** (§1.2). A peer reads the rows and facts of any schema
@@ -828,7 +830,7 @@ impl Peer {
                     tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
                     o.out.push(Output::Refused { id, why })
                 }
-                Verdict::Gap { last } => self.close_gap(last, o),
+                Verdict::Held { last } => self.close_gap(last, o),
                 _ => {}
             },
             _ => {}
@@ -975,11 +977,11 @@ impl Peer {
         // here, for a device that lost the ones between to go on from.
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
             said!(warn, "gap", &entry, last = last);
-            return Verdict::Gap { last };
+            return Verdict::Held { last };
         }
         if self.functions.of(&entry.func).is_none() {
-            said!(warn, "held", &entry);
-            return Verdict::Held { func: entry.func };
+            said!(warn, "held", &entry, last = last);
+            return Verdict::Held { last };
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
         let run = self.attempt(&entry, o);

@@ -1,4 +1,4 @@
-//! A gap in a device's pushes is answered (§1.7): `Gap { last }`, where its
+//! A gap in a device's pushes is answered (§1.7): `Held { last }`, where its
 //! origin stands at the authority. A device that holds the ones between
 //! waits for them; one that no longer does numbers its pending intents on
 //! from `last` and pushes them again, rather than pushing past the gap
@@ -35,7 +35,7 @@ fn a_device_past_a_gap_goes_on_from_where_the_authority_stands() {
     alice.local = 17;
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Gap { last: 1 })]) && f.is_empty(), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Held { last: 1 })]) && f.is_empty(), "{s:?}");
     let o = alice.step(down(&s[0]));
     assert_eq!(
         (alice.pending[0].entry.local, alice.local),

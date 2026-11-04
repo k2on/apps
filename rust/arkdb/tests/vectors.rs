@@ -79,7 +79,7 @@ fn protocol() {
             Frame::Verdict {
                 space: Space::Durable,
                 id,
-                verdict: Verdict::Held { func: "demo.gone".into() },
+                verdict: Verdict::Held { last: 1 },
             },
         ),
         (
