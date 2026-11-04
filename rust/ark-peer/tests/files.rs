@@ -51,7 +51,7 @@ fn domain() -> Domain {
 fn config(scoped: bool) -> Config {
     let mut c = Config::of(Arc::new(domain()));
     if scoped {
-        c.feed = Arc::new(|_| ark::peer::Feed::Scoped("photos.mine".into()));
+        c.feed = Arc::new(|_| Some("photos.mine".into()));
     }
     c
 }

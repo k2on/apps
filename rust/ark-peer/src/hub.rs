@@ -38,7 +38,7 @@ use std::collections::BTreeMap;
 use ark::format::Encode;
 use ark::frames::Frame;
 use ark::log::{Durable, EntryId, Origin, Record};
-use ark::peer::{Feed, Input, Journal, Peer as Machine, Role, Who};
+use ark::peer::{Input, Journal, Peer as Machine, Role, Who};
 use ark::schema::Space;
 
 use crate::{machine, Config, Disk, Fold, Instance, Peer};
@@ -207,17 +207,17 @@ impl Peer {
     /// A connection verified as `who`, numbered by the caller.
     pub fn accept_as(&mut self, c: ConnId, who: Who) {
         self.hub.next = self.hub.next.max(c + 1);
-        let feed = (self.config.feed)(&who);
-        if let Feed::Scoped(_) = feed {
+        let scope = (self.config.feed)(&who);
+        if scope.is_some() {
             self.log.step(Input::Feed {
                 who: who.clone(),
-                feed: feed.clone(),
+                scope: scope.clone(),
             });
         }
         let conn = Conn {
             who,
             hello: [false; 2],
-            whole: feed == Feed::Whole,
+            whole: scope.is_none(),
             device: None,
         };
         self.hub.conns.insert(c, conn);

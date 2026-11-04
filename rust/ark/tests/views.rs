@@ -9,7 +9,7 @@ mod demo;
 
 use ark::format::Encode;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer, Role, Who};
+use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, Who};
 use ark::plan::{splice, Maintained};
 use ark::prelude::{scan, Db, Desc, Id, Plan, Refusal};
 use ark::store::{Change, Store};
@@ -242,6 +242,11 @@ struct Fleet {
     seed: u64,
 }
 
+/// Whether `server` feeds `c` the log whole: it serves it no union.
+fn whole(server: &Peer, c: &Peer) -> bool {
+    !server.served.contains_key(&c.me.session)
+}
+
 impl Fleet {
     fn new(seed: u64) -> Fleet {
         let cas = demo::cas();
@@ -250,12 +255,11 @@ impl Fleet {
         let mut server = Peer::new(demo::shared(), cas.clone(), auth, who_of("server"));
         let mut clients = vec![];
         for i in 0..3 {
-            let mut c = Peer::new(demo::shared(), cas.clone(), Role::Replica, who_of(&format!("peer-{i}")));
+            let c = Peer::new(demo::shared(), cas.clone(), Role::Replica, who_of(&format!("peer-{i}")));
             if i > 0 {
-                c.feed = Feed::Scoped(h.into());
                 server.step(Input::Feed {
                     who: c.me.clone(),
-                    feed: c.feed.clone(),
+                    scope: Some(h.into()),
                 });
             }
             clients.push(c);
@@ -285,12 +289,11 @@ impl Fleet {
             from: Some(self.clients[i].me.clone()),
             bytes: b,
         });
+        let whole: Vec<bool> = self.clients.iter().map(|c| whole(&self.server, c)).collect();
         for x in o {
             match x {
                 Output::Send(b) => self.down[i].push(b),
-                Output::Fanout(b) => (0..3)
-                    .filter(|j| self.linked[*j] && self.clients[*j].feed == Feed::Whole)
-                    .for_each(|j| self.down[j].push(b.clone())),
+                Output::Fanout(b) => (0..3).filter(|j| self.linked[*j] && whole[*j]).for_each(|j| self.down[j].push(b.clone())),
                 Output::To { session, bytes } => {
                     let j = self.clients.iter().position(|c| c.me.session == session).unwrap();
                     if self.linked[j] {
@@ -359,7 +362,7 @@ impl Fleet {
     /// authority's state at its cursor: no row outside it, nothing in it
     /// missing.
     fn unions_hold(&self) -> Result<(), String> {
-        for c in self.clients.iter().filter(|c| c.feed != Feed::Whole) {
+        for c in self.clients.iter().filter(|c| !whole(&self.server, c)) {
             let at = c.log().head().0;
             if confirmed(c) != union_of(&state_at(&self.server, at), &c.me.actor) {
                 return Err(format!("{} at {at} does not hold its union", c.me.actor));
@@ -422,7 +425,7 @@ fn a_scoped_replica_holds_its_union() {
         f.unions_hold().unwrap();
         for c in &f.clients {
             assert!(c.pending.is_empty(), "{} settled", c.me.actor);
-            let want = if c.feed == Feed::Whole {
+            let want = if whole(&f.server, c) {
                 f.server.store.clone()
             } else {
                 union_of(&f.server.store, &c.me.actor)
@@ -430,7 +433,7 @@ fn a_scoped_replica_holds_its_union() {
             assert!(c.store == want, "{} holds what it is fed", c.me.actor);
             let (held, all) = (c.store.rows("item").count(), f.server.store.rows("item").count());
             assert!(
-                c.feed == Feed::Whole || (0 < held && held < all),
+                whole(&f.server, c) || (0 < held && held < all),
                 "{} holds some items, not all",
                 c.me.actor
             );

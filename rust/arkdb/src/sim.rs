@@ -460,7 +460,7 @@ impl Net {
             let pairs = [(Some(&c.log), Some(&self.hub.log)), (c.live.as_ref(), self.hub.live.as_ref())];
             for (space, (p, a)) in [Space::Durable, Space::Volatile].into_iter().zip(pairs) {
                 let (Some(p), Some(a)) = (p, a) else { continue };
-                if p.feed != ark::peer::Feed::Whole {
+                if space == Space::Durable && (self.hub.config.feed)(&c.log.me).is_some() {
                     continue;
                 }
                 let from = p.log().base_seq().max(a.log().base_seq());

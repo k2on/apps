@@ -25,7 +25,6 @@ use std::path::PathBuf;
 
 use ark::file::{is_hash, FileRef};
 use ark::frames::Frame;
-use ark::peer::Feed;
 
 use crate::{ConnId, Deliver, Peer};
 
@@ -449,8 +448,8 @@ impl Peer {
         }
         let Some(who) = self.who(c) else { return false };
         let store = match (self.config.feed)(&who) {
-            Feed::Whole => Some(&self.log.store),
-            Feed::Scoped(_) => self.log.served.get(&who.session).map(|s| &s.union),
+            None => Some(&self.log.store),
+            Some(_) => self.log.served.get(&who.session).map(|s| &s.union),
         };
         let may = store.is_some_and(|s| ark::file::held(s, hash));
         if may {

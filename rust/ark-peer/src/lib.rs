@@ -88,7 +88,7 @@ use ark::format::Encode;
 use ark::frames::Frame;
 use ark::hash::EntryHash;
 use ark::log::{Durable, Entry, EntryId, Origin, Record, Seq, Span};
-use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer as Machine, Role, Told, Who};
+use ark::peer::{Ctx, Input, Journal, Output, Peer as Machine, Role, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::Space;
 use ark::store::Change;
@@ -166,13 +166,18 @@ impl Live {
 pub struct Config {
     pub log: Arc<Domain>,
     pub live: Option<Live>,
-    pub feed: Arc<dyn Fn(&Who) -> Feed + Send + Sync>,
+    /// The scope each connection is fed by (§1.8), by who it is; none,
+    /// the log whole.
+    pub feed: Scoping,
     pub keep: Option<usize>,
     /// A server's functions a device calls by name over its link, outside
     /// both machines ([`Frame::Call`](ark::frames::Frame)): never logged,
     /// journaled, recorded or told to another connection.
     pub calls: BTreeMap<String, Call>,
 }
+
+/// The scope a connection is fed by, by who it is ([`Config::feed`]).
+pub type Scoping = Arc<dyn Fn(&Who) -> Option<String> + Send + Sync>;
 
 /// One of a server's [`Config::calls`]: given the caller, verified as its
 /// connection is, and the call's input; what it gives back, or why not. It
@@ -185,7 +190,7 @@ impl Config {
         Config {
             log,
             live: None,
-            feed: Arc::new(|_| Feed::Whole),
+            feed: Arc::new(|_| None),
             keep: None,
             calls: BTreeMap::new(),
         }

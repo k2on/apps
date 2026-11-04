@@ -386,7 +386,7 @@ pub async fn start(config: Config) -> Result<Server> {
 
     let mut hub = hub_config(&hosted, config.retain);
     if config.scoped {
-        hub.feed = Arc::new(|_| ark::peer::Feed::Scoped("session.feed".into()));
+        hub.feed = Arc::new(|_| Some("session.feed".into()));
     }
     let mut server = ark_peer::Server::new(hub).auth(auth.clone());
     (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive);

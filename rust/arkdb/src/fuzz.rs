@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::peer::{Ctx, Feed, Who};
+use ark::peer::{Ctx, Who};
 use ark::prelude::Id;
 use ark::schema::Space;
 use ark::store::Store;
@@ -142,13 +142,7 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
     let mut hub = Config::of(Arc::new(crate::demo::demo()));
     let scope = g.scope.clone();
     let scoped = scope.clone();
-    hub.feed = Arc::new(move |w: &Who| {
-        if w.session.starts_with("partial") {
-            Feed::Scoped(scoped.clone())
-        } else {
-            Feed::Whole
-        }
-    });
+    hub.feed = Arc::new(move |w: &Who| w.session.starts_with("partial").then(|| scoped.clone()));
     hub.keep = r.one_in(3).then(|| 2 + r.below(4) as usize);
     if live {
         hub.live = Some(Live {
@@ -167,9 +161,6 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
     };
     let logins: Vec<(Who, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
     let mut net = Net::of(hub, logins, seed);
-    if let Some(c) = net.clients.get_mut(&0).filter(|_| partial) {
-        c.log.feed = Feed::Scoped(scope.clone());
-    }
     let watch = |net: &mut Net, r: &mut Rng, i: i64| -> Result<(), String> {
         let (f, input) = g.query(r, net, i);
         let ctx = ctx_of(&net.clients[&i].log.me);
@@ -199,9 +190,6 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
         };
         net.run(&op);
         found.ops += 1;
-        if let Some(c) = net.clients.get_mut(&0).filter(|_| partial) {
-            c.log.feed = Feed::Scoped(scope.clone());
-        }
         if matches!(op, Op::Reopen(_)) {
             watch(&mut net, &mut r, i)?;
         }

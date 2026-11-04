@@ -4,7 +4,7 @@
 //! ```text
 //! Role  = Replica | Authority { journal }   -- "alone" is an authority whose journal has a fork
 //! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Open | Connected
-//!       | Alone | Join | Compact | Write { facts } | Feed { who, feed }
+//!       | Alone | Join | Compact | Write { facts } | Feed { who, scope }
 //! Output= Send | Fanout | To { session } | Changes(by span) | Persist | Refused { id, why } | Confirmed(id)
 //! ```
 //!
@@ -343,14 +343,6 @@ pub enum Role {
     Authority { journal: Journal },
 }
 
-/// What a replica is fed: every entry whole, or a scope's union (§1.8),
-/// the scope by hash.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Feed {
-    Whole,
-    Scoped(String),
-}
-
 /// A connection an authority serves by a scope: who it is, the scope, the
 /// union it holds, and the head of the chain it was sent.
 #[derive(Clone, Debug)]
@@ -386,10 +378,11 @@ pub enum Input {
         facts: Vec<Change>,
         now: i64,
     },
-    /// How the connection verified as `who` is fed (an authority's).
+    /// The scope the connection verified as `who` is fed by (§1.8): its
+    /// union, by the scope's name; none, the log whole (an authority's).
     Feed {
         who: Who,
-        feed: Feed,
+        scope: Option<String>,
     },
 }
 
@@ -447,7 +440,6 @@ pub struct Peer {
     pub functions: Functions,
     pub pending: Vec<Pending>,
     pub role: Role,
-    pub feed: Feed,
     pub me: Who,
     pub space: Space,
     /// Where this peer's intents come from (§1.6), and the last `local` it
@@ -517,7 +509,6 @@ impl Peer {
             functions,
             pending: vec![],
             role,
-            feed: Feed::Whole,
             me,
             space: Space::Durable,
             origin,
@@ -624,9 +615,9 @@ impl Peer {
                 self.decide(entry, given, &mut o);
             }
             Input::Write { .. } => {}
-            Input::Feed { who, feed } => match feed {
-                Feed::Whole => drop(self.served.remove(&who.session)),
-                Feed::Scoped(scope) => {
+            Input::Feed { who, scope } => match scope {
+                None => drop(self.served.remove(&who.session)),
+                Some(scope) => {
                     let union = self.blank();
                     let s = Served {
                         who: who.clone(),
