@@ -20,7 +20,7 @@ fn hub() -> ark_peer::Handle {
 
 /// `token`'s device, linked to `hub`, driven.
 fn driven(token: &str, hub: &ark_peer::Handle) -> Driven {
-    let mut p = Peer::open(config(), dev(token).unwrap(), Box::new(Memory::default()), false);
+    let mut p = Peer::open(config(), dev(token).unwrap(), Box::new(Memory::default()));
     p.set_token(Some(token.into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));
     Driven::new(p)
@@ -61,7 +61,7 @@ fn a_driven_peer_takes_in_and_sends_with_nobody_pumping() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "held already on this thread")]
 fn a_peer_held_twice_on_one_thread_is_said() {
-    let p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()), false);
+    let p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()));
     let d = Driven::new(p);
     let _held = d.lock();
     let _again = d.lock();
@@ -84,7 +84,7 @@ fn a_fill_is_taken_in_without_telling_the_app_of_every_part() {
         p.log.machine.step(ark::peer::Input::Compact(head));
     })
     .unwrap();
-    let mut p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()), false);
+    let mut p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()));
     p.log.machine.part = Some(16 << 10);
     p.set_token(Some("alice@laptop".into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));

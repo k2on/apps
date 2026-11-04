@@ -199,7 +199,7 @@ impl Disk for Tally {
 #[test]
 fn a_mutate_writes_one_pending_record() {
     let written = Arc::new(AtomicUsize::new(0));
-    let mut c = Peer::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())), false);
+    let mut c = Peer::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())));
     let create = "demo.create_playlist";
     let mut last = 0;
     for i in 0..=8000 {

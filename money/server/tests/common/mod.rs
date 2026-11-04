@@ -45,7 +45,7 @@ pub struct Peer {
 
 pub fn open(who: Who) -> Peer {
     let config = ark_peer::Config::of(money_domain::shared());
-    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()), false);
+    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()));
     client.link.backoff = (20, 200);
     Peer { client, refused: vec![] }
 }

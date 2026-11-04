@@ -38,7 +38,7 @@ pub fn device(token: &str, mut disk: Box<dyn Disk>) -> Peer {
     let who = dev(token).unwrap_or(dev("x@y").unwrap());
     let origin = Origin::named(&who.session);
     ark_peer::local::preset(&mut *disk, |r| r.origin = origin).unwrap();
-    Peer::open(config(), who, disk, false)
+    Peer::open(config(), who, disk)
 }
 
 /// `token`'s device, dialling `url` through `dial`, and its bell.

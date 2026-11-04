@@ -42,7 +42,7 @@ fn server(config: Config, data: &Path) -> anyhow::Result<ark_peer::Handle> {
 
 /// A device of `config` on `disk`, linked to `hub`, pumped until `f` holds.
 fn synced(config: Config, disk: &Path, who: &str, hub: &ark_peer::Handle, author: &[&str], f: impl Fn(&Peer) -> bool) -> Peer {
-    let mut p = Peer::open(config, dev(who).unwrap(), Box::new(Files::new(disk).unwrap()), false);
+    let mut p = Peer::open(config, dev(who).unwrap(), Box::new(Files::new(disk).unwrap()));
     let (wake, rx) = bell();
     p.set_waker(wake);
     p.set_token(Some(who.into()));
@@ -133,7 +133,7 @@ fn a_replica_of_a_schema_not_grown_from_starts_empty_its_pending_kept() {
     p.author(Space::Durable, "demo.create_playlist", named("Psalms"), 1).unwrap();
     drop(p);
     for _ in 0..2 {
-        let p = Peer::open(retitled(), dev("alice@laptop").unwrap(), Box::new(Files::new(&phone).unwrap()), false);
+        let p = Peer::open(retitled(), dev("alice@laptop").unwrap(), Box::new(Files::new(&phone).unwrap()));
         assert_eq!(p.log.log().head().0, 0, "no entry it was sent");
         assert_eq!(p.log.pending.len(), 1, "its intent, pending");
         assert_eq!(playlists(&p), 1, "and run on top");

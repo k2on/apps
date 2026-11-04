@@ -98,6 +98,8 @@ pub struct Net {
     pub doubled: usize,
     /// Frames whose bytes did not decode to what was sent.
     pub misread: Vec<Vec<u8>>,
+    /// Every frame put in flight, and whether a client sent it.
+    pub wire: Vec<(bool, Vec<u8>)>,
     /// Every login each client held, by session: what its entries' roles
     /// must be.
     pub logins: BTreeMap<String, Who>,
@@ -145,6 +147,7 @@ impl Net {
             dropped: 0,
             doubled: 0,
             misread: vec![],
+            wire: vec![],
             logins: BTreeMap::new(),
             alone: BTreeSet::new(),
             views: BTreeMap::new(),
@@ -167,7 +170,7 @@ impl Net {
         if let Some(live) = &mut config.live {
             live.origin = counted(&who.session);
         }
-        self.clients.insert(i, Peer::open(config, who, Box::new(disk), true));
+        self.clients.insert(i, Peer::open(config, who, Box::new(disk)));
         self.heal(i);
         i
     }
@@ -201,6 +204,7 @@ impl Net {
             };
         }
         if self.conns.contains_key(&i) {
+            self.wire.extend(frames.iter().map(|f| (true, f.clone())));
             self.to_server.entry(i).or_default().extend(frames);
         }
     }
@@ -208,6 +212,7 @@ impl Net {
     fn told_by_server(&mut self, out: Vec<Deliver>) {
         for (c, b) in out {
             if let Some((i, _)) = self.conns.iter().find(|(_, x)| **x == c) {
+                self.wire.push((false, b.clone()));
                 self.to_client.entry(*i).or_default().push(b);
             }
         }

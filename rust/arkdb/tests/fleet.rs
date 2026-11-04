@@ -2,11 +2,9 @@
 //! scripted fleet of three over the demo — adds from everyone, a
 //! partition, more adds, 200 random deliveries with duplicates and drops —
 //! must reach the head and the state K1 pinned over a bare machine, with
-//! one chain on every peer and nothing pending; and the trace corpus:
-//! every client of every fleet session, recorded and replayed into fresh
-//! machines to the same outputs.
+//! one chain on every peer and nothing pending; and forty other seeds the
+//! same.
 
-use arkdb::trace::{record, replay};
 use arkdb::vectors::fleet;
 
 /// K1's pin (`rust/ark/tests/fleet.rs`, now moved here): twenty entries,
@@ -31,23 +29,21 @@ fn fleet_seed_7_through_the_hub() {
     assert_eq!(net.hub.log.store.state_hash().hex(), HASH);
 }
 
-/// Forty other seeds converge to twenty entries, nothing refused, and every
-/// client of each — 123 traces with seed 7's — replays to what it said.
-/// Falsified by the client dropping its frames on `connected` after the
-/// machine queued them (`frames.clear()` after the steps): no fleet
-/// settled; and by the client recording its open as a login with no
-/// session: no trace replayed.
+/// Forty other seeds converge to twenty entries, nothing refused, every
+/// client of each — 123 with seed 7's — with nothing pending. Falsified by
+/// the client dropping its frames on `connected` after the machine queued
+/// them (`frames.clear()` after the steps): no fleet settled.
 #[test]
-fn fleets_of_other_seeds_converge_and_every_client_replays() {
-    let mut traces = 0;
+fn fleets_of_other_seeds_converge() {
+    let mut clients = 0;
     for seed in 0..=40 {
         let net = fleet(seed);
         net.converged().unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         assert_eq!((net.hub.log.log().head().0, net.refused.len()), (HEAD, 0), "seed {seed}");
         for (i, c) in &net.clients {
-            replay(&record(&format!("fleet-seed-{seed}, client {i}"), c)).unwrap_or_else(|e| panic!("seed {seed} client {i}: {e}"));
-            traces += 1;
+            assert!(c.log.pending.is_empty(), "seed {seed} client {i}: pending");
+            clients += 1;
         }
     }
-    assert_eq!(traces, 123);
+    assert_eq!(clients, 123);
 }

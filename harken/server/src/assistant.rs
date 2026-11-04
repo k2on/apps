@@ -3114,6 +3114,13 @@ pub mod ha {
         speaker(&k.0, &k.1)
     }
 
+    /// A step of `k`'s speaker, inside its span: what the machine says in it
+    /// is the speaker's among the events.
+    fn stepped<T>(k: &(String, String), step: impl FnOnce() -> T) -> T {
+        tracing::debug_span!(target: "ark", "step", peer = %label(k), space = "volatile")
+            .in_scope(step)
+    }
+
     /// `user`'s session with each of `entities`' ids ([`speaker`]) read as
     /// the entity, which is how the bridge names a speaker.
     pub fn as_entities(mut s: Listening, user: &str, entities: &[String]) -> Listening {
@@ -3317,9 +3324,7 @@ pub mod ha {
                     continue;
                 };
                 let input = Input::Frame { from: None, bytes };
-                let seen = input.clone();
-                let out = peer.step(input);
-                ark_peer::observe::step(&label(&k), Space::Volatile, None, &seen, &out);
+                let out = stepped(&k, || peer.step(input));
                 for o in &out {
                     if let Output::Changes(told) = o {
                         if let Some(by) = told.iter().rev().find_map(|t| t.by) {
@@ -3378,12 +3383,10 @@ pub mod ha {
                 now,
                 cause,
             };
-            let seen = input.clone();
             let Some(peer) = self.machines.get_mut(&k) else {
                 return;
             };
-            let out = peer.step(input);
-            ark_peer::observe::step(&label(&k), Space::Volatile, None, &seen, &out);
+            let out = stepped(&k, || peer.step(input));
             self.send(c, out);
         }
 
@@ -3413,7 +3416,6 @@ pub mod ha {
                     config,
                     who.clone(),
                     Box::new(ark_peer::Memory::default()),
-                    false,
                 );
                 p.sign_in(who.clone());
                 let token = login.token.clone();

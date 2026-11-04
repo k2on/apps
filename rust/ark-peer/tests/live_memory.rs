@@ -45,7 +45,7 @@ fn device(k: usize) -> Peer {
         ..ark_peer::Live::new(Module::of(&room()))
     });
     let who = dev(&format!("u{k}@d{k}")).unwrap();
-    let mut p = Peer::open(c, who, Box::new(Memory::default()), false);
+    let mut p = Peer::open(c, who, Box::new(Memory::default()));
     p.linked = true;
     p
 }

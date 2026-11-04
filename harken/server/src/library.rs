@@ -237,7 +237,7 @@ impl Scanner {
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
         let config = Config::of(hosted.domain.clone());
-        let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk), false);
+        let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk));
         // Each start is a login of its own: what the replica kept pending
         // is authored again under it, from its session's first `local`,
         // or the hub would hold the first entry for the ones before it.

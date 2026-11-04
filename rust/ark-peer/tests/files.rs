@@ -57,7 +57,7 @@ fn config(scoped: bool) -> Config {
 }
 
 fn device(scoped: bool, who: &str) -> Peer {
-    Peer::open(config(scoped), dev(who).unwrap(), Box::new(Memory::default()), false)
+    Peer::open(config(scoped), dev(who).unwrap(), Box::new(Memory::default()))
 }
 
 /// Frames carried both ways until nobody has more; `drop` says which of a
@@ -290,7 +290,6 @@ fn a_device_s_unsent_files_outlast_a_restart() {
             config(false),
             dev("alice@phone").unwrap(),
             Box::new(ark_peer::Files::new(dir.path()).unwrap()),
-            false,
         )
     };
     let mut alice = open();

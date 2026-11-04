@@ -501,7 +501,7 @@ impl Headless {
         };
         let disk = Files::new(f.dir.join("replica"))
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
-        let mut client = Peer::open(config, who.clone(), Box::new(disk), false);
+        let mut client = Peer::open(config, who.clone(), Box::new(disk));
         client.link.backoff = (f.backoff.0.max(1), f.backoff.1.max(f.backoff.0).max(1));
         client.link.chunk = CHUNK;
         match (f.alone, client.is_alone()) {

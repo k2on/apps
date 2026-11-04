@@ -134,7 +134,7 @@ fn ctx_of(w: &Who) -> Ctx {
 }
 
 /// One session from its seed: the net it left, or the first check it failed.
-pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
+pub fn session(seed: u64) -> Result<(Net, Found), String> {
     let mut r = Rng(seed);
     let g = Gen::new();
     let room = crate::demo::room();
@@ -208,14 +208,14 @@ pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
         net.views_hold().map_err(|e| format!("after op {k} ({op:?}): {e}"))?;
     }
     net.settle()?;
-    check(&net, &g, partial, traces)?;
+    check(&net, &g, partial)?;
     found.entries = net.hub.log.log().head().0 as usize;
     found.refused = net.refused.len();
     Ok((net, found))
 }
 
 /// Everything a settled session must be.
-pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), String> {
+pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
     net.converged()?;
     if let Some(b) = net.misread.first() {
         return Err(format!("a frame did not read back as sent: {}", ark::hash::hex(b)));
@@ -256,41 +256,19 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
             return Err("the partial client is not exactly its union".into());
         }
     }
-    if traces {
-        for (i, c) in &net.clients {
-            let t = crate::trace::record(&format!("client {i}"), c);
-            crate::trace::replay(&t).map_err(|e| format!("client {i}'s trace: {e}"))?;
-        }
-    }
     Ok(())
 }
 
-/// `arkdb fuzz [sessions] [first seed] [traces [DIR]]`: that many sessions
-/// ([`session`]), seeds counted up from the first, each checked, every
-/// client's trace replayed when `traces` is given or, with `DIR`, written
-/// there instead as `seed-<seed>-client-<i>.json` (a trace corpus,
-/// `spec/RUNNERS.md` § trace, which the flake's `traces` check replays);
-/// each failure printed with its seed, which reproduces it. Whether any
-/// failed.
+/// `arkdb fuzz [sessions] [first seed]`: that many sessions ([`session`]),
+/// seeds counted up from the first, each checked; each failure printed
+/// with its seed, which reproduces it. Whether any failed.
 pub fn main(args: &[String]) -> bool {
     let n: u64 = args.first().and_then(|a| a.parse().ok()).unwrap_or(10_000);
     let first: u64 = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(1);
-    let traces = args.get(2).is_some_and(|a| a == "traces");
-    let out = args.get(3).filter(|_| traces);
-    if let Some(d) = out {
-        std::fs::create_dir_all(d).unwrap_or_else(|e| panic!("{d}: {e}"));
-    }
     let (mut failed, mut entries, mut refused, mut ops) = (0, 0, 0, 0);
     for seed in first..first + n {
-        match std::panic::catch_unwind(|| session(seed, traces && out.is_none())) {
-            Ok(Ok((net, f))) => {
-                (entries, refused, ops) = (entries + f.entries, refused + f.refused, ops + f.ops);
-                for (i, c) in net.clients.iter().filter(|_| out.is_some()) {
-                    let path = format!("{}/seed-{seed}-client-{i}.json", out.expect("a directory"));
-                    let t = crate::trace::record(&format!("seed {seed} client {i}"), c);
-                    std::fs::write(&path, t).unwrap_or_else(|e| panic!("{path}: {e}"));
-                }
-            }
+        match std::panic::catch_unwind(|| session(seed)) {
+            Ok(Ok((_, f))) => (entries, refused, ops) = (entries + f.entries, refused + f.refused, ops + f.ops),
             Ok(Err(e)) => {
                 failed += 1;
                 println!("seed {seed}: {e}");

@@ -126,6 +126,22 @@ use crate::schema::{Schema, Space};
 use crate::store::{Change, Log, Store, LOG};
 use crate::Refusal;
 
+/// An event of the machine's, `tracing`'s at target `ark`, said where what
+/// it says happens: an entry's with its id, its trace and span (an entry's
+/// span is its id) and the span it was a child of, so that one tap's trace
+/// is read across every peer that saw it. The driver's span around a step
+/// names the peer and the space.
+macro_rules! said {
+    ($level:ident, $what:expr, $e:expr $(, $k:ident = $v:expr)*) => {{
+        let e: &Entry = $e;
+        let s = e.span();
+        let parent = e.cause.map(|c| crate::hash::hex(&c.id)).unwrap_or_default();
+        tracing::$level!(target: "ark", entry = %crate::hash::hex(&e.id.0), trace = %crate::hash::hex(&s.trace.0),
+            span = %crate::hash::hex(&s.id), parent = %parent, func = %e.func, actor = %e.actor,
+            session = %e.session, local = e.local $(, $k = $v)*, "{}", $what)
+    }};
+}
+
 /// How many logged entries a `Page` carries at most.
 pub const PAGE: usize = 256;
 
@@ -642,7 +658,9 @@ impl Peer {
             Some(Runs::Scope(_)) => return Err(Refusal::new("a scope writes nothing")),
             None => return Err(Refusal(format!("no function {}", e.func))),
         };
-        let changes = p.apply(&mut self.store, &Ctx::of(e), &e.input)?;
+        let s = e.span();
+        let run = tracing::debug_span!(target: "ark", "run", func = %e.func, trace = %crate::hash::hex(&s.trace.0), span = %crate::hash::hex(&s.id));
+        let changes = run.in_scope(|| p.apply(&mut self.store, &Ctx::of(e), &e.input))?;
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
             self.store.undo(&changes).expect("an inverse applies");
@@ -694,6 +712,7 @@ impl Peer {
             ..self.entry(func, input, now)
         };
         let (id, local) = (entry.id, entry.local);
+        said!(debug, "entry", &entry);
         if self.is_authority() {
             let run = self.attempt(&entry, o);
             return self.decide(entry, run, o);
@@ -701,7 +720,10 @@ impl Peer {
         // Filling, a refusal may be of rows not sent yet: the authority's to
         // judge, the intent pending unrun.
         match self.attempt(&entry, o) {
-            Err(why) if self.fill.is_none() => o.out.push(Output::Refused { id, why: why.0 }),
+            Err(why) if self.fill.is_none() => {
+                said!(warn, "refused", &entry, why = why.0.as_str());
+                o.out.push(Output::Refused { id, why: why.0 })
+            }
             run => {
                 self.local = local;
                 o.send(Frame::push(self.space, [entry.clone()]));
@@ -753,6 +775,11 @@ impl Peer {
             }
         };
         let verdict = v.clone().map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq });
+        match &verdict {
+            Verdict::Ok { seq } => tracing::debug!(target: "ark", entry = %crate::hash::hex(&id.0), seq, "ok"),
+            Verdict::Refused { why } => tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused"),
+            _ => {}
+        }
         self.verdict(origin, &actor, local, id, verdict);
         v
     }
@@ -800,7 +827,10 @@ impl Peer {
                 // At or below where this peer stands, an intent still pending
                 // here is in the state it holds (a fill carried it).
                 Verdict::Ok { seq } if seq <= self.log().head().0 && self.settle(&id, o) => o.out.push(Output::Confirmed(id)),
-                Verdict::Refused { why } if self.settle(&id, o) => o.out.push(Output::Refused { id, why }),
+                Verdict::Refused { why } if self.settle(&id, o) => {
+                    tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
+                    o.out.push(Output::Refused { id, why })
+                }
                 Verdict::Gap { last } => self.close_gap(last, o),
                 _ => {}
             },
@@ -947,9 +977,11 @@ impl Peer {
         // Past a gap (behind a held one, too): where its origin stands
         // here, for a device that lost the ones between to go on from.
         if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
+            said!(warn, "gap", &entry, last = last);
             return Verdict::Gap { last };
         }
         if self.functions.of(&entry.func).is_none() {
+            said!(warn, "held", &entry);
             return Verdict::Held { func: entry.func };
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
@@ -1004,7 +1036,9 @@ impl Peer {
                     self.pending.remove(i);
                 }
             }
-            if l.entry.origin == self.origin {
+            let mine = l.entry.origin == self.origin;
+            said!(debug, if mine { "confirmed" } else { "applied" }, &l.entry, seq = l.seq);
+            if mine {
                 o.out.push(Output::Confirmed(l.entry.id));
             }
             self.asked = None;
@@ -1039,6 +1073,7 @@ impl Peer {
     /// authority at a cursor below every log's, which it answers with a
     /// fill (§1.7).
     fn diverge(&mut self, seq: Seq, o: &mut Out) {
+        tracing::warn!(target: "ark", seq, "diverged");
         (self.fill, self.more) = (None, None);
         self.diverged.push(seq);
         self.undo_pending(o);
@@ -1094,6 +1129,9 @@ impl Peer {
             }
         }
         self.fill = p.next.clone();
+        if self.fill.is_none() {
+            tracing::info!(target: "ark", seq = p.seq, "filled");
+        }
         match self.fill {
             Some(_) => self.ask_more(o),
             None => o.persist(Record::Rows(self.store.kv_rows())),

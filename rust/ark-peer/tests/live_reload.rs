@@ -26,7 +26,7 @@ fn device() -> Peer {
         device: Some(b"d0".to_vec()),
         ..ark_peer::Live::new(Module::of(&room()))
     });
-    let mut p = Peer::open(c, dev("u0@d0").unwrap(), Box::new(Memory::default()), false);
+    let mut p = Peer::open(c, dev("u0@d0").unwrap(), Box::new(Memory::default()));
     p.linked = true;
     p
 }

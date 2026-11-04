@@ -67,7 +67,7 @@ impl Net {
         };
         for i in 0..n {
             let who = dev(&format!("user{i}@device{i}")).unwrap();
-            net.join(Peer::open(config(), who, Box::new(Memory::default()), false));
+            net.join(Peer::open(config(), who, Box::new(Memory::default())));
         }
         net
     }

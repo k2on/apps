@@ -95,7 +95,7 @@ pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
         live,
         ..ark_peer::Config::of(hosted().domain.clone())
     };
-    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()), false);
+    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()));
     client.link.backoff = QUICK;
     Peer {
         client,

@@ -243,48 +243,12 @@ pub const ANOTHER: &str =
 /// A patch of a view's rows, each its bytes.
 pub type Patch = ark::plan::Patch<Vec<u8>>;
 
-/// One input to one machine; or both machines opened afresh as a login,
-/// as at [`Peer::open`] — the log's alone from its fork when it was
-/// alone; or a sign-in: the log's machine authoring as the login from its first
-/// `local`, the live one afresh. Each names the log's origin and the live
-/// machine's, which is drawn at every open.
-#[derive(Clone, Debug)]
-pub enum Act {
-    Open(Who, Origin, Option<(Seq, EntryHash)>, Option<Origin>),
-    SignIn(Who, Origin, Option<Origin>),
-    Step(Space, Input),
-}
-
-/// Where a machine stands after a step: its head, its state, its pending
-/// intents — what a trace holds a replay to.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct At {
-    pub head: (Seq, EntryHash),
-    pub state: ark::hash::StateHash,
-    pub pending: Vec<EntryId>,
-}
-
-impl At {
-    pub fn of(p: &Machine) -> At {
-        At {
-            head: p.log().head(),
-            state: p.store.state_hash(),
-            pending: p.pending.iter().map(|x| x.entry.id).collect(),
-        }
-    }
-}
-
-/// One recorded act, what it said, and where its machine stood after.
-pub type Recorded = (Act, Vec<Output>, Option<At>);
-
 /// Three instances wired: the log's machine on the disk, the live one, and
 /// the local instance beside them on the same disk; and what wires them.
 pub struct Peer {
     pub config: Config,
     pub log: Instance,
     pub live: Option<Instance>,
-    /// Every input given, when recording.
-    pub record: Option<Vec<Recorded>>,
     /// Whether a connection to its server is up.
     pub linked: bool,
     /// The link: the server, the login's token, the connection and when it
@@ -413,7 +377,6 @@ impl Peer {
             config,
             log,
             live,
-            record: None,
             linked: false,
             link: link::Link::default(),
             hub: hub::Hub::default(),
@@ -434,22 +397,15 @@ impl Peer {
     }
 
     /// A device opened as `me` from what `disk` holds.
-    pub fn open(config: Config, me: Who, disk: Box<dyn Disk>, record: bool) -> Peer {
+    pub fn open(config: Config, me: Who, disk: Box<dyn Disk>) -> Peer {
         let files = disk.files();
         let (disk, local) = local::beside(disk);
-        let mut p = Peer::opened(config, me, disk, local, record.then(Vec::new), link::Link::default());
+        let mut p = Peer::opened(config, me, disk, local, link::Link::default());
         p.keep_files(files);
         p
     }
 
-    pub(crate) fn opened(
-        config: Config,
-        me: Who,
-        disk: Box<dyn Disk>,
-        mut local: Instance,
-        mut record: Option<Vec<Recorded>>,
-        link: link::Link,
-    ) -> Peer {
+    pub(crate) fn opened(config: Config, me: Who, disk: Box<dyn Disk>, mut local: Instance, link: link::Link) -> Peer {
         let (r, intents) = local.read::<Local, _>(|db| (local::replica(db).unwrap_or_default(), db.pending.scan()));
         let origin = match r.origin {
             o if o != Origin::default() => o,
@@ -461,9 +417,6 @@ impl Peer {
         };
         let pending: Vec<Entry> = intents.into_iter().map(|i| i.entry).collect();
         let live = live_of(&config, &me);
-        if let Some(rec) = &mut record {
-            rec.push((Act::Open(me.clone(), origin, r.fork, live.as_ref().map(|l| l.origin)), vec![], None));
-        }
         let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
         let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
         let mut disk = disk;
@@ -483,7 +436,7 @@ impl Peer {
         }
         log.disk = Some(disk);
         let mut p = Peer::with(config, log, live, local);
-        (p.record, p.link) = (record, link);
+        p.link = link;
         p.saved = (r.local, pending.iter().map(|e| (e.local, e.id)).collect());
         let durable = Durable {
             pending,
@@ -502,7 +455,7 @@ impl Peer {
         link.wire = None;
         let local = Instance::open::<Local>(self.local.into_disk());
         let files = self.files.store;
-        let mut p = Peer::opened(self.config, me, self.log.into_disk(), local, self.record, link);
+        let mut p = Peer::opened(self.config, me, self.log.into_disk(), local, link);
         p.keep_files(files);
         p
     }
@@ -537,13 +490,10 @@ impl Peer {
     /// server), to every connection it fans out to, or to a session's; a
     /// record to the disk; changes to the views; verdicts kept.
     fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Vec<Output> {
-        let rec = self.record.is_some().then(|| input.clone());
-        let seen = tracing::event_enabled!(target: "ark", tracing::Level::WARN).then(|| input.clone());
+        let label = self.label();
         let Some(m) = self.instance(space) else { return vec![] };
-        let out = m.step(input);
-        if let Some(i) = &seen {
-            observe::step(&self.label(), space, from, i, &out);
-        }
+        let space_name = ["durable", "volatile"][space as usize];
+        let out = tracing::debug_span!(target: "ark", "step", peer = %label, space = space_name, conn = from).in_scope(|| m.step(input));
         for o in &out {
             match o {
                 Output::Send(b) => match from {
@@ -572,13 +522,6 @@ impl Peer {
                 Output::Confirmed(id) if !self.hub.serving => self.told.confirmed(space, *id),
                 _ => {}
             }
-        }
-        if let Some(i) = rec {
-            let at = At::of(self.machine(space).expect("a machine that spoke"));
-            self.record
-                .as_mut()
-                .expect("recording")
-                .push((Act::Step(space, i), out.clone(), Some(at)));
         }
         match (self.hub.serving, space) {
             (true, Space::Durable) => self.kept(),
@@ -894,9 +837,6 @@ impl Peer {
                 (p.origin, p.local) = (x.origin, x.local);
             }
             self.live = Some(p);
-        }
-        if let Some(r) = &mut self.record {
-            r.push((Act::SignIn(who.clone(), origin, self.live.as_ref().map(|l| l.origin)), vec![], None));
         }
         let durable = Durable {
             rows: self.log.confirmed_rows(),

@@ -58,7 +58,7 @@ impl Net {
             devices: vec![],
         };
         for i in 0..n {
-            let mut d = Peer::open(config(), dev(&format!("user{i}@device{i}")).unwrap(), Box::new(Memory::default()), false);
+            let mut d = Peer::open(config(), dev(&format!("user{i}@device{i}")).unwrap(), Box::new(Memory::default()));
             let c = net.hub.accept(d.me().clone());
             d.connected();
             net.devices.push((d, c));

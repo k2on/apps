@@ -102,7 +102,7 @@ fn write() {
     let (hub, auth) = server(&data);
     let login = auth.issue(&ark_auth::server::dev_account("alice"), "laptop").unwrap();
     let who = auth.authenticate()(&login.token).unwrap();
-    let mut device = Peer::open(config(), who, Box::new(Files::new(data.join("replica")).unwrap()), false);
+    let mut device = Peer::open(config(), who, Box::new(Files::new(data.join("replica")).unwrap()));
     let (wake, rx) = bell();
     device.set_waker(wake);
     device.set_token(Some(login.token.clone()));
@@ -156,7 +156,7 @@ fn an_old_data_directory_opens() {
         .filter(|e| e.entry.actor == "alice")
         .map(|e| e.entry.origin)
         .collect();
-    let device = Peer::open(config(), who, Box::new(Files::new(data.path().join("replica")).unwrap()), false);
+    let device = Peer::open(config(), who, Box::new(Files::new(data.path().join("replica")).unwrap()));
     assert_eq!(device.log.log().head().0, HEAD - 1, "the replica's chain, before bob's sign-in");
     assert_eq!(held(&device.log.store), names(), "and its rows");
     assert!(device.log.pending.is_empty(), "nothing pending");

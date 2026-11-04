@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]   a domain's typed Kotlin or Swift, to stdout
-//! arkdb fuzz [SESSIONS] [FIRST SEED] [traces [DIR]] the fuzzer
+//! arkdb fuzz [SESSIONS] [FIRST SEED]                the fuzzer
 //! arkdb tail [--from DIR] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 //! arkdb trace ID [--from DIR]                       what a tap or an entry caused, everywhere
 //! arkdb peer P [--from DIR]                         one peer's events
@@ -11,7 +11,7 @@
 //! ```
 
 const USAGE: &str = "arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]
-arkdb fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]
+arkdb fuzz [SESSIONS] [FIRST SEED]
 arkdb tail [--from DIR|FILE|-] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 arkdb trace ID [--from DIR|FILE|-]
 arkdb peer P [--from DIR|FILE|-]

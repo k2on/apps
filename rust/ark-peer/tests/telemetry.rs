@@ -19,7 +19,7 @@ fn a_devices_events_reach_its_server_named_by_its_login() {
     assert!(install(Sink::Outbox));
     let config = || Config::of(Arc::new(demo()));
     let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
-    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()), false);
+    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     let c = hub.accept(d.me().clone());
     d.connected();
     d.linked = true;

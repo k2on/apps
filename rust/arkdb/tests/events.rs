@@ -38,7 +38,7 @@ fn a_taps_trace_prints_what_it_caused_everywhere() {
     let mut ds: Vec<(Peer, ConnId)> = ["alice@phone", "bob@laptop"]
         .iter()
         .map(|t| {
-            let mut d = Peer::open(config(), dev(t).unwrap(), Box::new(Memory::default()), false);
+            let mut d = Peer::open(config(), dev(t).unwrap(), Box::new(Memory::default()));
             let c = hub.accept(d.me().clone());
             d.connected();
             (d, c)

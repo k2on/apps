@@ -172,7 +172,7 @@ impl Peer {
                 me
             }
         };
-        let mut p = Peer::opened(config, me, disk, local, None, crate::link::Link::default());
+        let mut p = Peer::opened(config, me, disk, local, crate::link::Link::default());
         p.keep_files(files);
         match login {
             Some((who, token)) if (&who.actor, &who.session) != (&p.log.me.actor, &p.log.me.session) => p.login(who, token),

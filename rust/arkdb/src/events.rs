@@ -252,8 +252,7 @@ pub fn render_trace(all: &[Event], id: &str) -> Result<String, String> {
             "entry" => {
                 let span = field(e, "span").unwrap_or_default().to_string();
                 let n = nodes.entry(span).or_default();
-                let kind = field(e, "kind").unwrap_or_default();
-                if n.what.is_empty() || (kind == "push" && field(e, "dir") == Some("out")) {
+                if n.what.is_empty() {
                     (n.at, n.what) = (e.at, field(e, "func").unwrap_or_default().to_string());
                     n.by = format!(
                         "{} \u{b7} {}",
@@ -263,6 +262,13 @@ pub fn render_trace(all: &[Event], id: &str) -> Result<String, String> {
                     n.parent = field(e, "parent").filter(|p| !p.is_empty()).map(String::from);
                 }
                 n.seen.insert(who(e));
+            }
+            "applied" | "confirmed" => {
+                nodes
+                    .entry(field(e, "span").unwrap_or_default().to_string())
+                    .or_default()
+                    .seen
+                    .insert(who(e));
             }
             _ => {}
         }
@@ -294,6 +300,7 @@ pub fn render_trace(all: &[Event], id: &str) -> Result<String, String> {
             "mutate",
             "changed",
             "confirmed",
+            "applied",
             "to",
             "page",
         ];

@@ -183,7 +183,7 @@ impl Importer {
         // an import it had not seen confirmed is pulled again from the
         // cursor kept, rather than pushed again from a disk.
         let config = ark_peer::Config::of(money_domain::shared());
-        let mut peer = Peer::open(config, who.clone(), Box::new(Memory::default()), false);
+        let mut peer = Peer::open(config, who.clone(), Box::new(Memory::default()));
         peer.sign_in(who.clone());
         let token = login.token.clone();
         let dial = hub.dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));

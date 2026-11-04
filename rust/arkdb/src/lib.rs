@@ -12,5 +12,4 @@ pub mod gen;
 pub mod library;
 pub mod port;
 pub mod sim;
-pub mod trace;
 pub mod vectors;
