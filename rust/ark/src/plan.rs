@@ -45,17 +45,9 @@ use crate::Refusal;
 /// An element's place in a list, as bytes.
 pub type Okey = Vec<u8>;
 
-/// Per element whose value moved: what it was, what it is.
-type Delta<T> = BTreeMap<Okey, (Option<T>, Option<T>)>;
-
-fn put<T>(d: &mut Delta<T>, k: Okey, old: Option<T>, new: Option<T>) {
-    d.entry(k).or_insert((old, None)).1 = new;
-}
-
-fn prune<T: PartialEq>(mut d: Delta<T>) -> Delta<T> {
-    d.retain(|_, (a, b)| a != b);
-    d
-}
+/// Per element that may have moved: what it is now (none: gone). What it
+/// was is the reader's own to know; a move to the same value is no move.
+type Delta<T> = BTreeMap<Okey, Option<T>>;
 
 /// A row before and after, as its bytes.
 type Moved = (Option<Vec<u8>>, Option<Vec<u8>>);
@@ -194,7 +186,7 @@ impl<S: Tables, T: Elem> Op<S, T> for ScanOp<T> {
         let moved = p.net.get(self.table.as_str()).into_iter().flat_map(|t| t.range(self.prefix.clone()..));
         moved
             .take_while(|(k, _)| k.starts_with(&self.prefix))
-            .map(|(k, (a, b))| (k.clone(), (dec(a), dec(b))))
+            .map(|(k, (_, b))| (k.clone(), dec(b)))
             .collect()
     }
 }
@@ -247,22 +239,26 @@ impl<S: Tables, T: Elem, U: Elem> Op<S, U> for EachOp<S, T, U> {
                 (k, t)
             })
             .collect();
-        moved.extend(self.input.push(p).into_iter().map(|(k, (_, new))| (k, new)));
+        moved.extend(self.input.push(p));
         let mut out = Delta::new();
         for (k, new) in moved {
-            if let Some((_, at, Some(u))) = self.kept.remove(&k) {
-                put(&mut out, at, Some(u), None);
-            }
-            match new {
+            let was = self.kept.remove(&k).and_then(|(_, at, u)| Some((at, u?)));
+            let now = match new {
                 Some(t) => {
-                    if let (at, Some(u)) = self.run(p.store, &k, t, true) {
-                        put(&mut out, at, None, Some(u))
-                    }
+                    let (at, u) = self.run(p.store, &k, t, true);
+                    u.map(|u| (at, u))
                 }
-                None => self.deps.set(&k, vec![]),
+                None => {
+                    self.deps.set(&k, vec![]);
+                    None
+                }
+            };
+            if was != now {
+                out.extend(was.map(|(at, _)| (at, None)));
+                out.extend(now.map(|(at, u)| (at, Some(u))));
             }
         }
-        prune(out)
+        out
     }
 }
 
@@ -287,7 +283,7 @@ impl<S: Tables, T: Elem> Op<S, T> for TakeOp<S, T> {
         let d = self.input.push(p);
         let window = |all: &BTreeMap<Okey, T>| all.iter().take(self.n).map(|(k, t)| (k.clone(), t.clone())).collect::<BTreeMap<_, _>>();
         let before = window(&self.all);
-        for (k, (_, new)) in d {
+        for (k, new) in d {
             match new {
                 Some(t) => self.all.insert(k, t),
                 None => self.all.remove(&k),
@@ -295,11 +291,10 @@ impl<S: Tables, T: Elem> Op<S, T> for TakeOp<S, T> {
         }
         let after = window(&self.all);
         let keys: BTreeSet<&Okey> = before.keys().chain(after.keys()).collect();
-        prune(
-            keys.into_iter()
-                .map(|k| (k.clone(), (before.get(k).cloned(), after.get(k).cloned())))
-                .collect(),
-        )
+        keys.into_iter()
+            .filter(|k| before.get(*k) != after.get(*k))
+            .map(|k| (k.clone(), after.get(k).cloned()))
+            .collect()
     }
 }
 
@@ -358,7 +353,7 @@ impl<S: Tables, T: Elem, K: Key + Clone + Send + 'static, A: Elem> Op<S, A> for 
 
     fn push(&mut self, p: &Pushed) -> Delta<A> {
         let mut touched = self.deps.hit(p);
-        for (k, (_, new)) in self.input.push(p) {
+        for (k, new) in self.input.push(p) {
             if let Some(g) = self.of.remove(&k) {
                 self.groups.get_mut(&g).expect("a member's group").1.remove(&k);
                 touched.insert(g);
@@ -371,9 +366,11 @@ impl<S: Tables, T: Elem, K: Key + Clone + Send + 'static, A: Elem> Op<S, A> for 
         for g in touched {
             let was = self.aggs.get(&g).cloned();
             let now = self.aggregate(p.store, &g);
-            put(&mut out, g, was, now);
+            if was != now {
+                out.insert(g, now);
+            }
         }
-        prune(out)
+        out
     }
 }
 
@@ -406,18 +403,18 @@ impl<T: Clone> Side<T> {
     /// This side's moves through the join: each element moved, paired
     /// (by `pair`, in the join's order) with the other side's partners.
     fn push<U: Clone, P>(&mut self, d: Delta<T>, other: &Side<U>, out: &mut Delta<P>, pair: impl Fn(&Okey, &T, &Okey, &U) -> (Okey, P)) {
-        for (a, (_, new)) in d {
+        for (a, new) in d {
             if let Some((key, t)) = self.remove(&a) {
                 other.partners(&key).for_each(|(b, u)| {
-                    let (k, p) = pair(&a, &t, b, u);
-                    put(out, k, Some(p), None)
+                    let (k, _) = pair(&a, &t, b, u);
+                    out.insert(k, None);
                 });
             }
             if let Some(t) = new {
                 let key = self.add(a.clone(), t.clone());
                 other.partners(&key).for_each(|(b, u)| {
                     let (k, p) = pair(&a, &t, b, u);
-                    put(out, k, None, Some(p))
+                    out.insert(k, Some(p));
                 });
             }
         }
@@ -437,11 +434,11 @@ impl<S: Tables, T: Elem, U: Elem> Op<S, (T, U)> for JoinOp<S, T, U> {
             self.r.add(k, u);
         }
         let mut out = Delta::new();
-        let left = self.left.hydrate(store, keep).into_iter().map(|(k, t)| (k, (None, Some(t))));
+        let left = self.left.hydrate(store, keep).into_iter().map(|(k, t)| (k, Some(t)));
         self.l.push(left.collect(), &self.r, &mut out, |a, t, b, u| {
             ([&a[..], b].concat(), (t.clone(), u.clone()))
         });
-        out.into_iter().filter_map(|(k, (_, p))| Some((k, p?))).collect()
+        out.into_iter().filter_map(|(k, p)| Some((k, p?))).collect()
     }
 
     fn push(&mut self, p: &Pushed) -> Delta<(T, U)> {
@@ -451,7 +448,7 @@ impl<S: Tables, T: Elem, U: Elem> Op<S, (T, U)> for JoinOp<S, T, U> {
             .push(dl, &self.r, &mut out, |a, t, b, u| ([&a[..], b].concat(), (t.clone(), u.clone())));
         self.r
             .push(dr, &self.l, &mut out, |b, u, a, t| ([&a[..], b].concat(), (t.clone(), u.clone())));
-        prune(out)
+        out
     }
 }
 
@@ -714,15 +711,9 @@ impl<S: Tables, T: Elem> View<S, T> {
         let d = if p.hits(&self.built) {
             let (plan, built) = recorded::<S, _>(store, |db| (self.make)(&self.ctx, db));
             (self.plan, self.built) = (plan?, built);
-            let new: BTreeMap<Okey, T> = self.plan.op.hydrate(store, true).into_iter().collect();
-            let mut d = Delta::new();
-            for (k, t) in &self.list {
-                d.insert(k.clone(), (Some(t.clone()), new.get(k).cloned()));
-            }
-            for (k, t) in &new {
-                d.entry(k.clone()).or_insert((None, Some(t.clone())));
-            }
-            prune(d)
+            let mut d: Delta<T> = self.list.keys().map(|k| (k.clone(), None)).collect();
+            d.extend(self.plan.op.hydrate(store, true).into_iter().map(|(k, t)| (k, Some(t))));
+            d
         } else {
             self.plan.op.push(p)
         };
@@ -732,23 +723,20 @@ impl<S: Tables, T: Elem> View<S, T> {
     /// The delta applied to the list, as positional patches in order.
     fn patch(&mut self, d: Delta<T>) -> Vec<Patch<T>> {
         let mut out = vec![];
-        for (k, (_, new)) in d {
-            let at = self.list.range::<Okey, _>(..&k).count();
-            match (self.list.contains_key(&k), new) {
-                (true, None) => {
-                    self.list.remove(&k);
-                    out.push(Patch::Remove { at });
-                }
-                (true, Some(t)) => {
-                    self.list.insert(k, t.clone());
-                    out.push(Patch::Update { at, node: t });
-                }
-                (false, Some(t)) => {
-                    self.list.insert(k, t.clone());
-                    out.push(Patch::Insert { at, node: t });
-                }
-                (false, None) => {}
-            }
+        for (k, new) in d {
+            let same = self.list.get(&k).map(|was| Some(was) == new.as_ref());
+            let at = || self.list.range::<Okey, _>(..&k).count();
+            let patch = match (same, new) {
+                (Some(_), None) => Patch::Remove { at: at() },
+                (Some(false), Some(t)) => Patch::Update { at: at(), node: t },
+                (None, Some(t)) => Patch::Insert { at: at(), node: t },
+                _ => continue,
+            };
+            match &patch {
+                Patch::Remove { .. } => self.list.remove(&k),
+                Patch::Update { node, .. } | Patch::Insert { node, .. } => self.list.insert(k, node.clone()),
+            };
+            out.push(patch);
         }
         out
     }
