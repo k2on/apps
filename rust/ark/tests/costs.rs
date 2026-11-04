@@ -196,7 +196,7 @@ fn store_of(rows: &[Change]) -> Store {
         let Change::Add { table, row } = c else { panic!("a store is rows") };
         by.iter_mut().find(|(t, _)| t == table).unwrap().1.push(row.clone());
     }
-    Store::from_rows(schema.into(), Space::Durable, &by).unwrap().0
+    Store::from_rows(schema.into(), Space::Durable, &by).unwrap()
 }
 
 type Made<T> = ark::plan::Make<Lib, T>;

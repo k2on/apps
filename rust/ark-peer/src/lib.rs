@@ -68,7 +68,6 @@ pub mod instance;
 mod jobs;
 pub mod link;
 pub mod local;
-pub mod migrate;
 pub mod observe;
 pub mod signed;
 pub mod watched;
@@ -121,12 +120,6 @@ pub struct Module {
 }
 
 impl Module {
-    /// The steps that read rows of a schema before this one
-    /// ([`ark::migrate`]): its domain's.
-    pub fn migrations(&self) -> &[ark::migrate::Migration] {
-        self.domain.as_ref().map_or(&[], |d| &d.migrations)
-    }
-
     /// The tables a fill sends last ([`ark::peer::Peer::later`]): its
     /// domain's.
     pub fn later(&self) -> &[String] {
@@ -242,6 +235,10 @@ impl Config {
         }
     }
 }
+
+/// Why an authority's disk is not opened under its schema.
+pub const ANOTHER: &str =
+    "the rows on disk are of a schema this one does not grow from: a schema only grows (append a table, or a column that is an Option or defaulted)";
 
 /// A patch of a view's rows, each its bytes.
 pub type Patch = ark::plan::Patch<Vec<u8>>;
@@ -470,21 +467,19 @@ impl Peer {
         let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
         let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
         let mut disk = disk;
-        // Rows of a schema this one does not grow from: an authority's
-        // migrated, a replica's sent again from empty (`migrate`).
-        let read = match r.fork {
-            Some(_) => migrate::migrate(&mut *disk, &config.log.schema, config.log.migrations()).map(|_| true),
-            None => migrate::kept(&mut *disk, &config.log.schema),
+        // Rows of a schema this one does not grow from (a build older than
+        // a schema that only grows): a replica's are sent again from empty,
+        // a device alone's refused (`disk::own`).
+        let schema = &config.log.schema;
+        let empty = |disk: &mut dyn Disk| disk.record(&Record::Rows(log.confirmed_rows()).to_bytes());
+        let read = match disk::own(&mut *disk, schema) {
+            Ok(false) if r.fork.is_some() => Err(std::io::Error::other(ANOTHER)),
+            Ok(false) => empty(&mut *disk).and_then(|_| disk::put_schema(&mut *disk, schema)),
+            Ok(true) => disk::put_schema(&mut *disk, schema),
+            Err(e) => Err(e),
         };
-        match read {
-            Ok(true) => {}
-            Ok(false) => {
-                let empty = Record::Rows(log.confirmed_rows()).to_bytes();
-                if let Err(e) = disk.record(&empty) {
-                    log.failure = Some(e.to_string());
-                }
-            }
-            Err(e) => log.failure = Some(e.to_string()),
+        if let Err(e) = read {
+            log.failure = Some(e.to_string());
         }
         log.disk = Some(disk);
         let mut p = Peer::with(config, log, live, local);

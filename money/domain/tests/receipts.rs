@@ -591,8 +591,10 @@ fn groups_and_categories_become_one_tree() {
     .into_iter()
     .collect();
     let now = d.schema.clone();
-    let rows = ark::migrate::migrate(&was, &old, &now, &d.migrations).unwrap().expect("migrated");
-    let (store, _) = ark::store::Store::from_rows(now, ark::schema::Space::Durable, &rows).unwrap();
+    let space = ark::schema::Space::Durable;
+    let mut tables = ark::dynamic::tables(&ark::store::Store::from_rows(std::sync::Arc::new(was), space, &old).unwrap()).unwrap();
+    money_domain::migrations::categories_as_a_tree(&mut tables).unwrap();
+    let store = ark::dynamic::store(now, space, &tables).unwrap();
     let cats: Vec<Category> = store
         .rows("category")
         .map(|r| <Category as ark::format::Encode>::from_bytes(r).unwrap())

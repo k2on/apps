@@ -33,7 +33,6 @@
 //! ([`Store::apply_kv`]). The store's rows with the log's are what a peer
 //! makes durable ([`Store::kv_rows`]).
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Arc;
@@ -583,40 +582,24 @@ impl Store {
         rows
     }
 
-    /// A store of `space` holding exactly these rows, as some schema of this
-    /// one wrote them (§1.2): each read as it is, and only when it is not
-    /// this schema's completed or cut to its prefix ([`Table::fit`]); a
-    /// table this schema lacks dropped; constraints judged once all are in,
-    /// so the order tables come in does not matter. And whether any was
-    /// another schema's (a table of this space missing counts). Each row is
-    /// parsed once, unless it is fitted.
-    pub fn from_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Store, bool), Refusal> {
-        Store::of_rows(schema, space, rows, true)
-    }
-
-    /// [`Store::from_rows`], its constraints judged or not: a replica's
-    /// filling holds rows whose neighbours are not all there yet.
-    pub(crate) fn of_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)], judged: bool) -> Result<(Store, bool), Refusal> {
+    /// A store of `space` holding exactly these rows, as some schema this
+    /// one grows from or into wrote them ([`Table::fit`]), each parsed once
+    /// unless fitted; constraints judged once all are in, so the order
+    /// tables come in does not matter.
+    pub fn from_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
         let mut s = Store::new(schema.clone(), space);
-        let mut other = schema.tables.iter().filter(|t| t.space == space).count() != rows.len();
         let mut parsed: Vec<Vec<Parsed>> = schema.tables.iter().map(|_| vec![]).collect();
         for (table, rs) in rows {
-            let t = match s.find(table) {
-                Err(_) => {
-                    other = true;
-                    continue;
-                }
-                t => t?,
-            };
-            let tab = &schema.tables[t];
+            // A table this schema lacks is a newer one's: none of its.
+            let Ok(t) = s.find(table) else { continue };
             for row in rs {
+                let tab = &schema.tables[t];
                 let (row, p) = match tab.parse(row) {
-                    Ok(p) => (Cow::Borrowed(&row[..]), p),
+                    Ok(p) => (row.clone(), p),
                     Err(e) => {
-                        let (r, o) = tab.fit(row).map_err(|_| e)?;
-                        other |= o;
+                        let r = tab.fit(row).map_err(|_| e)?;
                         let p = tab.parse(&r)?;
-                        (Cow::Owned(r), p)
+                        (r, p)
                     }
                 };
                 if s.tables[t].rows.contains_key(&p.key) {
@@ -627,12 +610,12 @@ impl Store {
                 parsed[t].push(p);
             }
         }
-        for (t, tab) in schema.tables.iter().enumerate().filter(|_| judged) {
+        for (t, tab) in schema.tables.iter().enumerate() {
             for p in &parsed[t] {
                 s.judge(tab, p)?;
             }
         }
-        Ok((s, other))
+        Ok(s)
     }
 
     /// Every row of `table` in key order from `from` on, each with its key.
@@ -646,7 +629,7 @@ impl Store {
     }
 
     /// The rows of `table` from `from` to `to` (none: its end) replaced by
-    /// `rows`, judging nothing: how a
+    /// `rows`, as some schema of this one wrote them, judging nothing: how a
     /// replica filling holds a range it was sent, whose neighbours it may
     /// not hold yet. What moved, as changes. A table this schema lacks is
     /// none of its.
@@ -656,8 +639,9 @@ impl Store {
         let tab = &schema.tables[t];
         let mut sent = BTreeMap::new();
         for row in rows {
-            let p = tab.parse(row)?;
-            sent.insert(p.key.clone(), (row.clone(), p));
+            let row = tab.fit(row)?;
+            let p = tab.parse(&row)?;
+            sent.insert(p.key.clone(), (row, p));
         }
         let hi = to.map_or(Bound::Unbounded, Bound::Excluded);
         let held: Vec<Vec<u8>> = self.tables[t]

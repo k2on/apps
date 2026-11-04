@@ -12,7 +12,10 @@
 //! appended is an `Option` or carries a default (`#[serde(default)]`,
 //! [`compat`]). So a row written under the older schema is read under the
 //! newer by adding what it lacks, and a row written under the newer under
-//! the older by dropping what it has beyond ([`Table::fit`]).
+//! the older by dropping what it has beyond ([`Table::fit`]): a peer reads
+//! the rows and facts of any schema its own grows from or into. Rows move
+//! to a schema that is neither by an export, a transform and an import
+//! ([`crate::dynamic`]).
 //!
 //! A table is [`Space::Durable`] or [`Space::Volatile`] (§1.3, §1.9): a
 //! volatile table is not in snapshots and not in the state hash.
@@ -249,10 +252,10 @@ impl Table {
     /// A row of this table as some schema of it wrote it, read under this
     /// one: as it is; completed with the defaults of the columns appended
     /// since (an older schema's); or without the columns this one lacks (a
-    /// newer one's) — and whether it was another's.
-    pub fn fit(&self, row: &[u8]) -> Result<(Vec<u8>, bool), Refusal> {
+    /// newer one's).
+    pub fn fit(&self, row: &[u8]) -> Result<Vec<u8>, Refusal> {
         if self.parse(row).is_ok() {
-            return Ok((row.to_vec(), false));
+            return Ok(row.to_vec());
         }
         let at = |e: String| Refusal(format!("{}: {e}", self.name));
         let written = self.columns_as_written(row).map_err(at)?;
@@ -266,7 +269,7 @@ impl Table {
             };
             out.insert(c.name.clone(), x);
         }
-        Ok((typed_bytes(&self.row_type(), &J::Object(out))?, true))
+        typed_bytes(&self.row_type(), &J::Object(out))
     }
 }
 

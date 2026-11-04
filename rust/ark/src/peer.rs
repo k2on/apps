@@ -48,10 +48,11 @@
 //! and pushes them again ([`Peer::close_gap`]). A device is never stuck
 //! behind an intent nobody holds.
 //!
-//! **A schema grows** (§1.2). A log opened under a prefix-extension of the
-//! schema it was written under reads its rows and its entries' facts under
-//! this one ([`crate::schema::Table::fit`]). A replica runs its
-//! authority's schema.
+//! **A schema grows** (§1.2). A peer reads the rows and facts of any schema
+//! its own grows from or into ([`crate::schema::Table::fit`]), so a replica
+//! of an older or a newer build than its authority syncs with it. A schema
+//! only grows: rows move within it by an export, a transform and an import
+//! ([`crate::dynamic`]).
 //!
 //! **A fill** is how a replica the log cannot page is sent the rows: in
 //! parts of about [`PART`] bytes, the tables a domain sends [`Peer::later`]
@@ -476,7 +477,7 @@ pub const MIN_PART: usize = 4 << 10;
 /// completed or cut to their prefix, changes to tables it lacks dropped.
 fn fit(schema: &Schema, facts: &[Change]) -> Vec<Change> {
     let fitted = |c: &Change| match schema.table(c.table()) {
-        Some((_, t)) => Some(c.map(|r| t.fit(r).map_or_else(|_| r.to_vec(), |(r, _)| r))),
+        Some((_, t)) => Some(c.map(|r| t.fit(r).unwrap_or_else(|_| r.to_vec()))),
         None => (c.table() == LOG).then(|| c.clone()),
     };
     facts.iter().filter_map(fitted).collect()
@@ -561,11 +562,10 @@ impl Peer {
     }
 
     fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
-        Store::from_rows(self.store.schema_arc().clone(), self.space, rows).map(|(s, _)| s)
+        Store::from_rows(self.store.schema_arc().clone(), self.space, rows)
     }
 
-    /// Rows as some schema wrote them, read under this peer's (§1.2), and a
-    /// log standing on `log`.
+    /// A store of these rows, and a log standing on `log`.
     fn on_fit(&self, rows: &[(String, Vec<Vec<u8>>)], log: impl IntoIterator<Item = Vec<u8>>) -> Result<Store, Refusal> {
         let mut s = self.of_rows(rows)?;
         s.start_log(log)?;
@@ -961,7 +961,8 @@ impl Peer {
     /// Confirmed entries, applied by their facts: a page is one rebase.
     /// An entry that is the oldest pending intent as it was previewed moves
     /// nothing. At the first that is not, the pending intents are undone,
-    /// each entry's facts applied — put as they are while filling — and the intents
+    /// each entry's facts applied — read under this schema when another
+    /// wrote them (§1.2), put as they are while filling — and the intents
     /// still pending run again once, after the page. Facts that do not
     /// apply are a divergence, healed by a fill.
     fn confirm(&mut self, ls: Vec<Logged>, o: &mut Out) {
@@ -986,9 +987,13 @@ impl Peer {
                     self.undo_pending(o);
                     undone = true;
                 }
+                let schema = self.store.schema_arc().clone();
                 let moved = match self.fill {
-                    Some(_) => self.store.force_all(&l.facts).ok(),
-                    None => self.store.apply_all(&l.facts).ok().map(|_| l.facts.clone()),
+                    Some(_) => self.store.force_all(&fit(&schema, &l.facts)).ok(),
+                    None => match self.store.apply_all(&l.facts) {
+                        Ok(()) => Some(l.facts.clone()),
+                        Err(_) => Some(fit(&schema, &l.facts)).filter(|f| self.store.apply_all(f).is_ok()),
+                    },
                 };
                 let Some(moved) = moved else {
                     self.redo_pending(o);
@@ -1229,11 +1234,9 @@ impl Peer {
         }
     }
 
-    /// Opens what was made durable, under this peer's schema, which may be a
-    /// prefix-extension of the one it was written under (§1.2), or, for a
-    /// replica behind its authority, a prefix of it: the store's rows read
-    /// under it (completed, or cut to their prefix), the log's table's
-    /// checked as a chain, and the log's rows appended since, in order, each
+    /// Opens what was made durable under this peer's schema, or one it grows
+    /// from or into (§1.2): the store's rows read under it, the log's checked
+    /// as a chain, and the log's rows appended since, in order, each
     /// linking onto the head and its facts applied, all or none, up to the
     /// first that does not — the store is then made durable whole again,
     /// without it. A fill under way begins again from nothing. The pending intents run again on
@@ -1251,11 +1254,10 @@ impl Peer {
         };
         if let Ok(mut store) = opened {
             // Every entry read once: those the rows hold, from their rows,
-            // and those appended, as their records were read; facts fitted
-            // only when they are not this schema's as they are.
-            let schema = store.schema_arc().clone();
+            // and those appended, as their records were read.
             let mut entries = store.log().entries();
             let (n, held) = (d.logged.len(), entries.len());
+            let schema = store.schema_arc().clone();
             for l in d.logged.into_iter().filter(|_| !filling) {
                 if store.append(&l, &l.facts).is_err() && store.append(&l, &fit(&schema, &l.facts)).is_err() {
                     break;

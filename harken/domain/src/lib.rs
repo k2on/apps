@@ -76,7 +76,6 @@ pub fn domain() -> Domain {
         shows::show_people, shows::appearances, shows::set_transcript, shows::transcript, shows::name_voice, feed)
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
-    .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
     // Nearly every row is a transcript's line: a device filling is sent
     // the library first, and the lines after.
     .later("cue")

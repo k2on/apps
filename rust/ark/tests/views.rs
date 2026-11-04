@@ -8,7 +8,6 @@
 mod demo;
 
 use ark::format::Encode;
-use ark::hash::hex;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer, Role, Who};
 use ark::plan::{splice, Maintained};
@@ -201,7 +200,7 @@ fn union_of(store: &Store, actor: &str) -> Store {
             (t, held)
         })
         .collect();
-    Store::from_rows(demo::shared(), ark::schema::Space::Durable, &rows).unwrap().0
+    Store::from_rows(demo::shared(), ark::schema::Space::Durable, &rows).unwrap()
 }
 
 /// A peer's confirmed state: its store with its pending changes undone.
@@ -441,54 +440,3 @@ fn a_scoped_replica_holds_its_union() {
 }
 
 // * A table browsed
-
-/// A table browsed (`ark::dynamic::Browse`) is a plan like any other: the
-/// items of one playlist, from track `b` on, last place first, the first
-/// two, kept by patches through adds, a move, a remove and a row of another
-/// playlist — after each, its rows those a fresh browse gives, and the
-/// patches splice. Falsified by the descending sort not complementing the
-/// column's bytes: the first rows were `b`, `c` where the browse asks `d`,
-/// `c`.
-#[test]
-fn a_browse_is_kept_by_patches() {
-    let (p, q) = ([1u8; 16], [2u8; 16]);
-    let item = |pl: &[u8], t: &str, pos| Change::Add {
-        table: "item".into(),
-        row: item_row(pl, t, pos),
-    };
-    let mut store = Store::from_rows(
-        shared(),
-        ark::schema::Space::Durable,
-        &[("playlist".into(), vec![playlist_row(&p, "P", "alice"), playlist_row(&q, "Q", "bob")])],
-    )
-    .unwrap()
-    .0;
-    for c in [item(&p, "a", 1), item(&p, "b", 2), item(&p, "c", 3), item(&p, "d", 4), item(&q, "z", 9)] {
-        store.apply(&c).unwrap();
-    }
-    let b = ark::dynamic::Browse::table("item")
-        .eq("playlist_id", serde_json::json!(hex(&p)))
-        .range(Some(serde_json::json!([hex(&p), "b"])), None)
-        .sort("pos", true)
-        .take(2);
-    let mut v = ark::plan::View::new(b.make(&shared()).unwrap(), ctx(), &store).unwrap();
-    let tracks = |rows: Vec<Vec<u8>>| rows.iter().map(|r| item_of(r).1).collect::<Vec<_>>();
-    assert_eq!(tracks(v.rows()), ["d", "c"]);
-    let moved = Change::Edit {
-        table: "item".into(),
-        old: item_row(&p, "c", 3),
-        new: item_row(&p, "c", 7),
-    };
-    let gone = Change::Remove {
-        table: "item".into(),
-        row: item_row(&p, "d", 4),
-    };
-    for batch in [vec![item(&p, "e", 5)], vec![moved], vec![gone, item(&q, "y", 8)], vec![item(&p, "a0", 9)]] {
-        let was = v.rows();
-        store.apply_all(&batch).unwrap();
-        let patches = v.push(&batch, &store).unwrap();
-        assert_eq!(v.rows(), b.rows(&store).unwrap(), "a fresh browse");
-        assert_eq!(splice(&patches, &was), v.rows(), "the patches splice");
-    }
-    assert_eq!(tracks(v.rows()), ["c", "e"], "a0 is below the range");
-}

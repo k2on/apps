@@ -87,12 +87,11 @@ impl Server {
                 let mut f = Files::new(d.join("log"))?;
                 f.sync = true;
                 // Its schema beside it, so the log can be read by what does
-                // not compile its domain (`arkdb rows`); rows of one this
-                // does not grow from migrated (`crate::migrate`).
-                let log = &self.config.log;
-                if crate::migrate::migrate(&mut f, &log.schema, log.migrations())? {
-                    tracing::info!("the log was migrated to schema {}", log.schema.hash().hex());
+                // not compile its domain (`arkdb export`).
+                if !crate::disk::own(&mut f, &self.config.log.schema)? {
+                    anyhow::bail!(crate::ANOTHER);
                 }
+                crate::disk::put_schema(&mut f, &self.config.log.schema)?;
                 Box::new(f)
             }
             None => Box::new(Memory::default()),

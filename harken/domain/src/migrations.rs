@@ -1,24 +1,15 @@
-//! The steps that read the rows of a schema before this one
-//! ([`ark::migrate`]), oldest first. Each pins the schema it reads, as the
-//! server last stood on it (`migrations/<name>.json`, a copy of
-//! `tests/schema.json` then), and is a function over every row as JSON.
+//! What moved data from a schema before this one: each a transform of a
+//! server's export (`arkdb export`, `ark::dynamic::Tables`), its rows as
+//! JSON, under the schema it read (`migrations/<name>.json`, a copy of
+//! `tests/schema.json` then), for `arkdb import` under this one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ark::migrate::{Migration, Tables};
+use ark::dynamic::Tables;
 use ark::Refusal;
 use serde_json::{Map, Value as Json};
 
 use crate::keys;
-
-/// Every step, oldest first.
-pub fn all() -> Vec<Migration> {
-    vec![Migration::new(
-        "albums by folder",
-        include_str!("../migrations/albums-by-folder.json"),
-        albums_by_folder,
-    )]
-}
 
 /// An album was its name, so two recordings of one title were one album;
 /// it is now its folder and its name ([`keys::album_id`]), and a song names
@@ -29,7 +20,7 @@ pub fn all() -> Vec<Migration> {
 /// none until their files offer one; a picture of no folder's (one taken
 /// out of a file, `.art/…`) is each one's. An album no song was on goes,
 /// as the albums page never listed it.
-fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
+pub fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
     let file_of: BTreeMap<String, String> = t
         .get("media")
         .into_iter()

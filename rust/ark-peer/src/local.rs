@@ -155,20 +155,6 @@ pub fn preset(disk: &mut dyn Disk, f: impl FnOnce(&mut Replica)) -> io::Result<(
     })
 }
 
-/// A server's journal on `disk` told each origin's last `local` and actor
-/// in `last`, where it is past what the journal says: what a log about to
-/// lose its entries keeps of them, as a horizon moving does.
-pub fn passed(disk: &mut dyn Disk, last: impl IntoIterator<Item = (Origin, String, i64)>) -> io::Result<()> {
-    edit(disk, |db| {
-        for (origin, actor, local) in last {
-            if db.origin.get(&origin).is_none_or(|l| l.last < local) {
-                db.origin.put(Last { origin, actor, last: local })?;
-            }
-        }
-        Ok(())
-    })
-}
-
 /// The local instance on `disk`, as `f` changes it.
 fn edit(disk: &mut dyn Disk, f: impl for<'t> FnOnce(&mut Db<'t, Local>) -> Result<(), ark::prelude::Refusal>) -> io::Result<()> {
     let names = [format!("{LOCAL}kv"), format!("{LOCAL}log")];

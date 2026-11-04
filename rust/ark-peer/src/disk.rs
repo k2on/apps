@@ -34,10 +34,67 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use ark::format::Encode;
-use ark::log::{Logged, Record, Rows};
+use std::sync::Arc;
 
-/// The blob a server's schema is in, beside its log.
+use ark::dynamic::Tables;
+use ark::log::{Logged, Record, Rows};
+use ark::schema::{compat, Schema, Space};
+
+/// The blob a disk's schema is in, beside its log: what its rows are, to
+/// what reads them without the domain compiled in.
 pub const SCHEMA: &str = "schema.json";
+
+/// The schema `disk` says its rows are, if it says.
+fn stored(disk: &mut dyn Disk) -> io::Result<Option<Schema>> {
+    let Some(b) = disk.get(SCHEMA)? else { return Ok(None) };
+    serde_json::from_slice(&b)
+        .map(Some)
+        .map_err(|e| io::Error::other(format!("{SCHEMA}: {e}")))
+}
+
+/// `schema` beside `disk`'s rows, as what they are.
+pub fn put_schema(disk: &mut dyn Disk, schema: &Schema) -> io::Result<()> {
+    disk.put(SCHEMA, &serde_json::to_vec_pretty(schema).map_err(io::Error::other)?)
+}
+
+/// Whether `disk`'s rows read under `schema`: it says none, or one
+/// `schema` grows from (§1.2). A schema only grows, so every device syncs
+/// with every server; data moves within it by an [`export`] and an
+/// [`import`].
+pub fn own(disk: &mut dyn Disk, schema: &Schema) -> io::Result<bool> {
+    Ok(stored(disk)?.is_none_or(|was| compat(&was, schema).is_ok()))
+}
+
+/// Every row `disk` holds, in its human form ([`ark::dynamic::Tables`]),
+/// read under the schema it says, and that schema. The disk is read from a
+/// copy, so a peer writing it meanwhile is undisturbed.
+pub fn export(disk: &mut dyn Disk) -> io::Result<(Schema, Tables)> {
+    let schema = stored(disk)?.ok_or_else(|| io::Error::other(format!("no {SCHEMA}: nothing says what the rows are")))?;
+    let mut copy = Memory::default();
+    for name in ["kv", "log"] {
+        disk.get(name)?.map_or(Ok(()), |b| copy.put(name, &b))?;
+    }
+    let read = crate::Instance::open_under(Arc::new(schema.clone()), Box::new(copy));
+    if let Some(why) = read.failure {
+        return Err(io::Error::other(why));
+    }
+    let tables = ark::dynamic::tables(&read.store).map_err(|e| io::Error::other(e.0))?;
+    Ok((schema, tables))
+}
+
+/// `tables` — an [`export`] taken under `from`, transformed — made the
+/// rows of an empty `disk` under `schema`, which grows from `from`, every
+/// row judged, its log starting afresh.
+pub fn import(disk: &mut dyn Disk, from: &Schema, schema: Arc<Schema>, tables: &Tables) -> io::Result<()> {
+    compat(from, &schema).map_err(|e| io::Error::other(format!("the schema does not grow from the export's: {}", e.0)))?;
+    if disk.get("kv")?.is_some() || disk.get("log")?.is_some_and(|l| !l.is_empty()) {
+        return Err(io::Error::other("an import is into a disk that holds no rows"));
+    }
+    let store = ark::dynamic::store(schema.clone(), Space::Durable, tables).map_err(|e| io::Error::other(e.0))?;
+    let rows = ark::log::standing(store.snapshot_rows(), 0, Default::default());
+    disk.record(&Record::Rows(rows).to_bytes())?;
+    put_schema(disk, &schema)
+}
 
 /// The store made durable, read back: its rows as last written whole, and
 /// the log's rows appended since.

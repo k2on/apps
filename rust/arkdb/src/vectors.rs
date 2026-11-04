@@ -382,7 +382,7 @@ pub fn run_view(text: &str) -> Result<(), String> {
             rows.iter().map(|r| row_of(&d.schema, &t.name, r)).collect::<Result<_, _>>()?,
         ));
     }
-    let store = Store::from_rows(d.schema.clone(), ark::schema::Space::Durable, &by).map_err(|r| r.0)?.0;
+    let store = Store::from_rows(d.schema.clone(), ark::schema::Space::Durable, &by).map_err(|r| r.0)?;
     let batches = (v["batches"].as_array().ok_or("no batches")?.iter())
         .map(|b| {
             b.as_array()

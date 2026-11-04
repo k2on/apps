@@ -148,9 +148,7 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
             done.push(c);
         }
         if k % 97 == 0 {
-            let fresh = Store::from_rows(schema.clone(), ark::schema::Space::Durable, &s.snapshot_rows())
-                .unwrap()
-                .0;
+            let fresh = Store::from_rows(schema.clone(), ark::schema::Space::Durable, &s.snapshot_rows()).unwrap();
             assert_eq!(fresh.state_hash(), s.state_hash(), "at write {k}");
             assert_eq!(fresh, s);
         }
@@ -280,14 +278,14 @@ fn compat_is_a_prefix_extension() {
     )
     .is_err());
     let row = item_row(&id(1), "t1", 4);
-    let (full, other) = new.tables[1].fit(&row).unwrap();
-    assert!(other);
+    let full = new.tables[1].fit(&row).unwrap();
+    assert_ne!(full, row);
     assert_eq!(
         ark::dynamic::row(&new.tables[1], &full).unwrap(),
         serde_json::json!({"playlist_id": hex(&id(1)), "track_id": "t1", "pos": 4, "note": null, "plays": 0})
     );
-    assert_eq!(old.tables[1].fit(&full).unwrap(), (row.clone(), true));
-    assert_eq!(old.tables[1].fit(&row).unwrap(), (row, false));
+    assert_eq!(old.tables[1].fit(&full).unwrap(), row);
+    assert_eq!(old.tables[1].fit(&row).unwrap(), row);
 }
 
 /// The log's invariant is the chain (§1.6): rows are read into it only
@@ -345,4 +343,30 @@ fn the_log_is_a_table_whose_rows_are_a_chain() {
         "the horizon moves"
     );
     assert_eq!((s.state_hash(), s.snapshot_rows()), (hash, rows), "not in the hash or a snapshot sent");
+}
+
+/// A store's human form is its whole state (`ark::dynamic`): its tables
+/// read back are the same store, and a transform of them — a column
+/// renamed — is imported under a schema that has it, every row judged.
+/// Falsified by `store` not judging what it imports: the item naming no
+/// playlist was taken.
+#[test]
+fn a_store_is_exported_transformed_and_imported() {
+    use ark::dynamic::{store, tables};
+    use ark::schema::Space;
+    let mut s = Store::new(demo::shared(), Space::Durable);
+    s.put("playlist", playlist_row(&id(1), "Road", "u")).unwrap();
+    s.put("item", item_row(&id(1), "t1", 1)).unwrap();
+    let mut t = tables(&s).unwrap();
+    assert_eq!(store(demo::shared(), Space::Durable, &t).unwrap(), s, "read back, the same store");
+    let mut renamed = (*demo::shared()).clone();
+    renamed.tables[0].columns[1].name = "title".into();
+    for p in t.get_mut("playlist").unwrap() {
+        let name = p.remove("name").unwrap();
+        p.insert("title".into(), name);
+    }
+    let moved = store(Arc::new(renamed), Space::Durable, &t).unwrap();
+    assert_eq!(moved.rows("playlist").count(), 1);
+    t.get_mut("playlist").unwrap().clear();
+    assert!(store(demo::shared(), Space::Durable, &t).is_err(), "an item naming no playlist");
 }

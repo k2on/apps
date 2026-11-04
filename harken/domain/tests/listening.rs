@@ -818,7 +818,7 @@ fn a_restart_restores_the_session_paused_with_no_output_and_nobody_here() {
             .map(|t| (t.to_string(), h.store.rows(t).map(|r| r.to_vec()).collect()))
             .collect();
         let mut back = House::new();
-        back.store = Store::from_rows(domain().schema.clone(), ark::schema::Space::Durable, &kept).unwrap().0;
+        back.store = Store::from_rows(domain().schema.clone(), ark::schema::Space::Durable, &kept).unwrap();
         back.now = later;
         back.author("authority", "authority", "on_restore", &()).unwrap();
         back

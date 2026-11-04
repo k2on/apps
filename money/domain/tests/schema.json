@@ -64,12 +64,21 @@
       "space": "durable"
     },
     {
-      "name": "group",
+      "name": "category",
       "columns": [
         {
           "name": "id",
           "ty": {
-            "Id": "group"
+            "Id": "category"
+          },
+          "default": null
+        },
+        {
+          "name": "parent_id",
+          "ty": {
+            "Option": {
+              "Id": "category"
+            }
           },
           "default": null
         },
@@ -90,61 +99,6 @@
         },
         {
           "name": "income",
-          "ty": "Bool",
-          "default": null
-        },
-        {
-          "name": "created_ms",
-          "ty": "Int",
-          "default": null
-        },
-        {
-          "name": "user_id",
-          "ty": "Text",
-          "default": null
-        }
-      ],
-      "key": 1,
-      "indexes": [
-        {
-          "columns": [
-            2
-          ],
-          "unique": false
-        }
-      ],
-      "refs": [],
-      "space": "durable"
-    },
-    {
-      "name": "category",
-      "columns": [
-        {
-          "name": "id",
-          "ty": {
-            "Id": "category"
-          },
-          "default": null
-        },
-        {
-          "name": "group_id",
-          "ty": {
-            "Id": "group"
-          },
-          "default": null
-        },
-        {
-          "name": "name",
-          "ty": "Text",
-          "default": null
-        },
-        {
-          "name": "pos",
-          "ty": "Int",
-          "default": null
-        },
-        {
-          "name": "hidden",
           "ty": "Bool",
           "default": null
         },
@@ -188,7 +142,7 @@
       "refs": [
         {
           "column": 1,
-          "table": "group"
+          "table": "category"
         }
       ],
       "space": "durable"
@@ -360,6 +314,11 @@
           "name": "imported_by",
           "ty": "Text",
           "default": ""
+        },
+        {
+          "name": "split",
+          "ty": "Bool",
+          "default": false
         }
       ],
       "key": 1,
@@ -1074,6 +1033,453 @@
         {
           "column": 1,
           "table": "category"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "split",
+      "columns": [
+        {
+          "name": "txn_id",
+          "ty": {
+            "Id": "txn"
+          },
+          "default": null
+        },
+        {
+          "name": "line",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "category_id",
+          "ty": {
+            "Option": {
+              "Id": "category"
+            }
+          },
+          "default": null
+        },
+        {
+          "name": "date",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "amount",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "memo",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [
+        {
+          "columns": [
+            0
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            2,
+            3
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 0,
+          "table": "txn"
+        },
+        {
+          "column": 2,
+          "table": "category"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "receipt",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "store",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "date",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "place",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "total",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "txn_id",
+          "ty": {
+            "Option": {
+              "Id": "txn"
+            }
+          },
+          "default": null
+        },
+        {
+          "name": "imported_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            1,
+            2
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            5
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 5,
+          "table": "txn"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "item",
+      "columns": [
+        {
+          "name": "receipt_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "line",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "sku",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "same",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "quantity",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "unit",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "amount",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "category_id",
+          "ty": {
+            "Option": {
+              "Id": "category"
+            }
+          },
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [
+        {
+          "columns": [
+            0
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            8
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            4
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 0,
+          "table": "receipt"
+        },
+        {
+          "column": 8,
+          "table": "category"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "charge",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "receipt_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "date",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "amount",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "card",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "txn_id",
+          "ty": {
+            "Option": {
+              "Id": "txn"
+            }
+          },
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            1
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            5
+          ],
+          "unique": false
+        },
+        {
+          "columns": [
+            2
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 5,
+          "table": "txn"
+        }
+      ],
+      "space": "durable"
+    },
+    {
+      "name": "photo",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "photo"
+          },
+          "default": null
+        },
+        {
+          "name": "file",
+          "ty": {
+            "Record": [
+              "FileRef",
+              [
+                [
+                  "hash",
+                  "Text"
+                ],
+                [
+                  "size",
+                  "Int"
+                ],
+                [
+                  "media",
+                  "Text"
+                ]
+              ]
+            ]
+          },
+          "default": null
+        },
+        {
+          "name": "txn_id",
+          "ty": {
+            "Option": {
+              "Id": "txn"
+            }
+          },
+          "default": null
+        },
+        {
+          "name": "taken_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "JobPhotoRead",
+              [
+                [
+                  "Pending",
+                  [
+                    [
+                      "due_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Claimed",
+                  [
+                    [
+                      "by",
+                      "Text"
+                    ],
+                    [
+                      "at_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Done",
+                  [
+                    [
+                      "value",
+                      {
+                        "Record": [
+                          "PhotoRead",
+                          [
+                            [
+                              "receipt_id",
+                              "Text"
+                            ],
+                            [
+                              "state",
+                              "Text"
+                            ],
+                            [
+                              "changed",
+                              {
+                                "List": "Text"
+                              }
+                            ]
+                          ]
+                        ]
+                      }
+                    ]
+                  ]
+                ],
+                [
+                  "Failed",
+                  [
+                    [
+                      "why",
+                      "Text"
+                    ],
+                    [
+                      "retry_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Cancelled",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            2
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [
+        {
+          "column": 2,
+          "table": "txn"
         }
       ],
       "space": "durable"

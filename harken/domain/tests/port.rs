@@ -404,10 +404,9 @@ fn the_schema_hash_is_pinned() {
 }
 
 /// The schema reads every row the one a server last stood on wrote
-/// (`tests/schema.json`): as they are (`ark::schema::compat`), or through
-/// the domain's migrations (`src/migrations.rs`). A column appended with
-/// neither an `Option` type nor a default, and no step that reads the rows
-/// before it, is a server that does not start. `ARK_WRITE_GEN=1` writes
+/// (`tests/schema.json`), as they are: this one grows from it
+/// (`ark::schema::compat`). A column appended with neither an `Option` type
+/// nor a default is a server that does not start. `ARK_WRITE_GEN=1` writes
 /// this schema there, once it is the one the server runs.
 ///
 /// Falsified by taking `#[serde(default)]` off `person.banner`: "banner is
@@ -421,7 +420,7 @@ fn the_schema_reads_what_the_last_one_wrote() {
     }
     let was = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}; ARK_WRITE_GEN=1 writes it"));
     let was: ark::schema::Schema = serde_json::from_str(&was).unwrap();
-    let read = ark::migrate::migrate(&was, &vec![], &now, &domain().migrations);
+    let read = ark::schema::compat(&was, &now);
     assert!(read.is_ok(), "{read:?}");
 }
 

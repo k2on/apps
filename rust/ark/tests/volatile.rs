@@ -295,3 +295,58 @@ fn volatile_verdicts_are_a_window() {
         "{s:?}"
     );
 }
+
+/// `here` with a column appended, `mood`, an `Option`: a schema the
+/// waves' grows into.
+fn moody() -> Arc<Schema> {
+    let mut s = (*schema()).clone();
+    let here = s.tables.iter_mut().find(|t| t.name == "here").unwrap();
+    here.columns.push(ark::schema::Column {
+        name: "mood".into(),
+        ty: ark::row::Type::Option(Box::new(ark::row::Type::Text)),
+        default: None,
+    });
+    Arc::new(s)
+}
+
+/// A wave as the newer build writes it, with a mood.
+struct Moody;
+
+impl ark::peer::Procedure for Moody {
+    fn apply(&self, store: &mut ark::store::Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<ark::store::Change>, Refusal> {
+        let Wave { name } = <Wave as ark::format::Encode>::from_bytes(input)?;
+        let t = moody().tables.iter().find(|t| t.name == "here").unwrap().clone();
+        let row = ark::dynamic::row_bytes(&t, &serde_json::json!({"session": ctx.device(), "name": name, "mood": "glad"}))?;
+        let c = ark::store::Change::Add { table: "here".into(), row };
+        store.apply(&c)?;
+        Ok(vec![c])
+    }
+}
+
+/// Live state is the log's system (§1.2, §1.9): a volatile authority of a
+/// newer build — `here` with a mood — and a replica of the build before
+/// sync, the replica holding the wave cut to its columns; and a replica of
+/// the newer build syncs with an authority of the older, holding it
+/// completed. Neither diverges. Falsified by a replica applying facts of
+/// another schema as they are: the older one diverged at the wave.
+#[test]
+fn live_state_syncs_across_a_schema_that_grew() {
+    let mut fns = cas();
+    fns.insert("waves.wave", Arc::new(Moody));
+    let wider = |role: Role, name: &str| Peer::new(moody(), fns.clone(), role, who(name)).in_space(Space::Volatile);
+    let authority_role = || Role::Authority { journal: Journal::default() };
+    for (mut server, mut replica) in [
+        (wider(authority_role(), "server"), peer(Role::Replica, "alice", Space::Volatile)),
+        (authority(), wider(Role::Replica, "alice")),
+    ] {
+        let o = replica.step(waving("phone"));
+        let (s, f) = deliver_up(&mut server, &who("alice"), &o);
+        for frame in s.iter().chain(&f) {
+            replica.step(down(frame));
+        }
+        assert!(replica.pending.is_empty() && replica.diverged.is_empty(), "synced");
+        let (_, t) = replica.store.schema_arc().table("here").unwrap();
+        let row = replica.store.get("here", &here_key("alice-session")).expect("the wave");
+        assert_eq!(ark::dynamic::row(t, &row).unwrap()["name"], "phone");
+    }
+}

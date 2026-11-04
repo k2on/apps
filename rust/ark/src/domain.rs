@@ -88,9 +88,6 @@ pub struct Domain {
     pub version: String,
     pub schema: Arc<Schema>,
     pub fns: BTreeMap<String, Function>,
-    /// The steps that read rows of a schema before this one, oldest first
-    /// ([`crate::migrate`]).
-    pub migrations: Vec<crate::migrate::Migration>,
     /// The tables a server sends a device last when it fills it
     /// ([`crate::peer::Peer::later`]): what it can be without for a while.
     pub later: Vec<String>,
@@ -167,16 +164,8 @@ impl Domain {
             version: version.into(),
             schema: Arc::new(S::schema()),
             fns: BTreeMap::new(),
-            migrations: vec![],
             later: vec![],
         }
-    }
-
-    /// A step that reads rows of a schema before this one, after those
-    /// already given ([`crate::migrate`]).
-    pub fn migration(mut self, m: crate::migrate::Migration) -> Domain {
-        self.migrations.push(m);
-        self
     }
 
     /// `table` sent after every other in a fill, after those already given.
