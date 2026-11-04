@@ -264,8 +264,7 @@ impl Seeder {
         let d = domain();
         let b = d.binding(name).unwrap_or_else(|| panic!("the demo authors {name}"));
         let f = d.get(b).and_then(|f| f.proc.clone()).unwrap_or_else(|| panic!("{name} writes nothing"));
-        f(&mut self.store, &self.ctx, &input.to_bytes())
-            .unwrap_or_else(|r| panic!("the demo could not {name}: {r}"));
+        f(&mut self.store, &self.ctx, &input.to_bytes()).unwrap_or_else(|r| panic!("the demo could not {name}: {r}"));
     }
 
     fn ask<T: Encode>(&self, name: &str, input: &impl Encode) -> Vec<T> {
