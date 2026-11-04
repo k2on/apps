@@ -342,7 +342,8 @@ jobs:
   # A PR's, compared with main's and shown on the PR.
   compare:
     needs: [which, android, ios]
-    if: ${{ !cancelled() && needs.which.outputs.mode == 'pr' }}
+    # Only when this run took something: a run with no build of its own says nothing.
+    if: ${{ !cancelled() && needs.which.outputs.mode == 'pr' && (needs.which.outputs.android != '' || needs.which.outputs.ios != '') }}
     runs-on: ubuntu-latest
     # The PR's comment and its branch, one run at a time.
     concurrency:
