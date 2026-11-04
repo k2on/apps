@@ -52,10 +52,6 @@ pub trait Store: Send {
     fn unsent(&self) -> Vec<String>;
     /// Marked made here and not yet sent, or not.
     fn mark(&mut self, hash: &str, unsent: bool) -> io::Result<()>;
-    /// Where a whole file is on the disk, for what reads it there.
-    fn path(&self, _hash: &str) -> Option<PathBuf> {
-        None
-    }
 }
 
 fn not_a_name(hash: &str) -> io::Error {
@@ -220,10 +216,6 @@ impl Store for Dir {
             },
         }
     }
-
-    fn path(&self, hash: &str) -> Option<PathBuf> {
-        self.len(hash).and_then(|_| self.at(hash, "").ok())
-    }
 }
 
 /// What a peer does with files: its store, and where each transfer is.
@@ -325,11 +317,6 @@ impl Peer {
             return None;
         }
         self.file(f)
-    }
-
-    /// Where a whole file is on the disk, for what reads it there.
-    pub fn file_path(&self, f: &FileRef) -> Option<PathBuf> {
-        self.files.store.path(&f.hash)
     }
 
     /// Whether the server said why it would not give a file.
