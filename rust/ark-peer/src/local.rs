@@ -1,10 +1,11 @@
 //! What a peer keeps beside its log, as rows (§1.3, §1.7, §1.9): the
 //! schema [`Local`], on a local instance under the `local.` names of the
 //! peer's disk ([`Shared`]): a server's journal — each origin's last
-//! `local` and actor (`origin`), the intents it refused (`verdict`) — and
-//! its volatile space as it
-//! last closed (`volatile`); a device's replica (`replica`: its origin,
-//! the last `local` drawn, who last signed in, its fork) and its pending intents (`pending`). And an app's logins
+//! `local` and actor (`origin`), the intents it refused (`verdict`); a
+//! device's replica (`replica`: its origin, the last `local` drawn, who
+//! last signed in, its fork) and its pending intents (`pending`). A
+//! server's volatile space as it last closed is beside them, its rows whole
+//! (`local.volatile`, `crate::hub`). And an app's logins
 //! ([`Logins`]), a local instance of `ark-auth`'s schema.
 
 use std::io;
@@ -14,7 +15,6 @@ use ark::db::{Db, Durable as Run};
 use ark::hash::EntryHash;
 use ark::log::{Entry, EntryId, Origin, Seq};
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
-use ark::row::Bytes;
 use ark_auth::remember::Remembered;
 
 use crate::{Disk, Instance};
@@ -37,17 +37,6 @@ pub struct Refused {
     #[ark(key)]
     pub entry: EntryId,
     pub why: String,
-}
-
-/// A server's: a row of its volatile space (its log's row among them) as
-/// it stood when the server last closed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "volatile")]
-pub struct LiveRow {
-    #[ark(key)]
-    pub table: String,
-    #[ark(key)]
-    pub row: Bytes,
 }
 
 /// A device's, one row: its origin and the last `local` drawn from it,
@@ -80,7 +69,6 @@ pub struct Intent {
 pub struct Local {
     pub origin: Last,
     pub verdict: Refused,
-    pub volatile: LiveRow,
     pub replica: Replica,
     pub pending: Intent,
 }

@@ -21,8 +21,8 @@
 //! session's first such connection says it and `on_leave` when its last
 //! closes, so a device on two connections is one device. On a restart the
 //! volatile space is what the server wrote of it when it last closed
-//! (its local instance's `volatile` rows), and `on_restore` is authored
-//! over it.
+//! (its rows whole, one record beside its local instance: `local.volatile`),
+//! and `on_restore` is authored over it.
 //!
 //! **The journal** beside the log keeps what the log cannot, as rows of the
 //! peer's local instance (`origin`, `verdict`): each origin's last `local`
@@ -36,13 +36,16 @@
 use std::collections::BTreeMap;
 
 use ark::frames::{Frame, Verdict};
-use ark::log::Durable;
+use ark::log::{Durable, Record};
 use ark::peer::{Feed, Input, Journal, Peer as Machine, Role, Who};
-use ark::row::Bytes;
 use ark::schema::Space;
 
-use crate::local::{Last, LiveRow, Refused};
+use crate::local::{Last, Refused};
 use crate::{machine, Config, Disk, Fold, Instance, Peer};
+
+/// Where a server keeps its volatile space as it last closed: the store's
+/// rows whole, one record, beside its local instance's.
+const VOLATILE: &str = "volatile";
 
 pub type ConnId = u64;
 
@@ -134,7 +137,7 @@ impl Peer {
         let origin = log.origin;
         let mine = log.log().entries().into_iter().filter(|l| l.entry.origin == origin);
         log.local = mine.map(|l| l.entry.local).max().unwrap_or(0);
-        let (last, refused, kept) = local.read::<crate::Local, _>(|db| (db.origin.scan(), db.verdict.scan(), db.volatile.scan()));
+        let (last, refused) = local.read::<crate::Local, _>(|db| (db.origin.scan(), db.verdict.scan()));
         let j = journal(&mut log);
         last.into_iter().for_each(|l| j.pass(l.origin, &l.actor, l.last));
         j.verdicts.extend(refused.into_iter().map(|r| (r.entry, Verdict::Refused { why: r.why })));
@@ -149,14 +152,8 @@ impl Peer {
         let mut p = Peer::with(config, log, live, local);
         p.keep_files(files);
         (p.hub.serving, p.hub.next) = (true, 1);
-        if let (false, Some(live)) = (kept.is_empty(), &mut p.live) {
-            let mut rows: Vec<(String, Vec<Vec<u8>>)> = vec![];
-            for LiveRow { table, row } in kept {
-                match rows.last_mut() {
-                    Some((t, rs)) if *t == table => rs.push(row.0),
-                    _ => rows.push((table, vec![row.0])),
-                }
-            }
+        let kept = p.local.disk.as_mut().and_then(|d| d.get(VOLATILE).ok().flatten());
+        if let (Some(Ok(Record::Rows(rows))), Some(live)) = (kept.map(|b| Record::dec(&b)), &mut p.live) {
             live.step(Input::Open(Durable { rows, ..Durable::default() }));
             if let Some(f) = p.config.live.as_ref().and_then(|l| l.on_restore.clone()) {
                 let _ = p.author(Space::Volatile, &f, vec![], now);
@@ -171,13 +168,10 @@ impl Peer {
     pub fn close(&mut self) {
         let Some(live) = &self.live else { return };
         let (seq, hash) = live.log().head();
-        let rows = ark::log::standing(live.store.snapshot_rows(), seq, hash);
-        self.keep(|db| {
-            db.volatile.scan().iter().try_for_each(|k| db.volatile.remove(k))?;
-            let rows = rows.into_iter().flat_map(|(table, rs)| rs.into_iter().map(move |r| (table.clone(), r)));
-            rows.into_iter()
-                .try_for_each(|(table, row)| db.volatile.put(LiveRow { table, row: Bytes(row) }))
-        });
+        let rows = Record::Rows(ark::log::standing(live.store.snapshot_rows(), seq, hash));
+        if let Some(Err(e)) = self.local.disk.as_mut().map(|d| d.put(VOLATILE, &rows.enc())) {
+            self.local.failure = Some(e.to_string());
+        }
     }
 
     /// A connection verified as `who`.
