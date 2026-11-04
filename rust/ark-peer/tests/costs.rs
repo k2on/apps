@@ -288,13 +288,12 @@ fn offline_then_joined() {
     let t = Instant::now();
     let mut d = device(token, Box::new(Memory::default()));
     for j in 0..10 {
-        d.author(Space::Durable, "demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
+        d.mutate_at("demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
     }
     eprintln!("d: open: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
     let t = Instant::now();
     (0..n).for_each(|i| {
-        d.author(Space::Durable, "demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0)
-            .unwrap()
+        d.mutate_at("demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0).unwrap();
     });
     eprintln!("e: {n} adds offline: {:.1} µs each", us(t.elapsed() / n as u32));
     let t = Instant::now();
