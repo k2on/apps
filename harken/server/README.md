@@ -174,7 +174,7 @@ HARKEN_DEV_AUTH=1 harken-server [127.0.0.1:8787]
 | `HARKEN_REDIRECTS` | comma-separated prefixes a login may return to, besides loopback, `harken://` and the public URL |
 | `HARKEN_MEDIA` | the media root: `music/` is scanned, all of it served at `/media`, **unauthenticated** |
 | `HARKEN_WEB`, `HARKEN_WEB_MODULE` | the browser client, with the build as its validator; the module names the file whose change is a rebuild off the store |
-| `HARKEN_RETAIN_ENTRIES` | entries the log keeps above its snapshot (10000); `HARKEN_RETAIN_DAYS` is read and keeps nothing on v5 |
+| `HARKEN_RETAIN_ENTRIES` | entries the log keeps above its snapshot (10000) |
 | `HARKEN_KEEPALIVE_MS` | how often the sync socket pings (20000); it closes after three unanswered |
 | `HARKEN_HA_URL`, `HARKEN_HA_TOKEN_FILE`, `HARKEN_HA_PLAYERS` | all three or none; players are `media_player.x[=Name]`, comma-separated |
 | `HARKEN_HA_MEDIA` | where a *speaker* fetches from (default: the public URL) |

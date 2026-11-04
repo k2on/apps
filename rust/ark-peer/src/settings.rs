@@ -1,6 +1,6 @@
 //! What a server is told (§1.11; the `server` feature): where it listens
 //! and keeps its log, how people sign in, where a browser reaches it, its
-//! web build, its keepalive and retention, and who holds which role —
+//! web build, its keepalive and the log it keeps, and who holds which role —
 //! read from the environment under an app's prefix
 //! ([`Serve::from_env`]: `HARKEN_DATA`, `HARKEN_OIDC_ISSUER`, …), so that
 //! what is any app's server is configured once, here, and an app reads
@@ -28,38 +28,11 @@ pub enum SignIn {
     },
 }
 
-/// How often the sync socket pings, and how many may go unanswered before
-/// a connection is closed: three, and only three ([`Serve::from_vars`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Keepalive {
-    pub every: Duration,
-    pub missed: u32,
-}
+/// How often the sync socket pings, unless told.
+pub const KEEPALIVE: Duration = Duration::from_secs(20);
 
-impl Default for Keepalive {
-    fn default() -> Keepalive {
-        Keepalive {
-            every: Duration::from_secs(20),
-            missed: 3,
-        }
-    }
-}
-
-/// How much of the log the server keeps: `entries` above the snapshot the
-/// log stands on (`Config::keep`); a device further behind is sent the
-/// snapshot and rebases onto it. `days` is read and checked, and kept
-/// nothing by: the horizon is a count of entries, not a device's place.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Retention {
-    pub entries: usize,
-    pub days: u64,
-}
-
-impl Default for Retention {
-    fn default() -> Retention {
-        Retention { entries: 10_000, days: 30 }
-    }
-}
+/// How many entries the log keeps above its snapshot, unless told.
+pub const RETAIN: usize = 10_000;
 
 /// Everything any app's server is told.
 #[derive(Clone, Debug)]
@@ -88,11 +61,13 @@ pub struct Serve {
     pub web: Option<PathBuf>,
     /// The file whose change is a rebuild off the store; unset, every file is.
     pub web_module: Option<String>,
-    /// How often the sync socket pings (`_KEEPALIVE_MS`).
-    pub keepalive: Keepalive,
-    /// How much of the log the server keeps (`_RETAIN_ENTRIES`, 10,000;
-    /// `_RETAIN_DAYS`, 30, read and unused: [`Retention`]).
-    pub retain: Retention,
+    /// How often the sync socket pings (`_KEEPALIVE_MS`, 20 s); a socket
+    /// that leaves three unanswered is closed.
+    pub keepalive: Duration,
+    /// How many entries the log keeps above the snapshot it stands on
+    /// (`_RETAIN_ENTRIES`, 10,000: `Config::keep`); a device further behind
+    /// is sent the snapshot and rebases onto it.
+    pub retain: usize,
     /// Who holds which role: role → account ids (`_ROLES`). Asked at every
     /// connection, so a restart with another configuration grants or
     /// revokes at once.
@@ -112,8 +87,8 @@ impl Serve {
             picture_hosts: vec![],
             web: None,
             web_module: None,
-            keepalive: Keepalive::default(),
-            retain: Retention::default(),
+            keepalive: KEEPALIVE,
+            retain: RETAIN,
             roles: BTreeMap::new(),
         }
     }
@@ -131,8 +106,6 @@ impl Serve {
     /// _PICTURE_HOSTS            hosts trusted with pictures, comma-separated
     /// _WEB, _WEB_MODULE         the browser client
     /// _KEEPALIVE_MS             the sync socket's ping interval (20000)
-    /// _KEEPALIVE_MISSED         pings unanswered before it closes (3, and only 3)
-    /// _RETAIN_DAYS              read and checked; kept nothing by
     /// _RETAIN_ENTRIES           entries kept above the snapshot (10000)
     /// _ROLES                    who holds which role: `library=alice,bob;admin=alice`
     /// ```
@@ -163,25 +136,15 @@ impl Serve {
             ),
             _ => bail!("{issuer}, {client} and {secret} go together; set all three"),
         };
-        let mut keepalive = Keepalive::default();
+        let mut keepalive = KEEPALIVE;
         if let Some(ms) = env("KEEPALIVE_MS") {
             let ms: u64 = (ms.trim().parse().ok().filter(|n| *n > 0))
                 .ok_or_else(|| anyhow!("{} is milliseconds, more than none: {ms}", name("KEEPALIVE_MS")))?;
-            keepalive.every = Duration::from_millis(ms);
+            keepalive = Duration::from_millis(ms);
         }
-        if let Some(n) = env("KEEPALIVE_MISSED") {
-            let k = name("KEEPALIVE_MISSED");
-            keepalive.missed = n.trim().parse().map_err(|_| anyhow!("{k} is a count: {n}"))?;
-            if keepalive.missed != 3 {
-                bail!("{k}: the sync socket closes after 3 unanswered pings, not {n}");
-            }
-        }
-        let mut retain = Retention::default();
-        if let Some(d) = env("RETAIN_DAYS") {
-            retain.days = d.trim().parse().map_err(|_| anyhow!("{} is a count of days: {d}", name("RETAIN_DAYS")))?;
-        }
+        let mut retain = RETAIN;
         if let Some(n) = env("RETAIN_ENTRIES") {
-            retain.entries = (n.trim().parse()).map_err(|_| anyhow!("{} is a count of entries: {n}", name("RETAIN_ENTRIES")))?;
+            retain = (n.trim().parse()).map_err(|_| anyhow!("{} is a count of entries: {n}", name("RETAIN_ENTRIES")))?;
         }
         let list = |k: &str| -> Vec<String> {
             let v = env(k).unwrap_or_default();

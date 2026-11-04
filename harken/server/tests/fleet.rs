@@ -1392,10 +1392,7 @@ fn fuzz(seed: u64, steps: usize) {
 /// the horizon assertion names 0.
 #[test]
 fn a_peer_away_past_the_horizon_is_served_the_snapshot() {
-    let f = Fleet::with_env(
-        "retention",
-        vec![("HARKEN_RETAIN_ENTRIES", "50"), ("HARKEN_RETAIN_DAYS", "0")],
-    );
+    let f = Fleet::with_env("retention", vec![("HARKEN_RETAIN_ENTRIES", "50")]);
     let mut a = f.peer("a", Some("alice"));
     let mut b = f.peer("b", Some("alice"));
     let mut c = f.peer("c", Some("alice"));

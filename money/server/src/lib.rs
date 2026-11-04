@@ -50,7 +50,7 @@ use ark_peer::Running;
 
 use importer::{Banks, Importer};
 
-pub use ark_peer::{Keepalive, Retention, SignIn};
+pub use ark_peer::SignIn;
 /// The phones' URL scheme: a login may always send its code back there.
 pub const PHONE_SCHEME: &str = "money://";
 
@@ -279,7 +279,7 @@ pub async fn start(config: Config) -> Result<Server> {
     stores.dir.get_or_insert_with(|| config.data.join("receipts"));
     let importer_slot = Arc::new(std::sync::Mutex::new(None));
     let mut hub = ark_peer::Config {
-        keep: Some(config.retain.entries),
+        keep: Some(config.retain),
         // Settings' stores, called over the socket and kept off the log.
         calls: setup::calls(setup::Setup {
             data: config.data.clone(),
@@ -294,7 +294,7 @@ pub async fn start(config: Config) -> Result<Server> {
         hub.feed = Arc::new(|_| ark::peer::Feed::Scoped("session.feed".into()));
     }
     let mut server = ark_peer::Server::new(hub).auth(auth.clone());
-    (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive.every);
+    (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive);
     if let Some(dir) = &config.web {
         server.web = Some((dir.clone(), config.web_module.clone()));
     }
