@@ -146,9 +146,6 @@ macro_rules! said {
     }};
 }
 
-/// How many logged entries a `Page` carries at most.
-pub const PAGE: usize = 256;
-
 /// What a function knows of the intent it runs for: all frozen in the
 /// entry, so every run of it, anywhere, is the same.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -462,20 +459,33 @@ pub struct Peer {
     pub fill: Option<Cursor>,
     /// The part a replica filling has asked for and not been sent.
     more: Option<Cursor>,
-    /// How many bytes of rows a replica would have each part of a fill
-    /// carry, at most, said in each `Hello` and `More`; none: [`PART`].
+    /// How many bytes a replica would have each frame it is sent of rows or
+    /// entries carry — a part of a fill, a page of the log — and each page
+    /// of its own pushes, about, said in each `Hello` and `More`; none:
+    /// [`PART`].
     pub part: Option<usize>,
 }
 
-/// How many bytes of rows a fill's part carries, about: past it, the
-/// part ends at the row after; a row is never cut. What a device taking
-/// parts on a thread of its own is sent; one taking them on the thread it
-/// draws on asks for less ([`Peer::part`]): a `Hello` and a `More` say.
+/// How many bytes of rows a fill's part, or of entries a page, carries at
+/// most, about: past it, the frame ends at the row or the entry after; none
+/// is cut, and each frame holds one. What a device taking frames on a
+/// thread of its own is sent; one taking them on the thread it draws on
+/// asks for less ([`Peer::part`]): a `Hello` and a `More` say.
 pub const PART: usize = 256 << 10;
 
-/// The least a replica may ask a part be: below it a
-/// fill is more asking than rows.
-pub const MIN_PART: usize = 4 << 10;
+/// `items` in pages of about `most` bytes, each as `weight` says: a page
+/// ends at the item that takes it to `most`, so each holds one at least.
+fn pages<T>(items: &[T], most: usize, weight: impl Fn(&T) -> usize) -> Vec<&[T]> {
+    let (mut out, mut from, mut size) = (vec![], 0, 0);
+    for (i, x) in items.iter().enumerate() {
+        size += weight(x);
+        if size >= most || i + 1 == items.len() {
+            out.push(&items[from..=i]);
+            (from, size) = (i + 1, 0);
+        }
+    }
+    out
+}
 
 /// Facts as some schema wrote them, read under `schema` (§1.2): rows
 /// completed or cut to their prefix, changes to tables it lacks dropped.
@@ -776,8 +786,8 @@ impl Peer {
         }
         let scope = from.as_ref().zip(self.functions.feed.as_ref()).and_then(|(w, feed)| feed(w));
         let scoped = scope.is_some();
-        // Never past [`PART`], nor so small a fill is mostly asking.
-        let most = |most: u64| (most as usize).clamp(MIN_PART, PART);
+        // Never past [`PART`].
+        let most = |most: u64| (most as usize).clamp(1, PART);
         match (f, self.is_authority(), from) {
             (Frame::Hello { cursor, hash, .. }, true, Some(who)) if scoped => self.serve_scoped(who, scope.unwrap(), cursor, hash, o),
             (Frame::Hello { cursor, hash, most: m, .. }, true, from) => {
@@ -815,9 +825,9 @@ impl Peer {
         }
     }
 
-    /// A `Hello` at `(cursor, hash)`: the pages from there when this log has
-    /// that hash there, and a fill's first part, of about `most` bytes, when
-    /// it does not.
+    /// A `Hello` at `(cursor, hash)`: the pages from there, each of about
+    /// `most` bytes, when this log has that hash there, and a fill's first
+    /// part, of about `most` bytes, when it does not.
     fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, most: usize, o: &mut Out) {
         let has = match hash {
             Some(h) => self.log().has(cursor, &h),
@@ -827,7 +837,8 @@ impl Peer {
             let part = part(&self.store, &self.fill_order(), self.log().head(), None, most);
             return o.send(Frame::Part { space: self.space, part });
         }
-        for page in self.log().after(cursor).collect::<Vec<_>>().chunks(PAGE) {
+        let after: Vec<Logged> = self.log().after(cursor).collect();
+        for page in pages(&after, most, Logged::weight) {
             o.send(Frame::Page {
                 space: self.space,
                 from: page[0].seq - 1,
@@ -1143,7 +1154,8 @@ impl Peer {
     }
 
     fn repush(&mut self, o: &mut Out) {
-        for page in self.pending.make_contiguous().chunks(PAGE) {
+        let most = self.most() as usize;
+        for page in pages(self.pending.make_contiguous(), most, Logged::weight) {
             o.out.push(Output::Send(
                 To::Back,
                 Frame::push(self.space, page.iter().map(|p| p.entry.clone())).enc(),

@@ -736,8 +736,12 @@ fn held(server: &Server, user: &str) -> Option<Listening> {
     (s.session.is_some() || !s.devices.is_empty()).then_some(s)
 }
 
-/// More songs than one page of the log (`ark::peer::PAGE`).
-const SONGS: usize = ark::peer::PAGE + 44;
+/// More songs than one page of the log of [`SMALL`] bytes.
+const SONGS: usize = 300;
+
+/// The bytes a browser asks each page or part it is sent be, as one taking
+/// them on the thread it draws on does (`ark_peer::driven`).
+const SMALL: usize = 16 << 10;
 
 /// How far into the session's volatile log a client has heard.
 fn live_head(p: &Peer) -> i64 {
@@ -972,7 +976,8 @@ fn a_speaker_taken_or_sent_elsewhere_is_let_go_out_loud() {
 /// longer than one batch has the client say `Hello` a *second* time on the
 /// same socket to ask for the rest, and that must not be a departure and an
 /// arrival — or the session drops the browser from its own presence, and
-/// with it the speaker beside it. Three hundred songs is two batches.
+/// with it the speaker beside it. Three hundred songs, to a browser asking
+/// for batches of [`SMALL`] bytes, is several.
 ///
 /// Falsified by `Desk::hello` parting a connection that says the same
 /// device again: the session's sequence moved by the browser's leave and
@@ -1017,6 +1022,7 @@ fn asking_for_the_next_batch_does_not_leave_the_session() {
     });
 
     let mut browser = device(&server, "max", Kind::Computer, "Browser", true);
+    browser.client.log.machine.part = Some(SMALL);
     told(&mut browser, "the browser and the kitchen", |s| {
         s.devices.len() == 2
     });

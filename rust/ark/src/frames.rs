@@ -31,9 +31,10 @@
 //! each `More`, the part from where it says, of rows as they stand when
 //! the authority answers. A replica asks for each part once it holds the
 //! one before. A `Hello` and a `More` say how big a replica would have the
-//! part they ask for, `most` bytes of rows at most — one that takes a part
-//! on the thread it draws on asks for small ones, and is sent more of
-//! them — within [`crate::peer::MIN_PART`] and [`crate::peer::PART`].
+//! frames it is sent — a part, `most` bytes of rows at most, or a page,
+//! `most` bytes of entries — one that takes them on the thread it draws on
+//! asks for small ones, and is sent more of them — up to
+//! [`crate::peer::PART`].
 //!
 //! `Call` and `Reply` are no machine's either: a device's call of a
 //! function its server's program registered by name (ark-peer's

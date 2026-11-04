@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use ark::frames::Frame;
 use ark::log::{Entry, EntryId, Logged, Origin, Seq};
-use ark::peer::{Ctx, Output, Peer, Role, Who, PAGE};
+use ark::peer::{Ctx, Output, Peer, Role, Who};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
 use ark::store::{Change, Store};
@@ -95,6 +95,10 @@ fn log(playlists: u64, n: u64) -> Peer {
     assert_eq!(a.log().head().0, (playlists + n) as Seq, "every entry sequenced");
     a
 }
+
+/// Entries a page of the log carries here: about what one of `PART` bytes
+/// carries of the demo's.
+const PAGE: usize = 256;
 
 /// A page of the log as the `Batch` a replica is sent.
 fn page(a: &Peer) -> Frame {

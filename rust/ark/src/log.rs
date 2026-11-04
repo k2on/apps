@@ -254,6 +254,17 @@ impl Logged {
         Logged { entry, ..self }
     }
 
+    /// About how many bytes it is in a frame: what a page is cut by.
+    pub fn weight(&self) -> usize {
+        let e = &self.entry;
+        let rows = |c: &Change| match c {
+            Change::Add { row, .. } | Change::Remove { row, .. } => row.len(),
+            Change::Edit { old, new, .. } => old.len() + new.len(),
+        };
+        let facts: usize = self.facts.iter().map(|c| c.table().len() + rows(c)).sum();
+        96 + e.func.len() + e.actor.len() + e.session.len() + e.input.len() + facts
+    }
+
     /// Whether this links onto `prev`.
     pub fn links(&self, prev: &EntryHash) -> bool {
         self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts)
