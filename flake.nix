@@ -696,8 +696,10 @@
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           iosRust = rust.override { targets = iosTargets; };
           # One app's: `name`, `crate` and `so` as `androidPhone`'s, and the
-          # framework's name.
-          iosPhone = { name, crate, so, framework }: pkgs.stdenv.mkDerivation {
+          # framework's name. With `xcode`, an Xcode.app in the store
+          # (`strictIos`), it is built from that and nothing outside the
+          # store, under the strict sandbox; without, from the builder's.
+          iosPhone = { name, crate, so, framework, xcode ? null }: pkgs.stdenv.mkDerivation {
             pname = "${name}-ios-xcframework";
             version = "0.1.0";
             src = only rustDirs;
@@ -705,29 +707,38 @@
             cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
             nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
             # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
-            # Xcode, outside the store.
-            __noChroot = true;
+            # Xcode, outside the store — unless one in the store is given.
+            __noChroot = xcode == null;
             # The iOS targets compile and link with the builder's Xcode: its
             # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
             # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
             # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
             # fails under them: both are taken back for these two targets. The
             # Swift is UniFFI's from the library built for this Mac.
-            buildPhase = ''
+            buildPhase = let
+              tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
+            in ''
               runHook preBuild
-              export PATH=/usr/bin:$PATH
-              export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+              ${if xcode == null then ''
+                export PATH=/usr/bin:$PATH
+                export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+              '' else ''
+                export DEVELOPER_DIR=${xcode}/Contents/Developer
+                export PATH=$DEVELOPER_DIR/usr/bin:${tc}:$PATH
+                export HOME=$TMPDIR/home
+                mkdir -p "$HOME"
+              ''}
               unset SDKROOT
               ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
-                export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
-                export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
+                export CC_${l}=${tc}/clang CXX_${l}=${tc}/clang++ AR_${l}=${tc}/ar
+                export CARGO_TARGET_${u}_LINKER=${tc}/clang
                 cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
               '') iosTargets}
               ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
               cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
-              /usr/bin/xcodebuild -create-xcframework \
+              ${if xcode == null then "/usr/bin/xcodebuild" else "$DEVELOPER_DIR/usr/bin/xcodebuild"} -create-xcframework \
                 -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
                 -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
                 -output ${framework}.xcframework
@@ -742,6 +753,87 @@
           };
           harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
+
+          # **Can the iPhone builds keep nix's strict sandbox?** An
+          # experiment (.github/workflows/xcode-strict.yaml): `xcode` is an
+          # Xcode.app put in the store by its hash (`nix-store --add-fixed
+          # --recursive`, from the runner's own: Apple's licence keeps it off
+          # any cache), and each step is built from that and the store
+          # alone, none with `__noChroot`. A, it runs at all; B, a C file
+          # compiled and linked for the simulator; C, money's kernel as its
+          # xcframework; D, the money app for the simulator, as
+          # app-screens.yaml would take it.
+          strictIos = xcode:
+            let
+              dev = "${xcode}/Contents/Developer";
+              tc = "${dev}/Toolchains/XcodeDefault.xctoolchain/usr/bin";
+              sim = "${dev}/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk";
+              # What every step starts from: the store's Xcode, a home of
+              # its own, and none of nixpkgs' compiler settings, which
+              # Xcode's own tools would take for theirs.
+              setup = ''
+                export DEVELOPER_DIR=${dev}
+                export PATH=${dev}/usr/bin:${tc}:$PATH
+                export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home
+                mkdir -p "$HOME/Library/Developer/CoreSimulator/Devices"
+                unset SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX LD AR AS RANLIB STRIP NM
+                for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
+                  case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
+                done
+              '';
+              step = name: script: pkgs.runCommand "strict-ios-${name}" { } ''
+                ${setup}
+                mkdir -p $out
+                ${script}
+              '';
+              kernel = iosPhone (moneyFfi // { framework = "MoneyFFI"; inherit xcode; });
+            in
+            {
+              a-runs = step "runs" ''
+                xcodebuild -version | tee $out/version
+                xcrun --sdk iphonesimulator --show-sdk-path | tee $out/sdk
+                swiftc --version 2>&1 | tee $out/swift
+              '';
+              b-compiles = step "compiles" ''
+                printf 'int answer(void) { return 42; }\n' > a.c
+                printf 'int answer(void);\nint main(void) { return answer() == 42 ? 0 : 1; }\n' > m.c
+                ${tc}/clang -target arm64-apple-ios17.0-simulator -isysroot ${sim} -c a.c -o a.o
+                ${tc}/clang -target arm64-apple-ios17.0-simulator -isysroot ${sim} m.c a.o -o $out/answer
+                ${tc}/ar rcs $out/liba.a a.o
+                file $out/answer | tee $out/file || true
+              '';
+              c-kernel = kernel;
+              d-app = pkgs.stdenv.mkDerivation {
+                pname = "strict-ios-money-simulator";
+                version = "0.1.0";
+                src = only [ "money/ios" "swift/ArkUI" ];
+                nativeBuildInputs = [ xcodegen ];
+                buildPhase = ''
+                  runHook preBuild
+                  ${setup}
+                  mkdir -p money/ffi/ios
+                  cp -r ${kernel}/MoneyFFI.xcframework ${kernel}/swift money/ffi/ios/
+                  chmod -R u+w money/ffi/ios
+                  cd money/ios
+                  xcodegen generate
+                  xcodebuild build \
+                    -project Money.xcodeproj -scheme Money -configuration Release \
+                    -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+                    -derivedDataPath $TMPDIR/derived \
+                    ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+                    CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= \
+                    ENABLE_USER_SCRIPT_SANDBOXING=NO \
+                    COMPILER_INDEX_STORE_ENABLE=NO
+                  runHook postBuild
+                '';
+                installPhase = ''
+                  mkdir -p $out
+                  cp -R $TMPDIR/derived/Build/Products/Release-iphonesimulator/Money.app $out/
+                '';
+                dontStrip = true;
+                dontFixup = true;
+              };
+            };
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
@@ -872,6 +964,8 @@
           '';
         in
         {
+          # Not packages: built only with an argument (the experiment above).
+          legacyPackages = { inherit strictIos; };
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             inherit harken-server arkdb;
@@ -1152,6 +1246,7 @@
     in
     {
       packages = lib.mapAttrs (_: o: o.packages) outputs;
+      legacyPackages = lib.mapAttrs (_: o: o.legacyPackages) outputs;
       # What .github/workflows/build.yaml builds and publishes, read by its
       # `plan` job (`nix eval --json .#publish.x86_64-linux`).
       publish = lib.mapAttrs (_: o: o.publish) outputs;

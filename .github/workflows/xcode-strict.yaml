@@ -1,0 +1,104 @@
+# An experiment: can the iPhone builds keep nix's strict sandbox, with Xcode
+# itself an input in the store? (flake.nix, `strictIos`.)
+#
+# The runner's Xcode is put in the store by its own hash (`nix-store
+# --add-fixed --recursive`): nothing is downloaded, and nothing of Apple's
+# goes to a cache (its licence does not allow it). Then four builds, each
+# with the strict sandbox and none of them `__noChroot`, each going on
+# whether the last built or not, so one run says how far strict reaches:
+#
+#   A  Xcode from the store runs: xcodebuild, xcrun, swiftc
+#   B  a C file compiled and linked for the simulator
+#   C  money's kernel, as its xcframework
+#   D  the money app for the simulator, as app-screens would take it
+#
+# Run by hand, or by a push that moves this file.
+name: xcode-strict
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/xcode-strict.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  strict:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # The newest Xcode 26, and only it: the others are room the store needs.
+      - name: Xcode, and room for it twice
+        run: |
+          xcode=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
+          [ -n "$xcode" ] || { echo "::error::no Xcode 26 on this image"; exit 1; }
+          xcode=$(cd "$xcode" && pwd -P)
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+          for other in /Applications/Xcode*.app; do
+            [ "$(cd "$other" && pwd -P)" = "$xcode" ] || sudo rm -rf "$other"
+          done
+          du -sh "$xcode"
+          df -h /
+          echo "XCODE=$xcode" >> "$GITHUB_ENV"
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            sandbox = true
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
+      - name: The sandbox is strict
+        run: |
+          nix config show sandbox
+          [ "$(nix config show sandbox)" = true ] || { echo "::error::the sandbox is not strict"; exit 1; }
+
+      # Its hash is what a flake would pin: the same Xcode gives the same
+      # path on any runner, and a different one a different path.
+      - name: Xcode, into the store by its hash
+        run: |
+          start=$(date +%s)
+          path=$(nix-store --add-fixed --recursive sha256 "$XCODE")
+          echo "added in $(( $(date +%s) - start ))s: $path"
+          nix path-info -Sh "$path"
+          nix hash path "$path"
+          echo "STORE_XCODE=$path" >> "$GITHUB_ENV"
+          df -h /
+
+      - name: A, Xcode from the store runs
+        id: a
+        continue-on-error: true
+        run: bash .github/strict-ios.sh a-runs
+
+      - name: B, a C file for the simulator
+        id: b
+        continue-on-error: true
+        run: bash .github/strict-ios.sh b-compiles
+
+      - name: C, money's kernel
+        id: c
+        continue-on-error: true
+        run: bash .github/strict-ios.sh c-kernel
+
+      - name: D, the money app for the simulator
+        id: d
+        continue-on-error: true
+        run: bash .github/strict-ios.sh d-app
+
+      - name: How far strict reached
+        run: |
+          {
+            echo "### Strict sandbox, Xcode in the store"
+            echo
+            echo "| Step | Outcome |"
+            echo "| --- | --- |"
+            echo "| A, Xcode runs | ${{ steps.a.outcome }} |"
+            echo "| B, C for the simulator | ${{ steps.b.outcome }} |"
+            echo "| C, money's kernel | ${{ steps.c.outcome }} |"
+            echo "| D, the money app | ${{ steps.d.outcome }} |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
