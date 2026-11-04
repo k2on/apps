@@ -26,7 +26,7 @@
 //!
 //! What a peer keeps beside its log is the rows of its local instance
 //! (`local`), in this same format under the names `local.kv` and
-//! `local.log` ([`crate::Shared`]).
+//! `local.log` (`local::Shared`).
 //!
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};

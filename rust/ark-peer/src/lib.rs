@@ -103,7 +103,7 @@ pub use handle::{dev, Authenticate, Handle};
 pub use hub::{Called, ConnId, Deliver};
 pub use instance::{Fold, Instance};
 pub use link::{Event, Pumped, Wake};
-pub use local::{Local, Logins, Shared};
+pub use local::{Local, Logins};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use serve::{Running, Server};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
@@ -818,8 +818,9 @@ impl Peer {
         }
     }
 
-    /// A view's answer as it stands.
-    pub fn values(&self, view: usize) -> Option<Vec<Vec<u8>>> {
+    /// A view's rows as they stand, each its bytes; none while it cannot be
+    /// made.
+    pub fn rows(&self, view: usize) -> Option<Vec<Vec<u8>>> {
         self.views.get(view)?.as_ref()?.view.as_ref().map(|v| v.rows())
     }
 

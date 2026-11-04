@@ -142,7 +142,7 @@ fn views_at(copies: usize) {
         let started = Instant::now();
         let v = client.view(name, input).unwrap_or_else(|e| panic!("{name}: {e}"));
         let took = started.elapsed();
-        eprintln!("{name:>14} {:>6} {took:>10.1?}", client.rows(v).len());
+        eprintln!("{name:>14} {:>6} {took:>10.1?}", client.rows(v).unwrap_or_default().len());
     }
     let (mut toggle, mut describe) = (vec![], vec![]);
     for round in 0..ROUNDS * 2 {

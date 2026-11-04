@@ -111,7 +111,7 @@ impl<T> Watched<T> {
     }
 
     fn fill(&mut self, peer: &Peer) {
-        let rows = self.view.map(|v| peer.rows(v)).unwrap_or_default();
+        let rows = self.view.and_then(|v| peer.rows(v)).unwrap_or_default();
         self.rows = rows.iter().map(|b| (self.read)(b)).collect();
     }
 }

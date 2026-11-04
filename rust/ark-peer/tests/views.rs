@@ -48,7 +48,7 @@ fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
     let v = p
         .watch(Space::Durable, "demo.named", &CreatePlaylist { name: "Road".into() }.to_bytes(), p.ctx())
         .unwrap();
-    assert_eq!(p.values(v).map(|r| r.len()), Some(1));
+    assert_eq!(p.rows(v).map(|r| r.len()), Some(1));
     let rename = |name: &str| {
         RenamePlaylist {
             playlist_id: Id::new(road),
@@ -57,9 +57,9 @@ fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
         .to_bytes()
     };
     author(&mut p, "demo.rename_playlist", rename("Sea"));
-    assert_eq!((p.update(v), p.values(v)), (Update::Reset, None), "it cannot be made");
+    assert_eq!((p.update(v), p.rows(v)), (Update::Reset, None), "it cannot be made");
     author(&mut p, "demo.rename_playlist", rename("Road"));
-    assert_eq!((p.update(v), p.values(v).map(|r| r.len())), (Update::Reset, Some(1)), "made again");
+    assert_eq!((p.update(v), p.rows(v).map(|r| r.len())), (Update::Reset, Some(1)), "made again");
 }
 
 /// A UI's view (`Watched`) keeps its rows as its own type: refused at open

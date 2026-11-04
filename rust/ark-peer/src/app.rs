@@ -343,11 +343,6 @@ impl Peer {
         self.watch(Space::Durable, &b, input, ctx).map_err(|r| r.0)
     }
 
-    /// A view's rows as they stand, each its bytes.
-    pub fn rows(&self, view: usize) -> Vec<Vec<u8>> {
-        self.values(view).unwrap_or_default()
-    }
-
     /// What a view did since it was last asked.
     pub fn update(&mut self, view: usize) -> Update {
         self.told.updates.remove(&view).unwrap_or(Update::Unchanged)

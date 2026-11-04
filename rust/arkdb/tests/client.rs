@@ -118,7 +118,7 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
     }
     n.settle().unwrap();
     n.views_hold().unwrap();
-    assert_eq!(n.clients[&0].values(0).unwrap().len(), 3);
+    assert_eq!(n.clients[&0].rows(0).unwrap().len(), 3);
 }
 
 /// The room: two devices arrive and are here, by `on_join` the hub authored;
@@ -145,7 +145,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     n.deliver();
     let ctx = Ctx::default();
     n.watch(1, Space::Volatile, "room.present", vec![], ctx).unwrap();
-    assert_eq!(n.clients[&1].values(0).unwrap().len(), 2, "both here");
+    assert_eq!(n.clients[&1].rows(0).unwrap().len(), 2, "both here");
     n.run(&Op::Call(0, "room.rename".into(), Rename { name: "kitchen".into() }.to_bytes()));
     for x in [1, 2, 3] {
         n.run(&Op::Call(0, "room.point".into(), Point { x }.to_bytes()));
@@ -168,7 +168,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     n.run(&Op::Partition(0));
     n.deliver();
     n.views_hold().unwrap();
-    assert_eq!(n.clients[&1].values(0).unwrap().len(), 1, "the phone has gone");
+    assert_eq!(n.clients[&1].rows(0).unwrap().len(), 1, "the phone has gone");
     assert!(n.refused.is_empty(), "{:?}", n.refused);
 }
 

@@ -594,7 +594,7 @@ impl ViewHandle {
     /// Its rows as they stand, each its bytes.
     pub(crate) fn rows_bytes(&self) -> Vec<Vec<u8>> {
         let s = self.shared.lock();
-        s.kept(self.id).map_or(vec![], |(at, _)| s.peer.rows(at))
+        s.kept(self.id).and_then(|(at, _)| s.peer.rows(at)).unwrap_or_default()
     }
 
     /// What it did since last taken, and the rows that came with it, each

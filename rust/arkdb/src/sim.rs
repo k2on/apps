@@ -197,7 +197,7 @@ impl Net {
             match c.update(k.1) {
                 Update::Patched(patches) => self.views.entry(k).and_modify(|v| v.4 = splice(&patches, &v.4)),
                 Update::Reset => {
-                    let rows = c.values(k.1).unwrap_or_default();
+                    let rows = c.rows(k.1).unwrap_or_default();
                     self.views.entry(k).and_modify(|v| v.4 = rows)
                 }
                 Update::Unchanged => continue,
@@ -382,7 +382,7 @@ impl Net {
     pub fn watch(&mut self, i: i64, space: Space, name: &str, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
         let c = self.client(i);
         let v = c.watch(space, name, &input, ctx.clone()).map_err(|r| r.0)?;
-        let rows = c.values(v).unwrap_or_default();
+        let rows = c.rows(v).unwrap_or_default();
         self.views.insert((i, v), (space, name.into(), input, ctx, rows));
         Ok(v)
     }
@@ -398,7 +398,7 @@ impl Net {
             };
             let store = &c.machine(*space).unwrap().store;
             let fresh = d.expect("a domain").watch(store, ctx, f, input).map_err(|r| r.0)?.rows();
-            if c.values(*v).as_ref() != Some(&fresh) || *mirror != fresh {
+            if c.rows(*v).as_ref() != Some(&fresh) || *mirror != fresh {
                 return Err(format!("client {i}'s view {v} is not a fresh evaluation"));
             }
         }

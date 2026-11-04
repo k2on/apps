@@ -1,6 +1,6 @@
 //! What a peer keeps beside its log, as rows (§1.3, §1.7, §1.9): the
 //! schema [`Local`], on a local instance under the `local.` names of the
-//! peer's disk ([`Shared`]): a device's replica (`replica`: its origin, the
+//! peer's disk (`Shared`): a device's replica (`replica`: its origin, the
 //! last `local` drawn, who last signed in, its fork) and its pending
 //! intents (`pending`). A server's journal and its volatile space as it
 //! last closed are beside them, each one record (`local.journal`,
@@ -56,7 +56,7 @@ pub const LOCAL: &str = "local.";
 /// One disk's blobs shared, each holder under a prefix of their names: how
 /// a peer's local instance keeps its journal on the disk its log is on.
 #[derive(Clone)]
-pub struct Shared {
+pub(crate) struct Shared {
     disk: Arc<Mutex<Box<dyn Disk>>>,
     prefix: String,
 }
