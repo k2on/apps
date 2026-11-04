@@ -79,7 +79,11 @@ device's replica in it, written once by an older build and opened by
 `rust/ark-peer/tests/old_data.rs`, which reads back its rows, its chain
 and its sign-in. A change to the on-disk format writes the fixture again,
 with a note in `old_data.rs` of what moved: logs are started afresh, by
-decision, rather than migrated.
+decision, rather than migrated. Only a server's rows must cross a build: a
+device's directory may break, as it refills from its server. A server's
+directory written by main before the restructure (which this build does
+not read) crosses by `tools/from-main/migrate.sh`: its rows exported by
+that build, imported by this one, and checked row for row.
 
 Every disk keeps the schema its rows were written under beside them,
 `schema.json` (`rust/ark-peer/src/disk.rs`). A schema only grows (a table
