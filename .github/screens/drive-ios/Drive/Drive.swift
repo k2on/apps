@@ -9,14 +9,20 @@
 //   APP_SERVER  the server's address, typed into the first page; unset, none
 //   APP_USER    the name the server's dev sign-in page is given
 //   APP_SHOTS   the shots, as the app's screens/shots.json has them:
-//               [{"id": …, "steps": [{"tap": label} | {"type": text} | {"wait": seconds}]}]
-//   APP_OUT     the directory the PNGs are written to, on the Mac
+//               [{"id": …, "steps": [{"tap": label, "role"?: …} | {"type": text} | {"wait": seconds}]}]
+//               A tap's label is what the element says or its accessibility
+//               identifier; `role` ("tab", "button", "field", "text") says
+//               which kind it is when several say it.
+//   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
+//               the app's accessibility tree as it was taken (<id>.tree.txt),
+//               which is what a step can name
 import XCTest
 
 /// A shot, as shots.json has it.
 struct Shot: Decodable {
     struct Step: Decodable {
         var tap: String?
+        var role: String?
         var type: String?
         var wait: Double?
     }
@@ -50,7 +56,14 @@ final class Drive: XCTestCase {
             // The server's page: its one text field, whatever an app labels it.
             let field = app.textFields.firstMatch
             if field.waitForExistence(timeout: 20) {
-                try signIn(app, field: field, server: server, user: try value("APP_USER"))
+                do {
+                    try signIn(app, field: field, server: server, user: try value("APP_USER"))
+                } catch {
+                    // What the app and the system showed instead, to see why.
+                    let seen = "== the app\n\(app.debugDescription)\n\n== SpringBoard\n\(springboard.debugDescription)"
+                    try? seen.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
+                    throw error
+                }
                 XCTAssertTrue(field.waitForNonExistence(timeout: 60), "signed in, past the server's page")
                 sleep(3)
             }
@@ -62,8 +75,12 @@ final class Drive: XCTestCase {
             sleep(2)
             for step in shot.steps {
                 if let label = step.tap {
-                    let c = control(app, label)
-                    XCTAssertTrue(c.waitForExistence(timeout: 30), "\(label) is there for \(shot.id)")
+                    let c = control(app, label, role: step.role)
+                    if !c.waitForExistence(timeout: 30) {
+                        try? app.debugDescription.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
+                        XCTFail("\(label) is not there for \(shot.id); stuck.tree.txt is what was")
+                        return
+                    }
                     c.tap()
                 }
                 if let text = step.type { app.typeText(text) }
@@ -71,6 +88,7 @@ final class Drive: XCTestCase {
             }
             sleep(3)
             try XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
+            try app.debugDescription.write(to: out.appendingPathComponent("\(shot.id).tree.txt"), atomically: true, encoding: .utf8)
         }
     }
 
@@ -115,10 +133,20 @@ final class Drive: XCTestCase {
         if let send { send.tap() } else { name.typeText("\n") }
     }
 
-    /// A tab, or any button, that says `label`.
-    private func control(_ app: XCUIApplication, _ label: String) -> XCUIElement {
-        let tab = app.tabBars.buttons[label]
-        return tab.exists ? tab : app.buttons[label].firstMatch
+    /// What says `label`, or has it as its identifier: of the `role` asked
+    /// for when one is; else a tab, else a button, else any element.
+    private func control(_ app: XCUIApplication, _ label: String, role: String?) -> XCUIElement {
+        switch role {
+        case "tab": return app.tabBars.buttons[label]
+        case "button": return app.buttons[label].firstMatch
+        case "field": return app.textFields[label].firstMatch
+        case "text": return app.staticTexts[label].firstMatch
+        default:
+            let tab = app.tabBars.buttons[label]
+            if tab.exists { return tab }
+            let button = app.buttons[label].firstMatch
+            return button.exists ? button : app.descendants(matching: .any)[label].firstMatch
+        }
     }
 
     private func first(timeout: TimeInterval, _ candidates: [XCUIElement]) throws -> XCUIElement {

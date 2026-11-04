@@ -2,11 +2,46 @@
   "_": "money's screenshots (.github/screens/apps.md): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken.",
   "android": "us.koon.money",
   "ios": "us.koon.money",
-  "server": { "port": 8788, "user": "alex" },
+  "server": {
+    "port": 8788,
+    "user": "alex"
+  },
   "shots": [
-    { "id": "budget", "steps": [{ "tap": "Budget" }] },
-    { "id": "accounts", "steps": [{ "tap": "Accounts" }] },
-    { "id": "transactions", "steps": [{ "tap": "Transactions" }] },
-    { "id": "insights", "steps": [{ "tap": "Insights" }] }
+    {
+      "id": "budget",
+      "steps": [
+        {
+          "tap": "Budget",
+          "role": "tab"
+        }
+      ]
+    },
+    {
+      "id": "accounts",
+      "steps": [
+        {
+          "tap": "Accounts",
+          "role": "tab"
+        }
+      ]
+    },
+    {
+      "id": "transactions",
+      "steps": [
+        {
+          "tap": "Transactions",
+          "role": "tab"
+        }
+      ]
+    },
+    {
+      "id": "insights",
+      "steps": [
+        {
+          "tap": "Insights",
+          "role": "tab"
+        }
+      ]
+    }
   ]
 }

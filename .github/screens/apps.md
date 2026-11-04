@@ -34,9 +34,23 @@ All of it is in `<app>/screens/`:
   taken on that phone. `server` (optional): the port its `server.sh`
   listens on, and the name the server's dev sign-in is given. Each shot is
   the app opened afresh, its `steps` done in order, and the screen taken:
-  `{"tap": "<label>"}` taps what shows that text (a tab, a button),
-  `{"type": "<text>"}` types into what has focus, `{"wait": <seconds>}`
-  waits.
+  `{"tap": "<label>"}` taps the element whose accessibility label (what it
+  says) or identifier is `<label>` (an iOS `accessibilityIdentifier`, an
+  Android resource id or exposed Compose `testTag`), and `"role"`
+  (`tab`, `button`, `field`, `text`) says which kind when several share a
+  label (a tab and a heading both saying "Transactions"); `{"type":
+  "<text>"}` types into what has focus; `{"wait": <seconds>}` waits.
+
+  **Write steps from the accessibility tree, not by guessing.** Every shot
+  is saved with the tree of the screen it was taken from, beside its
+  picture: `<id>.tree.txt` on the `screens` branch (`apps/<app>/<phone>/
+  <theme>/`) and in the run's artifacts. On Android it is `ui.py --tree`'s
+  outline of uiautomator's dump (what each node says, its `#id`, its
+  `[role]`, whether it can be pressed); on iOS, XCUITest's own
+  description of the app's hierarchy. To add a shot, open the tree of the
+  screen it starts from and name what to tap as it is written there. A
+  step that finds nothing leaves `stuck.png` and `stuck.tree.txt`: what
+  was on the screen instead.
 
 - **`server.sh`** (only for an app with a server):
   `server.sh <dir> <listen address>`, run from the repository's root,
