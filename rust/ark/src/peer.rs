@@ -227,61 +227,44 @@ pub trait Procedure: Send + Sync {
 /// named, by the row's bytes. Never run as an intent.
 pub type Scope = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
 
-/// One function a peer has by name: a procedure it runs, or a scope it
-/// asks of rows.
-#[derive(Clone)]
-pub enum Runs {
-    Procedure(Arc<dyn Procedure>),
-    Scope(Scope),
-}
-
-/// The functions a peer runs, by the names entries call them by (§1.16):
-/// its domain's, registered when the program was built. Nothing a peer is
-/// sent is ever run but by a name it already has.
+/// The functions a peer has, by the names entries call them by (§1.16):
+/// its domain's, registered when the program was built — the procedures
+/// it runs, and the scopes it asks of rows. Nothing a peer is sent is ever
+/// run but by a name it already has.
 #[derive(Clone, Default)]
 pub struct Functions {
-    fns: BTreeMap<String, Runs>,
+    procedures: BTreeMap<String, Arc<dyn Procedure>>,
+    scopes: BTreeMap<String, Scope>,
 }
 
 impl fmt::Debug for Functions {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_set().entries(self.fns.keys()).finish()
+        f.debug_set().entries(self.procedures.keys().chain(self.scopes.keys())).finish()
     }
 }
 
 impl Functions {
     pub fn insert(&mut self, name: impl Into<String>, p: Arc<dyn Procedure>) {
-        self.put(name, Runs::Procedure(p));
+        self.procedures.insert(name.into(), p);
     }
 
-    pub fn put(&mut self, name: impl Into<String>, r: Runs) {
-        self.fns.insert(name.into(), r);
-    }
-
-    /// What `name` is here, of either kind.
-    pub fn of(&self, name: &str) -> Option<&Runs> {
-        self.fns.get(name)
+    pub fn insert_scope(&mut self, name: impl Into<String>, s: Scope) {
+        self.scopes.insert(name.into(), s);
     }
 
     /// The procedure `name` is.
     pub fn get(&self, name: &str) -> Option<&Arc<dyn Procedure>> {
-        match self.fns.get(name)? {
-            Runs::Procedure(p) => Some(p),
-            Runs::Scope(_) => None,
-        }
+        self.procedures.get(name)
     }
 
     /// The scope `name` is.
     pub fn scope(&self, name: &str) -> Option<&Scope> {
-        match self.fns.get(name)? {
-            Runs::Scope(s) => Some(s),
-            Runs::Procedure(_) => None,
-        }
+        self.scopes.get(name)
     }
 
-    /// Every name, in order.
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.fns.keys().map(String::as_str)
+    /// Whether `name` is a function here, of either kind.
+    pub fn has(&self, name: &str) -> bool {
+        self.procedures.contains_key(name) || self.scopes.contains_key(name)
     }
 }
 
@@ -638,9 +621,9 @@ impl Peer {
 
     /// Runs an intent over the store and applies what it did, all or none.
     fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
-        let p = match self.functions.of(&e.func) {
-            Some(Runs::Procedure(p)) => p.clone(),
-            Some(Runs::Scope(_)) => return Err(Refusal::new("a scope writes nothing")),
+        let p = match self.functions.get(&e.func) {
+            Some(p) => p.clone(),
+            None if self.functions.has(&e.func) => return Err(Refusal::new("a scope writes nothing")),
             None => return Err(Refusal(format!("no function {}", e.func))),
         };
         let s = e.span();
@@ -959,7 +942,7 @@ impl Peer {
             said!(warn, "gap", &entry, last = last);
             return Verdict::Held { last };
         }
-        if self.functions.of(&entry.func).is_none() {
+        if !self.functions.has(&entry.func) {
             said!(warn, "held", &entry, last = last);
             return Verdict::Held { last };
         }

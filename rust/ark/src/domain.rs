@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use crate::db::{read, write_in, Db, Tables, Volatile, Writes};
 use crate::hash::SchemaHash;
-use crate::peer::{self, Ctx, Functions, Procedure, Runs};
+use crate::peer::{self, Ctx, Functions, Procedure};
 use crate::plan::{answer, Maintained, Plan, View};
 use crate::row::{Describe, Input, Row, Type, Value};
 use crate::schema::Schema;
@@ -278,8 +278,8 @@ impl Domain {
     pub fn functions(&self) -> Functions {
         let mut c = Functions::default();
         for f in self.fns.values() {
-            let run = f.proc.clone().map(Runs::Procedure).or(f.scope.clone().map(Runs::Scope));
-            run.into_iter().for_each(|r| c.put(f.name.clone(), r));
+            f.proc.clone().into_iter().for_each(|p| c.insert(f.name.clone(), p));
+            f.scope.clone().into_iter().for_each(|s| c.insert_scope(f.name.clone(), s));
         }
         c
     }
