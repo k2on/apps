@@ -428,7 +428,7 @@ fn fill(driven: bool) {
         }
         for b in sent {
             let Ok(f) = Frame::dec(&b) else { continue };
-            if f.space() != ark::schema::Space::Durable || matches!(f, Frame::Telemetry { .. }) {
+            if f.space() != ark::schema::Space::Durable || matches!(&f, Frame::Call { name, .. } if name == ark::frames::EVENTS) {
                 continue;
             }
             for o in server.machine.step(Input::Frame {

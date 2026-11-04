@@ -61,9 +61,10 @@ is a query over it, not another system.
 
 ## Where it goes
 
-- **Over the sync socket.** One new frame, `Telemetry { events }`, from a
-  peer to its server: the connection, the login and the offline buffering a
-  peer already has. A peer keeps a bounded buffer while it is away.
+- **Over the sync socket.** A call nobody answers, `ark.events` (it was a
+  frame of its own, `Telemetry`, until a call did the same), from a peer to
+  its server: the connection, the login and the offline buffering a peer
+  already has. A peer keeps a bounded buffer while it is away.
 - **The server collects its system**: its own events and every peer's, in a
   bounded store in its data directory, with a live tail.
 - **In a test**, an in-memory collector shared by every peer of a simulator

@@ -6,7 +6,6 @@
 //! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, most }
 //! Page    { space, from, logged: [Logged] }
 //! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { last } }
-//! Telemetry { events: [Event] }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
 //! More    { space, from: { table, key }, most }
 //! Call    { id, name, input }
@@ -35,17 +34,15 @@
 //! on the thread it draws on asks for small ones, and is sent more of
 //! them — within [`crate::peer::MIN_PART`] and [`crate::peer::PART`].
 //!
-//! `Telemetry` is no machine's: what a device says of itself
-//! (docs/plan-observe.md), sent to its server beside the frames, which a
-//! server collects and a machine never reads.
-//!
 //! `Call` and `Reply` are no machine's either: a device's call of a
 //! function its server's program registered by name (ark-peer's
 //! `Config::calls`) and the server's answer, matched by the device's `id`.
 //! A call is never an entry: its input is not logged, journaled, recorded
 //! or told to any other connection, so it can carry what must stay off the
 //! log (a password for the server alone). It is answered once, while the
-//! connection that made it is up, and is not sent again.
+//! connection that made it is up, and is not sent again. What a device says
+//! of itself is shipped as one ([`EVENTS`]), which every server collects
+//! and answers nothing.
 //!
 //! `Offer`, `Want`, `Chunk`, `Have` and `Absent` are no machine's either:
 //! the bytes of the files rows name (`crate::file`, docs/plan-files.md),
@@ -97,9 +94,6 @@ pub enum Frame {
         id: EntryId,
         verdict: Verdict,
     },
-    Telemetry {
-        events: Vec<Event>,
-    },
     Part {
         space: Space,
         part: Part,
@@ -140,6 +134,11 @@ pub enum Frame {
         why: String,
     },
 }
+
+/// The call a device ships what it said of itself by (docs/plan-observe.md):
+/// its input a page of [`Event`]s, which every server collects and answers
+/// nothing — no machine's, and no app's to register.
+pub const EVENTS: &str = "ark.events";
 
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
 /// loud (`error`, `warn`, `info`, `debug`, `trace`), what (`msg`), and its
@@ -191,8 +190,7 @@ impl Frame {
             | Frame::Part { space, .. }
             | Frame::More { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
-            Frame::Telemetry { .. }
-            | Frame::Call { .. }
+            Frame::Call { .. }
             | Frame::Reply { .. }
             | Frame::Offer { .. }
             | Frame::Want { .. }

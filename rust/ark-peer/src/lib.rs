@@ -856,11 +856,13 @@ impl Peer {
     }
 
     /// What this peer said of itself since, out of the outbox and to its
-    /// server ([`Frame::Telemetry`](ark::frames::Frame)), a page at a time.
+    /// server as a call nobody answers ([`ark::frames::EVENTS`]), a page at
+    /// a time.
     pub(crate) fn ship(&mut self) {
         let events = observe::take(&self.label(), 256);
         if !events.is_empty() {
-            self.frames.push(ark::frames::Frame::Telemetry { events }.enc());
+            let (id, name, input) = (0, ark::frames::EVENTS.into(), events.to_bytes());
+            self.frames.push(Frame::Call { id, name, input }.enc());
         }
     }
 
