@@ -3,9 +3,9 @@
 //!
 //! ```text
 //! Role  = Replica | Authority { journal }   -- "alone" is an authority whose journal has a fork
-//! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Tick | Persisted | Open
-//!       | Connected | Alone | Join | Compact
-//! Output= Send | Fanout | Changes(by span) | Persist | Refused { id, why } | Confirmed(id)
+//! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Open | Connected
+//!       | Alone | Join | Compact | Write { facts } | Feed { who, feed }
+//! Output= Send | Fanout | To { session } | Changes(by span) | Persist | Refused { id, why } | Confirmed(id)
 //! ```
 //!
 //! Sans-io: [`Peer::step`] takes one input and says what to do — no
@@ -370,8 +370,6 @@ pub enum Input {
         /// The span it is authored under, frozen in the entry.
         cause: Option<Span>,
     },
-    Tick(i64),
-    Persisted(Seq),
     Open(Durable),
     Connected,
     Alone,
@@ -613,7 +611,6 @@ impl Peer {
                 }
             }
             Input::Mutate { func, input, now, cause } => self.mutate(func, input, now, cause, &mut o),
-            Input::Tick(_) | Input::Persisted(_) => {}
             Input::Open(d) => self.open(d, &mut o),
             Input::Connected => self.connected(&mut o),
             Input::Alone => self.alone(&mut o),
