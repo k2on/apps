@@ -309,8 +309,8 @@ fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Spac
 /// A device's live machine as `me`, from an origin drawn for it. The live
 /// space keeps nothing across an open, so its `local`s start again at 1;
 /// under the log's origin, which the disk keeps, a reloaded page's calls
-/// were refused as overtaken by what the page before it had said, for as
-/// long as the server ran.
+/// were taken for ones the server had judged already, for as long as it
+/// ran.
 fn live_of(config: &Config, me: &Who) -> Option<Instance> {
     let l = config.live.as_ref()?;
     let mut p = machine(&l.module, Role::Replica, me, Some((l.origin)()), Space::Volatile);

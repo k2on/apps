@@ -21,8 +21,8 @@
 //! session's first such connection says it and `on_leave` when its last
 //! closes, so a device on two connections is one device. On a restart the
 //! volatile space is what the server wrote of it when it last closed
-//! (its rows whole, one record beside its local instance: `local.volatile`),
-//! and `on_restore` is authored over it.
+//! (its rows whole, one record beside its local instance: `local.volatile`,
+//! and its journal, `local.live`), and `on_restore` is authored over it.
 //!
 //! **The journal** beside the log keeps what the log cannot, as one record
 //! beside the peer's local instance (`local.journal`): each origin's last
@@ -36,7 +36,7 @@
 use std::collections::BTreeMap;
 
 use ark::format::Encode;
-use ark::frames::{Frame, Verdict};
+use ark::frames::Frame;
 use ark::log::{Durable, EntryId, Origin, Record};
 use ark::peer::{Feed, Input, Journal, Peer as Machine, Role, Who};
 use ark::schema::Space;
@@ -44,9 +44,11 @@ use ark::schema::Space;
 use crate::{machine, Config, Disk, Fold, Instance, Peer};
 
 /// What a server keeps beside its local instance, each one record on its
-/// disk: its volatile space as it last closed, the store's rows whole; and
-/// its journal, each origin's last `local` and actor and what it refused.
+/// disk: its volatile space as it last closed, the store's rows whole, and
+/// the live journal then; and its journal, each origin's last `local` and
+/// actor and what it refused.
 const VOLATILE: &str = "volatile";
+const LIVE: &str = "live";
 const JOURNAL: &str = "journal";
 
 /// Each origin's last `local`, and the actor it is bound to.
@@ -150,7 +152,7 @@ impl Peer {
         let (last, refused): (Lasts, Vec<(EntryId, String)>) = kept(&mut local, JOURNAL).unwrap_or_default();
         let j = journal(&mut log);
         last.into_iter().for_each(|(origin, (actor, l))| j.pass(origin, &actor, l));
-        j.verdicts.extend(refused.into_iter().map(|(id, why)| (id, Verdict::Refused { why })));
+        j.refused.extend(refused);
         log.local = log.local.max(journal(&mut log).last_of(&origin));
         // The live authority draws an origin at every open, as a device's
         // live machine does: under the session's, the one the log authors
@@ -162,6 +164,9 @@ impl Peer {
         let mut p = Peer::with(config, log, live, local);
         p.keep_files(files);
         (p.hub.serving, p.hub.next) = (true, 1);
+        if let (Some(live), Some(j)) = (&mut p.live, kept::<Journal>(&mut p.local, LIVE)) {
+            *journal(live) = j;
+        }
         if let (Some(Record::Rows(rows)), Some(live)) = (kept(&mut p.local, VOLATILE), &mut p.live) {
             live.step(Input::Open(Durable { rows, ..Durable::default() }));
             if let Some(f) = p.config.live.as_ref().and_then(|l| l.on_restore.clone()) {
@@ -173,12 +178,15 @@ impl Peer {
     }
 
     /// Writes the volatile space as it stands, whole, for the next open:
-    /// its rows, and its log's.
+    /// its rows, its log's and its journal, so that the live authority
+    /// opened again goes on judging each origin from where it was.
     pub fn close(&mut self) {
-        let Some(live) = &self.live else { return };
+        let Some(live) = &mut self.live else { return };
         let (seq, hash) = live.log().head();
         let rows = Record::Rows(ark::log::standing(live.store.snapshot_rows(), seq, hash));
+        let j = journal(live).to_bytes();
         self.put_beside(VOLATILE, &rows.enc());
+        self.put_beside(LIVE, &j);
     }
 
     /// A record kept beside the local instance, on its disk; a failure kept
@@ -353,19 +361,13 @@ impl Peer {
     fn mark(&mut self) -> (usize, i64) {
         let base = self.log.log().base_seq();
         let j = journal(&mut self.log);
-        let refused = j.verdicts.values().filter(|v| matches!(v, Verdict::Refused { .. })).count();
-        (refused, base)
+        (j.refused.len(), base)
     }
 
     /// The journal whole: each origin's last, and what it refused.
     fn keep_journal(&mut self) {
         let j = journal(&mut self.log);
-        let refused: Vec<(EntryId, String)> = (j.verdicts.iter())
-            .filter_map(|(id, v)| match v {
-                Verdict::Refused { why } => Some((*id, why.clone())),
-                _ => None,
-            })
-            .collect();
+        let refused: Vec<(EntryId, String)> = j.refused.iter().map(|(id, why)| (*id, why.clone())).collect();
         let bytes = ark::format::encode(&(&j.last, refused)).expect("a journal serializes");
         self.put_beside(JOURNAL, &bytes);
     }

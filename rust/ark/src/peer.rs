@@ -104,12 +104,12 @@
 //! A device says what it is in its `Hello` ([`Peer::device`]); its
 //! `on_join` and `on_leave` are entries the authority authors through
 //! `Mutate`, as the driver sees connections come and go. `resync` is a
-//! `Hello` with a hash the authority lacks, answered with a fill. A
-//! volatile authority forgets on restart what each origin last pushed, so
-//! there a push past a gap is taken, and one that comes after it is
-//! refused as overtaken: what was live then is gone. It keeps the verdicts
-//! of each origin's last [`WINDOW`] `local`s only: one pushed again inside
-//! them is answered as it was, one below them refused as overtaken.
+//! `Hello` with a hash the authority lacks, answered with a fill. It runs
+//! the log's rules: a volatile authority restarted from nothing has a
+//! chain its replicas lack, so each is filled from it, and holds their
+//! pushes past what it judged until they number them on from its `last`.
+//! It keeps in memory only, so of an origin's refusals it keeps those of
+//! its last [`WINDOW`] `local`s.
 //!
 //! **The horizon** (`Compact`) is moved by its driver, in either role, up
 //! to the head (a device alone, up to its fork): a replica's pending
@@ -148,8 +148,8 @@ macro_rules! said {
 pub const PAGE: usize = 256;
 
 /// How many of an origin's last `local`s a volatile authority keeps the
-/// verdicts of: one pushed again inside them is answered as it was, one
-/// below them is refused as overtaken.
+/// refusals of, in memory: one refused below them and pushed again is
+/// answered as one judged is.
 pub const WINDOW: i64 = 64;
 
 /// What a function knows of the intent it runs for: all frozen in the
@@ -306,13 +306,15 @@ impl Pending {
     }
 }
 
-/// What an authority keeps beside its log: every intent it judged and how;
-/// each origin's last `local` and the actor it is bound to; and, for a
-/// device alone, where it forked from the log it will join again.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// What an authority keeps beside its log: each origin's last `local` and
+/// the actor it is bound to; the intents it refused, and why — an intent
+/// at or below its origin's last and not refused is in the log, or folded
+/// below its horizon; and, for a device alone, where it forked from the
+/// log it will join again.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Journal {
     pub fork: Option<(Seq, EntryHash)>,
-    pub verdicts: BTreeMap<EntryId, Verdict>,
+    pub refused: BTreeMap<EntryId, String>,
     pub last: BTreeMap<Origin, (String, i64)>,
 }
 
@@ -770,28 +772,29 @@ impl Peer {
                 Ok(l.seq)
             }
         };
-        let verdict = v.clone().map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq });
-        match &verdict {
-            Verdict::Ok { seq } => tracing::debug!(target: "ark", entry = %crate::hash::hex(&id.0), seq, "ok"),
-            Verdict::Refused { why } => tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused"),
-            _ => {}
+        match &v {
+            Ok(seq) => tracing::debug!(target: "ark", entry = %crate::hash::hex(&id.0), seq, "ok"),
+            Err(why) => tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused"),
         }
-        self.verdict(origin, &actor, local, id, verdict);
+        self.verdict(origin, &actor, local, id, v.as_ref().err());
         v
     }
 
-    /// A verdict kept, its origin's `local` passed. In the volatile space
-    /// only an origin's last [`WINDOW`] are kept: as the window moves, the
-    /// verdicts it leaves (at most a window's) are forgotten.
-    fn verdict(&mut self, origin: Origin, actor: &str, local: i64, id: EntryId, verdict: Verdict) {
+    /// An intent judged: its origin's `local` passed, and a refusal kept.
+    /// In the volatile space only the refusals of an origin's last
+    /// [`WINDOW`] are kept: as the window moves, those it leaves (at most a
+    /// window's) are forgotten.
+    fn verdict(&mut self, origin: Origin, actor: &str, local: i64, id: EntryId, refused: Option<&String>) {
         let space = self.space;
         let j = self.journal();
         let was = j.last_of(&origin);
         j.pass(origin, actor, local);
-        j.verdicts.insert(id, verdict);
+        if let Some(why) = refused {
+            j.refused.insert(id, why.clone());
+        }
         if space == Space::Volatile {
             for k in (was - WINDOW).max(0) + 1..=(local - WINDOW).min(was) {
-                j.verdicts.remove(&EntryId::of(origin, k));
+                j.refused.remove(&EntryId::of(origin, k));
             }
         }
     }
@@ -947,29 +950,25 @@ impl Peer {
     }
 
     fn verdict_on(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Verdict {
-        let (space, j) = (self.space, self.journal());
-        if let Some(verdict) = j.verdicts.get(&entry.id) {
-            return verdict.clone();
+        let head = self.log().head().0;
+        let j = self.journal();
+        if let Some(why) = j.refused.get(&entry.id) {
+            return Verdict::Refused { why: why.clone() };
         }
         if !entry.id_checks() || j.others(&entry.origin, &who.actor) {
             let why = "an id that is not its own, or from an origin of another actor".into();
             return Verdict::Refused { why };
         }
         let last = j.last_of(&entry.origin);
-        // At or below the last and judged by no verdict here: in the log's
-        // space, sequenced below the horizon by a log opened since (a
-        // refusal's verdict is journaled); in the volatile, overtaken.
+        // At or below the last and not refused: sequenced, at or below the
+        // head — every entry up to which this connection is sent before
+        // the verdict.
         if entry.local <= last {
-            return match space {
-                Space::Durable => Verdict::Ok { seq: self.log().base_seq() },
-                Space::Volatile => Verdict::Refused {
-                    why: "overtaken by a later one of its origin".into(),
-                },
-            };
+            return Verdict::Ok { seq: head };
         }
         // Past a gap (behind a held one, too): where its origin stands
         // here, for a device that lost the ones between to go on from.
-        if entry.local != last + 1 && !(space == Space::Volatile && entry.local > last) {
+        if entry.local != last + 1 {
             said!(warn, "gap", &entry, last = last);
             return Verdict::Held { last };
         }
@@ -1084,8 +1083,10 @@ impl Peer {
         o.send(self.hello(-1, None));
     }
 
-    /// A part of a fill. The first begins one: the store emptied, the log
-    /// standing on where the part was taken. Any other is the one asked
+    /// A part of a fill. The first begins one — unless this peer stands
+    /// where it was taken, filled already — the store emptied, the log
+    /// standing on where the part was taken: an authority is always right,
+    /// one restarted behind its replicas too. Any other is the one asked
     /// for, at the head — every entry the authority logged before it was
     /// sent before it — or it is passed by: past a gap, the head asked for
     /// again, and the part. Its ranges replace what the store held in
@@ -1098,7 +1099,7 @@ impl Peer {
         let (n, h) = self.log().head();
         let asked = self.more.take();
         if p.first {
-            if self.fill.is_none() && self.log().has(p.seq, &p.hash) && (p.seq == n || self.space == Space::Durable) {
+            if self.fill.is_none() && (p.seq, p.hash) == (n, h) {
                 return;
             }
         } else if self.fill.is_none() || asked.is_none() || asked != p.from() {
@@ -1303,7 +1304,6 @@ impl Peer {
             self.store = store;
             if let Role::Authority { journal } = &mut self.role {
                 for l in &entries {
-                    journal.verdicts.insert(l.entry.id, Verdict::Ok { seq: l.seq });
                     journal.pass(l.entry.origin, &l.entry.actor, l.entry.local);
                 }
             }

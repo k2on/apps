@@ -2,9 +2,9 @@
 //! machine over the volatile tables, sharing a connection with the durable
 //! one — its frames name their space, its store hashes its own tables, it
 //! makes nothing durable, a change to the other space is refused, and a
-//! volatile authority that restarted takes a session's pushes past the gap
-//! its restart made and answers a `Hello` it lacks the hash for with a
-//! snapshot (`resync`).
+//! volatile authority that restarted runs the log's rules: it answers a
+//! `Hello` it lacks the hash for with a fill, and holds a session's pushes
+//! past the gap its restart made until they are numbered on from it.
 
 #[path = "demo.rs"]
 mod demo;
@@ -157,13 +157,14 @@ fn a_change_to_the_other_space_is_refused() {
     );
 }
 
-/// An authority restarted from nothing: the replica's `Hello` names a hash
-/// it lacks and is answered with a fill of its store, and the replica's next
-/// intent — its second, the first lost with the old authority — is taken.
-/// Falsified by keeping the durable gap rule in the volatile space: the
-/// second wave waited for a first that would never come.
+/// An authority restarted from nothing runs the log's rules: the
+/// replica's `Hello` names a hash it lacks and is answered with a fill of
+/// its store, and the replica's next intent — its second, the first lost
+/// with the old authority — is held, numbered on from where its origin
+/// stands there, and taken. Falsified by a replica passing by a first part
+/// at a point of its log: it kept the lost wave.
 #[test]
-fn a_restarted_authority_resyncs_and_takes_the_gap() {
+fn a_restarted_authority_fills_and_holds_the_gap() {
     let (mut server, mut live) = (authority(), peer(Role::Replica, "alice", Space::Volatile));
     let o = live.step(waving("phone"));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
@@ -180,28 +181,13 @@ fn a_restarted_authority_resyncs_and_takes_the_gap() {
     live.step(down(&s[0]));
     assert!(live.store.get("here", &here_key("alice-session")).is_none(), "the restart lost the wave");
     let o = live.step(waving("laptop"));
+    let (s, _) = deliver_up(&mut fresh, &who("alice"), &o);
+    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Held { last: 0 })]), "{s:?}");
+    let o = live.step(down(&s[0]));
     let (s, f) = deliver_up(&mut fresh, &who("alice"), &o);
     assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 1 })]), "{s:?}");
     live.step(down(&f[0]));
     assert!(live.pending.is_empty() && live.store == fresh.store);
-}
-
-/// A volatile push that comes after a later one of its session was taken
-/// is refused as overtaken, and its replica lets it go. Falsified by
-/// `push` without the rule: nothing answered it and it stayed pending.
-#[test]
-fn a_volatile_push_overtaken_is_refused() {
-    let (mut server, mut live) = (authority(), peer(Role::Replica, "alice", Space::Volatile));
-    let first = live.step(waving("phone"));
-    let second = live.step(waving("laptop"));
-    for o in [&second, &first] {
-        let (s, f) = deliver_up(&mut server, &who("alice"), o);
-        for frame in s.iter().chain(&f) {
-            live.step(down(frame));
-        }
-    }
-    assert!(live.pending.is_empty(), "both answered");
-    assert_eq!(server.log().head().0, 1, "only the later one taken");
 }
 
 /// A replica moves its own horizon (`Compact`, at most its head): the
@@ -267,12 +253,12 @@ fn a_replica_folds_its_confirmed_rows() {
     assert_eq!(log.pending.len(), 1);
 }
 
-/// A volatile authority keeps each origin's last 64 verdicts: a push again
-/// inside them is answered as it was, one below them refused as
-/// overtaken, and no more are kept however many come. Falsified by
-/// keeping every verdict, as before: it held 70.
+/// A volatile authority keeps nothing of an intent it took, and the
+/// refusals of each origin's last 64 only: a push again of one taken is
+/// answered as sequenced, at the head, however many came. Falsified by
+/// journaling every verdict, as before: it held 70.
 #[test]
-fn volatile_verdicts_are_a_window() {
+fn volatile_verdicts_are_not_kept() {
     let (mut server, mut live) = (authority(), peer(Role::Replica, "alice", Space::Volatile));
     let mut pushes = vec![];
     for n in 0..70 {
@@ -284,16 +270,11 @@ fn volatile_verdicts_are_a_window() {
         pushes.push(o);
     }
     let Role::Authority { journal } = &server.role else { unreachable!() };
-    assert_eq!(journal.verdicts.len(), 64);
-    let (s, _) = deliver_up(&mut server, &who("alice"), &pushes[69]);
-    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 70 })]), "{s:?}");
-    let (s, _) = deliver_up(&mut server, &who("alice"), &pushes[6]);
-    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 7 })]), "the 64th last: {s:?}");
-    let (s, _) = deliver_up(&mut server, &who("alice"), &pushes[5]);
-    assert!(
-        matches!(&verdicts(&s)[..], [Some(Verdict::Refused { why })] if why.contains("overtaken")),
-        "{s:?}"
-    );
+    assert!(journal.refused.is_empty() && journal.last.len() == 1, "{journal:?}");
+    for p in [&pushes[69], &pushes[5]] {
+        let (s, _) = deliver_up(&mut server, &who("alice"), p);
+        assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 70 })]), "{s:?}");
+    }
 }
 
 /// `here` with a column appended, `mood`, an `Option`: a schema the

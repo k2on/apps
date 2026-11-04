@@ -289,7 +289,8 @@ fn a_web_build_is_its_own_validator() {
 
 /// The live space across a restart: what the hub held when it closed is
 /// what it opens with, and `on_restore` is authored over it — the room
-/// keeps who was here and lets every pointer go. Falsified by `Peer::serve`
+/// keeps who was here and lets every pointer go — and its journal, so each
+/// origin is judged on from where it was. Falsified by `Peer::serve`
 /// not reading what `close` wrote: the room came back empty.
 #[test]
 fn the_live_space_is_restored_and_on_restore_authored() {
@@ -325,9 +326,16 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         vec![1, 1],
         "here, and a pointer"
     );
+    let journal = |h: &Peer| match &h.live.as_ref().unwrap().role {
+        ark::peer::Role::Authority { journal } => journal.last.clone(),
+        ark::peer::Role::Replica => unreachable!(),
+    };
+    let judged = journal(&hub);
+    assert!(!judged.is_empty());
     hub.close();
     let disk = hub.log.disk.take().unwrap();
     let hub = Peer::serve(config, disk, 3);
+    assert!(judged.iter().all(|(o, l)| journal(&hub).get(o) == Some(l)), "the journal kept");
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
         vec![1, 0],

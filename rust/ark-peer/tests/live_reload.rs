@@ -52,7 +52,8 @@ fn carry(hub: &mut Peer, d: &mut Peer, c: u64) {
 /// the server's live space. Falsified by the live machine opening under the
 /// log's origin, which the disk keeps: the reloaded page's `local`s started
 /// again at 1, below what the page before it had pushed, and every call was
-/// refused as overtaken — harken's presses and hand-offs after a reload.
+/// taken for one judged already — harken's presses and hand-offs after a
+/// reload.
 #[test]
 fn a_reloaded_page_is_heard_in_the_live_space() {
     let mut hub = hub();

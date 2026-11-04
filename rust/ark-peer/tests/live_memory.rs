@@ -112,7 +112,7 @@ fn run(c: usize, n: u64) -> Held {
         assert!(live(d).pending.is_empty());
     }
     let verdicts = match &live(&hub).role {
-        Role::Authority { journal } => journal.verdicts.len(),
+        Role::Authority { journal } => journal.refused.len() + journal.last.len(),
         Role::Replica => unreachable!("a server's live machine is an authority"),
     };
     Held {
