@@ -1,6 +1,6 @@
 //! Files beside the log (docs/plan-files.md): the bytes of what rows name
-//! by [`FileRef`], kept by hash in a [`Store`] and carried by frames no
-//! machine reads (`Offer`, `Want`, `Chunk`, `Have`, `Absent`).
+//! by [`FileRef`], kept by hash as blobs of a [`Disk`] and carried by
+//! frames no machine reads (`Offer`, `Want`, `Chunk`, `Have`, `Absent`).
 //!
 //! **A device** makes a file ([`Peer::put_file`]): it is in its store at
 //! once and marked unsent, and its reference goes in the app's mutation,
@@ -19,207 +19,109 @@
 //! large one never holds back a device's sync.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::io::{self, Read};
 
 use ark::file::{is_hash, FileRef};
 use ark::frames::Frame;
 
-use crate::{ConnId, Deliver, Peer};
+use crate::{ConnId, Deliver, Disk, Memory, Peer};
 
 /// The most of a file one `Chunk` carries.
 pub const CHUNK: usize = 1 << 20;
 
-/// Files by hash: whole ones, ones arriving, and the ones made here not
-/// yet sent.
-pub trait Store: Send {
-    /// A whole file's size.
-    fn len(&self, hash: &str) -> Option<u64>;
-    /// At most `n` of a whole file's bytes from `at`.
-    fn read(&self, hash: &str, at: u64, n: usize) -> io::Result<Vec<u8>>;
-    /// How much of a file arriving is here.
-    fn partial(&self, hash: &str) -> u64;
-    /// Bytes of a file arriving, at `at`, where what is here ends.
-    fn append(&mut self, hash: &str, at: u64, bytes: &[u8]) -> io::Result<()>;
-    /// A file arrived whole, if its bytes are its name's; otherwise it is
-    /// dropped, to be sent again.
-    fn finish(&mut self, hash: &str) -> io::Result<()>;
-    /// A whole file, its name its bytes'.
-    fn put(&mut self, bytes: &[u8]) -> io::Result<String>;
-    /// The files made here not yet sent.
-    fn unsent(&self) -> Vec<String>;
-    /// Marked made here and not yet sent, or not.
-    fn mark(&mut self, hash: &str, unsent: bool) -> io::Result<()>;
-}
+// Files are blobs of a [`Disk`] of their own ([`Disk::files`]), named by
+// their hash: `<hash>` whole, `<hash>.part` arriving, and an empty
+// `<hash>.unsent` beside one made here and not yet sent. A whole one is
+// written in full or renamed from its part, so it is whole or not there.
 
 fn not_a_name(hash: &str) -> io::Error {
     io::Error::other(format!("{hash:.80} is not a file's name"))
 }
 
-fn not_its_bytes() -> io::Error {
-    io::Error::other("the bytes are not the file they were sent as")
-}
-
-/// Files in memory: a simulated device's, and the web build's until a page
-/// closes.
-#[derive(Default)]
-pub struct Memory {
-    whole: BTreeMap<String, Vec<u8>>,
-    arriving: BTreeMap<String, Vec<u8>>,
-    unsent: BTreeSet<String>,
-}
-
-impl Store for Memory {
-    fn len(&self, hash: &str) -> Option<u64> {
-        self.whole.get(hash).map(|b| b.len() as u64)
-    }
-
-    fn read(&self, hash: &str, at: u64, n: usize) -> io::Result<Vec<u8>> {
-        let b = self.whole.get(hash).ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
-        let at = (at as usize).min(b.len());
-        Ok(b[at..(at + n).min(b.len())].to_vec())
-    }
-
-    fn partial(&self, hash: &str) -> u64 {
-        self.arriving.get(hash).map_or(0, |b| b.len() as u64)
-    }
-
-    fn append(&mut self, hash: &str, at: u64, bytes: &[u8]) -> io::Result<()> {
-        if self.partial(hash) != at {
-            return Err(io::Error::other("not where the file ends"));
-        }
-        self.arriving.entry(hash.into()).or_default().extend_from_slice(bytes);
-        Ok(())
-    }
-
-    fn finish(&mut self, hash: &str) -> io::Result<()> {
-        let b = self.arriving.remove(hash).unwrap_or_default();
-        if ark::file::hash(&b) != hash {
-            return Err(not_its_bytes());
-        }
-        self.whole.insert(hash.into(), b);
-        Ok(())
-    }
-
-    fn put(&mut self, bytes: &[u8]) -> io::Result<String> {
-        let hash = ark::file::hash(bytes);
-        self.whole.insert(hash.clone(), bytes.to_vec());
-        Ok(hash)
-    }
-
-    fn unsent(&self) -> Vec<String> {
-        self.unsent.iter().cloned().collect()
-    }
-
-    fn mark(&mut self, hash: &str, unsent: bool) -> io::Result<()> {
-        match unsent {
-            true => self.unsent.insert(hash.into()),
-            false => self.unsent.remove(hash),
-        };
-        Ok(())
+/// The blob of the file `hash` (`ext` "" whole, `.part`, `.unsent`).
+fn blob(hash: &str, ext: &str) -> io::Result<String> {
+    match is_hash(hash) {
+        true => Ok(format!("{hash}{ext}")),
+        false => Err(not_a_name(hash)),
     }
 }
 
-/// Files in a directory: `<hash>` whole, `<hash>.part` arriving,
-/// `<hash>.unsent` beside one made here and not yet sent. A whole one is
-/// written to its part and renamed, so it is whole or not there.
-#[derive(Clone, Debug)]
-pub struct Dir(pub PathBuf);
+/// A whole file's size.
+fn whole(d: &dyn Disk, hash: &str) -> Option<u64> {
+    d.len(&blob(hash, "").ok()?)
+}
 
-impl Dir {
-    pub fn new(dir: impl Into<PathBuf>) -> io::Result<Dir> {
-        let dir = dir.into();
-        fs::create_dir_all(&dir)?;
-        Ok(Dir(dir))
+/// At most `n` of a whole file's bytes from `at`.
+fn bytes(d: &dyn Disk, hash: &str, at: u64, n: usize) -> io::Result<Vec<u8>> {
+    d.read(&blob(hash, "")?, at, n)
+}
+
+/// How much of a file arriving is here.
+fn partial(d: &dyn Disk, hash: &str) -> u64 {
+    blob(hash, ".part").ok().and_then(|b| d.len(&b)).unwrap_or(0)
+}
+
+/// Bytes of a file arriving, at `at`, where what is here ends.
+fn append(d: &mut dyn Disk, hash: &str, at: u64, bytes: &[u8]) -> io::Result<()> {
+    if partial(d, hash) != at {
+        return Err(io::Error::other("not where the file ends"));
     }
+    d.append(&blob(hash, ".part")?, bytes)
+}
 
-    /// A server's files, under its data directory (`Serve::data`).
-    pub fn of_server(data: impl Into<PathBuf>) -> io::Result<Dir> {
-        Dir::new(data.into().join("log").join("files"))
+/// A file arrived whole, if its bytes are its name's; otherwise it is
+/// dropped, to be sent again.
+fn finish(d: &mut dyn Disk, hash: &str) -> io::Result<()> {
+    let part = blob(hash, ".part")?;
+    if ark::file::hash_reader(Reading(d, &part, 0))? != hash {
+        let _ = d.remove(&part);
+        return Err(io::Error::other("the bytes are not the file they were sent as"));
     }
+    d.rename(&part, &blob(hash, "")?)
+}
 
-    fn at(&self, hash: &str, ext: &str) -> io::Result<PathBuf> {
-        if !is_hash(hash) {
-            return Err(not_a_name(hash));
-        }
-        Ok(self.0.join(format!("{hash}{ext}")))
+/// A blob read in parts, as a reader.
+struct Reading<'a>(&'a dyn Disk, &'a str, u64);
+
+impl Read for Reading<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let b = self.0.read(self.1, self.2, buf.len())?;
+        buf[..b.len()].copy_from_slice(&b);
+        self.2 += b.len() as u64;
+        Ok(b.len())
     }
 }
 
-impl Store for Dir {
-    fn len(&self, hash: &str) -> Option<u64> {
-        fs::metadata(self.at(hash, "").ok()?).ok().map(|m| m.len())
+/// A whole file, its name its bytes'.
+fn put(d: &mut dyn Disk, bytes: &[u8]) -> io::Result<String> {
+    let hash = ark::file::hash(bytes);
+    if whole(d, &hash).is_none() {
+        d.put(&blob(&hash, "")?, bytes)?;
     }
+    Ok(hash)
+}
 
-    fn read(&self, hash: &str, at: u64, n: usize) -> io::Result<Vec<u8>> {
-        let mut f = fs::File::open(self.at(hash, "")?)?;
-        f.seek(SeekFrom::Start(at))?;
-        let mut b = Vec::with_capacity(n);
-        f.take(n as u64).read_to_end(&mut b)?;
-        Ok(b)
-    }
+/// The files made here not yet sent.
+fn unsent(d: &dyn Disk) -> Vec<String> {
+    let names = d.names(".unsent").into_iter();
+    names
+        .filter_map(|n| n.strip_suffix(".unsent").map(String::from))
+        .filter(|h| is_hash(h))
+        .collect()
+}
 
-    fn partial(&self, hash: &str) -> u64 {
-        self.at(hash, ".part").ok().and_then(|p| fs::metadata(p).ok()).map_or(0, |m| m.len())
-    }
-
-    fn append(&mut self, hash: &str, at: u64, bytes: &[u8]) -> io::Result<()> {
-        let path = self.at(hash, ".part")?;
-        let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
-        if f.metadata()?.len() != at {
-            return Err(io::Error::other("not where the file ends"));
-        }
-        f.write_all(bytes)
-    }
-
-    fn finish(&mut self, hash: &str) -> io::Result<()> {
-        let part = self.at(hash, ".part")?;
-        let f = fs::File::open(&part)?;
-        if ark::file::hash_reader(f)? != hash {
-            let _ = fs::remove_file(&part);
-            return Err(not_its_bytes());
-        }
-        fs::File::open(&part)?.sync_all()?;
-        fs::rename(part, self.at(hash, "")?)
-    }
-
-    fn put(&mut self, bytes: &[u8]) -> io::Result<String> {
-        let hash = ark::file::hash(bytes);
-        if self.len(&hash).is_none() {
-            let part = self.at(&hash, ".part")?;
-            let mut f = fs::File::create(&part)?;
-            f.write_all(bytes)?;
-            f.sync_all()?;
-            fs::rename(part, self.at(&hash, "")?)?;
-        }
-        Ok(hash)
-    }
-
-    fn unsent(&self) -> Vec<String> {
-        let Ok(rd) = fs::read_dir(&self.0) else { return vec![] };
-        let names = rd.filter_map(|e| e.ok()?.file_name().into_string().ok());
-        names
-            .filter_map(|n| n.strip_suffix(".unsent").map(String::from))
-            .filter(|h| is_hash(h))
-            .collect()
-    }
-
-    fn mark(&mut self, hash: &str, unsent: bool) -> io::Result<()> {
-        let path = self.at(hash, ".unsent")?;
-        match unsent {
-            true => fs::write(path, []),
-            false => match fs::remove_file(path) {
-                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-                _ => Ok(()),
-            },
-        }
+/// Marked made here and not yet sent, or not.
+fn mark(d: &mut dyn Disk, hash: &str, unsent: bool) -> io::Result<()> {
+    let b = blob(hash, ".unsent")?;
+    match unsent {
+        true => d.put(&b, &[]),
+        false => d.remove(&b),
     }
 }
 
 /// What a peer does with files: its store, and where each transfer is.
 pub(crate) struct Files {
-    pub store: Box<dyn Store>,
+    pub store: Box<dyn Disk>,
     /// A device's: the files it was asked for and does not hold whole, and
     /// those of them wanted on this connection.
     wanted: BTreeSet<String>,
@@ -236,7 +138,7 @@ pub(crate) struct Files {
 }
 
 impl Files {
-    pub fn new(store: Box<dyn Store>) -> Files {
+    pub fn new(store: Box<dyn Disk>) -> Files {
         Files {
             store,
             wanted: BTreeSet::new(),
@@ -256,9 +158,9 @@ impl Default for Files {
 }
 
 /// The file's bytes from `at`, as one chunk.
-fn chunk(store: &dyn Store, hash: &str, at: u64) -> Option<Frame> {
-    let size = store.len(hash)?;
-    let bytes = store.read(hash, at, CHUNK).ok()?;
+fn chunk(store: &dyn Disk, hash: &str, at: u64) -> Option<Frame> {
+    let size = whole(store, hash)?;
+    let bytes = bytes(store, hash, at, CHUNK).ok()?;
     Some(Frame::Chunk {
         hash: hash.into(),
         at,
@@ -271,29 +173,31 @@ fn chunk(store: &dyn Store, hash: &str, at: u64) -> Option<Frame> {
 /// the next is wanted from — after it, or, out of step (a chunk again after
 /// a reconnect), from where the file stops — or none, the file whole; or why
 /// its bytes are not its name's.
-fn arriving(store: &mut dyn Store, hash: &str, at: u64, size: u64, bytes: &[u8]) -> Result<Option<u64>, String> {
+fn arriving(store: &mut dyn Disk, hash: &str, at: u64, size: u64, bytes: &[u8]) -> Result<Option<u64>, String> {
     let end = at + bytes.len() as u64;
-    if store.append(hash, at, bytes).is_err() || bytes.is_empty() && end < size {
-        return Ok(Some(store.partial(hash)));
+    if append(store, hash, at, bytes).is_err() || bytes.is_empty() && end < size {
+        return Ok(Some(partial(store, hash)));
     }
     match end < size {
         true => Ok(Some(end)),
-        false => store.finish(hash).map(|_| None).map_err(|e| e.to_string()),
+        false => finish(store, hash).map(|_| None).map_err(|e| e.to_string()),
     }
 }
 
 impl Peer {
-    /// The store files are kept in: a device's is `files/` beside its disk
-    /// when it has a directory ([`crate::Disk::files`]).
-    pub fn keep_files(&mut self, store: Box<dyn Store>) {
+    /// The disk files are kept on: a device's is `files/` beside its own
+    /// when that is a directory ([`crate::Disk::files`]).
+    pub fn keep_files(&mut self, store: Box<dyn Disk>) {
         self.files.store = store;
     }
 
     /// A file made here: kept, marked unsent and offered to the server when
     /// there is one; its reference, for a row to name.
     pub fn put_file(&mut self, bytes: &[u8], media: &str) -> Result<FileRef, String> {
-        let hash = self.files.store.put(bytes).map_err(|e| e.to_string())?;
-        self.files.store.mark(&hash, true).map_err(|e| e.to_string())?;
+        let store = &mut *self.files.store;
+        let hash = put(store, bytes)
+            .and_then(|h| mark(store, &h, true).map(|_| h))
+            .map_err(|e| e.to_string())?;
         if self.linked {
             let size = bytes.len() as u64;
             self.frames.push(Frame::Offer { hash, size }.enc());
@@ -305,8 +209,8 @@ impl Peer {
     /// A file's bytes, when they are here; when not, wanted from the
     /// server, and the views rung when they arrive.
     pub fn file(&self, f: &FileRef) -> Option<Vec<u8>> {
-        let size = self.files.store.len(&f.hash)?;
-        self.files.store.read(&f.hash, 0, size as usize).ok()
+        let size = whole(&*self.files.store, &f.hash)?;
+        bytes(&*self.files.store, &f.hash, 0, size as usize).ok()
     }
 
     /// [`Peer::file`], wanted from the server when it is not here.
@@ -325,7 +229,7 @@ impl Peer {
 
     /// The files this device made that the server does not hold yet.
     pub fn files_unsent(&self) -> Vec<String> {
-        self.files.store.unsent()
+        unsent(&*self.files.store)
     }
 
     /// How many wanted files have arrived whole: what a UI redraws on.
@@ -335,7 +239,7 @@ impl Peer {
 
     fn want(&mut self, hash: &str) {
         // Here already: a store shared with the server's, which has it.
-        if self.files.store.len(hash).is_some() {
+        if whole(&*self.files.store, hash).is_some() {
             if self.files.wanted.remove(hash) {
                 self.files.absent.remove(hash);
                 self.files.arrived += 1;
@@ -343,7 +247,7 @@ impl Peer {
             return;
         }
         if self.linked && self.files.asked.insert(hash.into()) {
-            let at = self.files.store.partial(hash);
+            let at = partial(&*self.files.store, hash);
             self.frames.push(Frame::Want { hash: hash.into(), at }.enc());
         }
     }
@@ -351,10 +255,10 @@ impl Peer {
     /// A connection up: every unsent file offered, every wanted one asked.
     pub(crate) fn files_connected(&mut self) {
         self.files.asked.clear();
-        for hash in self.files.store.unsent() {
-            match self.files.store.len(&hash) {
+        for hash in unsent(&*self.files.store) {
+            match whole(&*self.files.store, &hash) {
                 Some(size) => self.frames.push(Frame::Offer { hash, size }.enc()),
-                None => drop(self.files.store.mark(&hash, false)),
+                None => drop(mark(&mut *self.files.store, &hash, false)),
             }
         }
         let wanted: Vec<String> = self.files.wanted.iter().cloned().collect();
@@ -366,7 +270,7 @@ impl Peer {
         match f {
             // The server taking an upload: the next chunk of it.
             Frame::Want { hash, at } => {
-                if self.files.store.unsent().contains(&hash) {
+                if unsent(&*self.files.store).contains(&hash) {
                     if let Some(c) = chunk(&*self.files.store, &hash, at) {
                         self.frames.push(c.enc());
                     }
@@ -385,7 +289,7 @@ impl Peer {
                 self.files.asked.remove(&hash);
             }
             Frame::Have { hash } => {
-                let _ = self.files.store.mark(&hash, false);
+                let _ = mark(&mut *self.files.store, &hash, false);
                 if self.files.wanted.contains(&hash) {
                     self.files.asked.remove(&hash);
                     self.want(&hash);
@@ -409,10 +313,10 @@ impl Peer {
                 if !is_hash(&hash) {
                     return absent(hash, "not a file's name");
                 }
-                if files.store.len(&hash).is_some() {
+                if whole(&*files.store, &hash).is_some() {
                     return to(Frame::Have { hash });
                 }
-                let at = files.store.partial(&hash);
+                let at = partial(&*files.store, &hash);
                 to(Frame::Want { hash, at })
             }
             Frame::Chunk { hash, at, size, bytes } => match arriving(&mut *files.store, &hash, at, size, &bytes) {
@@ -487,7 +391,7 @@ impl Peer {
     pub(crate) fn have_files(&mut self, hashes: &[String]) -> bool {
         let mut all = true;
         for h in hashes {
-            if self.files.store.len(h).is_none() {
+            if whole(&*self.files.store, h).is_none() {
                 all = false;
                 if is_hash(h) && self.files.wanted.insert(h.clone()) {
                     self.want(h);

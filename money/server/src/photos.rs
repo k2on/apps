@@ -67,7 +67,7 @@ pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<
 /// The importer's peer reading photos: from the server's store, with
 /// `program`.
 pub fn handle(peer: &mut Peer, program: PathBuf, data: PathBuf) -> std::io::Result<()> {
-    peer.keep_files(Box::new(ark_peer::Dir::of_server(&data)?));
+    peer.keep_files(Box::new(ark_peer::Files::new(data.join("log").join("files"))?));
     peer.handle::<Photo>(move |p, photo| read(p, &program, &data, photo));
     Ok(())
 }

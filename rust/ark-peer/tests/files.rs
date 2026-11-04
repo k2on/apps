@@ -283,7 +283,6 @@ fn bytes_that_are_not_their_name_are_not_kept() {
 /// and has not sent; or by a store that takes a path for a name.
 #[test]
 fn a_device_s_unsent_files_outlast_a_restart() {
-    use ark_peer::Store;
     let dir = tempfile::tempdir().unwrap();
     let open = || {
         Peer::open(
@@ -308,7 +307,16 @@ fn a_device_s_unsent_files_outlast_a_restart() {
     assert!(alice.files_unsent().is_empty());
     assert!(open().files_unsent().is_empty(), "the mark is off on the disk");
 
-    let mut store = ark_peer::Dir::new(dir.path().join("x")).unwrap();
-    assert!(store.append("../../etc/passwd", 0, b"no").is_err());
-    assert_eq!(store.len("../files"), None);
+    // A name that is a path is no file's: nothing is written beside `files/`.
+    let mut hub = Peer::serve(config(false), Box::new(ark_peer::Files::new(dir.path().join("x")).unwrap()), 0);
+    let c = hub.accept(alice.me().clone());
+    let bytes = b"no".to_vec();
+    let chunk = ark::frames::Frame::Chunk {
+        hash: "../escape".into(),
+        at: 0,
+        size: 2,
+        bytes,
+    };
+    hub.frame(c, chunk.enc(), 0);
+    assert!(!dir.path().join("x").join("escape.part").exists(), "a path is no file's name");
 }

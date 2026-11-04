@@ -97,7 +97,6 @@ pub use app::{nobody, Arg, Outcome};
 pub use ark::file::FileRef;
 pub use ark::peer::{Fold, Scoping};
 pub use disk::{Disk, Files, Memory};
-pub use files::{Dir, Store};
 #[cfg(not(target_arch = "wasm32"))]
 pub use handle::{dev, Authenticate, Handle};
 pub use hub::{Called, ConnId, Deliver};

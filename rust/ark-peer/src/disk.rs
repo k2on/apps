@@ -6,7 +6,9 @@
 //! A [`Disk`] is named blobs — a file each in a directory ([`Files`]), a
 //! buffer each ([`Memory`], for tests and the simulator), or a key each of
 //! a page's `localStorage` (`Local`, in a browser, for what is small) — and the format is
-//! written once, over them ([`Disk::load`], [`Disk::record`]):
+//! written once, over them ([`Disk::load`], [`Disk::record`]). The files
+//! rows name are blobs too, of a disk of their own ([`Disk::files`]: a
+//! directory's `files/`), read and written in parts (`crate::files`):
 //!
 //! - `kv`: the store's rows whole ([`Record::Rows`]), the log's table's
 //!   among them, written (to a temporary file, then renamed) when a
@@ -31,7 +33,7 @@
 //!
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use ark::format::Encode;
@@ -104,10 +106,38 @@ pub trait Disk: Send {
     /// Bytes added at the end of a blob.
     fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()>;
 
-    /// Where the files its rows name are kept (`crate::files`): in memory,
-    /// unless the disk is a directory.
-    fn files(&self) -> Box<dyn crate::files::Store> {
-        Box::new(crate::files::Memory::default())
+    /// A blob's size, when there is one.
+    fn len(&self, _name: &str) -> Option<u64> {
+        None
+    }
+
+    /// At most `n` of a blob's bytes from `at`: what a file is read in
+    /// parts by.
+    fn read(&self, name: &str, _at: u64, _n: usize) -> io::Result<Vec<u8>> {
+        Err(io::Error::other(format!("{name} is not read in parts here")))
+    }
+
+    /// A blob given another name, durably; the one it had gone.
+    fn rename(&mut self, from: &str, to: &str) -> io::Result<()> {
+        let b = self.get(from)?.ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        self.put(to, &b)?;
+        self.remove(from)
+    }
+
+    /// A blob gone; none there is no failure.
+    fn remove(&mut self, name: &str) -> io::Result<()> {
+        Err(io::Error::other(format!("{name} is not removed here")))
+    }
+
+    /// The names of its blobs that end `suffix`.
+    fn names(&self, _suffix: &str) -> Vec<String> {
+        vec![]
+    }
+
+    /// Where the files its rows name are kept (`crate::files`), as blobs
+    /// named by their hash: in memory, unless the disk is a directory.
+    fn files(&self) -> Box<dyn Disk> {
+        Box::new(Memory::default())
     }
 
     /// What the store made durable is opened from: its rows as last written
@@ -175,6 +205,25 @@ impl Disk for Memory {
         self.0.entry(name.into()).or_default().extend_from_slice(bytes);
         Ok(())
     }
+
+    fn len(&self, name: &str) -> Option<u64> {
+        self.0.get(name).map(|b| b.len() as u64)
+    }
+
+    fn read(&self, name: &str, at: u64, n: usize) -> io::Result<Vec<u8>> {
+        let b = self.0.get(name).ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        let at = (at as usize).min(b.len());
+        Ok(b[at..(at + n).min(b.len())].to_vec())
+    }
+
+    fn remove(&mut self, name: &str) -> io::Result<()> {
+        self.0.remove(name);
+        Ok(())
+    }
+
+    fn names(&self, suffix: &str) -> Vec<String> {
+        self.0.keys().filter(|n| n.ends_with(suffix)).cloned().collect()
+    }
 }
 
 /// The blobs in a directory, a file each; one written whole goes to a
@@ -196,11 +245,41 @@ impl Files {
 }
 
 impl Disk for Files {
-    fn files(&self) -> Box<dyn crate::files::Store> {
-        match crate::files::Dir::new(self.dir.join("files")) {
+    fn files(&self) -> Box<dyn Disk> {
+        match Files::new(self.dir.join("files")) {
             Ok(d) => Box::new(d),
-            Err(_) => Box::new(crate::files::Memory::default()),
+            Err(_) => Box::new(Memory::default()),
         }
+    }
+
+    fn len(&self, name: &str) -> Option<u64> {
+        fs::metadata(self.dir.join(name)).ok().map(|m| m.len())
+    }
+
+    fn read(&self, name: &str, at: u64, n: usize) -> io::Result<Vec<u8>> {
+        let mut f = File::open(self.dir.join(name))?;
+        f.seek(SeekFrom::Start(at))?;
+        let mut b = Vec::with_capacity(n);
+        f.take(n as u64).read_to_end(&mut b)?;
+        Ok(b)
+    }
+
+    fn rename(&mut self, from: &str, to: &str) -> io::Result<()> {
+        File::open(self.dir.join(from))?.sync_all()?;
+        fs::rename(self.dir.join(from), self.dir.join(to))
+    }
+
+    fn remove(&mut self, name: &str) -> io::Result<()> {
+        match fs::remove_file(self.dir.join(name)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+
+    fn names(&self, suffix: &str) -> Vec<String> {
+        let Ok(rd) = fs::read_dir(&self.dir) else { return vec![] };
+        let names = rd.filter_map(|e| e.ok()?.file_name().into_string().ok());
+        names.filter(|n| n.ends_with(suffix)).collect()
     }
 
     fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>> {
@@ -221,7 +300,8 @@ impl Disk for Files {
     fn append(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
         let mut f = OpenOptions::new().create(true).append(true).open(self.dir.join(name))?;
         f.write_all(bytes)?;
-        match self.sync || name != "log" {
+        // A file arriving is synced as it is renamed whole.
+        match self.sync || name != "log" && !name.ends_with(".part") {
             true => f.sync_data(),
             false => Ok(()),
         }
