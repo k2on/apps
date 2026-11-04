@@ -1,11 +1,10 @@
 //! What a peer keeps beside its log, as rows (§1.3, §1.7, §1.9): the
 //! schema [`Local`], on a local instance under the `local.` names of the
-//! peer's disk ([`Shared`]): a server's journal — each origin's last
-//! `local` and actor (`origin`), the intents it refused (`verdict`); a
-//! device's replica (`replica`: its origin, the last `local` drawn, who
-//! last signed in, its fork) and its pending intents (`pending`). A
-//! server's volatile space as it last closed is beside them, its rows whole
-//! (`local.volatile`, `crate::hub`). And an app's logins
+//! peer's disk ([`Shared`]): a device's replica (`replica`: its origin, the
+//! last `local` drawn, who last signed in, its fork) and its pending
+//! intents (`pending`). A server's journal and its volatile space as it
+//! last closed are beside them, each one record (`local.journal`,
+//! `local.volatile`, `crate::hub`). And an app's logins
 //! ([`Logins`]), a local instance of `ark-auth`'s schema.
 
 use std::io;
@@ -13,31 +12,11 @@ use std::sync::{Arc, Mutex};
 
 use ark::db::{Db, Durable as Run};
 use ark::hash::EntryHash;
-use ark::log::{Entry, EntryId, Origin, Seq};
+use ark::log::{Entry, Origin, Seq};
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
 use ark_auth::remember::Remembered;
 
 use crate::{Disk, Instance};
-
-/// A server's: an origin's last `local` judged, and the actor it is bound
-/// to.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "origin")]
-pub struct Last {
-    #[ark(key)]
-    pub origin: Origin,
-    pub actor: String,
-    pub last: i64,
-}
-
-/// A server's: an intent it refused, and why.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "verdict")]
-pub struct Refused {
-    #[ark(key)]
-    pub entry: EntryId,
-    pub why: String,
-}
 
 /// A device's, one row: its origin and the last `local` drawn from it,
 /// who last signed in on it, and its fork while alone.
@@ -67,8 +46,6 @@ pub struct Intent {
 /// What a peer keeps beside its log.
 #[derive(Schema)]
 pub struct Local {
-    pub origin: Last,
-    pub verdict: Refused,
     pub replica: Replica,
     pub pending: Intent,
 }
