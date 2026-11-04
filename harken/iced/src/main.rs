@@ -932,6 +932,12 @@ impl App {
         crate::client::memory(client::nobody(), None)
     }
 
+    /// Whether this window has no server: what it does is pending on its
+    /// replica, kept here until "connect" names one.
+    pub fn is_alone(&self) -> bool {
+        self.server.is_empty()
+    }
+
     /// "Connect": the replica this window has been using alone joins the
     /// server in the entry, in place — the local history pending there, the
     /// lists patched rather than rebuilt — the server is remembered for the
@@ -2119,7 +2125,7 @@ impl App {
         if cfg!(feature = "demo") {
             return Some(Account::alone("A demo \u{2014} what you do stays on this device"));
         }
-        if self.peer.client.lock().link.url.is_none() {
+        if self.is_alone() {
             return Some(Account::alone("Alone \u{2014} what you do is kept on this device"));
         }
         let login = self.login.as_ref()?;

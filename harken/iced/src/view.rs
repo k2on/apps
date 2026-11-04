@@ -103,7 +103,7 @@ impl App {
             bottom: 0.0,
             left: GUTTER,
         });
-        let alone = self.peer.client.lock().link.url.is_none();
+        let alone = self.is_alone();
         let paged: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             true => column![top, self.view_page()].spacing(10).into(),
             false => stack![self.view_page(), top].into(),
@@ -1970,7 +1970,7 @@ impl App {
     /// Exactly [`arkui::account::HEIGHT`] tall, because the menu hangs off
     /// its bottom before anything is laid out.
     fn view_top(&self) -> Element<'_, Message> {
-        let alone = self.peer.client.lock().link.url.is_none();
+        let alone = self.is_alone();
         let left: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             // Alone: everything works here, and this is how it starts
             // syncing — a server, then its sign-in (`docs/plan-alone.md` §4).
@@ -2020,7 +2020,7 @@ impl App {
             (c.cursor(), c.pending_len())
         };
         let mut line = format!("{} songs \u{b7} cursor {cursor} \u{b7} {pending} pending", p.items().len());
-        if !cfg!(feature = "demo") && p.client.lock().link.url.is_none() {
+        if !cfg!(feature = "demo") && self.is_alone() {
             line = format!("alone \u{b7} {line}");
         } else if !cfg!(feature = "demo") {
             // Who the replica's session row says, once it has synced.
