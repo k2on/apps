@@ -2083,7 +2083,6 @@ impl App {
         let l = &self.listening;
         let stats = l.stats();
         let client = &self.peer.client.lock();
-        let status = client.status();
         let live = crate::client::live_status(client);
         let session = self.session.as_ref();
         let yes = |b: bool| if b { "yes" } else { "no" };
@@ -2099,10 +2098,10 @@ impl App {
             ("this device".into(), format!("{} \u{b7} {}", l.name(), l.me())),
             ("can play".into(), yes(Player::AUDIBLE).into()),
             (String::new(), String::new()),
-            ("link".into(), status.link.clone()),
+            ("link".into(), client.link_state().into()),
             (
                 "client linked \u{b7} epoch".into(),
-                format!("{} \u{b7} {}", yes(status.linked), status.epoch),
+                format!("{} \u{b7} {}", yes(client.linked), client.link.epoch),
             ),
             (
                 "live seq \u{b7} pending \u{b7} synced".into(),
@@ -2230,7 +2229,7 @@ impl App {
         rows.push((String::new(), String::new()));
         rows.push((
             "log cursor \u{b7} pending \u{b7} songs".into(),
-            format!("{} \u{b7} {} \u{b7} {}", status.cursor, status.pending, self.peer.items().len()),
+            format!("{} \u{b7} {} \u{b7} {}", client.cursor(), client.pending_len(), self.peer.items().len()),
         ));
         // What this window did, and what became of each: pending, in the log,
         // or refused and why — the sentence every replica reaches.

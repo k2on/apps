@@ -143,18 +143,6 @@ impl Told {
     }
 }
 
-/// Where a device stands, as a status line says it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Status {
-    pub link: String,
-    pub linked: bool,
-    /// How many connections have opened.
-    pub epoch: u64,
-    pub cursor: i64,
-    pub pending: usize,
-    pub user: String,
-}
-
 /// Nobody, on a session of this device's own: who a device nobody ever
 /// signed in on authors as.
 pub fn nobody() -> Who {
@@ -369,12 +357,6 @@ impl Peer {
         self.told.replies.remove(&id)
     }
 
-    /// How many calls' answers wait to be taken: a driver tells its app when
-    /// this grows.
-    pub fn replies_waiting(&self) -> usize {
-        self.told.replies.len()
-    }
-
     pub fn pending_len(&self) -> usize {
         self.log.pending.len()
     }
@@ -390,8 +372,11 @@ impl Peer {
         self.log.store.state_hash()
     }
 
-    pub fn status(&self) -> Status {
-        let link = match (self.link.url.is_none(), self.link.token.is_some(), self.linked, self.link.offline) {
+    /// Where its link stands, as a status line says it: `alone` (no
+    /// server), `signed out`, `online`, `offline`, `connecting` or
+    /// `waiting to dial`.
+    pub fn link_state(&self) -> &'static str {
+        match (self.link.url.is_none(), self.link.token.is_some(), self.linked, self.link.offline) {
             // No server to dial: what it does is pending, kept here.
             (true, ..) => "alone",
             (_, false, ..) => "signed out",
@@ -399,14 +384,6 @@ impl Peer {
             (_, _, false, true) => "offline",
             _ if self.dialling() => "connecting",
             _ => "waiting to dial",
-        };
-        Status {
-            link: link.into(),
-            linked: self.linked,
-            epoch: self.link.epoch,
-            cursor: self.cursor(),
-            pending: self.pending_len(),
-            user: self.me().actor.clone(),
         }
     }
 }

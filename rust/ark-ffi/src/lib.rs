@@ -482,15 +482,15 @@ impl Peer {
 
     pub fn status(&self) -> Status {
         let s = self.shared.lock();
-        let st = s.peer.status();
+        let p = &s.peer;
         Status {
-            link: st.link,
-            linked: st.linked,
-            epoch: st.epoch,
-            cursor: st.cursor,
-            pending: st.pending as u64,
-            user: st.user,
-            session: s.peer.me().session.clone(),
+            link: p.link_state().into(),
+            linked: p.linked,
+            epoch: p.link.epoch,
+            cursor: p.cursor(),
+            pending: p.pending_len() as u64,
+            user: p.me().actor.clone(),
+            session: p.me().session.clone(),
             failure: s.peer.failure().map(Into::into),
             denied: s.state.denied.clone(),
         }

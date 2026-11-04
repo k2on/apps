@@ -93,7 +93,7 @@ use ark::schema::Space;
 use ark::store::Change;
 use ark::{Domain, Refusal};
 
-pub use app::{nobody, Arg, Outcome, Status, Update};
+pub use app::{nobody, Arg, Outcome, Update};
 pub use ark::file::FileRef;
 pub use ark::peer::{Fold, Scoping};
 pub use disk::{Disk, Files, Memory};

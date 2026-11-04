@@ -1114,7 +1114,7 @@ mod tests {
         let id = peer.items()[1].id;
         peer.client.lock().mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
-        assert_eq!(peer.client.lock().status().link, "alone");
+        assert_eq!(peer.client.lock().link_state(), "alone");
         let before = peer.items().to_vec();
 
         peer.join("ws://hub/sync");

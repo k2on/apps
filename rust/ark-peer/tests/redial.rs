@@ -46,14 +46,14 @@ fn a_dropped_connection_is_dialled_again_at_once_and_a_failing_dial_waits() {
     // so that nobody between pumps sees the link waiting.
     c.pump();
     assert_eq!(2, dials.lock().unwrap().len(), "dropped: dialled again at once");
-    assert_eq!("connecting", c.status().link, "and never shown waiting");
+    assert_eq!("connecting", c.link_state(), "and never shown waiting");
 
     // The second was refused: now it waits, 5 ms, then 10, then 20 and no longer.
     let deadline = Instant::now() + Duration::from_secs(2);
     while dials.lock().unwrap().len() < 5 && Instant::now() < deadline {
         c.pump();
         if dials.lock().unwrap().len() < 5 {
-            assert_eq!("waiting to dial", c.status().link, "refused: waiting, and said so");
+            assert_eq!("waiting to dial", c.link_state(), "refused: waiting, and said so");
         }
         wait(&c, &rx, Duration::from_millis(1));
     }
