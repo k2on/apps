@@ -12,6 +12,13 @@
 //! docs/plan-observe.md), and when they stopped carrying a state hash:
 //! each change started every log afresh, by decision, rather than
 //! migrating one.
+//!
+//! Read as it is since a server's journal and its volatile space moved out
+//! of its local instance's rows into records beside them (`local.journal`,
+//! `local.volatile`): the journal this fixture wrote as rows is not read,
+//! so a server opened from it knows the origins its log holds and no
+//! refusal, and a device pushing past what was folded closes the gap
+//! (`Verdict::Gap`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -71,7 +71,8 @@ writer's own runner must fail.
 What a peer keeps on disk is a contract too: a new build opens the
 directory an old one wrote. `disk.rs` (`rust/ark-peer/src/`) is its
 format — `kv`, `log`, `local.kv`, `local.log` per peer, under a
-server's `log/`; a server's `session.key` beside it (`ark-auth`). The
+server's `log/` (its journal and its volatile space as it last closed
+beside them, `local.journal` and `local.volatile`); a server's `session.key` beside it (`ark-auth`). The
 fixture `rust/ark-peer/tests/data/server/` is a server's directory with a
 device's replica in it, written once by an older build and opened by
 `rust/ark-peer/tests/old_data.rs`, which reads back its rows, its chain
