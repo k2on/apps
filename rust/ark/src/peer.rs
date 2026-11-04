@@ -82,7 +82,7 @@
 //! its `Hello` the authority takes the union from its store and sends it as
 //! a fill of one part at the head; every entry after is sent to it alone
 //! (`To::Session`) with the facts the scope's filter makes of the entry's
-//! ([`scoped`]), the union's state hash after them, and a
+//! (`scoped`), the union's state hash after them, and a
 //! chain of its own from that fill. `To::All` is for connections fed
 //! whole. The replica is the same machine: it applies facts like every
 //! replica, its own intents previewed over what it holds and confirmed by
@@ -1347,14 +1347,11 @@ fn part(store: &Store, order: &[String], head: (Seq, EntryHash), from: Option<Cu
     }
 }
 
-/// A scope's verdict on a row of a table.
-pub type Holds<'a> = dyn FnMut(&str, &[u8]) -> Result<bool, Refusal> + 'a;
-
 /// §1.8 A scope's filter over facts, in order: the changes they make to the
 /// rows it holds — an edit across its line as the add or the remove it is.
 /// `holds` is the scope's verdict on a row of a table; a scope is a
 /// function of the row alone, so the filter keeps nothing.
-pub fn scoped(facts: &[Change], holds: &mut Holds) -> Result<Vec<Change>, Refusal> {
+fn scoped(facts: &[Change], mut holds: impl FnMut(&str, &[u8]) -> Result<bool, Refusal>) -> Result<Vec<Change>, Refusal> {
     let mut out = vec![];
     for c in facts {
         let t = || c.table().to_string();
