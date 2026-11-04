@@ -81,15 +81,17 @@ impl Wire for Closed {
 /// The link's state: where and as whom it dials, the connection, and when
 /// it is dialled again — at once after a connection that had opened closes;
 /// `backoff.0` milliseconds after a dial that fails, doubling to
-/// `backoff.1`, back to the first once one opens; and how long, in ms, one
-/// pump takes in what the connection said before it leaves the rest for
-/// the next (`budget`), so a driver answers between them: what a
+/// `backoff.1`, back to the first once one opens; and how many of what the
+/// connection said one pump takes in (`chunk`), the rest kept for the next,
+/// so a driver answers between them; and how long, in ms, one pump takes
+/// things in before it leaves the rest for the next (`budget`): what a
 /// page whose one thread also draws asks, so a fill is taken in between
 /// frames — the next pump is then due at once ([`Peer::deadline`]).
 pub struct Link {
     pub url: Option<String>,
     pub token: Option<String>,
     pub backoff: (u64, u64),
+    pub chunk: usize,
     pub budget: Option<u64>,
     backlog: std::collections::VecDeque<Event>,
     pub(crate) dial: Option<Box<dyn Dial>>,
@@ -111,6 +113,7 @@ impl Default for Link {
             url: None,
             token: None,
             backoff: (250, 30_000),
+            chunk: usize::MAX,
             budget: None,
             backlog: Default::default(),
             dial: None,
@@ -256,8 +259,10 @@ impl Peer {
         self.dial_if_due(now);
         let l = &mut self.link;
         l.backlog.extend(l.wire.as_mut().map(|w| w.events()).unwrap_or_default());
-        let ends = l.budget.map(|b| now + b);
-        while let Some(e) = self.link.backlog.pop_front() {
+        let (mut left, ends) = (l.chunk, l.budget.map(|b| now + b));
+        while left > 0 {
+            let Some(e) = self.link.backlog.pop_front() else { break };
+            left -= 1;
             p.moved = true;
             match e {
                 Event::Open => {
