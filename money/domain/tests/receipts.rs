@@ -227,7 +227,7 @@ fn target_receipt(items: &[(&str, &str, i64)], total: i64) -> ReceiptImport {
 fn a_receipt_splits_what_paid_for_it() {
     let (mut b, checking, groceries, eggs, improvement) = household();
     b.spend(checking, "2026-10-01", "Target", Some(groceries), -2_000);
-    b.from_bank(checking, "2026-10-25", "Target", Some(groceries), -8_740);
+    b.bank_spends(checking, "2026-10-25", "Target", Some(groceries), -8_740);
     let id = b.register(None).into_iter().find(|l| l.amount == -8_740).unwrap().id;
     let r = target_receipt(
         &[
@@ -747,7 +747,7 @@ fn a_receipt_never_overrides_a_category_somebody_confirmed() {
     assert_eq!(line(&b, -4_590).category, "Gas");
 
     // Not approved yet: the receipt's category.
-    b.from_bank(checking, "2026-10-21", "Costco", Some(groceries), -8_578);
+    b.bank_spends(checking, "2026-10-21", "Costco", Some(groceries), -8_578);
     b.run("add_receipts", &fillup("2103771734395261021", "2026-10-21", -8_578)).unwrap();
     assert_eq!(line(&b, -8_578).category, "Gas");
 }

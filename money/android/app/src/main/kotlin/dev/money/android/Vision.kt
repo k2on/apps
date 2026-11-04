@@ -67,6 +67,12 @@ data class Quad(val tl: Pt, val tr: Pt, val br: Pt, val bl: Pt) {
 
     fun scaled(s: Float): Quad = Quad(tl * s, tr * s, br * s, bl * s)
 
+    /** Moved by `dx`, `dy`: in a frame cut from this one at `-dx`, `-dy`. */
+    fun shifted(dx: Float, dy: Float): Quad {
+        fun m(p: Pt) = Pt(p.x + dx, p.y + dy)
+        return Quad(m(tl), m(tr), m(br), m(bl))
+    }
+
     /** Each corner `t` of the way to `o`'s. */
     fun toward(o: Quad, t: Float): Quad {
         fun l(a: Pt, b: Pt) = Pt(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
