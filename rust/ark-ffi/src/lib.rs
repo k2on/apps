@@ -7,8 +7,9 @@
 //! bridge a [`Peer`] is called by function name with JSON — `mutate` (on
 //! the space the function writes), `query`, `view` — and says where it stands
 //! (`status`), what became of each intent (`outcome`, `take_refusals`),
-//! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
-//! and whether it is alone (`alone`, `join`).
+//! and who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session
+//! rows). With no server (`connect` never called) it is a replica whose
+//! intents stay pending, kept on its disk until it has one.
 //! The typed Kotlin and Swift over these names is generated from the domain
 //! (`arkdb gen`), types only; a view whose row type has a twin is read
 //! typed instead, its rows UniFFI's records ([`typed`]).
@@ -134,8 +135,8 @@ impl Outcome {
 /// Where a device stands, as a status line says it.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct Status {
-    /// `alone`, `signed out`, `online`, `offline`, `connecting` or `waiting
-    /// to dial`.
+    /// `alone` (no server), `signed out`, `online`, `offline`, `connecting`
+    /// or `waiting to dial`.
     pub link: String,
     pub linked: bool,
     pub epoch: u64,
@@ -143,7 +144,6 @@ pub struct Status {
     pub pending: u64,
     pub user: String,
     pub session: String,
-    pub alone: bool,
     /// The disk's last refusal, while it lasts.
     pub failure: Option<String>,
     /// Why the server last turned this login away (close 4401), until the
@@ -491,7 +491,6 @@ impl Peer {
             pending: st.pending as u64,
             user: st.user,
             session: s.peer.me().session.clone(),
-            alone: st.alone,
             failure: s.peer.failure().map(Into::into),
             denied: s.state.denied.clone(),
         }
@@ -542,19 +541,6 @@ impl Peer {
     /// dialled after it, what is pending kept.
     pub fn logout(&self) {
         self.shared.act(|s| drop(s.peer.sign_out()));
-    }
-
-    /// Alone: its own authority over a local history (§1.7).
-    pub fn alone(&self) {
-        self.shared.act(|s| s.peer.alone());
-    }
-
-    /// Joined to the server at `url`: the local history handed over.
-    pub fn join(&self, url: String) {
-        self.shared.act(|s| {
-            s.peer.join();
-            s.peer.connect(&url);
-        });
     }
 }
 

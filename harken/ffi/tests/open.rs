@@ -1,4 +1,4 @@
-//! harken's peer through the bridge: opened alone on a disk, a playlist
+//! harken's peer through the bridge: opened on a disk with no server, a playlist
 //! made by name and seen in a view, and the listening session read.
 
 use ark_ffi::Taken;
@@ -11,7 +11,6 @@ fn harken_opens_and_is_called_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let device = r#"{"can_play":true,"id":"","kind":"phone","name":"Pixel","user":""}"#;
     let p = harken_open(dir.path().to_str().unwrap().into(), None, device.into()).unwrap();
-    p.alone();
     let lists = p.view("playlists".into(), "null".into()).unwrap();
     p.mutate("create_playlist".into(), r#"{"name":"Mix"}"#.into()).unwrap();
     let Taken::Patched { ops } = lists.take().update else {

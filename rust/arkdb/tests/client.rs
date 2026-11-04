@@ -219,5 +219,5 @@ fn a_mutate_writes_one_pending_record() {
     assert_eq!(c.log.pending.len(), 8002);
     assert_eq!(c.log.pending[8001].entry.local, 8002);
     let _ = c.mutate_at(create, named("And one"), 9001);
-    assert_eq!(c.log.pending.last().unwrap().entry.local, 8003, "the session's local read back");
+    assert_eq!(c.log.pending.back().unwrap().entry.local, 8003, "the session's local read back");
 }

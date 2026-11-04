@@ -8,7 +8,7 @@
 //!
 //! A script is [`Op`]s: authoring on the log or the live space, a
 //! partition and its heal, the server restarted from its disk, a client
-//! reopened from its own, a sign-in, going alone and joining, a delivery.
+//! reopened from its own, a sign-in, a while offline, a delivery.
 //! [`Net::settle`] reconnects everyone and delivers perfectly until nothing
 //! is in flight or pending. Every frame moved is checked to decode to the
 //! bytes that were sent, and every view a client keeps is mirrored by its
@@ -68,13 +68,15 @@ pub enum Op {
     Restart,
     Reopen(i64),
     SignIn(i64, Who),
-    Alone(i64),
-    Join(i64),
+    /// A client offline for a while — no server reached, its intents
+    /// pending — until `Online`.
+    Offline(i64),
+    Online(i64),
     /// A device's disk loses its pending intents but keeps the last
     /// `local` it drew, as a phone's did whose intents before its 18th
     /// were nowhere: what was lost is gone, and the next one is pushed
     /// past a gap, which the authority answers (`Verdict::Held`) and the
-    /// device numbers on from. A device alone keeps its chain.
+    /// device numbers on from.
     LosePending(i64),
     /// The clock moves on this many milliseconds.
     Wait(i64),
@@ -103,8 +105,8 @@ pub struct Net {
     /// Every login each client held, by session: what its entries' roles
     /// must be.
     pub logins: BTreeMap<String, Who>,
-    /// The clients alone.
-    pub alone: BTreeSet<i64>,
+    /// The clients offline.
+    pub offline: BTreeSet<i64>,
     /// Each view kept, by client and number: what it is of, and the list
     /// its patches made.
     pub views: BTreeMap<(i64, usize), Watched>,
@@ -149,7 +151,7 @@ impl Net {
             misread: vec![],
             wire: vec![],
             logins: BTreeMap::new(),
-            alone: BTreeSet::new(),
+            offline: BTreeSet::new(),
             views: BTreeMap::new(),
         };
         for (w, c) in clients {
@@ -231,26 +233,21 @@ impl Net {
             Op::Partition(i) => self.partition(i),
             Op::Heal(i) => self.heal(i),
             Op::Restart => self.restart(),
-            Op::LosePending(i) if !self.alone.contains(&i) => {
+            Op::LosePending(i) => {
                 self.partition(i);
                 let c = self.client(i);
                 let lost = ark::log::Durable {
                     rows: c.log.confirmed_rows(),
-                    logged: vec![],
                     local: c.log.local,
-                    pending: vec![],
+                    ..Default::default()
                 };
                 c.step(Space::Durable, ark::peer::Input::Open(lost));
                 self.heal(i);
             }
-            Op::LosePending(_) => {}
             Op::Reopen(i) => {
                 self.partition(i);
                 self.views.retain(|k, _| k.0 != i);
                 let c = self.clients.remove(&i).unwrap().reopen();
-                if !c.log.is_authority() {
-                    self.alone.remove(&i);
-                }
                 self.clients.insert(i, c);
                 self.heal(i);
             }
@@ -260,16 +257,13 @@ impl Net {
                 self.client(i).sign_in(w);
                 self.heal(i);
             }
-            Op::Alone(i) => {
+            Op::Offline(i) => {
                 self.partition(i);
-                self.client(i).alone();
-                self.alone.insert(i);
+                self.offline.insert(i);
             }
-            Op::Join(i) => {
-                if self.alone.remove(&i) {
+            Op::Online(i) => {
+                if self.offline.remove(&i) {
                     self.heal(i);
-                    self.client(i).join();
-                    self.told_by_client(i);
                 }
             }
             Op::Wait(ms) => {
@@ -296,9 +290,9 @@ impl Net {
         self.to_client.remove(&i);
     }
 
-    /// A client comes back on a fresh connection; a client alone stays so.
+    /// A client comes back on a fresh connection; a client offline stays so.
     pub fn heal(&mut self, i: i64) {
-        if self.conns.contains_key(&i) || self.alone.contains(&i) {
+        if self.conns.contains_key(&i) || self.offline.contains(&i) {
             return;
         }
         // The connection is who the client last signed in as, whatever it
@@ -424,14 +418,14 @@ impl Net {
         }
     }
 
-    /// Everyone back from alone, reconnected, the relay run out, and
+    /// Everyone back online, reconnected, the relay run out, and
     /// everything delivered perfectly until nothing is in flight and nothing
     /// is pending; bounded, so a fleet that cannot converge is an error
     /// rather than a hang.
     pub fn settle(&mut self) -> Result<(), String> {
         let all: Vec<i64> = self.clients.keys().copied().collect();
         for i in &all {
-            self.run(&Op::Join(*i));
+            self.run(&Op::Online(*i));
         }
         for i in &all {
             self.partition(*i);

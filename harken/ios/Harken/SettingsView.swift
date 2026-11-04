@@ -111,7 +111,7 @@ struct DiagnosticsView: View {
 
     static func numbers(_ s: Status) -> [(String, String)] {
         [("user", s.user), ("session", s.session), ("link", s.link), ("linked", "\(s.linked)"), ("epoch", "\(s.epoch)"),
-         ("cursor", "\(s.cursor)"), ("not synced", "\(s.pending)"), ("alone", "\(s.alone)"),
+         ("cursor", "\(s.cursor)"), ("not synced", "\(s.pending)"),
          ("disk", s.failure ?? "—"), ("denied", s.denied ?? "—")]
     }
 

@@ -143,20 +143,19 @@ impl Seeder {
 pub const DEMO: &str = "demo";
 const LOCAL: &str = "local";
 
-/// The demo's replica: every seeded row, as the confirmed state of a peer that
-/// is its own authority.
+/// The demo's replica: every seeded row, as the confirmed state of a peer with
+/// no server.
 pub fn seeded() -> Replica {
     open(seeded_disk(1))
 }
 
-/// The demo's replica opened from its records: its own authority, as the
+/// The demo's replica opened from its records, with no server, as the
 /// library's identity.
 pub fn open(disk: Memory) -> Replica {
     let mut peer = crate::client::open(Box::new(disk), None, crate::listening::device());
     // The demo's identity is the library's, as its seed was
     // (`docs/plan-guards.md` D1).
     peer.set_roles([crate::domain::LIBRARY]);
-    peer.alone();
     peer
 }
 

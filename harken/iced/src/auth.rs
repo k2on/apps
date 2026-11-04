@@ -191,13 +191,11 @@ pub fn remember_joined(server: &str) -> Result<(), String> {
     }
 }
 
-/// This device's replica with no server: its own authority, authoring as
+/// This device's replica with no server: what it does pending, authoring as
 /// nobody until somebody signs in at a server it joins.
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub fn open_alone() -> Result<Replica, String> {
-    let mut r = crate::client::open(disk(LOCAL)?, None, crate::listening::device());
-    r.alone();
-    Ok(r)
+    Ok(crate::client::open(disk(LOCAL)?, None, crate::listening::device()))
 }
 
 /// What a window on a server, with nobody signed in, does as it opens.

@@ -1,5 +1,5 @@
-//! The demo: the seeded household (`money_domain::seed`) on a peer that is
-//! its own authority, in memory — what the apps run with no server, their
+//! The demo: the seeded household (`money_domain::seed`) on a peer with no
+//! server, in memory — what the apps run with no server, their
 //! previews draw and their screenshots are taken of. It is the demo
 //! window's (`money/iced`) to the cent: Alex's, some of it Sam's, the
 //! Chase card's last few days waiting for a look. Nothing it does leaves

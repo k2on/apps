@@ -8,7 +8,7 @@
 //! to four clients — one fed by the scope `demo.top_two`, some holding the
 //! admin role, sometimes the live room — and a script of authoring,
 //! partitions and heals, the server restarted, a client reopened, a
-//! sign-in, going alone and joining, waits and deliveries; sometimes the
+//! sign-in, a while offline, waits and deliveries; sometimes the
 //! hub keeps only a few entries above its horizon. After every op every
 //! view kept is its patches and a fresh evaluation; once settled,
 //! [`check`]: every whole client converged, the partial one exactly its
@@ -182,8 +182,8 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
             17 if r.one_in(3) => Op::Restart,
             18 if r.one_in(2) => Op::Reopen(i),
             19 if whole && r.one_in(3) => Op::SignIn(i, login(i + !partial as i64, k + 1, r.one_in(3))),
-            20 if whole && r.one_in(2) => Op::Alone(i),
-            21 => Op::Join(i),
+            20 if whole && r.one_in(2) => Op::Offline(i),
+            21 => Op::Online(i),
             22 => Op::Wait(r.below(80) as i64),
             23 if r.one_in(3) => Op::LosePending(i),
             _ => Op::Step,

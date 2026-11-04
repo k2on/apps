@@ -455,7 +455,7 @@ pub struct PeerProc {
     pub name: String,
     pub dir: PathBuf,
     pub user: Option<String>,
-    /// Started `--alone`: its own authority, dialling nothing. Cleared, the
+    /// Started `--alone`: no server, dialling nothing, its intents pending. Cleared, the
     /// next start is `--server` over the same directory — the join.
     pub alone: bool,
     pub proxy: Proxy,

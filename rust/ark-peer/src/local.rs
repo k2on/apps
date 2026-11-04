@@ -1,10 +1,10 @@
 //! What a peer keeps beside its log, as rows (§1.3, §1.7, §1.9): the
 //! schema [`Local`], on a local instance under the `local.` names of the
 //! peer's disk (`Shared`): a device's replica (`replica`: its origin, the
-//! last `local` drawn, who last signed in, its fork) and its pending
-//! intents (`pending`). A server's journal and its volatile space as it
-//! last closed are beside them, each one record (`local.journal`,
-//! `local.volatile`, `crate::hub`). And an app's logins
+//! last `local` drawn, who last signed in). A device's pending intents are
+//! beside them, records appended ([`Kept`], `local.pending`); a server's
+//! journal and its volatile space as it last closed, each one record
+//! (`local.journal`, `local.volatile`, `crate::hub`). And an app's logins
 //! ([`Logins`]), a local instance of `ark-auth`'s schema.
 
 use std::io;
@@ -12,14 +12,15 @@ use std::sync::{Arc, Mutex};
 
 use ark::db::{Db, Durable as Run};
 use ark::hash::EntryHash;
-use ark::log::{Entry, Origin, Seq};
+use ark::log::{Origin, Seq};
+use ark::peer::Pending;
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
 use ark_auth::remember::Remembered;
 
 use crate::{Disk, Instance};
 
-/// A device's, one row: its origin and the last `local` drawn from it,
-/// who last signed in on it, and its fork while alone.
+/// A device's, one row: its origin and the last `local` drawn from it (as
+/// it was signed in: [`Kept`] has it since), and who last signed in on it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[ark(table = "replica")]
 pub struct Replica {
@@ -31,23 +32,50 @@ pub struct Replica {
     pub local: i64,
     pub actor: Option<String>,
     pub session: String,
-    pub fork: Option<(Seq, EntryHash)>,
-}
-
-/// A device's: one of its own intents not yet confirmed, by its `local`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "pending")]
-pub struct Intent {
-    #[ark(key)]
-    pub local: i64,
-    pub entry: Entry,
 }
 
 /// What a peer keeps beside its log.
 #[derive(Schema)]
 pub struct Local {
     pub replica: Replica,
-    pub pending: Intent,
+}
+
+/// The blob a device's pending intents are kept in, under [`LOCAL`].
+pub const PENDING: &str = "pending";
+
+/// One record of a device's pending intents (§1.7), length-framed in
+/// [`PENDING`]: so many taken off the front (confirmed or refused), these
+/// put on the back, each with its preview's changes — or, `whole`, these
+/// all of them, the blob written afresh; with the last `local` drawn and
+/// the head of the log the changes stand on. A mutate appends one put, so
+/// what it writes is the same however many are pending; an open puts the
+/// changes back rather than running the intents again.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Kept {
+    pub whole: bool,
+    pub gone: u64,
+    pub put: Vec<Pending>,
+    pub local: i64,
+    pub at: Option<(Seq, EntryHash)>,
+}
+
+impl Kept {
+    /// The pending intents the records in `blob` keep, read up to the first
+    /// that does not read; the last of them, and how many there are.
+    pub fn read(blob: &[u8]) -> (Vec<Pending>, Kept, usize) {
+        let (mut pending, mut last) = (std::collections::VecDeque::new(), Kept::default());
+        let records = crate::disk::framed::<Kept>(blob).0;
+        let n = records.len();
+        for k in records {
+            if k.whole {
+                pending.clear();
+            }
+            pending.drain(..(k.gone as usize).min(pending.len()));
+            pending.extend(k.put.iter().cloned());
+            last = Kept { put: vec![], ..k };
+        }
+        (pending.into(), last, n)
+    }
 }
 
 /// The names a peer's local instance journals under on its disk.

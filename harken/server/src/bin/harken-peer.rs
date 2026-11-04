@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! harken-peer --dir DIR --server URL [--user NAME]     a peer of that server
-//! harken-peer --dir DIR --alone [--user NAME]          its own authority
+//! harken-peer --dir DIR --alone [--user NAME]          no server
 //!   [--pump-ms 50] [--ping-ms 20000] [--backoff-ms 500,30000]
 //!   [--auth-patience-ms N] [--roles ROLE,ROLE]
 //!   [--device KIND,NAME,CAN_PLAY]
@@ -40,13 +40,13 @@
 //! `--ping-ms` is read and has no effect: the hub pings, and the link
 //! answers.
 //!
-//! **Alone, then a server, is one directory.** A directory used `--alone`
-//! and then opened with `--server` is a peer joining that server: the chain
-//! it sequenced alone is pushed as intents on its first connection and is
-//! pending until the server answers it — as the login `--user` signs in,
-//! or as nobody until `sign_in` — and the other way round a directory
-//! opened `--alone` after a server goes alone from where it is. `join` and
-//! `leave` do the same without a restart.
+//! **Alone, then a server, is one directory.** A peer `--alone` dials
+//! nothing: what it does is pending, kept in its directory. Opened with
+//! `--server`, it pushes all of it on its first connection, pending until
+//! the server answers it — as the login `--user` signs in, or as nobody
+//! until `sign_in` — and the other way round a directory opened `--alone`
+//! after a server stops dialling it and goes on from where it is. `join`
+//! and `leave` do the same without a restart.
 //!
 //! **It reads commands as JSON lines on stdin and answers each with one JSON
 //! line on stdout**, so a test — or a shell — drives it with no socket of
@@ -100,7 +100,7 @@ use std::time::{Duration, Instant};
 
 use ark::hash::hex;
 use ark::log::EntryId;
-use ark::peer::{Journal, Role, Who};
+use ark::peer::Who;
 use ark_auth::client::Patience;
 use ark_auth::Login;
 use ark_peer::{Config, Files, Peer};
@@ -503,11 +503,6 @@ impl Headless {
         let mut client = Peer::open(config, who.clone(), Box::new(disk));
         client.link.backoff = (f.backoff.0.max(1), f.backoff.1.max(f.backoff.0).max(1));
         client.link.chunk = CHUNK;
-        match (f.alone, client.is_alone()) {
-            (true, false) => client.alone(),
-            (false, true) => client.join(),
-            _ => {}
-        }
         // A directory that was another login's, or alone: what it has
         // pending is authored again as this one.
         if login.is_some()
@@ -544,7 +539,7 @@ impl Headless {
         let (server, token) = (self.server.clone(), self.token.clone());
         self.peer.with(|p| {
             p.set_token(None);
-            if let (Some(server), Some(token), false) = (server, token, p.is_alone()) {
+            if let (Some(server), Some(token)) = (server, token) {
                 p.set_token(Some(token));
                 p.connect(&ark_auth::socket_url(&server));
             }
@@ -605,19 +600,11 @@ impl Headless {
 
     fn status(&self) -> Answer {
         let st = self.peer.status();
-        let (alone, signed_out) = (st.alone, self.token.is_none() && !st.alone);
-        let (dialling, diverged, fork) = self.peer.with(|p| {
-            let fork = match &p.log.role {
-                Role::Authority {
-                    journal:
-                        Journal {
-                            fork: Some((n, _)), ..
-                        },
-                } => *n,
-                _ => 0,
-            };
-            (!p.is_signed_out(), p.log.diverged.len(), fork)
-        });
+        let alone = self.server.is_none();
+        let signed_out = self.token.is_none() && !alone;
+        let (dialling, diverged) = self
+            .peer
+            .with(|p| (!p.is_signed_out(), p.log.diverged.len()));
         let link = match (alone, dialling, st.linked) {
             (true, _, _) => "alone",
             (_, false, _) if signed_out => "signed out",
@@ -639,7 +626,6 @@ impl Headless {
             .set("link", json!(link))
             .set("opens", json!(st.epoch))
             .set("diverged", json!(diverged))
-            .set("fork", json!(fork))
     }
 
     /// Signs in as `login`: the client authors as it, the link dials with it.
@@ -685,18 +671,19 @@ impl Headless {
                 Answer::ok(ok).set("cursor", json!(self.peer.status().cursor))
             }
             Cmd::Settle { timeout } => {
-                // Linked (or alone), nothing pending, and the cursor still
-                // for two steps of `--pump-ms`: what "caught up" can mean
-                // from this end alone. The fleet compares against the
-                // server's head as well.
-                let (mut last, mut still) = (-1, 0);
+                // Linked and nothing pending (or alone, with no server to
+                // wait for), and the cursor still for two steps of
+                // `--pump-ms`: what "caught up" can mean from this end
+                // alone. The fleet compares against the server's head as
+                // well.
+                let (mut last, mut still, alone) = (-1, 0, self.server.is_none());
                 let ok = self.until(timeout, self.still, |p| {
                     if p.cursor() == last {
                         still += 1;
                     } else {
                         (last, still) = (p.cursor(), 0);
                     }
-                    (p.linked || p.is_alone()) && p.pending_len() == 0 && still >= 2
+                    (alone || p.linked && p.pending_len() == 0) && still >= 2
                 });
                 let st = self.peer.status();
                 Answer::ok(ok)
@@ -814,11 +801,6 @@ impl Headless {
                     },
                 };
                 let took = Instant::now();
-                self.peer.with(|p| {
-                    if p.is_alone() {
-                        p.join();
-                    }
-                });
                 self.server = Some(server.clone());
                 match &login {
                     Some(l) => {
@@ -841,12 +823,12 @@ impl Headless {
                     .set("cursor", json!(st.cursor))
             }
             Cmd::Leave => {
-                if self.peer.status().alone {
+                if self.server.is_none() {
                     return Answer::refused("already alone");
                 }
                 self.peer.with(|p| {
                     p.set_token(None);
-                    p.alone();
+                    p.link.url = None;
                 });
                 self.server = None;
                 Answer::ok(true).set("cursor", json!(self.peer.status().cursor))
@@ -1284,17 +1266,18 @@ mod tests {
         assert_eq!(rows["rows"].as_array().unwrap().len(), 1, "{rows}");
         assert_eq!(rows["rows"][0]["name"], json!("Road trip"));
         let after = line(&mut h, r#"{"cmd":"hash"}"#);
-        assert_ne!(
-            before["hash"], after["hash"],
-            "alone, the confirmed store moved"
+        assert_eq!(
+            (&before["hash"], after["cursor"].clone()),
+            (&after["hash"], json!(0)),
+            "alone, nothing is confirmed"
         );
-        assert_eq!(after["cursor"], json!(1));
+        assert_ne!(before["view"], after["view"], "alone, the view moved");
         assert_eq!(
             line(&mut h, &format!(r#"{{"cmd":"standing","id":{id}}}"#)),
-            json!({"standing": "confirmed"})
+            json!({"standing": "pending"})
         );
         let status = line(&mut h, r#"{"cmd":"status"}"#);
-        assert_eq!(status["pending"], json!(0));
+        assert_eq!(status["pending"], json!(1));
         assert_eq!(status["denied"], Value::Null);
         assert_eq!(status["link"], json!("alone"));
         assert_eq!(
@@ -1309,11 +1292,11 @@ mod tests {
     }
 
     /// A directory used `--alone` and then opened with `--server` is the
-    /// join — what it sequenced alone is pending, handed over on the first
+    /// join — what it did alone is pending, handed over on the first
     /// connection — and `leave` and `join` walk the same two transitions
     /// without a restart. No server answers here, so nothing is pushed;
     /// the fleet has the rest. Falsified by `Cmd::Leave` answering without
-    /// going alone: the cursor stayed at 0 with three pending.
+    /// forgetting the server: the link said "signed out", not "alone".
     #[test]
     fn alone_then_a_server_is_one_directory() {
         let dir = tempfile::tempdir().unwrap();
@@ -1337,7 +1320,10 @@ mod tests {
         }
         let status = line(&mut h, r#"{"cmd":"status"}"#);
         assert_eq!(status["link"], json!("alone"));
-        assert_eq!(status["cursor"], json!(3));
+        assert_eq!(
+            (&status["cursor"], &status["pending"]),
+            (&json!(0), &json!(3))
+        );
         drop(h);
 
         let online = flags(&a(&["--dir", d, "--server", &server])).unwrap();
@@ -1349,9 +1335,9 @@ mod tests {
             "joined, signed out: the three are pending: {status}"
         );
         let left = line(&mut h, r#"{"cmd":"leave"}"#);
-        assert_eq!(left["cursor"], json!(3), "{left}");
+        assert_eq!(left["cursor"], json!(0), "{left}");
         let status = line(&mut h, r#"{"cmd":"status"}"#);
-        assert_eq!(status["pending"], json!(0));
+        assert_eq!(status["pending"], json!(3));
         assert_eq!(status["link"], json!("alone"));
         let joined = line(&mut h, &format!(r#"{{"cmd":"join","server":"{server}"}}"#));
         assert_eq!(joined["pending"], json!(3), "{joined}");

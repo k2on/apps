@@ -5,7 +5,7 @@
 //! Everything goes in through the domain's own mutations, the ones every
 //! peer runs — accounts opened, a budget laid out, paydays, bills, a card
 //! the bank feeds through Plaid ([`Bank`]) — applied once each over one
-//! store and kept as the snapshot a peer alone opens on, which is what
+//! store and kept as the snapshot a peer with no server opens on, which is what
 //! harken's demo does with its library (`harken/iced/src/seed.rs`). The
 //! dates are today's, so the month on screen is this one; the amounts are
 //! drawn from a fixed sequence, so every load is the same household.
@@ -718,13 +718,12 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
     disk
 }
 
-/// The demo's peer: the seeded household, its own authority, holding the
+/// The demo's peer: the seeded household, with no server, holding the
 /// bank importer's role so that "Sync" can run the import here as a
 /// server's importer would.
 pub fn open(disk: Memory) -> Replica {
     let mut peer = Replica::open_as(Config::of(domain()), Box::new(disk), None);
     peer.set_roles([BANK]);
-    peer.alone();
     peer
 }
 

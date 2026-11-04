@@ -2,9 +2,9 @@
 //! own intents pending, and a role.
 //!
 //! ```text
-//! Role  = Replica | Authority { journal }   -- "alone" is an authority whose journal has a fork
+//! Role  = Replica | Authority { journal }
 //! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Open | Connected
-//!       | Alone | Join | Compact | Write { facts } | Feed { who, scope }
+//!       | Compact | Write { facts } | Feed { who, scope }
 //! Output= Send | Fanout | To { session } | Changes(by span) | Persist | Refused { id, why } | Confirmed(id)
 //! ```
 //!
@@ -86,15 +86,12 @@
 //! union must hold the rows its rows reference; a `Hello` from a
 //! connection whose union does not is answered with nothing.
 //!
-//! **Going alone and joining.** `Alone` makes a replica an authority over
-//! its own log from where it is (the fork), sequencing its pending intents
-//! and every one after; a pending intent that refuses then stays pending,
-//! unrun, the server's to judge. `Join` turns back into a replica, the
-//! chain above the fork its pending intents beside those, in the order
-//! they were authored, and pushes them as after any connection: the server
-//! judges each as the push it is, and the peer rebases onto what it
-//! answers. A chain is never taken whole: an entry refused loses that
-//! entry, not the chain.
+//! **Offline is not a mode.** A replica with no server, or one not reached
+//! for a while, is a replica not connected: its intents stay pending, the
+//! store their preview, and are pushed when it connects. What a driver
+//! keeps of them on its disk — each intent and its preview's changes, and
+//! the head they stand on ([`Durable::at`]) — is opened without running
+//! them again; their confirmations, in order, take the previewed path.
 //!
 //! **Live state is a second machine** (§1.9): a peer [`Peer::in_space`]
 //! `Volatile` is this machine over the volatile tables, sharing the
@@ -112,11 +109,11 @@
 //! its last [`WINDOW`] `local`s.
 //!
 //! **The horizon** (`Compact`) is moved by its driver, in either role, up
-//! to the head (a device alone, up to its fork): a replica's pending
+//! to the head: a replica's pending
 //! intents are rebased by their own changes over the head, never by an
 //! entry below it, so a replica folds as an authority does.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::sync::Arc;
 
@@ -277,7 +274,7 @@ pub struct Who {
 }
 
 /// One of this peer's own intents, with what its last run changed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Pending {
     pub entry: Entry,
     pub changes: Vec<Change>,
@@ -292,11 +289,9 @@ impl Pending {
 /// What an authority keeps beside its log: each origin's last `local` and
 /// the actor it is bound to; the intents it refused, and why — an intent
 /// at or below its origin's last and not refused is in the log, or folded
-/// below its horizon; and, for a device alone, where it forked from the
-/// log it will join again.
+/// below its horizon.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Journal {
-    pub fork: Option<(Seq, EntryHash)>,
     pub refused: BTreeMap<EntryId, String>,
     pub last: BTreeMap<Origin, (String, i64)>,
 }
@@ -351,8 +346,6 @@ pub enum Input {
     },
     Open(Durable),
     Connected,
-    Alone,
-    Join,
     Compact(Seq),
     /// An authority's own facts, made by its driver (a closure over an
     /// unwired instance's tables): logged as an entry naming no function,
@@ -421,7 +414,11 @@ pub struct Peer {
     /// the log as its table (§1.6).
     pub store: Store,
     pub functions: Functions,
-    pub pending: Vec<Pending>,
+    pub pending: VecDeque<Pending>,
+    /// How many times the pending intents were run again: what a driver
+    /// keeping them compares, to know when to write them whole rather than
+    /// the ones taken off the front and put on the back.
+    pub reruns: u64,
     pub role: Role,
     pub me: Who,
     pub space: Space,
@@ -487,7 +484,8 @@ impl Peer {
         Peer {
             store,
             functions,
-            pending: vec![],
+            pending: VecDeque::new(),
+            reruns: 0,
             role,
             me,
             space: Space::Durable,
@@ -584,8 +582,6 @@ impl Peer {
             Input::Mutate { func, input, now, cause } => self.mutate(func, input, now, cause, &mut o),
             Input::Open(d) => self.open(d, &mut o),
             Input::Connected => self.connected(&mut o),
-            Input::Alone => self.alone(&mut o),
-            Input::Join => self.join(&mut o),
             Input::Compact(n) => self.compact(n, &mut o),
             Input::Write { facts, now } if self.is_authority() => {
                 let entry = self.entry(String::new(), vec![], now);
@@ -647,14 +643,12 @@ impl Peer {
 
     /// Runs the pending intents again, in order, over the store as it is;
     /// one that now refuses stays pending with no changes, the authority's
-    /// to judge. A device alone keeps its own unrun: they are its server's.
+    /// to judge.
     fn redo_pending(&mut self, o: &mut Out) {
+        self.reruns += 1;
         for p in std::mem::take(&mut self.pending) {
-            let changes = match self.is_authority() {
-                true => vec![],
-                false => self.attempt(&p.entry, o).unwrap_or_default(),
-            };
-            self.pending.push(Pending::new(p.entry, changes));
+            let changes = self.attempt(&p.entry, o).unwrap_or_default();
+            self.pending.push_back(Pending::new(p.entry, changes));
         }
     }
 
@@ -695,14 +689,14 @@ impl Peer {
             run => {
                 self.local = local;
                 o.send(Frame::push(self.space, [entry.clone()]));
-                self.pending.push(Pending::new(entry, run.unwrap_or_default()));
+                self.pending.push_back(Pending::new(entry, run.unwrap_or_default()));
             }
         }
     }
 
     /// An authority's own intent judged by what its run did — a function's
     /// or its driver's facts — and the verdict told: logged, its `local`
-    /// drawn, or refused, drawing none, so a chain made alone has no gaps.
+    /// drawn, or refused, drawing none.
     fn decide(&mut self, entry: Entry, run: Result<Vec<Change>, Refusal>, o: &mut Out) {
         let (id, local) = (entry.id, entry.local);
         match self.judged(entry, run, o) {
@@ -973,9 +967,9 @@ impl Peer {
                 }
                 return self.ask(o);
             }
-            let previewed = !undone && self.pending.first().is_some_and(|p| p.entry.id == l.entry.id && p.changes == l.facts);
+            let previewed = !undone && self.pending.front().is_some_and(|p| p.entry.id == l.entry.id && p.changes == l.facts);
             if previewed {
-                self.pending.remove(0);
+                self.pending.pop_front();
             } else {
                 if !undone {
                     self.undo_pending(o);
@@ -1126,8 +1120,9 @@ impl Peer {
     }
 
     fn repush(&mut self, o: &mut Out) {
-        for page in self.pending.chunks(PAGE) {
-            o.send(Frame::push(self.space, page.iter().map(|p| p.entry.clone())));
+        for page in self.pending.make_contiguous().chunks(PAGE) {
+            o.out
+                .push(Output::Send(Frame::push(self.space, page.iter().map(|p| p.entry.clone())).enc()));
         }
     }
 
@@ -1141,7 +1136,7 @@ impl Peer {
     /// and pushed again. None of them has been judged: the authority's last
     /// is below them all.
     fn close_gap(&mut self, last: i64, o: &mut Out) {
-        if self.pending.first().is_none_or(|p| p.entry.local <= last + 1) {
+        if self.pending.front().is_none_or(|p| p.entry.local <= last + 1) {
             return;
         }
         self.undo_pending(o);
@@ -1168,65 +1163,15 @@ impl Peer {
         self.ask_more(o);
     }
 
-    fn alone(&mut self, o: &mut Out) {
-        // A replica filling holds too little to judge by: it stays one.
-        if self.is_authority() || self.fill.is_some() {
-            return;
-        }
-        self.undo_pending(o);
-        let fork = Some(self.log().head());
-        self.role = Role::Authority {
-            journal: Journal { fork, ..Journal::default() },
-        };
-        for p in std::mem::take(&mut self.pending) {
-            match self.attempt(&p.entry, o) {
-                Ok(facts) => self.decide(p.entry, Ok(facts), o),
-                // Kept for the server, whose `local`s it would otherwise skip.
-                Err(_) => self.pending.push(Pending::new(p.entry, vec![])),
-            }
-        }
-    }
-
-    /// The chain above the fork made pending intents, its facts their
-    /// changes, with those kept unrun as it went alone among them in the
-    /// order they were authored (one already in the chain is not two), the
-    /// log made durable at the fork; then a `Hello` there and every pending
-    /// intent pushed, as on any connection.
-    fn join(&mut self, o: &mut Out) {
-        let Role::Authority {
-            journal: Journal { fork: Some((at, _)), .. },
-        } = self.role
-        else {
-            return;
-        };
-        let chain: Vec<Logged> = self.log().after(at).collect();
-        self.store.log_truncate(at);
-        let mut pending: Vec<Pending> = chain.into_iter().map(|l| Pending::new(l.entry, l.facts)).collect();
-        for p in std::mem::take(&mut self.pending) {
-            let e = &p.entry;
-            if pending.iter().all(|q| q.entry.id != e.id) {
-                let at = pending.iter().position(|q| (q.entry.origin, e.local < q.entry.local) == (e.origin, true));
-                pending.insert(at.unwrap_or(pending.len()), p);
-            }
-        }
-        (self.pending, self.role) = (pending, Role::Replica);
-        o.persist(Record::Rows(self.confirmed_rows()));
-        self.connected(o);
-    }
-
-    /// Moves the horizon to `n`, at most the head (a device alone keeps
-    /// what is above its fork): the log's rows below it deleted, and the
+    /// Moves the horizon to `n`, at most the head: the log's rows below it
+    /// deleted, and the
     /// store as confirmed made durable whole, which folds every write
     /// before. A replica may move its own: its pending intents stand on
     /// the head and are rebased by their own changes, so no entry below
     /// the head is read again; a `Hello` says the head.
     fn compact(&mut self, n: Seq, o: &mut Out) {
         let (head, base) = (self.log().head().0, self.log().base_seq());
-        let fork = match &self.role {
-            Role::Authority { journal } => journal.fork,
-            Role::Replica => None,
-        };
-        let n = n.clamp(base, fork.map_or(head, |(f, _)| f.min(head)));
+        let n = n.clamp(base, head);
         if n == base || self.fill.is_some() {
             return;
         }
@@ -1241,8 +1186,10 @@ impl Peer {
     /// as a chain, and the log's rows appended since, in order, each
     /// linking onto the head and its facts applied, all or none, up to the
     /// first that does not — the store is then made durable whole again,
-    /// without it. A fill under way begins again from nothing. The pending intents run again on
-    /// top.
+    /// without it. A fill under way begins again from nothing. The pending
+    /// intents' changes are put back on top when the log stands where they
+    /// were made ([`Durable::at`]) and apply; from the first that does not,
+    /// they run again.
     fn open(&mut self, d: Durable, o: &mut Out) {
         self.undo_pending(o);
         self.pending.clear();
@@ -1278,8 +1225,21 @@ impl Peer {
             }
         }
         self.local = self.local.max(d.local);
-        self.pending = d.pending.into_iter().map(|entry| Pending::new(entry, vec![])).collect();
-        self.redo_pending(o);
+        let mut kept = d.at.is_some() && d.at == Some(self.log().head());
+        for p in d.pending {
+            kept = kept && self.store.apply_all(&p.changes).is_ok();
+            let changes = match kept {
+                true => {
+                    o.tell(Some(p.entry.span()), p.changes.iter().cloned());
+                    p.changes
+                }
+                false => self.attempt(&p.entry, o).unwrap_or_default(),
+            };
+            self.pending.push_back(Pending::new(p.entry, changes));
+        }
+        if !kept && !self.pending.is_empty() {
+            self.reruns += 1;
+        }
     }
 }
 

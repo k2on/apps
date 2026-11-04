@@ -24,9 +24,7 @@ fn librarian(dir: &tempfile::TempDir) -> Arc<Peer> {
         picture: String::new(),
     };
     let device = r#"{"can_play":true,"id":"","kind":"phone","name":"Pixel","user":""}"#;
-    let p = harken_open(dir.path().to_str().unwrap().into(), Some(login), device.into()).unwrap();
-    p.alone();
-    p
+    harken_open(dir.path().to_str().unwrap().into(), Some(login), device.into()).unwrap()
 }
 
 /// The playlists and a playlist's contents, read typed while the old path

@@ -364,7 +364,6 @@ class Screens {
                 pending = 2u,
                 user = "ana",
                 session = "s-7f3a",
-                alone = false,
                 failure = null,
                 denied = null,
             )

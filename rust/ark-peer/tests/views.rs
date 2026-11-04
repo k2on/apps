@@ -37,9 +37,8 @@ fn author(p: &mut Peer, name: &str, input: Vec<u8>) {
 fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
     let domain = ark::register!(Domain::new::<Demo>("demo", "1"); create_playlist, add_to_playlist, rename_playlist, named);
     let mut p = Peer::open_as(Config::of(Arc::new(domain)), Box::new(Memory::default()), None);
-    p.alone();
     author(&mut p, "demo.create_playlist", CreatePlaylist { name: "Road".into() }.to_bytes());
-    let road = p.log.log().entries()[0].entry.id.draw(0);
+    let road = p.log.pending[0].entry.id.draw(0);
     let track = AddToPlaylist {
         playlist_id: Id::new(road),
         track_id: "t1".into(),
@@ -65,14 +64,14 @@ fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
 /// A UI's view (`Watched`) keeps its rows as its own type: refused at open
 /// it is no rows, asked again when anything moved; once it answers its rows
 /// are read whole, then patched; and opened for one login it is opened
-/// again for the next, whose rows are its own. Falsified by settling a view
+/// again for the next, read afresh — alice's intents, pending still, are
+/// bob's now, authored again from his origin, so his Road is another. Falsified by settling a view
 /// whoever is signed in (the `who` test taken out of `Watched::take`): after
-/// bob signed in it said nothing moved, alice's two tracks still its rows.
+/// bob signed in it said it was patched.
 #[test]
 fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
     let domain = ark::register!(Domain::new::<Demo>("demo", "1"); create_playlist, add_to_playlist, rename_playlist, named);
     let mut p = Peer::open_as(Config::of(Arc::new(domain)), Box::new(Memory::default()), None);
-    p.alone();
     p.sign_in(ark::peer::Who {
         actor: "alice".into(),
         session: "a".into(),
@@ -82,7 +81,7 @@ fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
     let mut w = ark_peer::Watched::open(&mut p, "demo.named", road.clone(), |b| Item::from_bytes(b).unwrap());
     assert_eq!((w.view(), w.rows.len()), (None, 0), "refused: no rows");
     author(&mut p, "demo.create_playlist", road);
-    let id = Id::new(p.log.log().entries()[0].entry.id.draw(0));
+    let id = Id::new(p.log.pending[0].entry.id.draw(0));
     let add = |t: &str| AddToPlaylist {
         playlist_id: id,
         track_id: t.into(),
@@ -99,5 +98,6 @@ fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
         roles: vec![],
     });
     assert_eq!(w.settle(&mut p, false), Update::Reset, "opened again for bob");
-    assert!(w.rows.is_empty(), "bob has no playlist Road");
+    // His Road is drawn from his origin; alice's adds name hers.
+    assert!(w.rows.is_empty(), "bob's Road has no tracks");
 }

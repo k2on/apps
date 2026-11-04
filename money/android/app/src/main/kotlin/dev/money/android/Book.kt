@@ -387,7 +387,7 @@ private constructor(
                 banks = banks?.rows?.toList().orEmpty(),
                 linked = linked?.rows?.toList().orEmpty(),
                 asks = asks?.rows?.toList().orEmpty(),
-                link = Link(s.linked, if (s.alone) "alone" else s.link, s.pending.toInt()),
+                link = Link(s.linked, s.link, s.pending.toInt()),
                 who = who.replaceFirstChar { it.uppercase() },
                 demo = demo,
                 server = server,

@@ -13,9 +13,9 @@
 //! ([`Peer::open_as`]) authors as whoever last signed in on it — [`nobody`],
 //! on a device where nobody ever did — and dials nothing; a login
 //! ([`Peer::login`]) makes its pending intents the signer's, as
-//! [`Peer::sign_in`] re-authors them, and dials. A device that joined a
-//! server while alone hands its history over as intents pending under the
-//! login that signs in there (§1.7).
+//! [`Peer::sign_in`] re-authors them, and dials. What a device did with
+//! no server is pending, and is handed over under the login that signs in
+//! at one (§1.7).
 
 use std::collections::BTreeMap;
 
@@ -153,7 +153,6 @@ pub struct Status {
     pub cursor: i64,
     pub pending: usize,
     pub user: String,
-    pub alone: bool,
 }
 
 /// Nobody, on a session of this device's own: who a device nobody ever
@@ -271,8 +270,8 @@ impl Peer {
 
     /// An intent of the function `name` (its binding, or the binding's last
     /// part) on `input` — a value, or its encoding — on the space the
-    /// function writes, now: its id, or the refusal its preview (or, alone
-    /// or serving, its sequencing) gave it here and now. A live one the
+    /// function writes, now: its id, or the refusal its preview (or, serving,
+    /// its sequencing) gave it here and now. A live one the
     /// config relays (`Live::ephemeral`) goes through the relay, under the
     /// id it is sent with when nothing goes first.
     pub fn mutate(&mut self, name: &str, input: impl Arg) -> Result<EntryId, String> {
@@ -375,10 +374,6 @@ impl Peer {
         self.told.replies.len()
     }
 
-    pub fn is_alone(&self) -> bool {
-        self.log.is_authority()
-    }
-
     pub fn pending_len(&self) -> usize {
         self.log.pending.len()
     }
@@ -395,7 +390,8 @@ impl Peer {
     }
 
     pub fn status(&self) -> Status {
-        let link = match (self.is_alone(), self.link.token.is_some(), self.linked, self.link.offline) {
+        let link = match (self.link.url.is_none(), self.link.token.is_some(), self.linked, self.link.offline) {
+            // No server to dial: what it does is pending, kept here.
             (true, ..) => "alone",
             (_, false, ..) => "signed out",
             (_, _, true, _) => "online",
@@ -410,7 +406,6 @@ impl Peer {
             cursor: self.cursor(),
             pending: self.pending_len(),
             user: self.me().actor.clone(),
-            alone: self.is_alone(),
         }
     }
 }

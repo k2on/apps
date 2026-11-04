@@ -892,7 +892,7 @@ impl App {
         }
     }
 
-    /// The demo: a seeded replica that is its own authority, and nothing to
+    /// The demo: a seeded replica with no server, and nothing to
     /// sign in to. In memory on both targets, as it always was — a demo that
     /// reloads to its seed is a demo that cannot be broken.
     #[cfg(feature = "demo")]
@@ -929,9 +929,7 @@ impl App {
     /// the saved one will not open, or before a page knows its server.
     #[cfg(not(feature = "demo"))]
     fn alone_in_memory() -> Replica {
-        let mut r = crate::client::memory(client::nobody(), None);
-        r.alone();
-        r
+        crate::client::memory(client::nobody(), None)
     }
 
     /// "Connect": the replica this window has been using alone joins the
@@ -2121,7 +2119,7 @@ impl App {
         if cfg!(feature = "demo") {
             return Some(Account::alone("A demo \u{2014} what you do stays on this device"));
         }
-        if self.peer.client.lock().is_alone() {
+        if self.peer.client.lock().link.url.is_none() {
             return Some(Account::alone("Alone \u{2014} what you do is kept on this device"));
         }
         let login = self.login.as_ref()?;

@@ -176,10 +176,10 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
             ),
         ),
         (
-            "alone-then-join",
+            "offline-then-online",
             run(
                 two(5),
-                vec![Op::Alone(0), create(0, "Road"), add(0, p, "t5"), create(1, "Bob's"), Op::Join(0)],
+                vec![Op::Offline(0), create(0, "Road"), add(0, p, "t5"), create(1, "Bob's"), Op::Online(0)],
             ),
         ),
         (

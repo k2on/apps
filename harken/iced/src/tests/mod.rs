@@ -53,11 +53,9 @@ pub fn hand(p: crate::peer::Peer) -> crate::peer::Peer {
     p
 }
 
-/// A replica in memory, its own authority, as `me`.
+/// A replica in memory with no server, as `me`: what it does is pending.
 pub fn alone(me: &str) -> crate::peer::Peer {
-    let mut client = crate::client::memory(who(me), None);
-    client.alone();
-    lists(client)
+    lists(crate::client::memory(who(me), None))
 }
 
 /// A replica in memory, signed in as `me` with a token, reaching no server

@@ -501,13 +501,11 @@ impl Peer {
     }
 
     /// Hand what this peer did alone to the server at `url`
-    /// (`docs/plan-alone.md` §4), in place: the replica goes back to its
-    /// fork and its local history is pending again, and every open list is
-    /// told that as changes — none, so the library does not blink. With no
-    /// login the history stays nobody's until a sign-in makes it the
+    /// (`docs/plan-alone.md` §4), in place: its local history is pending
+    /// already, so no open list moves and the library does not blink. With
+    /// no login the history stays nobody's until a sign-in makes it the
     /// signer's.
     pub fn join(&mut self, url: &str) {
-        self.client.lock().join();
         self.client.lock().connect(url);
         self.refresh();
     }
@@ -1105,7 +1103,6 @@ mod tests {
     fn a_window_alone_joins_a_server_in_place() {
         use ark_peer::{Config, Peer as Hub};
         let mut client = crate::client::memory(crate::client::nobody(), None);
-        client.alone();
         client.set_roles([crate::domain::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.client.by_hand();

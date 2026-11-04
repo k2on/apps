@@ -20,8 +20,8 @@
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
 //! is its intents not yet sequenced, each at sequence 0 with no facts and
-//! zero hashes ([`Logged::intent`]) — a push being a page of one; a chain
-//! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers
+//! zero hashes ([`Logged::intent`]) — a push being a page of one; what it
+//! did with no server is pushed so too, as intents (§1.7). A `Verdict` answers
 //! one intent: sequenced at `seq`, refused, or `Held` — not judged, past
 //! one of its origin's the authority has not judged or naming a function
 //! it does not run — with the last of its origin it has.

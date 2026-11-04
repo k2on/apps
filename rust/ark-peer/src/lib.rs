@@ -3,10 +3,11 @@
 //! — over one disk. A device and a server are the same [`Peer`] in two
 //! roles:
 //!
-//! - **a device** ([`Peer::open`]) is a replica, or an authority alone
-//!   since its fork; it **dials** a server ([`Peer::connect`]: the link,
-//!   `link`), keeps its pending intents on its disk, relays its ephemeral
-//!   calls, and keeps the maintained views a UI draws (§1.10);
+//! - **a device** ([`Peer::open`]) is a replica; it **dials** a server
+//!   ([`Peer::connect`]: the link, `link`) when it has one, keeps its
+//!   pending intents on its disk — with no server, or none reached, they
+//!   are simply pending — relays its ephemeral calls, and keeps the
+//!   maintained views a UI draws (§1.10);
 //! - **a server** ([`Peer::serve`]) is the authority of each space; it
 //!   **listens** (`hub`: the connections, each with its identity and its
 //!   feed, routed; the journal beside the log), natively on a thread of its
@@ -86,9 +87,8 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::hash::EntryHash;
-use ark::log::{Durable, Entry, EntryId, Origin, Record, Seq, Span};
-use ark::peer::{Ctx, Input, Journal, Output, Peer as Machine, Role, Told, Who};
+use ark::log::{Durable, Entry, EntryId, Origin, Record, Span};
+use ark::peer::{Ctx, Input, Output, Peer as Machine, Pending, Role, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::Space;
 use ark::store::Change;
@@ -241,9 +241,8 @@ pub struct Peer {
     told: app::Told,
     /// What it keeps beside its log, on the same disk.
     pub local: Instance,
-    /// The `local` and the pending intents (each its `local` and id) its
-    /// local instance holds.
-    saved: (i64, Vec<(i64, EntryId)>),
+    /// What it keeps of the log's pending intents, as last written.
+    saved: Saved,
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
     missed: Option<Vec<Told>>,
@@ -251,6 +250,18 @@ pub struct Peer {
     pub(crate) files: files::Files,
     /// The reconcilers, by their view.
     reconcilers: BTreeMap<usize, jobs::Reconciler>,
+}
+
+/// What a device last wrote of its pending intents ([`local::Kept`]): its
+/// last `local`, how many times they had been run again, the `local` of
+/// the last and how many, and how many records the blob holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Saved {
+    local: i64,
+    reruns: u64,
+    back: Option<i64>,
+    len: usize,
+    records: usize,
 }
 
 /// A view a peer keeps (§1.10): what it is made of — its space, the
@@ -262,13 +273,6 @@ struct Kept {
     input: Vec<u8>,
     ctx: Ctx,
     view: Option<Box<dyn Maintained>>,
-}
-
-/// The role of a device alone since `fork`.
-pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
-    Role::Authority {
-        journal: Journal { fork, ..Journal::default() },
-    }
 }
 
 fn machine(d: &Domain, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
@@ -357,7 +361,7 @@ impl Peer {
             woke: [None, None],
             told: app::Told::default(),
             local,
-            saved: (0, vec![]),
+            saved: Saved::default(),
             runners: vec![],
             missed: None,
             reconcilers: BTreeMap::new(),
@@ -375,7 +379,9 @@ impl Peer {
     }
 
     pub(crate) fn opened(config: Config, me: Who, disk: Box<dyn Disk>, mut local: Instance, link: link::Link) -> Peer {
-        let (r, intents) = local.read::<Local, _>(|db| (local::replica(db).unwrap_or_default(), db.pending.scan()));
+        let r = local.read::<Local, _>(|db| local::replica(db).unwrap_or_default());
+        let blob = local.disk.as_mut().and_then(|d| d.get(local::PENDING).ok().flatten());
+        let (pending, kept, records) = local::Kept::read(&blob.unwrap_or_default());
         let origin = match r.origin {
             o if o != Origin::default() => o,
             _ => {
@@ -384,18 +390,14 @@ impl Peer {
                 origin
             }
         };
-        let pending: Vec<Entry> = intents.into_iter().map(|i| i.entry).collect();
         let live = live_of(&config, &me);
-        let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
-        let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
+        let mut log = machine(&config.log, Role::Replica, &me, Some(origin), Space::Durable);
         let mut disk = disk;
         // Rows of a schema this one does not grow from (a build older than
-        // a schema that only grows): a replica's are sent again from empty,
-        // a device alone's refused (`disk::own`).
+        // a schema that only grows) are sent again from empty (`disk::own`).
         let schema = &config.log.schema;
         let empty = |disk: &mut dyn Disk| disk.record(&Record::Rows(log.confirmed_rows()).to_bytes());
         let read = match disk::own(&mut *disk, schema) {
-            Ok(false) if r.fork.is_some() => Err(std::io::Error::other(ANOTHER)),
             Ok(false) => empty(&mut *disk).and_then(|_| disk::put_schema(&mut *disk, schema)),
             Ok(true) => disk::put_schema(&mut *disk, schema),
             Err(e) => Err(e),
@@ -406,10 +408,18 @@ impl Peer {
         log.disk = Some(disk);
         let mut p = Peer::with(config, log, live, local);
         p.link = link;
-        p.saved = (r.local, pending.iter().map(|e| (e.local, e.id)).collect());
+        let local = r.local.max(kept.local);
+        p.saved = Saved {
+            local,
+            back: pending.last().map(|p| p.entry.local),
+            len: pending.len(),
+            records,
+            ..Saved::default()
+        };
         let durable = Durable {
             pending,
-            local: r.local,
+            at: kept.at,
+            local,
             ..p.log.stored()
         };
         p.step(Space::Durable, Input::Open(durable));
@@ -516,38 +526,55 @@ impl Peer {
         }
     }
 
-    /// A device's pending intents and its last `local` kept as they change, as the change to what is kept: the intents
-    /// confirmed or refused off the front deleted, those new at the back
-    /// put — so a mutate writes its one row — or, when the intents are
-    /// others (authored again from a new origin), all of them.
+    /// A device's pending intents, their changes and its last `local` kept
+    /// as they change, one record appended ([`local::Kept`]): the intents
+    /// confirmed or refused off the front, those new at the back — so a
+    /// mutate writes its one, whatever is pending — or, when they were run
+    /// again (a rebase, a renumbering, an open), or the records outnumber
+    /// them, all of them, written afresh; and the head they stand on.
     fn keep_pending(&mut self) {
-        let ids: Vec<(i64, EntryId)> = self.log.pending.iter().map(|p| (p.entry.local, p.entry.id)).collect();
-        if (self.log.local, &ids) == (self.saved.0, &self.saved.1) {
+        let (m, s) = (&self.log, &mut self.saved);
+        let back = m.pending.back().map(|p| p.entry.local);
+        if (m.local, m.reruns, back, m.pending.len()) == (s.local, s.reruns, s.back, s.len) {
             return;
         }
-        let was = std::mem::take(&mut self.saved.1);
-        let gone = (0..=was.len()).find(|d| ids.starts_with(&was[*d..]));
-        let (gone, kept) = gone.map_or((was.len(), 0), |d| (d, was.len() - d));
-        let local = self.log.local;
-        let fresh: Vec<Entry> = self.log.pending[kept..].iter().map(|p| p.entry.clone()).collect();
-        self.keep(|db| {
-            for (l, _) in &was[..gone] {
-                db.pending.delete(*l)?;
-            }
-            for entry in fresh {
-                db.pending.put(local::Intent { local: entry.local, entry })?;
-            }
-            let mut r = local::replica(db).unwrap_or_default();
-            r.local = local;
-            db.replica.put(r)
-        });
-        self.saved = (local, ids);
+        let whole = m.reruns != s.reruns || s.records > m.pending.len() + 64;
+        let new = match whole {
+            true => m.pending.len(),
+            false => m.pending.iter().rev().take_while(|p| s.back.is_none_or(|b| p.entry.local > b)).count(),
+        };
+        let kept = local::Kept {
+            whole,
+            gone: if whole { 0 } else { (s.len + new - m.pending.len()) as u64 },
+            put: m.pending.iter().skip(m.pending.len() - new).cloned().collect(),
+            local: m.local,
+            at: Some(m.log().head()),
+        };
+        *s = Saved {
+            local: m.local,
+            reruns: m.reruns,
+            back,
+            len: m.pending.len(),
+            records: if whole { 1 } else { s.records + 1 },
+        };
+        let bytes = disk::frame(&kept.to_bytes());
+        let Some(d) = self.local.disk.as_mut() else { return };
+        let wrote = match whole {
+            true => d.put(local::PENDING, &bytes),
+            false => d.append(local::PENDING, &bytes),
+        };
+        if let Err(e) = wrote {
+            self.local.failure = Some(format!("the pending intents cannot be written: {e}"));
+        }
     }
 
     /// Every view of `space` told a settle's changes. One that cannot be
     /// kept up, or could not be made, is made again over the store as it
     /// is, under its number: its rows are read afresh ([`Update::Reset`]).
     fn changed(&mut self, space: Space, cs: &[Change]) {
+        if !self.views.iter().flatten().any(|w| w.space == space) {
+            return;
+        }
         let store = match space {
             Space::Durable => &self.log.store,
             Space::Volatile => &self.live.as_ref().expect("a machine that spoke").store,
@@ -700,7 +727,7 @@ impl Peer {
         // Where this device's own intents stand, beside where the server
         // has them (`arkdb origins`): a first pending past the server's
         // last + 1 is a gap, answered and closed (`Verdict::Held`).
-        let first = self.log.pending.first().map(|p| p.entry.local);
+        let first = self.log.pending.front().map(|p| p.entry.local);
         tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending.len(), first, "replica");
         self.step(Space::Durable, Input::Connected);
         self.step(Space::Volatile, Input::Connected);
@@ -746,36 +773,6 @@ impl Peer {
         self.step(space, Input::Frame { from: None, bytes });
     }
 
-    /// Alone, its fork kept on its disk so that a reopen is alone still.
-    pub fn alone(&mut self) {
-        self.step(Space::Durable, Input::Alone);
-        if let Role::Authority {
-            journal: Journal { fork: Some(f), .. },
-        } = &self.log.role
-        {
-            let f = *f;
-            self.replica(|r| r.fork = Some(f));
-        }
-    }
-
-    /// Joined again: the chain made alone is pending intents (§1.7), kept
-    /// so before the log forgets it at the fork.
-    pub fn join(&mut self) {
-        if let Role::Authority {
-            journal: Journal { fork: Some((at, _)), .. },
-        } = &self.log.role
-        {
-            let chain: Vec<Entry> = self.log.log().after(*at).map(|l| l.entry).collect();
-            self.keep(|db| {
-                chain
-                    .into_iter()
-                    .try_for_each(|entry| db.pending.put(local::Intent { local: entry.local, entry }))
-            });
-        }
-        self.step(Space::Durable, Input::Join);
-        self.replica(|r| r.fork = None);
-    }
-
     /// Another login: every pending intent the signer's, its id kept — or,
     /// for another actor than the one this device authored as, authored
     /// again from a new origin's first `local` — and the live machine
@@ -808,9 +805,9 @@ impl Peer {
         }
         let durable = Durable {
             rows: self.log.confirmed_rows(),
-            logged: vec![],
             local: if other { pending.len() as i64 } else { self.log.local },
-            pending,
+            pending: pending.into_iter().map(|e| Pending::new(e, vec![])).collect(),
+            ..Durable::default()
         };
         self.step(Space::Durable, Input::Open(durable));
         if self.linked {

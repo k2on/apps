@@ -145,17 +145,18 @@ fn the_bridge_does_what_the_kit_does() {
         "any other refused at once"
     );
 
-    // A device alone keeps a history of its own, and hands it over joining.
+    // A device with no server keeps what it does pending, and hands it over
+    // once it has one.
     let carol = device(&dc, "tablet", None);
-    carol.connect_with("", dial());
-    carol.alone();
     carol.mutate("create_playlist".into(), r#"{"name":"Alone"}"#.into()).unwrap();
     let s = carol.status();
-    assert!(s.alone && s.cursor == 1 && s.link == "alone", "{s:?}");
-    carol.join(String::new());
+    assert!(s.cursor == 0 && s.pending == 1 && s.link == "alone", "{s:?}");
+    carol.connect_with("", dial());
     carol.login(login("carol@tablet"));
     until("carol's playlist reached bob", || playlists(&bob).iter().any(|p| p.name == "Alone"));
-    until("carol has nothing pending", || carol.status().pending == 0 && !carol.status().alone);
+    until("carol has nothing pending", || {
+        carol.status().pending == 0 && carol.status().link == "online"
+    });
 
     // Signed out: nothing dialled, the history kept.
     alice.logout();

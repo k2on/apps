@@ -20,7 +20,7 @@ fn demo() -> Arc<Peer> {
 fn the_demo_is_the_seeded_household() {
     let p = demo();
     let st = p.status();
-    assert!(st.alone, "{st:?}");
+    assert_eq!(st.link, "alone", "{st:?}");
     assert_eq!(st.user, seed::ME);
 
     let accounts = AccountLineView::new(p.clone(), "accounts".into(), "null".into()).unwrap().rows();
@@ -43,7 +43,7 @@ fn the_demo_is_the_seeded_household() {
     let bank = DemoBank::new();
     let first = bank.sync(p.clone(), Some(TODAY.into())).unwrap();
     assert_eq!(first.note, "Chase: 2 new from the bank \u{2014} one still pending");
-    assert!(p.outcome(first.intent).is_some_and(|o| !o.pending && o.refused.is_none()));
+    assert!(p.outcome(first.intent).is_some_and(|o| o.pending && o.refused.is_none()), "no server: kept here");
     let t = inbox.take();
     assert!(matches!(t.update, Taken::Patched { .. }), "{t:?}");
     assert_eq!(inbox.rows().len(), waiting + 2);

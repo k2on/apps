@@ -276,3 +276,47 @@ fn timings() {
 fn us(d: Duration) -> f64 {
     d.as_secs_f64() * 1e6
 }
+
+/// A device offline for long — 10 playlists and 5,000 adds made with no
+/// server — reopened from its disk, then linked to a fresh server and
+/// pumped until every intent is confirmed: the time of each step.
+#[test]
+#[ignore]
+fn offline_then_joined() {
+    let n = 5000;
+    let token = "carol@perf";
+    let t = Instant::now();
+    let mut d = device(token, Box::new(Memory::default()));
+    for j in 0..10 {
+        d.author(Space::Durable, "demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
+    }
+    eprintln!("d: open: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    let t = Instant::now();
+    (0..n).for_each(|i| {
+        d.author(Space::Durable, "demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0)
+            .unwrap()
+    });
+    eprintln!("e: {n} adds offline: {:.1} µs each", us(t.elapsed() / n as u32));
+    let t = Instant::now();
+    let mut d = d.reopen();
+    eprintln!("f: a reopen at {n}: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    let mut s = Server::new(Config::of(Arc::new(domain())));
+    s.data = None;
+    let hub = s.build().unwrap().0;
+    let t = Instant::now();
+    let (wake, rx) = ark_peer::link::bell();
+    d.set_waker(wake);
+    d.link.backoff = (5, 20);
+    d.set_token(Some(token.into()));
+    d.connect_with("", hub.dialer(Arc::new(dev)));
+    let mut c = (d, rx);
+    let held = ark_peer::link::until(Duration::from_secs(120), Duration::ZERO, || {
+        c.0.pump();
+        c.0.linked && c.0.log.pending.is_empty() || {
+            wait(&c.0, &c.1, Duration::from_millis(1));
+            false
+        }
+    });
+    assert!(held, "never confirmed");
+    eprintln!("g: joined, {n} confirmed: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+}

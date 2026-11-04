@@ -26,7 +26,8 @@
 //!
 //! What a peer keeps beside its log is the rows of its local instance
 //! (`local`), in this same format under the names `local.kv` and
-//! `local.log` (`local::Shared`).
+//! `local.log` (`local::Shared`), and a device's pending intents, records
+//! framed the same way and appended (`local.pending`, `local::Kept`).
 //!
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -147,7 +148,7 @@ pub trait Disk: Send {
 
 /// Length-framed records read up to the first that does not read; and the
 /// bytes they take.
-fn framed<T: Encode>(bytes: &[u8]) -> (Vec<T>, usize) {
+pub(crate) fn framed<T: Encode>(bytes: &[u8]) -> (Vec<T>, usize) {
     let (mut out, mut at) = (vec![], 0);
     while let Some(len) = bytes.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()) as usize) {
         let Some(Ok(x)) = bytes.get(at + 4..at + 4 + len).map(T::from_bytes) else {
@@ -159,7 +160,7 @@ fn framed<T: Encode>(bytes: &[u8]) -> (Vec<T>, usize) {
     (out, at)
 }
 
-fn frame(bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn frame(bytes: &[u8]) -> Vec<u8> {
     [&(bytes.len() as u32).to_be_bytes()[..], bytes].concat()
 }
 

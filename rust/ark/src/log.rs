@@ -347,12 +347,15 @@ impl Record {
 /// What a peer is opened from: its store's rows as they were last written
 /// whole — the log's table's among them — and the rows appended to the
 /// log's table since, in order, whose facts write the rest again; its own
-/// intents still pending; and the last `local` it drew.
+/// intents still pending, each with its preview's changes, and the head of
+/// the log those were made at (none: they are run again); and the last
+/// `local` it drew.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Durable {
     #[serde(with = "crate::format::raw_tables")]
     pub rows: Rows,
     pub logged: Vec<Logged>,
-    pub pending: Vec<Entry>,
+    pub pending: Vec<crate::peer::Pending>,
+    pub at: Option<(Seq, EntryHash)>,
     pub local: i64,
 }

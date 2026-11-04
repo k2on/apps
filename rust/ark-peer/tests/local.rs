@@ -2,7 +2,7 @@
 //! an instance's rows read back after a reopen, its journal folded; an
 //! ephemeral one kept nowhere; a server's journal — each origin's last —
 //! across a restart; a device's replica
-//! row across a reopen, and its chain pending after a join.
+//! row and its pending intents across a reopen.
 
 use std::sync::Arc;
 
@@ -146,44 +146,27 @@ fn the_last_of_each_origin_survives_a_restart() {
     assert!(matches!(verdicts(&out)[..], [Verdict::Ok { .. }]), "{:?}", verdicts(&out));
 }
 
-/// A device's replica row is what it opens as: its origin, its fork while
-/// alone, who last signed in, its last `local`. Falsified by `Peer::alone`
-/// not putting the fork: the reopened device was a replica.
+/// A device's replica row is what it opens as: its origin, who last signed
+/// in, its last `local`; and its pending intents, with their changes, put
+/// back without running them. Falsified by `keep_pending` not putting the
+/// head the intents stand on (`at`): the reopen ran them again, and its
+/// reruns moved.
 #[test]
 fn a_device_reopens_as_its_replica_row() {
     let config = Config::of(Arc::new(arkdb::demo::demo()));
     let mut d = Peer::open_as(config.clone(), Box::new(Memory::default()), None);
-    d.alone();
-    let _ = d.mutate_at(CREATE, arkdb::demo::CreatePlaylist { name: "Road".into() }.to_bytes(), 1);
-    let (origin, me, local) = (d.log.origin, d.log.me.clone(), d.log.local);
-    let mut d = d.reopen();
-    assert!(d.is_alone(), "alone still");
-    assert_eq!((d.log.origin, d.log.me.session.clone(), d.log.local), (origin, me.session.clone(), local));
-    let disk = d.log.disk.take().unwrap();
-    let d = Peer::open_as(config, disk, None);
-    assert_eq!((d.log.origin, &d.log.me.session), (origin, &me.session), "who last signed in, read back");
-}
-
-/// A device that joined again, reopened before its server answered, has
-/// its chain as pending intents and its log at the fork: the join made
-/// both durable. Falsified by the machine's `join` not writing the store at
-/// the fork: the reopened device held the chain as its log and nothing
-/// pending, which its server never sees (the fuzzer's seed 2464 did not
-/// settle).
-#[test]
-fn a_device_reopened_after_joining_has_its_chain_pending() {
-    let config = Config::of(Arc::new(arkdb::demo::demo()));
-    let mut d = Peer::open_as(config, Box::new(Memory::default()), None);
-    d.alone();
     for name in ["Road", "Trip"] {
         let input = arkdb::demo::CreatePlaylist { name: name.into() }.to_bytes();
         d.mutate_at(CREATE, input, 1).unwrap();
     }
-    assert_eq!(d.cursor(), 2);
-    d.join();
-    let d = d.reopen();
-    assert!(!d.is_alone());
-    assert_eq!((d.cursor(), d.pending_len()), (0, 2));
+    let (origin, me, local, store) = (d.log.origin, d.log.me.clone(), d.log.local, d.log.store.clone());
+    let mut d = d.reopen();
+    assert_eq!((d.log.origin, d.log.me.session.clone(), d.log.local), (origin, me.session.clone(), local));
+    assert_eq!((d.cursor(), d.pending_len(), d.log.reruns), (0, 2, 0), "put back, none run");
+    assert_eq!(d.log.store, store);
+    let disk = d.log.disk.take().unwrap();
+    let d = Peer::open_as(config, disk, None);
+    assert_eq!((d.log.origin, &d.log.me.session), (origin, &me.session), "who last signed in, read back");
 }
 
 /// A login remembered is recalled by the next run of the app, from its
