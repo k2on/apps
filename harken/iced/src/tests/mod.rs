@@ -24,17 +24,13 @@ mod keys;
 mod views;
 
 use crate::domain::AddSong;
-use ark::peer::Who;
+use ark::peer::Ctx;
 
 use crate::client::Replica;
 use crate::listening::{Device, Kind};
 
-fn who(me: &str) -> Who {
-    Who {
-        actor: me.into(),
-        session: format!("{me}-device"),
-        roles: vec![],
-    }
+fn who(me: &str) -> Ctx {
+    Ctx::who(me, format!("{me}-device"), vec![])
 }
 
 /// A replica's lists, its device holding the `library` role

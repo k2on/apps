@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ark::format::Encode;
 use ark::log::EntryId;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::schema::Space;
 use ark_auth::{Account, Login};
 use ark_peer::Memory;
@@ -75,7 +75,7 @@ pub struct Peer {
 }
 
 /// A client as `who`, in memory, linked to nothing.
-pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
+pub fn open(who: Ctx, device: Option<(Kind, &str, bool)>) -> Peer {
     let device = device.map(|(kind, name, can_play)| {
         Device {
             can_play,
@@ -104,12 +104,8 @@ pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
 }
 
 /// Nobody: a client used before anybody signed in.
-pub fn nobody() -> Who {
-    Who {
-        actor: String::new(),
-        session: String::new(),
-        roles: vec![],
-    }
+pub fn nobody() -> Ctx {
+    Ctx::who(String::new(), String::new(), vec![])
 }
 
 /// `user`, signed in on this server as a device of their own: a fresh

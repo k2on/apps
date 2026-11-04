@@ -12,7 +12,7 @@ mod support {
 
 use ark::frames::{Frame, Verdict};
 use ark::log::{EntryId, Origin};
-use ark::peer::{Peer, Role, Who};
+use ark::peer::{Ctx, Peer, Role};
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
 
@@ -27,7 +27,7 @@ use support::wire::*;
 /// sequenced at 3.
 #[test]
 fn ids_are_the_origins_whoever_signs_in() {
-    let nobody = Who::default();
+    let nobody = Ctx::default();
     let origin = Origin::named(b"a device's sixteen bytes");
     let mut device = Peer::new(demo::cas(), Role::Replica, nobody);
     device.origin = origin;

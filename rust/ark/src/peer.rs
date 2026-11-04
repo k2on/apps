@@ -149,7 +149,9 @@ macro_rules! said {
 }
 
 /// What a function knows of the intent it runs for: all frozen in the
-/// entry, so every run of it, anywhere, is the same.
+/// entry, so every run of it, anywhere, is the same. In no entry, who
+/// someone is ([`Ctx::who`]): who a peer authors as, who a connection was
+/// verified to be.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Ctx {
     pub id: EntryId,
@@ -161,8 +163,35 @@ pub struct Ctx {
     /// or a view may say it acted under.
     pub span: Option<Span>,
     /// How many row ids this run has drawn ([`Ctx::new_id`]).
-    pub draws: std::cell::Cell<i64>,
+    pub draws: Draws,
 }
+
+/// A count a shared context moves: a `Cell`'s, but one a context held
+/// across threads (who a connection is) may carry.
+#[derive(Debug, Default)]
+pub struct Draws(std::sync::atomic::AtomicI64);
+
+impl Draws {
+    pub fn get(&self) -> i64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    pub fn set(&self, n: i64) {
+        self.0.store(n, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Clone for Draws {
+    fn clone(&self) -> Draws {
+        Draws(self.get().into())
+    }
+}
+
+impl PartialEq for Draws {
+    fn eq(&self, other: &Draws) -> bool {
+        self.get() == other.get()
+    }
+}
+impl Eq for Draws {}
 
 impl Ctx {
     pub fn of(e: &Entry) -> Ctx {
@@ -177,13 +206,13 @@ impl Ctx {
         }
     }
 
-    /// `who`'s at `now`, in no entry: a query's or a view's context.
-    pub fn new(who: &Who, now: i64) -> Ctx {
+    /// Who someone is, in no entry; at a `now`, a query's or a view's
+    /// context.
+    pub fn who(actor: impl Into<String>, session: impl Into<String>, roles: Vec<String>) -> Ctx {
         Ctx {
-            actor: who.actor.clone(),
-            session: who.session.clone(),
-            roles: who.roles.clone(),
-            now,
+            actor: actor.into(),
+            session: session.into(),
+            roles,
             ..Ctx::default()
         }
     }
@@ -210,14 +239,6 @@ impl Ctx {
     pub fn has_role(&self, role: &str) -> bool {
         self.roles.iter().any(|r| r == role)
     }
-}
-
-/// Who a peer authors as, and who a connection was verified to be.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Who {
-    pub actor: String,
-    pub session: String,
-    pub roles: Vec<String>,
 }
 
 /// What an authority keeps beside its log: each origin's last `local` and
@@ -259,7 +280,7 @@ pub enum Role {
 /// union it holds, and the head of the chain it was sent.
 #[derive(Clone, Debug)]
 pub struct Served {
-    pub who: Who,
+    pub who: Ctx,
     pub scope: String,
     pub union: Store,
     pub head: Option<(Seq, EntryHash)>,
@@ -267,7 +288,7 @@ pub struct Served {
 
 /// The scope a connection is fed by, by who it is (§1.8): its union, by
 /// the scope's name; none, the log whole.
-pub type Scoping = Arc<dyn Fn(&Who) -> Option<String> + Send + Sync>;
+pub type Scoping = Arc<dyn Fn(&Ctx) -> Option<String> + Send + Sync>;
 
 /// When a machine folds its log into its rows, the one rule, after every
 /// step: once the entries above its horizon outnumber `keep` and `slack`
@@ -305,7 +326,7 @@ impl Fold {
 #[derive(Clone, Debug)]
 pub enum Input {
     Frame {
-        from: Option<Who>,
+        from: Option<Ctx>,
         bytes: Vec<u8>,
     },
     Mutate {
@@ -389,7 +410,7 @@ pub struct Peer {
     /// the ones taken off the front and put on the back.
     pub reruns: u64,
     pub role: Role,
-    pub me: Who,
+    pub me: Ctx,
     pub space: Space,
     /// Where this peer's intents come from (§1.6), and the last `local` it
     /// drew.
@@ -437,7 +458,7 @@ fn pages<T>(items: &[T], most: usize, weight: impl Fn(&T) -> usize) -> Vec<&[T]>
 impl Peer {
     /// A peer from empty; its origin named by its session's bytes until
     /// its driver gives it the one it drew ([`Origin`]).
-    pub fn new(domain: Arc<Domain>, role: Role, me: Who) -> Peer {
+    pub fn new(domain: Arc<Domain>, role: Role, me: Ctx) -> Peer {
         let origin = Origin::named(&me.session);
         let mut p = Peer {
             store: Store::new(domain.schema.clone(), Space::Durable),
@@ -718,7 +739,7 @@ impl Peer {
 
     // * Frames
 
-    fn frame(&mut self, from: Option<Who>, f: Frame, o: &mut Out) {
+    fn frame(&mut self, from: Option<Ctx>, f: Frame, o: &mut Out) {
         if f.space() != self.space {
             return;
         }
@@ -807,14 +828,14 @@ impl Peer {
     fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
         let s = &self.served[session];
         let scope = self.domain.fns.get(&s.scope).and_then(|f| f.scope.clone());
-        let ctx = Ctx::new(&s.who, 0);
+        let ctx = s.who.clone();
         move |table, row| scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?(&ctx, table, row)
     }
 
     /// A `Hello` from a connection fed by a scope: nothing when it stands at
     /// the head of what it was sent, and otherwise its union, afresh, as a
     /// fill of one part at the head.
-    fn serve_scoped(&mut self, who: Who, scope: String, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
+    fn serve_scoped(&mut self, who: Ctx, scope: String, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
         let session = &who.session.clone();
         if self.served.get(session).is_none_or(|s| (&s.who, &s.scope) != (&who, &scope)) {
             let union = self.blank();
@@ -887,7 +908,7 @@ impl Peer {
 
     /// A pushed intent judged, its device's pending beginning past `from`,
     /// and the verdict sent back: every push is answered.
-    fn push(&mut self, who: &Who, from: i64, entry: Entry, o: &mut Out) {
+    fn push(&mut self, who: &Ctx, from: i64, entry: Entry, o: &mut Out) {
         let id = entry.id;
         let verdict = self.verdict_on(who, from, entry, o);
         o.send(Frame::Verdict {
@@ -897,7 +918,7 @@ impl Peer {
         });
     }
 
-    fn verdict_on(&mut self, who: &Who, from: i64, mut entry: Entry, o: &mut Out) -> Verdict {
+    fn verdict_on(&mut self, who: &Ctx, from: i64, mut entry: Entry, o: &mut Out) -> Verdict {
         let head = self.log().head().0;
         let j = self.journal();
         if let Some(why) = j.refused.get(&entry.id) {

@@ -10,7 +10,7 @@ mod common;
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::row::Row;
 use ark::store::Change;
 use ark_auth::server::{dev_account, Auth, Mode};
@@ -216,12 +216,8 @@ fn the_watch_names_what_to_close() {
         signed_in(&hub, id, user, expires);
     }
     // c1 is no sign-in's: a connection the server's process made itself.
-    let open: Vec<Who> = [("alice", "a1"), ("alice", "a2"), ("bob", "b1"), ("carol", "c1")]
-        .map(|(a, s)| Who {
-            actor: a.into(),
-            session: s.into(),
-            roles: vec![],
-        })
+    let open: Vec<Ctx> = [("alice", "a1"), ("alice", "a2"), ("bob", "b1"), ("carol", "c1")]
+        .map(|(a, s)| Ctx::who(a, s, vec![]))
         .into();
     let revoke = Change::Edit {
         table: SignIn::TABLE.into(),

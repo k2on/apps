@@ -49,7 +49,7 @@ them in with two fields, one line and one registration.
   written into a row, so a restart with other configuration grants or
   revokes for every login at once. `Account.roles` carries the issued and
   configured ones to the client in the exchange's answer; a client hands
-  them to its peer as the `Who` it authors as (`ark_peer::who`), and the
+  them to its peer as the `Ctx` it authors as (`ark_peer::who`), and the
   server takes a connection's roles from its judging whatever the client
   says. A provider's groups claim is not read.
 - **OIDC** (the `openidconnect` crate, 4.x, over the same blocking `ureq`
@@ -135,7 +135,7 @@ if let Some(code) = ark_auth::web::take_code() {
 | iced's hand-written `remembered::{recall, remember, forget}` | `ark_peer::Logins::new(app).{recall, remember, forget}`, rows of `remember::Remembered` |
 | `session::SessionStore::open(petros::open_path(..))` (SQLite, Diesel) | a `SignIn` row of the app's log, written by the hub |
 | `SessionStore::issue(&account)` before `Auth::new` | `Auth::issue(&account, device)` once the hub is built |
-| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `Auth::authenticate` (a token to an `ark::peer::Who`), `Auth::watcher` |
+| `impl petros::Authenticate for Authenticator` (`authenticate` + `owns`) | `Auth::authenticate` (a token to an `ark::peer::Ctx`), `Auth::watcher` |
 | `Mode::{Oidc, Dev}`, `Auth::new(..).allow_redirect(..)`, `server::router` | the same (axum 0.7) |
 | a secret passed in | `oidc::read_secret(path)`, `Provider::discover_with_secret_file` |
 

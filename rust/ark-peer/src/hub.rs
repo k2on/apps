@@ -38,7 +38,7 @@ use std::collections::BTreeMap;
 use ark::format::Encode;
 use ark::frames::Frame;
 use ark::log::{EntryId, Origin, Record};
-use ark::peer::{Input, Journal, Peer as Machine, Role, Who};
+use ark::peer::{Ctx, Input, Journal, Peer as Machine, Role};
 use ark::schema::Space;
 
 use crate::{machine, Config, Disk, Fold, Peer};
@@ -65,7 +65,7 @@ pub type ConnId = u64;
 pub type Deliver = (ConnId, Vec<u8>);
 
 struct Conn {
-    who: Who,
+    who: Ctx,
     hello: [bool; 2],
     whole: bool,
     device: Option<Vec<u8>>,
@@ -95,7 +95,7 @@ pub(crate) struct Hub {
 #[derive(Clone, Debug)]
 pub struct Called {
     pub conn: ConnId,
-    pub who: Who,
+    pub who: Ctx,
     pub id: u64,
     pub name: String,
     pub input: Vec<u8>,
@@ -124,12 +124,8 @@ fn journal(p: &mut Machine) -> &mut Journal {
 }
 
 /// Who a server's authorities author as.
-pub fn authority() -> Who {
-    Who {
-        actor: "authority".into(),
-        session: "authority".into(),
-        roles: vec![],
-    }
+pub fn authority() -> Ctx {
+    Ctx::who("authority", "authority", vec![])
 }
 
 impl Peer {
@@ -194,14 +190,14 @@ impl Peer {
     }
 
     /// A connection verified as `who`.
-    pub fn accept(&mut self, who: Who) -> ConnId {
+    pub fn accept(&mut self, who: Ctx) -> ConnId {
         let c = self.hub.next;
         self.accept_as(c, who);
         c
     }
 
     /// A connection verified as `who`, numbered by the caller.
-    pub fn accept_as(&mut self, c: ConnId, who: Who) {
+    pub fn accept_as(&mut self, c: ConnId, who: Ctx) {
         self.hub.next = self.hub.next.max(c + 1);
         let conn = Conn {
             whole: (self.config.feed)(&who).is_none(),
@@ -213,12 +209,12 @@ impl Peer {
     }
 
     /// Every connection open, and who it is.
-    pub fn connections(&self) -> impl Iterator<Item = (ConnId, &Who)> {
+    pub fn connections(&self) -> impl Iterator<Item = (ConnId, &Ctx)> {
         self.hub.conns.iter().map(|(c, conn)| (*c, &conn.who))
     }
 
     /// Who a connection is.
-    pub(crate) fn who(&self, c: ConnId) -> Option<Who> {
+    pub(crate) fn who(&self, c: ConnId) -> Option<Ctx> {
         self.hub.conns.get(&c).map(|conn| conn.who.clone())
     }
 
@@ -338,7 +334,7 @@ impl Peer {
 
     /// The live space's `f` on `input`, authored by the authority as `who`:
     /// a device's arrival or leaving is its login's.
-    fn author_as(&mut self, who: &Who, f: &str, input: Vec<u8>, now: i64) {
+    fn author_as(&mut self, who: &Ctx, f: &str, input: Vec<u8>, now: i64) {
         let Some(live) = &mut self.live else { return };
         let was = std::mem::replace(&mut live.me, who.clone());
         let _ = self.author(Space::Volatile, f, input, now);

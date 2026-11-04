@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ark::log::Seq;
-use ark::peer::Who;
+use ark::peer::Ctx;
 
 use ark_auth::server::Watch;
 
@@ -34,15 +34,11 @@ pub use ark_auth::server::Authenticate;
 
 /// The dev reading of a token: `user@device` is `user` on a session named
 /// by the whole token; `:role,role` after it, the roles.
-pub fn dev(token: &str) -> Option<Who> {
+pub fn dev(token: &str) -> Option<Ctx> {
     let (id, roles) = token.split_once(':').unwrap_or((token, ""));
     let actor = id.split_once('@').map_or(id, |(u, _)| u);
     let roles = roles.split(',').map(str::trim).filter(|r| !r.is_empty()).map(String::from).collect();
-    (!actor.is_empty()).then(|| Who {
-        actor: actor.into(),
-        session: id.into(),
-        roles,
-    })
+    (!actor.is_empty()).then(|| Ctx::who(actor, id, roles))
 }
 
 type Job = Box<dyn FnOnce(&mut Peer, &mut BTreeMap<ConnId, Sink>) -> Vec<Deliver> + Send>;
@@ -113,7 +109,7 @@ impl Handle {
                     continue;
                 }
                 ticked = if tick { now } else { ticked };
-                let open: Vec<Who> = peer.connections().map(|(_, w)| w.clone()).collect();
+                let open: Vec<Ctx> = peer.connections().map(|(_, w)| w.clone()).collect();
                 for session in w(&peer.log.store, (!tick).then_some(&seen[..]), &open, now) {
                     let out = close(&mut peer, &mut sinks, &session);
                     deliver(&mut sinks, out);
@@ -132,7 +128,7 @@ impl Handle {
     }
 
     /// A connection verified as `who`, its frames to `sink`.
-    pub fn connect(&self, who: Who, sink: Sink) -> ConnId {
+    pub fn connect(&self, who: Ctx, sink: Sink) -> ConnId {
         let c = self.next.fetch_add(1, Ordering::Relaxed);
         self.run(move |p, s| {
             p.accept_as(c, who);

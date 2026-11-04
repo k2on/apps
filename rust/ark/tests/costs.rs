@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use ark::frames::Frame;
 use ark::log::{Entry, EntryId, Logged, Origin, Seq};
-use ark::peer::{Ctx, Output, Peer, Role, Who};
+use ark::peer::{Ctx, Output, Peer, Role};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
 use ark::store::{Change, Store};
@@ -66,12 +66,8 @@ fn allocs<T>(f: impl FnOnce() -> T) -> (T, usize) {
 
 // The demo, driven ---------------------------------------------------------------------
 
-fn who(actor: &str, session: &str) -> Who {
-    Who {
-        actor: actor.into(),
-        session: session.into(),
-        roles: vec![],
-    }
+fn who(actor: &str, session: &str) -> Ctx {
+    Ctx::who(actor, session, vec![])
 }
 
 /// A log an authority sequenced from one author: `playlists` playlists,

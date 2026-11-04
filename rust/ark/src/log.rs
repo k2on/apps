@@ -183,7 +183,7 @@ impl Entry {
     /// The `local`-th intent from `origin`, as `who` makes it: calling
     /// `func` on `input` (an input is its encoding; no bytes are `()`'s) at
     /// `now`.
-    pub fn new(who: &crate::peer::Who, origin: Origin, local: i64, func: impl Into<String>, input: Vec<u8>, now: i64) -> Entry {
+    pub fn new(who: &crate::peer::Ctx, origin: Origin, local: i64, func: impl Into<String>, input: Vec<u8>, now: i64) -> Entry {
         Entry {
             id: EntryId::of(origin, local),
             actor: who.actor.clone(),

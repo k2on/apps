@@ -10,7 +10,7 @@
 //! inserted ([`again`]) — a page that is not yours is no rows rather than
 //! an error, and is asked again when anything moved.
 
-use ark::peer::Who;
+use ark::peer::Ctx;
 
 use crate::{Patch, Peer};
 
@@ -18,7 +18,7 @@ use crate::{Patch, Peer};
 pub struct Watched<T> {
     name: String,
     input: Vec<u8>,
-    who: Who,
+    who: Ctx,
     /// The view, or — while its query refuses — none, which is no rows.
     view: Option<usize>,
     read: fn(&[u8]) -> T,

@@ -25,7 +25,7 @@ use std::sync::Arc;
 use ark::db::{Db, Tables, Writes};
 use ark::format::Encode;
 use ark::log::Record;
-use ark::peer::{Fold, Input, Output, Peer as Machine, Role, Who};
+use ark::peer::{Ctx, Fold, Input, Output, Peer as Machine, Role};
 use ark::schema::{Schema, Space};
 use ark::Refusal;
 
@@ -99,7 +99,7 @@ impl Instance {
             schema,
             ..Default::default()
         });
-        let mut machine = Machine::new(domain, role, Who::default()).in_space(space);
+        let mut machine = Machine::new(domain, role, Ctx::default()).in_space(space);
         // Its own ids, drawn afresh at each open: the log it folds keeps none.
         machine.origin = draw_origin();
         Instance::new(machine, disk)

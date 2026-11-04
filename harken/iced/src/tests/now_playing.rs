@@ -5,7 +5,7 @@
 //! (`harken_player::config::hub`), as the phones' hall does.
 use std::sync::Arc;
 
-use ark::peer::Who;
+use ark::peer::Ctx;
 use arkui::vim;
 
 use super::{song, who};
@@ -48,7 +48,7 @@ pub(super) fn hub() -> ark_peer::Handle {
 /// window (`me-device`, holding the library role), `phone` the phone.
 pub(super) fn dial(hub: &ark_peer::Handle) -> impl ark_peer::link::Dial {
     hub.dialer(Arc::new(|t: &str| match t {
-        "dev" => Some(Who {
+        "dev" => Some(Ctx {
             roles: vec![crate::domain::LIBRARY.to_string()],
             ..who("me")
         }),
@@ -58,12 +58,8 @@ pub(super) fn dial(hub: &ark_peer::Handle) -> impl ark_peer::link::Dial {
 }
 
 /// The phone: the same account, its own login.
-pub(super) fn phone_who() -> Who {
-    Who {
-        actor: "me".into(),
-        session: "phone".into(),
-        roles: vec![],
-    }
+pub(super) fn phone_who() -> Ctx {
+    Ctx::who("me", "phone", vec![])
 }
 
 /// Everything said answered: the hub's turn, then the window's update and

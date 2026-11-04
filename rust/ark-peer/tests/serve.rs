@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::schema::Space;
 use ark_peer::link::{socket, wait, Dial, Event};
 use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Memory, Peer, Server};
@@ -190,7 +190,7 @@ impl Disk for Flaky {
     }
 }
 
-fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
+fn push(who: &Ctx, local: i64, name: &str) -> Vec<u8> {
     support::push(who, local, "demo.create_playlist", named(name))
 }
 

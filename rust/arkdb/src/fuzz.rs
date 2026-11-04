@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::prelude::Id;
 use ark::schema::Space;
 use ark::store::Store;
@@ -120,17 +120,13 @@ pub struct Found {
     pub ops: usize,
 }
 
-fn login(i: i64, n: u64, admin: bool) -> Who {
+fn login(i: i64, n: u64, admin: bool) -> Ctx {
     let roles = if admin { vec!["admin".to_string()] } else { vec![] };
-    Who {
-        actor: format!("u{}", i % 2),
-        session: if i == 0 { format!("partial-{n}") } else { format!("s{i}-{n}") },
+    Ctx::who(
+        format!("u{}", i % 2),
+        if i == 0 { format!("partial-{n}") } else { format!("s{i}-{n}") },
         roles,
-    }
-}
-
-fn ctx_of(w: &Who) -> Ctx {
-    Ctx::new(w, 0)
+    )
 }
 
 /// One session from its seed: the net it left, or the first check it failed.
@@ -141,7 +137,7 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
     let mut hub = Config::of(Arc::new(crate::demo::demo()));
     let scope = g.scope.clone();
     let scoped = scope.clone();
-    hub.feed = Arc::new(move |w: &Who| w.session.starts_with("partial").then(|| scoped.clone()));
+    hub.feed = Arc::new(move |w: &Ctx| w.session.starts_with("partial").then(|| scoped.clone()));
     hub.keep = r.one_in(3).then(|| 2 + r.below(4) as usize);
     if live {
         hub = Config {
@@ -155,11 +151,11 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
         true => crate::demo::device(Config::of(Arc::new(crate::demo::demo())), &format!("d{i}"), 50),
         false => Config::of(Arc::new(crate::demo::demo())),
     };
-    let logins: Vec<(Who, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
+    let logins: Vec<(Ctx, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
     let mut net = Net::of(hub, logins, seed);
     let watch = |net: &mut Net, r: &mut Rng, i: i64| -> Result<(), String> {
         let (f, input) = g.query(r, net, i);
-        let ctx = ctx_of(&net.clients[&i].log.me);
+        let ctx = net.clients[&i].log.me.clone();
         net.watch(i, Space::Durable, &f, input, ctx).map(|_| ())
     };
     for i in 0..n {
@@ -231,7 +227,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
     }
     if let Some(c) = net.clients.get(&0).filter(|_| partial) {
         let holds = g.functions.get(&g.scope).and_then(|f| f.scope.clone()).expect("the scope");
-        let ctx = ctx_of(&c.log.me);
+        let ctx = c.log.me.clone();
         let mut rows = vec![];
         for (name, rs) in hub.store.snapshot_rows() {
             let held = rs.into_iter().filter(|row| holds(&ctx, &name, row) == Ok(true)).collect();

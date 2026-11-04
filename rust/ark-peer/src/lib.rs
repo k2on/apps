@@ -87,7 +87,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::frames::Frame;
 use ark::log::{Entry, EntryId, Logged, Origin, Record, Span};
-use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To, Told, Who};
+use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To, Told};
 use ark::plan::Maintained;
 use ark::schema::Space;
 use ark::store::Change;
@@ -147,7 +147,7 @@ pub struct Config {
 /// One of a server's [`Config::calls`]: given the caller, verified as its
 /// connection is, and the call's input; what it gives back, or why not. It
 /// runs on a thread of its own ([`Handle`]), so it may take its time.
-pub type Call = Arc<dyn Fn(&Who, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
+pub type Call = Arc<dyn Fn(&Ctx, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
 
 impl Config {
     /// A peer of `log`, with no live space.
@@ -250,7 +250,7 @@ struct Kept {
     view: Option<Box<dyn Maintained>>,
 }
 
-fn machine(d: &Arc<Domain>, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
+fn machine(d: &Arc<Domain>, role: Role, me: &Ctx, origin: Option<Origin>, space: Space) -> Instance {
     let mut p = Machine::new(d.clone(), role, me.clone()).in_space(space);
     if let Some(o) = origin {
         p.origin = o;
@@ -263,7 +263,7 @@ fn machine(d: &Arc<Domain>, role: Role, me: &Who, origin: Option<Origin>, space:
 /// `local`s start again at 1; under one origin for every open, a reloaded
 /// page's calls were taken for ones the server had judged already, for as
 /// long as it ran.
-fn live_of(config: &Config, me: &Who, origin: Origin, opens: u64) -> Option<Instance> {
+fn live_of(config: &Config, me: &Ctx, origin: Origin, opens: u64) -> Option<Instance> {
     let live = config.live.as_ref()?;
     let mut p = machine(live, Role::Replica, me, Some(live_origin(origin, opens)), Space::Volatile);
     p.fold = Some(Fold::REPLICA);
@@ -316,12 +316,8 @@ pub fn monotonic_ms() -> u64 {
 
 /// Who a login is, as a server verifies it: the account, the session, the
 /// roles it holds.
-pub fn who(l: &ark_auth::Login) -> Who {
-    Who {
-        actor: l.user.id.clone(),
-        session: l.session.clone(),
-        roles: l.user.roles.clone(),
-    }
+pub fn who(l: &ark_auth::Login) -> Ctx {
+    Ctx::who(l.user.id.clone(), l.session.clone(), l.user.roles.clone())
 }
 
 impl Peer {
@@ -350,7 +346,7 @@ impl Peer {
     }
 
     /// A device opened as `me` from what `disk` holds.
-    pub fn open(config: Config, me: Who, disk: Box<dyn Disk>) -> Peer {
+    pub fn open(config: Config, me: Ctx, disk: Box<dyn Disk>) -> Peer {
         let files = disk.files();
         let (disk, local) = local::beside(disk);
         let mut p = Peer::opened(config, me, disk, local, link::Link::default());
@@ -358,7 +354,7 @@ impl Peer {
         p
     }
 
-    pub(crate) fn opened(config: Config, me: Who, disk: Box<dyn Disk>, mut local: Box<dyn Disk>, link: link::Link) -> Peer {
+    pub(crate) fn opened(config: Config, me: Ctx, disk: Box<dyn Disk>, mut local: Box<dyn Disk>, link: link::Link) -> Peer {
         let r = local::Replica::read(&mut *local);
         // Pending intents are read only beside the replica they were drawn
         // from: a disk whose replica does not read (none yet, or an older
@@ -761,7 +757,7 @@ impl Peer {
     /// for another actor than the one this device authored as, authored
     /// again from a new origin's first `local` — and the live machine
     /// started over.
-    pub fn sign_in(&mut self, who: Who) {
+    pub fn sign_in(&mut self, who: Ctx) {
         let was = &self.log.me;
         let other = !was.actor.is_empty() && was.actor != who.actor;
         if other {

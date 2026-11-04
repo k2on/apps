@@ -7,16 +7,12 @@ use ark::frames::{Frame, Verdict};
 use ark::log::Logged;
 use std::sync::Arc;
 
-use ark::peer::{Input, Journal, Output, Peer, Role, To, Who};
+use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To};
 use ark::store::Change;
 use ark::Domain;
 
-pub fn who(name: &str) -> Who {
-    Who {
-        actor: name.into(),
-        session: format!("{name}-session"),
-        roles: vec![],
-    }
+pub fn who(name: &str) -> Ctx {
+    Ctx::who(name, format!("{name}-session"), vec![])
 }
 
 pub fn replica(name: &str, cas: Arc<Domain>) -> Peer {
@@ -70,7 +66,7 @@ pub fn down(f: &Frame) -> Input {
 }
 
 /// A frame from a connection verified as `w`, to an authority.
-pub fn up(w: &Who, f: &Frame) -> Input {
+pub fn up(w: &Ctx, f: &Frame) -> Input {
     Input::Frame {
         from: Some(w.clone()),
         bytes: f.enc(),
@@ -96,7 +92,7 @@ pub fn logged(f: &Frame) -> Logged {
 
 /// Every frame a step sent upstream delivered to the authority as `w`; what
 /// the authority says back, sends then fanouts.
-pub fn deliver_up(server: &mut Peer, w: &Who, outs: &[Output]) -> (Vec<Frame>, Vec<Frame>) {
+pub fn deliver_up(server: &mut Peer, w: &Ctx, outs: &[Output]) -> (Vec<Frame>, Vec<Frame>) {
     let (mut s, mut f) = (vec![], vec![]);
     for frame in sends(outs) {
         let o = server.step(up(w, &frame));

@@ -80,11 +80,7 @@ fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
 fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
     let domain = ark::register!(Domain::new::<Demo>("demo", "1"); create_playlist, add_to_playlist, rename_playlist, named);
     let mut p = Peer::open_as(Config::of(Arc::new(domain)), Box::new(Memory::default()), None);
-    p.sign_in(ark::peer::Who {
-        actor: "alice".into(),
-        session: "a".into(),
-        roles: vec![],
-    });
+    p.sign_in(ark::peer::Ctx::who("alice", "a", vec![]));
     let road = CreatePlaylist { name: "Road".into() }.to_bytes();
     let mut w = ark_peer::Watched::open(&mut p, "demo.named", road.clone(), |b| Item::from_bytes(b).unwrap());
     assert_eq!((w.view(), w.rows.len()), (None, 0), "refused: no rows");
@@ -103,11 +99,7 @@ fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
     assert!(!w.settle(&mut p, true).is_empty());
     let tracks: Vec<&str> = w.rows.iter().map(|i| i.track_id.as_str()).collect();
     assert_eq!(tracks, ["t1", "t2"]);
-    p.sign_in(ark::peer::Who {
-        actor: "bob".into(),
-        session: "b".into(),
-        roles: vec![],
-    });
+    p.sign_in(ark::peer::Ctx::who("bob", "b", vec![]));
     let gone = vec![Patch::Remove { at: 1 }, Patch::Remove { at: 0 }];
     assert_eq!(w.settle(&mut p, false), gone, "opened again for bob: alice's rows removed");
     // His Road is drawn from his origin; alice's adds name hers.

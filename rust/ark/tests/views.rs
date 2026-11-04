@@ -9,7 +9,7 @@ mod demo;
 
 use ark::format::Encode;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To, Who};
+use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To};
 use ark::plan::{splice, Maintained};
 use ark::prelude::{scan, Db, Desc, Id, Plan, Refusal};
 use ark::store::{Change, Store};
@@ -162,12 +162,8 @@ fn a_view_follows_a_replica_through_a_rebase() {
     assert!(alice.pending.is_empty() && alice.store == server.store);
 }
 
-fn who_of(name: &str) -> Who {
-    Who {
-        actor: name.into(),
-        session: format!("{name}-session"),
-        roles: vec![],
-    }
+fn who_of(name: &str) -> Ctx {
+    Ctx::who(name, format!("{name}-session"), vec![])
 }
 
 fn replica_of(name: &str) -> Peer {
@@ -253,7 +249,7 @@ impl Fleet {
         let mut server = Peer::new(cas.clone(), auth, who_of("server"));
         // Every client but the first is fed by the scope.
         let first = who_of("peer-0").session;
-        server.feed = Some(std::sync::Arc::new(move |w: &Who| (w.session != first).then(|| h.into())));
+        server.feed = Some(std::sync::Arc::new(move |w: &Ctx| (w.session != first).then(|| h.into())));
         let mut clients = vec![];
         for i in 0..3 {
             clients.push(Peer::new(cas.clone(), Role::Replica, who_of(&format!("peer-{i}"))));

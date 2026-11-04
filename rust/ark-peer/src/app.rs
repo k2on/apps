@@ -23,7 +23,7 @@ use ark::format::Encode;
 use ark::frames::Reply;
 use ark::hash::StateHash;
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::schema::Space;
 
 use crate::{now_ms, Config, Disk, Patch, Peer};
@@ -119,15 +119,11 @@ impl Told {
 
 /// Nobody, on a session of this device's own: who a device nobody ever
 /// signed in on authors as.
-pub fn nobody() -> Who {
+pub fn nobody() -> Ctx {
     let here = 0u8;
     let seed = format!("{}:{}:{:p}", now_ms(), crate::monotonic_ms(), &here);
     let id = ark::hash::hex(&ark::hash::sha256(&[seed.as_bytes()])[..8]);
-    Who {
-        actor: String::new(),
-        session: format!("device-{id}"),
-        roles: vec![],
-    }
+    Ctx::who(String::new(), format!("device-{id}"), vec![])
 }
 
 impl Peer {
@@ -135,16 +131,12 @@ impl Peer {
     /// ([`nobody`]) on a disk nobody ever signed in on — and then, given a
     /// login and its token, as that login, its pending intents made the
     /// login's when they were somebody else's.
-    pub fn open_as(config: Config, disk: Box<dyn Disk>, login: Option<(Who, String)>) -> Peer {
+    pub fn open_as(config: Config, disk: Box<dyn Disk>, login: Option<(Ctx, String)>) -> Peer {
         let files = disk.files();
         let (disk, mut local) = crate::local::beside(disk);
         let kept = crate::local::Replica::read(&mut *local);
         let me = match kept.actor {
-            Some(actor) => Who {
-                actor,
-                session: kept.session,
-                roles: vec![],
-            },
+            Some(actor) => Ctx::who(actor, kept.session, vec![]),
             None => {
                 let me = nobody();
                 let (actor, session) = (Some(me.actor.clone()), me.session.clone());
@@ -168,7 +160,7 @@ impl Peer {
 
     /// Somebody signed in: every pending intent theirs, and the connection
     /// dialled with their token.
-    pub fn login(&mut self, who: Who, token: String) {
+    pub fn login(&mut self, who: Ctx, token: String) {
         let (actor, session) = (Some(who.actor.clone()), who.session.clone());
         self.replica(|r| (r.actor, r.session) = (actor, session));
         self.set_token(None);
@@ -190,7 +182,7 @@ impl Peer {
         }
     }
 
-    pub fn me(&self) -> &Who {
+    pub fn me(&self) -> &Ctx {
         &self.log.me
     }
 
@@ -199,7 +191,8 @@ impl Peer {
         let me = self.me();
         Ctx {
             id: EntryId::of(&me.session, 0),
-            ..Ctx::new(me, now_ms())
+            now: now_ms(),
+            ..me.clone()
         }
     }
 

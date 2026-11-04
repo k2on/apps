@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark::log::EntryId;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark_peer::driven::{Driven, Locked};
 use ark_peer::link::Dial;
 use ark_peer::{Config, Files, Patch, Watched};
@@ -91,12 +91,8 @@ impl From<ark_auth::Login> for Login {
 }
 
 impl Login {
-    fn who(&self) -> Who {
-        Who {
-            actor: self.user.clone(),
-            session: self.session.clone(),
-            roles: self.roles.clone(),
-        }
+    fn who(&self) -> Ctx {
+        Ctx::who(self.user.clone(), self.session.clone(), self.roles.clone())
     }
 }
 

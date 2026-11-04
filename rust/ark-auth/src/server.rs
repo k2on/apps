@@ -26,7 +26,7 @@ use ark::db::read;
 use ark::format::Encode;
 use ark::hash::{hex, unhex};
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::row::Row;
 use ark::store::{Change, Store};
 
@@ -80,10 +80,10 @@ pub trait Hub: Send + Sync {
 /// The hub's watch over who is signed in: given what an entry changed — or
 /// `None`, the clock's tick — and the sessions connected, the sessions
 /// whose connections to close.
-pub type Watch = Box<dyn FnMut(&Store, Option<&[Change]>, &[Who], i64) -> Vec<String> + Send>;
+pub type Watch = Box<dyn FnMut(&Store, Option<&[Change]>, &[Ctx], i64) -> Vec<String> + Send>;
 
 /// Who signs in, as a token proves it.
-pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
+pub type Authenticate = Arc<dyn Fn(&str) -> Option<Ctx> + Send + Sync>;
 
 /// A login started and not finished: what the provider's answer has to
 /// match, where the code goes, and what is signing in.
@@ -287,12 +287,13 @@ impl Auth {
     /// Who session `id` proves over `store` at `now`: its row live, its
     /// person holding the roles it was opened with, those the role table
     /// grants and those the configuration does.
-    pub fn judge(&self, store: &Store, id: &str, now: i64) -> Option<Who> {
+    pub fn judge(&self, store: &Store, id: &str, now: i64) -> Option<Ctx> {
         let s = current(&at(id, now), store)?;
-        Some(Who {
+        Some(Ctx {
             roles: self.merged(&s.user, &s.roles),
             actor: s.user,
             session: id.into(),
+            ..Ctx::default()
         })
     }
 

@@ -63,14 +63,7 @@ fn a_login_from_the_routes_is_who_the_socket_says_you_are() {
     );
 
     // A token nobody issued is turned away, and keeps what it authored.
-    let mut mallory = open(
-        ark::peer::Who {
-            actor: "mallory".into(),
-            session: "nope".into(),
-            roles: vec![],
-        },
-        None,
-    );
+    let mut mallory = open(ark::peer::Ctx::who("mallory", "nope", vec![]), None);
     mallory.connect(&url, "forged");
     mallory.mutate("playlists.create_playlist", &named("Mine now"));
     pump_until(&mut [&mut mallory], 10, |ps| ps[0].closed());

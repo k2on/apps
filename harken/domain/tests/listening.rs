@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use ark::format::Encode;
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::row::Row;
 use ark::store::{Change, Store};
 use ark_peer::Config;
@@ -1283,11 +1283,7 @@ impl Wire {
             name: id.into(),
             user: "alice".into(),
         };
-        let who = Who {
-            actor: "alice".into(),
-            session: id.into(),
-            roles: vec![],
-        };
+        let who = Ctx::who("alice", id, vec![]);
         let i = self.net.add(
             who,
             Config {

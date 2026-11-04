@@ -1010,7 +1010,7 @@ mod tests {
     use crate::domain::AddToPlaylist;
     use crate::tests::{alone, signed_in, song};
     use ark::frames::{Frame, Verdict};
-    use ark::peer::Who;
+    use ark::peer::Ctx;
     use ark::schema::Space;
 
     fn on(playlist: Id, media: Id) -> AddToPlaylist {
@@ -1102,11 +1102,7 @@ mod tests {
         let mut hub = Hub::serve(Config::of(d.clone()), Box::new(ark_peer::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles of the login.
-        let alice = Who {
-            actor: "alice".into(),
-            session: "alice@desktop".into(),
-            roles: vec![crate::domain::LIBRARY.into()],
-        };
+        let alice = Ctx::who("alice", "alice@desktop", vec![crate::domain::LIBRARY.into()]);
         peer.client.lock().login(alice.clone(), "alice@desktop:library".into());
         peer.refresh();
         let c = hub.accept(alice);

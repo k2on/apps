@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ark::frames::Frame;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::plan::splice;
 use ark::schema::Space;
 use ark_peer::{Config, ConnId, Deliver, Memory, Peer};
@@ -49,12 +49,8 @@ impl Rng {
 }
 
 /// Client `i`'s first login, as K1's simulator named it.
-pub fn who(i: i64) -> Who {
-    Who {
-        actor: format!("peer-{i}"),
-        session: format!("peer-{i}-session"),
-        roles: vec![],
-    }
+pub fn who(i: i64) -> Ctx {
+    Ctx::who(format!("peer-{i}"), format!("peer-{i}-session"), vec![])
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,7 +61,7 @@ pub enum Op {
     Heal(i64),
     Restart,
     Reopen(i64),
-    SignIn(i64, Who),
+    SignIn(i64, Ctx),
     /// A client offline for a while — no server reached, its intents
     /// pending — until `Online`.
     Offline(i64),
@@ -102,7 +98,7 @@ pub struct Net {
     pub wire: Vec<(bool, Vec<u8>)>,
     /// Every login each client held, by session: what its entries' roles
     /// must be.
-    pub logins: BTreeMap<String, Who>,
+    pub logins: BTreeMap<String, Ctx>,
     /// The clients offline.
     pub offline: BTreeSet<i64>,
     /// Each view kept, by client and number: what it is of, and the list
@@ -121,7 +117,7 @@ impl Net {
     }
 
     /// A hub and a client per login, each linked.
-    pub fn of(hub: Config, clients: Vec<(Who, Config)>, seed: u64) -> Net {
+    pub fn of(hub: Config, clients: Vec<(Ctx, Config)>, seed: u64) -> Net {
         let mut net = Net {
             hub: Peer::serve(hub.clone(), Box::new(Memory::default()), 0),
             hub_config: hub,
@@ -147,7 +143,7 @@ impl Net {
     }
 
     /// One more client, linked: its number.
-    pub fn add(&mut self, who: Who, config: Config) -> i64 {
+    pub fn add(&mut self, who: Ctx, config: Config) -> i64 {
         let i = self.clients.keys().last().map_or(0, |n| n + 1);
         self.logins.insert(who.session.clone(), who.clone());
         // The origin a device draws once, seeded: its first session's.

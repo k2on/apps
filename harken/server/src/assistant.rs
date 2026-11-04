@@ -2957,7 +2957,7 @@ pub mod ha {
     use crate::domain::{Device, Output as Sound};
     use crate::domain::{Listening as Row, ListeningDevice};
     use ark::format::Encode;
-    use ark::peer::{Input, Output, Peer, Role, To, Who};
+    use ark::peer::{Ctx, Input, Output, Peer, Role, To};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
     use ark_peer::Handle;
@@ -3255,11 +3255,7 @@ pub mod ha {
         /// The speaker `entity`, called `name`, standing in `user`'s session.
         fn stand(&mut self, user: &str, entity: &str, name: &str) {
             let k = (user.to_string(), entity.to_string());
-            let who = Who {
-                actor: user.into(),
-                session: speaker(user, entity),
-                roles: vec![],
-            };
+            let who = Ctx::who(user, speaker(user, entity), vec![]);
             let domain = &self.hosted.domain;
             let peer = self.machines.entry(k.clone()).or_insert_with(|| {
                 Peer::new(domain.clone(), Role::Replica, who.clone()).in_space(Space::Volatile)

@@ -23,7 +23,7 @@
 //! one URL, get one code back — and differs between the targets only in where
 //! the code comes back to: a loopback port the desktop listens on, or this
 //! page's own address.
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark_auth::Login;
 use ark_peer::Logins;
 
@@ -258,7 +258,7 @@ pub fn came_back() -> bool {
 }
 
 /// Who a login is, as the server verifies it and an entry carries it.
-pub fn who_of(l: &Login) -> Who {
+pub fn who_of(l: &Login) -> Ctx {
     ark_peer::who(l)
 }
 

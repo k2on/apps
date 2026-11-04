@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use ark::format::Encode;
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark_peer::Config;
 use arkdb::sim::{Net, Op};
 use common::{domain, full, song};
@@ -23,19 +23,15 @@ struct Fleet {
     net: Net,
 }
 
-fn who(actor: &str, session: &str, roles: &[&str]) -> Who {
+fn who(actor: &str, session: &str, roles: &[&str]) -> Ctx {
     let roles = roles.iter().map(|r| r.to_string()).collect();
-    Who {
-        actor: actor.into(),
-        session: session.into(),
-        roles,
-    }
+    Ctx::who(actor, session, roles)
 }
 
 impl Fleet {
     /// `arkdb`'s simulator: a device per login, each its connection's
     /// verified identity.
-    fn new(seed: u64, logins: Vec<Who>) -> Fleet {
+    fn new(seed: u64, logins: Vec<Ctx>) -> Fleet {
         let config = Config::of(std::sync::Arc::new(harken_domain::domain()));
         let devices = logins.into_iter().map(|w| (w, config.clone())).collect();
         Fleet {

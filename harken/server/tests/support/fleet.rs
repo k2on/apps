@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use ark::format::Encode;
 use ark::hash::hex;
 use ark::log::Logged;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::store::{Change, Store};
 use ark_peer::{Config, Files, Peer};
 use arkdb::sim::{Net, Op};
@@ -903,11 +903,7 @@ impl Seeder {
         let i = match self.users.get(user) {
             Some(i) => *i,
             None => {
-                let who = Who {
-                    actor: user.into(),
-                    session: format!("seeded-{user}"),
-                    roles: vec!["library".into()],
-                };
+                let who = Ctx::who(user, format!("seeded-{user}"), vec!["library".into()]);
                 let i = self.net.add(who, Config::of(hosted().domain.clone()));
                 *self.users.entry(user.into()).or_insert(i)
             }

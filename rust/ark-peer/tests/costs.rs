@@ -150,7 +150,7 @@ fn fanout(c: usize) -> usize {
     let author = dev("alice@dev").unwrap();
     let a = hub.accept(author.clone());
     let mut local = 0;
-    let mut push = |hub: &mut Peer, conn, who: &ark::peer::Who, func: &str, input: Vec<u8>| {
+    let mut push = |hub: &mut Peer, conn, who: &ark::peer::Ctx, func: &str, input: Vec<u8>| {
         local += 1;
         hub.frame(conn, support::push(who, local, func, input), 0)
     };

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use ark::domain::Domain;
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::peer::{Input, Journal, Output, Peer as Machine, Role, To, Who};
+use ark::peer::{Ctx, Input, Journal, Output, Peer as Machine, Role, To};
 use ark_peer::{Instance, Memory};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Playlist, RemoveFromPlaylist, RenamePlaylist};
 
@@ -19,12 +19,8 @@ fn module() -> Domain {
     arkdb::demo::demo().later("playlist")
 }
 
-fn who(name: &str) -> Who {
-    Who {
-        actor: name.into(),
-        session: format!("{name}-session"),
-        roles: vec![],
-    }
+fn who(name: &str) -> Ctx {
+    Ctx::who(name, format!("{name}-session"), vec![])
 }
 
 fn server() -> Machine {

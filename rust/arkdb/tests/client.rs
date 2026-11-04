@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::row::Id;
 use ark::schema::Space;
 use ark_peer::{Config, Disk, Memory, Peer};
@@ -59,19 +59,11 @@ fn a_reopened_client_keeps_its_pending_intents() {
 /// the actor was: the id was another.
 #[test]
 fn a_sign_in_authors_what_was_pending_as_the_login() {
-    let anon = Who {
-        actor: "".into(),
-        session: "anon".into(),
-        roles: vec![],
-    };
+    let anon = Ctx::who("", "anon", vec![]);
     let mut n = Net::of(demo(), vec![(anon, demo()), (who(1), demo())], 5);
     n.run(&Op::Partition(0));
     n.run(&create("Road"));
-    let alice = Who {
-        actor: "alice".into(),
-        session: "alice-session".into(),
-        roles: vec!["listener".into()],
-    };
+    let alice = Ctx::who("alice", "alice-session", vec!["listener".into()]);
     n.run(&Op::SignIn(0, alice.clone()));
     n.settle().unwrap();
     n.converged().unwrap();

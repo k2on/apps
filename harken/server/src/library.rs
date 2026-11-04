@@ -57,7 +57,7 @@ use crate::domain::{
 };
 use anyhow::{Context, Result};
 use ark::format::Encode;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
 use ark::store::{Dir, Read, Scan as Range, Store};
 use ark_auth::Login;
@@ -228,11 +228,7 @@ impl Scanner {
         roles.push(crate::domain::LIBRARY.to_string());
         roles.sort();
         roles.dedup();
-        let who = Who {
-            actor: login.user.id.clone(),
-            session: login.session.clone(),
-            roles,
-        };
+        let who = Ctx::who(login.user.id.clone(), login.session.clone(), roles);
         let dir = replica_dir(&data);
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
@@ -1047,7 +1043,8 @@ fn would(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> Would {
     let me = &peer.log.me;
     let ctx = Ctx {
         id: peer.log.next_id(),
-        ..Ctx::new(me, ark_peer::now_ms())
+        now: ark_peer::now_ms(),
+        ..me.clone()
     };
     let Some(f) = peer.domain().get(name).and_then(|f| f.proc.clone()) else {
         return Would::Change;

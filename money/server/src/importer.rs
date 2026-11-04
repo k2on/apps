@@ -61,7 +61,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use ark::format::Encode;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::row::Id;
 use ark_auth::Login;
 use ark_peer::{Handle, Memory, Peer};
@@ -174,11 +174,7 @@ impl Importer {
         roles.push(money_domain::BANK.to_string());
         roles.sort();
         roles.dedup();
-        let who = Who {
-            actor: login.user.id.clone(),
-            session: login.session.clone(),
-            roles,
-        };
+        let who = Ctx::who(login.user.id.clone(), login.session.clone(), roles);
         // In memory: what it holds is the hub's, filled at every start, and
         // an import it had not seen confirmed is pulled again from the
         // cursor kept, rather than pushed again from a disk.

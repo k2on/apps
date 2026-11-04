@@ -13,7 +13,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::hash::hex;
 use ark::log::{EntryId, Origin};
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::row::Id;
 use ark::store::{Change, Store};
 use ark_peer::Config;
@@ -119,16 +119,8 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
     let two = |seed| Net::new(demo(), |_| demo(), 2, seed);
     let mut keep = demo();
     keep.keep = Some(1);
-    let anon = Who {
-        actor: String::new(),
-        session: "anonymous".into(),
-        roles: vec![],
-    };
-    let alice = Who {
-        actor: "alice".into(),
-        session: "alice-session".into(),
-        roles: vec!["listener".into()],
-    };
+    let anon = Ctx::who(String::new(), "anonymous", vec![]);
+    let alice = Ctx::who("alice", "alice-session", vec!["listener".into()]);
     let hub = Config {
         live_keep: Some(4),
         ..crate::demo::hub(demo())

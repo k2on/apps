@@ -100,7 +100,7 @@ use std::time::{Duration, Instant};
 
 use ark::hash::hex;
 use ark::log::EntryId;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark_auth::client::Patience;
 use ark_auth::Login;
 use ark_peer::{Config, Files, Peer};
@@ -259,12 +259,8 @@ fn log_in(server: &str, user: &str, patience: Patience) -> Result<Login, String>
 }
 
 /// Nobody: a peer signed out, or one alone with no name.
-fn nobody(name: &str) -> Who {
-    Who {
-        actor: name.into(),
-        session: name.into(),
-        roles: vec![],
-    }
+fn nobody(name: &str) -> Ctx {
+    Ctx::who(name, name, vec![])
 }
 
 // -- JSON: the domain's own --------------------------------------------------------
@@ -940,7 +936,7 @@ impl ark_ffi::Listener for Stderr {
 }
 
 /// `--roles` beside a login's.
-fn with_roles(who: &mut Who, roles: &[String]) {
+fn with_roles(who: &mut Ctx, roles: &[String]) {
     who.roles.extend(roles.iter().cloned());
     who.roles.sort();
     who.roles.dedup();
@@ -951,7 +947,7 @@ fn with_roles(who: &mut Who, roles: &[String]) {
 /// The same session is no new login: its intents are its own already, and
 /// authoring them again from its first `local` would name entries the
 /// server has answered.
-fn reauthor(client: &mut Peer, who: Who) {
+fn reauthor(client: &mut Peer, who: Ctx) {
     let log = &client.log;
     let mut theirs = log.pending.iter().map(|p| &p.entry.session);
     if who.session == log.me.session && theirs.all(|s| *s == who.session) {

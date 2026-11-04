@@ -10,7 +10,7 @@ use ark::db::{Durable, Volatile};
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::prelude::*;
 
 use ark_peer::{dev, Config, Disk, Instance, Memory, Peer};
@@ -103,7 +103,7 @@ fn config() -> Config {
     }
 }
 
-fn push(who: &Who, local: i64, func: &str, name: &str) -> Vec<u8> {
+fn push(who: &Ctx, local: i64, func: &str, name: &str) -> Vec<u8> {
     support::push(who, local, func, support::named(name))
 }
 

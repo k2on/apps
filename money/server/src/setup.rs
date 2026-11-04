@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result};
 use ark::format::Encode;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use money_domain::setup::{self as calls, AmazonState, BrowserPage, CostcoState, Stores};
 
 use crate::costco::Costco;
@@ -46,7 +46,7 @@ pub fn calls(setup: Setup) -> BTreeMap<String, ark_peer::Call> {
     let mut out = BTreeMap::new();
     let mut add = |name: &str, f: fn(&Setup, &[u8]) -> Result<Vec<u8>>| {
         let s = setup.clone();
-        let call: ark_peer::Call = Arc::new(move |who: &Who, input: &[u8]| {
+        let call: ark_peer::Call = Arc::new(move |who: &Ctx, input: &[u8]| {
             if who.actor == crate::importer::ACCOUNT {
                 return Err("the importer sets up nothing".into());
             }
