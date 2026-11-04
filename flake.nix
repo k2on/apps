@@ -810,6 +810,9 @@
                 export DEVELOPER_DIR=${dev}
                 export PATH=${dev}/usr/bin:${tc}:$PATH
                 export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home
+                # A name for the build user, which has none here: XcodeGen
+                # stops without one ("Couldn't find current username").
+                export USER=nixbld LOGNAME=nixbld
                 mkdir -p "$HOME/Library/Developer/CoreSimulator/Devices"
                 unset SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX LD AR AS RANLIB STRIP NM
                 for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
@@ -828,6 +831,11 @@
                     (global-name "com.apple.FileCoordination"))
                 '';
                 all-services = "(allow mach-lookup)";
+                # Only to see whether a derivation's own rules are applied
+                # at all under the strict sandbox (F).
+                hosts = ''
+                  (allow file-read* (literal "/private/etc/hosts") (literal "/etc/hosts"))
+                '';
               };
               step = name: attrs: script: pkgs.runCommand "strict-ios-${name}" attrs ''
                 ${setup}
@@ -849,6 +857,30 @@
                 test -f $out/A.xcframework/Info.plist
               '';
               kernel = iosPhone (moneyFfi // { framework = "MoneyFFI"; inherit xcode; });
+              # F: is a derivation's own sandbox profile applied when strict?
+              # /etc/hosts is outside what the strict sandbox lets a build
+              # read; with `hosts` it is let in, if profiles count.
+              hostsWith = profile: step "hosts-${profile}" { __sandboxProfile = profiles.${profile}; } ''
+                if /bin/cat /etc/hosts > /dev/null 2>&1; then echo "read" | tee $out/result; else echo "denied" | tee $out/result; fi
+              '';
+              # G: who the build is, as the C library says, under each profile:
+              # a framework that asks and is told nothing may be what falls.
+              whoWith = profile: step "who-${profile}" { __sandboxProfile = profiles.${profile}; } ''
+                cat > who.c <<'C'
+                #include <pwd.h>
+                #include <stdio.h>
+                #include <stdlib.h>
+                #include <unistd.h>
+                int main(void) {
+                  struct passwd *p = getpwuid(getuid());
+                  printf("uid %d, getpwuid: %s, home %s, getlogin: %s, HOME %s\n", (int)getuid(),
+                    p ? p->pw_name : "(none)", p ? p->pw_dir : "(none)", getlogin() ? getlogin() : "(none)", getenv("HOME"));
+                  return 0;
+                }
+                C
+                ${tc}/clang -isysroot ${dev}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk who.c -o who
+                ./who | tee $out/who
+              '';
               appWith = profile: pkgs.stdenv.mkDerivation {
                 pname = "strict-ios-money-simulator-${profile}";
                 version = "0.1.0";
@@ -891,6 +923,10 @@
               e-xcframework-none = xcframeworkWith "none";
               e-xcframework-xcode-services = xcframeworkWith "xcode-services";
               e-xcframework-all-services = xcframeworkWith "all-services";
+              f-hosts-none = hostsWith "none";
+              f-hosts-hosts = hostsWith "hosts";
+              g-who-none = whoWith "none";
+              g-who-all-services = whoWith "all-services";
               c-kernel = kernel;
               d-app-xcode-services = appWith "xcode-services";
               d-app-all-services = appWith "all-services";

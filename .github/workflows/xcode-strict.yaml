@@ -132,15 +132,53 @@ jobs:
           codesign -v --deep "$STORE_XCODE/$f" && echo "store DVTFoundation: valid" || echo "store DVTFoundation: INVALID"
           ls -la "$STORE_XCODE/Contents" | head -12
 
+      # Are a derivation's own sandbox rules applied when the sandbox is
+      # strict? /etc/hosts, which it keeps out, with and without a rule
+      # letting it in.
+      - name: F, a derivation's own sandbox rules, applied?
+        id: f
+        continue-on-error: true
+        run: |
+          bash .github/strict-ios.sh f-hosts-none
+          bash .github/strict-ios.sh f-hosts-hosts
+
+      # Who the build user is, as the C library says, in the sandbox:
+      # a framework told nothing may be what falls.
+      - name: G, who the build is, in the sandbox
+        id: g
+        continue-on-error: true
+        run: |
+          bash .github/strict-ios.sh g-who-none
+          bash .github/strict-ios.sh g-who-all-services
+
+      # What macOS wrote of each crash in the last two hours: the exception,
+      # and the crashed thread, frame by frame.
       - name: E, what macOS wrote of xcodebuild's crashes
         if: always()
         run: |
-          for d in /Library/Logs/DiagnosticReports ~/Library/Logs/DiagnosticReports; do
-            sudo find "$d" -iname '*xcodebuild*' -newer "$GITHUB_ENV" 2>/dev/null
-          done | head -5 | while read -r r; do
+          sudo find /Library/Logs/DiagnosticReports ~/Library/Logs/DiagnosticReports /private/var/db/diagnostics \
+            -maxdepth 2 -iname '*xcodebuild*' -mmin -120 2>/dev/null | head -3 > "$RUNNER_TEMP/crashes" || true
+          echo "$(wc -l < "$RUNNER_TEMP/crashes") crash reports"
+          while read -r r; do
             echo "===== $r"
-            sudo head -c 6000 "$r" | grep -v '^\s*$' | head -80
-          done
+            sudo cat "$r" | python3 -c '
+          import json, sys
+          text = sys.stdin.read()
+          head, _, body = text.partition("\n")
+          try:
+              b = json.loads(body)
+          except ValueError:
+              print(text[:3000]); sys.exit()
+          print("exception:", json.dumps(b.get("exception")))
+          print("termination:", json.dumps(b.get("termination")))
+          print("asi:", json.dumps(b.get("asi"))[:1500])
+          images = b.get("usedImages", [])
+          t = b["threads"][b.get("faultingThread", 0)]
+          for f in t.get("frames", [])[:30]:
+              name = images[f["imageIndex"]].get("name", "?") if f.get("imageIndex", -1) < len(images) else "?"
+              print(" ", name, f.get("symbol", hex(f.get("imageOffset", 0))))
+          '
+          done < "$RUNNER_TEMP/crashes"
 
       - name: C, money's kernel
         id: c
@@ -170,6 +208,8 @@ jobs:
             echo "| E, xcodebuild, Xcode's and CoreSimulator's services | ${{ steps.e2.outcome }} |"
             echo "| E, xcodebuild, any service | ${{ steps.e3.outcome }} |"
             echo "| E, outside the sandbox (see its log) | ${{ steps.e4.outcome }} |"
+            echo "| F, own sandbox rules applied (see its log) | ${{ steps.f.outcome }} |"
+            echo "| G, who the build is (see its log) | ${{ steps.g.outcome }} |"
             echo "| C, money's kernel | ${{ steps.c.outcome }} |"
             echo "| D, the money app, Xcode's services | ${{ steps.d1.outcome }} |"
             echo "| D, the money app, any service | ${{ steps.d2.outcome }} |"

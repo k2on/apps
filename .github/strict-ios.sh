@@ -10,5 +10,6 @@ out=$(nix build --impure --print-build-logs --no-link --print-out-paths --expr "
     (builtins.storePath \"$STORE_XCODE\")).$step")
 echo "$step: $out"
 find "$out" -maxdepth 3 | head -30
-for f in "$out"/version "$out"/sdk "$out"/swift "$out"/file; do [ -f "$f" ] && cat "$f"; done
+# What it says of itself: each small file it left, whole.
+find "$out" -maxdepth 1 -type f -size -8k | while read -r f; do echo "--- ${f##*/}"; cat "$f"; done
 true
