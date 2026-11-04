@@ -216,37 +216,30 @@ impl Table {
     fn columns_of(&self, row: &[u8], check: bool) -> Result<Vec<Option<J>>, String> {
         let need = self.needed(check);
         let upto = need.iter().rposition(|n| *n).map_or(0, |i| i + 1);
+        match self.columns_upto(row, upto, check)? {
+            (_, rest) if check && !rest.is_empty() => Err("not a row's one encoding".into()),
+            (cols, _) => Ok(cols),
+        }
+    }
+
+    /// A row's first `upto` columns, as some schema of this table wrote
+    /// them, and the bytes after them: a column beyond where the bytes end
+    /// is missing — unless `check`, which also holds each column's bytes to
+    /// its one encoding (a row the store holds is whole).
+    fn columns_upto<'r>(&self, row: &'r [u8], upto: usize, check: bool) -> Result<(Vec<Option<J>>, &'r [u8]), String> {
         let mut cols: Vec<Option<J>> = vec![None; self.columns.len()];
         let mut rest = row;
         for (i, c) in self.columns[..upto].iter().enumerate() {
+            if rest.is_empty() && !check {
+                break;
+            }
             let (v, r) = take_seed(Seed(&c.ty), rest).map_err(|e| format!("{}: {e}", c.name))?;
             if check && encode(&Typed(&c.ty, &v)).map_err(|e| e.0)? != rest[..rest.len() - r.len()] {
                 return Err("not a row's one encoding".into());
             }
             (cols[i], rest) = (Some(v), r);
         }
-        if check && !rest.is_empty() {
-            return Err("not a row's one encoding".into());
-        }
-        Ok(cols)
-    }
-
-    /// A row's columns as some schema of this table wrote them, in order up
-    /// to where its bytes end: a column beyond them is missing, one beyond
-    /// this table's dropped.
-    fn columns_as_written(&self, row: &[u8]) -> Result<Vec<Option<J>>, String> {
-        let mut rest = row;
-        let mut out = vec![];
-        for c in &self.columns {
-            if rest.is_empty() {
-                out.push(None);
-                continue;
-            }
-            let (v, r) = take_seed(Seed(&c.ty), rest).map_err(|e| format!("{}: {e}", c.name))?;
-            out.push(Some(v));
-            rest = r;
-        }
-        Ok(out)
+        Ok((cols, rest))
     }
 
     /// A row of this table as some schema of it wrote it, read under this
@@ -258,7 +251,8 @@ impl Table {
             return Ok(row.to_vec());
         }
         let at = |e: String| Refusal(format!("{}: {e}", self.name));
-        let written = self.columns_as_written(row).map_err(at)?;
+        // A column beyond this table's is dropped.
+        let (written, _) = self.columns_upto(row, self.columns.len(), false).map_err(at)?;
         let mut out = Map::new();
         for (c, v) in self.columns.iter().zip(written) {
             let x = match (v, &c.default) {
