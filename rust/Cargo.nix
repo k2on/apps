@@ -11096,6 +11096,11 @@ rec {
         edition = "2021";
         crateBin = [
           {
+            name = "money-seed";
+            path = "src/bin/money-seed.rs";
+            requiredFeatures = [ ];
+          }
+          {
             name = "money-server";
             path = "src/main.rs";
             requiredFeatures = [ ];
@@ -11138,6 +11143,7 @@ rec {
           {
             name = "money-domain";
             packageId = "money-domain";
+            features = [ "seed" ];
           }
           {
             name = "serde";

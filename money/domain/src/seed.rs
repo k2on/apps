@@ -380,8 +380,33 @@ fn plaid_txn(id: &str, date: &str, payee: &str, cents: i64, pending: bool, repla
     }
 }
 
-/// The household, three months of it up to `today`.
+/// The household, three months of it up to `today`: the demo's records,
+/// its own authority's, as the demo window and the phones' demo open them.
 pub fn seeded_disk(today: &str, now: i64) -> Memory {
+    let mut disk = Memory::default();
+    log(&mut disk, today, now).expect("memory takes it");
+    ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (Some(ME.into()), LOCAL.into())).expect("memory takes it");
+    disk
+}
+
+/// The household written onto `disk` as a log starting from its snapshot:
+/// what a server's data directory (`<data>/log`) is seeded with before it
+/// starts, so a phone signed in as [`ME`] opens on it (`money-seed`, what
+/// the app screenshots run: .github/screens/apps.md).
+pub fn log(disk: &mut dyn Disk, today: &str, now: i64) -> std::io::Result<()> {
+    let store = household(today, now);
+    let snapshot = Snapshot {
+        seq: 0,
+        hash: Default::default(),
+        state: store.state_hash(),
+        rows: store.snapshot_rows(),
+    };
+    disk.record(&Record::Rows(snapshot.kv_rows()).enc())?;
+    ark_peer::migrate::put_schema(disk, store.schema_arc())
+}
+
+/// The household's store, three months of it up to `today`.
+fn household(today: &str, now: i64) -> Store {
     let this = month_of(today);
     let months = [add_months(&this, -2), add_months(&this, -1), this.clone()];
     let first = format!("{}-01", months[0]);
@@ -709,18 +734,7 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
         charges: vec![charge(add_days(today, -1), -1_798), charge(today.to_string(), -2_399)],
     };
     s.run(ME, "add_charges", &charges);
-
-    let snapshot = Snapshot {
-        seq: 0,
-        hash: Default::default(),
-        state: s.store.state_hash(),
-        rows: s.store.snapshot_rows(),
-    };
-    let mut disk = Memory::default();
-    disk.record(&Record::Rows(snapshot.kv_rows()).enc()).expect("memory takes it");
-    ark_peer::migrate::put_schema(&mut disk, s.store.schema_arc()).expect("memory takes it");
-    ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (Some(ME.into()), LOCAL.into())).expect("memory takes it");
-    disk
+    s.store
 }
 
 /// The demo's peer: the seeded household, its own authority, holding the
