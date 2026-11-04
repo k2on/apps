@@ -24,10 +24,10 @@
 //! A server keeps its schema beside them, as JSON ([`SCHEMA`]): what reads
 //! the rows without its domain compiled in reads them under it.
 //!
-//! What a peer keeps beside its log is the rows of its local instance
-//! (`local`), in this same format under the names `local.kv` and
-//! `local.log` (`local::Shared`), and a device's pending intents, records
-//! framed the same way and appended (`local.pending`, `local::Kept`).
+//! What a peer keeps beside its log is records under the names `local.*`
+//! (`local::Shared`): a device's replica (`local.replica`) and its pending
+//! intents, records framed the same way and appended (`local.pending`,
+//! `local::Kept`); a server's journal and volatile space (`crate::hub`).
 //!
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};

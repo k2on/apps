@@ -46,11 +46,10 @@
 //! every token by the row it names and closes what is revoked or expired,
 //! as `ark_auth::server::Auth` says (`serve`).
 //!
-//! **A peer is three instances** (`instance`: a machine and what keeps
-//! it) wired together: the log's, the live space's, and the local one
-//! beside them on the same disk, whose rows (`local`) are what a peer keeps
-//! beside its log — a server's journal and volatile space, a device's
-//! replica and pending intents.
+//! **A peer is two instances** (`instance`: a machine and what keeps
+//! it) wired together, the log's and the live space's, and records beside
+//! them on the same disk (`local`): a server's journal and volatile space,
+//! a device's replica and pending intents.
 //!
 //! **Handlers and reconcilers** (`jobs`) act on the world outside: a
 //! handler claims, runs and finishes the jobs of a kind (`ark::effect`) on
@@ -104,7 +103,7 @@ pub use handle::{dev, Authenticate, Handle};
 pub use hub::{Called, ConnId, Deliver};
 pub use instance::Instance;
 pub use link::{Event, Pumped, Wake};
-pub use local::{Local, Logins};
+pub use local::Logins;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use serve::{Running, Server};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
@@ -210,8 +209,8 @@ pub const ANOTHER: &str =
 /// A patch of a view's rows, each its bytes.
 pub type Patch = ark::plan::Patch<Vec<u8>>;
 
-/// Three instances wired: the log's machine on the disk, the live one, and
-/// the local instance beside them on the same disk; and what wires them.
+/// Two instances wired, the log's machine on the disk and the live one,
+/// the records beside them on the same disk, and what wires them.
 pub struct Peer {
     pub config: Config,
     pub log: Instance,
@@ -237,8 +236,10 @@ pub struct Peer {
     woke: [Option<Span>; 2],
     /// What became of its own intents, and what its views did.
     told: app::Told,
-    /// What it keeps beside its log, on the same disk.
-    pub local: Instance,
+    /// What it keeps beside its log, on the same disk, and its last
+    /// refusal, while it lasts.
+    pub local: Box<dyn Disk>,
+    local_failure: Option<String>,
     /// What it keeps of the log's pending intents, as last written.
     saved: Saved,
     /// The handlers registered here, and what changed while they ran.
@@ -343,7 +344,7 @@ pub fn who(l: &ark_auth::Login) -> Who {
 }
 
 impl Peer {
-    fn with(config: Config, log: Instance, live: Option<Instance>, local: Instance) -> Peer {
+    fn with(config: Config, log: Instance, live: Option<Instance>, local: Box<dyn Disk>) -> Peer {
         Peer {
             config,
             log,
@@ -359,6 +360,7 @@ impl Peer {
             woke: [None, None],
             told: app::Told::default(),
             local,
+            local_failure: None,
             saved: Saved::default(),
             runners: vec![],
             missed: None,
@@ -376,15 +378,15 @@ impl Peer {
         p
     }
 
-    pub(crate) fn opened(config: Config, me: Who, disk: Box<dyn Disk>, mut local: Instance, link: link::Link) -> Peer {
-        let r = local.read::<Local, _>(|db| local::replica(db).unwrap_or_default());
-        let blob = local.disk.as_mut().and_then(|d| d.get(local::PENDING).ok().flatten());
+    pub(crate) fn opened(config: Config, me: Who, disk: Box<dyn Disk>, mut local: Box<dyn Disk>, link: link::Link) -> Peer {
+        let r = local::Replica::read(&mut *local);
+        let blob = local.get(local::PENDING).ok().flatten();
         let (pending, kept, records) = local::Kept::read(&blob.unwrap_or_default());
         let origin = match r.origin {
             o if o != Origin::default() => o,
             _ => {
                 let origin = draw_origin();
-                let _ = local.write::<Local, ark::db::Durable, _>(|db| db.replica.put(local::Replica { origin, ..r.clone() }));
+                let _ = local.put(local::REPLICA, &local::Replica { origin, ..r.clone() }.to_bytes());
                 origin
             }
         };
@@ -430,9 +432,8 @@ impl Peer {
         let me = self.log.me.clone();
         let mut link = self.link;
         link.wire = None;
-        let local = Instance::open::<Local>(self.local.into_disk());
         let files = self.files.store;
-        let mut p = Peer::opened(self.config, me, self.log.into_disk(), local, link);
+        let mut p = Peer::opened(self.config, me, self.log.into_disk(), self.local, link);
         p.keep_files(files);
         p
     }
@@ -445,9 +446,9 @@ impl Peer {
     }
 
     /// What keeps a disk from being written, while it lasts: the log's, or
-    /// its local instance's.
+    /// its records' beside it.
     pub fn failure(&self) -> Option<&str> {
-        self.log.failure.as_deref().or(self.local.failure.as_deref())
+        self.log.failure.as_deref().or(self.local_failure.as_deref())
     }
 
     fn instance(&mut self, space: Space) -> Option<&mut Instance> {
@@ -508,19 +509,18 @@ impl Peer {
         out
     }
 
-    /// Its replica row, changed by `f`, kept.
+    /// Its replica, changed by `f`, kept.
     pub(crate) fn replica(&mut self, f: impl FnOnce(&mut local::Replica)) {
-        self.keep(|db| {
-            let mut r = local::replica(db).unwrap_or_default();
-            f(&mut r);
-            db.replica.put(r)
-        });
+        let mut r = local::Replica::read(&mut *self.local);
+        f(&mut r);
+        self.put_beside(local::REPLICA, &r.to_bytes());
     }
 
-    /// `f` written to its local instance; a refusal kept as its failure.
-    pub(crate) fn keep(&mut self, f: impl for<'t> FnOnce(&mut ark::db::Db<'t, Local>) -> Result<(), Refusal>) {
-        if let Err(e) = self.local.write::<Local, ark::db::Durable, _>(f) {
-            self.local.failure = Some(e.0);
+    /// A record kept beside its log, on its disk; a failure kept as its
+    /// failure.
+    pub(crate) fn put_beside(&mut self, name: &str, bytes: &[u8]) {
+        if let Err(e) = self.local.put(name, bytes) {
+            self.local_failure = Some(e.to_string());
         }
     }
 
@@ -556,13 +556,12 @@ impl Peer {
             records: if whole { 1 } else { s.records + 1 },
         };
         let bytes = disk::frame(&kept.to_bytes());
-        let Some(d) = self.local.disk.as_mut() else { return };
         let wrote = match whole {
-            true => d.put(local::PENDING, &bytes),
-            false => d.append(local::PENDING, &bytes),
+            true => self.local.put(local::PENDING, &bytes),
+            false => self.local.append(local::PENDING, &bytes),
         };
         if let Err(e) = wrote {
-            self.local.failure = Some(format!("the pending intents cannot be written: {e}"));
+            self.local_failure = Some(format!("the pending intents cannot be written: {e}"));
         }
     }
 

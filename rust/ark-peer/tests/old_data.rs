@@ -13,6 +13,13 @@
 //! each change started every log afresh, by decision, rather than
 //! migrating one.
 //!
+//! A device's own records beside its log (its replica, its pending
+//! intents) may break between builds — a device refills from its server —
+//! and since its replica became a record (`local.replica`) rather than a
+//! row of a local instance, the fixture's (`replica/local.*`) is not read:
+//! the device draws a new origin. Nothing of the server's is beside its
+//! log as rows, so the server's directory reads as it did.
+//!
 //! Read as it is since a server's journal and its volatile space moved out
 //! of its local instance's rows into records beside them (`local.journal`,
 //! `local.volatile`): the journal this fixture wrote as rows is not read,
@@ -167,8 +174,7 @@ fn an_old_data_directory_opens() {
     assert_eq!(device.log.log().head().0, HEAD - 1, "the replica's chain, before bob's sign-in");
     assert_eq!(held(&device.log.store), names(), "and its rows");
     assert!(device.log.pending.is_empty(), "nothing pending");
-    let replica = device.local.read::<ark_peer::local::Local, _>(ark_peer::local::replica).unwrap();
-    assert!(!origins.is_empty() && origins.iter().all(|o| *o == replica.origin), "its origin");
+    assert!(!origins.is_empty(), "alice's entries, from the device");
 }
 
 fn copy(from: &Path, to: &Path) {

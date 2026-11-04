@@ -21,11 +21,11 @@
 //! session's first such connection says it and `on_leave` when its last
 //! closes, so a device on two connections is one device. On a restart the
 //! volatile space is what the server wrote of it when it last closed
-//! (its rows whole, one record beside its local instance: `local.volatile`,
+//! (its rows whole, one record beside its log: `local.volatile`,
 //! and its journal, `local.live`), and `on_restore` is authored over it.
 //!
 //! **The journal** beside the log keeps what the log cannot, as one record
-//! beside the peer's local instance (`local.journal`): each origin's last
+//! beside the log (`local.journal`): each origin's last
 //! `local` and actor and the intents refused, written whole when a refusal
 //! or the horizon moves, so that after a restart a push past a refusal is not
 //! taken for a gap, a refused intent pushed again is answered again, and
@@ -41,9 +41,9 @@ use ark::log::{Durable, EntryId, Origin, Record};
 use ark::peer::{Input, Journal, Peer as Machine, Role, Who};
 use ark::schema::Space;
 
-use crate::{machine, Config, Disk, Fold, Instance, Peer};
+use crate::{machine, Config, Disk, Fold, Peer};
 
-/// What a server keeps beside its local instance, each one record on its
+/// What a server keeps beside its log, each one record on its
 /// disk: its volatile space as it last closed, the store's rows whole, and
 /// the live journal then; and its journal, each origin's last `local` and
 /// actor and what it refused.
@@ -54,9 +54,9 @@ const JOURNAL: &str = "journal";
 /// Each origin's last `local`, and the actor it is bound to.
 type Lasts = BTreeMap<Origin, (String, i64)>;
 
-/// A record kept beside `local`, read.
-fn kept<T: Encode>(local: &mut Instance, name: &str) -> Option<T> {
-    T::from_bytes(&local.disk.as_mut()?.get(name).ok()??).ok()
+/// A record kept beside the log, read.
+fn kept<T: Encode>(local: &mut Box<dyn Disk>, name: &str) -> Option<T> {
+    T::from_bytes(&local.get(name).ok()??).ok()
 }
 
 pub type ConnId = u64;
@@ -188,14 +188,6 @@ impl Peer {
         let j = journal(live).to_bytes();
         self.put_beside(VOLATILE, &rows.enc());
         self.put_beside(LIVE, &j);
-    }
-
-    /// A record kept beside the local instance, on its disk; a failure kept
-    /// as its failure.
-    fn put_beside(&mut self, name: &str, bytes: &[u8]) {
-        if let Some(Err(e)) = self.local.disk.as_mut().map(|d| d.put(name, bytes)) {
-            self.local.failure = Some(e.to_string());
-        }
     }
 
     /// A connection verified as `who`.

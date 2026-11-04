@@ -176,7 +176,7 @@ impl Peer {
     pub fn open_as(config: Config, disk: Box<dyn Disk>, login: Option<(Who, String)>) -> Peer {
         let files = disk.files();
         let (disk, mut local) = crate::local::beside(disk);
-        let kept = local.read::<crate::Local, _>(crate::local::replica).unwrap_or_default();
+        let kept = crate::local::Replica::read(&mut *local);
         let me = match kept.actor {
             Some(actor) => Who {
                 actor,
@@ -186,7 +186,8 @@ impl Peer {
             None => {
                 let me = nobody();
                 let (actor, session) = (Some(me.actor.clone()), me.session.clone());
-                let _ = local.write::<crate::Local, ark::db::Durable, _>(|db| db.replica.put(crate::local::Replica { actor, session, ..kept }));
+                let r = crate::local::Replica { actor, session, ..kept };
+                let _ = local.put(crate::local::REPLICA, &r.to_bytes());
                 me
             }
         };

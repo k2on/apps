@@ -1,4 +1,4 @@
-//! What a peer keeps beside its log, as rows of its local instance, held:
+//! What a peer keeps beside its log, and an instance's rows, held:
 //! an instance's rows read back after a reopen, its journal folded; an
 //! ephemeral one kept nowhere; a server's journal — each origin's last —
 //! across a restart; a device's replica
