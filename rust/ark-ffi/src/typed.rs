@@ -10,7 +10,8 @@
 //! scalar, `String`, `Option` and `Vec` are their own twins; an id is a
 //! [`RowId`] (its hex, the apps' `Id`). A view of rows of `T` is an object
 //! of `T`'s own (`<T>View`, over [`Typed`]): its rows, and what it did as a
-//! [`Taken`] whose inserted and updated rows come beside it, in order.
+//! [`Taken`] whose inserted and updated rows come beside it, in order — as
+//! a view read as JSON's do ([`crate::ViewTaken`]).
 //! Mutations (of either space) and queries stay called by name with JSON.
 
 use std::sync::Arc;
@@ -95,9 +96,9 @@ pub enum Op {
     Update { at: u64 },
 }
 
-/// What a typed view did since it was last taken: its rows taken with it
-/// are, for `Patched`, each insert's and update's in order, and for
-/// `Reset`, all of them.
+/// What a view did since it was last taken: its rows taken with it are,
+/// for `Patched`, each insert's and update's in order, and for `Reset`, all
+/// of them.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum Taken {
     Unchanged,

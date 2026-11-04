@@ -12,9 +12,10 @@ public struct Id: Hashable {
     public static let none = Id(String(repeating: "0", count: 32))
 }
 
-/// A view's rows read as `T`, and what it did since last taken: each row its
-/// JSON read by `read` over a `ViewHandle`, or — a typed view — rows UniFFI
-/// hands over as they are (`typed`).
+/// A view's rows read as `T`, and what it did since last taken (a `Taken`
+/// and the rows that came with it): each row its JSON read by `read` over a
+/// `ViewHandle`, or — a typed view — rows UniFFI hands over as they are
+/// (`typed`).
 public final class LiveView<T> {
     let rowsOf: () -> [T]
     let takeOf: () -> Update<T>
@@ -23,18 +24,8 @@ public final class LiveView<T> {
 
     public convenience init(_ handle: ViewHandle, _ read: @escaping (Any?) -> T) {
         self.init(rows: { handle.rows().map { read(J.parse($0)) } }, take: {
-            switch handle.take() {
-            case .unchanged: return .unchanged
-            case let .reset(rows): return .reset(rows.map { read(J.parse($0)) })
-            case let .patched(patches):
-                return .patched(patches.map { p -> Change<T> in
-                    switch p {
-                    case let .insert(at, row): return .insert(at: Int(at), row: read(J.parse(row)))
-                    case let .remove(at): return .remove(at: Int(at))
-                    case let .update(at, row): return .update(at: Int(at), row: read(J.parse(row)))
-                    }
-                })
-            }
+            let t = handle.take()
+            return LiveView.taken(t.update, t.rows.map { read(J.parse($0)) })
         })
     }
 
@@ -43,20 +34,26 @@ public final class LiveView<T> {
     public static func typed(rows: @escaping () -> [T], take: @escaping () -> (Taken, [T])) -> LiveView<T> {
         LiveView(rows: rows, take: {
             let (t, came) = take()
-            switch t {
-            case .unchanged: return .unchanged
-            case .reset: return .reset(came)
-            case let .patched(ops):
-                var r = came.makeIterator()
-                return .patched(ops.map { o -> Change<T> in
-                    switch o {
-                    case let .insert(at): return .insert(at: Int(at), row: r.next()!)
-                    case let .remove(at): return .remove(at: Int(at))
-                    case let .update(at): return .update(at: Int(at), row: r.next()!)
-                    }
-                })
-            }
+            return taken(t, came)
         })
+    }
+
+    /// What a view did, `came` the rows that came with it: each insert's
+    /// and update's, or all.
+    static func taken(_ t: Taken, _ came: [T]) -> Update<T> {
+        switch t {
+        case .unchanged: return .unchanged
+        case .reset: return .reset(came)
+        case let .patched(ops):
+            var r = came.makeIterator()
+            return .patched(ops.map { o -> Change<T> in
+                switch o {
+                case let .insert(at): return .insert(at: Int(at), row: r.next()!)
+                case let .remove(at): return .remove(at: Int(at))
+                case let .update(at): return .update(at: Int(at), row: r.next()!)
+                }
+            })
+        }
     }
 
     public func rows() -> [T] { rowsOf() }

@@ -1,7 +1,7 @@
 //! harken's peer through the bridge: opened alone on a disk, a playlist
 //! made by name and seen in a view, and the listening session read.
 
-use ark_ffi::ViewUpdate;
+use ark_ffi::Taken;
 use harken_ffi::{harken_listening, harken_open};
 
 /// Falsified by `config` registering no domain for the log: `playlists`
@@ -14,10 +14,10 @@ fn harken_opens_and_is_called_by_name() {
     p.alone();
     let lists = p.view("playlists".into(), "null".into()).unwrap();
     p.mutate("create_playlist".into(), r#"{"name":"Mix"}"#.into()).unwrap();
-    let ViewUpdate::Patched { patches } = lists.take() else {
+    let Taken::Patched { ops } = lists.take().update else {
         panic!("patched")
     };
-    assert_eq!(patches.len(), 1);
+    assert_eq!(ops.len(), 1);
     assert_eq!(
         p.check("create_playlist".into(), r#"{"name":" "}"#.into()).as_deref(),
         Some("a playlist needs a name")

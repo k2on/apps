@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_ffi::{Listener, Login, Patch, Peer, Refusal, ViewUpdate};
+use ark_ffi::{Listener, Login, Op, Peer, Refusal, Taken};
 use ark_peer::{dev, Config, Handle, Live, Memory};
 use arkdb::demo::{arrival, demo, live, room, Playlist};
 
@@ -115,14 +115,13 @@ fn the_bridge_does_what_the_kit_does() {
     let before = told.0.load(Ordering::Relaxed);
     let add = format!(r#"{{"playlist_id":"{road}","track_id":"t1"}}"#);
     alice.mutate("add_to_playlist".into(), add).unwrap();
-    let ViewUpdate::Patched { patches } = items.take() else {
-        panic!("patched")
+    let taken = items.take();
+    let (Taken::Patched { ops }, [row]) = (&taken.update, &taken.rows[..]) else {
+        panic!("one insert: {taken:?}")
     };
-    let [Patch::Insert { at: 0, row }] = &patches[..] else {
-        panic!("one insert: {patches:?}")
-    };
+    assert_eq!(ops[..], [Op::Insert { at: 0 }]);
     assert!(row.contains(r#""track_id":"t1""#), "{row}");
-    assert_eq!(items.take(), ViewUpdate::Unchanged);
+    assert_eq!(items.take().update, Taken::Unchanged);
     assert!(told.0.load(Ordering::Relaxed) > before, "the listener was told");
     assert_eq!(alice.query("items".into(), args.clone()).unwrap(), format!("[{row}]"));
 
@@ -273,10 +272,10 @@ fn a_kinds_due_jobs_are_asked_by_name() {
     .unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"now","after_ms":0}"#.into()).unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"later","after_ms":3600000}"#.into()).unwrap();
-    let due = d.due("fetch".into()).unwrap();
-    assert_eq!(due.rows.len(), 1, "{due:?}");
-    assert!(due.rows[0].contains(r#""id":"now""#), "{due:?}");
-    assert!(due.next_ms.is_some_and(|t| t > ark_peer::now_ms() + 3_000_000));
+    let due: serde_json::Value = serde_json::from_str(&d.query("fetch.due".into(), "null".into()).unwrap()).unwrap();
+    assert_eq!(due["rows"].as_array().unwrap().len(), 1, "{due}");
+    assert_eq!(due["rows"][0]["id"], "now", "{due}");
+    assert!(due["next_ms"].as_i64().is_some_and(|t| t > ark_peer::now_ms() + 3_000_000));
 }
 
 /// A kept view that could not be kept up is made again from its input,
@@ -289,14 +288,16 @@ fn a_view_made_again_after_a_reset_is_made_from_its_input() {
     let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
     let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"b","after_ms":0}"#.into()).unwrap();
-    assert!(matches!(every.take(), ViewUpdate::Patched { .. }));
+    assert!(matches!(every.take().update, Taken::Patched { .. }));
     jobs::REFUSE.store(true, Ordering::SeqCst);
     d.mutate("fetch.ask".into(), r#"{"id":"a","after_ms":0}"#.into()).unwrap();
     assert!(!jobs::REFUSE.load(Ordering::SeqCst), "the plan was made again, and refused");
-    let ViewUpdate::Reset { rows } = every.take() else { panic!("reset") };
+    let (Taken::Reset, rows) = (every.take().update, every.rows()) else {
+        panic!("reset")
+    };
     assert_eq!(rows.len(), 2, "made again from its input: {rows:?}");
     d.mutate("fetch.ask".into(), r#"{"id":"c","after_ms":0}"#.into()).unwrap();
-    assert!(matches!(every.take(), ViewUpdate::Patched { .. }), "and kept up after");
+    assert!(matches!(every.take().update, Taken::Patched { .. }), "and kept up after");
 }
 
 /// A tap in the app is the root of what it causes: what is mutated between

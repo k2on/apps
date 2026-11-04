@@ -7,7 +7,6 @@
 //! bridge a [`Peer`] is called by function name with JSON — `mutate` (on
 //! the space the function writes), `query`, `view` — and says where it stands
 //! (`status`), what became of each intent (`outcome`, `take_refusals`),
-//! which jobs of a kind are due for a handler written in the app (`due`),
 //! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
 //! and whether it is alone (`alone`, `join`).
 //! The typed Kotlin and Swift over these names is generated from the domain
@@ -16,11 +15,11 @@
 //!
 //! **It drives itself.** A peer has a thread of its own that pumps its link
 //! whenever the connection rings or a dial is due, and keeps its views up:
-//! each [`ViewHandle`] gathers its patches ([`ViewUpdate`]) until taken, and
+//! each [`ViewHandle`] gathers its patches ([`ViewTaken`]) until taken, and
 //! the app's [`Listener`] is told whenever anything moved — a frame came, a
 //! view was patched — on whatever thread moved it; the app then takes its
 //! views and asks `status` on its own. A view that could not be kept up is
-//! read again by itself and says [`ViewUpdate::Reset`] with its rows.
+//! read again by itself and says [`Taken::Reset`] with its rows.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -55,13 +54,6 @@ impl<S: Into<String>> From<S> for Refusal {
     fn from(why: S) -> Refusal {
         Refusal::Refused { why: why.into() }
     }
-}
-
-/// A kind's jobs due now, each its row's JSON, and when the next is due.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Due {
-    pub rows: Vec<String>,
-    pub next_ms: Option<i64>,
 }
 
 /// A login as the server hands it over: the token the link proves itself
@@ -106,42 +98,12 @@ impl Login {
     }
 }
 
-/// One change to a view's rows, each row its JSON (§1.10).
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Patch {
-    /// `row` before the row at `at` (`at` the length appends).
-    Insert {
-        at: u64,
-        row: String,
-    },
-    Remove {
-        at: u64,
-    },
-    Update {
-        at: u64,
-        row: String,
-    },
-}
-
-/// The server's answer to a call ([`Peer::request`]): what its function
-/// gave back, as bytes, or why not.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Reply {
-    Ok { output: Vec<u8> },
-    Refused { why: String },
-}
-
-/// What a view did since it was last taken.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum ViewUpdate {
-    Unchanged,
-    Patched {
-        patches: Vec<Patch>,
-    },
-    /// It was read again: these are its rows.
-    Reset {
-        rows: Vec<String>,
-    },
+/// What a view did since it was last taken ([`Taken`]), and the rows that
+/// came with it, each its JSON (§1.10): a typed view's `<T>Taken`, by name.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ViewTaken {
+    pub update: Taken,
+    pub rows: Vec<String>,
 }
 
 /// What has become of the intent `id` (as [`Peer::mutate`] gave it):
@@ -179,7 +141,6 @@ pub struct Status {
     pub epoch: u64,
     pub cursor: i64,
     pub pending: u64,
-    pub joining: bool,
     pub user: String,
     pub session: String,
     pub alone: bool,
@@ -211,8 +172,6 @@ struct State {
     next: u64,
     /// Why the server last turned the login away.
     denied: Option<String>,
-    /// The calls' answers waiting when the app was last told.
-    replies: usize,
     /// The files that had arrived when the app was last told.
     files: u64,
 }
@@ -226,7 +185,7 @@ struct Held<'a> {
 impl Held<'_> {
     /// Every view's updates taken from the peer into what the app has not
     /// taken; a view opened for another login, or refused, opened again.
-    /// Whether any moved — or a call's answer came, or a file.
+    /// Whether any moved — or a file came.
     fn settle(&mut self) -> bool {
         let (peer, s) = (&mut *self.peer, &mut *self.state);
         let mut moved = false;
@@ -238,9 +197,9 @@ impl Held<'_> {
             }
             moved = true;
         }
-        let (replies, files) = (peer.replies_waiting(), peer.files_arrived());
-        moved |= replies > s.replies || files != s.files;
-        (s.replies, s.files) = (replies, files);
+        let files = peer.files_arrived();
+        moved |= files != s.files;
+        s.files = files;
         moved
     }
 
@@ -371,7 +330,7 @@ impl Peer {
     }
 
     /// A maintained view of `name` on its input's bytes.
-    pub fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
+    pub(crate) fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
         let id = self.shared.act(|s| -> Result<u64, String> {
             let view = Watched::try_open(&mut s.peer, &name, args, |_| ())?;
             let id = s.state.next;
@@ -440,22 +399,6 @@ impl Peer {
         Ok(ark::hash::hex(&id.0))
     }
 
-    /// A call of one of the server's own functions (`ark_peer::Config::calls`)
-    /// on its input's bytes, sent now: its id, for [`Peer::take_reply`]; never
-    /// logged, and refused while not connected. The listener rings when its
-    /// answer comes.
-    pub fn request(&self, name: String, input: Vec<u8>) -> Result<u64, Refusal> {
-        Ok(self.shared.act(|s| s.peer.request(&name, input))?)
-    }
-
-    /// What the server answered the call `id`, once it has; told once.
-    pub fn take_reply(&self, id: u64) -> Option<Reply> {
-        self.shared.act(|s| s.peer.take_reply(id)).map(|r| match r {
-            Ok(output) => Reply::Ok { output },
-            Err(why) => Reply::Refused { why },
-        })
-    }
-
     /// A file made on this device (docs/plan-files.md): kept in its
     /// `files/`, sent to the server on this or the next connection; its
     /// name (the hex sha256 of `bytes`), for the `FileRef` a mutation
@@ -488,27 +431,14 @@ impl Peer {
     }
 
     /// A query's or a view's answer on its input's JSON, as JSON, over the
-    /// optimistic state.
+    /// optimistic state: a kind's jobs due (`<kind>.due`) among them, what a
+    /// handler written in the app asks whenever the listener rings, then
+    /// answers through `mutate` — `<kind>.claim`, and once that is taken
+    /// (`outcome`), `<kind>.finish`.
     pub fn query(&self, name: String, input: String) -> Result<String, Refusal> {
         let s = self.shared.lock();
         let answer = s.peer.ask(&name, &s.peer.input_json(&name, &input)?)?;
         Ok(s.peer.answer_json(&name, &answer)?)
-    }
-
-    /// The jobs of `kind` (a table of `ark::effect` rows) a claim would take
-    /// now, each its row's JSON, and when the next falls due: what a
-    /// handler written in the app asks whenever the listener rings or its
-    /// timer for `next_ms` fires, then answers through `mutate` —
-    /// `<kind>.claim`, and once that is confirmed (`standing`),
-    /// `<kind>.finish`. A view's rows stream through `view` already.
-    pub fn due(&self, kind: String) -> Result<Due, Refusal> {
-        let answer = self.query(format!("{kind}.due"), "null".into())?;
-        let a: serde_json::Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
-        let rows = a["rows"].as_array().into_iter().flatten();
-        Ok(Due {
-            rows: rows.map(|r| r.to_string()).collect(),
-            next_ms: a["next_ms"].as_i64(),
-        })
     }
 
     /// A maintained view of the function `name` on its input's JSON.
@@ -559,7 +489,6 @@ impl Peer {
             epoch: st.epoch,
             cursor: st.cursor,
             pending: st.pending as u64,
-            joining: false,
             user: st.user,
             session: s.peer.me().session.clone(),
             alone: st.alone,
@@ -644,24 +573,12 @@ impl ViewHandle {
         self.json(self.rows_bytes())
     }
 
-    /// What it did since last taken.
-    pub fn take(&self) -> ViewUpdate {
-        let (taken, rows) = self.take_bytes();
-        let mut rows = self.json(rows).into_iter();
-        let mut row = || rows.next().unwrap_or_default();
-        match taken {
-            Taken::Unchanged => ViewUpdate::Unchanged,
-            Taken::Reset => ViewUpdate::Reset { rows: rows.collect() },
-            Taken::Patched { ops } => ViewUpdate::Patched {
-                patches: ops
-                    .into_iter()
-                    .map(|op| match op {
-                        Op::Insert { at } => Patch::Insert { at, row: row() },
-                        Op::Remove { at } => Patch::Remove { at },
-                        Op::Update { at } => Patch::Update { at, row: row() },
-                    })
-                    .collect(),
-            },
+    /// What it did since last taken, and the rows that came with it.
+    pub fn take(&self) -> ViewTaken {
+        let (update, rows) = self.take_bytes();
+        ViewTaken {
+            update,
+            rows: self.json(rows),
         }
     }
 }
@@ -675,14 +592,14 @@ impl ViewHandle {
     }
 
     /// Its rows as they stand, each its bytes.
-    pub fn rows_bytes(&self) -> Vec<Vec<u8>> {
+    pub(crate) fn rows_bytes(&self) -> Vec<Vec<u8>> {
         let s = self.shared.lock();
         s.kept(self.id).map_or(vec![], |(at, _)| s.peer.rows(at))
     }
 
     /// What it did since last taken, and the rows that came with it, each
     /// its bytes ([`Taken`]).
-    pub fn take_bytes(&self) -> (Taken, Vec<Vec<u8>>) {
+    pub(crate) fn take_bytes(&self) -> (Taken, Vec<Vec<u8>>) {
         let mut s = self.shared.lock();
         s.settle();
         let Some(k) = s.state.views.get_mut(&self.id) else {

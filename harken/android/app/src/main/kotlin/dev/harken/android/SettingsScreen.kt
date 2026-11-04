@@ -221,7 +221,6 @@ fun numbers(s: Status): List<Pair<String, String>> =
         "epoch" to s.epoch.toString(),
         "cursor" to s.cursor.toString(),
         "not synced" to s.pending.toString(),
-        "joining" to s.joining.toString(),
         "alone" to s.alone.toString(),
         "disk" to (s.failure ?: "—"),
         "denied" to (s.denied ?: "—"),
