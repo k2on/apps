@@ -81,8 +81,14 @@ final class Drive: XCTestCase {
     /// app; and an app that waits for a press to open it gets one.
     private func signIn(_ app: XCUIApplication, field: XCUIElement, server: String, user: String) throws {
         field.tap()
-        field.typeText(server)
-        app.buttons["Continue"].tap()
+        // Sent with the keyboard's Go, as the page sends it (`onSubmit`): a tap
+        // on Continue while the keyboard is up can go to the keyboard's
+        // leaving rather than to the button. Continue only if, a few seconds
+        // on, the page has still not moved.
+        field.typeText(server + "\n")
+        sleep(4)
+        let next = app.buttons["Continue"]
+        if field.exists && next.exists && next.isEnabled && next.isHittable { next.tap() }
         let safari = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
         let allow = springboard.buttons["Continue"]
         let open = app.buttons["Sign In"]
