@@ -4,8 +4,8 @@
 use ark_ffi::ViewUpdate;
 use harken_ffi::{harken_listening, harken_open};
 
-/// Falsified by `config` registering no domain for the log
-/// (`Config::new` over the module alone): `playlists` was no function.
+/// Falsified by `config` registering no domain for the log: `playlists`
+/// was no function.
 #[test]
 fn harken_opens_and_is_called_by_name() {
     let dir = tempfile::tempdir().unwrap();

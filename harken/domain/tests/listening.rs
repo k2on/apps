@@ -25,7 +25,7 @@ use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::row::Row;
 use ark::store::{Change, Store};
-use ark_peer::{Config, Live, Module};
+use ark_peer::{Config, Live};
 use arkdb::sim::{Net, Op};
 use common::domain;
 use harken_domain::host::Listening;
@@ -1249,8 +1249,8 @@ fn a_report_of_a_volume_is_heard_in_order() {
 /// How often a device relays its scrubber.
 const RELAY_MS: i64 = 250;
 
-fn module() -> Module {
-    Module::of(domain())
+fn module() -> std::sync::Arc<ark::domain::Domain> {
+    std::sync::Arc::new(domain().clone())
 }
 
 /// The house over the wire: the hub, the session in its volatile machine,
@@ -1263,7 +1263,7 @@ struct Wire {
 
 impl Wire {
     fn new() -> Wire {
-        let mut hub = Config::new(module());
+        let mut hub = Config::of(module());
         let get = |n: &str| Some(format!("listening.{n}"));
         hub.live = Some(Live {
             on_join: get("on_join"),
@@ -1304,7 +1304,7 @@ impl Wire {
             who,
             Config {
                 live: Some(live),
-                ..Config::new(module())
+                ..Config::of(module())
             },
         );
         self.net.deliver();

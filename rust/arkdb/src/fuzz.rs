@@ -23,7 +23,7 @@ use ark::peer::{Ctx, Feed, Who};
 use ark::prelude::Id;
 use ark::schema::Space;
 use ark::store::Store;
-use ark_peer::{Config, Live, Module, Peer};
+use ark_peer::{Config, Live, Peer};
 
 use crate::demo::{AddToPlaylist, CreatePlaylist, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
 pub use crate::sim::Rng;
@@ -31,7 +31,7 @@ use crate::sim::{Net, Op};
 
 /// The demo, and what a script can do with it.
 pub struct Gen {
-    pub module: Module,
+    pub functions: ark::peer::Functions,
     pub scope: String,
 }
 
@@ -41,7 +41,7 @@ const TRACKS: [&str; 6] = ["t1", "t2", "t3", "t4", "t5", ""];
 impl Gen {
     pub fn new() -> Gen {
         Gen {
-            module: Module::of(&crate::demo::demo()),
+            functions: crate::demo::demo().functions(),
             scope: "demo.top_two".into(),
         }
     }
@@ -156,7 +156,7 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
             on_leave: Some("room.on_leave".into()),
             arrive: Arc::new(crate::demo::arrival),
             keep: Some(4),
-            ..Live::new(Module::of(&room))
+            ..Live::new(Arc::new(room.clone()))
         });
     }
     let n = 2 + r.below(3) as i64;
@@ -228,7 +228,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
     s.undo(entries.iter().flat_map(|l| &l.facts))
         .map_err(|r| format!("the log's facts do not undo: {r}"))?;
     for l in &entries {
-        let p = g.module.functions.get(&l.entry.func).ok_or("an entry of no function")?;
+        let p = g.functions.get(&l.entry.func).ok_or("an entry of no function")?;
         let ran = p
             .apply(&mut s, &Ctx::of(&l.entry), &l.entry.input)
             .map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
@@ -244,7 +244,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
         return Err("the log replayed from its facts is not the store".into());
     }
     if let Some(c) = net.clients.get(&0).filter(|_| partial) {
-        let holds = g.module.functions.scope(&g.scope).expect("the scope");
+        let holds = g.functions.scope(&g.scope).expect("the scope");
         let ctx = ctx_of(&c.log.me);
         let mut rows = vec![];
         for (name, rs) in hub.store.snapshot_rows() {

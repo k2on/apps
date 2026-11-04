@@ -1,5 +1,5 @@
 //! The ArkDB v5 peer: a driver of the one machine (§1.7), twice — the
-//! log's and, when the module has live state, the volatile space's (§1.9)
+//! log's and, when the domain has live state, the volatile space's (§1.9)
 //! — over one disk. A device and a server are the same [`Peer`] in two
 //! roles:
 //!
@@ -26,7 +26,7 @@
 //! rows as its own type, patched as the view moves (`watched`).
 //!
 //! **The relay** of ephemeral calls is the driver's policy, as §1.9 says:
-//! a call to a function the module names ephemeral goes to the volatile
+//! a call to a function the config names ephemeral goes to the volatile
 //! machine at most once every `every_ms`, coalesced to the newest call per
 //! function; the rest go at once.
 //!
@@ -88,9 +88,9 @@ use ark::format::Encode;
 use ark::frames::Frame;
 use ark::hash::EntryHash;
 use ark::log::{Durable, Entry, EntryId, Origin, Record, Seq, Span};
-use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Told, Who};
+use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer as Machine, Role, Told, Who};
 use ark::plan::Maintained;
-use ark::schema::{Schema, Space};
+use ark::schema::Space;
 use ark::store::Change;
 use ark::{Domain, Refusal};
 
@@ -110,44 +110,17 @@ pub use serve::{Running, Server};
 pub use settings::{Serve, SignIn};
 pub use watched::Watched;
 
-/// One space's module: its domain — its functions called by name in it,
-/// its views made by it — and, as the machine holds them, its schema and
-/// the functions it runs.
-#[derive(Clone)]
-pub struct Module {
-    pub schema: Arc<Schema>,
-    pub functions: Functions,
-    pub domain: Arc<Domain>,
-}
-
-impl Module {
-    /// The tables a fill sends last ([`ark::peer::Peer::later`]): its
-    /// domain's.
-    pub fn later(&self) -> &[String] {
-        &self.domain.later
-    }
-
-    /// A domain as a peer holds it (§1.16).
-    pub fn of(d: &Domain) -> Module {
-        Module {
-            schema: d.schema.clone(),
-            functions: d.functions(),
-            domain: Arc::new(d.clone()),
-        }
-    }
-}
-
 /// What `on_join` and `on_leave` are authored with: from who a connection
 /// is and what its device said, the function's input, or none.
 pub type Arrive = Arc<dyn Fn(&Who, &[u8]) -> Option<Vec<u8>> + Send + Sync>;
 
-/// The live space: its module; as a device, what its `Hello` says it is
+/// The live space: its domain; as a device, what its `Hello` says it is
 /// and the functions relayed as ephemeral, and how often; as a server, the
 /// functions it authors as devices come and go and the input it authors
 /// them with, and the entries kept above the horizon.
 #[derive(Clone)]
 pub struct Live {
-    pub module: Module,
+    pub domain: Arc<Domain>,
     pub device: Option<Vec<u8>>,
     pub ephemeral: BTreeSet<String>,
     pub every_ms: i64,
@@ -169,9 +142,9 @@ pub type Draw = Arc<dyn Fn() -> Origin + Send + Sync>;
 pub const TRACE_MS: i64 = 30_000;
 
 impl Live {
-    pub fn new(module: Module) -> Live {
+    pub fn new(domain: Arc<Domain>) -> Live {
         Live {
-            module,
+            domain,
             device: None,
             ephemeral: BTreeSet::new(),
             every_ms: 0,
@@ -185,13 +158,13 @@ impl Live {
     }
 }
 
-/// What a peer is made of: the log's module and the live one; and, as a
-/// server, how each connection is fed (§1.8) and the entries kept above
+/// What a peer is made of: the log's domain and the live one, each its
+/// schema and its functions by name (§1.16); and, as a server, how each connection is fed (§1.8) and the entries kept above
 /// the horizon (all of them when none); and the functions of its own a
 /// device may call over its link (`calls`).
 #[derive(Clone)]
 pub struct Config {
-    pub log: Module,
+    pub log: Arc<Domain>,
     pub live: Option<Live>,
     pub feed: Arc<dyn Fn(&Who) -> Feed + Send + Sync>,
     pub keep: Option<usize>,
@@ -207,7 +180,8 @@ pub struct Config {
 pub type Call = Arc<dyn Fn(&Who, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
 
 impl Config {
-    pub fn new(log: Module) -> Config {
+    /// A peer of `log`, with no live space.
+    pub fn of(log: Arc<Domain>) -> Config {
         Config {
             log,
             live: None,
@@ -217,17 +191,12 @@ impl Config {
         }
     }
 
-    /// The domain `space`'s views are made by.
+    /// The domain of `space`.
     fn domain_of(&self, space: Space) -> Option<Arc<Domain>> {
         match space {
-            Space::Durable => Some(self.log.domain.clone()),
-            Space::Volatile => Some(self.live.as_ref()?.module.domain.clone()),
+            Space::Durable => Some(self.log.clone()),
+            Space::Volatile => Some(self.live.as_ref()?.domain.clone()),
         }
-    }
-
-    /// A domain's: its module for the log.
-    pub fn of(domain: Arc<Domain>) -> Config {
-        Config::new(Module::of(&domain))
     }
 }
 
@@ -297,9 +266,9 @@ pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
     }
 }
 
-fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
-    let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone()).in_space(space);
-    p.later = m.later().to_vec();
+fn machine(d: &Domain, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
+    let mut p = Machine::new(d.schema.clone(), d.functions(), role, me.clone()).in_space(space);
+    p.later = d.later.clone();
     if let Some(o) = origin {
         p.origin = o;
     }
@@ -313,7 +282,7 @@ fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Spac
 /// ran.
 fn live_of(config: &Config, me: &Who) -> Option<Instance> {
     let l = config.live.as_ref()?;
-    let mut p = machine(&l.module, Role::Replica, me, Some((l.origin)()), Space::Volatile);
+    let mut p = machine(&l.domain, Role::Replica, me, Some((l.origin)()), Space::Volatile);
     (p.device, p.fold) = (l.device.clone(), Some(Fold::REPLICA));
     Some(p)
 }

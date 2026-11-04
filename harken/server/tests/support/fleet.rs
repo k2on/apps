@@ -117,7 +117,7 @@ impl Log {
         let mut p = Peer::serve(harken_server::hub_config(hosted(), 10_000), disk, 0);
         let state = std::mem::replace(
             &mut p.log.store,
-            Store::new(hosted().module.schema.clone(), ark::schema::Space::Durable),
+            Store::new(hosted().domain.schema.clone(), ark::schema::Space::Durable),
         );
         Some(Log {
             base: state.log().base_seq(),
@@ -908,7 +908,7 @@ impl Seeder {
                     session: format!("seeded-{user}"),
                     roles: vec!["library".into()],
                 };
-                let i = self.net.add(who, Config::new(hosted().module.clone()));
+                let i = self.net.add(who, Config::of(hosted().domain.clone()));
                 *self.users.entry(user.into()).or_insert(i)
             }
         };
@@ -1102,7 +1102,7 @@ impl Fleet {
             let log = self.server.log_on_disk().unwrap_or_else(|| Log {
                 base: 0,
                 entries: vec![],
-                state: Store::new(hosted().module.schema.clone(), ark::schema::Space::Durable),
+                state: Store::new(hosted().domain.schema.clone(), ark::schema::Space::Durable),
             });
             let head = log.head_seq();
             let hash = log.hash();

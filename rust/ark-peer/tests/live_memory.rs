@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use ark::format::Encode;
 use ark::peer::Role;
 use ark::schema::Space;
-use ark_peer::{dev, Config, Memory, Module, Peer};
+use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
 use arkdb::demo::{arrival, room, Point};
 
@@ -27,22 +27,22 @@ use arkdb::demo::{arrival, room, Point};
 const KEEP: usize = 256;
 
 fn hub() -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
+    let mut c = Config::of(Arc::new(domain()));
     c.live = Some(ark_peer::Live {
         on_join: Some("room.on_join".into()),
         on_leave: Some("room.on_leave".into()),
         arrive: Arc::new(arrival),
         keep: Some(KEEP),
-        ..ark_peer::Live::new(Module::of(&room()))
+        ..ark_peer::Live::new(Arc::new(room()))
     });
     Peer::serve(c, Box::new(Memory::default()), 0)
 }
 
 fn device(k: usize) -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
+    let mut c = Config::of(Arc::new(domain()));
     c.live = Some(ark_peer::Live {
         device: Some(format!("d{k}").into_bytes()),
-        ..ark_peer::Live::new(Module::of(&room()))
+        ..ark_peer::Live::new(Arc::new(room()))
     });
     let who = dev(&format!("u{k}@d{k}")).unwrap();
     let mut p = Peer::open(c, who, Box::new(Memory::default()));

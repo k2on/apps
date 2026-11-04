@@ -159,7 +159,7 @@ impl Peer {
         // from, its first `local` and the log's had one id.
         let live = config.live.as_ref().map(|l| Instance {
             fold: Fold::keep(l.keep),
-            ..machine(&l.module, auth(), &me, Some((l.origin)()), Space::Volatile)
+            ..machine(&l.domain, auth(), &me, Some((l.origin)()), Space::Volatile)
         });
         let mut p = Peer::with(config, log, live, local);
         p.keep_files(files);

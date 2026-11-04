@@ -1103,7 +1103,7 @@ mod tests {
     /// playlist".
     #[test]
     fn a_window_alone_joins_a_server_in_place() {
-        use ark_peer::{Config, Module, Peer as Hub};
+        use ark_peer::{Config, Peer as Hub};
         let mut client = crate::client::memory(crate::client::nobody(), None);
         client.alone();
         client.set_roles([crate::domain::LIBRARY]);
@@ -1127,7 +1127,7 @@ mod tests {
         assert_eq!(peer.client.lock().pending_len(), 5);
 
         let d = crate::client::domain();
-        let mut hub = Hub::serve(Config::new(Module::of(d)), Box::new(ark_peer::Memory::default()), 0);
+        let mut hub = Hub::serve(Config::of(d.clone()), Box::new(ark_peer::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles of the login.
         let alice = Who {

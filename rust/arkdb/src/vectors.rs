@@ -16,7 +16,7 @@ use ark::log::{EntryId, Origin};
 use ark::peer::Who;
 use ark::row::Id;
 use ark::store::{Change, Store};
-use ark_peer::{Config, Live, Module};
+use ark_peer::{Config, Live};
 use serde_json::{json, Value};
 
 use crate::demo::{arrival, live, room, AddToPlaylist, CreatePlaylist, Point, Rename};
@@ -136,7 +136,7 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         on_leave: Some("room.on_leave".into()),
         arrive: Arc::new(arrival),
         keep: Some(4),
-        ..Live::new(Module::of(&room))
+        ..Live::new(Arc::new(room.clone()))
     });
     let device = |name: &str| Config {
         live: Some(live(name, 100)),

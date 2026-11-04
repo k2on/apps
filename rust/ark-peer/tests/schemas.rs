@@ -81,7 +81,7 @@ fn every_device_syncs_with_a_server_whose_schema_grew() {
     }));
     hub.stop();
     let hub = server(grown(), &data).unwrap();
-    let schema = grown().log.schema;
+    let schema = grown().log.schema.clone();
     let (_, tag) = schema.table("tag").unwrap();
     let row = ark::dynamic::row_bytes(tag, &serde_json::json!({"name": "loud"})).unwrap();
     hub.write(vec![Change::Add { table: "tag".into(), row }]).unwrap().unwrap();

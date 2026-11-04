@@ -14,7 +14,7 @@ use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
 use ark::row::Id;
 use ark::schema::Space;
-use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
+use ark_peer::{Config, Disk, Live, Memory, Peer};
 use arkdb::demo::{arrival, live, room};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
 use arkdb::sim::{who, Net, Op};
@@ -135,7 +135,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
         on_leave: Some("room.on_leave".into()),
         arrive: std::sync::Arc::new(arrival),
         keep: Some(8),
-        ..Live::new(Module::of(&r))
+        ..Live::new(Arc::new(r.clone()))
     });
     let config = |name: &str| Config {
         live: Some(live(name, 100)),

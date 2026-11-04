@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use ark::prelude::*;
-use ark_peer::{Live, Module};
+use ark_peer::Live;
 
 // * The demo
 
@@ -233,7 +233,7 @@ pub fn live(name: &str, every_ms: i64) -> Live {
         device: Some(name.as_bytes().to_vec()),
         ephemeral: BTreeSet::from(["room.point".to_string()]),
         every_ms,
-        ..Live::new(Module::of(&room()))
+        ..Live::new(std::sync::Arc::new(room()))
     }
 }
 

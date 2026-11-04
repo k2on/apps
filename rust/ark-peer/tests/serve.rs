@@ -15,7 +15,7 @@ use ark::frames::{Frame, Verdict};
 use ark::peer::Who;
 use ark::schema::Space;
 use ark_peer::link::{socket, wait, Dial, Event};
-use ark_peer::{dev, now_ms, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
+use ark_peer::{dev, now_ms, Disk, Files, Handle, Live, Memory, Peer, Server};
 
 mod support;
 
@@ -303,7 +303,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         on_restore: Some("room.on_restore".into()),
         arrive: Arc::new(arrival),
         keep: Some(8),
-        ..Live::new(Module::of(&r))
+        ..Live::new(Arc::new(r.clone()))
     });
     let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
     let alice = dev("alice@phone").unwrap();

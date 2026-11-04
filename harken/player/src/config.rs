@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use ark::domain::Domain;
 use ark::format::Encode;
-use ark_peer::{Config, Live, Module};
+use ark_peer::{Config, Live};
 use harken_domain::Device;
 
 /// The milliseconds between two ephemeral calls the relay sends — a
@@ -42,7 +42,7 @@ pub fn peer(domain: &Arc<Domain>, device: Vec<u8>, every_ms: i64) -> Config {
         device: Some(device),
         ephemeral: [SCRUB.to_string()].into(),
         every_ms,
-        ..Live::new(Module::of(domain))
+        ..Live::new(domain.clone())
     };
     Config {
         live: Some(live),
@@ -61,7 +61,7 @@ pub fn hub(domain: &Arc<Domain>, keep: Option<usize>) -> Config {
             on_restore: get("on_restore"),
             arrive: Arc::new(harken_domain::host::arrive),
             keep: Some(256),
-            ..Live::new(Module::of(domain))
+            ..Live::new(domain.clone())
         }),
         keep,
         ..Config::of(domain.clone())

@@ -89,7 +89,7 @@ pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
         ),
         ephemeral: [hosted().func("listening.scrub")].into(),
         every_ms: RELAY_MS,
-        ..Live::new(hosted().module.clone())
+        ..Live::new(hosted().domain.clone())
     });
     let config = ark_peer::Config {
         live,

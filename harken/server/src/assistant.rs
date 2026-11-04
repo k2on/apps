@@ -3260,11 +3260,11 @@ pub mod ha {
                 session: speaker(user, entity),
                 roles: vec![],
             };
-            let module = &self.hosted.module;
+            let domain = &self.hosted.domain;
             let peer = self.machines.entry(k.clone()).or_insert_with(|| {
                 let mut p = Peer::new(
-                    module.schema.clone(),
-                    module.functions.clone(),
+                    domain.schema.clone(),
+                    domain.functions(),
                     Role::Replica,
                     who.clone(),
                 )

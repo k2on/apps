@@ -23,7 +23,7 @@ use ark::row::{Id, Type};
 use ark::schema::{Schema, Space, Table};
 use ark::store::Store;
 use ark_peer::link::wait;
-use ark_peer::{dev, now_ms, Config, Disk, Memory, Module, Peer, Server};
+use ark_peer::{dev, now_ms, Config, Disk, Memory, Peer, Server};
 use arkdb::demo::{demo as domain, AddToPlaylist};
 
 mod support;
@@ -147,7 +147,7 @@ fn an_offline_intent_writes_the_same_as_pending_grows() {
 /// A hub with `c` connections fed whole, each at the head, and one of
 /// them pushing an add: what one push allocates.
 fn fanout(c: usize) -> usize {
-    let mut hub = Peer::serve(Config::new(Module::of(&domain())), Box::new(Memory::default()), 0);
+    let mut hub = Peer::serve(Config::of(Arc::new(domain())), Box::new(Memory::default()), 0);
     let author = dev("alice@dev").unwrap();
     let a = hub.accept(author.clone());
     let mut local = 0;
@@ -246,7 +246,7 @@ fn a_media_row_is_held_in_bounded_bytes() {
 #[test]
 #[ignore]
 fn timings() {
-    let mut s = Server::new(Config::new(Module::of(&domain())));
+    let mut s = Server::new(Config::of(Arc::new(domain())));
     s.data = None;
     let hub = s.build().unwrap().0;
     let mut c = support::linked("alice@perf", "", hub.dialer(Arc::new(dev)));

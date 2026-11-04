@@ -7,14 +7,15 @@
 
 use std::collections::VecDeque;
 
+use ark::domain::Domain;
 use ark::format::Encode;
 use ark::frames::Frame;
 use ark::peer::{Input, Journal, Output, Peer as Machine, Role, Who};
-use ark_peer::{Instance, Memory, Module};
+use ark_peer::{Instance, Memory};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Playlist, RemoveFromPlaylist, RenamePlaylist};
 
-fn module() -> Module {
-    Module::of(&arkdb::demo::demo().later("playlist"))
+fn module() -> Domain {
+    arkdb::demo::demo().later("playlist")
 }
 
 fn who(name: &str) -> Who {
@@ -29,17 +30,17 @@ fn server() -> Machine {
     let m = module();
     let mut p = Machine::new(
         m.schema.clone(),
-        m.functions.clone(),
+        m.functions(),
         Role::Authority { journal: Journal::default() },
         who("server"),
     );
-    p.later = m.later().to_vec();
+    p.later = m.later.clone();
     p
 }
 
 fn replica() -> Machine {
     let m = module();
-    Machine::new(m.schema.clone(), m.functions.clone(), Role::Replica, who("alice"))
+    Machine::new(m.schema.clone(), m.functions(), Role::Replica, who("alice"))
 }
 
 fn alice() -> Instance {

@@ -396,8 +396,8 @@ impl Net {
         for ((i, v), (space, f, input, ctx, mirror)) in &self.views {
             let c = &self.clients[i];
             let d = match space {
-                Space::Durable => Some(&c.config.log.domain),
-                Space::Volatile => c.config.live.as_ref().map(|l| &l.module.domain),
+                Space::Durable => Some(&c.config.log),
+                Space::Volatile => c.config.live.as_ref().map(|l| &l.domain),
             };
             let store = &c.machine(*space).unwrap().store;
             let fresh = d.expect("a domain").watch(store, ctx, f, input).map_err(|r| r.0)?.rows();

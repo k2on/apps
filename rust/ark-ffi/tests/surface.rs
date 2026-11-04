@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ark_ffi::{Listener, Login, Patch, Peer, Refusal, Standing, ViewUpdate};
-use ark_peer::{dev, Config, Handle, Live, Memory, Module};
+use ark_peer::{dev, Config, Handle, Live, Memory};
 use arkdb::demo::{arrival, demo, live, room, Playlist};
 
 fn config() -> Config {
@@ -21,7 +21,7 @@ fn server() -> Handle {
         on_join: Some("room.on_join".into()),
         on_leave: Some("room.on_leave".into()),
         arrive: Arc::new(arrival),
-        ..Live::new(Module::of(&room()))
+        ..Live::new(Arc::new(room()))
     });
     Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), 0))
 }

@@ -5,26 +5,26 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::schema::Space;
-use ark_peer::{dev, Config, Memory, Module, Peer};
+use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
 use arkdb::demo::{arrival, room, CreatePlaylist, Point};
 
 fn hub() -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
+    let mut c = Config::of(Arc::new(domain()));
     c.live = Some(ark_peer::Live {
         on_join: Some("room.on_join".into()),
         on_leave: Some("room.on_leave".into()),
         arrive: Arc::new(arrival),
-        ..ark_peer::Live::new(Module::of(&room()))
+        ..ark_peer::Live::new(Arc::new(room()))
     });
     Peer::serve(c, Box::new(Memory::default()), 0)
 }
 
 fn device() -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
+    let mut c = Config::of(Arc::new(domain()));
     c.live = Some(ark_peer::Live {
         device: Some(b"d0".to_vec()),
-        ..ark_peer::Live::new(Module::of(&room()))
+        ..ark_peer::Live::new(Arc::new(room()))
     });
     let mut p = Peer::open(c, dev("u0@d0").unwrap(), Box::new(Memory::default()));
     p.linked = true;
