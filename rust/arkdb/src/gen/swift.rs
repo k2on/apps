@@ -27,7 +27,7 @@ const LANG: Lang = Lang {
         format!("/// `{name}`: its intent's id.\n    @discardableResult public func {m}({p}) throws -> String {{ try peer.mutate(name: \"{name}\", input: {arg}) }}")
     },
     live: |Hole { m, p, name, arg, .. }| {
-        format!("/// `{name}`, on the live space.\n    public func {m}({p}) throws {{ try peer.call(name: \"{name}\", input: {arg}) }}")
+        format!("/// `{name}`, on the live space.\n    public func {m}({p}) throws {{ _ = try peer.mutate(name: \"{name}\", input: {arg}) }}")
     },
     typed_view: |Hole { m, p, name, arg, r, .. }| {
         format!("/// `{name}`, kept, its rows UniFFI's.\n    public func {m}({p}) throws -> LiveView<{r}> {{ typed(try {r}View(peer: peer, name: \"{name}\", input: {arg})) }}")

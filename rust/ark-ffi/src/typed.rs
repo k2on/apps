@@ -11,7 +11,7 @@
 //! [`RowId`] (its hex, the apps' `Id`). A view of rows of `T` is an object
 //! of `T`'s own (`<T>View`, over [`Typed`]): its rows, and what it did as a
 //! [`Taken`] whose inserted and updated rows come beside it, in order.
-//! Mutations, queries and the live space stay called by name with JSON.
+//! Mutations (of either space) and queries stay called by name with JSON.
 
 use std::sync::Arc;
 
@@ -132,7 +132,7 @@ impl Peer {
     pub fn view_typed<T: Describe>(&self, name: &str, input: &str) -> Result<Typed<T>, Refusal> {
         let args = {
             let s = self.shared.lock();
-            let f = s.peer.binding(name).and_then(|b| s.peer.domain().get(&b).map(|f| f.output.clone()));
+            let f = s.peer.function(name).ok().map(|f| f.output.clone());
             if f.as_ref().is_some_and(|o| *o != Some(T::describe())) {
                 return Err(format!("{name}'s rows are not {}", std::any::type_name::<T>()).into());
             }

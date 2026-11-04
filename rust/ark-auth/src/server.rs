@@ -74,7 +74,7 @@ pub trait Hub: Send + Sync {
     fn write(&self, c: Change) -> Result<(), String>;
     /// The domain's function `func` run on `input`, as an entry the
     /// authority authors.
-    fn author(&self, func: &str, input: Vec<u8>) -> Result<(), String>;
+    fn mutate(&self, func: &str, input: Vec<u8>) -> Result<(), String>;
 }
 
 /// The hub's watch over who is signed in: given what an entry changed — or
@@ -387,7 +387,7 @@ impl Auth {
                 name: account.name.clone(),
             };
             // A welcome refused is not a sign-in refused: the person is in.
-            if let Err(e) = hub.author(func, input.to_bytes()) {
+            if let Err(e) = hub.mutate(func, input.to_bytes()) {
                 eprintln!("ark-auth: {func} for {}: {e}", account.id);
             }
         }

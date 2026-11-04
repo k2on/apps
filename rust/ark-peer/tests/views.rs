@@ -24,7 +24,7 @@ pub fn named(ctx: &Ctx, db: &Db<Demo>, input: CreatePlaylist) -> Result<Plan<Dem
 }
 
 fn author(p: &mut Peer, name: &str, input: Vec<u8>) {
-    p.author(Space::Durable, name, input, 1).unwrap();
+    p.mutate_at(name, input, 1).unwrap();
 }
 
 /// A view whose making read a playlist that is renamed away cannot be

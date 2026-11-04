@@ -1,8 +1,9 @@
 //! What an app drives (§1.10, §1.15): a device's functions called by
 //! name, its views, and what became of what it did.
 //!
-//! An app authors and asks by a function's name (`create_playlist`, or its
-//! whole binding, `playlists.create_playlist`) — or calls the domain's own
+//! An app authors ([`Peer::mutate`], on the space the function writes) and
+//! asks by a function's name (`create_playlist`, or its whole binding,
+//! `playlists.create_playlist`) — or calls the domain's own
 //! view functions ([`Peer::answer`]) — and holds the
 //! maintained views its lists are, each one's patches handed back as an
 //! [`Update`]. The peer keeps every intent's [`Standing`] and the refusals
@@ -18,15 +19,33 @@
 
 use std::collections::BTreeMap;
 
+use ark::domain::{Domain, Function};
 use ark::format::Encode;
 use ark::frames::Reply;
 use ark::hash::StateHash;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::schema::Space;
-use ark::Domain;
 
 use crate::{now_ms, Config, Disk, Patch, Peer};
+
+/// What a function is called with: a value, or its encoding already (a
+/// host's that speaks JSON, [`Peer::input_json`]).
+pub trait Arg {
+    fn bytes(self) -> Vec<u8>;
+}
+
+impl<T: Encode> Arg for &T {
+    fn bytes(self) -> Vec<u8> {
+        self.to_bytes()
+    }
+}
+
+impl Arg for Vec<u8> {
+    fn bytes(self) -> Vec<u8> {
+        self
+    }
+}
 
 /// What has become of an intent this device authored.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -226,97 +245,80 @@ impl Peer {
         &self.config.log
     }
 
-    /// The binding a name means ([`Domain::binding`]).
-    pub fn binding(&self, name: &str) -> Option<String> {
-        self.config.log.binding(name).map(String::from)
+    /// The function a name means ([`Domain::binding`]) and the domain it
+    /// is of: the log's, else the live space's.
+    fn found(&self, name: &str) -> Result<(&Domain, &Function), String> {
+        let live = self.config.live.as_ref().map(|l| &*l.domain);
+        [&*self.config.log]
+            .into_iter()
+            .chain(live)
+            .find_map(|d| Some((d, d.get(d.binding(name)?)?)))
+            .ok_or_else(|| format!("no function {name}"))
     }
 
-    fn func(&self, name: &str) -> Result<String, String> {
-        self.binding(name).ok_or_else(|| format!("no function {name}"))
+    /// The function a name means, of the log's domain or the live space's:
+    /// its whole name, its kind and space, what it takes and answers.
+    pub fn function(&self, name: &str) -> Result<&Function, String> {
+        Ok(self.found(name)?.1)
     }
 
     /// A query's or a view's answer over the optimistic state, as this
     /// login reads it: its encoding.
     pub fn ask(&self, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
-        let b = self.func(name)?;
-        self.domain().ask(&self.log.store, &self.ctx(), &b, input).map_err(|r| r.0)
+        let b = &self.function(name)?.name;
+        self.domain().ask(&self.log.store, &self.ctx(), b, input).map_err(|r| r.0)
     }
 
-    /// An intent: its id, or the refusal its preview — or, alone, its
-    /// sequencing — gave it here and now.
-    pub fn mutate(&mut self, name: &str, input: &impl Encode) -> Result<EntryId, String> {
-        self.mutate_bytes(name, input.to_bytes())
+    /// An intent of the function `name` (its binding, or the binding's last
+    /// part) on `input` — a value, or its encoding — on the space the
+    /// function writes, now: its id, or the refusal its preview (or, alone
+    /// or serving, its sequencing) gave it here and now. A live one the
+    /// config relays (`Live::ephemeral`) goes through the relay, under the
+    /// id it is sent with when nothing goes first.
+    pub fn mutate(&mut self, name: &str, input: impl Arg) -> Result<EntryId, String> {
+        self.mutate_at(name, input, now_ms())
     }
 
-    pub fn mutate_bytes(&mut self, name: &str, input: Vec<u8>) -> Result<EntryId, String> {
-        let (f, id) = (self.func(name)?, self.log.next_id());
-        if let Err(why) = self.author(Space::Durable, &f, input, now_ms()) {
+    /// [`Peer::mutate`] at `now`: a simulator's clock.
+    pub fn mutate_at(&mut self, name: &str, input: impl Arg, now: i64) -> Result<EntryId, String> {
+        let f = self.function(name)?;
+        let (space, f) = (f.space, f.name.clone());
+        let id = self.machine(space).ok_or_else(|| format!("no {space:?} machine here"))?.next_id();
+        if let Err(why) = self.author(space, &f, input.bytes(), now) {
             self.told.rejections.retain(|(r, _)| *r != id);
+            self.told.live_refused.retain(|(r, _)| *r != id);
             return Err(why);
         }
         self.flush();
         Ok(id)
     }
 
-    /// A call on the live space (§1.9) by a name of its live domain (or
-    /// the log's): an ephemeral one through the relay, any other at once;
-    /// the preview's refusal said.
-    pub fn call(&mut self, name: &str, input: Vec<u8>) -> Result<(), String> {
-        let live = self.config.live.as_ref().map(|l| &*l.domain);
-        let f = match live.and_then(|d| d.binding(name)) {
-            Some(f) => f.to_string(),
-            None => self.func(name)?,
-        };
-        let id = self.live.as_ref().ok_or("no live space here")?.next_id();
-        if let Err(why) = self.author(Space::Volatile, &f, input, now_ms()) {
-            self.told.live_refused.retain(|(r, _)| *r != id);
-            return Err(why);
-        }
-        self.flush();
-        Ok(())
-    }
-
-    /// The domain a name of a function or a table is in, and the name
-    /// there: the log's, else the live space's.
-    fn named(&self, name: &str, table: bool) -> Result<(&Domain, String), String> {
-        let live = self.config.live.as_ref().map(|l| &*l.domain);
-        for d in [&*self.config.log].into_iter().chain(live) {
-            match table {
-                true if d.schema.table(name).is_some() => return Ok((d, name.into())),
-                false => match d.binding(name) {
-                    Some(b) => return Ok((d, b.into())),
-                    None => continue,
-                },
-                true => continue,
-            }
-        }
-        Err(format!("no {} {name}", if table { "table" } else { "function" }))
-    }
-
     /// A function's input — of the log's domain or the live one's — from its
     /// JSON (§1.1's human form), as the value format writes it: what a host
     /// that speaks JSON authors and asks with.
     pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, String> {
-        let (d, b) = self.named(name, false)?;
-        d.input_json(&b, text).map_err(|r| r.0)
+        let (d, f) = self.found(name)?;
+        d.input_json(&f.name, text).map_err(|r| r.0)
     }
 
     /// What [`Peer::ask`] answered, as JSON.
     pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
-        let (d, b) = self.named(name, false)?;
-        d.answer_json(&b, bytes).map_err(|r| r.0)
+        let (d, f) = self.found(name)?;
+        d.answer_json(&f.name, bytes).map_err(|r| r.0)
     }
 
     /// One row of a view of `name`, as JSON.
     pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
-        let (d, b) = self.named(name, false)?;
-        d.element_json(&b, bytes).map_err(|r| r.0)
+        let (d, f) = self.found(name)?;
+        d.element_json(&f.name, bytes).map_err(|r| r.0)
     }
 
     /// A row of a table of either space, as JSON.
     pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
-        let (d, t) = self.named(table, true)?;
-        d.row_json(&t, bytes).map_err(|r| r.0)
+        let live = self.config.live.as_ref().map(|l| &*l.domain);
+        let mut ds = [&*self.config.log].into_iter().chain(live);
+        let d = ds.find(|d| d.schema.table(table).is_some()).ok_or_else(|| format!("no table {table}"))?;
+        d.row_json(table, bytes).map_err(|r| r.0)
     }
 
     /// A query's answer over the optimistic state, as this login reads it.
@@ -337,7 +339,7 @@ impl Peer {
     /// A maintained view of a query (§1.10) over the optimistic state, as
     /// this login reads it: its number, or the query's refusal.
     pub fn view(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
-        let (ctx, b) = (self.ctx(), self.func(name)?);
+        let (ctx, b) = (self.ctx(), self.function(name)?.name.clone());
         self.watch(Space::Durable, &b, input, ctx).map_err(|r| r.0)
     }
 

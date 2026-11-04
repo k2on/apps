@@ -221,14 +221,11 @@ impl Net {
     pub fn run(&mut self, op: &Op) {
         self.now += 1;
         match op.clone() {
-            Op::Mutate(i, f, input) => {
+            Op::Mutate(i, f, input) | Op::Call(i, f, input) => {
                 let now = self.now;
-                let _ = self.client(i).author(Space::Durable, &f, input, now);
-                self.told_by_client(i);
-            }
-            Op::Call(i, f, input) => {
-                let now = self.now;
-                let _ = self.client(i).author(Space::Volatile, &f, input, now);
+                if let Err(why) = self.client(i).mutate_at(&f, input, now) {
+                    self.refused.push((i, why));
+                }
                 self.told_by_client(i);
             }
             Op::Partition(i) => self.partition(i),

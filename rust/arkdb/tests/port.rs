@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::schema::Space;
+
 use ark_peer::{Config, Server};
 use arkdb::demo::{demo, CreatePlaylist, Playlist};
 use serde_json::Value as Json;
@@ -38,9 +38,7 @@ fn a_servers_rows_are_exported_transformed_and_imported() {
     let hub = server(&from);
     for name in ["Hymns", "Psalms"] {
         let input = CreatePlaylist { name: name.into() }.to_bytes();
-        hub.with(move |p| p.author(Space::Durable, "demo.create_playlist", input, 1))
-            .unwrap()
-            .unwrap();
+        hub.with(move |p| p.mutate_at("demo.create_playlist", input, 1)).unwrap().unwrap();
     }
     let export = arkdb::port::export(&args(&["--from", &from.display().to_string()])).unwrap();
     hub.stop();

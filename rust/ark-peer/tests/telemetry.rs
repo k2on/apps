@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::schema::Space;
+
 use ark_peer::observe::{install, Sink};
 use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::{demo, CreatePlaylist};
@@ -23,9 +23,8 @@ fn a_devices_events_reach_its_server_named_by_its_login() {
     let c = hub.accept(d.me().clone());
     d.connected();
     d.linked = true;
-    let f = d.binding("create_playlist").unwrap();
-    d.author(Space::Durable, &f, CreatePlaylist { name: "Road".into() }.to_bytes(), 1)
-        .unwrap();
+    let f = d.function("create_playlist").unwrap().name.clone();
+    d.mutate_at(&f, CreatePlaylist { name: "Road".into() }.to_bytes(), 1).unwrap();
     d.ship();
     let frames = d.take_frames();
     assert!(

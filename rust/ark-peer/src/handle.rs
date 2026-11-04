@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use ark::log::Seq;
 use ark::peer::Who;
-use ark::schema::Space;
+
 use ark_auth::server::Watch;
 
 use crate::link::{Closed, Dial, Event, Wake, Wire};
@@ -179,19 +179,20 @@ impl Handle {
         rx.recv().ok()
     }
 
-    /// An entry the authority of `space` authors itself
-    /// ([`Peer::author`]): the head it was sequenced at, or the refusal.
-    pub fn author(&self, space: Space, func: String, input: Vec<u8>) -> Option<Result<Seq, String>> {
-        self.sequenced(space, move |p| p.author(space, &func, input, now_ms()))
+    /// An entry the authority authors itself ([`Peer::mutate`]): the head
+    /// of the space it is on, sequenced, or the refusal.
+    pub fn mutate(&self, name: String, input: Vec<u8>) -> Option<Result<Seq, String>> {
+        self.with(move |p| {
+            let space = p.function(&name)?.space;
+            p.mutate(&name, input)?;
+            Ok(p.machine(space).map_or(0, |m| m.log().head().0))
+        })
     }
 
-    /// Facts the authority writes raw ([`Peer::write`]): as `author`.
+    /// Facts the authority writes raw ([`Peer::write`]): the head they
+    /// were sequenced at, or the refusal.
     pub fn write(&self, facts: Vec<ark::store::Change>) -> Option<Result<Seq, String>> {
-        self.sequenced(Space::Durable, move |p| p.write(facts, now_ms()))
-    }
-
-    fn sequenced(&self, space: Space, f: impl FnOnce(&mut Peer) -> Result<(), String> + Send + 'static) -> Option<Result<Seq, String>> {
-        self.with(move |p| f(p).map(|_| p.machine(space).map_or(0, |m| m.log().head().0)))
+        self.with(move |p| p.write(facts, now_ms()).map(|_| p.log.log().head().0))
     }
 
     /// The in-process transport: a device's link dialling this server in

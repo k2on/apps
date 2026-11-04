@@ -3427,7 +3427,7 @@ pub mod ha {
                 self.recorders.insert(user.to_string(), p);
             }
             if let Some(p) = self.recorders.get_mut(user) {
-                if let Err(why) = p.mutate_bytes(name, input) {
+                if let Err(why) = p.mutate(name, input) {
                     eprintln!("harken-server: house: {user}'s {name} was refused: {why}");
                 }
                 p.pump();

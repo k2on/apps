@@ -204,7 +204,7 @@ fn a_mutate_writes_one_pending_record() {
     let mut last = 0;
     for i in 0..=8000 {
         let before = written.load(Ordering::Relaxed);
-        let _ = c.author(Space::Durable, create, named(&format!("List {i}")), i);
+        let _ = c.mutate_at(create, named(&format!("List {i}")), i);
         last = written.load(Ordering::Relaxed) - before;
     }
     assert_eq!(c.log.pending.len(), 8001);
@@ -213,11 +213,11 @@ fn a_mutate_writes_one_pending_record() {
     let mut c = c.reopen();
     assert_eq!(c.log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
     let before = written.load(Ordering::Relaxed);
-    let _ = c.author(Space::Durable, create, named("One more"), 9000);
+    let _ = c.mutate_at(create, named("One more"), 9000);
     assert!(written.load(Ordering::Relaxed) - before < 512);
     let mut c = c.reopen();
     assert_eq!(c.log.pending.len(), 8002);
     assert_eq!(c.log.pending[8001].entry.local, 8002);
-    let _ = c.author(Space::Durable, create, named("And one"), 9001);
+    let _ = c.mutate_at(create, named("And one"), 9001);
     assert_eq!(c.log.pending.last().unwrap().entry.local, 8003, "the session's local read back");
 }

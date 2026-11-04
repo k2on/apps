@@ -81,8 +81,10 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
 ```
 
 - **A mutator** is `fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>`, run
-  as an intent; a refusal undoes every write it made.
-- **A live transition** (`#[live]`) is a mutator over volatile tables.
+  as an intent; a refusal undoes every write it made. Over `Db<S,
+  Volatile>` it writes the live space's tables (§1.9) and its intents
+  are on that space: a peer's `mutate` sends each to the space its
+  function writes.
 - **A query** (`#[query]`) is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`.
 - **A view** (`#[view]`) returns a `Plan<S, T>`, kept up to date.
 - **A scope** (`#[scope]`) says per table which rows a connection fed by

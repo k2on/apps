@@ -9,7 +9,7 @@ mod support;
 use std::path::Path;
 use std::sync::Arc;
 
-use ark::schema::{Space, Table};
+use ark::schema::Table;
 use ark::store::Change;
 use ark_peer::link::{bell, wait};
 use ark_peer::{dev, Config, Files, Peer, Server};
@@ -48,7 +48,7 @@ fn synced(config: Config, disk: &Path, who: &str, hub: &ark_peer::Handle, author
     p.set_token(Some(who.into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));
     for name in author {
-        p.author(Space::Durable, "demo.create_playlist", named(name), 1).unwrap();
+        p.mutate_at("demo.create_playlist", named(name), 1).unwrap();
     }
     let held = ark_peer::link::until(std::time::Duration::from_secs(5), std::time::Duration::ZERO, || {
         p.pump();
@@ -107,9 +107,7 @@ fn every_device_syncs_with_a_server_whose_schema_grew() {
 fn a_server_under_a_schema_not_grown_from_does_not_start() {
     let dir = tempfile::tempdir().unwrap();
     let hub = server(support::config(), dir.path()).unwrap();
-    hub.with(|p| p.author(Space::Durable, "demo.create_playlist", named("Hymns"), 1))
-        .unwrap()
-        .unwrap();
+    hub.with(|p| p.mutate_at("demo.create_playlist", named("Hymns"), 1)).unwrap().unwrap();
     hub.stop();
     let kv = std::fs::read(dir.path().join("log/kv")).ok();
     let why = server(retitled(), dir.path()).err().expect("refused").to_string();
@@ -130,7 +128,7 @@ fn a_replica_of_a_schema_not_grown_from_starts_empty_its_pending_kept() {
         p.log.pending.is_empty() && p.log.log().head().0 >= 1
     });
     hub.stop();
-    p.author(Space::Durable, "demo.create_playlist", named("Psalms"), 1).unwrap();
+    p.mutate_at("demo.create_playlist", named("Psalms"), 1).unwrap();
     drop(p);
     for _ in 0..2 {
         let p = Peer::open(retitled(), dev("alice@laptop").unwrap(), Box::new(Files::new(&phone).unwrap()));

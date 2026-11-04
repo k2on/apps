@@ -131,15 +131,18 @@ fn the_bridge_does_what_the_kit_does() {
         bob.query("items".into(), args.clone()).is_ok_and(|r| r.contains("t1"))
     });
     until("both here", || bob.live_rows("here".into()).len() == 2);
-    alice.call("point".into(), r#"{"x":3}"#.into()).unwrap();
+    alice.mutate("point".into(), r#"{"x":3}"#.into()).unwrap();
     until("bob sees the pointer", || {
         bob.live_rows("pointer".into()).iter().any(|r| r.contains(r#""x":3"#))
     });
     assert!(
-        alice.call("point".into(), r#"{"x":"three"}"#.into()).is_err(),
+        alice.mutate("point".into(), r#"{"x":"three"}"#.into()).is_err(),
         "an input not of its type refused at once"
     );
-    assert!(alice.call("rename".into(), r#"{"name":7}"#.into()).is_err(), "any other refused at once");
+    assert!(
+        alice.mutate("rename".into(), r#"{"name":7}"#.into()).is_err(),
+        "any other refused at once"
+    );
 
     // A device alone keeps a history of its own, and hands it over joining.
     let carol = device(&dc, "tablet", None);

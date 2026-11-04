@@ -94,7 +94,7 @@ use ark::schema::Space;
 use ark::store::Change;
 use ark::{Domain, Refusal};
 
-pub use app::{nobody, Standing, Status, Update};
+pub use app::{nobody, Arg, Standing, Status, Update};
 pub use ark::file::FileRef;
 pub use disk::{Disk, Files, Memory};
 pub use files::{Dir, Store};
@@ -579,12 +579,11 @@ impl Peer {
         }
     }
 
-    /// An intent of this peer's own on `space`'s machine — a device's on the
-    /// log, a live call (an ephemeral one through the relay), or a server's
-    /// own entry (the server half of a mutator, a raw write, a device's
-    /// arrival) — and the verdict it was given here and now: a preview's
-    /// refusal, or the authority's.
-    pub fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
+    /// An intent of this peer's own of the function `func` on `space`'s
+    /// machine ([`Peer::mutate`]; a server's of a device's arrival), an
+    /// ephemeral one through the relay, and the verdict it was given here
+    /// and now: a preview's refusal, or the authority's.
+    pub(crate) fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
         let ephemeral = self.config.live.as_ref().is_some_and(|l| l.ephemeral.contains(func));
         if space == Space::Volatile && ephemeral {
             let cause = self.cause(space, now);

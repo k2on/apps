@@ -274,9 +274,10 @@ fn a_clients_raw_write_is_refused() {
     let mut bob = signed_in(&server, "bob");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == head(&server));
     bob.client.log.functions.insert(h.clone(), raw);
-    let _ = bob
-        .client
-        .author(ark::schema::Space::Durable, &h, vec![], ark_peer::now_ms());
+    // A function the domain has not: past `mutate`, to the machine itself.
+    let (input, now, cause) = (vec![], ark_peer::now_ms(), None);
+    let raw = ark::peer::Input::Mutate { func: h.clone(), input, now, cause };
+    bob.client.step(ark::schema::Space::Durable, raw);
     for _ in 0..100 {
         bob.pump();
         std::thread::sleep(std::time::Duration::from_millis(10));

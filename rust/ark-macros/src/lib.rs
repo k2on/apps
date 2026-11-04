@@ -55,17 +55,12 @@ pub fn schema(input: TokenStream) -> TokenStream {
     out(domain::schema(syn::parse_macro_input!(input as syn::DeriveInput)))
 }
 
-/// `#[mutator("name")]`: registers `fn(&Ctx, &mut Db<S>, I) -> Result<(),
-/// Refusal>` by name.
+/// `#[mutator("name")]`: registers `fn(&Ctx, &mut Db<S, P>, I) ->
+/// Result<(), Refusal>` by name, on the space `P` it writes (`Db<S>` the
+/// log's, `Db<S, Volatile>` the live space's).
 #[proc_macro_attribute]
 pub fn mutator(attr: TokenStream, item: TokenStream) -> TokenStream {
     out(domain::register("mutator", attr.into(), item.into()))
-}
-
-/// `#[live("name")]`: a mutator over volatile tables.
-#[proc_macro_attribute]
-pub fn live(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::register("live", attr.into(), item.into()))
 }
 
 /// `#[query("name")]`: registers `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`.

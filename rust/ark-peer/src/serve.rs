@@ -136,10 +136,8 @@ impl ark_auth::server::Hub for Handle {
         Handle::write(self, vec![c]).ok_or("the hub is gone")?.map(|_| ())
     }
 
-    fn author(&self, func: &str, input: Vec<u8>) -> std::result::Result<(), String> {
-        Handle::author(self, ark::schema::Space::Durable, func.into(), input)
-            .ok_or("the hub is gone")?
-            .map(|_| ())
+    fn mutate(&self, func: &str, input: Vec<u8>) -> std::result::Result<(), String> {
+        Handle::mutate(self, func.into(), input).ok_or("the hub is gone")?.map(|_| ())
     }
 }
 

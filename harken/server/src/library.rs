@@ -956,7 +956,7 @@ fn author_one(peer: &mut ark_peer::Peer, name: &str, what: &str, input: Vec<u8>)
     if !would_change(peer, name, &input) {
         return false;
     }
-    match peer.mutate_bytes(name, input) {
+    match peer.mutate(name, input) {
         Ok(_) => true,
         Err(why) => {
             eprintln!("harken-server: library: {what} ({name}) was refused: {why}");
@@ -979,7 +979,7 @@ fn author(peer: &mut ark_peer::Peer, plan: &crate::sync::Plan) -> (usize, bool) 
             Would::Refuse if call.if_there => continue,
             Would::Change | Would::Refuse => {}
         }
-        match peer.mutate_bytes(call.name, call.input.clone()) {
+        match peer.mutate(call.name, call.input.clone()) {
             Ok(_) => authored += 1,
             Err(why) => eprintln!(
                 "harken-server: {}: {} ({}) was refused: {why}",
@@ -1213,7 +1213,7 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         scan.prints.set(print);
         return Offered::Read;
     }
-    match peer.mutate_bytes(ADD_SONG, call) {
+    match peer.mutate(ADD_SONG, call) {
         Ok(_) => {
             scan.prints.set(print);
             Offered::Authored
@@ -1301,7 +1301,7 @@ fn offer_episode(
         if !would_change(peer, name, &input) {
             continue;
         }
-        match peer.mutate_bytes(name, input) {
+        match peer.mutate(name, input) {
             Ok(_) => authored = true,
             Err(why) => {
                 eprintln!(

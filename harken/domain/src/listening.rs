@@ -227,7 +227,7 @@ fn playable(db: &Db<Harken, Volatile>, ctx: &Ctx, session: &Session) -> Result<(
 /// the device the session has chosen while that device is here, playing or
 /// paused — a device somebody picked stays picked; with none, or the one
 /// there was gone, the caller takes the sound if it can play.
-#[live("listening.start")]
+#[mutator("listening.start")]
 pub fn start(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Start) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
     if input.at >= input.queue.len() as i64 {
@@ -256,7 +256,7 @@ pub fn start(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Start) -> Result<(
 }
 
 /// Resume, on the output where it can answer, else on the caller.
-#[live("listening.play")]
+#[mutator("listening.play")]
 pub fn play(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
@@ -273,7 +273,7 @@ pub fn play(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refus
 }
 
 /// Pause, wherever the sound is. Nobody takes anything.
-#[live("listening.pause")]
+#[mutator("listening.pause")]
 pub fn pause(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
@@ -281,7 +281,7 @@ pub fn pause(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refu
 }
 
 /// Somewhere else in the track, playing on if it was.
-#[live("listening.seek")]
+#[mutator("listening.seek")]
 pub fn seek(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Seek) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
@@ -294,7 +294,7 @@ pub fn seek(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Seek) -> Result<(),
 
 /// The next track or the one before, from its start; before the first is
 /// the first again. A press that means a sound.
-#[live("listening.skip")]
+#[mutator("listening.skip")]
 pub fn skip(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Skip) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
@@ -311,7 +311,7 @@ pub fn skip(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Skip) -> Result<(),
 }
 
 /// A track of the queue, from its start. A press that means a sound.
-#[live("listening.jump")]
+#[mutator("listening.jump")]
 pub fn jump(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Jump) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
@@ -329,7 +329,7 @@ pub fn jump(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Jump) -> Result<(),
 /// Move the sound to a device that is here and can play: `moving` until it
 /// says it has started, the clock standing where it stopped meanwhile.
 /// Handing it to the device that already has it, settled, changes nothing.
-#[live("listening.transfer")]
+#[mutator("listening.transfer")]
 pub fn transfer(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Transfer) -> Result<(), Refusal> {
     let session = session_of(db, ctx.user());
     if !is_active(&session) {
@@ -362,7 +362,7 @@ pub fn transfer(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Transfer) -> Re
 }
 
 /// Nothing queued, nothing playing, nowhere.
-#[live("listening.stop")]
+#[mutator("listening.stop")]
 pub fn stop(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refusal> {
     put_session(db, ctx.user(), Session::Idle)
 }

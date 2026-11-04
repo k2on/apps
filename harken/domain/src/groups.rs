@@ -175,7 +175,7 @@ pub fn leader(db: &Db<Harken, Volatile>, user: &str) -> Result<String, Refusal> 
 }
 
 /// A speaker joins the output's group; whatever followed it follows nobody.
-#[live("listening.join")]
+#[mutator("listening.join")]
 pub fn join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), Refusal> {
     let Some(leader) = output_id(&session_of(db, ctx.user())) else {
         return refuse("nothing is playing to join");
@@ -187,7 +187,7 @@ pub fn join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(
 }
 
 /// …and leaves whatever group it is in.
-#[live("listening.unjoin")]
+#[mutator("listening.unjoin")]
 pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), Refusal> {
     if !entry(db, ctx.user(), &input.device).is_some_and(|e| e.present.follows.is_some()) {
         return refuse("that device is not in a group");
@@ -197,7 +197,7 @@ pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result
 }
 
 /// A leader's word on who follows it, changed outside harken.
-#[live("listening.report_group")]
+#[mutator("listening.report_group")]
 pub fn report_group(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportGroup) -> Result<(), Refusal> {
     if !entry(db, ctx.user(), ctx.device()).is_some_and(|e| e.present.family.is_some()) {
         return refuse("not here, or not a speaker that groups");
@@ -214,14 +214,14 @@ fn grouped(ctx: &Ctx, db: &Db<Harken, Volatile>) -> Result<(), Refusal> {
 }
 
 /// The output's group at a level, every member in proportion, unmuted.
-#[live("listening.set_group_volume")]
+#[mutator("listening.set_group_volume")]
 pub fn set_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupVolume) -> Result<(), Refusal> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
     group_at(db, ctx.user(), &leader, input.level)
 }
 
-#[live("listening.nudge_group_volume")]
+#[mutator("listening.nudge_group_volume")]
 pub fn nudge_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupNudge) -> Result<(), Refusal> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
@@ -229,7 +229,7 @@ pub fn nudge_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Group
     group_at(db, ctx.user(), &leader, to)
 }
 
-#[live("listening.set_group_mute")]
+#[mutator("listening.set_group_mute")]
 pub fn set_group_mute(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupMute) -> Result<(), Refusal> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;

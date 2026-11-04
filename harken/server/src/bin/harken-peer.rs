@@ -657,7 +657,10 @@ impl Headless {
     /// Answer one command. `quit` is answered like `persist`; the loop is
     /// what stops.
     fn handle(&mut self, cmd: Cmd) -> Answer {
-        let binding = |name: &str| self.peer.with(|p| p.binding(name));
+        let binding = |name: &str| {
+            self.peer
+                .with(|p| p.function(name).ok().map(|f| f.name.clone()))
+        };
         match cmd {
             Cmd::Mutate { name, args } => {
                 let Some(name) = binding(&name) else {
@@ -862,10 +865,12 @@ impl Headless {
                 if self.hosted.get(&name).is_none() {
                     return Answer::refused(format!("no transition {name}"));
                 }
-                match self
-                    .args(&name, &input)
-                    .and_then(|a| self.peer.call(name, a).map_err(|e| e.to_string()))
-                {
+                match self.args(&name, &input).and_then(|a| {
+                    self.peer
+                        .mutate(name, a)
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                }) {
                     Err(why) => Answer::refused(why),
                     Ok(()) => Answer::ok(true).set(
                         "kind",

@@ -1393,49 +1393,49 @@ class Harken(val peer: Peer) {
     fun works(input: Works): View<WorkSummary> = View(peer.view("library.works", input.json())) { j -> WorkSummary.of(j) }
 
     /** `listening.advance`, on the live space. */
-    fun advance(input: Advance) = peer.call("listening.advance", input.json())
+    fun advance(input: Advance) { peer.mutate("listening.advance", input.json()) }
 
     /** `listening.clear_upcoming`, on the live space. */
-    fun clearUpcoming() = peer.call("listening.clear_upcoming", "null")
+    fun clearUpcoming() { peer.mutate("listening.clear_upcoming", "null") }
 
     /** `listening.enqueue`, on the live space. */
-    fun enqueue(input: Enqueue) = peer.call("listening.enqueue", input.json())
+    fun enqueue(input: Enqueue) { peer.mutate("listening.enqueue", input.json()) }
 
     /** `listening.equip`, on the live space. */
-    fun equip(input: Equip) = peer.call("listening.equip", input.json())
+    fun equip(input: Equip) { peer.mutate("listening.equip", input.json()) }
 
     /** `listening.join`, on the live space. */
-    fun join(input: Member) = peer.call("listening.join", input.json())
+    fun join(input: Member) { peer.mutate("listening.join", input.json()) }
 
     /** `listening.jump`, on the live space. */
-    fun jump(input: Jump) = peer.call("listening.jump", input.json())
+    fun jump(input: Jump) { peer.mutate("listening.jump", input.json()) }
 
     /** `listening.last_played`, kept. */
     fun lastPlayed(): View<Play> = View(peer.view("listening.last_played", "null")) { j -> Play.of(j) }
 
     /** `listening.move`, on the live space. */
-    fun move(input: Move) = peer.call("listening.move", input.json())
+    fun move(input: Move) { peer.mutate("listening.move", input.json()) }
 
     /** `listening.nudge_group_volume`, on the live space. */
-    fun nudgeGroupVolume(input: GroupNudge) = peer.call("listening.nudge_group_volume", input.json())
+    fun nudgeGroupVolume(input: GroupNudge) { peer.mutate("listening.nudge_group_volume", input.json()) }
 
     /** `listening.nudge_volume`, on the live space. */
-    fun nudgeVolume(input: NudgeVolume) = peer.call("listening.nudge_volume", input.json())
+    fun nudgeVolume(input: NudgeVolume) { peer.mutate("listening.nudge_volume", input.json()) }
 
     /** `listening.on_join`, on the live space. */
-    fun onJoin(input: Device) = peer.call("listening.on_join", input.json())
+    fun onJoin(input: Device) { peer.mutate("listening.on_join", input.json()) }
 
     /** `listening.on_leave`, on the live space. */
-    fun onLeave(input: Device) = peer.call("listening.on_leave", input.json())
+    fun onLeave(input: Device) { peer.mutate("listening.on_leave", input.json()) }
 
     /** `listening.on_restore`, on the live space. */
-    fun onRestore() = peer.call("listening.on_restore", "null")
+    fun onRestore() { peer.mutate("listening.on_restore", "null") }
 
     /** `listening.pause`, on the live space. */
-    fun pause() = peer.call("listening.pause", "null")
+    fun pause() { peer.mutate("listening.pause", "null") }
 
     /** `listening.play`, on the live space. */
-    fun play() = peer.call("listening.play", "null")
+    fun play() { peer.mutate("listening.play", "null") }
 
     /** `listening.recently_played`, kept. */
     fun recentlyPlayed(): View<Play> = View(peer.view("listening.recently_played", "null")) { j -> Play.of(j) }
@@ -1444,58 +1444,58 @@ class Harken(val peer: Peer) {
     fun recordPlay(input: RecordPlay): String = peer.mutate("listening.record_play", input.json())
 
     /** `listening.release`, on the live space. */
-    fun release() = peer.call("listening.release", "null")
+    fun release() { peer.mutate("listening.release", "null") }
 
     /** `listening.remove`, on the live space. */
-    fun remove(input: Remove) = peer.call("listening.remove", input.json())
+    fun remove(input: Remove) { peer.mutate("listening.remove", input.json()) }
 
     /** `listening.report_group`, on the live space. */
-    fun reportGroup(input: ReportGroup) = peer.call("listening.report_group", input.json())
+    fun reportGroup(input: ReportGroup) { peer.mutate("listening.report_group", input.json()) }
 
     /** `listening.report_position`, on the live space. */
-    fun reportPosition(input: Report) = peer.call("listening.report_position", input.json())
+    fun reportPosition(input: Report) { peer.mutate("listening.report_position", input.json()) }
 
     /** `listening.report_volume`, on the live space. */
-    fun reportVolume(input: ReportVolume) = peer.call("listening.report_volume", input.json())
+    fun reportVolume(input: ReportVolume) { peer.mutate("listening.report_volume", input.json()) }
 
     /** `listening.scrub`, on the live space. */
-    fun scrub(input: Scrub) = peer.call("listening.scrub", input.json())
+    fun scrub(input: Scrub) { peer.mutate("listening.scrub", input.json()) }
 
     /** `listening.seek`, on the live space. */
-    fun seek(input: Seek) = peer.call("listening.seek", input.json())
+    fun seek(input: Seek) { peer.mutate("listening.seek", input.json()) }
 
     /** `listening.set_group_mute`, on the live space. */
-    fun setGroupMute(input: GroupMute) = peer.call("listening.set_group_mute", input.json())
+    fun setGroupMute(input: GroupMute) { peer.mutate("listening.set_group_mute", input.json()) }
 
     /** `listening.set_group_volume`, on the live space. */
-    fun setGroupVolume(input: GroupVolume) = peer.call("listening.set_group_volume", input.json())
+    fun setGroupVolume(input: GroupVolume) { peer.mutate("listening.set_group_volume", input.json()) }
 
     /** `listening.set_mute`, on the live space. */
-    fun setMute(input: SetMute) = peer.call("listening.set_mute", input.json())
+    fun setMute(input: SetMute) { peer.mutate("listening.set_mute", input.json()) }
 
     /** `listening.set_volume`, on the live space. */
-    fun setVolume(input: SetVolume) = peer.call("listening.set_volume", input.json())
+    fun setVolume(input: SetVolume) { peer.mutate("listening.set_volume", input.json()) }
 
     /** `listening.skip`, on the live space. */
-    fun skip(input: Skip) = peer.call("listening.skip", input.json())
+    fun skip(input: Skip) { peer.mutate("listening.skip", input.json()) }
 
     /** `listening.stalled`, on the live space. */
-    fun stalled(input: At) = peer.call("listening.stalled", input.json())
+    fun stalled(input: At) { peer.mutate("listening.stalled", input.json()) }
 
     /** `listening.start`, on the live space. */
-    fun start(input: Start) = peer.call("listening.start", input.json())
+    fun start(input: Start) { peer.mutate("listening.start", input.json()) }
 
     /** `listening.started`, on the live space. */
-    fun started(input: At) = peer.call("listening.started", input.json())
+    fun started(input: At) { peer.mutate("listening.started", input.json()) }
 
     /** `listening.stop`, on the live space. */
-    fun stop() = peer.call("listening.stop", "null")
+    fun stop() { peer.mutate("listening.stop", "null") }
 
     /** `listening.transfer`, on the live space. */
-    fun transfer(input: Transfer) = peer.call("listening.transfer", input.json())
+    fun transfer(input: Transfer) { peer.mutate("listening.transfer", input.json()) }
 
     /** `listening.unjoin`, on the live space. */
-    fun unjoin(input: Member) = peer.call("listening.unjoin", input.json())
+    fun unjoin(input: Member) { peer.mutate("listening.unjoin", input.json()) }
 
     /** `look.cancel`: its intent's id. */
     fun cancel(input: LookCancel): String = peer.mutate("look.cancel", input.json())

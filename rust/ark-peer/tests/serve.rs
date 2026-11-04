@@ -22,7 +22,7 @@ mod support;
 use support::{config, device, linked, named, until};
 
 fn create(c: &mut Peer, name: &str) {
-    let _ = c.author(Space::Durable, "demo.create_playlist", named(name), now_ms());
+    let _ = c.mutate_at("demo.create_playlist", named(name), now_ms());
     c.pump();
 }
 
@@ -81,7 +81,7 @@ fn a_linked_round_trip_waits_on_nothing() {
     let direct: Vec<Duration> = (0..100)
         .map(|i| {
             let t = std::time::Instant::now();
-            let _ = d.author(Space::Durable, "demo.create_playlist", named(&format!("D{i}")), now_ms());
+            let _ = d.mutate_at("demo.create_playlist", named(&format!("D{i}")), now_ms());
             loop {
                 for f in d.take_frames() {
                     wire.send(f);
@@ -162,13 +162,13 @@ fn the_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     for name in ["a", "b"] {
-        hub.author(Space::Durable, "demo.create_playlist", named(name), 1).unwrap();
+        hub.mutate_at("demo.create_playlist", named(name), 1).unwrap();
     }
     let store = hub.log.store.clone();
     drop(hub);
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     assert_eq!((hub.log.log(), &hub.log.store), (store.log(), &store));
-    hub.author(Space::Durable, "demo.create_playlist", named("c"), 1).unwrap();
+    hub.mutate_at("demo.create_playlist", named("c"), 1).unwrap();
     assert_eq!(hub.log.log().entries()[2].entry.local, 3, "its own count goes on");
 }
 
@@ -317,8 +317,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         most: ark::peer::PART as u64,
     };
     hub.frame(c, hello.enc(), 1);
-    hub.author(Space::Volatile, "room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2)
-        .unwrap();
+    hub.mutate_at("room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2).unwrap();
     let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
@@ -356,7 +355,7 @@ async fn a_frame_past_16_mib_is_taken() {
     let name = big.clone();
     running
         .hub
-        .with(move |p| p.author(Space::Durable, "demo.create_playlist", named(&name), 1))
+        .with(move |p| p.mutate_at("demo.create_playlist", named(&name), 1))
         .unwrap()
         .unwrap();
     tokio::task::spawn_blocking(move || {

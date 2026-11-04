@@ -118,11 +118,10 @@ fn offline(n: u64) -> usize {
     let token = "alice@perf";
     let mut c = device(token, Box::new(disk.clone()));
     for j in 0..10 {
-        c.author(Space::Durable, "demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
+        c.mutate_at("demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
     }
     let add = |c: &mut Peer, i: u64| {
-        c.author(Space::Durable, "demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0)
-            .unwrap();
+        c.mutate_at("demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0).unwrap();
     };
     (0..n).for_each(|i| add(&mut c, i));
     let before = disk.written();
@@ -253,8 +252,7 @@ fn timings() {
     let n = 2000;
     let t = Instant::now();
     for j in 0..n {
-        c.0.author(Space::Durable, "demo.create_playlist", named(&format!("P{j}")), now_ms())
-            .unwrap();
+        c.0.mutate_at("demo.create_playlist", named(&format!("P{j}")), now_ms()).unwrap();
         c.0.pump();
         while !c.0.log.pending.is_empty() {
             wait(&c.0, &c.1, Duration::from_millis(1));
@@ -264,15 +262,13 @@ fn timings() {
     eprintln!("b: a linked round trip, {n} playlists: {:.1} µs", us(t.elapsed() / n));
     let disk = Counting::default();
     let mut d = device("bob@perf", Box::new(disk));
-    d.author(Space::Durable, "demo.create_playlist", named("P"), 0).unwrap();
+    d.mutate_at("demo.create_playlist", named("P"), 0).unwrap();
     (0..4000).for_each(|i| {
-        d.author(Space::Durable, "demo.add_to_playlist", add_input(&pid("bob@perf", 1), i), 0)
-            .unwrap()
+        d.mutate_at("demo.add_to_playlist", add_input(&pid("bob@perf", 1), i), 0).unwrap();
     });
     let t = Instant::now();
     (0..1000).for_each(|i| {
-        d.author(Space::Durable, "demo.add_to_playlist", add_input(&pid("bob@perf", 1), 5000 + i), 0)
-            .unwrap()
+        d.mutate_at("demo.add_to_playlist", add_input(&pid("bob@perf", 1), 5000 + i), 0).unwrap();
     });
     eprintln!("c: an offline intent at 4,000 pending: {:.1} µs", us(t.elapsed() / 1000));
 }

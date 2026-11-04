@@ -12,7 +12,7 @@ use ark::frames::{Frame, Verdict};
 
 use ark::peer::Who;
 use ark::prelude::*;
-use ark::schema::Space;
+
 use ark_peer::{dev, Config, Disk, Instance, Memory, Peer};
 
 mod support;
@@ -154,7 +154,7 @@ fn a_device_reopens_as_its_replica_row() {
     let config = Config::of(Arc::new(arkdb::demo::demo()));
     let mut d = Peer::open_as(config.clone(), Box::new(Memory::default()), None);
     d.alone();
-    let _ = d.author(Space::Durable, CREATE, arkdb::demo::CreatePlaylist { name: "Road".into() }.to_bytes(), 1);
+    let _ = d.mutate_at(CREATE, arkdb::demo::CreatePlaylist { name: "Road".into() }.to_bytes(), 1);
     let (origin, me, local) = (d.log.origin, d.log.me.clone(), d.log.local);
     let mut d = d.reopen();
     assert!(d.is_alone(), "alone still");
@@ -177,7 +177,7 @@ fn a_device_reopened_after_joining_has_its_chain_pending() {
     d.alone();
     for name in ["Road", "Trip"] {
         let input = arkdb::demo::CreatePlaylist { name: name.into() }.to_bytes();
-        d.author(Space::Durable, CREATE, input, 1).unwrap();
+        d.mutate_at(CREATE, input, 1).unwrap();
     }
     assert_eq!(d.cursor(), 2);
     d.join();

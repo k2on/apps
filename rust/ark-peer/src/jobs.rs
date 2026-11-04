@@ -191,7 +191,7 @@ impl Peer {
         input: &[u8],
         mut f: impl FnMut(Vec<T>) + Send + 'static,
     ) -> Result<usize, String> {
-        let b = self.binding(name).ok_or_else(|| format!("no view {name}"))?;
+        let b = self.function(name)?.name.clone();
         let v = self.watch(space, &b, input, self.ctx()).map_err(|r| r.0)?;
         let mut tell: Reconciler = Box::new(move |rows| f(rows.iter().filter_map(|b| T::decode(b).ok()).collect()));
         tell(&self.rows(v));

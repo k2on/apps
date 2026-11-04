@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ark::prelude::*;
-use ark::schema::Space;
+
 use ark_auth::server::{Auth, Mode};
 use ark_auth::{Role, SignIn};
 use ark_peer::link::{bell, wait};
@@ -116,7 +116,7 @@ fn write() {
     device.connect_with("", hub.dialer(auth.authenticate()));
     for name in names() {
         let input = CreatePlaylist { name }.to_bytes();
-        device.author(Space::Durable, "app.create_playlist", input, 1).unwrap();
+        device.mutate_at("app.create_playlist", input, 1).unwrap();
     }
     for _ in 0..400 {
         device.pump();

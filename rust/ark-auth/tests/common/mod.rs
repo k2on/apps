@@ -72,7 +72,7 @@ impl Hub for Memory {
         self.0.lock().unwrap().apply(&c).map_err(|r| r.0)
     }
 
-    fn author(&self, func: &str, input: Vec<u8>) -> Result<(), String> {
+    fn mutate(&self, func: &str, input: Vec<u8>) -> Result<(), String> {
         self.1.lock().unwrap().push((func.into(), input));
         Ok(())
     }

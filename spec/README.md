@@ -43,7 +43,7 @@ is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 | 1.11 | `frames.rs` | the frames — `Hello`, `Page` (a peer's intents, or an authority's chain), `Verdict`, `Part` and `More` (a fill; a `Hello` and a `More` say how big a part the replica would have), `Call` and `Reply` (a server's own function a device calls, outside both machines), and `Offer`, `Want`, `Chunk`, `Have`, `Absent` (the bytes of the files rows name, beside the log) — in the value format; no frame carries code |
 | 1.16 | `row.rs` | `Row`, `Input` and its refinements (the form's words), `Describe` and `Type`, `Id`, typed indexes |
 | 1.16 | `db.rs` | the typed store a function reads and writes, a run reading its own writes, a refusal undoing them |
-| 1.16 | `domain.rs` | a `Domain`: the schema and functions by name — mutators, live transitions, queries, views, scopes |
+| 1.16 | `domain.rs` | a `Domain`: the schema and functions by name — mutators (of the space each writes), queries, views, scopes |
 | — | `file.rs` | `FileRef`, how a row names a file: the hex sha256 of its bytes, their size and media type, an ordinary record column; the files a value names (`named`), and whether a store holds a row naming one (`held`, who may read a file) |
 | — | `lib.rs` | `Refusal` and the prelude a domain uses; the derives and attributes are `rust/ark-macros` |
 

@@ -68,6 +68,6 @@ pub mod prelude {
     pub use crate::plan::{scan, scan_from, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};
     pub use crate::Refusal;
-    pub use ark_macros::{live, mutator, query, scope, view, Describe, Effect, Input, Row, Schema};
+    pub use ark_macros::{mutator, query, scope, view, Describe, Effect, Input, Row, Schema};
     pub use serde::{Deserialize, Serialize};
 }

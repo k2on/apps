@@ -47,7 +47,7 @@ const LANG: Lang = Lang {
     write: |e| format!("{e}.json()"),
     param: |t| format!("input: {t}"),
     mutator: |Hole { m, p, name, arg, .. }| format!("/** `{name}`: its intent's id. */\n    fun {m}({p}): String = peer.mutate(\"{name}\", {arg})"),
-    live: |Hole { m, p, name, arg, .. }| format!("/** `{name}`, on the live space. */\n    fun {m}({p}) = peer.call(\"{name}\", {arg})"),
+    live: |Hole { m, p, name, arg, .. }| format!("/** `{name}`, on the live space. */\n    fun {m}({p}) {{ peer.mutate(\"{name}\", {arg}) }}"),
     typed_view: |Hole { m, p, name, arg, r, .. }| {
         format!("/** `{name}`, kept, its rows UniFFI's. */\n    fun {m}({p}): View<{r}> = typed({r}View(peer, \"{name}\", {arg}))")
     },

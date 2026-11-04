@@ -34,7 +34,7 @@ fn two_devices_share_a_session() {
     assert_eq!(ids, ["laptop", "phone"]);
     let track = r#"{"album":"","creator":"","duration_ms":1000,"file":"a.flac","id":"00000000000000000000000000000001","title":"A"}"#;
     phone
-        .call("start".into(), format!(r#"{{"at":0,"from":"","position":0,"queue":[{track}]}}"#))
+        .mutate("start".into(), format!(r#"{{"at":0,"from":"","position":0,"queue":[{track}]}}"#))
         .unwrap();
     hall.carry();
     let s = &listening(&laptop)["session"];

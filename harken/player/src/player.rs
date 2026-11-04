@@ -51,7 +51,7 @@ struct Calls<'a> {
 impl Calls<'_> {
     fn call(&mut self, transition: &str, input: Vec<u8>) -> Result<(), String> {
         self.stats.calls += 1;
-        let out = self.peer.call(&format!("listening.{transition}"), input);
+        let out = self.peer.mutate(&format!("listening.{transition}"), input).map(|_| ());
         if let Err(why) = &out {
             self.stats.refused += 1;
             self.stats.last_refusal = Some(format!("{transition}: {why}"));

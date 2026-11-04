@@ -41,7 +41,7 @@ fn bench_queries() {
     ];
     for (name, input) in &reads {
         let started = Instant::now();
-        let b = client.binding(name).unwrap();
+        let b = client.function(name).unwrap().name.clone();
         let v = crate::client::domain()
             .ask(&client.log.store, &client.ctx(), &b, input)
             .unwrap_or_else(|e| panic!("{name}: {e}"));

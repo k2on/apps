@@ -62,7 +62,7 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
     d.connected();
     carry(&mut hub, &mut d, c);
     for i in 0..5 {
-        d.author(Space::Volatile, "room.point", Point { x: i }.to_bytes(), i).unwrap();
+        d.mutate_at("room.point", Point { x: i }.to_bytes(), i).unwrap();
         carry(&mut hub, &mut d, c);
     }
     // The page reloads: its connection goes, it opens again from its disk.
@@ -73,7 +73,7 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
     d.connected();
     carry(&mut hub, &mut d, c);
     let before = hub.machine(Space::Volatile).unwrap().log().head();
-    d.author(Space::Volatile, "room.point", Point { x: 99 }.to_bytes(), 20).unwrap();
+    d.mutate_at("room.point", Point { x: 99 }.to_bytes(), 20).unwrap();
     carry(&mut hub, &mut d, c);
     let after = hub.machine(Space::Volatile).unwrap().log().head();
     assert_ne!(before, after, "the reloaded page's call never reached the server's live space");
@@ -88,13 +88,8 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
 fn the_servers_spaces_name_their_entries_apart() {
     let mut hub = hub();
     // The log's first entry is the server's own, as harken's library is.
-    hub.author(
-        Space::Durable,
-        "demo.create_playlist",
-        CreatePlaylist { name: "mix".into() }.to_bytes(),
-        0,
-    )
-    .unwrap();
+    hub.mutate_at("demo.create_playlist", CreatePlaylist { name: "mix".into() }.to_bytes(), 0)
+        .unwrap();
     let mut d = device();
     let c = hub.accept(d.me().clone());
     d.connected();

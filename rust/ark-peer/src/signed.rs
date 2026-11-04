@@ -34,7 +34,7 @@ impl Peer {
             id: self.me().session.clone(),
         }
         .to_bytes();
-        let r = self.mutate_bytes(REVOKE, input);
+        let r = self.mutate(REVOKE, input);
         self.set_token(None);
         r
     }

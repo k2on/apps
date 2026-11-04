@@ -3,8 +3,9 @@
 //! data class or struct per record and row, a sealed class or enum per sum,
 //! each read from and written as the JSON the kernel's serde reads and
 //! writes (struct fields in declaration order, sums externally tagged), and
-//! a stub per function calling it by name: a mutator's `mutate`, a live
-//! transition's `call`, a query's answer read, a view's handle typed.
+//! a stub per function calling it by name: a mutator's `mutate` (giving
+//! its intent's id, or nothing on the live space), a query's answer read, a
+//! view's handle typed.
 //! Nothing of a function's body is ever generated. What the generated code
 //! stands on — `Id`, `View` and JSON — is the bridge's own typed half,
 //! written once (`rust/ark-ffi/kotlin/Typed.kt`, `rust/ark-ffi/swift/Typed.swift`).
@@ -67,6 +68,7 @@ pub struct Stub {
     pub name: String,
     pub method: String,
     pub kind: Kind,
+    pub space: Space,
     pub input: Type,
     pub output: Option<Type>,
 }
@@ -117,7 +119,8 @@ pub struct Lang {
     pub read: fn(&str, &str) -> String,
     pub write: fn(&str) -> String,
     pub param: fn(&str) -> String,
-    /// The stubs, by kind, and a query's call (`name`, `arg`).
+    /// The stubs, by kind (a mutator of the live space's `live`), and a
+    /// query's call (`name`, `arg`).
     pub mutator: fn(&Hole) -> String,
     pub live: fn(&Hole) -> String,
     pub typed_view: fn(&Hole) -> String,
@@ -211,8 +214,8 @@ impl Lang {
                 r: "",
             };
             let line = match (f.kind, &f.output) {
+                (Kind::Mutator, _) if f.space == Space::Volatile => (self.live)(&h),
                 (Kind::Mutator, _) => (self.mutator)(&h),
-                (Kind::Live, _) => (self.live)(&h),
                 (Kind::View, Some(Type::Record(r, _))) if views.contains(r.as_str()) => (self.typed_view)(&Hole { r, ..h }),
                 (Kind::View, Some(o)) => (self.view)(&Hole {
                     t: &self.ty(o, &bare),
@@ -291,6 +294,7 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
                 name: f.name.clone(),
                 method: camel(if alone { last(&f.name) } else { f.name.clone() }.as_str(), false),
                 kind: f.kind,
+                space: f.space,
                 input: f.input.clone(),
                 output: f.output.clone(),
             }

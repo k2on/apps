@@ -213,7 +213,7 @@ impl Device<'_> {
 
     fn call(&self, transition: &str, input: Value) {
         self.peer
-            .call(transition.into(), input.to_string())
+            .mutate(transition.into(), input.to_string())
             .unwrap_or_else(|e| panic!("{transition}: {e:?}"));
         self.hall.carry();
     }

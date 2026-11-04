@@ -3,12 +3,13 @@
 //! A [`Domain`] is what a crate of plain Rust registers: the schema its
 //! `#[derive(Schema)]` struct is, and per name — `playlists.add_to_playlist`
 //! — a function and its input's type description. `#[mutator(..)]`,
-//! `#[live(..)]`, `#[query(..)]`, `#[view(..)]` and `#[scope(..)]` only
-//! register a function by name ([`register!`]); what it does is the Rust.
+//! `#[query(..)]`, `#[view(..)]` and `#[scope(..)]` only register a
+//! function by name ([`register!`]); what it does is the Rust.
 //!
-//! - a **mutator** (and a **live transition**, over volatile tables) is
-//!   `fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>`: the machine runs it
-//!   as a [`Procedure`], its input read and refined first ([`Input`]);
+//! - a **mutator** is `fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>`:
+//!   the machine of the space it writes (`P`, durable unless it says
+//!   [`Volatile`](crate::db::Volatile): a live transition, §1.9) runs it as
+//!   a [`Procedure`], its input read and refined first ([`Input`]);
 //! - a **query** is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`, answered
 //!   over a store;
 //! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>`,
@@ -28,12 +29,12 @@ pub mod effect;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::db::{read, write_in, Db, Tables, Volatile, Writes};
+use crate::db::{read, write_in, Db, Tables, Writes};
 use crate::hash::SchemaHash;
 use crate::peer::{self, Ctx, Functions, Procedure};
 use crate::plan::{answer, Maintained, Plan, View};
 use crate::row::{Describe, Input, Row, Type, Value};
-use crate::schema::Schema;
+use crate::schema::{Schema, Space};
 use crate::store::{Change, Store};
 use crate::Refusal;
 
@@ -41,7 +42,6 @@ use crate::Refusal;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     Mutator,
-    Live,
     Query,
     View,
     Scope,
@@ -82,6 +82,7 @@ fn function<I: Input>(name: &str, kind: Kind, output: Option<Type>) -> Function 
         described: Described {
             name: name.into(),
             kind,
+            space: Space::Durable,
             input,
             output,
             checks,
@@ -124,7 +125,7 @@ fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
     }
 }
 
-/// A mutator's function, or a live transition's (`P` the space it writes).
+/// A mutator's function (`P` the space it writes).
 pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>;
 
 struct Mutate<S: Tables, P: Writes, I> {
@@ -200,21 +201,16 @@ impl Domain {
         self
     }
 
-    fn writer<S: Tables, P: Writes, I: Input>(self, name: &str, kind: Kind, f: WriteFn<S, P, I>) -> Domain {
-        self.add(Function {
+    /// A mutator of the space `P` its `Db` writes, which it writes alone
+    /// ([`crate::db`]): a durable one an intent on the log, a volatile one a
+    /// transition of live state (§1.9).
+    pub fn mutator<S: Tables, P: Writes, I: Input>(self, name: &str, f: WriteFn<S, P, I>) -> Domain {
+        let mut f = Function {
             proc: Some(Arc::new(Mutate { f })),
-            ..function::<I>(name, kind, None)
-        })
-    }
-
-    pub fn mutator<S: Tables, I: Input>(self, name: &str, f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>) -> Domain {
-        self.writer(name, Kind::Mutator, f)
-    }
-
-    /// A transition of live state: a mutator over volatile tables (§1.9),
-    /// which writes none other ([`crate::db`]).
-    pub fn live<S: Tables, I: Input>(self, name: &str, f: WriteFn<S, Volatile, I>) -> Domain {
-        self.writer(name, Kind::Live, f)
+            ..function::<I>(name, Kind::Mutator, None)
+        };
+        f.described.space = P::SPACE;
+        self.add(f)
     }
 
     pub fn query<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>) -> Domain {
@@ -264,10 +260,10 @@ impl Domain {
     /// The function a name means: itself, or the first whose last part it
     /// is.
     pub fn binding(&self, name: &str) -> Option<&str> {
-        self.fns
-            .keys()
-            .map(String::as_str)
-            .find(|n| *n == name || n.rsplit('.').next() == Some(name))
+        match self.fns.get_key_value(name) {
+            Some((n, _)) => Some(n),
+            None => self.fns.keys().map(String::as_str).find(|n| n.rsplit('.').next() == Some(name)),
+        }
     }
 
     pub fn schema_hash(&self) -> SchemaHash {
@@ -343,6 +339,9 @@ pub struct Catalog {
 pub struct Described {
     pub name: String,
     pub kind: Kind,
+    /// The space a mutator writes, and its intents are on.
+    #[serde(default)]
+    pub space: Space,
     /// What it takes, as a form reads it.
     pub input: Type,
     /// What it answers, a query's or a view's element.

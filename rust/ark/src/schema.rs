@@ -31,9 +31,10 @@ use crate::json::{Seed, Typed};
 use crate::row::Type;
 use crate::Refusal;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Space {
+    #[default]
     Durable,
     Volatile,
 }

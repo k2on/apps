@@ -89,7 +89,7 @@ impl Net {
 
     /// The server's logged entries naming `func`, in order.
     fn logged(&self, func: &str) -> Vec<Entry> {
-        let f = self.hub.binding(func).unwrap_or_else(|| func.to_string());
+        let f = self.hub.function(func).map_or_else(|_| func.to_string(), |f| f.name.clone());
         self.hub
             .log
             .log()
@@ -172,9 +172,9 @@ fn an_answer_after_the_trace_is_over_begins_its_own() {
     let tap = net.d(0).begin("tap");
     asks(&mut net, 0, "a");
     net.d(0).end();
-    let f = net.d(1).binding("fetch.ask").unwrap();
+    let f = net.d(1).function("fetch.ask").unwrap().name.clone();
     let late = tap.began + ark_peer::TRACE_MS + 1;
-    net.d(1).author(Space::Durable, &f, Ask { id: "late".into() }.to_bytes(), late).unwrap();
+    net.d(1).mutate_at(&f, Ask { id: "late".into() }.to_bytes(), late).unwrap();
     net.carry();
     let b = net.logged("fetch.ask").pop().unwrap();
     assert_eq!(b.cause, None, "late, it is a trace of its own");

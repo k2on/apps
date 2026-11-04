@@ -217,7 +217,10 @@ impl Peer {
 
     /// A transition of the session; a refusal of its preview, said.
     pub fn call(&mut self, transition: &str, input: Vec<u8>) -> Result<(), String> {
-        let out = self.client.call(&format!("listening.{transition}"), input);
+        let out = self
+            .client
+            .mutate(&format!("listening.{transition}"), input)
+            .map(|_| ());
         if let Err(why) = &out {
             self.refused.push((Space::Volatile, why.clone()));
         }

@@ -4,8 +4,8 @@
 //! The kit is domain-agnostic: an app's own Rust crate links its domain in
 //! and opens a [`Peer`] over it ([`Peer::open`]; harken's is `harken/ffi`,
 //! whose `harken_open` is the constructor its phones call). Through the
-//! bridge a [`Peer`] is called by function name with JSON — `mutate`,
-//! `query`, `view`, the live space's `call` — and says where it stands
+//! bridge a [`Peer`] is called by function name with JSON — `mutate` (on
+//! the space the function writes), `query`, `view` — and says where it stands
 //! (`status`), what became of each intent (`standing`, `take_rejections`),
 //! which jobs of a kind are due for a handler written in the app (`due`),
 //! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
@@ -407,21 +407,24 @@ impl Peer {
         self.shared.act(|s| s.peer.dial_now());
     }
 
-    /// An intent of the function `name` on its input's JSON: its id, or why
-    /// its preview — or, alone, its sequencing — refused it.
+    /// An intent of the function `name` on its input's JSON, on the space
+    /// the function writes (a live one through the relay when it is
+    /// ephemeral): its id, or why its preview — or, alone, its sequencing —
+    /// refused it.
     pub fn mutate(&self, name: String, input: String) -> Result<String, Refusal> {
         let _call = tracing::debug_span!(target: "ark", "ffi", call = "mutate", name = %name).entered();
         let id = self.shared.act(|s| {
             let input = s.peer.input_json(&name, &input)?;
-            // An app's mutate is somebody's doing — a tap — and the root of
-            // what it causes, unless the app opened a span around it; a
-            // job's own steps answer what made the job due instead.
+            // An app's mutate of the log is somebody's doing — a tap — and
+            // the root of what it causes, unless the app opened a span
+            // around it; a job's own steps answer what made the job due
+            // instead, and a live call what woke it.
             let job = [".claim", ".finish", ".cancel"].iter().any(|v| name.ends_with(v));
-            if job || s.peer.open_span().is_some() {
-                return s.peer.mutate_bytes(&name, input);
+            if job || s.peer.open_span().is_some() || s.peer.function(&name)?.space == ark::schema::Space::Volatile {
+                return s.peer.mutate(&name, input);
             }
             s.peer.begin(&name);
-            let out = s.peer.mutate_bytes(&name, input);
+            let out = s.peer.mutate(&name, input);
             s.peer.end();
             out
         })?;
@@ -468,13 +471,10 @@ impl Peer {
     /// The first of an input's refinements that fails, as a form says it.
     pub fn check(&self, name: String, input: String) -> Option<String> {
         let s = self.shared.lock();
-        let f = s.peer.binding(&name).and_then(|b| s.peer.domain().get(&b).cloned());
-        match f {
-            Some(f) => match s.peer.input_json(&name, &input) {
-                Ok(b) => (f.check)(&b).err().and_then(|mut e| e.drain(..).next()).map(|(_, w)| w),
-                Err(why) => Some(why),
-            },
-            None => Some(format!("no function {name}")),
+        let checked = s.peer.function(&name).and_then(|f| Ok((f.check)(&s.peer.input_json(&name, &input)?)));
+        match checked {
+            Ok(c) => c.err().and_then(|mut e| e.drain(..).next()).map(|(_, w)| w),
+            Err(why) => Some(why),
         }
     }
 
@@ -506,16 +506,6 @@ impl Peer {
     pub fn view(&self, name: String, input: String) -> Result<Arc<ViewHandle>, Refusal> {
         let args = self.shared.lock().peer.input_json(&name, &input)?;
         self.view_bytes(name, args)
-    }
-
-    /// A call on the live space (§1.9) on its input's JSON: an ephemeral
-    /// one through the relay, any other at once.
-    pub fn call(&self, name: String, input: String) -> Result<(), Refusal> {
-        let _call = tracing::debug_span!(target: "ark", "ffi", call = "call", name = %name).entered();
-        Ok(self.shared.act(|s| {
-            let input = s.peer.input_json(&name, &input)?;
-            s.peer.call(&name, input)
-        })?)
     }
 
     /// A trace begun here, named `name` — what a tap, a gesture, a scan in

@@ -934,10 +934,7 @@ impl Job {
     /// A mutation authored, and waited for until the hub confirms it — on
     /// its disk — or refuses it.
     fn author(&mut self, name: &str, input: &impl Encode) -> Result<()> {
-        let id = self
-            .peer
-            .mutate_bytes(name, input.to_bytes())
-            .map_err(|why| anyhow!("refused here: {why}"))?;
+        let id = self.peer.mutate(name, input.to_bytes()).map_err(|why| anyhow!("refused here: {why}"))?;
         let mut why = None;
         let held = ark_peer::link::until(CONFIRM, Duration::from_millis(0), || {
             ark_peer::link::wait(&self.peer, &self.rx, Duration::from_millis(50));

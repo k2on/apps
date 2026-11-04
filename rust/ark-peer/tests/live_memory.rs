@@ -101,7 +101,7 @@ fn run(c: usize, n: u64) -> Held {
     for i in 0..n {
         let k = i as usize % c;
         let x = Point { x: i as i64 }.to_bytes();
-        ds[k].0.author(Space::Volatile, "room.point", x, i as i64).unwrap();
+        ds[k].0.mutate_at("room.point", x, i as i64).unwrap();
         carry(&mut hub, &mut ds);
     }
     let per_call = t.elapsed() / n as u32;

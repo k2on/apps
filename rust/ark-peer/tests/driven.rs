@@ -8,7 +8,6 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark::schema::Space;
 use ark_peer::driven::Driven;
 use ark_peer::link::bell;
 use ark_peer::{dev, Memory, Peer};
@@ -46,10 +45,10 @@ fn a_driven_peer_takes_in_and_sends_with_nobody_pumping() {
     until(&alice, "alice linked", |p| p.linked);
     until(&bob, "bob linked", |p| p.linked);
     let _ = rang.try_iter().count();
-    bob.lock().author(Space::Durable, "demo.create_playlist", named("Road"), 1).unwrap();
+    bob.lock().mutate_at("demo.create_playlist", named("Road"), 1).unwrap();
     until(&alice, "alice has bob's playlist", |p| p.log.log().head().0 >= 1);
     assert!(rang.try_iter().count() > 0, "and her app was told");
-    alice.lock().author(Space::Durable, "demo.create_playlist", named("Hymns"), 2).unwrap();
+    alice.lock().mutate_at("demo.create_playlist", named("Hymns"), 2).unwrap();
     until(&alice, "hers confirmed", |p| p.log.pending.is_empty() && p.log.log().head().0 >= 2);
     let at = hub.with(|p| p.log.log().head().0).unwrap();
     assert_eq!(at, 2, "the server has both");
@@ -78,7 +77,7 @@ fn a_fill_is_taken_in_without_telling_the_app_of_every_part() {
     hub.with(|p| {
         for i in 0..80 {
             let name = format!("{i:02}{}", "x".repeat(40_000));
-            p.author(Space::Durable, "demo.create_playlist", named(&name), 1).unwrap();
+            p.mutate_at("demo.create_playlist", named(&name), 1).unwrap();
         }
         let head = p.log.machine.log().head().0;
         p.log.machine.step(ark::peer::Input::Compact(head));
