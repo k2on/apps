@@ -433,6 +433,10 @@ fn run(seed: u64) -> (String, String, usize, usize) {
         .values()
         .filter(|f| f.kind == ark::domain::Kind::View)
         .map(|f| f.name.as_str())
+        // A kind's due jobs became a view after these pins were taken (it
+        // was a query, never asked here): the pins are over the views
+        // there were.
+        .filter(|n| *n != "look.due")
         .collect();
     assert_eq!(views.len(), 32);
     let (mut refused, mut moved) = (0, 0);
