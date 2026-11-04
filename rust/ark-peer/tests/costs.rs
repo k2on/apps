@@ -166,6 +166,7 @@ fn fanout(c: usize) -> usize {
         device: None,
         schema: Default::default(),
         version: String::new(),
+        most: ark::peer::PART as u64,
     }
     .enc();
     let conns: Vec<u64> = (0..c).map(|k| hub.accept(dev(&format!("u{k}@x")).unwrap())).collect();

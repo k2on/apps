@@ -171,7 +171,8 @@ fn a_fill_comes_in_parts_the_later_tables_last() {
     same(&alice, &server);
 }
 
-/// A replica that asks for small parts (`Frame::Parts`) is sent them: the
+/// A replica that asks for small parts (`most`, in its `Hello` and each
+/// `More`) is sent them: the
 /// demo's 40 KB playlists one a part where it would be sent several, each
 /// part's rows past the size only by its last; filled, it is the
 /// authority's store all the same. Falsified by the authority sending

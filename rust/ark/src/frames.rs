@@ -3,13 +3,12 @@
 //! verdicts and pages of its chain.
 //!
 //! ```text
-//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version }
+//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version, most }
 //! Page    { space, from, logged: [Logged] }
 //! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { last } }
 //! Telemetry { events: [Event] }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
-//! More    { space, from: { table, key } }
-//! Parts   { space, most }
+//! More    { space, from: { table, key }, most }
 //! Call    { id, name, input }
 //! Reply   { id, reply: Ok { output } | Refused { why } }
 //! Offer   { hash, size }
@@ -31,10 +30,10 @@
 //! `Hello` its log cannot page — the first, from its rows' start — and to
 //! each `More`, the part from where it says, of rows as they stand when
 //! the authority answers. A replica asks for each part once it holds the
-//! one before. `Parts` is how big a replica would have them: at most
-//! `most` bytes of rows each, from its next `Hello` on — one that takes a
-//! part on the thread it draws on asks for small ones, and is sent more of
-//! them. Unasked, a part is about [`crate::peer::PART`].
+//! one before. A `Hello` and a `More` say how big a replica would have the
+//! part they ask for, `most` bytes of rows at most — one that takes a part
+//! on the thread it draws on asks for small ones, and is sent more of
+//! them — within [`crate::peer::MIN_PART`] and [`crate::peer::PART`].
 //!
 //! `Telemetry` is no machine's: what a device says of itself
 //! (docs/plan-observe.md), sent to its server beside the frames, which a
@@ -87,6 +86,7 @@ pub enum Frame {
         device: Option<Vec<u8>>,
         schema: SchemaHash,
         version: String,
+        most: u64,
     },
     Page {
         space: Space,
@@ -108,9 +108,6 @@ pub enum Frame {
     More {
         space: Space,
         from: Cursor,
-    },
-    Parts {
-        space: Space,
         most: u64,
     },
     Call {
@@ -193,8 +190,7 @@ impl Frame {
             | Frame::Page { space, .. }
             | Frame::Verdict { space, .. }
             | Frame::Part { space, .. }
-            | Frame::More { space, .. }
-            | Frame::Parts { space, .. } => *space,
+            | Frame::More { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
             Frame::Telemetry { .. }
             | Frame::Call { .. }

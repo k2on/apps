@@ -314,6 +314,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         device: Some(b"phone".to_vec()),
         schema: Default::default(),
         version: String::new(),
+        most: ark::peer::PART as u64,
     };
     hub.frame(c, hello.enc(), 1);
     hub.author(Space::Volatile, "room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2)

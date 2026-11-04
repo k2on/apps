@@ -57,6 +57,7 @@ fn every_frame() -> Vec<Frame> {
             device: None,
             schema: SchemaHash([0; 32]),
             version: String::new(),
+            most: ark::peer::PART as u64,
         },
         Frame::Hello {
             space: Space::Volatile,
@@ -65,6 +66,7 @@ fn every_frame() -> Vec<Frame> {
             device: Some(b"phone\0".to_vec()),
             schema: SchemaHash([2; 32]),
             version: "1.2".into(),
+            most: ark::peer::PART as u64,
         },
         Frame::push(Space::Volatile, [entry.clone()]),
         Frame::push(Space::Durable, [entry.clone(), entry]),
@@ -101,9 +103,6 @@ fn every_frame() -> Vec<Frame> {
                 table: "item".into(),
                 key: vec![0, 1],
             },
-        },
-        Frame::Parts {
-            space: Space::Durable,
             most: 16 << 10,
         },
         Frame::Call {

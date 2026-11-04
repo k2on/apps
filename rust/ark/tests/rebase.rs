@@ -269,6 +269,7 @@ fn compaction_and_the_horizon() {
         device: None,
         schema: Default::default(),
         version: String::new(),
+        most: ark::peer::PART as u64,
     };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
     let mut r = replica("x", Functions::default());
