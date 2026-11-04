@@ -809,15 +809,6 @@ data class PhotoClaim(val id: Id, val by: String) {
     }
 }
 
-/** The record `PhotoDue`. */
-data class PhotoDue(val rows: List<Photo>, val nextMs: Long? = null) {
-    fun json(): String = "{" + "\"rows\":" + J.wlist(rows) { v0 -> v0.json() } + "," + "\"next_ms\":" + J.wopt(nextMs) { v0 -> v0.toString() } + "}"
-
-    companion object {
-        fun of(j: Any?): PhotoDue = (j as JSONObject).let { o -> PhotoDue(J.list(o.opt("rows")) { v0 -> Photo.of(v0) }, J.opt(o.opt("next_ms")) { v0 -> J.int(v0) }) }
-    }
-}
-
 /** The record `PhotoFinish`. */
 data class PhotoFinish(val id: Id, val by: String, val outcome: PhotoOutcome) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "}"
@@ -1332,8 +1323,8 @@ class Money(val peer: Peer) {
     /** `photo.claim`: its intent's id. */
     fun claim(input: PhotoClaim): String = peer.mutate("photo.claim", input.json())
 
-    /** `photo.due`. */
-    fun due(): PhotoDue = PhotoDue.of(J.parse(peer.query("photo.due", "null")))
+    /** `photo.due`, kept. */
+    fun due(): View<Photo> = View(peer.view("photo.due", "null")) { j -> Photo.of(j) }
 
     /** `photo.finish`: its intent's id. */
     fun finish(input: PhotoFinish): String = peer.mutate("photo.finish", input.json())
@@ -1385,9 +1376,6 @@ class Money(val peer: Peer) {
 
     /** `role.revoke`: its intent's id. */
     fun roleRevoke(input: Grant): String = peer.mutate("role.revoke", input.json())
-
-    /** `session.current`. */
-    fun current(): SignIn? = J.opt(J.parse(peer.query("session.current", "null"))) { v0 -> SignIn.of(v0) }
 
     /** `session.mine`, kept. */
     fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { j -> SignIn.of(j) }

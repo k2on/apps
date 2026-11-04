@@ -15,8 +15,8 @@
 //! `#[derive(Effect)]` on a row with a `state: Job<T>` field writes
 //! [`Effect`]; [`Effect::register`] adds `<table>.claim {id, by}`,
 //! `<table>.finish {id, by, outcome}` and `<table>.cancel {id}` to a
-//! domain, and the query `<table>.due`: the rows a claim would take now,
-//! and when the next is due (what a handler outside Rust asks). Each is judged at the authority in log order: of a claim and a
+//! domain, and the view `<table>.due`: the rows a claim would take now
+//! (what a handler outside Rust asks). Each is judged at the authority in log order: of a claim and a
 //! cancel of one pending row, whichever comes first wins and the other is
 //! refused; a finish is refused unless the row is claimed by its `by`. A
 //! claim is judged at its entry's `now`. A `Done` carries its outcome:
@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::{Db, Durable, Tables};
 use crate::domain::Domain;
 use crate::peer::Ctx;
+use crate::plan::{scan, Plan};
 use crate::row::{Describe, Input, Row, Type, Value};
 use crate::Refusal;
 
@@ -87,11 +88,11 @@ pub trait Effect: Row<Space = Durable> {
         None
     }
 
-    /// `<table>.claim`, `.finish` and `.cancel`, and `.due`, over the
+    /// `<table>.claim`, `.finish` and `.cancel`, and the view `.due`, over the
     /// schema `S`.
     fn register<S: Tables>(d: Domain) -> Domain {
         let name = |f: &str| format!("{}.{f}", Self::TABLE);
-        let d = d.mutator(&name("claim"), claim::<S, Self>).query(&name("due"), due::<S, Self>);
+        let d = d.mutator(&name("claim"), claim::<S, Self>).view(&name("due"), due::<S, Self>);
         d.mutator(&name("finish"), finish::<S, Self>).mutator(&name("cancel"), cancel::<S, Self>)
     }
 
@@ -171,15 +172,6 @@ pub struct Cancel<R: Effect> {
     pub id: R::Id,
 }
 
-/// `due`'s answer: the jobs a claim would take now, and when the next falls
-/// due.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct Due<R: Effect> {
-    pub rows: Vec<R>,
-    pub next_ms: Option<i64>,
-}
-
 /// A type named for its job's table — `LookClaim` — so that each kind's
 /// are types of their own in the generated Kotlin and Swift.
 fn named<R: Effect>(what: &str, fs: Vec<(&str, Type)>) -> Type {
@@ -210,12 +202,6 @@ impl<R: Effect> Describe for Finish<R> {
 impl<R: Effect> Describe for Cancel<R> {
     fn describe() -> Type {
         named::<R>("Cancel", vec![("id", R::Id::describe())])
-    }
-}
-
-impl<R: Effect> Describe for Due<R> {
-    fn describe() -> Type {
-        named::<R>("Due", vec![("rows", Vec::<R>::describe()), ("next_ms", Option::<i64>::describe())])
     }
 }
 
@@ -284,12 +270,7 @@ fn cancel<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Cancel<R>) -> Resu
     db.tab::<R>().update(r)
 }
 
-fn due<S: Tables, R: Effect>(ctx: &Ctx, db: &Db<S>, _: ()) -> Result<Due<R>, Refusal> {
-    let open = db.tab::<R>().scan().into_iter().filter_map(|r| Some((r.job().due(R::LEASE_MS)?, r)));
-    let (now, later): (Vec<_>, Vec<_>) = open.partition(|(d, _)| *d <= ctx.now);
-    let next_ms = later.iter().map(|(d, _)| *d).min();
-    Ok(Due {
-        rows: now.into_iter().map(|(_, r)| r).collect(),
-        next_ms,
-    })
+fn due<S: Tables, R: Effect>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, R>, Refusal> {
+    let now = ctx.now;
+    Ok(scan::<S, R>().filter(move |r| r.job().due(R::LEASE_MS).is_some_and(|d| d <= now)))
 }

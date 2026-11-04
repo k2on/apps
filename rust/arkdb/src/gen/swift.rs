@@ -35,8 +35,6 @@ const LANG: Lang = Lang {
     view: |Hole { m, p, name, arg, t, rd, .. }| {
         format!("/// `{name}`, kept.\n    public func {m}({p}) throws -> LiveView<{t}> {{ LiveView(try peer.view(name: \"{name}\", input: {arg})) {{ j in {rd} }} }}")
     },
-    query: |Hole { m, p, name, t, rd, .. }| format!("/// `{name}`.\n    public func {m}({p}) throws -> {t} {{ {rd} }}"),
-    query_call: |name, arg| format!("J.parse(try peer.query(name: \"{name}\", input: {arg}))"),
     typed: |r| format!("private func typed(_ v: {r}View) -> LiveView<{r}> {{ LiveView.typed(rows: v.rows, take: {{ let t = v.take(); return (t.update, t.rows) }}) }}"),
     live_table: |table, row, m| {
         format!("/// The live table `{table}`, as this device holds it.\n    public func {m}() -> [{row}] {{ peer.liveRows(table: \"{table}\").map {{ {row}(json: J.parse($0)) }} }}")

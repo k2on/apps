@@ -259,7 +259,7 @@ pub mod jobs {
 }
 
 /// A handler in the app asks which jobs of a kind are due: the rows a
-/// claim would take now, each its JSON, and when the next falls due.
+/// claim would take now, each its JSON (the view `<kind>.due`).
 /// Falsified by `<kind>.due` answering every open row: the job due in an
 /// hour was among those due now.
 #[test]
@@ -274,9 +274,8 @@ fn a_kinds_due_jobs_are_asked_by_name() {
     d.mutate("fetch.ask".into(), r#"{"id":"now","after_ms":0}"#.into()).unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"later","after_ms":3600000}"#.into()).unwrap();
     let due: serde_json::Value = serde_json::from_str(&d.query("fetch.due".into(), "null".into()).unwrap()).unwrap();
-    assert_eq!(due["rows"].as_array().unwrap().len(), 1, "{due}");
-    assert_eq!(due["rows"][0]["id"], "now", "{due}");
-    assert!(due["next_ms"].as_i64().is_some_and(|t| t > ark_peer::now_ms() + 3_000_000));
+    assert_eq!(due.as_array().unwrap().len(), 1, "{due}");
+    assert_eq!(due[0]["id"], "now", "{due}");
 }
 
 /// A kept view that could not be kept up is made again from its input,

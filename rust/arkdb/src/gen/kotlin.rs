@@ -54,8 +54,6 @@ const LANG: Lang = Lang {
     view: |Hole { m, p, name, arg, t, rd, .. }| {
         format!("/** `{name}`, kept. */\n    fun {m}({p}): View<{t}> = View(peer.view(\"{name}\", {arg})) {{ j -> {rd} }}")
     },
-    query: |Hole { m, p, name, t, rd, .. }| format!("/** `{name}`. */\n    fun {m}({p}): {t} = {rd}"),
-    query_call: |name, arg| format!("J.parse(peer.query(\"{name}\", {arg}))"),
     typed: |r| format!("private fun typed(v: {r}View): View<{r}> = View.typed(v::rows, {{ v.take().let {{ it.update to it.rows }} }}, v::close)"),
     live_table: |table, row, m| {
         format!("/** The live table `{table}`, as this device holds it. */\n    fun {m}(): List<{row}> = peer.liveRows(\"{table}\").map {{ {row}.of(J.parse(it)) }}")

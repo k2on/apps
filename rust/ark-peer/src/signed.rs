@@ -12,7 +12,7 @@ use ark::format::Encode;
 use ark::log::EntryId;
 use ark::row::Row;
 use ark::store::Change;
-use ark_auth::rows::{CURRENT, REVOKE};
+use ark_auth::rows::REVOKE;
 use ark_auth::{Revoke, Role, SignIn};
 
 use crate::Peer;
@@ -21,9 +21,7 @@ impl Peer {
     /// Who this device is signed in as, as its replica holds its session:
     /// nobody signed out, or before the session has synced.
     pub fn current(&self) -> Option<SignIn> {
-        let d = &*self.config.log;
-        let b = d.ask(&self.log.store, &self.ctx(), CURRENT, &[]).ok()?;
-        Option::<SignIn>::from_bytes(&b).ok().flatten()
+        ark_auth::rows::current(&self.ctx(), &self.log.store)
     }
 
     /// Signed out: this session revoked through the domain, pushed while

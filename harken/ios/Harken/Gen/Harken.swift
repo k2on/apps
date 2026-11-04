@@ -990,21 +990,6 @@ public struct LookClaim: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by)]) }
 }
 
-/// The record `LookDue`.
-public struct LookDue: Equatable {
-    public var rows: [Look]
-    public var nextMs: Int64?
-
-    public init(rows: [Look], nextMs: Int64? = nil) { self.rows = rows; self.nextMs = nextMs; }
-
-    public init(json j: Any?) {
-        let o = j as! [String: Any]
-        self.init(rows: J.list(o["rows"]) { v0 in Look(json: v0) }, nextMs: J.opt(o["next_ms"]) { v0 in J.int(v0) })
-    }
-
-    public var json: String { J.obj(["\"rows\":" + J.wlist(rows) { v0 in v0.json }, "\"next_ms\":" + J.wopt(nextMs) { v0 in String(v0) }]) }
-}
-
 /// The record `LookFinish`.
 public struct LookFinish: Equatable {
     public var id: Id
@@ -2482,8 +2467,8 @@ public struct Harken {
     /// `look.claim`: its intent's id.
     @discardableResult public func claim(_ input: LookClaim) throws -> String { try peer.mutate(name: "look.claim", input: input.json) }
 
-    /// `look.due`.
-    public func due() throws -> LookDue { LookDue(json: J.parse(try peer.query(name: "look.due", input: "null"))) }
+    /// `look.due`, kept.
+    public func due() throws -> LiveView<Look> { LiveView(try peer.view(name: "look.due", input: "null")) { j in Look(json: j) } }
 
     /// `look.finish`: its intent's id.
     @discardableResult public func finish(_ input: LookFinish) throws -> String { try peer.mutate(name: "look.finish", input: input.json) }
@@ -2517,9 +2502,6 @@ public struct Harken {
 
     /// `role.revoke`: its intent's id.
     @discardableResult public func roleRevoke(_ input: Grant) throws -> String { try peer.mutate(name: "role.revoke", input: input.json) }
-
-    /// `session.current`.
-    public func current() throws -> SignIn? { J.opt(J.parse(try peer.query(name: "session.current", input: "null"))) { v0 in SignIn(json: v0) } }
 
     /// `session.mine`, kept.
     public func mine() throws -> LiveView<SignIn> { LiveView(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }

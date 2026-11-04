@@ -430,10 +430,10 @@ impl Peer {
         }
     }
 
-    /// A query's or a view's answer on its input's JSON, as JSON, over the
-    /// optimistic state: a kind's jobs due (`<kind>.due`) among them, what a
-    /// handler written in the app asks whenever the listener rings, then
-    /// answers through `mutate` — `<kind>.claim`, and once that is taken
+    /// A view's answer on its input's JSON, as JSON, over the optimistic
+    /// state: a kind's jobs due (`<kind>.due`) among them, what a handler
+    /// written in the app asks whenever the listener rings, then answers
+    /// through `mutate` — `<kind>.claim`, and once that is taken
     /// (`outcome`), `<kind>.finish`.
     pub fn query(&self, name: String, input: String) -> Result<String, Refusal> {
         let s = self.shared.lock();

@@ -10,9 +10,6 @@
 //!   the machine of the space it writes (`P`, durable unless it says
 //!   [`Volatile`](crate::db::Volatile): a live transition, §1.9) runs it as
 //!   a [`Procedure`], its input read and refined first ([`Input`]);
-//! - a **query** ([`Domain::query`]: a kind's due jobs, who is signed
-//!   in) is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`, answered over a
-//!   store;
 //! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>`,
 //!   kept up to date ([`crate::plan::View`]) or answered afresh;
 //! - a **scope** is a [`Scope`]: per table, `fn(&Ctx, &R) -> bool`, which
@@ -30,7 +27,7 @@ pub mod effect;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::db::{read, write_in, Db, Tables, Writes};
+use crate::db::{write_in, Db, Tables, Writes};
 use crate::hash::SchemaHash;
 use crate::peer::{self, Ctx, Functions, Procedure};
 use crate::plan::{answer, Maintained, Plan, View};
@@ -43,7 +40,6 @@ use crate::Refusal;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Mutator,
-    Query,
     View,
     Scope,
 }
@@ -65,7 +61,7 @@ pub struct Function {
     pub space: Space,
     /// What it takes, as a form reads it.
     pub input: Type,
-    /// What it answers, a query's or a view's element.
+    /// What it answers: a view's element.
     pub output: Option<Type>,
     /// What the machine runs: a mutator's.
     pub proc: Option<Arc<dyn Procedure>>,
@@ -210,17 +206,6 @@ impl Domain {
         self.add(f)
     }
 
-    pub fn query<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>) -> Domain {
-        let ask: Ask = Arc::new(move |store, ctx, b| {
-            let input = input_of::<I>(b)?;
-            read::<S, _>(store, |db| f(ctx, db, input)).map(|t| t.encode())
-        });
-        self.add(Function {
-            ask: Some(ask),
-            ..function::<I>(name, Kind::Query, Some(T::describe()))
-        })
-    }
-
     pub fn view<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: ViewFn<S, I, T>) -> Domain {
         let make = move |b: &[u8]| -> Result<crate::plan::Make<S, T>, Refusal> {
             let input = input_of::<I>(b)?;
@@ -277,7 +262,7 @@ impl Domain {
         c
     }
 
-    /// A query's or a view's answer over a store, as `ctx` reads it.
+    /// A view's answer over a store, as `ctx` reads it.
     pub fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
         let ask = f.ask.as_ref().ok_or_else(|| Refusal(format!("{name} answers nothing")))?;
@@ -294,13 +279,10 @@ impl Domain {
         crate::json::from_text(&self.func(name)?.input, text)
     }
 
-    /// What [`Domain::ask`] answered, as JSON: a query's value, a view's
-    /// list.
+    /// What [`Domain::ask`] answered, as JSON: a view's list.
     pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, Refusal> {
-        let f = self.func(name)?;
-        let t = f.output.clone().unwrap_or(Type::Unit);
-        let t = if f.kind == Kind::View { Type::List(Box::new(t)) } else { t };
-        crate::json::to_text(&t, bytes)
+        let t = self.func(name)?.output.clone().unwrap_or(Type::Unit);
+        crate::json::to_text(&Type::List(Box::new(t)), bytes)
     }
 
     /// One element of a view of a function, as JSON.

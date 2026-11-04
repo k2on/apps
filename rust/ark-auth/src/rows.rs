@@ -24,7 +24,6 @@ use ark::prelude::*;
 pub const ADMIN: &str = "admin";
 /// The functions by name.
 pub const REVOKE: &str = "session.revoke";
-pub const CURRENT: &str = "session.current";
 pub const MINE: &str = "session.mine";
 pub const GRANT: &str = "role.grant";
 pub const UNGRANT: &str = "role.revoke";
@@ -124,7 +123,6 @@ pub fn register<S: AuthTables>(d: Domain) -> Domain {
     d.mutator(REVOKE, revoke::<S>)
         .mutator(GRANT, grant::<S>)
         .mutator(UNGRANT, revoke_role::<S>)
-        .query(CURRENT, current::<S>)
         .view(MINE, mine::<S>)
 }
 
@@ -167,17 +165,25 @@ pub fn revoke_role<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Re
     S::role_mut(db).delete((input.user, input.role))
 }
 
-/// Who the caller is: its session while it is live, holding the roles it
-/// was opened with and those granted its person, sorted, once each.
-pub fn current<S: AuthTables>(ctx: &Ctx, db: &Db<S>, _: ()) -> Result<Option<SignIn>, Refusal> {
-    let Some(mut s) = S::sign_in(db).get(ctx.session.clone()).filter(|s| live(s, ctx.now)) else {
-        return Ok(None);
-    };
-    let granted = S::role(db).by(Role::KEY).from(s.user.clone()).all();
-    s.roles.extend(granted.into_iter().map(|r| r.role));
-    s.roles.sort();
-    s.roles.dedup();
-    Ok(Some(s))
+/// The two tables alone: what [`current`] reads any store holding them as.
+#[derive(Schema)]
+pub struct Signed {
+    pub sign_in: SignIn,
+    pub role: Role,
+}
+
+/// Who the caller is, over a store holding the two tables: its session
+/// while it is live, holding the roles it was opened with and those
+/// granted its person, sorted, once each.
+pub fn current(ctx: &Ctx, store: &ark::store::Store) -> Option<SignIn> {
+    ark::db::read::<Signed, _>(store, |db| {
+        let mut s = db.sign_in.get(ctx.session.clone()).filter(|s| live(s, ctx.now))?;
+        let granted = db.role.by(Role::KEY).from(s.user.clone()).all();
+        s.roles.extend(granted.into_iter().map(|r| r.role));
+        s.roles.sort();
+        s.roles.dedup();
+        Some(s)
+    })
 }
 
 /// The caller's live sign-ins, newest first.

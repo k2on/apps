@@ -24,8 +24,7 @@ fn run(hub: &Memory, ctx: &ark::peer::Ctx, name: &str, input: &impl Encode) -> R
 }
 
 fn current(hub: &Memory, ctx: &ark::peer::Ctx) -> Option<SignIn> {
-    let b = domain().ask(&hub.0.lock().unwrap(), ctx, "session.current", &[]).unwrap();
-    Option::<SignIn>::from_bytes(&b).unwrap()
+    ark_auth::rows::current(ctx, &hub.0.lock().unwrap())
 }
 
 /// A row as a sign-in writes it, straight into the store.

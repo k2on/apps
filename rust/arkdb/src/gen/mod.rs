@@ -4,8 +4,7 @@
 //! each read from and written as the JSON the kernel's serde reads and
 //! writes (struct fields in declaration order, sums externally tagged), and
 //! a stub per function calling it by name: a mutator's `mutate` (giving
-//! its intent's id, or nothing on the live space), a query's answer read, a
-//! view's handle typed.
+//! its intent's id, or nothing on the live space), a view's handle typed.
 //! Nothing of a function's body is ever generated. What the generated code
 //! stands on — `Id`, `View` and JSON — is the bridge's own typed half,
 //! written once (`rust/ark-ffi/kotlin/Typed.kt`, `rust/ark-ffi/swift/Typed.swift`).
@@ -119,14 +118,11 @@ pub struct Lang {
     pub read: fn(&str, &str) -> String,
     pub write: fn(&str) -> String,
     pub param: fn(&str) -> String,
-    /// The stubs, by kind (a mutator of the live space's `live`), and a
-    /// query's call (`name`, `arg`).
+    /// The stubs, by kind (a mutator of the live space's `live`).
     pub mutator: fn(&Hole) -> String,
     pub live: fn(&Hole) -> String,
     pub typed_view: fn(&Hole) -> String,
     pub view: fn(&Hole) -> String,
-    pub query: fn(&Hole) -> String,
-    pub query_call: fn(&str, &str) -> String,
     /// The adapter of a typed view of a row type; a live table's rows
     /// (`table`, `row`, the method).
     pub typed: fn(&str) -> String,
@@ -222,15 +218,7 @@ impl Lang {
                     rd: &self.rd(o, "j", &bare, 0),
                     ..h
                 }),
-                (_, Some(o)) => {
-                    let rd = self.rd(o, &(self.query_call)(name, &arg), &bare, 0);
-                    (self.query)(&Hole {
-                        t: &self.ty(o, &bare),
-                        rd: &rd,
-                        ..h
-                    })
-                }
-                (_, None) => continue,
+                _ => continue,
             };
             let _ = writeln!(out, "    {line}\n");
         }

@@ -231,7 +231,7 @@ impl Peer {
         &self.log.me
     }
 
-    /// Who a query reads as, and a view is kept for.
+    /// Who a view is read and kept for.
     pub fn ctx(&self) -> Ctx {
         let me = self.me();
         Ctx {
@@ -261,8 +261,8 @@ impl Peer {
         Ok(self.found(name)?.1)
     }
 
-    /// A query's or a view's answer over the optimistic state, as this
-    /// login reads it: its encoding.
+    /// A view's answer over the optimistic state, as this login reads it:
+    /// its encoding.
     pub fn ask(&self, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
         let b = &self.function(name)?.name;
         self.domain().ask(&self.log.store, &self.ctx(), b, input).map_err(|r| r.0)
@@ -320,7 +320,7 @@ impl Peer {
         d.row_json(table, bytes).map_err(|r| r.0)
     }
 
-    /// A query's answer over the optimistic state, as this login reads it.
+    /// A view's answer over the optimistic state, as this login reads it.
     pub fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> Result<T, String> {
         let bytes = self.ask(name, &input.to_bytes())?;
         T::from_bytes(&bytes).map_err(|r| format!("{name}: {r}"))
@@ -335,8 +335,8 @@ impl Peer {
         Ok(plan.run(&self.log.store, &ctx))
     }
 
-    /// A maintained view of a query (§1.10) over the optimistic state, as
-    /// this login reads it: its number, or the query's refusal.
+    /// A maintained view (§1.10) over the optimistic state, as this login
+    /// reads it: its number, or the view's refusal.
     pub fn view(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
         let (ctx, b) = (self.ctx(), self.function(name)?.name.clone());
         self.watch(Space::Durable, &b, input, ctx).map_err(|r| r.0)

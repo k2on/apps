@@ -564,15 +564,6 @@ data class LookClaim(val id: Id, val by: String) {
     }
 }
 
-/** The record `LookDue`. */
-data class LookDue(val rows: List<Look>, val nextMs: Long? = null) {
-    fun json(): String = "{" + "\"rows\":" + J.wlist(rows) { v0 -> v0.json() } + "," + "\"next_ms\":" + J.wopt(nextMs) { v0 -> v0.toString() } + "}"
-
-    companion object {
-        fun of(j: Any?): LookDue = (j as JSONObject).let { o -> LookDue(J.list(o.opt("rows")) { v0 -> Look.of(v0) }, J.opt(o.opt("next_ms")) { v0 -> J.int(v0) }) }
-    }
-}
-
 /** The record `LookFinish`. */
 data class LookFinish(val id: Id, val by: String, val outcome: LookOutcome) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "}"
@@ -1503,8 +1494,8 @@ class Harken(val peer: Peer) {
     /** `look.claim`: its intent's id. */
     fun claim(input: LookClaim): String = peer.mutate("look.claim", input.json())
 
-    /** `look.due`. */
-    fun due(): LookDue = LookDue.of(J.parse(peer.query("look.due", "null")))
+    /** `look.due`, kept. */
+    fun due(): View<Look> = View(peer.view("look.due", "null")) { j -> Look.of(j) }
 
     /** `look.finish`: its intent's id. */
     fun finish(input: LookFinish): String = peer.mutate("look.finish", input.json())
@@ -1538,9 +1529,6 @@ class Harken(val peer: Peer) {
 
     /** `role.revoke`: its intent's id. */
     fun roleRevoke(input: Grant): String = peer.mutate("role.revoke", input.json())
-
-    /** `session.current`. */
-    fun current(): SignIn? = J.opt(J.parse(peer.query("session.current", "null"))) { v0 -> SignIn.of(v0) }
 
     /** `session.mine`, kept. */
     fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { j -> SignIn.of(j) }
