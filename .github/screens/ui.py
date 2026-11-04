@@ -5,7 +5,9 @@
 
 Prints the centre of the first node whose text or content description is
 <text> (else the first that contains it), or with --field of the first
-text field, as `x y`; nothing, and exit 1, when there is none.
+text field, as `x y`; nothing, and exit 1, when there is none. Of several,
+one that can be pressed (it, or what holds it, is clickable) comes first:
+a page's heading and its button often say the same.
 """
 import re
 import sys
@@ -18,6 +20,15 @@ if start < 0:
 end = raw.rfind(">")
 root = ET.fromstring(raw[start : end + 1])
 nodes = list(root.iter("node"))
+parent = {c: p for p in root.iter() for c in p}
+
+
+def pressable(n):
+    while n is not None:
+        if n.get("clickable") == "true":
+            return True
+        n = parent.get(n)
+    return False
 
 
 def centre(n):
@@ -39,4 +50,5 @@ else:
     ]
 if not found:
     sys.exit(1)
+found.sort(key=lambda n: not pressable(n))
 print(centre(found[0]))

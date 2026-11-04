@@ -8,13 +8,17 @@
 #
 #   app-ios.sh <out> <Foo.app> <app> <device name> [server URL]
 #
-# Writes <out>/device.json and <out>/<theme>/<id>.png.
+# Writes <out>/device.json and <out>/<theme>/<id>.png, and each theme's test
+# results to $RESULTS (a directory of its own, so they are never taken for
+# shots; a temporary one when unset).
 set -euo pipefail
 out=$1
 bundle_app=$2
 app=$3
 device=$4
 server=${5:-}
+results=${RESULTS:-$(mktemp -d)}
+mkdir -p "$results"
 here=$(cd "$(dirname "$0")" && pwd)
 user=$(jq -r '.server.user // empty' "$app/screens/shots.json")
 shots=$(jq -c '.shots' "$app/screens/shots.json")
@@ -44,10 +48,15 @@ appearance() {
 for theme in light dark; do
   echo "$app ios $theme"
   appearance "$theme"
+  # The test's own lines, and why it failed if it did; its whole log beside its results.
+  status=0
   TEST_RUNNER_APP_BUNDLE="$bundle" TEST_RUNNER_APP_SERVER="$server" TEST_RUNNER_APP_USER="$user" \
   TEST_RUNNER_APP_SHOTS="$shots" TEST_RUNNER_APP_OUT="$out/$theme" \
     xcodebuild test-without-building -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
-      -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$out/../$app-ios-$theme.xcresult" -quiet
+      -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$results/$app-ios-$theme.xcresult" \
+      > "$results/$app-ios-$theme.log" 2>&1 || status=$?
+  grep -E "error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$app-ios-$theme.log" || true
+  [ "$status" -eq 0 ] || exit 1
 done
 
 read -r w h < <(sips -g pixelWidth -g pixelHeight "$(ls "$out"/*/*.png | head -1)" | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}')

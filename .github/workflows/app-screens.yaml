@@ -276,7 +276,18 @@ jobs:
         run: bash .github/screens/meanwhile.sh wait boot
 
       - name: Capture
+        env:
+          RESULTS: ${{ runner.temp }}/results
         run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
+
+      # The driver's results (its log, and the test's recording of the
+      # screen), when a capture failed: what to look at.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ios-driver-results
+          path: ${{ runner.temp }}/results
+          if-no-files-found: ignore
 
       - name: The servers' logs
         if: always()
@@ -314,6 +325,7 @@ jobs:
             git --work-tree="$branch" checkout FETCH_HEAD -- .
           fi
           bash .github/screens/apps-lay.sh "$RUNNER_TEMP/new" "$branch/apps"
+          shopt -s nullglob
           for a in "$branch"/apps/*/; do
             python3 -I .github/screens/manifest.py "$a" "${{ github.run_id }}" "$SHA"
           done
@@ -369,7 +381,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -q -m "app screens for #$PR at $SHA"
+          git commit -q --allow-empty -m "app screens for #$PR at $SHA"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "screens-pr-$PR"
       - name: The PR's comment
         run: |
