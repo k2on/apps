@@ -223,12 +223,12 @@ impl Peer {
     }
 
     pub fn domain(&self) -> &Domain {
-        self.config.domain.as_deref().expect("a peer called by name has a domain")
+        &self.config.log.domain
     }
 
     /// The binding a name means ([`Domain::binding`]).
     pub fn binding(&self, name: &str) -> Option<String> {
-        self.config.domain.as_deref()?.binding(name).map(String::from)
+        self.config.log.domain.binding(name).map(String::from)
     }
 
     fn func(&self, name: &str) -> Result<String, String> {
@@ -262,7 +262,7 @@ impl Peer {
     /// the log's): an ephemeral one through the relay, any other at once;
     /// the preview's refusal said.
     pub fn call(&mut self, name: &str, input: Vec<u8>) -> Result<(), String> {
-        let live = self.config.live.as_ref().and_then(|l| l.module.domain.as_deref());
+        let live = self.config.live.as_ref().map(|l| &*l.module.domain);
         let f = match live.and_then(|d| d.binding(name)) {
             Some(f) => f.to_string(),
             None => self.func(name)?,
@@ -279,8 +279,8 @@ impl Peer {
     /// The domain a name of a function or a table is in, and the name
     /// there: the log's, else the live space's.
     fn named(&self, name: &str, table: bool) -> Result<(&Domain, String), String> {
-        let live = self.config.live.as_ref().and_then(|l| l.module.domain.as_deref());
-        for d in self.config.domain.as_deref().into_iter().chain(live) {
+        let live = self.config.live.as_ref().map(|l| &*l.module.domain);
+        for d in std::iter::once(&*self.config.log.domain).chain(live) {
             match table {
                 true if d.schema.table(name).is_some() => return Ok((d, name.into())),
                 false => match d.binding(name) {

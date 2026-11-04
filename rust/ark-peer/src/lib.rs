@@ -110,20 +110,21 @@ pub use serve::{Running, Server};
 pub use settings::{Serve, SignIn};
 pub use watched::Watched;
 
-/// One space's module: its schema, the functions a peer runs by name, and
-/// the domain its views are made by.
+/// One space's module: its domain — its functions called by name in it,
+/// its views made by it — and, as the machine holds them, its schema and
+/// the functions it runs.
 #[derive(Clone)]
 pub struct Module {
     pub schema: Arc<Schema>,
     pub functions: Functions,
-    pub domain: Option<Arc<Domain>>,
+    pub domain: Arc<Domain>,
 }
 
 impl Module {
     /// The tables a fill sends last ([`ark::peer::Peer::later`]): its
     /// domain's.
     pub fn later(&self) -> &[String] {
-        self.domain.as_ref().map_or(&[], |d| &d.later)
+        &self.domain.later
     }
 
     /// A domain as a peer holds it (§1.16).
@@ -131,7 +132,7 @@ impl Module {
         Module {
             schema: d.schema.clone(),
             functions: d.functions(),
-            domain: Some(Arc::new(d.clone())),
+            domain: Arc::new(d.clone()),
         }
     }
 }
@@ -184,16 +185,14 @@ impl Live {
     }
 }
 
-/// What a peer is made of: the log's module and the live one; the domain
-/// its functions are called by name in, when there is one (`app`); and, as
-/// a server, how each connection is fed (§1.8) and the entries kept above
+/// What a peer is made of: the log's module and the live one; and, as a
+/// server, how each connection is fed (§1.8) and the entries kept above
 /// the horizon (all of them when none); and the functions of its own a
 /// device may call over its link (`calls`).
 #[derive(Clone)]
 pub struct Config {
     pub log: Module,
     pub live: Option<Live>,
-    pub domain: Option<Arc<Domain>>,
     pub feed: Arc<dyn Fn(&Who) -> Feed + Send + Sync>,
     pub keep: Option<usize>,
     /// A server's functions a device calls by name over its link, outside
@@ -212,7 +211,6 @@ impl Config {
         Config {
             log,
             live: None,
-            domain: None,
             feed: Arc::new(|_| Feed::Whole),
             keep: None,
             calls: BTreeMap::new(),
@@ -222,17 +220,14 @@ impl Config {
     /// The domain `space`'s views are made by.
     fn domain_of(&self, space: Space) -> Option<Arc<Domain>> {
         match space {
-            Space::Durable => self.log.domain.clone(),
-            Space::Volatile => self.live.as_ref()?.module.domain.clone(),
+            Space::Durable => Some(self.log.domain.clone()),
+            Space::Volatile => Some(self.live.as_ref()?.module.domain.clone()),
         }
     }
 
-    /// A domain's: its module for the log, its functions by name.
+    /// A domain's: its module for the log.
     pub fn of(domain: Arc<Domain>) -> Config {
-        Config {
-            domain: Some(domain.clone()),
-            ..Config::new(Module::of(&domain))
-        }
+        Config::new(Module::of(&domain))
     }
 }
 

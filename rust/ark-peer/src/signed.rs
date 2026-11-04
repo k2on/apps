@@ -21,7 +21,7 @@ impl Peer {
     /// Who this device is signed in as, as its replica holds its session:
     /// nobody signed out, or before the session has synced.
     pub fn current(&self) -> Option<SignIn> {
-        let d = self.config.log.domain.as_deref()?;
+        let d = &self.config.log.domain;
         let b = d.ask(&self.log.store, &self.ctx(), CURRENT, &[]).ok()?;
         Option::<SignIn>::from_bytes(&b).ok().flatten()
     }
