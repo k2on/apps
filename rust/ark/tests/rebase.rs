@@ -15,7 +15,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
-use ark::log::{EntryId, Logged, Origin, Record};
+use ark::log::{Cursor, EntryId, Logged, Origin, Record};
 use ark::peer::{Ctx, Input, Output, Peer, To};
 use ark::store::{Change, LOG};
 use demo::{create_input, pair_input, pos_of, rename_input, ADD, CREATE, REMOVE, RENAME};
@@ -240,7 +240,8 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     }));
     assert_eq!(carol.diverged, vec![2]);
     let hello = sends(&o);
-    assert!(matches!(hello[..], [Frame::Hello { cursor: -1, hash: None, .. }]));
+    // The fill begun again: its first part asked for.
+    assert!(matches!(&hello[..], [Frame::More { from, .. }] if *from == Cursor::default()));
     let mut server = s.server.clone();
     let mut up_frames = hello;
     while !up_frames.is_empty() {

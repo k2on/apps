@@ -20,16 +20,18 @@
 //! changes; the machine applies them. A replica runs code for its own
 //! pending intents only (that is the optimistic view) and applies every
 //! confirmed entry by its facts, each a row as it was and as it is: facts
-//! that do not apply to what a replica holds are a divergence, healed by a
-//! fill. An entry carries the authority's state hash after it, which a
-//! replica takes as it is.
+//! that do not apply to what a replica holds begin its fill again, from
+//! nothing.
 //!
-//! **The rebase.** Confirmed entries arriving under pending intents: undo
-//! the pending changes newest-first, apply each entry's facts, then re-run
-//! the intents still pending over the new store, once for the page, and
-//! record their new changes. When an entry is the oldest pending intent
-//! itself and its facts are what the preview did, nothing moves. A view is
-//! told every change made, rebases included, as `Output::Changes`.
+//! **The rebase.** Confirmed entries arriving under pending intents: the
+//! pending changes are undone, newest-first, only as far as they must be —
+//! an entry that is the oldest pending intent as it was previewed (a
+//! pending intent is a `Logged` at sequence 0, its preview its facts) is in
+//! the store already, and is taken off the front — and at the first that
+//! is not, each entry's facts are applied, and the intents still pending
+//! run again over the new store, once for the page, their new changes
+//! kept. A view is told every change made, rebases included, as
+//! `Output::Changes`.
 //!
 //! **The authority** judges each pushed intent once — dedupe by `(origin,
 //! local)`, a gap in a replica's pushes waits for them in order — stamps it
@@ -746,7 +748,13 @@ impl Peer {
             // A peer's intents, each a push.
             (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
-            (Frame::More { from, most: m, .. }, true, _) if !scoped => o.send(Frame::Part {
+            // A union fed by a scope is one part: asked for again, it is
+            // sent afresh.
+            (Frame::More { .. }, true, Some(who)) if scoped => {
+                self.served.remove(&who.session);
+                self.serve_scoped(who, scope.unwrap(), 0, None, o)
+            }
+            (Frame::More { from, most: m, .. }, true, _) => o.send(Frame::Part {
                 space: self.space,
                 part: part(&self.store, &self.fill_order(), self.log().head(), Some(from), most(m)),
             }),
@@ -1011,20 +1019,18 @@ impl Peer {
         self.part.unwrap_or(PART) as u64
     }
 
-    /// Facts that do not apply here: start again from nothing, asking the
-    /// authority at a cursor below every log's, which it answers with a
-    /// fill (§1.7).
+    /// Facts that do not apply here: the fill begun again, from nothing —
+    /// its first part asked for (§1.7).
     fn diverge(&mut self, seq: Seq, o: &mut Out) {
         tracing::warn!(target: "ark", seq, "diverged");
-        (self.fill, self.more) = (None, None);
         self.diverged.push(seq);
         self.undo_pending(o);
         let fresh = self.blank();
         o.tell(None, self.store.diff(&fresh));
         self.store = fresh;
         self.redo_pending(o);
-        self.asked = Some(-1);
-        o.send(self.hello(-1, None));
+        (self.fill, self.more, self.asked) = (Some(Cursor::default()), None, None);
+        self.ask_more(o);
     }
 
     /// A part of a fill. The first begins one — unless this peer stands
