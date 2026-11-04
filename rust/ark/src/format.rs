@@ -138,38 +138,16 @@ pub mod hex_bytes {
 // * Bytes that are a value
 
 /// Bytes that are a value of the format, written as that value: inside a
-/// JSON value their hex; inside a binary value, as bytes.
-pub mod raw {
-    use super::*;
-
-    pub fn serialize<S: Serializer>(b: &[u8], s: S) -> Result<S::Ok, S::Error> {
-        match s.is_human_readable() {
-            true => s.serialize_str(&hex(b)),
-            false => s.serialize_bytes(b),
-        }
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        bytes(d)
-    }
-}
+/// JSON value their hex; inside a binary value, as bytes — as fixed bytes
+/// are ([`hex_bytes`]).
+pub use hex_bytes as raw;
 
 /// [`raw`]'s bytes as a serde value.
-struct Raw<'a>(&'a [u8]);
+#[derive(Serialize)]
+struct Raw<'a>(#[serde(with = "raw")] &'a Vec<u8>);
 
-impl Serialize for Raw<'_> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        raw::serialize(self.0, s)
-    }
-}
-
-struct RawIn(Vec<u8>);
-
-impl<'de> Deserialize<'de> for RawIn {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<RawIn, D::Error> {
-        raw::deserialize(d).map(RawIn)
-    }
-}
+#[derive(Deserialize)]
+struct RawIn(#[serde(with = "raw")] Vec<u8>);
 
 /// A list of values' bytes.
 pub mod raw_list {
