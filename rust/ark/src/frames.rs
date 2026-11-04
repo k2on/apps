@@ -3,7 +3,7 @@
 //! verdicts and pages of its chain.
 //!
 //! ```text
-//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version, most }
+//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, most }
 //! Page    { space, from, logged: [Logged] }
 //! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { last } }
 //! Telemetry { events: [Event] }
@@ -63,8 +63,8 @@
 //! Every frame names its space, so two machines share a connection (§1.9):
 //! a verdict's id is `(origin, local)`'s, and each space counts its own.
 //! `device` is what a device says it is, the bytes the authority authors
-//! its `on_join` from (the driver's to read); `schema` and `version` are the
-//! domain the peer runs, its schema's hash and its version string. A frame
+//! its `on_join` from (the driver's to read); `schema` is the hash of the
+//! schema the peer runs. A frame
 //! is its bytes in the value format, serde's derived form (`crate::format`;
 //! `tests/frames.rs` holds every frame to
 //! reading back as itself).
@@ -85,7 +85,6 @@ pub enum Frame {
         hash: Option<EntryHash>,
         device: Option<Vec<u8>>,
         schema: SchemaHash,
-        version: String,
         most: u64,
     },
     Page {

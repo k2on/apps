@@ -455,9 +455,6 @@ pub struct Peer {
     pub served: BTreeMap<String, Served>,
     /// What this device says it is, in every `Hello` (§1.9).
     pub device: Option<Vec<u8>>,
-    /// The version of the domain this peer runs, in every `Hello` beside
-    /// its schema's hash: what an operator reads a fleet's spread by.
-    pub version: String,
     /// The tables an authority sends last in a fill, after every other:
     /// what a replica can be without for a while.
     pub later: Vec<String>,
@@ -517,7 +514,6 @@ impl Peer {
             asked: None,
             served: BTreeMap::new(),
             device: None,
-            version: String::new(),
             later: vec![],
             fill: None,
             more: None,
@@ -1048,7 +1044,6 @@ impl Peer {
             hash,
             device: self.device.clone(),
             schema: self.store.schema_hash(),
-            version: self.version.clone(),
             most: self.most(),
         }
     }

@@ -47,7 +47,7 @@ pub use types::*;
 /// guarded by it ([`library::is_library`]).
 pub const LIBRARY: &str = "library";
 
-/// This domain's version, which a `Hello` carries beside its schema's hash.
+/// This domain's version: what a build says it runs, beside its schema's hash.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Every function, registered by its name.

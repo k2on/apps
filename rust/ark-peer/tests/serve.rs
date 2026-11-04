@@ -314,7 +314,6 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         hash: None,
         device: Some(b"phone".to_vec()),
         schema: Default::default(),
-        version: String::new(),
         most: ark::peer::PART as u64,
     };
     hub.frame(c, hello.enc(), 1);

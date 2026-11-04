@@ -165,7 +165,6 @@ fn fanout(c: usize) -> usize {
         hash: Some(hash),
         device: None,
         schema: Default::default(),
-        version: String::new(),
         most: ark::peer::PART as u64,
     }
     .enc();
