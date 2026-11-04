@@ -1,0 +1,16 @@
+# UniFFI's binding generator, at the version the bridge is built with
+# (rust/ark-ffi's `uniffi`), for the flake's bindings: its own crate and
+# lockfile, outside the workspace, built in one `cargo build`. Built crate
+# by crate (`Cargo.nix`), `uniffi` and `uniffi_bindgen` came from builds of
+# different runs whose `uniffi_bindgen` hashed differently (its build is
+# not reproducible), and rustc would not link the two.
+[package]
+name = "uniffi-bindgen"
+version = "0.32.2"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+uniffi = { version = "=0.32.2", default-features = false, features = ["cli"] }

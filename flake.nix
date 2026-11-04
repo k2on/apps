@@ -426,10 +426,18 @@
               ${uniffiBindgen}/bin/uniffi-bindgen generate ${lib} --language ${language} --no-format \
                 --config ${config} --out-dir "${out}/${language}"
             '';
-          # UniFFI's bindgen binary (rust/ark-ffi/src/bin/uniffi-bindgen.rs),
-          # which is UniFFI's main: ark-ffi with its `bindgen-roots` feature,
-          # which runs no cargo.
-          uniffiBindgen = crate { packageId = "ark-ffi"; features = [ "default" "bindgen-roots" ]; };
+          # UniFFI's bindgen binary (nix/uniffi-bindgen), which is UniFFI's
+          # main at the bridge's version: its own crate and lockfile, built in
+          # one cargo build. Crate by crate, `uniffi` and `uniffi_bindgen`
+          # came from different runs whose `uniffi_bindgen` hashed
+          # differently, and would not link (x86_64 CI, 2026-11-04).
+          uniffiBindgen = rustPlatform.buildRustPackage {
+            pname = "uniffi-bindgen";
+            version = "0.32.2";
+            src = ./nix/uniffi-bindgen;
+            cargoLock.lockFile = ./nix/uniffi-bindgen/Cargo.lock;
+            doCheck = false;
+          };
           # An app's library for the host (`crate` its ffi crate, `so` the
           # library's name), which UniFFI reads the bindings from and the
           # app's JVM tests load; with the crate's `features`, which are the
