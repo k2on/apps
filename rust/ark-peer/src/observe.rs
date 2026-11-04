@@ -23,9 +23,9 @@ pub(crate) fn link(peer: &str, what: &str, why: Option<&str>) {
 // One `tracing` layer turns what is said — ark's events and any other
 // crate's at `info` or louder, a job's own code among them — into
 // [`Event`]s, each with the fields of the spans around it (a `job` span's
-// peer and span), and hands them to the process's one [`Sink`]: memory in
-// a test, files on a server, the outbox on a device, whose peers send
-// their own to their server ([`Peer::ship`](crate::Peer)).
+// peer and span), and hands them to the process's one sink: memory in a
+// test ([`memory`]), files on a server, the outbox on a device, whose peers
+// send their own to their server as they send their frames (`Peer::ship`).
 
 pub use ark::frames::Event;
 
@@ -40,53 +40,63 @@ use tracing_subscriber::registry::LookupSpan;
 
 /// Where a process's events go.
 pub enum Sink {
-    /// Kept, for a test to read.
-    Memory(Arc<Mutex<Vec<Event>>>),
-    /// A server's: lines of JSON in a directory, [`FILES`] files of
-    /// [`FILE_BYTES`] at most, the oldest dropped.
+    /// A server's: lines of JSON in this directory, eight files of 8 MiB
+    /// at most, the oldest dropped.
     #[cfg(not(target_arch = "wasm32"))]
-    Files(Mutex<Files>),
-    /// A device's: kept for its peer to send, [`OUTBOX`] at most.
+    Files(std::path::PathBuf),
+    /// A device's: kept for its peer to send, the newest 4096.
     Outbox,
 }
 
-pub const FILES: usize = 8;
-pub const FILE_BYTES: u64 = 8 << 20;
-pub const OUTBOX: usize = 4096;
+/// The sink a process has: a [`Sink`], or a test's memory.
+enum Kept {
+    Memory(Arc<Mutex<Vec<Event>>>),
+    #[cfg(not(target_arch = "wasm32"))]
+    Files(Mutex<Files>),
+    Outbox,
+}
 
-static SINK: OnceLock<Sink> = OnceLock::new();
+const FILES: usize = 8;
+const FILE_BYTES: u64 = 8 << 20;
+const OUTBOX: usize = 4096;
+
+static SINK: OnceLock<Kept> = OnceLock::new();
 static OUT: Mutex<VecDeque<Event>> = Mutex::new(VecDeque::new());
 
-/// `sink` made the process's, its layer the subscriber: whether it was (a
-/// process has one; the first wins).
-pub fn install(sink: Sink) -> bool {
-    if SINK.set(sink).is_err() {
-        return false;
-    }
-    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(Layer)).is_ok()
+/// `sink` made the process's, its layer the subscriber; refused when its
+/// directory cannot be made, or the process has a sink already (the first
+/// wins).
+pub fn install(sink: Sink) -> std::io::Result<()> {
+    let kept = match sink {
+        #[cfg(not(target_arch = "wasm32"))]
+        Sink::Files(dir) => Kept::Files(Mutex::new(Files::new(dir)?)),
+        Sink::Outbox => Kept::Outbox,
+    };
+    keep(kept)
+}
+
+fn keep(kept: Kept) -> std::io::Result<()> {
+    SINK.set(kept)
+        .map_err(|_| std::io::Error::other("this process keeps its events already"))?;
+    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(Layer)).map_err(std::io::Error::other)
 }
 
 /// A test's: the events of every peer in this process, kept.
 pub fn memory() -> Arc<Mutex<Vec<Event>>> {
     let kept: Arc<Mutex<Vec<Event>>> = Arc::default();
-    install(Sink::Memory(kept.clone()));
+    let _ = keep(Kept::Memory(kept.clone()));
     match SINK.get() {
-        Some(Sink::Memory(k)) => k.clone(),
+        Some(Kept::Memory(k)) => k.clone(),
         _ => kept,
     }
 }
 
 /// Events said elsewhere — a device's, sent — kept with this process's.
-pub fn collect(events: Vec<Event>) {
+pub(crate) fn collect(events: Vec<Event>) {
     let Some(sink) = SINK.get() else { return };
     for e in events {
         put(sink, e);
     }
-}
-
-/// Every event in the outbox, taken.
-pub fn take_all() -> Vec<Event> {
-    OUT.lock().unwrap_or_else(|p| p.into_inner()).drain(..).collect()
 }
 
 /// The outbox's events of `peer`, up to `n`, taken.
@@ -102,12 +112,12 @@ pub(crate) fn take(peer: &str, n: usize) -> Vec<Event> {
     taken
 }
 
-fn put(sink: &Sink, e: Event) {
+fn put(sink: &Kept, e: Event) {
     match sink {
-        Sink::Memory(k) => k.lock().unwrap_or_else(|p| p.into_inner()).push(e),
+        Kept::Memory(k) => k.lock().unwrap_or_else(|p| p.into_inner()).push(e),
         #[cfg(not(target_arch = "wasm32"))]
-        Sink::Files(f) => f.lock().unwrap_or_else(|p| p.into_inner()).write(&e),
-        Sink::Outbox => {
+        Kept::Files(f) => f.lock().unwrap_or_else(|p| p.into_inner()).write(&e),
+        Kept::Outbox => {
             let mut out = OUT.lock().unwrap_or_else(|p| p.into_inner());
             if out.len() == OUTBOX {
                 out.pop_front();
@@ -120,7 +130,7 @@ fn put(sink: &Sink, e: Event) {
 /// The JSON-lines files a server keeps its system's events in:
 /// `events-<n>.jsonl`, numbered up, the newest written.
 #[cfg(not(target_arch = "wasm32"))]
-pub struct Files {
+struct Files {
     dir: std::path::PathBuf,
     n: u64,
     file: Option<std::fs::File>,
@@ -129,8 +139,7 @@ pub struct Files {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Files {
-    pub fn new(dir: impl Into<std::path::PathBuf>) -> std::io::Result<Files> {
-        let dir = dir.into();
+    fn new(dir: std::path::PathBuf) -> std::io::Result<Files> {
         std::fs::create_dir_all(&dir)?;
         let n = numbered(&dir).last().map_or(0, |(n, _)| n + 1);
         Ok(Files {
@@ -165,7 +174,7 @@ impl Files {
 
 /// The event files of `dir`, oldest first, each its number and path.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn numbered(dir: &std::path::Path) -> Vec<(u64, std::path::PathBuf)> {
+fn numbered(dir: &std::path::Path) -> Vec<(u64, std::path::PathBuf)> {
     let mut all: Vec<(u64, std::path::PathBuf)> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()

@@ -851,17 +851,22 @@ impl Peer {
         self.told.updates.remove(&view);
     }
 
-    /// The frames for its server, taken: a driver carrying them itself.
     /// What this peer said of itself since, out of the outbox and to its
     /// server ([`Frame::Telemetry`](ark::frames::Frame)), a page at a time.
-    pub fn ship(&mut self) {
+    pub(crate) fn ship(&mut self) {
         let events = observe::take(&self.label(), 256);
         if !events.is_empty() {
             self.frames.push(ark::frames::Frame::Telemetry { events }.enc());
         }
     }
 
+    /// The frames for its server, taken — what it said of itself among
+    /// them while linked, as a link sends them — by a driver carrying them
+    /// itself.
     pub fn take_frames(&mut self) -> Vec<Vec<u8>> {
+        if self.linked {
+            self.ship();
+        }
         std::mem::take(&mut self.frames)
     }
 }

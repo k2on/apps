@@ -291,7 +291,7 @@ impl Peer {
     /// its link tuned — driven from now on as [`Peer::open`]'s is.
     pub fn of(peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
         // What this device does goes to its server (docs/plan-observe.md).
-        ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
+        let _ = ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
         let shared = Arc::new(Shared {
             peer: Driven::new(peer),
             state: Mutex::default(),

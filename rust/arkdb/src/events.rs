@@ -1,6 +1,6 @@
 //! Reading a system's events (docs/plan-observe.md): `arkdb tail`,
 //! `arkdb trace`, `arkdb peer`. A server keeps its system's events — its
-//! own and every device's — as lines of JSON (`ark_peer::observe::Files`);
+//! own and every device's — as lines of JSON (`ark_peer::observe::Sink::Files`);
 //! these read them, or a test's, or any stream of them on stdin, and print
 //! text a person and an agent read alike.
 //!

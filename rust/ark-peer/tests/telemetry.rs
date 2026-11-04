@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 
-use ark_peer::observe::{install, Sink};
+use ark_peer::observe::{install, Event, Sink};
 use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::{demo, CreatePlaylist};
 
@@ -16,7 +16,7 @@ use arkdb::demo::{demo, CreatePlaylist};
 /// frame: nothing came back marked as sent by the device's login.
 #[test]
 fn a_devices_events_reach_its_server_named_by_its_login() {
-    assert!(install(Sink::Outbox));
+    assert!(install(Sink::Outbox).is_ok());
     let config = || Config::of(Arc::new(demo()));
     let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
     let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
@@ -25,7 +25,6 @@ fn a_devices_events_reach_its_server_named_by_its_login() {
     d.linked = true;
     let f = d.function("create_playlist").unwrap().name.clone();
     d.mutate_at(&f, CreatePlaylist { name: "Road".into() }.to_bytes(), 1).unwrap();
-    d.ship();
     let frames = d.take_frames();
     assert!(
         frames
@@ -36,9 +35,16 @@ fn a_devices_events_reach_its_server_named_by_its_login() {
     for b in frames {
         let _ = hub.frame(c, b, 2);
     }
-    // The server's own peer has an empty label in the outbox as anything
-    // else; what it collected from the device is marked `from`.
-    let back = ark_peer::observe::take_all();
+    // What the server collected from the device is marked `from`, in the
+    // outbox it keeps its own in: what the device, linked to itself here,
+    // would send on.
+    let back: Vec<Event> = (d.take_frames().iter())
+        .filter_map(|b| match ark::frames::Frame::dec(b) {
+            Ok(ark::frames::Frame::Telemetry { events }) => Some(events),
+            _ => None,
+        })
+        .flatten()
+        .collect();
     let from = back
         .iter()
         .filter(|e| e.fields.iter().any(|(k, v)| k == "from" && v.contains("phone")))
