@@ -831,6 +831,12 @@
                     (global-name "com.apple.FileCoordination"))
                 '';
                 all-services = "(allow mach-lookup)";
+                # Run four: xcodebuild falls in DVTFilePathEventWatcher, its
+                # FSEvents stream never made, as the sandbox keeps
+                # fseventsd out. This and nothing else.
+                fsevents = ''
+                  (allow mach-lookup (global-name "com.apple.FSEvents"))
+                '';
                 # Only to see whether a derivation's own rules are applied
                 # at all under the strict sandbox (F).
                 hosts = ''
@@ -923,11 +929,13 @@
               e-xcframework-none = xcframeworkWith "none";
               e-xcframework-xcode-services = xcframeworkWith "xcode-services";
               e-xcframework-all-services = xcframeworkWith "all-services";
+              e-xcframework-fsevents = xcframeworkWith "fsevents";
               f-hosts-none = hostsWith "none";
               f-hosts-hosts = hostsWith "hosts";
               g-who-none = whoWith "none";
               g-who-all-services = whoWith "all-services";
               c-kernel = kernel;
+              d-app-fsevents = appWith "fsevents";
               d-app-xcode-services = appWith "xcode-services";
               d-app-all-services = appWith "all-services";
             };
