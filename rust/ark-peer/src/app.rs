@@ -248,7 +248,7 @@ impl Peer {
     /// The function a name means ([`Domain::binding`]) and the domain it
     /// is of: the log's, else the live space's.
     fn found(&self, name: &str) -> Result<(&Domain, &Function), String> {
-        let live = self.config.live.as_ref().map(|l| &*l.domain);
+        let live = self.config.live.as_deref();
         [&*self.config.log]
             .into_iter()
             .chain(live)
@@ -273,7 +273,7 @@ impl Peer {
     /// part) on `input` — a value, or its encoding — on the space the
     /// function writes, now: its id, or the refusal its preview (or, serving,
     /// its sequencing) gave it here and now. A live one the
-    /// config relays (`Live::ephemeral`) goes through the relay, under the
+    /// config relays (`Config::ephemeral`) goes through the relay, under the
     /// id it is sent with when nothing goes first.
     pub fn mutate(&mut self, name: &str, input: impl Arg) -> Result<EntryId, String> {
         self.mutate_at(name, input, now_ms())
@@ -315,7 +315,7 @@ impl Peer {
 
     /// A row of a table of either space, as JSON.
     pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
-        let live = self.config.live.as_ref().map(|l| &*l.domain);
+        let live = self.config.live.as_deref();
         let mut ds = [&*self.config.log].into_iter().chain(live);
         let d = ds.find(|d| d.schema.table(table).is_some()).ok_or_else(|| format!("no table {table}"))?;
         d.row_json(table, bytes).map_err(|r| r.0)

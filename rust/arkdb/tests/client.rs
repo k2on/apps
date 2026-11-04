@@ -14,8 +14,7 @@ use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Who};
 use ark::row::Id;
 use ark::schema::Space;
-use ark_peer::{Config, Disk, Live, Memory, Peer};
-use arkdb::demo::{arrival, live, room};
+use ark_peer::{Config, Disk, Memory, Peer};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
 use arkdb::sim::{who, Net, Op};
 
@@ -128,19 +127,11 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
 /// moves.
 #[test]
 fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
-    let r = room();
-    let mut hub = demo();
-    hub.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: std::sync::Arc::new(arrival),
-        keep: Some(8),
-        ..Live::new(Arc::new(r.clone()))
-    });
-    let config = |name: &str| Config {
-        live: Some(live(name, 100)),
-        ..demo()
+    let hub = Config {
+        live_keep: Some(8),
+        ..arkdb::demo::hub(demo())
     };
+    let config = |name: &str| arkdb::demo::device(demo(), name, 100);
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);
     n.deliver();
     let ctx = Ctx::default();

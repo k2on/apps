@@ -162,10 +162,19 @@ pub fn scrub(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Scrub) -> Result<(
 
 // * Coming and going
 
+/// A device as it said it is, its user and its id the login's it arrived
+/// or left as: a device is a session.
+fn as_login(ctx: &Ctx, device: Device) -> Device {
+    let (user, id) = (ctx.user().into(), ctx.device().into());
+    Device { user, id, ..device }
+}
+
 /// A device arriving takes nothing; one the sound stayed with gets it back,
-/// still paused.
+/// still paused. Authored by the server as the device's login, on what its
+/// `Hello` said.
 #[mutator("listening.on_join")]
-pub fn on_join(_: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), Refusal> {
+pub fn on_join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), Refusal> {
+    let device = as_login(ctx, device);
     let (user, id) = (device.user.clone(), device.id.clone());
     db.listening_device.delete(key(&user, &id))?;
     db.listening_device.insert(ListeningDevice {
@@ -189,6 +198,7 @@ pub fn on_join(_: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result
 /// another device, and the sound goes nowhere, kept for whichever plays.
 #[mutator("listening.on_leave")]
 pub fn on_leave(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), Refusal> {
+    let device = as_login(ctx, device);
     let (user, id) = (device.user.clone(), device.id.clone());
     dissolved(db, &user, &id)?;
     db.listening_device.delete(key(&user, &id))?;

@@ -16,10 +16,10 @@
 //! of the same function (`Functions::feed`) at the connection's `Hello`.
 //!
 //! **Devices** (§1.9). A connection's volatile `Hello` may say what its
-//! device is; the app turns that and the login into the input of its
-//! `on_join` (`Live::arrive`), and the server authors `on_join` when a
-//! session's first such connection says it and `on_leave` when its last
-//! closes, so a device on two connections is one device. On a restart the
+//! device is; the server authors the live domain's `on_join` on what it
+//! said, as the connection's login, when a session's first such connection
+//! says it, and `on_leave` when its last closes, so a device on two
+//! connections is one device. On a restart the
 //! volatile space is what the server wrote of it when it last closed
 //! (its rows whole, one record beside its log: `local.volatile`,
 //! and its journal, `local.live`), and `on_restore` is authored over it.
@@ -154,12 +154,15 @@ impl Peer {
         last.into_iter().for_each(|(origin, (actor, l))| j.pass(origin, &actor, l));
         j.refused.extend(refused);
         log.local = log.local.max(journal(&mut log).last_of(&origin));
-        // The live authority draws an origin at every open, as a device's
-        // live machine does: under the session's, the one the log authors
-        // from, its first `local` and the log's had one id.
+        // The live authority's origin is another at every open, as a
+        // device's live machine's is: under the log's, its first `local` and
+        // the log's had one id.
+        let opens = crate::local::Replica::read(&mut *local).opens + 1;
+        let r = crate::local::Replica { opens, ..Default::default() };
+        let _ = local.put(crate::local::REPLICA, &r.to_bytes());
         let live = config.live.as_ref().map(|l| {
-            let mut m = machine(&l.domain, auth(), &me, Some((l.origin)()), Space::Volatile);
-            m.fold = Fold::keep(l.keep);
+            let mut m = machine(l, auth(), &me, Some(crate::live_origin(origin, opens)), Space::Volatile);
+            m.fold = Fold::keep(config.live_keep);
             m
         });
         let mut p = Peer::with(config, log, live, local);
@@ -170,7 +173,7 @@ impl Peer {
         }
         if let (Some(Record::Rows(rows)), Some(live)) = (kept(&mut p.local, VOLATILE), &mut p.live) {
             live.step(Input::Open(Durable { rows, ..Durable::default() }));
-            if let Some(f) = p.config.live.as_ref().and_then(|l| l.on_restore.clone()) {
+            if let Some(f) = p.config.hook("on_restore") {
                 let _ = p.author(Space::Volatile, &f, vec![], now);
             }
         }
@@ -313,8 +316,8 @@ impl Peer {
             if *n == 0 {
                 let input = input.clone();
                 self.hub.devices.remove(&who.session);
-                if let Some(f) = self.config.live.as_ref().and_then(|l| l.on_leave.clone()) {
-                    let _ = self.author(Space::Volatile, &f, input, now);
+                if let Some(f) = self.config.hook("on_leave") {
+                    self.author_as(&who, &f, input, now);
                 }
             }
         }
@@ -322,17 +325,26 @@ impl Peer {
     }
 
     fn arrive(&mut self, c: ConnId, said: &[u8], now: i64) {
-        let (Some(live), Some(conn)) = (self.config.live.clone(), self.hub.conns.get_mut(&c)) else {
+        let Some(conn) = self.hub.conns.get_mut(&c).filter(|c| c.device.is_none()) else {
             return;
         };
-        let Some(input) = conn.device.is_none().then(|| (live.arrive)(&conn.who, said)).flatten() else {
-            return;
-        };
-        conn.device = Some(input.clone());
-        let n = &mut self.hub.devices.entry(conn.who.session.clone()).or_insert((0, input.clone())).0;
+        conn.device = Some(said.to_vec());
+        let who = conn.who.clone();
+        let n = &mut self.hub.devices.entry(who.session.clone()).or_insert((0, said.to_vec())).0;
         *n += 1;
-        if let (1, Some(f)) = (*n, live.on_join) {
-            let _ = self.author(Space::Volatile, &f, input, now);
+        if let (1, Some(f)) = (*n, self.config.hook("on_join")) {
+            self.author_as(&who, &f, said.to_vec(), now);
+        }
+    }
+
+    /// The live space's `f` on `input`, authored by the authority as `who`:
+    /// a device's arrival or leaving is its login's.
+    fn author_as(&mut self, who: &Who, f: &str, input: Vec<u8>, now: i64) {
+        let Some(live) = &mut self.live else { return };
+        let was = std::mem::replace(&mut live.me, who.clone());
+        let _ = self.author(Space::Volatile, f, input, now);
+        if let Some(live) = &mut self.live {
+            live.me = was;
         }
     }
 

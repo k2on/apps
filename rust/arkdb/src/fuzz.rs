@@ -23,7 +23,7 @@ use ark::peer::{Ctx, Who};
 use ark::prelude::Id;
 use ark::schema::Space;
 use ark::store::Store;
-use ark_peer::{Config, Live, Peer};
+use ark_peer::{Config, Peer};
 
 use crate::demo::{AddToPlaylist, CreatePlaylist, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
 pub use crate::sim::Rng;
@@ -137,7 +137,6 @@ fn ctx_of(w: &Who) -> Ctx {
 pub fn session(seed: u64) -> Result<(Net, Found), String> {
     let mut r = Rng(seed);
     let g = Gen::new();
-    let room = crate::demo::room();
     let live = r.one_in(2);
     let mut hub = Config::of(Arc::new(crate::demo::demo()));
     let scope = g.scope.clone();
@@ -145,19 +144,16 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
     hub.feed = Arc::new(move |w: &Who| w.session.starts_with("partial").then(|| scoped.clone()));
     hub.keep = r.one_in(3).then(|| 2 + r.below(4) as usize);
     if live {
-        hub.live = Some(Live {
-            on_join: Some("room.on_join".into()),
-            on_leave: Some("room.on_leave".into()),
-            arrive: Arc::new(crate::demo::arrival),
-            keep: Some(4),
-            ..Live::new(Arc::new(room.clone()))
-        });
+        hub = Config {
+            live_keep: Some(4),
+            ..crate::demo::hub(hub)
+        };
     }
     let n = 2 + r.below(3) as i64;
     let partial = r.one_in(2);
-    let config = |i: i64| Config {
-        live: live.then(|| crate::demo::live(&format!("d{i}"), 50)),
-        ..Config::of(Arc::new(crate::demo::demo()))
+    let config = |i: i64| match live {
+        true => crate::demo::device(Config::of(Arc::new(crate::demo::demo())), &format!("d{i}"), 50),
+        false => Config::of(Arc::new(crate::demo::demo())),
     };
     let logins: Vec<(Who, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
     let mut net = Net::of(hub, logins, seed);

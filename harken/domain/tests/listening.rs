@@ -18,14 +18,13 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::{Ctx, Who};
 use ark::row::Row;
 use ark::store::{Change, Store};
-use ark_peer::{Config, Live};
+use ark_peer::Config;
 use arkdb::sim::{Net, Op};
 use common::domain;
 use harken_domain::host::Listening;
@@ -102,7 +101,7 @@ impl House {
             name: device.into(),
             user: user.into(),
         };
-        self.author("authority", "authority", "on_join", &d).unwrap();
+        self.author(user, device, "on_join", &d).unwrap();
         self.devices.insert(device.into(), d);
     }
 
@@ -129,7 +128,7 @@ impl House {
     /// Its connection goes: `on_leave`. Not a decision about the music.
     fn leave(&mut self, device: &str) {
         let d = self.devices.remove(device).expect("standing");
-        self.author("authority", "authority", "on_leave", &d).unwrap();
+        self.author(&d.user.clone(), device, "on_leave", &d).unwrap();
     }
 
     /// Call as `device`: nothing, or the refusal.
@@ -1263,16 +1262,11 @@ struct Wire {
 
 impl Wire {
     fn new() -> Wire {
-        let mut hub = Config::of(module());
-        let get = |n: &str| Some(format!("listening.{n}"));
-        hub.live = Some(Live {
-            on_join: get("on_join"),
-            on_leave: get("on_leave"),
-            on_restore: get("on_restore"),
-            arrive: Arc::new(harken_domain::host::arrive),
-            keep: Some(64),
-            ..Live::new(module())
-        });
+        let hub = Config {
+            live: Some(module()),
+            live_keep: Some(64),
+            ..Config::of(module())
+        };
         Wire {
             net: Net::of(hub, vec![], 1),
             devices: BTreeMap::new(),
@@ -1289,12 +1283,6 @@ impl Wire {
             name: id.into(),
             user: "alice".into(),
         };
-        let live = Live {
-            device: Some(said.to_bytes()),
-            ephemeral: ["listening.scrub".to_string()].into(),
-            every_ms: RELAY_MS,
-            ..Live::new(module())
-        };
         let who = Who {
             actor: "alice".into(),
             session: id.into(),
@@ -1303,7 +1291,10 @@ impl Wire {
         let i = self.net.add(
             who,
             Config {
-                live: Some(live),
+                live: Some(module()),
+                device: Some(said.to_bytes()),
+                ephemeral: ["listening.scrub".to_string()].into(),
+                every_ms: RELAY_MS,
                 ..Config::of(module())
             },
         );

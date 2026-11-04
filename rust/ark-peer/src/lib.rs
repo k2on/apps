@@ -110,66 +110,34 @@ pub use serve::{Running, Server};
 pub use settings::{Serve, SignIn};
 pub use watched::Watched;
 
-/// What `on_join` and `on_leave` are authored with: from who a connection
-/// is and what its device said, the function's input, or none.
-pub type Arrive = Arc<dyn Fn(&Who, &[u8]) -> Option<Vec<u8>> + Send + Sync>;
-
-/// The live space: its domain; as a device, what its `Hello` says it is
-/// and the functions relayed as ephemeral, and how often; as a server, the
-/// functions it authors as devices come and go and the input it authors
-/// them with, and the entries kept above the horizon.
-#[derive(Clone)]
-pub struct Live {
-    pub domain: Arc<Domain>,
-    pub device: Option<Vec<u8>>,
-    pub ephemeral: BTreeSet<String>,
-    pub every_ms: i64,
-    pub on_join: Option<String>,
-    pub on_leave: Option<String>,
-    pub on_restore: Option<String>,
-    pub arrive: Arrive,
-    pub keep: Option<usize>,
-    /// Where a device's live machine draws its origin from, once per open
-    /// ([`draw_origin`]; a simulator's is seeded).
-    pub origin: Draw,
-}
-
-/// Where an origin is drawn from.
-pub type Draw = Arc<dyn Fn() -> Origin + Send + Sync>;
-
 /// How long a trace an answer joins lasts, from its beginning: what one
 /// hand caused is over by then ([`Peer::cause`]).
 pub const TRACE_MS: i64 = 30_000;
 
-impl Live {
-    pub fn new(domain: Arc<Domain>) -> Live {
-        Live {
-            domain,
-            device: None,
-            ephemeral: BTreeSet::new(),
-            every_ms: 0,
-            on_join: None,
-            on_leave: None,
-            on_restore: None,
-            arrive: Arc::new(|_, _| None),
-            keep: None,
-            origin: Arc::new(draw_origin),
-        }
-    }
-}
-
-/// What a peer is made of: the log's domain and the live one, each its
-/// schema and its functions by name (§1.16); and, as a server, how each connection is fed (§1.8) and the entries kept above
-/// the horizon (all of them when none); and the functions of its own a
-/// device may call over its link (`calls`).
+/// What a peer is made of: the log's domain and the live space's, each its
+/// schema and its functions by name (§1.16, §1.9); as a server, how each
+/// connection is fed (§1.8), the entries each space keeps above its horizon
+/// (all of them when none), and the functions of its own a device may call
+/// over its link (`calls`); as a device, what its live `Hello` says it is
+/// and the live functions it relays as ephemeral, and how often.
+///
+/// A server authors the live domain's `on_join` (a function whose name's
+/// last part is that) when a session's first connection says what its
+/// device is — on what it said, as the connection's login — its
+/// `on_leave` when the last closes, and its `on_restore` over what a
+/// restart kept.
 #[derive(Clone)]
 pub struct Config {
     pub log: Arc<Domain>,
-    pub live: Option<Live>,
+    pub live: Option<Arc<Domain>>,
     /// The scope each connection is fed by (§1.8), by who it is; none,
     /// the log whole.
     pub feed: Scoping,
     pub keep: Option<usize>,
+    pub live_keep: Option<usize>,
+    pub device: Option<Vec<u8>>,
+    pub ephemeral: BTreeSet<String>,
+    pub every_ms: i64,
     /// A server's functions a device calls by name over its link, outside
     /// both machines ([`Frame::Call`](ark::frames::Frame)): never logged,
     /// journaled, recorded or told to another connection.
@@ -189,6 +157,10 @@ impl Config {
             live: None,
             feed: Arc::new(|_| None),
             keep: None,
+            live_keep: None,
+            device: None,
+            ephemeral: BTreeSet::new(),
+            every_ms: 0,
             calls: BTreeMap::new(),
         }
     }
@@ -197,8 +169,14 @@ impl Config {
     fn domain_of(&self, space: Space) -> Option<Arc<Domain>> {
         match space {
             Space::Durable => Some(self.log.clone()),
-            Space::Volatile => Some(self.live.as_ref()?.domain.clone()),
+            Space::Volatile => self.live.clone(),
         }
+    }
+
+    /// The live domain's function whose name's last part is `last`: what a
+    /// server authors as devices come and go, and after a restart.
+    pub(crate) fn hook(&self, last: &str) -> Option<String> {
+        self.live.as_ref()?.binding(last).map(String::from)
     }
 }
 
@@ -283,21 +261,27 @@ fn machine(d: &Domain, role: Role, me: &Who, origin: Option<Origin>, space: Spac
     Instance::new(p, None)
 }
 
-/// A device's live machine as `me`, from an origin drawn for it. The live
-/// space keeps nothing across an open, so its `local`s start again at 1;
-/// under the log's origin, which the disk keeps, a reloaded page's calls
-/// were taken for ones the server had judged already, for as long as it
-/// ran.
-fn live_of(config: &Config, me: &Who) -> Option<Instance> {
-    let l = config.live.as_ref()?;
-    let mut p = machine(&l.domain, Role::Replica, me, Some((l.origin)()), Space::Volatile);
-    (p.device, p.fold) = (l.device.clone(), Some(Fold::REPLICA));
+/// A device's live machine as `me`, its origin its log's `origin` at its
+/// `opens`th open. The live space keeps nothing across an open, so its
+/// `local`s start again at 1; under one origin for every open, a reloaded
+/// page's calls were taken for ones the server had judged already, for as
+/// long as it ran.
+fn live_of(config: &Config, me: &Who, origin: Origin, opens: u64) -> Option<Instance> {
+    let live = config.live.as_ref()?;
+    let mut p = machine(live, Role::Replica, me, Some(live_origin(origin, opens)), Space::Volatile);
+    (p.device, p.fold) = (config.device.clone(), Some(Fold::REPLICA));
     Some(p)
+}
+
+/// The live machine's origin at the `opens`th open of a peer whose log's
+/// is `origin`.
+pub(crate) fn live_origin(origin: Origin, opens: u64) -> Origin {
+    Origin::named([&origin.0[..], b"live", &opens.to_be_bytes()].concat())
 }
 
 /// Sixteen bytes no other replica draws: the process's hasher keys (which
 /// the platform seeds), the clock and the process, through sha256.
-pub fn draw_origin() -> Origin {
+pub(crate) fn draw_origin() -> Origin {
     use std::hash::{BuildHasher, Hasher};
     let nanos = (now_ms() as u128) << 20 | monotonic_ms() as u128;
     let mut b = nanos.to_be_bytes().to_vec();
@@ -384,13 +368,11 @@ impl Peer {
         let (pending, kept, records) = local::Kept::read(&blob.unwrap_or_default());
         let origin = match r.origin {
             o if o != Origin::default() => o,
-            _ => {
-                let origin = draw_origin();
-                let _ = local.put(local::REPLICA, &local::Replica { origin, ..r.clone() }.to_bytes());
-                origin
-            }
+            _ => draw_origin(),
         };
-        let live = live_of(&config, &me);
+        let opens = r.opens + 1;
+        let _ = local.put(local::REPLICA, &local::Replica { origin, opens, ..r.clone() }.to_bytes());
+        let live = live_of(&config, &me, origin, opens);
         let mut log = machine(&config.log, Role::Replica, &me, Some(origin), Space::Durable);
         let mut disk = disk;
         // Rows of a schema this one does not grow from (a build older than
@@ -608,8 +590,7 @@ impl Peer {
     /// ephemeral one through the relay, and the verdict it was given here
     /// and now: a preview's refusal, or the authority's.
     pub(crate) fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
-        let ephemeral = self.config.live.as_ref().is_some_and(|l| l.ephemeral.contains(func));
-        if space == Space::Volatile && ephemeral {
+        if space == Space::Volatile && self.config.ephemeral.contains(func) {
             let cause = self.cause(space, now);
             self.relay.insert(func.into(), (input, now, cause));
             self.tick(now);
@@ -713,8 +694,7 @@ impl Peer {
 
     /// The clock: the relay goes when its interval has passed.
     pub fn tick(&mut self, now: i64) {
-        let every = self.config.live.as_ref().map_or(0, |l| l.every_ms);
-        if self.relay.is_empty() || self.relayed.is_some_and(|t| now - t < every) {
+        if self.relay.is_empty() || self.relayed.is_some_and(|t| now - t < self.config.every_ms) {
             return;
         }
         self.relayed = Some(now);
@@ -801,7 +781,8 @@ impl Peer {
             (e.actor, e.session, e.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
         }
         self.log.me = who.clone();
-        if let Some(mut p) = live_of(&self.config, &who) {
+        let opens = local::Replica::read(&mut *self.local).opens;
+        if let Some(mut p) = live_of(&self.config, &who, self.log.origin, opens) {
             // The live origin goes on counting, unless the actor is new.
             if let Some(x) = self.live.as_ref().filter(|_| !other) {
                 (p.origin, p.local) = (x.origin, x.local);

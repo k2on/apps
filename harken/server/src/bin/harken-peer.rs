@@ -839,9 +839,12 @@ impl Headless {
                 input,
             } => {
                 let name = format!("{live}.{transition}");
-                let ephemeral = self
-                    .peer
-                    .with(|p| p.config.live.as_ref().map(|l| l.ephemeral.contains(&name)));
+                let ephemeral = self.peer.with(|p| {
+                    p.config
+                        .live
+                        .as_ref()
+                        .map(|_| p.config.ephemeral.contains(&name))
+                });
                 let Some(ephemeral) = ephemeral else {
                     return Answer::refused("this peer is no device (--device)");
                 };

@@ -16,10 +16,10 @@ use ark::log::{EntryId, Origin};
 use ark::peer::Who;
 use ark::row::Id;
 use ark::store::{Change, Store};
-use ark_peer::{Config, Live};
+use ark_peer::Config;
 use serde_json::{json, Value};
 
-use crate::demo::{arrival, live, room, AddToPlaylist, CreatePlaylist, Point, Rename};
+use crate::demo::{AddToPlaylist, CreatePlaylist, Point, Rename};
 use crate::sim::{who, Net, Op};
 
 fn dir(d: &str) -> PathBuf {
@@ -108,7 +108,6 @@ pub fn fleet(seed: u64) -> Net {
 
 /// The scripted sessions whose clients are the `trace/` vectors.
 pub fn sessions() -> Vec<(&'static str, Net)> {
-    let room = room();
     let p = "peer-0-session";
     let run = |mut net: Net, ops: Vec<Op>| {
         for op in ops {
@@ -130,18 +129,11 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         session: "alice-session".into(),
         roles: vec!["listener".into()],
     };
-    let mut hub = demo();
-    hub.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: Arc::new(arrival),
-        keep: Some(4),
-        ..Live::new(Arc::new(room.clone()))
-    });
-    let device = |name: &str| Config {
-        live: Some(live(name, 100)),
-        ..demo()
+    let hub = Config {
+        live_keep: Some(4),
+        ..crate::demo::hub(demo())
     };
+    let device = |name: &str| crate::demo::device(demo(), name, 100);
     let point = |i, x| Op::Call(i, "room.point".into(), Point { x }.to_bytes());
     let steps = |n: usize| vec![Op::Step; n];
     vec![

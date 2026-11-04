@@ -21,29 +21,24 @@ use ark::peer::Role;
 use ark::schema::Space;
 use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
-use arkdb::demo::{arrival, room, Point};
+use arkdb::demo::{Arrival, Point};
 
 /// harken-server's live `keep`.
 const KEEP: usize = 256;
 
 fn hub() -> Peer {
-    let mut c = Config::of(Arc::new(domain()));
-    c.live = Some(ark_peer::Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: Arc::new(arrival),
-        keep: Some(KEEP),
-        ..ark_peer::Live::new(Arc::new(room()))
-    });
+    let c = Config {
+        live_keep: Some(KEEP),
+        ..arkdb::demo::hub(Config::of(Arc::new(domain())))
+    };
     Peer::serve(c, Box::new(Memory::default()), 0)
 }
 
 fn device(k: usize) -> Peer {
-    let mut c = Config::of(Arc::new(domain()));
-    c.live = Some(ark_peer::Live {
-        device: Some(format!("d{k}").into_bytes()),
-        ..ark_peer::Live::new(Arc::new(room()))
-    });
+    let c = Config {
+        device: Some(Arrival { name: format!("d{k}") }.to_bytes()),
+        ..arkdb::demo::hub(Config::of(Arc::new(domain())))
+    };
     let who = dev(&format!("u{k}@d{k}")).unwrap();
     let mut p = Peer::open(c, who, Box::new(Memory::default()));
     p.linked = true;

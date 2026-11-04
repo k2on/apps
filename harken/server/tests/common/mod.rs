@@ -11,7 +11,7 @@ use ark::log::EntryId;
 use ark::peer::Who;
 use ark::schema::Space;
 use ark_auth::{Account, Login};
-use ark_peer::{Live, Memory};
+use ark_peer::Memory;
 use harken_server::domain::host::{Kind, Listening};
 use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
@@ -76,23 +76,21 @@ pub struct Peer {
 
 /// A client as `who`, in memory, linked to nothing.
 pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
-    let live = device.map(|(kind, name, can_play)| Live {
-        device: Some(
-            Device {
-                can_play,
-                id: String::new(),
-                kind: kind.name().into(),
-                name: name.into(),
-                user: String::new(),
-            }
-            .to_bytes(),
-        ),
-        ephemeral: [hosted().func("listening.scrub")].into(),
-        every_ms: RELAY_MS,
-        ..Live::new(hosted().domain.clone())
+    let device = device.map(|(kind, name, can_play)| {
+        Device {
+            can_play,
+            id: String::new(),
+            kind: kind.name().into(),
+            name: name.into(),
+            user: String::new(),
+        }
+        .to_bytes()
     });
     let config = ark_peer::Config {
-        live,
+        live: device.is_some().then(|| hosted().domain.clone()),
+        device,
+        ephemeral: [hosted().func("listening.scrub")].into(),
+        every_ms: RELAY_MS,
         ..ark_peer::Config::of(hosted().domain.clone())
     };
     let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()));

@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use ark::prelude::*;
-use ark_peer::Live;
+use ark_peer::Config;
 
 // * The demo
 
@@ -159,10 +159,10 @@ pub struct Room {
     pub pointer: Pointer,
 }
 
-/// A device as `on_join` and `on_leave` are told of it.
+/// A device as its `Hello` says it, and `on_join` and `on_leave` are told
+/// of it, as its login: its session is the login's, whatever it says.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Arrival {
-    pub session: String,
     pub name: String,
 }
 
@@ -178,18 +178,18 @@ pub struct Rename {
 
 #[mutator("room.on_join")]
 pub fn on_join(ctx: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), Refusal> {
-    db.here.delete(&a.session)?;
+    db.here.delete(ctx.device())?;
     db.here.insert(Here {
-        session: a.session,
+        session: ctx.device().into(),
         name: a.name,
         since: ctx.now,
     })
 }
 
 #[mutator("room.on_leave")]
-pub fn on_leave(_: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), Refusal> {
-    db.pointer.delete(&a.session)?;
-    db.here.delete(&a.session)
+pub fn on_leave(ctx: &Ctx, db: &mut Db<Room, Volatile>, _: Arrival) -> Result<(), Refusal> {
+    db.pointer.delete(ctx.device())?;
+    db.here.delete(ctx.device())
 }
 
 /// After a restart: who was here is kept, every pointer let go.
@@ -227,27 +227,24 @@ pub fn room() -> Domain {
 }
 
 /// The room as a client of it is configured: the device it says it is,
-/// its name; `point` relayed every `every_ms`.
-pub fn live(name: &str, every_ms: i64) -> Live {
-    Live {
-        device: Some(name.as_bytes().to_vec()),
+/// `config` with the room as its live space: a device's, named `name`,
+/// relaying its pointer at most every `every_ms`.
+pub fn device(config: Config, name: &str, every_ms: i64) -> Config {
+    Config {
+        device: Some(Arrival { name: name.into() }.to_bytes()),
         ephemeral: BTreeSet::from(["room.point".to_string()]),
         every_ms,
-        ..Live::new(std::sync::Arc::new(room()))
+        ..hub(config)
     }
 }
 
-/// What a device's `Hello` says, made the input of `on_join`: its session
-/// is the login's, whatever it says; its name is what it says.
-pub fn arrival(who: &ark::peer::Who, said: &[u8]) -> Option<Vec<u8>> {
-    let name = String::from_utf8(said.to_vec()).ok()?;
-    Some(
-        Arrival {
-            session: who.session.clone(),
-            name,
-        }
-        .to_bytes(),
-    )
+/// `config` with the room as its live space: a server's, authoring its
+/// `on_join`, `on_leave` and `on_restore`.
+pub fn hub(config: Config) -> Config {
+    Config {
+        live: Some(std::sync::Arc::new(room())),
+        ..config
+    }
 }
 
 /// A domain of this crate's by its name: what a trace is replayed with.

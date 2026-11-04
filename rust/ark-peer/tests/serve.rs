@@ -15,7 +15,7 @@ use ark::frames::{Frame, Verdict};
 use ark::peer::Who;
 use ark::schema::Space;
 use ark_peer::link::{socket, wait, Dial, Event};
-use ark_peer::{dev, now_ms, Disk, Files, Handle, Live, Memory, Peer, Server};
+use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Memory, Peer, Server};
 
 mod support;
 
@@ -294,17 +294,10 @@ fn a_web_build_is_its_own_validator() {
 /// not reading what `close` wrote: the room came back empty.
 #[test]
 fn the_live_space_is_restored_and_on_restore_authored() {
-    use arkdb::demo::{arrival, room};
-    let r = room();
-    let mut config = config();
-    config.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        on_restore: Some("room.on_restore".into()),
-        arrive: Arc::new(arrival),
-        keep: Some(8),
-        ..Live::new(Arc::new(r.clone()))
-    });
+    let config = Config {
+        live_keep: Some(8),
+        ..arkdb::demo::hub(config())
+    };
     let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
     let alice = dev("alice@phone").unwrap();
     let c = hub.accept(alice.clone());
@@ -312,7 +305,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         space: Space::Volatile,
         cursor: 0,
         hash: None,
-        device: Some(b"phone".to_vec()),
+        device: Some(arkdb::demo::Arrival { name: "phone".into() }.to_bytes()),
         schema: Default::default(),
         most: ark::peer::PART as u64,
     };

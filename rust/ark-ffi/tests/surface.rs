@@ -8,21 +8,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ark_ffi::{Listener, Login, Op, Peer, Refusal, Taken};
-use ark_peer::{dev, Config, Handle, Live, Memory};
-use arkdb::demo::{arrival, demo, live, room, Playlist};
+use ark_peer::{dev, Config, Handle, Memory};
+use arkdb::demo::{demo, Playlist};
 
 fn config() -> Config {
     Config::of(Arc::new(demo()))
 }
 
 fn server() -> Handle {
-    let mut c = config();
-    c.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: Arc::new(arrival),
-        ..Live::new(Arc::new(room()))
-    });
+    let c = arkdb::demo::hub(config());
     Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), 0))
 }
 
@@ -43,10 +37,7 @@ fn login(token: &str) -> Login {
 
 /// A device on a disk of its own, saying `name` in the live space.
 fn device(dir: &tempfile::TempDir, name: &str, who: Option<Login>) -> Arc<Peer> {
-    let c = Config {
-        live: Some(live(name, 10)),
-        ..config()
-    };
+    let c = arkdb::demo::device(config(), name, 10);
     Peer::open(c, dir.path().to_str().unwrap(), who).expect("opened")
 }
 

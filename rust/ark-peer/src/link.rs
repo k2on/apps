@@ -204,7 +204,7 @@ impl Peer {
     /// the relay's next send while it holds a call, and now when what the
     /// connection said is not all taken in.
     pub fn deadline(&self) -> Option<u64> {
-        let every = self.config.live.as_ref().map_or(0, |l| l.every_ms);
+        let every = self.config.every_ms;
         let relay = (!self.relay.is_empty()).then(|| {
             let wait = self.relayed.map_or(0, |t| t + every - crate::now_ms()).max(0);
             crate::monotonic_ms() + wait as u64
