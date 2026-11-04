@@ -54,15 +54,11 @@ pub type Watch = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Box<dyn Maintained>, 
 /// An input's refinements over its encoding: every field that fails, and why.
 pub type Check = Arc<dyn Fn(&[u8]) -> Result<(), Vec<(String, String)>> + Send + Sync>;
 
-/// One function of a domain, by name.
+/// One function of a domain, by name: what it is ([`Described`], which it
+/// derefs to), and what runs it.
 #[derive(Clone)]
 pub struct Function {
-    pub name: String,
-    pub kind: Kind,
-    /// What it takes, as a form reads it.
-    pub input: Type,
-    /// What it answers, a query's or a view's element.
-    pub output: Option<Type>,
+    pub described: Described,
     /// What the machine runs: a mutator's, a live transition's.
     pub proc: Option<Arc<dyn Procedure>>,
     /// What a scope holds (§1.8).
@@ -70,9 +66,32 @@ pub struct Function {
     pub ask: Option<Ask>,
     pub watch: Option<Watch>,
     pub check: Check,
-    /// Each refined field of the input, and its refinements as a form says
-    /// them.
-    pub checks: Vec<(String, Vec<String>)>,
+}
+
+impl std::ops::Deref for Function {
+    type Target = Described;
+    fn deref(&self) -> &Described {
+        &self.described
+    }
+}
+
+/// A function taking `I` that runs nothing yet: what each kind is made from.
+fn function<I: Input>(name: &str, kind: Kind, output: Option<Type>) -> Function {
+    let (input, checks) = (I::describe(), I::checks());
+    Function {
+        described: Described {
+            name: name.into(),
+            kind,
+            input,
+            output,
+            checks,
+        },
+        proc: None,
+        scope: None,
+        ask: None,
+        watch: None,
+        check: check_of::<I>(),
+    }
 }
 
 impl std::fmt::Debug for Function {
@@ -183,16 +202,8 @@ impl Domain {
 
     fn writer<S: Tables, P: Writes, I: Input>(self, name: &str, kind: Kind, f: WriteFn<S, P, I>) -> Domain {
         self.add(Function {
-            name: name.into(),
-            kind,
-            input: I::describe(),
-            output: None,
             proc: Some(Arc::new(Mutate { f })),
-            scope: None,
-            ask: None,
-            watch: None,
-            check: check_of::<I>(),
-            checks: I::checks(),
+            ..function::<I>(name, kind, None)
         })
     }
 
@@ -212,16 +223,8 @@ impl Domain {
             read::<S, _>(store, |db| f(ctx, db, input)).map(|t| t.encode())
         });
         self.add(Function {
-            name: name.into(),
-            kind: Kind::Query,
-            input: I::describe(),
-            output: Some(T::describe()),
-            proc: None,
-            scope: None,
             ask: Some(ask),
-            watch: None,
-            check: check_of::<I>(),
-            checks: I::checks(),
+            ..function::<I>(name, Kind::Query, Some(T::describe()))
         })
     }
 
@@ -233,16 +236,9 @@ impl Domain {
         let ask: Ask = Arc::new(move |store, ctx, b| Ok(answer(&make(b)?, ctx, store)?.encode()));
         let watch: Watch = Arc::new(move |store, ctx, b| Ok(Box::new(View::new(make(b)?, ctx.clone(), store)?) as Box<dyn Maintained>));
         self.add(Function {
-            name: name.into(),
-            kind: Kind::View,
-            input: I::describe(),
-            output: Some(T::describe()),
-            proc: None,
-            scope: None,
             ask: Some(ask),
             watch: Some(watch),
-            check: check_of::<I>(),
-            checks: I::checks(),
+            ..function::<I>(name, Kind::View, Some(T::describe()))
         })
     }
 
@@ -250,16 +246,8 @@ impl Domain {
         let tables = scope.tables;
         let holds: peer::Scope = Arc::new(move |ctx, table, row| tables.get(table).map_or(Ok(false), |f| f(ctx, row)));
         self.add(Function {
-            name: name.into(),
-            kind: Kind::Scope,
-            input: Type::Unit,
-            output: None,
-            proc: None,
             scope: Some(holds),
-            ask: None,
-            watch: None,
-            check: check_of::<()>(),
-            checks: vec![],
+            ..function::<()>(name, Kind::Scope, None)
         })
     }
 
@@ -355,25 +343,19 @@ pub struct Catalog {
 pub struct Described {
     pub name: String,
     pub kind: Kind,
+    /// What it takes, as a form reads it.
     pub input: Type,
+    /// What it answers, a query's or a view's element.
     pub output: Option<Type>,
+    /// Each refined field of the input, and its refinements as a form says
+    /// them.
     pub checks: Vec<(String, Vec<String>)>,
 }
 
 impl Catalog {
     /// A domain's, as it registers its functions.
     pub fn of(d: &Domain) -> Catalog {
-        let functions = d
-            .fns
-            .values()
-            .map(|f| Described {
-                name: f.name.clone(),
-                kind: f.kind,
-                input: f.input.clone(),
-                output: f.output.clone(),
-                checks: f.checks.clone(),
-            })
-            .collect();
+        let functions = d.fns.values().map(|f| f.described.clone()).collect();
         Catalog {
             schema: (*d.schema).clone(),
             functions,
