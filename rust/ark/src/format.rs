@@ -149,7 +149,7 @@ pub mod raw_list {
     use super::*;
 
     pub fn serialize<S: Serializer>(rows: &[Vec<u8>], s: S) -> Result<S::Ok, S::Error> {
-        s.collect_seq(rows.iter().map(|r| Raw(r)))
+        s.collect_seq(rows.iter().map(Raw))
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Vec<u8>>, D::Error> {

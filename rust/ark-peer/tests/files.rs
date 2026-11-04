@@ -299,7 +299,7 @@ fn a_device_s_unsent_files_outlast_a_restart() {
     let mut alice = open();
     assert_eq!(alice.files_unsent(), vec![f.hash.clone()]);
     assert_eq!(alice.file(&f).as_deref(), Some(&b"a playlist's art"[..]));
-    assert!(alice.file_path(&f).is_some_and(|p| p.starts_with(dir.path())));
+    assert!(dir.path().join("files").join(&f.hash).is_file(), "kept in the directory");
 
     let mut hub = Peer::serve(config(false), Box::new(Memory::default()), 0);
     let a = hub.accept(alice.me().clone());
