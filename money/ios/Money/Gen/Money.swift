@@ -2318,23 +2318,23 @@ public struct Money {
     /// `transactions.splits`, kept.
     public func splits(_ input: OneTxn) throws -> LiveView<SplitLine> { LiveView(try peer.view(name: "transactions.splits", input: input.json)) { j in SplitLine(json: j) } }
 
-    private func typed(_ v: AccountLineView) -> LiveView<AccountLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: AccountLineView) -> LiveView<AccountLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: AskLineView) -> LiveView<AskLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: AskLineView) -> LiveView<AskLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: BankLineView) -> LiveView<BankLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: BankLineView) -> LiveView<BankLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: BudgetLineView) -> LiveView<BudgetLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: BudgetLineView) -> LiveView<BudgetLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: GroupLineView) -> LiveView<GroupLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: GroupLineView) -> LiveView<GroupLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: LinkedLineView) -> LiveView<LinkedLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: LinkedLineView) -> LiveView<LinkedLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: PayeeLineView) -> LiveView<PayeeLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: PayeeLineView) -> LiveView<PayeeLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: SpendingLineView) -> LiveView<SpendingLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: SpendingLineView) -> LiveView<SpendingLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: SummaryView) -> LiveView<Summary> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: SummaryView) -> LiveView<Summary> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: TxnLineView) -> LiveView<TxnLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: TxnLineView) -> LiveView<TxnLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 }

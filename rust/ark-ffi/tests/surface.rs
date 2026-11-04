@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_ffi::{Listener, Login, Op, Peer, Refusal, Taken};
+use ark_ffi::{Listener, Login, Op, Peer, Refusal};
 use ark_peer::{dev, Config, Handle, Memory};
 use arkdb::demo::{demo, Playlist};
 
@@ -107,12 +107,10 @@ fn the_bridge_does_what_the_kit_does() {
     let add = format!(r#"{{"playlist_id":"{road}","track_id":"t1"}}"#);
     alice.mutate("add_to_playlist".into(), add).unwrap();
     let taken = items.take();
-    let (Taken::Patched { ops }, [row]) = (&taken.update, &taken.rows[..]) else {
-        panic!("one insert: {taken:?}")
-    };
-    assert_eq!(ops[..], [Op::Insert { at: 0 }]);
+    let [row] = &taken.rows[..] else { panic!("one insert: {taken:?}") };
+    assert_eq!(taken.ops[..], [Op::Insert { at: 0 }]);
     assert!(row.contains(r#""track_id":"t1""#), "{row}");
-    assert_eq!(items.take().update, Taken::Unchanged);
+    assert_eq!(items.take().ops, vec![]);
     assert!(told.0.load(Ordering::Relaxed) > before, "the listener was told");
     assert_eq!(alice.query("items".into(), args.clone()).unwrap(), format!("[{row}]"));
 
@@ -279,16 +277,16 @@ fn a_view_made_again_after_a_reset_is_made_from_its_input() {
     let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
     let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"b","after_ms":0}"#.into()).unwrap();
-    assert!(matches!(every.take().update, Taken::Patched { .. }));
+    assert!(!every.take().ops.is_empty());
     jobs::REFUSE.store(true, Ordering::SeqCst);
     d.mutate("fetch.ask".into(), r#"{"id":"a","after_ms":0}"#.into()).unwrap();
     assert!(!jobs::REFUSE.load(Ordering::SeqCst), "the plan was made again, and refused");
-    let (Taken::Reset, rows) = (every.take().update, every.rows()) else {
-        panic!("reset")
-    };
-    assert_eq!(rows.len(), 2, "made again from its input: {rows:?}");
+    let (again, rows) = (every.take(), every.rows());
+    let made = [Op::Remove { at: 0 }, Op::Insert { at: 0 }, Op::Insert { at: 1 }];
+    assert_eq!(again.ops, made, "its row removed, and its rows inserted: {again:?}");
+    assert_eq!((rows.len(), again.rows), (2, rows), "made again from its input");
     d.mutate("fetch.ask".into(), r#"{"id":"c","after_ms":0}"#.into()).unwrap();
-    assert!(matches!(every.take().update, Taken::Patched { .. }), "and kept up after");
+    assert!(!every.take().ops.is_empty(), "and kept up after");
 }
 
 /// A tap in the app is the root of what it causes: what is mutated between

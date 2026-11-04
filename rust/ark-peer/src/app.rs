@@ -5,8 +5,7 @@
 //! asks by a function's name (`create_playlist`, or its whole binding,
 //! `playlists.create_playlist`) — or calls the domain's own
 //! view functions ([`Peer::answer`]) — and holds the
-//! maintained views its lists are, each one's patches handed back as an
-//! [`Update`]. The peer keeps every intent's [`Outcome`] and, per space,
+//! maintained views its lists are, each one's patches handed back. The peer keeps every intent's [`Outcome`] and, per space,
 //! the refusals its server sent until they are taken.
 //!
 //! **Nobody has to be signed in.** A device opened with no login
@@ -56,27 +55,6 @@ pub enum Outcome {
     Refused(String),
 }
 
-/// What one view did since it was last asked.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Update {
-    Unchanged,
-    Patched(Vec<Patch>),
-    /// It could not be kept up and was made again, under its number: read
-    /// its rows afresh.
-    Reset,
-}
-
-impl Update {
-    /// `patches` after what this holds already; a reset stays one.
-    pub fn patch(&mut self, patches: Vec<Patch>) {
-        match self {
-            u @ Update::Unchanged => *u = Update::Patched(patches),
-            Update::Patched(ps) => ps.extend(patches),
-            Update::Reset => {}
-        }
-    }
-}
-
 /// What became of a device's own intents, and what its views did.
 #[derive(Default)]
 pub(crate) struct Told {
@@ -84,7 +62,8 @@ pub(crate) struct Told {
     /// refusals of each space not yet taken.
     outcomes: BTreeMap<EntryId, Outcome>,
     pub refused: [Vec<(EntryId, String)>; 2],
-    pub updates: BTreeMap<usize, Update>,
+    /// What each view did since it was last asked: its patches, in order.
+    pub updates: BTreeMap<usize, Vec<Patch>>,
     /// The calls of its server's functions sent and not yet answered, the
     /// next one's id, and the answers not yet taken.
     asking: std::collections::BTreeSet<u64>,
@@ -132,14 +111,9 @@ impl Told {
     }
 
     pub fn patched(&mut self, view: usize, patches: Vec<Patch>) {
-        if patches.is_empty() {
-            return;
+        if !patches.is_empty() {
+            self.updates.entry(view).or_default().extend(patches);
         }
-        self.updates.entry(view).or_insert(Update::Unchanged).patch(patches);
-    }
-
-    pub fn reset(&mut self, view: usize) {
-        self.updates.insert(view, Update::Reset);
     }
 }
 
@@ -331,9 +305,9 @@ impl Peer {
         self.watch(Space::Durable, &b, input, ctx).map_err(|r| r.0)
     }
 
-    /// What a view did since it was last asked.
-    pub fn update(&mut self, view: usize) -> Update {
-        self.told.updates.remove(&view).unwrap_or(Update::Unchanged)
+    /// What a view did since it was last asked: its patches, in order.
+    pub fn update(&mut self, view: usize) -> Vec<Patch> {
+        self.told.updates.remove(&view).unwrap_or_default()
     }
 
     /// What became of the intent `id` on the log: none for one this run

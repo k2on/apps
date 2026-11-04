@@ -9,8 +9,8 @@
 // albums, the artists and the songs' details are maintained views — the
 // kernel's (§1.10), typed by the generated stubs (`gen.View`) — read once,
 // Home's three first; after every change each is asked what it did, and its
-// patches are spliced into the list the screens hold; only a `Reset` reads
-// one again. A page — an album, an artist, a playlist, a performance — is a
+// patches are spliced into the list the screens hold — a view made again
+// too, as its rows removed and inserted. A page — an album, an artist, a playlist, a performance — is a
 // view too, and so are a catalogue's lists (a person's works, a work's
 // performances, who is on one), each held while a screen shows it and
 // dropped when the last one leaves. Search is a
@@ -410,11 +410,6 @@ class Library(private val session: ArkSession) {
             is Update.Unchanged -> false
             is Update.Patched -> {
                 held.rows.splice(u.changes, held.of)
-                true
-            }
-            is Update.Reset -> {
-                held.rows.clear()
-                u.rows.mapTo(held.rows, held.of)
                 true
             }
         }

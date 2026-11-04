@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap};
 use crate::domain::{AddToPlaylist, RemoveFromPlaylist};
 use crate::domain::{DescribePerson, RemoveMedia, Search};
 
-use crate::peer::{key, Moved, Peer};
+use crate::peer::{key, Peer};
 use crate::places::Source;
 use crate::rows::{Album, Artist, Composer, Item, Playlist};
 
@@ -45,10 +45,10 @@ fn check(peer: &Peer, what: &str) {
 }
 
 /// Which lists the last refresh moved, and that each was patched rather than
-/// read again.
+/// read again: a list read again is every row removed and inserted.
 fn patched(peer: &Peer) -> BTreeSet<&str> {
-    for (name, m) in &peer.moved {
-        assert!(matches!(m, Moved::Patched(_)), "{name} was taken whole");
+    for (name, n) in &peer.moved {
+        assert!(*n <= 2, "{name} was taken whole: {n} patches");
     }
     peer.moved.iter().map(|(name, _)| name.as_str()).collect()
 }

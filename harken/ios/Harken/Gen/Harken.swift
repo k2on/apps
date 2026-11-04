@@ -2509,9 +2509,9 @@ public struct Harken {
     /// `session.revoke`: its intent's id.
     @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
 
-    private func typed(_ v: LibraryEntryView) -> LiveView<LibraryEntry> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: LibraryEntryView) -> LiveView<LibraryEntry> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: PlaylistView) -> LiveView<Playlist> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: PlaylistView) -> LiveView<Playlist> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
     /// The live table `listening`, as this device holds it.
     public func liveListening() -> [Listening] { peer.liveRows(table: "listening").map { Listening(json: J.parse($0)) } }

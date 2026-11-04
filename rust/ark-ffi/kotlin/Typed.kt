@@ -18,9 +18,10 @@ value class Id(val hex: String) {
 }
 
 /**
- * A view's rows read as `T`, and what it did since last taken (a [Taken] and the rows that came
- * with it): each row its JSON read by `read` over a [ViewHandle], or — a typed view — rows UniFFI
- * hands over as they are ([typed]).
+ * A view's rows read as `T`, and what it did since last taken (its [Op]s and the rows that came
+ * with them): each row its JSON read by `read` over a [ViewHandle], or — a typed view — rows UniFFI
+ * hands over as they are ([typed]). A view made again says so as its changes: its rows removed
+ * and inserted.
  */
 class View<T> private constructor(
     private val rowsOf: () -> List<T>,
@@ -29,7 +30,7 @@ class View<T> private constructor(
 ) : AutoCloseable {
     constructor(handle: ViewHandle, read: (Any?) -> T) : this(
         { handle.rows().map { read(J.parse(it)) } },
-        { handle.take().let { t -> taken(t.update, t.rows.map { read(J.parse(it)) }) } },
+        { handle.take().let { t -> taken(t.ops, t.rows.map { read(J.parse(it)) }) } },
         handle::close,
     )
 
@@ -41,23 +42,20 @@ class View<T> private constructor(
 
     companion object {
         /** A domain's typed view object (`<T>View`): its rows, and what it did with the rows that came with it. */
-        fun <T> typed(rows: () -> List<T>, take: () -> Pair<Taken, List<T>>, close: () -> Unit): View<T> =
-            View(rows, { take().let { (t, came) -> taken(t, came) } }, close)
+        fun <T> typed(rows: () -> List<T>, take: () -> Pair<List<Op>, List<T>>, close: () -> Unit): View<T> =
+            View(rows, { take().let { (ops, came) -> taken(ops, came) } }, close)
 
-        /** What a view did, `came` the rows that came with it: each insert's and update's, or all. */
-        private fun <T> taken(t: Taken, came: List<T>): Update<T> =
-            when (t) {
-                is Taken.Unchanged -> Update.Unchanged
-                is Taken.Reset -> Update.Reset(came)
-                is Taken.Patched -> came.iterator().let { r ->
-                    Update.Patched(t.ops.map { o ->
-                        when (o) {
-                            is Op.Insert -> Change.Insert(o.at.toInt(), r.next())
-                            is Op.Remove -> Change.Remove(o.at.toInt())
-                            is Op.Update -> Change.Update(o.at.toInt(), r.next())
-                        }
-                    })
-                }
+        /** What a view did, `came` the rows that came with it: each insert's and update's. */
+        private fun <T> taken(ops: List<Op>, came: List<T>): Update<T> =
+            if (ops.isEmpty()) Update.Unchanged
+            else came.iterator().let { r ->
+                Update.Patched(ops.map { o ->
+                    when (o) {
+                        is Op.Insert -> Change.Insert(o.at.toInt(), r.next())
+                        is Op.Remove -> Change.Remove(o.at.toInt())
+                        is Op.Update -> Change.Update(o.at.toInt(), r.next())
+                    }
+                })
             }
     }
 }
@@ -65,7 +63,6 @@ class View<T> private constructor(
 sealed class Update<out T> {
     data object Unchanged : Update<Nothing>()
     data class Patched<T>(val changes: List<Change<T>>) : Update<T>()
-    data class Reset<T>(val rows: List<T>) : Update<T>()
 }
 
 sealed class Change<out T> {

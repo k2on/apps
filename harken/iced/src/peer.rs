@@ -26,7 +26,7 @@ use crate::domain::{
 use ark::format::Encode;
 use ark_peer::{Patch, Watched};
 
-use crate::client::{Driven, Replica, Update};
+use crate::client::{Driven, Replica};
 use crate::places::{Place, Source};
 use crate::rows::{
     Album, Artist, Chapter, Composer, Credit, Cue, Download, EpisodeDetail, Id, Item, Listened, Person, Playlist, Recording, Show, Subscription,
@@ -49,25 +49,6 @@ const NONE: Id = [0; 16];
 /// An id as the domain's input types carry it.
 pub fn key<T>(id: Id) -> Key<T> {
     Key::new(id)
-}
-
-/// What one refresh did to one list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Moved {
-    /// This many patches, spliced.
-    Patched(usize),
-    /// Taken whole.
-    Reset,
-}
-
-impl Moved {
-    fn of(u: &Update) -> Option<Moved> {
-        match u {
-            Update::Unchanged => None,
-            Update::Patched(ps) => Some(Moved::Patched(ps.len())),
-            Update::Reset => Some(Moved::Reset),
-        }
-    }
 }
 
 /// The views the peer holds open, each with its rows
@@ -144,7 +125,7 @@ fn want<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, wanted: Option<(
 
 /// A page slot's settle, when the page has one there: its name, and what
 /// it did.
-fn settle<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, moved: bool) -> Option<(String, Update)> {
+fn settle<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, moved: bool) -> Option<(String, Vec<Patch>)> {
     slot.as_mut().map(|w| (w.name().to_string(), w.settle(client, moved)))
 }
 
@@ -181,9 +162,10 @@ pub struct Peer {
     /// while drawing rather than stored, so "line 9" means the same to the
     /// keyboard and to the eye.
     pub choices: Vec<Choice>,
-    /// What the last [`Peer::refresh`] moved, by query: the one place to
-    /// see that a change cost the lists it touched and no others.
-    pub moved: Vec<(String, Moved)>,
+    /// What the last [`Peer::refresh`] moved, by query, and by how many
+    /// patches: the one place to see that a change cost the lists it
+    /// touched and no others.
+    pub moved: Vec<(String, usize)>,
     /// Bumped whenever a list that carries covers moved: the window asks for
     /// covers when this moves, which is the *data* changing.
     pub art_gen: u64,
@@ -516,8 +498,9 @@ impl Peer {
     /// Nothing is read again here: each open view has been handed the
     /// client's changes as they happened (§1.10) and answers with the
     /// patches they made. A rebase is changes too: the inverse of what it
-    /// undid, what landed, what it re-applied. A view the client dropped,
-    /// or one opened for somebody else, is read whole again.
+    /// undid, what landed, what it re-applied. A view the client made
+    /// again, or one opened for somebody else, says its rows removed and
+    /// inserted.
     pub fn refresh(&mut self) -> bool {
         let state = self.client.lock().state();
         let moved = state != self.seen;
@@ -527,12 +510,11 @@ impl Peer {
         let mut guard = self.client.lock();
         let (c, v) = (&mut *guard, &mut self.views);
         let mut changed = Vec::new();
-        let mut note = |name: &str, u: Update| match Moved::of(&u) {
-            Some(m) => {
-                changed.push((name.to_string(), m));
-                true
+        let mut note = |name: &str, u: Vec<Patch>| {
+            if !u.is_empty() {
+                changed.push((name.to_string(), u.len()));
             }
-            None => false,
+            !u.is_empty()
         };
         let lists = note("playlists", v.playlists.settle(c, moved));
         let library = note("library", v.library.settle(c, moved));
@@ -544,16 +526,9 @@ impl Peer {
         let downloads = note("downloads", v.downloads.settle(c, moved));
         let mine = note("my_progress", v.mine.settle(c, moved));
         let u = v.details.take(c, moved);
-        match &u {
-            Update::Unchanged => {}
-            Update::Patched(patches) => patch_details(&mut v.details.rows, &mut self.details, patches),
-            Update::Reset => {
-                v.details.apply(c, &u);
-                self.details = v.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
-            }
-        }
+        patch_details(&mut v.details.rows, &mut self.details, &u);
         let details = note("track_details", u);
-        let mut slot = |u: Option<(String, Update)>| u.is_some_and(|(name, u)| note(&name, u));
+        let mut slot = |u: Option<(String, Vec<Patch>)>| u.is_some_and(|(name, u)| note(&name, u));
         let shown = slot(settle(c, &mut v.shown, moved));
         let works = slot(settle(c, &mut v.works, moved));
         let recordings = slot(settle(c, &mut v.recordings, moved));

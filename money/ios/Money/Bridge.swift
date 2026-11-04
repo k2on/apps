@@ -99,9 +99,6 @@ final class Held<E> {
         case .patched(let changes):
             rows.splice(changes)
             return true
-        case .reset(let all):
-            rows = all
-            return true
         }
     }
 }

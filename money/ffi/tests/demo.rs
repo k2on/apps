@@ -1,7 +1,7 @@
 //! The demo through the bridge: the seeded household read typed, as the
 //! apps' previews and screenshots draw it, and its bank's syncs.
 
-use ark_ffi::{Peer, Taken};
+use ark_ffi::Peer;
 use money_domain::seed;
 use money_domain::{AccountLineView, BudgetLineView, SummaryView, TxnLineView};
 use money_ffi::{money_add_months, money_demo, money_month_name, DemoBank};
@@ -48,7 +48,7 @@ fn the_demo_is_the_seeded_household() {
         "no server: kept here"
     );
     let t = inbox.take();
-    assert!(matches!(t.update, Taken::Patched { .. }), "{t:?}");
+    assert!(!t.ops.is_empty(), "{t:?}");
     assert_eq!(inbox.rows().len(), waiting + 2);
     let second = bank.sync(p.clone(), Some(TODAY.into())).unwrap();
     assert_eq!(second.note, "Chase: 2 from the bank, 1 pending one posted");

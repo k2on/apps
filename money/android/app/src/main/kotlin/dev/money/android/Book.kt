@@ -204,11 +204,6 @@ private class Held<T>(private val view: View<T>) : AutoCloseable {
                 rows.splice(u.changes)
                 true
             }
-            is Update.Reset -> {
-                rows.clear()
-                rows.addAll(u.rows)
-                true
-            }
         }
 
     override fun close() = view.close()

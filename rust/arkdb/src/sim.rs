@@ -20,7 +20,7 @@ use ark::frames::Frame;
 use ark::peer::{Ctx, Who};
 use ark::plan::splice;
 use ark::schema::Space;
-use ark_peer::{Config, ConnId, Deliver, Memory, Peer, Update};
+use ark_peer::{Config, ConnId, Deliver, Memory, Peer};
 
 /// The whole of a seeded run's randomness — the simulator's network, the
 /// fuzzer's script, harken's port — one generator: an LCG of Knuth's MMIX
@@ -178,14 +178,8 @@ impl Net {
         self.refused.extend(refused.map(|(_, why)| (i, why)));
         let mine: Vec<(i64, usize)> = self.views.range((i, 0)..=(i, usize::MAX)).map(|(k, _)| *k).collect();
         for k in mine {
-            match c.update(k.1) {
-                Update::Patched(patches) => self.views.entry(k).and_modify(|v| v.4 = splice(&patches, &v.4)),
-                Update::Reset => {
-                    let rows = c.rows(k.1).unwrap_or_default();
-                    self.views.entry(k).and_modify(|v| v.4 = rows)
-                }
-                Update::Unchanged => continue,
-            };
+            let patches = c.update(k.1);
+            self.views.entry(k).and_modify(|v| v.4 = splice(&patches, &v.4));
         }
         if self.conns.contains_key(&i) {
             self.wire.extend(frames.iter().map(|f| (true, f.clone())));

@@ -20,7 +20,8 @@
 //! the app's [`Listener`] is told whenever anything moved — a frame came, a
 //! view was patched — on whatever thread moved it; the app then takes its
 //! views and asks `status` on its own. A view that could not be kept up is
-//! read again by itself and says [`Taken::Reset`] with its rows.
+//! made again by itself, and says so as its patches: its rows removed and
+//! inserted.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -29,12 +30,12 @@ use ark::log::EntryId;
 use ark::peer::Who;
 use ark_peer::driven::{Driven, Locked};
 use ark_peer::link::Dial;
-use ark_peer::{Config, Files, Update, Watched};
+use ark_peer::{Config, Files, Patch, Watched};
 
 uniffi::setup_scaffolding!();
 
 pub mod typed;
-pub use typed::{Op, RowId, Taken, Twin, Typed};
+pub use typed::{Op, RowId, Twin, Typed};
 
 /// Why something was not done, as a sentence: what a form shows.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
@@ -99,11 +100,12 @@ impl Login {
     }
 }
 
-/// What a view did since it was last taken ([`Taken`]), and the rows that
-/// came with it, each its JSON (§1.10): a typed view's `<T>Taken`, by name.
+/// What a view did since it was last taken — its changes ([`Op`]), none
+/// when it did nothing — and the rows that came with them, each its JSON
+/// (§1.10): a typed view's `<T>Taken`, by name.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct ViewTaken {
-    pub update: Taken,
+    pub ops: Vec<Op>,
     pub rows: Vec<String>,
 }
 
@@ -161,7 +163,7 @@ pub trait Listener: Send + Sync {
 /// the peer as they are asked for), and what it did since taken.
 struct Kept {
     view: Watched<()>,
-    update: Update,
+    patches: Vec<Patch>,
 }
 
 /// What the bridge keeps beside the peer: its views, and what the app was
@@ -190,12 +192,9 @@ impl Held<'_> {
         let (peer, s) = (&mut *self.peer, &mut *self.state);
         let mut moved = false;
         for k in s.views.values_mut() {
-            match k.view.settle(peer, true) {
-                Update::Unchanged => continue,
-                Update::Patched(ps) => k.update.patch(ps),
-                Update::Reset => k.update = Update::Reset,
-            }
-            moved = true;
+            let ps = k.view.settle(peer, true);
+            moved |= !ps.is_empty();
+            k.patches.extend(ps);
         }
         let files = peer.files_arrived();
         moved |= files != s.files;
@@ -334,13 +333,7 @@ impl Peer {
         let id = self.shared.act(|s| -> Result<u64, String> {
             let view = Watched::try_open(&mut s.peer, &name, args, |_| ())?;
             let id = s.state.next;
-            s.state.views.insert(
-                id,
-                Kept {
-                    view,
-                    update: Update::Unchanged,
-                },
-            );
+            s.state.views.insert(id, Kept { view, patches: vec![] });
             s.state.next += 1;
             Ok(id)
         })?;
@@ -561,11 +554,8 @@ impl ViewHandle {
 
     /// What it did since last taken, and the rows that came with it.
     pub fn take(&self) -> ViewTaken {
-        let (update, rows) = self.take_bytes();
-        ViewTaken {
-            update,
-            rows: self.json(rows),
-        }
+        let (ops, rows) = self.take_bytes();
+        ViewTaken { ops, rows: self.json(rows) }
     }
 }
 
@@ -584,37 +574,28 @@ impl ViewHandle {
     }
 
     /// What it did since last taken, and the rows that came with it, each
-    /// its bytes ([`Taken`]).
-    pub(crate) fn take_bytes(&self) -> (Taken, Vec<Vec<u8>>) {
+    /// its bytes: each insert's and update's, in order.
+    pub(crate) fn take_bytes(&self) -> (Vec<Op>, Vec<Vec<u8>>) {
         let mut s = self.shared.lock();
         s.settle();
         let Some(k) = s.state.views.get_mut(&self.id) else {
-            return (Taken::Unchanged, vec![]);
+            return (vec![], vec![]);
         };
-        match std::mem::replace(&mut k.update, Update::Unchanged) {
-            Update::Unchanged => (Taken::Unchanged, vec![]),
-            Update::Patched(ps) => {
-                let (mut ops, mut rows) = (vec![], vec![]);
-                for p in ps {
-                    ops.push(match p {
-                        ark::plan::Patch::Insert { at, node } => {
-                            rows.push(node);
-                            Op::Insert { at: at as u64 }
-                        }
-                        ark::plan::Patch::Remove { at } => Op::Remove { at: at as u64 },
-                        ark::plan::Patch::Update { at, node } => {
-                            rows.push(node);
-                            Op::Update { at: at as u64 }
-                        }
-                    });
+        let (mut ops, mut rows) = (vec![], vec![]);
+        for p in std::mem::take(&mut k.patches) {
+            ops.push(match p {
+                Patch::Insert { at, node } => {
+                    rows.push(node);
+                    Op::Insert { at: at as u64 }
                 }
-                (Taken::Patched { ops }, rows)
-            }
-            Update::Reset => {
-                drop(s);
-                (Taken::Reset, self.rows_bytes())
-            }
+                Patch::Remove { at } => Op::Remove { at: at as u64 },
+                Patch::Update { at, node } => {
+                    rows.push(node);
+                    Op::Update { at: at as u64 }
+                }
+            });
         }
+        (ops, rows)
     }
 }
 

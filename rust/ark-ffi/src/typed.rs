@@ -9,9 +9,9 @@
 //! own type's twin ([`Twin`]), named in Kotlin and Swift as the type is. A
 //! scalar, `String`, `Option` and `Vec` are their own twins; an id is a
 //! [`RowId`] (its hex, the apps' `Id`). A view of rows of `T` is an object
-//! of `T`'s own (`<T>View`, over [`Typed`]): its rows, and what it did as a
-//! [`Taken`] whose inserted and updated rows come beside it, in order — as
-//! a view read as JSON's do ([`crate::ViewTaken`]).
+//! of `T`'s own (`<T>View`, over [`Typed`]): its rows, and what it did as
+//! its changes ([`Op`]) whose inserted and updated rows come beside them, in
+//! order — as a view read as JSON's do ([`crate::ViewTaken`]).
 //! Mutations (of either space) and queries stay called by name with JSON.
 
 use std::sync::Arc;
@@ -96,16 +96,6 @@ pub enum Op {
     Update { at: u64 },
 }
 
-/// What a view did since it was last taken: its rows taken with it are,
-/// for `Patched`, each insert's and update's in order, and for `Reset`, all
-/// of them.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Taken {
-    Unchanged,
-    Patched { ops: Vec<Op> },
-    Reset,
-}
-
 /// A view of rows of `T`, read as `T`: what a domain's `<T>View` object is.
 pub struct Typed<T> {
     handle: Arc<ViewHandle>,
@@ -121,9 +111,9 @@ impl<T: Encode> Typed<T> {
         self.handle.rows_bytes().iter().map(|b| decode(b)).collect()
     }
 
-    pub fn take(&self) -> (Taken, Vec<T>) {
-        let (taken, rows) = self.handle.take_bytes();
-        (taken, rows.iter().map(|b| decode(b)).collect())
+    pub fn take(&self) -> (Vec<Op>, Vec<T>) {
+        let (ops, rows) = self.handle.take_bytes();
+        (ops, rows.iter().map(|b| decode(b)).collect())
     }
 }
 

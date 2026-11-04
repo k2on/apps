@@ -93,7 +93,7 @@ use ark::schema::Space;
 use ark::store::Change;
 use ark::{Domain, Refusal};
 
-pub use app::{nobody, Arg, Outcome, Update};
+pub use app::{nobody, Arg, Outcome};
 pub use ark::file::FileRef;
 pub use ark::peer::{Fold, Scoping};
 pub use disk::{Disk, Files, Memory};
@@ -548,7 +548,8 @@ impl Peer {
 
     /// Every view of `space` told a settle's changes. One that cannot be
     /// kept up, or could not be made, is made again over the store as it
-    /// is, under its number: its rows are read afresh ([`Update::Reset`]).
+    /// is, under its number: its rows as they were removed, and as they are
+    /// inserted ([`watched::again`]).
     fn changed(&mut self, space: Space, cs: &[Change]) {
         if !self.views.iter().flatten().any(|w| w.space == space) {
             return;
@@ -571,14 +572,14 @@ impl Peer {
                     }
                     self.told.patched(i, patches)
                 }
-                was => {
+                _ => {
+                    let old = w.view.as_ref().map_or(0, |v| v.rows().len());
                     w.view = domain.as_ref().and_then(|d| d.watch(store, &w.ctx, &w.name, &w.input).ok());
-                    if was.is_some() || w.view.is_some() {
-                        if let (Some(f), Some(v)) = (self.reconcilers.get_mut(&i), &w.view) {
-                            f(&v.rows());
-                        }
-                        self.told.reset(i);
+                    let rows = w.view.as_ref().map(|v| v.rows()).unwrap_or_default();
+                    if let (Some(f), Some(_)) = (self.reconcilers.get_mut(&i), &w.view) {
+                        f(&rows);
                     }
+                    self.told.patched(i, watched::again(old, rows));
                 }
             }
         }
@@ -816,8 +817,8 @@ impl Peer {
 
     /// A maintained view of the domain's function `name` on `input` over
     /// `space`'s optimistic state, as `ctx` reads it (§1.16); what it does
-    /// comes as its [`Update`]s, under its number for as long as it is
-    /// held.
+    /// comes as its patches ([`Peer::update`]), under its number for as
+    /// long as it is held.
     pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
         let d = self.config.domain_of(space).ok_or_else(|| Refusal::new("no domain here"))?;
         let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;

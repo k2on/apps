@@ -1536,9 +1536,9 @@ class Harken(val peer: Peer) {
     /** `session.revoke`: its intent's id. */
     fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
 
-    private fun typed(v: LibraryEntryView): View<LibraryEntry> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: LibraryEntryView): View<LibraryEntry> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: PlaylistView): View<Playlist> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: PlaylistView): View<Playlist> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
     /** The live table `listening`, as this device holds it. */
     fun liveListening(): List<Listening> = peer.liveRows("listening").map { Listening.of(J.parse(it)) }

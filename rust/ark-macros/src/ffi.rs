@@ -178,7 +178,7 @@ fn view_object(name: &Ident) -> TokenStream {
 
         #[derive(Clone, Debug, PartialEq, ::uniffi::Record)]
         pub struct #taken {
-            pub update: ::ark_ffi::Taken,
+            pub ops: ::std::vec::Vec<::ark_ffi::Op>,
             pub rows: ::std::vec::Vec<#tw>,
         }
 
@@ -199,8 +199,8 @@ fn view_object(name: &Ident) -> TokenStream {
             }
 
             pub fn take(&self) -> #taken {
-                let (update, rows) = self.0.take();
-                #taken { update, rows: rows.into_iter().map(#twin).collect() }
+                let (ops, rows) = self.0.take();
+                #taken { ops, rows: rows.into_iter().map(#twin).collect() }
             }
         }
     }

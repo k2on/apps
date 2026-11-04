@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::prelude::*;
 use ark::schema::Space;
-use ark_peer::{Config, Memory, Peer, Update};
+use ark_peer::{Config, Memory, Patch, Peer};
 use arkdb::demo::{add_to_playlist, create_playlist, rename_playlist, AddToPlaylist, CreatePlaylist, Demo, Item, Playlist, RenamePlaylist};
 
 /// The items of the playlist of this name of the reader's: refused when
@@ -28,11 +28,11 @@ fn author(p: &mut Peer, name: &str, input: Vec<u8>) {
 }
 
 /// A view whose making read a playlist that is renamed away cannot be
-/// kept up: the peer makes it again, which refuses, and says `Reset`; the
-/// playlist named so again, it is made again under the same number and
-/// its rows are read. Falsified by `changed` dropping a view that cannot
-/// be kept up, as it did: the second `Reset` never came and the view had
-/// no rows.
+/// kept up: the peer makes it again, which refuses, and says its row
+/// removed; the playlist named so again, it is made again under the same
+/// number and says its row inserted. Falsified by `changed` dropping a view
+/// that cannot be kept up, as it did: the insert never came and the view
+/// had no rows.
 #[test]
 fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
     let domain = ark::register!(Domain::new::<Demo>("demo", "1"); create_playlist, add_to_playlist, rename_playlist, named);
@@ -56,15 +56,23 @@ fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
         .to_bytes()
     };
     author(&mut p, "demo.rename_playlist", rename("Sea"));
-    assert_eq!((p.update(v), p.rows(v)), (Update::Reset, None), "it cannot be made");
+    assert_eq!((p.update(v), p.rows(v)), (vec![Patch::Remove { at: 0 }], None), "it cannot be made");
     author(&mut p, "demo.rename_playlist", rename("Road"));
-    assert_eq!((p.update(v), p.rows(v).map(|r| r.len())), (Update::Reset, Some(1)), "made again");
+    let (again, rows) = (p.update(v), p.rows(v).unwrap_or_default());
+    assert_eq!(
+        again,
+        vec![Patch::Insert {
+            at: 0,
+            node: rows[0].clone()
+        }],
+        "made again"
+    );
 }
 
 /// A UI's view (`Watched`) keeps its rows as its own type: refused at open
 /// it is no rows, asked again when anything moved; once it answers its rows
-/// are read whole, then patched; and opened for one login it is opened
-/// again for the next, read afresh — alice's intents, pending still, are
+/// are inserted, then patched; and opened for one login it is opened
+/// again for the next, its rows removed and read afresh — alice's intents, pending still, are
 /// bob's now, authored again from his origin, so his Road is another. Falsified by settling a view
 /// whoever is signed in (the `who` test taken out of `Watched::take`): after
 /// bob signed in it said it was patched.
@@ -87,9 +95,12 @@ fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
         track_id: t.into(),
     };
     author(&mut p, "demo.add_to_playlist", add("t1").to_bytes());
-    assert_eq!(w.settle(&mut p, true), Update::Reset, "it answers now: read whole");
+    assert!(
+        matches!(&w.settle(&mut p, true)[..], [Patch::Insert { at: 0, .. }]),
+        "it answers now: its row inserted"
+    );
     author(&mut p, "demo.add_to_playlist", add("t2").to_bytes());
-    assert!(matches!(w.settle(&mut p, true), Update::Patched(_)));
+    assert!(!w.settle(&mut p, true).is_empty());
     let tracks: Vec<&str> = w.rows.iter().map(|i| i.track_id.as_str()).collect();
     assert_eq!(tracks, ["t1", "t2"]);
     p.sign_in(ark::peer::Who {
@@ -97,7 +108,8 @@ fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
         session: "b".into(),
         roles: vec![],
     });
-    assert_eq!(w.settle(&mut p, false), Update::Reset, "opened again for bob");
+    let gone = vec![Patch::Remove { at: 1 }, Patch::Remove { at: 0 }];
+    assert_eq!(w.settle(&mut p, false), gone, "opened again for bob: alice's rows removed");
     // His Road is drawn from his origin; alice's adds name hers.
     assert!(w.rows.is_empty(), "bob's Road has no tracks");
 }

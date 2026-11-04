@@ -1428,23 +1428,23 @@ class Money(val peer: Peer) {
     /** `transactions.splits`, kept. */
     fun splits(input: OneTxn): View<SplitLine> = View(peer.view("transactions.splits", input.json())) { j -> SplitLine.of(j) }
 
-    private fun typed(v: AccountLineView): View<AccountLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: AccountLineView): View<AccountLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: AskLineView): View<AskLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: AskLineView): View<AskLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: BankLineView): View<BankLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: BankLineView): View<BankLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: BudgetLineView): View<BudgetLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: BudgetLineView): View<BudgetLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: GroupLineView): View<GroupLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: GroupLineView): View<GroupLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: LinkedLineView): View<LinkedLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: LinkedLineView): View<LinkedLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: PayeeLineView): View<PayeeLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: PayeeLineView): View<PayeeLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: SpendingLineView): View<SpendingLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: SpendingLineView): View<SpendingLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: SummaryView): View<Summary> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: SummaryView): View<Summary> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 
-    private fun typed(v: TxnLineView): View<TxnLine> = View.typed(v::rows, { v.take().let { it.update to it.rows } }, v::close)
+    private fun typed(v: TxnLineView): View<TxnLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 }

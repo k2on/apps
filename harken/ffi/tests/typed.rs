@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use ark_ffi::{Login, Op, Peer, Refusal, RowId, Taken, Twin};
+use ark_ffi::{Login, Op, Peer, Refusal, RowId, Twin};
 use harken_domain::{LibraryEntryView, PlaylistView};
 use harken_ffi::harken_open;
 
@@ -39,14 +39,9 @@ fn a_views_rows_are_the_domains_own_types() {
     let lists = PlaylistView::new(p.clone(), "playlists.playlists".into(), "null".into()).unwrap();
     p.mutate("playlists.create_playlist".into(), r#"{"name":"Mix"}"#.into()).unwrap();
     let taken = lists.take();
-    assert_eq!(
-        taken.update,
-        Taken::Patched {
-            ops: vec![Op::Insert { at: 0 }]
-        }
-    );
+    assert_eq!(taken.ops, vec![Op::Insert { at: 0 }]);
     assert_eq!(taken.rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Mix"]);
-    assert_eq!(lists.take().update, Taken::Unchanged);
+    assert_eq!(lists.take().ops, vec![]);
     assert_eq!(lists.rows()[0].user_id, "u");
 
     let song = r#"{"title":"Air","artist":"Bach","album":"","duration_ms":1000,"file":"air.flac","track":1,"part":"","catalogue":"","performer":"","bpm":0,"album_art":"","artist_art":"","disc":1,"work_title":"","movement_no":0,"artist_banner":"","released":0,"folder":""}"#;
@@ -63,12 +58,7 @@ fn a_views_rows_are_the_domains_own_types() {
     assert_eq!((rows[0].title.as_str(), rows[0].playlist_pos), ("Air", Some(1)));
     assert_eq!(ark::hash::hex(&rows[0].id.0), media, "an id crosses as its sixteen bytes");
     let taken = library.take();
-    assert_eq!(
-        taken.update,
-        Taken::Patched {
-            ops: vec![Op::Update { at: 0 }]
-        }
-    );
+    assert_eq!(taken.ops, vec![Op::Update { at: 0 }]);
     assert_eq!(taken.rows[0].playlist_pos, Some(1), "the library marks what is on the playlist");
 
     let wrong = LibraryEntryView::new(p.clone(), "library.albums".into(), "null".into());

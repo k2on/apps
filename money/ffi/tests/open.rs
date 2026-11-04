@@ -2,7 +2,6 @@
 //! up and an account opened by name, seen in a typed view, and a refusal
 //! said as a value.
 
-use ark_ffi::Taken;
 use money_domain::AccountLineView;
 use money_ffi::{money_domain, money_open, money_send, Sent};
 
@@ -23,7 +22,7 @@ fn money_opens_and_is_called_by_name() {
     let o = p.outcome(id).unwrap();
     assert!(o.pending && o.refused.is_none(), "no server: pending, kept here");
     let t = accounts.take();
-    assert!(matches!(t.update, Taken::Patched { .. }), "{t:?}");
+    assert!(!t.ops.is_empty(), "{t:?}");
     assert_eq!(t.rows.len(), 1);
     assert_eq!((t.rows[0].name.as_str(), t.rows[0].balance), ("Checking", 120_000));
 
