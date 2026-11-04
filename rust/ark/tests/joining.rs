@@ -96,5 +96,5 @@ fn a_push_below_a_reopened_horizon_is_acknowledged_there() {
         journal.pass(Origin::named("bob-session"), "bob", 2);
     }
     let (back, _) = deliver_up(&mut reopened, &who("bob"), &o);
-    assert!(matches!(&verdicts(&back)[..], [Some(Verdict::Ok { seq: 2 })]), "{back:?}");
+    assert!(matches!(&verdicts(&back)[..], [Some(Verdict::At { seq: 2, .. })]), "{back:?}");
 }

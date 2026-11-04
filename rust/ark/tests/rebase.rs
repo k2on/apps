@@ -79,7 +79,7 @@ fn scenario() -> Scenario {
     let o = alice.step(Input::Connected);
     assert!(matches!(sends(&o)[..], [Frame::Hello { cursor: 3, .. }, Frame::Page { .. }]));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Ok { seq: 4 })]), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { seq: 4, .. })]), "{s:?}");
     let l4 = logged(&f[0]);
     assert!(
         matches!(&l4.facts[..], [Change::Add { row, .. }] if demo::item_of(row).2 == 3),
@@ -170,7 +170,7 @@ fn step_1_an_authority_sequences_the_transcript() {
             &who(&l.entry.actor),
             &[Output::Send(To::Back, Frame::push(ark::schema::Space::Durable, [l.entry.clone()]).enc())],
         );
-        assert!(matches!(verdicts(&acks)[..], [Some(Verdict::Ok { seq })] if seq == l.seq));
+        assert!(matches!(verdicts(&acks)[..], [Some(Verdict::At { seq, .. })] if seq == l.seq));
         assert_eq!(&logged(&f[0]), l, "entry {}: its facts, state and hash", l.seq);
     }
     assert_eq!(fresh.store, s.server.store);
@@ -311,11 +311,12 @@ fn edits_and_removes_rebase_too() {
     assert_eq!(pos_of(&alice.store, &pid(), "t4"), Some(4));
 }
 
-/// A function the authority does not run is `Held`: the intent stays pending on the device, which sends
-/// nothing back for a `Held` and pushes it again on its next connection;
-/// held again until the authority has the function, then sequenced.
-/// Falsified by `push` answering an unknown function with a `Reject`
-/// instead of `Held`: the first push came back refused.
+/// An intent naming a function the authority does not run is not judged:
+/// answered where its origin stands (`At`, its `last` below it), it stays
+/// pending on the device, which sends nothing back and pushes it again on
+/// its next connection; not judged again until the authority has the
+/// function, then sequenced. Falsified by `push` answering an unknown
+/// function with a refusal: the first push came back refused.
 #[test]
 fn held_until_the_authority_has_it() {
     let mut server = authority(demo::only(&[CREATE]));
@@ -324,18 +325,21 @@ fn held_until_the_authority_has_it() {
     deliver_up(&mut server, &who("alice"), &o);
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Held { .. })]) && f.is_empty(), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { last: 1, .. })]) && f.is_empty(), "{s:?}");
     assert!(sends(&alice.step(down(&s[0]))).is_empty(), "a held intent sends nothing");
     assert_eq!(alice.pending.len(), 2, "…and stays pending");
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
-        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Held { .. })]),
+        matches!(
+            verdicts(&s)[..],
+            [.., Some(Verdict::At { seq: 1, .. }), Some(Verdict::At { last: 1, .. })]
+        ),
         "held again: {s:?}"
     );
     server.functions.insert(ADD, demo::cas().get(ADD).unwrap().clone());
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
-        matches!(verdicts(&s)[..], [.., Some(Verdict::Ok { seq: 1 }), Some(Verdict::Ok { seq: 2 })]),
+        matches!(verdicts(&s)[..], [.., Some(Verdict::At { seq: 1, .. }), Some(Verdict::At { seq: 2, .. })]),
         "{s:?}"
     );
     assert_eq!(f.len(), 1);
@@ -421,11 +425,14 @@ fn a_sessions_pushes_are_judged_in_order() {
         }
     }
     assert!(
-        matches!(verdicts(&answers)[..], [Some(Verdict::Held { last: 0 }), Some(Verdict::Ok { seq: 1 })]),
+        matches!(
+            verdicts(&answers)[..],
+            [Some(Verdict::At { last: 0, .. }), Some(Verdict::At { seq: 1, .. })]
+        ),
         "the add waits: {answers:?}"
     );
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
-    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Ok { seq: 2 })]), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { seq: 2, .. })]), "{s:?}");
     alice.step(down(&f[0]));
     assert!(alice.pending.is_empty() && alice.store == server.store);
 }
@@ -486,7 +493,7 @@ fn a_page_rebases_once() {
 /// keeps nothing of the held one and answers what comes after it with the
 /// same `last`. The device holds the held one, so it waits, its numbers as they
 /// are; once the authority runs the function the next connection's pushes
-/// are judged in order. Falsified by a `Held` passing its `local`: the
+/// are judged in order. Falsified by one not judged passing its `local`: the
 /// playlist after it was sequenced at 2, before the track. And by
 /// `close_gap` renumbering whenever told of a gap: the held one moved.
 #[test]
@@ -497,11 +504,11 @@ fn what_comes_behind_a_held_intent_is_a_gap() {
     deliver_up(&mut server, &who("alice"), &o);
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
     let (s, _) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Held { .. })]), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { last: 1, .. })]), "{s:?}");
     let o = alice.step(mutate(CREATE, create_input("Sea"), 3));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(
-        matches!(verdicts(&s)[..], [Some(Verdict::Held { last: 1 })]) && f.is_empty(),
+        matches!(verdicts(&s)[..], [Some(Verdict::At { last: 1, .. })]) && f.is_empty(),
         "a gap: {s:?}"
     );
     assert_eq!(server.log().head().0, 1);
@@ -515,9 +522,9 @@ fn what_comes_behind_a_held_intent_is_a_gap() {
             verdicts(&s)[..],
             [
                 ..,
-                Some(Verdict::Ok { seq: 1 }),
-                Some(Verdict::Ok { seq: 2 }),
-                Some(Verdict::Ok { seq: 3 })
+                Some(Verdict::At { seq: 1, .. }),
+                Some(Verdict::At { seq: 2, .. }),
+                Some(Verdict::At { seq: 3, .. })
             ]
         ),
         "{s:?}"

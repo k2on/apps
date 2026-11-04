@@ -71,7 +71,7 @@ fn every_frame() -> Vec<Frame> {
         Frame::Verdict {
             space: Space::Durable,
             id,
-            verdict: Verdict::Ok { seq: 3 },
+            verdict: Verdict::At { seq: 3, last: 2 },
         },
         Frame::Verdict {
             space: Space::Volatile,
@@ -83,7 +83,7 @@ fn every_frame() -> Vec<Frame> {
         Frame::Verdict {
             space: Space::Durable,
             id,
-            verdict: Verdict::Held { last: 1 },
+            verdict: Verdict::At { seq: 2, last: 1 },
         },
         Frame::Page {
             space: Space::Durable,

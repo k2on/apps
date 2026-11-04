@@ -215,7 +215,7 @@ fn nothing_is_delivered_before_it_is_written() {
             [
                 Frame::Page { .. },
                 Frame::Verdict {
-                    verdict: Verdict::Ok { seq: 1 },
+                    verdict: Verdict::At { seq: 1, .. },
                     ..
                 }
             ]
@@ -255,7 +255,7 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
         out.iter().any(|(_, b)| matches!(
             Frame::dec(b),
             Ok(Frame::Verdict {
-                verdict: Verdict::Ok { seq: 1 },
+                verdict: Verdict::At { seq: 1, .. },
                 ..
             })
         )),

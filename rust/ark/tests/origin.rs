@@ -40,7 +40,7 @@ fn ids_are_the_origins_whoever_signs_in() {
         back.extend(sends(&server.step(up(&who("alice"), f))));
     }
     assert!(
-        matches!(verdicts(&back)[..], [Some(Verdict::Ok { seq: 1 }), Some(Verdict::Ok { seq: 2 })]),
+        matches!(verdicts(&back)[..], [Some(Verdict::At { seq: 1, .. }), Some(Verdict::At { seq: 2, .. })]),
         "{back:?}"
     );
     let e = &server.log().entries()[0].entry;
@@ -56,7 +56,7 @@ fn ids_are_the_origins_whoever_signs_in() {
         "the add named the playlist by its drawn id"
     );
     let again = sends(&server.step(up(&who("alice"), &pushes[1])));
-    assert!(matches!(verdicts(&again)[..], [Some(Verdict::Ok { seq: 2 })]), "{again:?}");
+    assert!(matches!(verdicts(&again)[..], [Some(Verdict::At { seq: 2, .. })]), "{again:?}");
     let mut third = pushes[1].clone();
     if let Frame::Page { logged, .. } = &mut third {
         logged[0].entry.local = 3;

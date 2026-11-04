@@ -117,7 +117,7 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
         &s[..],
         [Frame::Verdict {
             space: Space::Volatile,
-            verdict: Verdict::Ok { seq: 1 },
+            verdict: Verdict::At { seq: 1, .. },
             ..
         }]
     ));
@@ -182,10 +182,10 @@ fn a_restarted_authority_fills_and_holds_the_gap() {
     assert!(live.store.get("here", &here_key("alice-session")).is_none(), "the restart lost the wave");
     let o = live.step(waving("laptop"));
     let (s, _) = deliver_up(&mut fresh, &who("alice"), &o);
-    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Held { last: 0 })]), "{s:?}");
+    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::At { last: 0, .. })]), "{s:?}");
     let o = live.step(down(&s[0]));
     let (s, f) = deliver_up(&mut fresh, &who("alice"), &o);
-    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 1 })]), "{s:?}");
+    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::At { seq: 1, .. })]), "{s:?}");
     live.step(down(&f[0]));
     assert!(live.pending.is_empty() && live.store == fresh.store);
 }
@@ -273,7 +273,7 @@ fn volatile_verdicts_are_not_kept() {
     assert!(journal.refused.is_empty() && journal.last.len() == 1, "{journal:?}");
     for p in [&pushes[69], &pushes[5]] {
         let (s, _) = deliver_up(&mut server, &who("alice"), p);
-        assert!(matches!(&verdicts(&s)[..], [Some(Verdict::Ok { seq: 70 })]), "{s:?}");
+        assert!(matches!(&verdicts(&s)[..], [Some(Verdict::At { seq: 70, .. })]), "{s:?}");
     }
 }
 

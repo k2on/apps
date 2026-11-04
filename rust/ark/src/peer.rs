@@ -37,11 +37,13 @@
 //! runs it, and logs it with its facts. An origin is bound to the actor
 //! whose intents first came from it; another's pushed from it is refused. It runs exactly the functions its program
 //! was built with, by name (§1.16): nothing it is sent is code. **Every
-//! push is answered**: judged — `Ok` or `Refused` — or `Held { last }`,
-//! not judged, with the last `local` of its origin the authority has
-//! judged: an intent past a gap, or naming a function the authority does
-//! not run. A held intent's `local` is not passed, so one pushed after it
-//! from its origin is held too. A device whose oldest pending intent is
+//! push is answered**, by one rule: refused, or where its origin stands
+//! (`At { seq, last }`: the last `local` of it judged, and the head). Only
+//! the next of its origin, naming a function the authority runs, is judged
+//! first; one at or below `last` is in the log, and one past a gap or
+//! naming no function here is not judged — its `local` not passed, so one
+//! pushed after it is not judged either. A device's intent at or below
+//! `last` is confirmed; a device whose oldest pending intent is
 //! `last + 1` waits, and pushes it again on its next connection; one past
 //! it no longer holds the ones between — its disk lost them, or the
 //! authority's log is older than the one that judged them — and numbers its
@@ -73,7 +75,7 @@
 //! **An authority's own facts** are an intent naming no function, its input
 //! their encoding: run, they are applied as they are, judged by the store as
 //! any write is, and logged with no input — the facts are the entry, and
-//! nothing runs it again. Only an authority's own: one pushed is held.
+//! nothing runs it again. Only an authority's own: one pushed is not judged.
 //!
 //! **Partial sync is a view** (§1.8). A connection whose identity the
 //! authority's feed ([`Functions::feed`]) gives a scope is served its union: the rows its scope —
@@ -107,10 +109,9 @@
 //! `Mutate`, as the driver sees connections come and go. `resync` is a
 //! `Hello` with a hash the authority lacks, answered with a fill. It runs
 //! the log's rules: a volatile authority restarted from nothing has a
-//! chain its replicas lack, so each is filled from it, and holds their
-//! pushes past what it judged until they number them on from its `last`.
-//! It keeps in memory only, so of an origin's refusals it keeps those of
-//! its last [`WINDOW`] `local`s.
+//! chain its replicas lack, so each is filled from it, and judges none of
+//! their pushes past what it judged until they number them on from its
+//! `last`.
 //!
 //! **The horizon** is moved by the machine as its [`Fold`] says, after a
 //! step, in either role, up to the head: a replica's pending
@@ -147,11 +148,6 @@ macro_rules! said {
 
 /// How many logged entries a `Page` carries at most.
 pub const PAGE: usize = 256;
-
-/// How many of an origin's last `local`s a volatile authority keeps the
-/// refusals of, in memory: one refused below them and pushed again is
-/// answered as one judged is.
-pub const WINDOW: i64 = 64;
 
 /// What a function knows of the intent it runs for: all frozen in the
 /// entry, so every run of it, anywhere, is the same.
@@ -775,21 +771,11 @@ impl Peer {
     }
 
     /// An intent judged: its origin's `local` passed, and a refusal kept.
-    /// In the volatile space only the refusals of an origin's last
-    /// [`WINDOW`] are kept: as the window moves, those it leaves (at most a
-    /// window's) are forgotten.
     fn verdict(&mut self, origin: Origin, actor: &str, local: i64, id: EntryId, refused: Option<&String>) {
-        let space = self.space;
         let j = self.journal();
-        let was = j.last_of(&origin);
         j.pass(origin, actor, local);
         if let Some(why) = refused {
             j.refused.insert(id, why.clone());
-        }
-        if space == Space::Volatile {
-            for k in (was - WINDOW).max(0) + 1..=(local - WINDOW).min(was) {
-                j.refused.remove(&EntryId::of(origin, k));
-            }
         }
     }
 
@@ -820,14 +806,20 @@ impl Peer {
             }),
             (Frame::Part { part, .. }, false, _) => self.take(part, o),
             (Frame::Verdict { id, verdict, .. }, false, _) => match verdict {
-                // At or below where this peer stands, an intent still pending
-                // here is in the state it holds (a fill carried it).
-                Verdict::Ok { seq } if seq <= self.log().head().0 && self.settle(&id, o) => o.out.push(Output::Settled(id, Ok(()))),
+                // In the log at or below where this peer stands, an intent
+                // still pending here is in the state it holds (a fill carried
+                // it); and past where its origin stands, a gap is closed.
+                Verdict::At { seq, last } => {
+                    let taken = seq <= self.log().head().0 && self.pending.iter().any(|p| p.entry.id == id && p.entry.local <= last);
+                    if taken && self.settle(&id, o) {
+                        o.out.push(Output::Settled(id, Ok(())));
+                    }
+                    self.close_gap(last, o)
+                }
                 Verdict::Refused { why } if self.settle(&id, o) => {
                     tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
                     o.out.push(Output::Settled(id, Err(why)))
                 }
-                Verdict::Held { last } => self.close_gap(last, o),
                 _ => {}
             },
             _ => {}
@@ -968,26 +960,24 @@ impl Peer {
             return Verdict::Refused { why };
         }
         let last = j.last_of(&entry.origin);
-        // At or below the last and not refused: sequenced, at or below the
-        // head — every entry up to which this connection is sent before
-        // the verdict.
-        if entry.local <= last {
-            return Verdict::Ok { seq: head };
-        }
-        // Past a gap (behind a held one, too): where its origin stands
-        // here, for a device that lost the ones between to go on from.
-        if entry.local != last + 1 {
-            said!(warn, "gap", &entry, last = last);
-            return Verdict::Held { last };
-        }
-        if !self.functions.has(&entry.func) {
-            said!(warn, "held", &entry, last = last);
-            return Verdict::Held { last };
+        // Not the next of its origin, or naming no function here: where its
+        // origin stands. At or below the last and not refused, it is in the
+        // log at or below the head — every entry up to which this connection
+        // is sent before the verdict; past it, not judged, for a device that
+        // lost the ones between to go on from.
+        let known = self.functions.has(&entry.func);
+        if entry.local != last + 1 || !known {
+            match entry.local > last {
+                true if entry.local == last + 1 => said!(warn, "held", &entry, last = last),
+                true => said!(warn, "gap", &entry, last = last),
+                false => {}
+            }
+            return Verdict::At { seq: head, last };
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-        let run = self.attempt(&entry, o);
+        let (local, run) = (entry.local, self.attempt(&entry, o));
         self.judged(entry, run, o)
-            .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::Ok { seq })
+            .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::At { seq, last: local })
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.

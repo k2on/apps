@@ -143,7 +143,7 @@ fn the_last_of_each_origin_survives_a_restart() {
     let mut hub = restarted(hub);
     let a = hub.accept(alice.clone());
     let out = hub.frame(a, push(&alice, 3, CREATE, "A3"), 1);
-    assert!(matches!(verdicts(&out)[..], [Verdict::Ok { .. }]), "{:?}", verdicts(&out));
+    assert!(matches!(verdicts(&out)[..], [Verdict::At { last: 3, .. }]), "{:?}", verdicts(&out));
 }
 
 /// A device's replica row is what it opens as: its origin, who last signed

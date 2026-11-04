@@ -5,7 +5,7 @@
 //! ```text
 //! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, most }
 //! Page    { space, from, logged: [Logged] }
-//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { last } }
+//! Verdict { space, id, verdict: At { seq, last } | Refused { why } }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
 //! More    { space, from: { table, key }, most }
 //! Call    { id, name, input }
@@ -21,9 +21,10 @@
 //! is its intents not yet sequenced, each at sequence 0 with no facts and
 //! zero hashes ([`Logged::intent`]) — a push being a page of one; what it
 //! did with no server is pushed so too, as intents (§1.7). A `Verdict` answers
-//! one intent: sequenced at `seq`, refused, or `Held` — not judged, past
-//! one of its origin's the authority has not judged or naming a function
-//! it does not run — with the last of its origin it has.
+//! one intent: refused, or where its origin stands — the last `local` of
+//! it the authority judged, and its head: an intent at or below that last
+//! is in the log at or below the head; one past it was not judged (past a
+//! gap, or naming a function the authority does not run).
 //!
 //! A `Part` is a part of a fill (§1.7): the authority's answer to a
 //! `Hello` its log cannot page — the first, from its rows' start — and to
@@ -54,8 +55,8 @@
 //!
 //! **No code crosses the wire.** An entry names its function by name; an
 //! authority runs exactly the functions its program was built with, and
-//! an intent naming one it does not run is `Held`: it stays pending on the
-//! device, pushed again on its next connection. Nothing a client sends is ever loaded.
+//! an intent naming one it does not run is not judged: it stays pending on
+//! the device, pushed again on its next connection. Nothing a client sends is ever loaded.
 //!
 //! Every frame names its space, so two machines share a connection (§1.9):
 //! a verdict's id is `(origin, local)`'s, and each space counts its own.
@@ -152,24 +153,16 @@ pub struct Event {
     pub fields: Vec<(String, String)>,
 }
 
-/// An authority's answer to one intent: judged — sequenced at `seq`, or
-/// refused — or held: not judged here, and `last` the last `local` of its
-/// origin that is. What its journal keeps is the refusals.
+/// An authority's answer to one intent: refused, or where its origin
+/// stands — `last`, the last `local` of it judged, with the log at `seq`.
+/// One at or below `last` is in the log, at or below `seq`; one past it is
+/// not judged, and stays pending on the device, which numbers its pending
+/// on from `last` when it no longer holds the ones between (§1.7). What
+/// its journal keeps is the refusals.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
-    Ok {
-        seq: Seq,
-    },
-    Refused {
-        why: String,
-    },
-    /// Not judged: past a `local` of its origin the authority has not
-    /// judged, or naming a function it does not run. The device keeps it
-    /// pending; one that no longer holds the intents between numbers its
-    /// pending on from `last` (§1.7).
-    Held {
-        last: i64,
-    },
+    At { seq: Seq, last: i64 },
+    Refused { why: String },
 }
 
 /// A server's answer to one `Call`: what its function gave back, or why

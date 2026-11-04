@@ -73,7 +73,7 @@ pub enum Op {
     /// A device's disk loses its pending intents but keeps the last
     /// `local` it drew, as a phone's did whose intents before its 18th
     /// were nowhere: what was lost is gone, and the next one is pushed
-    /// past a gap, which the authority answers (`Verdict::Held`) and the
+    /// past a gap, which the authority answers (`Verdict::At`) and the
     /// device numbers on from.
     LosePending(i64),
     /// The clock moves on this many milliseconds.

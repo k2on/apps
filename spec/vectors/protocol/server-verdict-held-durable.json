@@ -1,5 +1,0 @@
-{
-  "bytes": "020010aa238dc8c0dea3c9309bb0c381b945680202",
-  "frame": {"Verdict":{"id":"aa238dc8c0dea3c9309bb0c381b94568","space":"durable","verdict":{"Held":{"last":1}}}},
-  "name": "server-verdict-held-durable"
-}

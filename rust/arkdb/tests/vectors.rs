@@ -73,26 +73,16 @@ fn protocol() {
         }
     }
     let id = EntryId::of("s", 1);
-    for (n, f) in [
-        (
-            "server-verdict-held-durable",
-            Frame::Verdict {
-                space: Space::Durable,
-                id,
-                verdict: Verdict::Held { last: 1 },
+    for (n, f) in [(
+        "server-verdict-refused-durable",
+        Frame::Verdict {
+            space: Space::Durable,
+            id,
+            verdict: Verdict::Refused {
+                why: "a playlist needs a name".into(),
             },
-        ),
-        (
-            "server-verdict-refused-durable",
-            Frame::Verdict {
-                space: Space::Durable,
-                id,
-                verdict: Verdict::Refused {
-                    why: "a playlist needs a name".into(),
-                },
-            },
-        ),
-    ] {
+        },
+    )] {
         if seen.insert(n.into()) {
             frames.push((n.into(), f));
         }
@@ -109,7 +99,7 @@ fn protocol() {
     for name in [
         "client-hello-volatile",
         "client-page-durable",
-        "server-verdict-ok-volatile",
+        "server-verdict-at-volatile",
         "server-page-volatile",
         "server-part-durable",
     ] {
@@ -117,14 +107,14 @@ fn protocol() {
     }
     let (_, ack) = on_disk("protocol")
         .into_iter()
-        .find(|(n, _)| n == "server-verdict-ok-durable.json")
+        .find(|(n, _)| n == "server-verdict-at-durable.json")
         .unwrap();
-    // The verdict's sequence, the frame's last byte, one more.
+    // The verdict's last, the frame's last byte, two more.
     let at = ack.find("\",\n  \"frame\"").unwrap();
     let last = u8::from_str_radix(&ack[at - 2..at], 16).unwrap();
     let wrong = format!("{}{:02x}{}", &ack[..at - 2], last.wrapping_add(2), &ack[at..]).replacen("{\n", "{\n  \"expect\": \"fail\",\n", 1);
     assert_ne!(wrong, ack, "the falsified verdict is the verdict");
-    vector("protocol/falsify", "server-verdict-ok-durable.json", &wrong).unwrap();
+    vector("protocol/falsify", "server-verdict-at-durable.json", &wrong).unwrap();
     for (n, text) in on_disk("protocol/falsify") {
         assert!(run_protocol(&text).is_err(), "{n} passed");
     }

@@ -1,5 +1,0 @@
-{
-  "bytes": "02011008f235f0f057c8dbe191ee8d22736ea2000c",
-  "frame": {"Verdict":{"id":"08f235f0f057c8dbe191ee8d22736ea2","space":"volatile","verdict":{"Ok":{"seq":6}}}},
-  "name": "server-verdict-ok-volatile"
-}
