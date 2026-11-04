@@ -107,7 +107,7 @@ fn verdict_of(peer: &str, sp: Space, dir: &str, conn: Option<ConnId>, e: &EntryI
     let e = id(e);
     match v {
         Verdict::Ok { seq } => debug!(target: "ark", peer, space = space(sp), dir, conn, entry = %e, seq, "ok"),
-        Verdict::Held { func } => info!(target: "ark", peer, space = space(sp), dir, conn, entry = %e, func = %func, "held"),
+        Verdict::Held { func } => warn!(target: "ark", peer, space = space(sp), dir, conn, entry = %e, func = %func, "held"),
         Verdict::Refused { why } => warn!(target: "ark", peer, space = space(sp), dir, conn, entry = %e, why = %why, "refused"),
         Verdict::Gap { last } => warn!(target: "ark", peer, space = space(sp), dir, conn, entry = %e, last, "gap"),
     }

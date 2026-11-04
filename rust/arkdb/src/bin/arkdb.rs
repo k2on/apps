@@ -6,7 +6,6 @@
 //! arkdb tail [--from DIR] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 //! arkdb trace ID [--from DIR]                       what a tap or an entry caused, everywhere
 //! arkdb peer P [--from DIR]                         one peer's events
-//! arkdb stuck [--from DIR]                          intents pushed and never judged, oldest first
 //! arkdb origins [--from DIR]                        where a server has each device's intents
 //! arkdb rows TABLE [COLUMN=VALUE]... [--sort [-]COLUMN] [-n N] [--from DIR]
 //!                                                   a server's rows, a JSON object a line
@@ -17,7 +16,6 @@ arkdb fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]
 arkdb tail [--from DIR|FILE|-] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 arkdb trace ID [--from DIR|FILE|-]
 arkdb peer P [--from DIR|FILE|-]
-arkdb stuck [--from DIR|FILE|-]
 arkdb origins [--from DIR]
 arkdb rows TABLE [COLUMN=VALUE]... [--sort [-]COLUMN] [-n N] [--from DIR]";
 
@@ -41,7 +39,7 @@ fn main() {
             Err(e) => fail(e),
         },
         Some((cmd, rest)) if cmd == "fuzz" => std::process::exit(arkdb::fuzz::main(rest) as i32),
-        Some((cmd, rest)) if ["tail", "trace", "peer", "stuck"].contains(&cmd.as_str()) => {
+        Some((cmd, rest)) if ["tail", "trace", "peer"].contains(&cmd.as_str()) => {
             if let Err(e) = arkdb::events::main(cmd, rest) {
                 fail(e)
             }

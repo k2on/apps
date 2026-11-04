@@ -6,7 +6,6 @@
 //!
 //! ```text
 //! arkdb tail  [--from DIR|FILE|-] [-n N] [--follow] [--peer P] [--refused] [--grep S]
-//! arkdb stuck [--from …]        every intent pushed and never judged
 //! arkdb trace ID [--from …]     everything a tap or an entry caused, as a tree
 //! arkdb peer  P  [--from …]     one peer's events, in order
 //! ```
@@ -341,98 +340,12 @@ fn print_node(out: &mut String, nodes: &BTreeMap<String, Node>, kids: &BTreeMap<
     }
 }
 
-/// One intent an authority was pushed, as its events tell it.
-#[derive(Default)]
-struct Pushed {
-    first: i64,
-    last: i64,
-    times: usize,
-    func: String,
-    session: String,
-    local: String,
-    /// Sequenced or refused: answered for good.
-    judged: bool,
-    /// The last thing said of it that was no judgment: held, or a gap.
-    said: Option<String>,
-}
-
-/// `arkdb stuck`: every intent an authority was pushed and never judged —
-/// neither sequenced nor refused — oldest first: how often it came, over
-/// how long, and what the authority said of it, if anything: `held` (a
-/// function it does not run), a `gap` and where its origin stands there,
-/// or nothing at all (an authority from before gaps were answered). A
-/// device pushes in order, so its first one stuck holds back every one
-/// after it, and its user's every change since.
-pub fn render_stuck(all: &[Event]) -> String {
-    let mut pushed: BTreeMap<String, Pushed> = BTreeMap::new();
-    let mut order = vec![];
-    for e in all {
-        let Some(entry) = field(e, "entry").map(|v| short(v).to_string()) else {
-            continue;
-        };
-        let dir = field(e, "dir");
-        match e.msg.as_str() {
-            "entry" if dir == Some("in") && field(e, "kind") == Some("push") => {
-                let p = pushed.entry(entry.clone()).or_insert_with(|| {
-                    order.push(entry.clone());
-                    Pushed {
-                        first: e.at,
-                        func: field(e, "func").unwrap_or_default().into(),
-                        session: short(field(e, "session").unwrap_or_default()).into(),
-                        local: field(e, "local").unwrap_or_default().into(),
-                        ..Pushed::default()
-                    }
-                });
-                (p.last, p.times) = (e.at, p.times + 1);
-            }
-            "ok" | "refused" if dir == Some("out") => {
-                if let Some(p) = pushed.get_mut(&entry) {
-                    p.judged = true;
-                }
-            }
-            "held" | "gap" if dir == Some("out") => {
-                if let Some(p) = pushed.get_mut(&entry) {
-                    p.said = Some(match field(e, "last") {
-                        Some(last) => format!("gap: the server has its origin to {last}"),
-                        None => format!("held: the server does not run {}", p.func),
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut out = String::new();
-    for id in order {
-        let p = &pushed[&id];
-        if p.judged {
-            continue;
-        }
-        let said = p.said.clone().unwrap_or_else(|| "never answered".into());
-        out += &format!(
-            "{}..{} session {} local {} {} {id}: pushed {}x, {said}\n",
-            clock(p.first),
-            clock(p.last),
-            p.session,
-            p.local,
-            p.func,
-            p.times
-        );
-    }
-    out
-}
-
-fn stuck(args: &[String]) -> Result<(), String> {
-    print!("{}", render_stuck(&read(&source(args))?));
-    Ok(())
-}
-
-/// `arkdb tail|trace|peer|stuck …`.
+/// `arkdb tail|trace|peer …`.
 pub fn main(cmd: &str, args: &[String]) -> Result<(), String> {
     match cmd {
         "tail" => tail(args),
         "trace" => trace(args),
         "peer" => peer(args),
-        "stuck" => stuck(args),
         _ => Err(format!("no command {cmd}")),
     }
 }

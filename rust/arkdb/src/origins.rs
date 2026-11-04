@@ -8,7 +8,7 @@
 //! every log on the disk says — the log and those a migration kept aside
 //! (`log.<hash>`) — as `logged`. Where `logged` is past `last` the server
 //! has forgotten what it judged: a device pushing on from there is past a
-//! gap (`Verdict::Gap`, and `arkdb stuck`), and one pushing again what it
+//! gap (`Verdict::Gap`, a warning `arkdb tail --refused` shows), and one pushing again what it
 //! was never told was judged would have it judged twice.
 //!
 //! The logs are read as their records, never opened (an instance folds a
