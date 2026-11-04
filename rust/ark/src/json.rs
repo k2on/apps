@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
-use serde::de::{DeserializeSeed, EnumAccess, Error as _, MapAccess, SeqAccess, VariantAccess, Visitor};
+use serde::de::{DeserializeSeed, EnumAccess, Error as _, SeqAccess, VariantAccess, Visitor};
 use serde::ser::{Error as _, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as J;
@@ -31,22 +31,6 @@ pub fn intern(name: &str) -> &'static str {
             let n: &'static str = Box::leak(name.to_owned().into_boxed_str());
             names.insert(n);
             n
-        }
-    }
-}
-
-/// Names kept for the life of the process, as a list: a struct's fields or
-/// a sum's variants, as serde's deserializers are told them.
-fn interned(names: Vec<&str>) -> &'static [&'static str] {
-    static LISTS: Mutex<BTreeSet<&'static [&'static str]>> = Mutex::new(BTreeSet::new());
-    let names: Vec<&'static str> = names.into_iter().map(intern).collect();
-    let mut lists = LISTS.lock().unwrap_or_else(|e| e.into_inner());
-    match lists.get(&names[..]) {
-        Some(l) => l,
-        None => {
-            let l: &'static [&'static str] = Box::leak(names.into_boxed_slice());
-            lists.insert(l);
-            l
         }
     }
 }
@@ -191,7 +175,8 @@ pub fn to_text(t: &Type, b: &[u8]) -> Result<String, Refusal> {
 // * A value of a type, read
 
 /// Reads a value of a type as the JSON its Rust type is written as:
-/// [`Typed`]'s inverse, for a format that does not say what it holds.
+/// [`Typed`]'s inverse, for the value format, which does not say what it
+/// holds: a record read as the tuple it writes, a variant by its index.
 #[derive(Clone, Copy)]
 pub struct Seed<'a>(pub &'a Type);
 
@@ -213,9 +198,10 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
             Type::List(t) => d.deserialize_seq(Of(t)),
             Type::Tuple(ts) => d.deserialize_tuple(ts.len(), Fields(ts.iter().map(|t| ("", t)).collect(), false)),
             Type::Record(n, fs) if fs.len() == 1 && positional(fs) => d.deserialize_newtype_struct(intern(n), Of(&fs[0].1)),
-            Type::Record(n, fs) if positional(fs) => d.deserialize_tuple_struct(intern(n), fs.len(), fields(fs, false)),
-            Type::Record(n, fs) => d.deserialize_struct(intern(n), interned(fs.iter().map(|f| &f.0[..]).collect()), fields(fs, true)),
-            Type::Sum(n, vs) => d.deserialize_enum(intern(n), interned(vs.iter().map(|v| &v.0[..]).collect()), Variants(vs)),
+            // The value format writes a record as a tuple, and a variant by its
+            // index: neither is read by a name.
+            Type::Record(_, fs) => d.deserialize_tuple(fs.len(), fields(fs, !positional(fs))),
+            Type::Sum(_, vs) => d.deserialize_enum("", &[], Variants(vs)),
         }
     }
 }
@@ -233,9 +219,6 @@ impl<'de> Visitor<'de> for Of<'_> {
         write!(f, "a {}", self.0.decl())
     }
     fn visit_none<E: serde::de::Error>(self) -> Result<J, E> {
-        Ok(J::Null)
-    }
-    fn visit_unit<E: serde::de::Error>(self) -> Result<J, E> {
         Ok(J::Null)
     }
     fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<J, D::Error> {
@@ -272,52 +255,11 @@ impl<'de> Visitor<'de> for Fields<'_> {
             false => J::Array(xs),
         })
     }
-    fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<J, A::Error> {
-        let mut m = serde_json::Map::new();
-        while let Some(k) = a.next_key::<String>()? {
-            let (_, t) = self
-                .0
-                .iter()
-                .find(|(n, _)| *n == k)
-                .ok_or_else(|| A::Error::custom(format!("no field {k}")))?;
-            m.insert(k, a.next_value_seed(Seed(t))?);
-        }
-        Ok(J::Object(m))
-    }
 }
 
 /// A sum's variants: the one read, by its index, as serde's JSON writes
 /// it — its name, or an object of one entry, its name to its payload.
 struct Variants<'a>(&'a [(String, Vec<(String, Type)>)]);
-
-/// A variant's index, as a binary format writes it, or its name.
-struct Which<'a>(&'a [(String, Vec<(String, Type)>)]);
-
-impl<'de> DeserializeSeed<'de> for Which<'_> {
-    type Value = usize;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<usize, D::Error> {
-        d.deserialize_identifier(self)
-    }
-}
-
-impl<'de> Visitor<'de> for Which<'_> {
-    type Value = usize;
-    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("a variant")
-    }
-    fn visit_u64<E: serde::de::Error>(self, i: u64) -> Result<usize, E> {
-        (i as usize)
-            .lt(&self.0.len())
-            .then_some(i as usize)
-            .ok_or_else(|| E::custom("no such variant"))
-    }
-    fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<usize, E> {
-        self.0
-            .iter()
-            .position(|(n, _)| n == s)
-            .ok_or_else(|| E::custom(format!("no variant {s}")))
-    }
-}
 
 impl<'de> Visitor<'de> for Variants<'_> {
     type Value = J;
@@ -325,16 +267,13 @@ impl<'de> Visitor<'de> for Variants<'_> {
         f.write_str("a variant")
     }
     fn visit_enum<A: EnumAccess<'de>>(self, a: A) -> Result<J, A::Error> {
-        let (i, v) = a.variant_seed(Which(self.0))?;
-        let (name, fs) = &self.0[i];
+        let (i, v) = a.variant::<u32>()?;
+        let (name, fs) = self.0.get(i as usize).ok_or_else(|| A::Error::custom("no such variant"))?;
         let one = |p: J| J::Object([(name.clone(), p)].into_iter().collect());
         match fs.len() {
             0 => v.unit_variant().map(|_| J::String(name.clone())),
             1 if positional(fs) => v.newtype_variant_seed(Seed(&fs[0].1)).map(one),
-            k if positional(fs) => v.tuple_variant(k, fields(fs, false)).map(one),
-            _ => v
-                .struct_variant(interned(fs.iter().map(|f| &f.0[..]).collect()), fields(fs, true))
-                .map(one),
+            k => v.tuple_variant(k, fields(fs, !positional(fs))).map(one),
         }
     }
 }
