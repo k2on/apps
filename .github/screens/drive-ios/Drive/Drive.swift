@@ -47,7 +47,8 @@ final class Drive: XCTestCase {
         app.terminate()
         app.launch()
         if let server = env["APP_SERVER"], !server.isEmpty {
-            let field = app.textFields["Server address"]
+            // The server's page: its one text field, whatever an app labels it.
+            let field = app.textFields.firstMatch
             if field.waitForExistence(timeout: 20) {
                 try signIn(app, field: field, server: server, user: try value("APP_USER"))
                 XCTAssertTrue(field.waitForNonExistence(timeout: 60), "signed in, past the server's page")

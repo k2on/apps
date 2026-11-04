@@ -11,6 +11,11 @@ comment's Markdown: each shot that differs or is new, main's beside the
 PR's, and how many are the same. Images are linked at <main ref> (the
 commit main's were read at) and the PR's branch, so an old comment still
 shows what it compared.
+
+A row is one screen — an app's shot in a theme — with main's and the PR's
+on each phone side by side, Android's then the iPhone's, so a change on one
+can be held against the other; it is shown when either phone's differs or
+is new. A phone with nothing of that screen says so in its cell.
 """
 import os
 import subprocess
@@ -48,21 +53,39 @@ def differs(a, b):
     return off / pixels > 0.001
 
 
-changed, new, same = [], [], 0
+# Each screen (app, theme, id), and on each phone: "same", "changed" or "new".
+screens = {}
 for app, phone, theme, id in shots(pr):
     path = f"{app}/{phone}/{theme}/{id}.png"
     before = os.path.join(main, path)
     if not os.path.isfile(before):
-        new.append((app, phone, theme, id, path))
+        state = "new"
     elif differs(before, os.path.join(pr, path)):
-        changed.append((app, phone, theme, id, path))
+        state = "changed"
     else:
-        same += 1
+        state = "same"
+    screens.setdefault((app, theme, id), {})[phone] = state
+
+PHONES = (("android", "Android"), ("ios", "iPhone"))
 
 
 def img(url):
-    return f'<img src="{url}" width="220">'
+    return f'<img src="{url}" width="160">'
 
+
+def cells(app, theme, id, phone, state):
+    """main's and the PR's of one screen on one phone."""
+    path = f"{app}/{phone}/{theme}/{id}.png"
+    before = img(f"{raw}/{main_ref}/apps/{path}") if os.path.isfile(os.path.join(main, path)) else "—"
+    # A phone this PR did not rebuild (its app's inputs for it did not move) is main's.
+    after = img(f"{raw}/{branch}/{path}") if state else ("not rebuilt: as main's" if before != "—" else "—")
+    return [before, after]
+
+
+shown = {k: v for k, v in screens.items() if any(s != "same" for s in v.values())}
+same = sum(1 for v in screens.values() for s in v.values() if s == "same") - sum(
+    1 for v in shown.values() for s in v.values() if s == "same"
+)
 
 out = ["<!-- app-screens -->", "### App screenshots", ""]
 out.append(
@@ -70,19 +93,18 @@ out.append(
     "with sample data (`.github/screens/apps.md`), and compared with main's."
 )
 out.append("")
-if not changed and not new:
+if not shown:
     out.append(f"No screen changed ({same} the same as main's)." if same else "No screens were taken.")
-for title, rows, both in (("Changed", changed, True), ("New", new, False)):
-    if not rows:
-        continue
-    out += ["", f"#### {title}", ""]
-    out.append("| Shot | main | this PR |" if both else "| Shot | this PR |")
-    out.append("| --- | --- | --- |" if both else "| --- | --- |")
-    for app, phone, theme, id, path in rows:
-        after = img(f"{raw}/{branch}/{path}")
-        name = f"{app} · {phone} · {id} ({theme})"
-        out.append(f"| {name} | {img(f'{raw}/{main_ref}/apps/{path}')} | {after} |" if both else f"| {name} | {after} |")
-if (changed or new) and same:
-    out += ["", f"{same} other shot{' is' if same == 1 else 's are'} the same as main's."]
+else:
+    out.append("| Screen | Android, main | Android, this PR | iPhone, main | iPhone, this PR |")
+    out.append("| --- | --- | --- | --- | --- |")
+    for (app, theme, id), phones in sorted(shown.items()):
+        said = ", ".join(f"{label} {phones[p]}" for p, label in PHONES if phones.get(p, "same") != "same")
+        row = [f"**{app}** {id} ({theme})<br>{said}"]
+        for p, _ in PHONES:
+            row += cells(app, theme, id, p, phones.get(p))
+        out.append("| " + " | ".join(row) + " |")
+    if same:
+        out += ["", f"{same} other shot{' is' if same == 1 else 's are'} the same as main's."]
 out += ["", "Money's sample household is dated today, so a screen showing dates can differ from main's for that alone."]
 print("\n".join(out))

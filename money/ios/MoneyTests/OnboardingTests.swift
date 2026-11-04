@@ -14,7 +14,7 @@ final class OnboardingTests: XCTestCase {
     func testALaunchStartsFromWhatWasRemembered() {
         var m = machine()
         XCTAssertEqual(m.begin(), [])
-        XCTAssertEqual(m.step, .server(typed: "money.koon.us", checking: false, error: nil))
+        XCTAssertEqual(m.step, .server(typed: "", checking: false, error: nil))
         var r = machine(server: "https://money.koon.us", login: Fx.login)
         XCTAssertEqual(r.begin(), [.openSession(server: "https://money.koon.us", login: Fx.login)])
         var d = machine(server: "https://money.koon.us", demo: true)
@@ -33,6 +33,7 @@ final class OnboardingTests: XCTestCase {
 
     func testAServerFoundGoesToSignInByItselfOnce() {
         var m = machine()
+        XCTAssertEqual(m.next(.typed("money.koon.us")), [])
         XCTAssertEqual(m.next(.check), [.findServer("money.koon.us")])
         let browse = Effect.browse("https://money.koon.us/auth/login?redirect=money://auth")
         XCTAssertEqual(m.next(.checked(.server("https://money.koon.us", newer: false))), [.rememberServer("https://money.koon.us"), browse])

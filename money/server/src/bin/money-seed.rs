@@ -23,8 +23,7 @@ fn main() -> Result<()> {
     }
     let mut disk = ark_peer::Files::new(&log).with_context(|| format!("opening {}", log.display()))?;
     let now = ark_peer::now_ms();
-    money_domain::seed::log(&mut disk, &money_domain::dates::day_of_ms(now), now)
-        .with_context(|| format!("writing {}", log.display()))?;
+    money_domain::seed::log(&mut disk, &money_domain::dates::day_of_ms(now), now).with_context(|| format!("writing {}", log.display()))?;
     eprintln!("money-seed: the demo's household in {}, as {}", log.display(), money_domain::seed::ME);
     Ok(())
 }

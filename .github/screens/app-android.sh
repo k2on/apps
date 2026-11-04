@@ -87,6 +87,7 @@ if [ -n "$server" ]; then
   adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1 || true
   open_app
   tap --field
+  sleep 1
   adb shell input text "$server"
   tap Continue
   # The server checked, then its sign-in: an app may open the browser by
@@ -98,6 +99,7 @@ if [ -n "$server" ]; then
   done
   # The server's dev sign-in page: a name, sent.
   tap --field 30
+  sleep 1
   adb shell input text "$user"
   adb shell input keyevent 66
   # Back in the app; a permission it asks for is allowed, once; then
