@@ -28,6 +28,11 @@
 // along by the same position flow, the one being said kept at the middle.
 package dev.harken.android
 
+import android.os.Build
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -95,6 +100,7 @@ import dev.arkui.Glyph
 import dev.arkui.Recompositions
 import dev.arkui.ReorderableItem
 import dev.arkui.Space
+import dev.arkui.Springs
 import dev.arkui.VolumeSlider
 import dev.arkui.quiet
 import dev.arkui.rememberReorder
@@ -289,102 +295,132 @@ fun FullFace(
     scrubbing: StateFlow<Long?> = Nobody,
 ) {
     val now = state.now
-    Column(modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = Space.xl)) {
-        Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = controls::close) { Glyph(Glyphs.Down, "Close the player") }
+    Box(modifier.fillMaxSize()) {
+        // Behind it all, the cover, blurred and faint, as the iPhone's player has it: read small, since
+        // it is only ever a wash. Android blurs from 12 (API 31); before that, no wash rather than a
+        // sharp cover behind the text.
+        if (now != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            Cover(seedOf(now), now.art, 64.dp, Modifier.fillMaxSize().blur(80.dp).alpha(BACKDROP), corner = 0.dp)
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = Space.xl)) {
+            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = controls::close) { Glyph(Glyphs.Down, "Close the player") }
+                Text(
+                    if (now?.album.isNullOrEmpty()) "Now playing" else now!!.album,
+                    style = quiet(MaterialTheme.typography.labelLarge),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = controls::more, enabled = now != null) { Glyph(Glyphs.More, "More") }
+            }
+            Spacer(Modifier.weight(0.5f))
+            // The card draws the cover in the slot as it travels (PlayerSheet.kt), as this one would:
+            // rounded, lifted, and a little smaller while paused.
+            if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
+            else if (now != null) {
+                val scale by animateFloatAsState(coverScale(state.playing), spring(Springs.MOVE, Springs.STIFFNESS), label = "cover")
+                Cover(
+                    seedOf(now),
+                    now.art,
+                    360.dp,
+                    Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        shape = RoundedCornerShape(COVER_CORNER)
+                        clip = true
+                        shadowElevation = COVER_SHADOW.toPx()
+                    },
+                    corner = COVER_CORNER,
+                )
+            }
+            Spacer(Modifier.weight(0.5f))
+            // The title opens its album and the name its person's page, as the desktop's bar and the
+            // iPhone's player do.
+            val album = now?.let(controls::albumOf)
+            val artist = now?.artist.orEmpty()
             Text(
-                if (now?.album.isNullOrEmpty()) "Now playing" else now!!.album,
-                style = quiet(MaterialTheme.typography.labelLarge),
-                textAlign = TextAlign.Center,
-                maxLines = 1,
+                now?.title ?: "Nothing playing",
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = if (album == null) Modifier else Modifier.clickable { controls.goTo(album) },
             )
-            IconButton(onClick = controls::more, enabled = now != null) { Glyph(Glyphs.More, "More") }
-        }
-        Spacer(Modifier.weight(0.5f))
-        if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
-        else if (now != null) Cover(seedOf(now), now.art, 360.dp, Modifier.fillMaxWidth().aspectRatio(1f), corner = 12.dp)
-        Spacer(Modifier.weight(0.5f))
-        // The title opens its album and the name its person's page, as the desktop's bar and the
-        // iPhone's player do.
-        val album = now?.let(controls::albumOf)
-        val artist = now?.artist.orEmpty()
-        Text(
-            now?.title ?: "Nothing playing",
-            style = MaterialTheme.typography.headlineSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = if (album == null) Modifier else Modifier.clickable { controls.goTo(album) },
-        )
-        Text(
-            artist,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            modifier = if (artist.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForArtist(artist)) },
-        )
-        // The chapter it is in, for an episode that has them.
-        val chapters = LocalChapters.current
-        if (chapters.isNotEmpty()) ChapterLine(chapters, position)
-        Spacer(Modifier.height(Space.l))
-        Scrubber(state, position, scrubbing, controls)
-        // The session has no shuffle and no repeat: neither is drawn while the phone is part of it,
-        // and the transport keeps its place.
-        val alone = state.on == null
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            if (alone) Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
-            else Spacer(Modifier.size(48.dp))
-            // An episode skips back and on a few seconds; a song goes a track.
-            val jogs = controls.jogs()
-            if (jogs) IconButton(onClick = { controls.jog(-JOG_BACK) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipBack, "Back $JOG_BACK seconds", size = 28.dp) }
-            else IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
-            FilledIconButton(
-                onClick = controls::toggle,
-                modifier = Modifier.size(72.dp),
-                shape = CircleShape,
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
-            ) {
-                Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 30.dp)
-            }
-            if (jogs) IconButton(onClick = { controls.jog(JOG_FORWARD) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipForward, "Forward $JOG_FORWARD seconds", size = 28.dp) }
-            else IconButton(onClick = controls::next, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Next, "Next", size = 28.dp) }
-            if (alone) Toggle(
-                if (state.repeat == Repeat.One) Glyphs.RepeatOne else Glyphs.Repeat,
-                when (state.repeat) {
-                    Repeat.Off -> "Repeat is off"
-                    Repeat.All -> "Repeating the queue"
-                    Repeat.One -> "Repeating this song"
-                },
-                state.repeat != Repeat.Off,
-                controls::repeat,
+            Text(
+                artist,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                modifier = if (artist.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForArtist(artist)) },
             )
-            else Spacer(Modifier.size(48.dp))
-        }
-        state.volume?.let { v ->
-            Spacer(Modifier.height(Space.s))
-            VolumeSlider(v.level, v.muted, controls::volume, controls::volumeDone, controls::mute, Modifier.fillMaxWidth(), about = state.on?.name ?: "this phone")
-        }
-        Spacer(Modifier.height(Space.l))
-        val on = state.on
-        // An episode with a transcript has it beside the queue: named while there is room.
-        val lines = LocalTranscript.current.isNotEmpty()
-        if (on == null && !lines) Box(Modifier.align(Alignment.CenterHorizontally)) { QueueChip(state, controls) }
-        else
+            // The chapter it is in, for an episode that has them.
+            val chapters = LocalChapters.current
+            if (chapters.isNotEmpty()) ChapterLine(chapters, position)
+            Spacer(Modifier.height(Space.l))
+            Scrubber(state, position, scrubbing, controls)
+            // The session has no shuffle and no repeat: neither is drawn while the phone is part of it,
+            // and the transport keeps its place.
+            val alone = state.on == null
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                if (on != null) {
-                    DeviceChip(on, controls, Modifier.weight(1f, fill = false))
-                    Spacer(Modifier.width(Space.s))
+                if (alone) Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
+                else Spacer(Modifier.size(48.dp))
+                // An episode skips back and on a few seconds; a song goes a track.
+                val jogs = controls.jogs()
+                if (jogs) IconButton(onClick = { controls.jog(-JOG_BACK) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipBack, "Back $JOG_BACK seconds", size = 28.dp) }
+                else IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
+                FilledIconButton(
+                    onClick = controls::toggle,
+                    modifier = Modifier.size(72.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
+                ) {
+                    Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 30.dp)
                 }
-                if (lines) {
-                    TranscriptChip(controls, named = on == null)
-                    Spacer(Modifier.width(Space.s))
-                }
-                QueueChip(state, controls, Modifier.weight(1f, fill = false))
+                if (jogs) IconButton(onClick = { controls.jog(JOG_FORWARD) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipForward, "Forward $JOG_FORWARD seconds", size = 28.dp) }
+                else IconButton(onClick = controls::next, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Next, "Next", size = 28.dp) }
+                if (alone) Toggle(
+                    if (state.repeat == Repeat.One) Glyphs.RepeatOne else Glyphs.Repeat,
+                    when (state.repeat) {
+                        Repeat.Off -> "Repeat is off"
+                        Repeat.All -> "Repeating the queue"
+                        Repeat.One -> "Repeating this song"
+                    },
+                    state.repeat != Repeat.Off,
+                    controls::repeat,
+                )
+                else Spacer(Modifier.size(48.dp))
             }
-        Spacer(Modifier.height(Space.l))
+            state.volume?.let { v ->
+                Spacer(Modifier.height(Space.s))
+                VolumeSlider(v.level, v.muted, controls::volume, controls::volumeDone, controls::mute, Modifier.fillMaxWidth(), about = state.on?.name ?: "this phone")
+            }
+            Spacer(Modifier.height(Space.l))
+            // Where it plays, what plays next, and an episode's transcript, in that order and centred,
+            // as the iPhone's player has them.
+            val on = state.on
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.s, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (on != null) DeviceChip(on, controls, Modifier.weight(1f, fill = false))
+                QueueChip(state, controls, Modifier.weight(1f, fill = false))
+                if (LocalTranscript.current.isNotEmpty()) TranscriptChip(controls)
+            }
+            Spacer(Modifier.height(Space.l))
+        }
     }
 }
+
+/** How much of its place the full player's cover takes: all of it playing, less paused. */
+fun coverScale(playing: Boolean): Float = if (playing) 1f else 0.9f
+
+/** The full player's cover: its corners and its shadow, here and travelling (PlayerSheet.kt). */
+val COVER_CORNER = 16.dp
+val COVER_SHADOW = 16.dp
+
+/** How much of the cover shows through behind the full player. */
+private const val BACKDROP = 0.45f
 
 // What plays after this: the queue's sheet.
 @Composable
@@ -399,18 +435,11 @@ private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier
     }
 }
 
-// What is being said, a line at a time: the transcript's sheet. Its glyph alone beside the device's chip.
+// What is being said, a line at a time: the transcript's sheet. Its glyph alone, after the queue's.
 @Composable
-private fun TranscriptChip(controls: Controls, named: Boolean) {
-    Row(
-        Modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::transcript).padding(horizontal = Space.l, vertical = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Glyph(Glyphs.Transcript, if (named) null else "Transcript", size = 18.dp)
-        if (named) {
-            Spacer(Modifier.width(Space.s))
-            Text("Transcript", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-        }
+private fun TranscriptChip(controls: Controls) {
+    Box(Modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::transcript).padding(horizontal = Space.l, vertical = Space.s)) {
+        Glyph(Glyphs.Transcript, "Transcript", size = 18.dp)
     }
 }
 

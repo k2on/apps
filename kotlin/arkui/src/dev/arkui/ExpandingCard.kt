@@ -205,6 +205,8 @@ public data class ExpandingCardSpec(
     /** The travelling piece's corner on the bar and expanded. */
     public val thumbCorner: Dp = 4.dp,
     public val bigCorner: Dp = 12.dp,
+    /** The travelling piece's shadow, expanded; none on the bar. */
+    public val bigShadow: Dp = 0.dp,
     /**
      * The expanded piece's margin from the screen's sides — it is the screen's width less two of
      * these, square — and where its top is guessed to be before the expanded face has said.
@@ -240,6 +242,7 @@ private class Geometry(d: Density, spec: ExpandingCardSpec) {
     val lift = with(d) { spec.lift.toPx() }
     val artSmall = with(d) { spec.thumbCorner.toPx() }
     val artBig = with(d) { spec.bigCorner.toPx() }
+    val artShadow = with(d) { spec.bigShadow.toPx() }
     val guessTop = with(d) { spec.bigTop.toPx() }
     val far = with(d) { spec.flick.toPx() }
 
@@ -276,7 +279,10 @@ private class Geometry(d: Density, spec: ExpandingCardSpec) {
  *   above the bar — collapsed, it takes no touch and no tick. Its first argument goes on the space
  *   it leaves for the travelling piece, which is told where that is.
  * - `traveler` is the piece both faces share, drawn by the card itself at the expanded size and
- *   scaled from the bar's [ExpandingCardSpec.thumb] to that space.
+ *   scaled from the bar's [ExpandingCardSpec.thumb] to that space. `artScale` is how much of that
+ *   space it takes expanded, about its centre (a cover a little smaller while paused); read as it
+ *   is drawn, so a change to it lays nothing out, and taken on as the card comes up, so the bar's
+ *   thumb is always whole.
  *
  * A tap on the bar calls `onOpen` (which is expected to [ExpandingCardState.open] it); a sideways
  * drag on the bar, far or fast enough, calls `onSwipeLeft` or `onSwipeRight`, and springs back. The
@@ -294,6 +300,7 @@ public fun ExpandingCard(
     onSwipeRight: () -> Unit = {},
     openLabel: String? = null,
     spec: ExpandingCardSpec = remember { ExpandingCardSpec() },
+    artScale: () -> Float = { 1f },
 ) {
     val sheet = state
     val density = LocalDensity.current
@@ -474,14 +481,18 @@ public fun ExpandingCard(
                                     lerp(from.bottom, to.bottom, p),
                                 )
                             a.placeWithLayer(0, 0) {
-                                val k = at.width / a.width
+                                // Its share of the space, taken on as it comes up, about the
+                                // space's centre.
+                                val q = 1f - (1f - artScale()) * p
+                                val k = at.width / a.width * q
                                 transformOrigin = TransformOrigin(0f, 0f)
                                 scaleX = k
                                 scaleY = k
-                                translationX = at.left + dx
-                                translationY = at.top + dy
+                                translationX = at.left + dx + at.width * (1f - q) / 2f
+                                translationY = at.top + dy + at.height * (1f - q) / 2f
                                 shape = RoundedCornerShape(lerp(g.artSmall, g.artBig, p) / k)
                                 clip = true
+                                shadowElevation = g.artShadow * p
                             }
                         }
                     }
