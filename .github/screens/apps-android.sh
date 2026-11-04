@@ -12,7 +12,9 @@ out=$1
 apks=$2
 shift 2
 for a in "$@"; do
-  apk=$(find "$apks/apk-$a" -name '*.apk' | head -1)
+  apk=$(find "$apks/apk-$a" -name '*.apk' 2>/dev/null | head -1)
+  # Nothing published for it yet: said where it was fetched, and its shots kept.
+  [ -n "$apk" ] || { echo "$a: no APK to take; skipped"; continue; }
   server=$(jq -r '.server.port // empty | "http://10.0.2.2:\(.)"' "$a/screens/shots.json")
   bash "$(dirname "$0")/app-android.sh" "$out/$a/android" "$apk" "$a" "$server" ||
     echo "::error::$a's Android screenshots failed"
