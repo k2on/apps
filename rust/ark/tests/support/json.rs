@@ -46,10 +46,9 @@ pub fn int(n: i64) -> String {
     n.to_string()
 }
 
-/// A row: its JSON under its table, columns in schema order.
+/// A row: its JSON under its table, columns by name.
 pub fn row(t: &Table, b: &[u8]) -> String {
-    let v = ark::dynamic::row(t, b).expect("a row reads");
-    serde_json::to_string(&ark::json::Typed(&t.row_type(), &v)).unwrap()
+    ark::dynamic::row(t, b).expect("a row reads").to_string()
 }
 
 /// The schema: its JSON (its hash is taken over its bytes in the value

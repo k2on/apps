@@ -3,16 +3,15 @@
 //! A row as the store and a replica see it, a row a person edits, an
 //! input a phone sends as JSON, is a [`serde_json::Value`] read under the
 //! schema's or the function's [`Type`]. [`Typed`] serializes it exactly as
-//! the Rust type it describes would be serialized, so its bytes in the
-//! value format ([`crate::format`]) are that type's bytes and its key that
-//! type's key, whichever side made it; [`Seed`] reads it back from those
-//! bytes, as the JSON the Rust type would be written as.
-
-use std::collections::BTreeSet;
-use std::sync::Mutex;
+//! the Rust type it describes would be serialized in a binary format, so
+//! its bytes in the value format ([`crate::format`]) are that type's bytes
+//! and its key that type's key, whichever side made it; [`Seed`] reads it
+//! back from those bytes, as the JSON the Rust type would be written as.
+//! Neither format writes a name (a record is a tuple, a variant its index),
+//! so neither is told one.
 
 use serde::de::{DeserializeSeed, EnumAccess, Error as _, SeqAccess, VariantAccess, Visitor};
-use serde::ser::{Error as _, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple, SerializeTupleStruct, SerializeTupleVariant};
+use serde::ser::{Error as _, SerializeSeq, SerializeTuple, SerializeTupleVariant};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as J;
 
@@ -20,25 +19,10 @@ use crate::hash::{hex, unhex};
 use crate::row::Type;
 use crate::Refusal;
 
-/// A name kept for the life of the process: what serde's `&'static str`
-/// names a schema's field or variant by. One per distinct name.
-pub fn intern(name: &str) -> &'static str {
-    static NAMES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
-    let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
-    match names.get(name) {
-        Some(n) => n,
-        None => {
-            let n: &'static str = Box::leak(name.to_owned().into_boxed_str());
-            names.insert(n);
-            n
-        }
-    }
-}
-
 // * A value under a type
 
 /// A JSON value under a [`Type`], serialized as the Rust type the type
-/// describes is: its JSON the same bytes, its key the same key.
+/// describes is in a binary format: the same bytes, the same key.
 pub struct Typed<'a>(pub &'a Type, pub &'a J);
 
 /// A record's fields named `0`, `1`, … are a tuple struct's.
@@ -46,11 +30,22 @@ fn positional(fs: &[(String, Type)]) -> bool {
     fs.first().is_some_and(|(n, _)| n == "0")
 }
 
+/// A record's fields, each its type and its value, in order: from an array
+/// of them, a tuple struct's, or an object of them by name (one missing is
+/// null).
+fn fields_of<'a>(fs: &'a [(String, Type)], v: &'a J) -> Option<Vec<(&'a Type, &'a J)>> {
+    static NULL: J = J::Null;
+    match v {
+        J::Array(xs) if positional(fs) && xs.len() == fs.len() => Some(fs.iter().map(|f| &f.1).zip(xs).collect()),
+        J::Object(m) if !positional(fs) => Some(fs.iter().map(|(f, t)| (t, m.get(f).unwrap_or(&NULL))).collect()),
+        _ => None,
+    }
+}
+
 impl Serialize for Typed<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let (ty, v) = (self.0, self.1);
         let bad = || S::Error::custom(format!("{v} is not a {}", ty.decl()));
-        let null = J::Null;
         match (ty, v) {
             (Type::Int, J::Number(n)) => s.serialize_i64(n.as_i64().ok_or_else(bad)?),
             (Type::Text, J::String(x)) => s.serialize_str(x),
@@ -63,13 +58,7 @@ impl Serialize for Typed<'_> {
                 seq.end()
             }
             (Type::Unit, J::Null) => s.serialize_unit(),
-            (Type::Id(_), J::String(h)) => {
-                let b = unhex(h).filter(|b| b.len() == 16).ok_or_else(bad)?;
-                match s.is_human_readable() {
-                    true => s.serialize_str(h),
-                    false => s.serialize_bytes(&b),
-                }
-            }
+            (Type::Id(_), J::String(h)) => s.serialize_bytes(&unhex(h).filter(|b| b.len() == 16).ok_or_else(bad)?),
             (Type::Option(_), J::Null) => s.serialize_none(),
             (Type::Option(t), v) => s.serialize_some(&Typed(t, v)),
             (Type::List(t), J::Array(xs)) => {
@@ -86,22 +75,15 @@ impl Serialize for Typed<'_> {
                 }
                 tup.end()
             }
-            (Type::Record(n, fs), v) if fs.len() == 1 && positional(fs) => s.serialize_newtype_struct(intern(n), &Typed(&fs[0].1, v)),
-            (Type::Record(n, fs), J::Array(xs)) if positional(fs) && fs.len() == xs.len() => {
-                let mut tup = s.serialize_tuple_struct(intern(n), fs.len())?;
-                for ((_, t), x) in fs.iter().zip(xs) {
-                    tup.serialize_field(&Typed(t, x))?;
+            (Type::Record(_, fs), v) if fs.len() == 1 && positional(fs) => s.serialize_newtype_struct("", &Typed(&fs[0].1, v)),
+            (Type::Record(_, fs), v) => {
+                let mut tup = s.serialize_tuple(fs.len())?;
+                for (t, x) in fields_of(fs, v).ok_or_else(bad)? {
+                    tup.serialize_element(&Typed(t, x))?;
                 }
                 tup.end()
             }
-            (Type::Record(n, fs), J::Object(m)) if !positional(fs) => {
-                let mut st = s.serialize_struct(intern(n), fs.len())?;
-                for (f, t) in fs {
-                    st.serialize_field(intern(f), &Typed(t, m.get(f).unwrap_or(&null)))?;
-                }
-                st.end()
-            }
-            (Type::Sum(n, vs), v) => {
+            (Type::Sum(_, vs), v) => {
                 let (name, payload) = match v {
                     J::String(x) => (x.as_str(), None),
                     J::Object(m) if m.len() == 1 => m.iter().next().map(|(k, p)| (k.as_str(), Some(p))).unwrap(),
@@ -109,23 +91,15 @@ impl Serialize for Typed<'_> {
                 };
                 let i = vs.iter().position(|(x, _)| x == name).ok_or_else(bad)?;
                 let fs = &vs[i].1;
-                let (sum, var) = (intern(n), intern(name));
                 match (fs.len(), payload) {
-                    (0, None) => s.serialize_unit_variant(sum, i as u32, var),
-                    (1, Some(p)) if positional(fs) => s.serialize_newtype_variant(sum, i as u32, var, &Typed(&fs[0].1, p)),
-                    (k, Some(J::Array(xs))) if positional(fs) && k == xs.len() => {
-                        let mut tv = s.serialize_tuple_variant(sum, i as u32, var, k)?;
-                        for ((_, t), x) in fs.iter().zip(xs) {
+                    (0, None) => s.serialize_unit_variant("", i as u32, ""),
+                    (1, Some(p)) if positional(fs) => s.serialize_newtype_variant("", i as u32, "", &Typed(&fs[0].1, p)),
+                    (k, Some(p)) => {
+                        let mut tv = s.serialize_tuple_variant("", i as u32, "", k)?;
+                        for (t, x) in fields_of(fs, p).ok_or_else(bad)? {
                             tv.serialize_field(&Typed(t, x))?;
                         }
                         tv.end()
-                    }
-                    (k, Some(J::Object(m))) if !positional(fs) => {
-                        let mut sv = s.serialize_struct_variant(sum, i as u32, var, k)?;
-                        for (f, t) in fs {
-                            sv.serialize_field(intern(f), &Typed(t, m.get(f).unwrap_or(&null)))?;
-                        }
-                        sv.end()
                     }
                     _ => Err(bad()),
                 }
@@ -168,8 +142,7 @@ pub fn from_text(t: &Type, text: &str) -> Result<Vec<u8>, Refusal> {
 
 /// A value's JSON text under its type, from its bytes in the value format.
 pub fn to_text(t: &Type, b: &[u8]) -> Result<String, Refusal> {
-    let v = typed_value(t, b)?;
-    serde_json::to_string(&Typed(t, &v)).map_err(|e| Refusal(e.to_string()))
+    typed_value(t, b).map(|v| v.to_string())
 }
 
 // * A value of a type, read
@@ -197,7 +170,7 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
             Type::Option(t) => d.deserialize_option(Of(t)),
             Type::List(t) => d.deserialize_seq(Of(t)),
             Type::Tuple(ts) => d.deserialize_tuple(ts.len(), Fields(ts.iter().map(|t| ("", t)).collect(), false)),
-            Type::Record(n, fs) if fs.len() == 1 && positional(fs) => d.deserialize_newtype_struct(intern(n), Of(&fs[0].1)),
+            Type::Record(_, fs) if fs.len() == 1 && positional(fs) => d.deserialize_newtype_struct("", Of(&fs[0].1)),
             // The value format writes a record as a tuple, and a variant by its
             // index: neither is read by a name.
             Type::Record(_, fs) => d.deserialize_tuple(fs.len(), fields(fs, !positional(fs))),
