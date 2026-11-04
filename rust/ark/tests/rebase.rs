@@ -386,7 +386,7 @@ fn a_peer_opens_from_what_it_persisted() {
     d.pending = sends(&pending)
         .into_iter()
         .map(|f| match f {
-            Frame::Page { mut logged, .. } => ark::peer::Pending::new(logged.remove(0).entry, vec![]),
+            Frame::Page { mut logged, .. } => ark::log::Logged::intent(logged.remove(0).entry, vec![]),
             _ => unreachable!(),
         })
         .collect();

@@ -209,7 +209,7 @@ fn union_of(store: &Store, actor: &str) -> Store {
 /// A peer's confirmed state: its store with its pending changes undone.
 fn confirmed(p: &Peer) -> Store {
     let mut s = p.store.clone();
-    for c in p.pending.iter().rev().flat_map(|x| x.changes.iter().rev()) {
+    for c in p.pending.iter().rev().flat_map(|x| x.facts.iter().rev()) {
         s.apply(&c.inverse()).unwrap();
     }
     s

@@ -275,19 +275,6 @@ pub struct Who {
     pub roles: Vec<String>,
 }
 
-/// One of this peer's own intents, with what its last run changed.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Pending {
-    pub entry: Entry,
-    pub changes: Vec<Change>,
-}
-
-impl Pending {
-    pub fn new(entry: Entry, changes: Vec<Change>) -> Pending {
-        Pending { entry, changes }
-    }
-}
-
 /// What an authority keeps beside its log: each origin's last `local` and
 /// the actor it is bound to; the intents it refused, and why — an intent
 /// at or below its origin's last and not refused is in the log, or folded
@@ -442,7 +429,9 @@ pub struct Peer {
     /// the log as its table (§1.6).
     pub store: Store,
     pub functions: Functions,
-    pub pending: VecDeque<Pending>,
+    /// This peer's own intents not yet sequenced, each at sequence 0 with
+    /// what its last run changed as its facts ([`Logged::intent`]).
+    pub pending: VecDeque<Logged>,
     /// How many times the pending intents were run again: what a driver
     /// keeping them compares, to know when to write them whole rather than
     /// the ones taken off the front and put on the back.
@@ -558,7 +547,7 @@ impl Peer {
             return self.store.kv_rows();
         }
         let mut s = self.store.clone();
-        s.undo(self.pending.iter().flat_map(|p| &p.changes)).expect("a pending change undoes");
+        s.undo(self.pending.iter().flat_map(|p| &p.facts)).expect("a pending change undoes");
         s.kv_rows()
     }
 
@@ -657,7 +646,7 @@ impl Peer {
 
     fn undo_pending(&mut self, o: &mut Out) {
         for p in self.pending.iter().rev() {
-            let undone = self.store.undo(&p.changes).expect("a pending change undoes");
+            let undone = self.store.undo(&p.facts).expect("a pending change undoes");
             o.tell(Some(p.entry.span()), undone);
         }
     }
@@ -669,7 +658,7 @@ impl Peer {
         self.reruns += 1;
         for p in std::mem::take(&mut self.pending) {
             let changes = self.attempt(&p.entry, o).unwrap_or_default();
-            self.pending.push_back(Pending::new(p.entry, changes));
+            self.pending.push_back(Logged::intent(p.entry, changes));
         }
     }
 
@@ -714,7 +703,7 @@ impl Peer {
             run => {
                 self.local = local;
                 o.send(Frame::push(self.space, [entry.clone()]));
-                self.pending.push_back(Pending::new(entry, run.unwrap_or_default()));
+                self.pending.push_back(Logged::intent(entry, run.unwrap_or_default()));
             }
         }
     }
@@ -1001,7 +990,7 @@ impl Peer {
                 }
                 return self.ask(o);
             }
-            let previewed = !undone && self.pending.front().is_some_and(|p| p.entry.id == l.entry.id && p.changes == l.facts);
+            let previewed = !undone && self.pending.front().is_some_and(|p| p.entry.id == l.entry.id && p.facts == l.facts);
             if previewed {
                 self.pending.pop_front();
             } else {
@@ -1271,15 +1260,15 @@ impl Peer {
         self.local = self.local.max(d.local);
         let mut kept = d.at.is_some() && d.at == Some(self.log().head());
         for p in d.pending {
-            kept = kept && self.store.apply_all(&p.changes).is_ok();
+            kept = kept && self.store.apply_all(&p.facts).is_ok();
             let changes = match kept {
                 true => {
-                    o.tell(Some(p.entry.span()), p.changes.iter().cloned());
-                    p.changes
+                    o.tell(Some(p.entry.span()), p.facts.iter().cloned());
+                    p.facts
                 }
                 false => self.attempt(&p.entry, o).unwrap_or_default(),
             };
-            self.pending.push_back(Pending::new(p.entry, changes));
+            self.pending.push_back(Logged::intent(p.entry, changes));
         }
         if !kept && !self.pending.is_empty() {
             self.reruns += 1;

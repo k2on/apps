@@ -34,7 +34,7 @@ fn a_replica_opens_its_pending_without_running_them() {
     let mut other = replica("eve", demo::cas());
     other.step(mutate(CREATE, create_input("Trip"), 1));
     let mut p = eve.pending[0].clone();
-    p.changes.clone_from(&other.pending[0].changes);
+    p.facts.clone_from(&other.pending[0].facts);
     let durable = |at| Durable {
         rows: eve.confirmed_rows(),
         pending: vec![p.clone()],

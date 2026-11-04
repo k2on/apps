@@ -230,10 +230,14 @@ impl Logged {
         EntryHash(sha256(&[&prev.0, &b]))
     }
 
-    /// An intent not yet sequenced, as a peer pages it (§1.11): at
-    /// sequence 0, with no facts and a zero hash.
-    pub fn intent(entry: Entry) -> Logged {
-        Logged::base(0, EntryHash::default()).with(entry)
+    /// An intent not yet sequenced: at sequence 0 and a zero hash, with
+    /// what its run changed as its facts — a peer's own pending, or, with
+    /// none, as a peer pages it (§1.11).
+    pub fn intent(entry: Entry, facts: Vec<Change>) -> Logged {
+        Logged {
+            facts,
+            ..Logged::base(0, EntryHash::default()).with(entry)
+        }
     }
 
     /// The row a log stands on at `(seq, hash)`: no entry, no facts.
@@ -355,7 +359,7 @@ pub struct Durable {
     #[serde(with = "crate::format::raw_tables")]
     pub rows: Rows,
     pub logged: Vec<Logged>,
-    pub pending: Vec<crate::peer::Pending>,
+    pub pending: Vec<Logged>,
     pub at: Option<(Seq, EntryHash)>,
     pub local: i64,
 }

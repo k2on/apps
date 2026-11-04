@@ -1009,7 +1009,7 @@ fn main() {
 /// intents' changes undone.
 fn confirmed(m: &ark::peer::Peer) -> ark::hash::StateHash {
     let mut s = m.store.clone();
-    let _ = s.undo(m.pending.iter().flat_map(|p| &p.changes));
+    let _ = s.undo(m.pending.iter().flat_map(|p| &p.facts));
     s.state_hash()
 }
 

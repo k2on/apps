@@ -11,7 +11,7 @@ use ark_peer::{Disk, Files, Memory};
 /// The `k`-th entry of the log (the disk does not link them: opening is
 /// the peer's).
 fn row(k: i64) -> Logged {
-    let mut l = Logged::intent(Entry::default());
+    let mut l = Logged::intent(Entry::default(), vec![]);
     l.seq = k;
     l
 }

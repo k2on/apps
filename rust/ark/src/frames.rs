@@ -203,7 +203,7 @@ impl Frame {
 
     /// A peer's intents, not yet sequenced, as a page.
     pub fn push(space: Space, entries: impl IntoIterator<Item = Entry>) -> Frame {
-        let logged = entries.into_iter().map(Logged::intent).collect();
+        let logged = entries.into_iter().map(|e| Logged::intent(e, vec![])).collect();
         Frame::Page { space, from: 0, logged }
     }
 

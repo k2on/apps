@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use ark::db::Durable as Run;
 use ark::format::Encode;
 use ark::hash::EntryHash;
+use ark::log::Logged;
 use ark::log::{Origin, Seq};
-use ark::peer::Pending;
 use ark::prelude::{Deserialize, Serialize};
 use ark_auth::remember::Remembered;
 
@@ -63,7 +63,7 @@ pub const PENDING: &str = "pending";
 pub struct Kept {
     pub whole: bool,
     pub gone: u64,
-    pub put: Vec<Pending>,
+    pub put: Vec<Logged>,
     pub local: i64,
     pub at: Option<(Seq, EntryHash)>,
 }
@@ -71,7 +71,7 @@ pub struct Kept {
 impl Kept {
     /// The pending intents the records in `blob` keep, read up to the first
     /// that does not read; the last of them, and how many there are.
-    pub fn read(blob: &[u8]) -> (Vec<Pending>, Kept, usize) {
+    pub fn read(blob: &[u8]) -> (Vec<Logged>, Kept, usize) {
         let (mut pending, mut last) = (std::collections::VecDeque::new(), Kept::default());
         let records = crate::disk::framed::<Kept>(blob).0;
         let n = records.len();

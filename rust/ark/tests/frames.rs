@@ -173,6 +173,6 @@ fn a_push_is_a_page_of_intents() {
     assert_eq!(*from, 0);
     assert!(logged
         .iter()
-        .all(|l| l.seq == 0 && l.facts.is_empty() && l == &Logged::intent(l.entry.clone())));
+        .all(|l| l.seq == 0 && l.facts.is_empty() && l == &Logged::intent(l.entry.clone(), vec![])));
     assert_eq!(logged.len(), 2);
 }

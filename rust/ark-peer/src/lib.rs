@@ -86,8 +86,8 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::log::{Durable, Entry, EntryId, Origin, Record, Span};
-use ark::peer::{Ctx, Input, Output, Peer as Machine, Pending, Role, To, Told, Who};
+use ark::log::{Durable, Entry, EntryId, Logged, Origin, Record, Span};
+use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::Space;
 use ark::store::Change;
@@ -795,7 +795,7 @@ impl Peer {
         let durable = Durable {
             rows: self.log.confirmed_rows(),
             local: if other { pending.len() as i64 } else { self.log.local },
-            pending: pending.into_iter().map(|e| Pending::new(e, vec![])).collect(),
+            pending: pending.into_iter().map(|e| Logged::intent(e, vec![])).collect(),
             ..Durable::default()
         };
         self.step(Space::Durable, Input::Open(durable));
