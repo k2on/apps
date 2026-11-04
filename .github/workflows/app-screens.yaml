@@ -16,6 +16,14 @@
 # simulator build is in ios's only when that app was sent to TestFlight. An
 # app neither run built is not taken again; what the branch has of it stays.
 #
+# **The screenshots' own scripts changed, nothing rebuilt.** A push to main
+# that moves only what takes the shots (.github/screens/, an app's screens/,
+# this file) takes every app again from what was last published, building
+# nothing: each APK as the F-Droid repository offers it (its index's newest
+# for the package), and each iPhone build as main's newest `simulator-<app>`
+# artifact, which main makes only when it sends that app to TestFlight
+# (kept 90 days; an older one is said, and that app's iOS shots are kept).
+#
 # **On main, published**: to the `screens` branch beside the docs' shots, as
 # apps/<app>/<phone>/<theme>/<id>.png with apps/<app>/manifest.json. **On a
 # pull request** (build and ios run there too, publishing nothing), each
@@ -34,6 +42,13 @@ on:
   workflow_run:
     workflows: [build, ios]
     types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - ".github/screens/**"
+      - "*/screens/**"
+      - ".github/workflows/app-screens.yaml"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -41,19 +56,23 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: app-screens-${{ github.event.workflow_run.name }}-${{ github.event.workflow_run.head_branch }}
+  group: app-screens-${{ github.event.workflow_run.name || 'published' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 env:
+  # The run whose builds are taken; none for a push or a run by hand, which
+  # take what was published.
   RUN: ${{ github.event.workflow_run.id }}
   WORKFLOW: ${{ github.event.workflow_run.name }}
   BRANCH: ${{ github.event.workflow_run.head_branch }}
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  FDROID: https://k2on.github.io/apps/fdroid/repo
 
 jobs:
   # What there is to take, and what for: `release` (main, published),
   # `pr` (a pull request's, compared), or nothing.
   which:
-    if: github.event.workflow_run.conclusion != 'cancelled'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     outputs:
       mode: ${{ steps.which.outputs.mode }}
@@ -71,6 +90,17 @@ jobs:
         run: |
           repo=${{ github.repository }}
           pr=
+          # The scripts moved, or a run by hand: every app, from what was published.
+          if [ -z "$RUN" ]; then
+            android="" ios=""
+            for shots in */screens/shots.json; do
+              a=${shots%%/*}
+              jq -e .android "$shots" > /dev/null && android="$android $a"
+              jq -e .ios "$shots" > /dev/null && ios="$ios $a"
+            done
+            { echo "mode=release"; echo "pr="; echo "android=${android# }"; echo "ios=${ios# }"; } | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$BRANCH" = main ] && [ "$EVENT" = push ]; then
             mode=release
             # From build, only once the F-Droid repository is up.
@@ -118,13 +148,18 @@ jobs:
           df -h /
 
       # The APKs the run built — what F-Droid offers, or the PR's — each in
-      # apk-<app>/.
-      - uses: actions/download-artifact@v4
+      # apk-<app>/; with no run, each as the F-Droid repository offers it.
+      - if: env.RUN != ''
+        uses: actions/download-artifact@v4
         with:
           pattern: apk-*
           path: ${{ runner.temp }}/apk
           run-id: ${{ env.RUN }}
           github-token: ${{ github.token }}
+      - if: env.RUN == ''
+        run: bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       # For the servers an app's server.sh builds.
       - uses: dtolnay/rust-toolchain@stable
@@ -209,13 +244,19 @@ jobs:
             xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
 
       # The simulator builds of the commit sent to TestFlight, or the PR's;
-      # each simulator-<app>/simulator.tgz, one .app inside.
-      - uses: actions/download-artifact@v4
+      # each simulator-<app>/simulator.tgz, one .app inside. With no run,
+      # main's newest of each: the last sent to TestFlight.
+      - if: env.RUN != ''
+        uses: actions/download-artifact@v4
         with:
           pattern: simulator-*
           path: ${{ runner.temp }}/apps
           run-id: ${{ env.RUN }}
           github-token: ${{ github.token }}
+      - if: env.RUN == ''
+        run: bash .github/screens/published.sh ios "$RUNNER_TEMP/apps" $APPS
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: for d in "$RUNNER_TEMP"/apps/simulator-*; do tar -xzf "$d/simulator.tgz" -C "$d"; done
 
       - uses: dtolnay/rust-toolchain@stable
@@ -274,7 +315,7 @@ jobs:
           fi
           bash .github/screens/apps-lay.sh "$RUNNER_TEMP/new" "$branch/apps"
           for a in "$branch"/apps/*/; do
-            python3 -I .github/screens/manifest.py "$a" "${{ github.event.workflow_run.id }}" "${{ github.event.workflow_run.head_sha }}"
+            python3 -I .github/screens/manifest.py "$a" "${{ github.run_id }}" "$SHA"
           done
       - name: Publish
         working-directory: ${{ runner.temp }}/branch
@@ -283,7 +324,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -q -m "app screens from ${{ github.event.workflow_run.head_sha }}"
+          git commit -q -m "app screens from $SHA"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screens
 
   # A PR's, compared with main's and shown on the PR.
@@ -297,7 +338,6 @@ jobs:
       cancel-in-progress: false
     env:
       PR: ${{ needs.which.outputs.pr }}
-      SHA: ${{ github.event.workflow_run.head_sha }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4

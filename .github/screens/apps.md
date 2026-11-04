@@ -73,6 +73,8 @@ flake's `publish`) and `simulator-<app>` from `ios.yaml`
   shot's PNG.
 - **`apps-android.sh`**, **`apps-ios.sh`**: each app in turn, so one that
   fails does not stop the others.
+- **`published.sh`**: each app's last published build, for a run that
+  builds nothing.
 - **`apps-lay.sh`**: lays a run's captures over a tree. A phone taken only
   in part keeps what the tree had.
 - **`manifest.py`**: the docs' manifest, written for each app
@@ -95,6 +97,14 @@ After `build` or `ios` finishes, from that run's artifacts:
   the PR, kept up to date, shows each changed or new shot beside main's.
   `ios` runs on pushes to this repository's branches, so a fork's PR gets
   its Android shots only.
+
+- **When only the screenshots' scripts change** (`.github/screens/`, an
+  app's `screens/`, the workflow) on main, nothing is built. Every app is
+  taken again from what was last published (`published.sh`): each APK as
+  the F-Droid repository's index offers it, and each iPhone build as main's
+  newest `simulator-<app>` artifact. Main makes that artifact only when it
+  sends the app to TestFlight, and keeps it 90 days. Running the workflow by
+  hand does the same.
 
 The scripts are always main's: a workflow_run workflow runs with this
 repository's token, so it never runs a PR's code. It only reads the PR

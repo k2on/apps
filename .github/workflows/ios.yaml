@@ -240,7 +240,9 @@ jobs:
           name: simulator-harken
           path: ${{ runner.temp }}/simulator.tgz
           if-no-files-found: error
-          retention-days: 7
+          # Main's is the last TestFlight build, which the screenshots take
+          # again when only their scripts change: kept as long as allowed.
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
 
       - name: Remove the API key
         if: always()
@@ -343,7 +345,9 @@ jobs:
           name: simulator-money
           path: ${{ runner.temp }}/simulator.tgz
           if-no-files-found: error
-          retention-days: 7
+          # Main's is the last TestFlight build, which the screenshots take
+          # again when only their scripts change: kept as long as allowed.
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
 
       - name: Remove the API key
         if: always()
