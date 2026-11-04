@@ -9,7 +9,10 @@
 #
 #   A  Xcode from the store runs: xcodebuild, xcrun, swiftc
 #   B  a C file compiled and linked for the simulator
-#   C  money's kernel, as its xcframework
+#   E  xcodebuild doing work (an xcframework of B's library), with the
+#      sandbox as it is and with rules of its own reaching the system's
+#      services: the first run's crashed with the sandbox as it is
+#   C  money's kernel, as its xcframework (laid out without xcodebuild)
 #   D  the money app for the simulator, as app-screens would take it
 #
 # Run by hand, or by a push that moves this file.
@@ -80,15 +83,38 @@ jobs:
         continue-on-error: true
         run: bash .github/strict-ios.sh b-compiles
 
+      # Why the first run's `xcodebuild -create-xcframework` crashed: the
+      # same command over B's library, with the sandbox as it is and with
+      # its own rules letting it reach the system's services.
+      - name: E, xcodebuild with the sandbox as it is
+        id: e1
+        continue-on-error: true
+        run: bash .github/strict-ios.sh e-xcframework-none
+
+      - name: E, xcodebuild reaching Xcode's and CoreSimulator's services
+        id: e2
+        continue-on-error: true
+        run: bash .github/strict-ios.sh e-xcframework-xcode-services
+
+      - name: E, xcodebuild reaching any service
+        id: e3
+        continue-on-error: true
+        run: bash .github/strict-ios.sh e-xcframework-all-services
+
       - name: C, money's kernel
         id: c
         continue-on-error: true
         run: bash .github/strict-ios.sh c-kernel
 
-      - name: D, the money app for the simulator
-        id: d
+      - name: D, the money app, reaching Xcode's and CoreSimulator's services
+        id: d1
         continue-on-error: true
-        run: bash .github/strict-ios.sh d-app
+        run: bash .github/strict-ios.sh d-app-xcode-services
+
+      - name: D, the money app, reaching any service
+        id: d2
+        continue-on-error: true
+        run: bash .github/strict-ios.sh d-app-all-services
 
       - name: How far strict reached
         run: |
@@ -99,6 +125,10 @@ jobs:
             echo "| --- | --- |"
             echo "| A, Xcode runs | ${{ steps.a.outcome }} |"
             echo "| B, C for the simulator | ${{ steps.b.outcome }} |"
+            echo "| E, xcodebuild, sandbox as it is | ${{ steps.e1.outcome }} |"
+            echo "| E, xcodebuild, Xcode's and CoreSimulator's services | ${{ steps.e2.outcome }} |"
+            echo "| E, xcodebuild, any service | ${{ steps.e3.outcome }} |"
             echo "| C, money's kernel | ${{ steps.c.outcome }} |"
-            echo "| D, the money app | ${{ steps.d.outcome }} |"
+            echo "| D, the money app, Xcode's services | ${{ steps.d1.outcome }} |"
+            echo "| D, the money app, any service | ${{ steps.d2.outcome }} |"
           } | tee -a "$GITHUB_STEP_SUMMARY"

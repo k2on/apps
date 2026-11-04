@@ -738,10 +738,38 @@
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
               cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
-              ${if xcode == null then "/usr/bin/xcodebuild" else "$DEVELOPER_DIR/usr/bin/xcodebuild"} -create-xcframework \
-                -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
-                -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
-                -output ${framework}.xcframework
+              ${if xcode == null then ''
+                /usr/bin/xcodebuild -create-xcframework \
+                  -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
+                  -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
+                  -output ${framework}.xcframework
+              '' else ''
+                # By hand, as xcodebuild lays it out: under the strict sandbox
+                # `xcodebuild -create-xcframework` crashes (xcode-strict.yaml),
+                # and an xcframework of static libraries is only this.
+                for slice in ios-arm64:aarch64-apple-ios ios-arm64-simulator:aarch64-apple-ios-sim; do
+                  id=''${slice%%:*} target=''${slice##*:}
+                  mkdir -p ${framework}.xcframework/$id
+                  cp target/$target/release/lib${so}.a ${framework}.xcframework/$id/
+                  cp -r headers ${framework}.xcframework/$id/Headers
+                done
+                slice() {
+                  echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
+                  echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
+                  echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string>"
+                  [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
+                  echo "</dict>"
+                }
+                {
+                  echo '<?xml version="1.0" encoding="UTF-8"?>'
+                  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+                  echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
+                  slice ios-arm64 ""
+                  slice ios-arm64-simulator simulator
+                  echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
+                  echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
+                } > ${framework}.xcframework/Info.plist
+              ''}
               runHook postBuild
             '';
             installPhase = ''
@@ -761,8 +789,15 @@
           # any cache), and each step is built from that and the store
           # alone, none with `__noChroot`. A, it runs at all; B, a C file
           # compiled and linked for the simulator; C, money's kernel as its
-          # xcframework; D, the money app for the simulator, as
-          # app-screens.yaml would take it.
+          # xcframework (laid out by hand: see iosPhone); D, the money app
+          # for the simulator, as app-screens.yaml would take it.
+          #
+          # The first run (Xcode 26.3, 17C529): A, B and C's cargo builds
+          # passed; `xcodebuild -create-xcframework` crashed (SIGSEGV). E
+          # asks why: the same command over B's library with the strict
+          # sandbox as it is, and with its own rules (`__sandboxProfile`)
+          # letting it reach the system's services it asks for by name —
+          # Xcode's and CoreSimulator's, or any. D is tried with each.
           strictIos = xcode:
             let
               dev = "${xcode}/Contents/Developer";
@@ -781,33 +816,45 @@
                   case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
                 done
               '';
-              step = name: script: pkgs.runCommand "strict-ios-${name}" { } ''
+              profiles = {
+                none = "";
+                xcode-services = ''
+                  (allow mach-lookup
+                    (global-name-prefix "com.apple.CoreSimulator")
+                    (global-name-prefix "com.apple.dt.")
+                    (global-name "com.apple.coresymbolicationd")
+                    (global-name "com.apple.lsd.mapdb")
+                    (global-name "com.apple.SecurityServer")
+                    (global-name "com.apple.FileCoordination"))
+                '';
+                all-services = "(allow mach-lookup)";
+              };
+              step = name: attrs: script: pkgs.runCommand "strict-ios-${name}" attrs ''
                 ${setup}
                 mkdir -p $out
                 ${script}
               '';
-              kernel = iosPhone (moneyFfi // { framework = "MoneyFFI"; inherit xcode; });
-            in
-            {
-              a-runs = step "runs" ''
-                xcodebuild -version | tee $out/version
-                xcrun --sdk iphonesimulator --show-sdk-path | tee $out/sdk
-                swiftc --version 2>&1 | tee $out/swift
-              '';
-              b-compiles = step "compiles" ''
+              b-compiles = step "compiles" { } ''
                 printf 'int answer(void) { return 42; }\n' > a.c
                 printf 'int answer(void);\nint main(void) { return answer() == 42 ? 0 : 1; }\n' > m.c
                 ${tc}/clang -target arm64-apple-ios17.0-simulator -isysroot ${sim} -c a.c -o a.o
                 ${tc}/clang -target arm64-apple-ios17.0-simulator -isysroot ${sim} m.c a.o -o $out/answer
                 ${tc}/ar rcs $out/liba.a a.o
-                file $out/answer | tee $out/file || true
               '';
-              c-kernel = kernel;
-              d-app = pkgs.stdenv.mkDerivation {
-                pname = "strict-ios-money-simulator";
+              # `xcodebuild -create-xcframework` over B's library, under `profile`.
+              xcframeworkWith = profile: step "xcframework-${profile}" { __sandboxProfile = profiles.${profile}; } ''
+                mkdir -p h
+                echo 'int answer(void);' > h/a.h
+                xcodebuild -create-xcframework -library ${b-compiles}/liba.a -headers h -output $out/A.xcframework
+                test -f $out/A.xcframework/Info.plist
+              '';
+              kernel = iosPhone (moneyFfi // { framework = "MoneyFFI"; inherit xcode; });
+              appWith = profile: pkgs.stdenv.mkDerivation {
+                pname = "strict-ios-money-simulator-${profile}";
                 version = "0.1.0";
                 src = only [ "money/ios" "swift/ArkUI" ];
                 nativeBuildInputs = [ xcodegen ];
+                __sandboxProfile = profiles.${profile};
                 buildPhase = ''
                   runHook preBuild
                   ${setup}
@@ -833,6 +880,20 @@
                 dontStrip = true;
                 dontFixup = true;
               };
+            in
+            {
+              a-runs = step "runs" { } ''
+                xcodebuild -version | tee $out/version
+                xcrun --sdk iphonesimulator --show-sdk-path | tee $out/sdk
+                swiftc --version 2>&1 | tee $out/swift
+              '';
+              inherit b-compiles;
+              e-xcframework-none = xcframeworkWith "none";
+              e-xcframework-xcode-services = xcframeworkWith "xcode-services";
+              e-xcframework-all-services = xcframeworkWith "all-services";
+              c-kernel = kernel;
+              d-app-xcode-services = appWith "xcode-services";
+              d-app-all-services = appWith "all-services";
             };
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
