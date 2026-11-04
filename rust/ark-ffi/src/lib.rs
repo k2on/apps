@@ -23,14 +23,13 @@
 //! read again by itself and says [`ViewUpdate::Reset`] with its rows.
 
 use std::collections::BTreeMap;
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark::log::EntryId;
 use ark::peer::Who;
-use ark_peer::link::{bell, Dial, Wake};
-use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
+use ark_peer::driven::{Driven, Locked};
+use ark_peer::link::Dial;
+use ark_peer::{Config, Files, Update, Watched};
 
 uniffi::setup_scaffolding!();
 
@@ -195,12 +194,12 @@ struct Kept {
     update: Update,
 }
 
+/// What the bridge keeps beside the peer: its views, and what the app was
+/// last told of.
+#[derive(Default)]
 struct State {
-    peer: ark_peer::Peer,
     views: BTreeMap<u64, Kept>,
     next: u64,
-    /// Until when the driver wakes often: a live call's relay is due.
-    hurry: u64,
     /// Why the server last turned the login away.
     denied: Option<String>,
     /// The calls' answers waiting when the app was last told.
@@ -209,26 +208,43 @@ struct State {
     files: u64,
 }
 
-impl State {
+/// The peer held, and the bridge's state beside it.
+struct Held<'a> {
+    peer: Locked<'a>,
+    state: MutexGuard<'a, State>,
+}
+
+impl std::ops::Deref for Held<'_> {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for Held<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        &mut self.state
+    }
+}
+
+impl Held<'_> {
     /// Every view's updates taken from the peer into what the app has not
     /// taken; a view opened for another login, or refused, opened again.
-    /// Whether any moved — or a call's answer came.
+    /// Whether any moved — or a call's answer came, or a file.
     fn settle(&mut self) -> bool {
+        let (peer, s) = (&mut *self.peer, &mut *self.state);
         let mut moved = false;
-        for k in self.views.values_mut() {
-            match k.view.settle(&mut self.peer, true) {
+        for k in s.views.values_mut() {
+            match k.view.settle(peer, true) {
                 Update::Unchanged => continue,
                 Update::Patched(ps) => k.update.patch(ps),
                 Update::Reset => k.update = Update::Reset,
             }
             moved = true;
         }
-        let replies = self.peer.replies_waiting();
-        moved |= replies > self.replies;
-        self.replies = replies;
-        let files = self.peer.files_arrived();
-        moved |= files != self.files;
-        self.files = files;
+        let (replies, files) = (peer.replies_waiting(), peer.files_arrived());
+        moved |= replies > s.replies || files != s.files;
+        (s.replies, s.files) = (replies, files);
         moved
     }
 
@@ -239,22 +255,26 @@ impl State {
     }
 }
 
+/// The peer, driven on a thread of its own ([`Driven`]), the bridge's
+/// state, and who is told when anything moved.
 struct Shared {
+    peer: Driven,
     state: Mutex<State>,
     listener: Mutex<Option<Arc<dyn Listener>>>,
-    wake: Wake,
-    /// Pumped by whoever drives it ([`Peer::pump`]), never by its thread.
-    by_hand: std::sync::atomic::AtomicBool,
 }
 
 impl Shared {
-    fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    fn lock(&self) -> Held<'_> {
+        let peer = self.peer.lock();
+        Held {
+            peer,
+            state: self.state.lock().unwrap_or_else(|e| e.into_inner()),
+        }
     }
 
     /// `f` on the peer, its views settled after; the listener told when
-    /// anything moved, and the driver rung to send what it said.
-    fn act<T>(&self, f: impl FnOnce(&mut State) -> T) -> T {
+    /// anything moved. Let go, the driver sends what the peer said.
+    fn act<T>(&self, f: impl FnOnce(&mut Held) -> T) -> T {
         let (out, moved) = {
             let mut s = self.lock();
             let out = f(&mut s);
@@ -263,7 +283,6 @@ impl Shared {
         if moved {
             self.tell();
         }
-        (self.wake)();
         out
     }
 
@@ -274,26 +293,12 @@ impl Shared {
         }
     }
 
-    /// How long the driver may sleep: until the next dial, a relay's
-    /// interval while one is due, a second at most.
-    fn patience(&self) -> Duration {
-        let s = self.lock();
-        let now = monotonic_ms();
-        let mut ms = 1000;
-        if let Some(d) = s.peer.deadline() {
-            ms = ms.min(d.saturating_sub(now));
-        }
-        if s.hurry > now {
-            let every = s.peer.config.live.as_ref().map_or(50, |l| l.every_ms.max(1) as u64);
-            ms = ms.min(every);
-        }
-        Duration::from_millis(ms)
-    }
-
+    /// What the driver's pumps took in — or, pumped by hand, a pump now —
+    /// settled into the views: whether anything moved, the app told so.
     fn pump(&self) -> bool {
+        let p = self.peer.pump();
         let moved = {
             let mut s = self.lock();
-            let p = s.peer.pump();
             if p.denied.is_some() {
                 s.denied = p.denied;
             }
@@ -303,26 +308,6 @@ impl Shared {
             self.tell();
         }
         moved
-    }
-}
-
-/// The driver: a pump whenever the link rings or the peer's patience runs
-/// out, until the peer is gone.
-fn drive(shared: Weak<Shared>, rx: Receiver<()>) {
-    loop {
-        let wait = match shared.upgrade() {
-            Some(s) => s.patience(),
-            None => return,
-        };
-        if let Err(RecvTimeoutError::Disconnected) = rx.recv_timeout(wait) {
-            return;
-        }
-        while rx.try_recv().is_ok() {}
-        match shared.upgrade() {
-            Some(s) if !s.by_hand.load(std::sync::atomic::Ordering::Relaxed) => drop(s.pump()),
-            Some(_) => {}
-            None => return,
-        }
     }
 }
 
@@ -364,31 +349,20 @@ impl Peer {
 
     /// A peer opened by its host its own way — as a login it keeps itself,
     /// its link tuned — driven from now on as [`Peer::open`]'s is.
-    pub fn of(mut peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
+    pub fn of(peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
         // What this device does goes to its server (docs/plan-observe.md).
         ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
-        let (wake, rx) = bell();
-        peer.set_waker(wake.clone());
-        let state = State {
-            peer,
-            views: BTreeMap::new(),
-            next: 0,
-            hurry: 0,
-            denied: None,
-            replies: 0,
-            files: 0,
-        };
         let shared = Arc::new(Shared {
-            state: Mutex::new(state),
+            peer: Driven::new(peer),
+            state: Mutex::default(),
             listener: Mutex::new(None),
-            wake,
-            by_hand: Default::default(),
         });
         let weak = Arc::downgrade(&shared);
-        std::thread::Builder::new()
-            .name("ark-peer".into())
-            .spawn(move || drive(weak, rx))
-            .map_err(|e| e.to_string())?;
+        shared.peer.set_waker(Arc::new(move || {
+            if let Some(s) = weak.upgrade() {
+                s.pump();
+            }
+        }));
         Ok(Arc::new(Peer { shared }))
     }
 
@@ -406,7 +380,7 @@ impl Peer {
     /// Pumped by hand from now on — [`Peer::pump`], and never by its own
     /// thread — so that a test says when what arrived is taken in.
     pub fn by_hand(&self) {
-        self.shared.by_hand.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shared.peer.by_hand();
     }
 
     /// What the connection said taken in now, and what the peer has to say
@@ -567,7 +541,6 @@ impl Peer {
     pub fn call(&self, name: String, input: String) -> Result<(), Refusal> {
         let _call = tracing::debug_span!(target: "ark", "ffi", call = "call", name = %name).entered();
         Ok(self.shared.act(|s| {
-            s.hurry = monotonic_ms() + 1000;
             let input = s.peer.input_json(&name, &input)?;
             s.peer.call(&name, input)
         })?)
