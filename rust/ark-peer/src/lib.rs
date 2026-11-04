@@ -364,7 +364,10 @@ impl Peer {
 
     pub(crate) fn opened(config: Config, me: Who, disk: Box<dyn Disk>, mut local: Box<dyn Disk>, link: link::Link) -> Peer {
         let r = local::Replica::read(&mut *local);
-        let blob = local.get(local::PENDING).ok().flatten();
+        // Pending intents are read only beside the replica they were drawn
+        // from: a disk whose replica does not read (none yet, or an older
+        // build's) starts afresh.
+        let blob = local.get(local::PENDING).ok().flatten().filter(|_| r.origin != Origin::default());
         let (pending, kept, records) = local::Kept::read(&blob.unwrap_or_default());
         let origin = match r.origin {
             o if o != Origin::default() => o,
