@@ -118,12 +118,19 @@ impl<'a> Pushed<'a> {
     }
 }
 
+/// Per prefix read, the elements whose reads covered it.
+type ByPrefix = BTreeMap<Vec<u8>, BTreeSet<Okey>>;
+/// A row of a table, read.
+type Decode<T> = Box<dyn Fn(&Store, &[u8]) -> T + Send>;
+/// An element's join key.
+type KeyFn<T> = Box<dyn Fn(&T) -> Vec<u8> + Send>;
+
 /// What each element's run of a closure read, and which elements a moved
 /// row reaches through it: per table and index, per prefix read, the
 /// elements.
 #[derive(Default)]
 struct Deps {
-    by: BTreeMap<(&'static str, Option<usize>), BTreeMap<Vec<u8>, BTreeSet<Okey>>>,
+    by: BTreeMap<(&'static str, Option<usize>), ByPrefix>,
     of: BTreeMap<Okey, Vec<Dep>>,
 }
 
@@ -170,11 +177,11 @@ trait Op<S, T>: Send {
 struct ScanOp<T> {
     table: String,
     prefix: Vec<u8>,
-    decode: Box<dyn Fn(&Store, &[u8]) -> T + Send>,
+    decode: Decode<T>,
 }
 
 impl<S: Tables, T: Elem> Op<S, T> for ScanOp<T> {
-    fn hydrate(&mut self, store: &Store, keep: bool) -> Vec<(Okey, T)> {
+    fn hydrate(&mut self, store: &Store, _: bool) -> Vec<(Okey, T)> {
         store
             .keyed_from(&self.table, &self.prefix)
             .take_while(|(k, _)| k.starts_with(&self.prefix))
@@ -247,10 +254,11 @@ impl<S: Tables, T: Elem, U: Elem> Op<S, U> for EachOp<S, T, U> {
                 put(&mut out, at, Some(u), None);
             }
             match new {
-                Some(t) => match self.run(p.store, &k, t, true) {
-                    (at, Some(u)) => put(&mut out, at, None, Some(u)),
-                    _ => {}
-                },
+                Some(t) => {
+                    if let (at, Some(u)) = self.run(p.store, &k, t, true) {
+                        put(&mut out, at, None, Some(u))
+                    }
+                }
                 None => self.deps.set(&k, vec![]),
             }
         }
@@ -374,7 +382,7 @@ impl<S: Tables, T: Elem, K: Key + Clone + Send + 'static, A: Elem> Op<S, A> for 
 struct Side<T> {
     keys: BTreeMap<Okey, Vec<u8>>,
     by: BTreeMap<Vec<u8>, BTreeMap<Okey, T>>,
-    key: Box<dyn Fn(&T) -> Vec<u8> + Send>,
+    key: KeyFn<T>,
 }
 
 impl<T: Clone> Side<T> {
