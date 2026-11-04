@@ -12,7 +12,7 @@ mod support {
 }
 
 use ark::frames::Verdict;
-use ark::log::{Durable, EntryId, Origin};
+use ark::log::{EntryId, Origin, Record};
 use ark::peer::Input;
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
@@ -35,12 +35,9 @@ fn a_replica_opens_its_pending_without_running_them() {
     other.step(mutate(CREATE, create_input("Trip"), 1));
     let mut p = eve.pending[0].clone();
     p.facts.clone_from(&other.pending[0].facts);
-    let durable = |at| Durable {
-        rows: eve.confirmed_rows(),
-        pending: vec![p.clone()],
-        at,
-        local: 1,
-        ..Durable::default()
+    let durable = |at| {
+        let pending = vec![p.clone()];
+        vec![Record::Rows(eve.confirmed_rows()), Record::Pending { pending, at, local: 1 }]
     };
     let mut kept = replica("eve", demo::cas());
     kept.step(Input::Open(durable(Some(eve.log().head()))));
@@ -88,10 +85,7 @@ fn a_push_below_a_reopened_horizon_is_acknowledged_there() {
     deliver_up(&mut server, &who("bob"), &o2);
     server.compact(2);
     let mut reopened = authority(demo::cas());
-    reopened.step(Input::Open(Durable {
-        rows: server.confirmed_rows(),
-        ..Durable::default()
-    }));
+    reopened.step(Input::Open(vec![Record::Rows(server.confirmed_rows())]));
     if let ark::peer::Role::Authority { journal } = &mut reopened.role {
         journal.pass(Origin::named("bob-session"), "bob", 2);
     }

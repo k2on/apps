@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use ark::db::{Db, Tables, Writes};
 use ark::format::Encode;
-use ark::log::Durable;
+use ark::log::Record;
 use ark::peer::{Fold, Input, Output, Peer as Machine, Role, Who};
 use ark::schema::{Schema, Space};
 use ark::Refusal;
@@ -107,16 +107,13 @@ impl Instance {
 
     /// What its disk holds, to open from: empty, the failure said, when it
     /// does not read.
-    pub fn stored(&mut self) -> Durable {
+    pub fn stored(&mut self) -> Vec<Record> {
         let stored = self.disk.as_mut().map(|d| d.load()).transpose();
         let s = stored.unwrap_or_else(|e| {
             self.failure = Some(e.to_string());
             None
         });
-        s.unwrap_or_else(|| Durable {
-            rows: self.machine.confirmed_rows(),
-            ..Durable::default()
-        })
+        s.unwrap_or_else(|| vec![Record::Rows(self.machine.confirmed_rows())])
     }
 
     /// One input to its machine, what it made durable written; what the

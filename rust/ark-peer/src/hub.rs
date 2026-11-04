@@ -37,7 +37,7 @@ use std::collections::BTreeMap;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::log::{Durable, EntryId, Origin, Record};
+use ark::log::{EntryId, Origin, Record};
 use ark::peer::{Input, Journal, Peer as Machine, Role, Who};
 use ark::schema::Space;
 
@@ -172,7 +172,7 @@ impl Peer {
             *journal(live) = j;
         }
         if let (Some(Record::Rows(rows)), Some(live)) = (kept(&mut p.local, VOLATILE), &mut p.live) {
-            live.step(Input::Open(Durable { rows, ..Durable::default() }));
+            live.step(Input::Open(vec![Record::Rows(rows)]));
             if let Some(f) = p.config.hook("on_restore") {
                 let _ = p.author(Space::Volatile, &f, vec![], now);
             }

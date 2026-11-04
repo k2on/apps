@@ -86,7 +86,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::log::{Durable, Entry, EntryId, Logged, Origin, Record, Span};
+use ark::log::{Entry, EntryId, Logged, Origin, Record, Span};
 use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To, Told, Who};
 use ark::plan::Maintained;
 use ark::schema::Space;
@@ -401,13 +401,9 @@ impl Peer {
             records,
             ..Saved::default()
         };
-        let durable = Durable {
-            pending,
-            at: kept.at,
-            local,
-            ..p.log.stored()
-        };
-        p.step(Space::Durable, Input::Open(durable));
+        let mut stored = p.log.stored();
+        stored.push(Record::Pending { pending, at: kept.at, local });
+        p.step(Space::Durable, Input::Open(stored));
         p
     }
 
@@ -803,13 +799,10 @@ impl Peer {
             }
             self.live = Some(p);
         }
-        let durable = Durable {
-            rows: self.log.confirmed_rows(),
-            local: if other { pending.len() as i64 } else { self.log.local },
-            pending: pending.into_iter().map(|e| Logged::intent(e, vec![])).collect(),
-            ..Durable::default()
-        };
-        self.step(Space::Durable, Input::Open(durable));
+        let local = if other { pending.len() as i64 } else { self.log.local };
+        let pending = pending.into_iter().map(|e| Logged::intent(e, vec![])).collect();
+        let records = vec![Record::Rows(self.log.confirmed_rows()), Record::Pending { pending, at: None, local }];
+        self.step(Space::Durable, Input::Open(records));
         if self.linked {
             self.connected();
         }

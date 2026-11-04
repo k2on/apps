@@ -96,7 +96,7 @@
 //! for a while, is a replica not connected: its intents stay pending, the
 //! store their preview, and are pushed when it connects. What a driver
 //! keeps of them on its disk — each intent and its preview's changes, and
-//! the head they stand on ([`Durable::at`]) — is opened without running
+//! the head they stand on ([`Record::Pending`]) — is opened without running
 //! them again; their confirmations, in order, take the previewed path.
 //!
 //! **Live state is a second machine** (§1.9): a peer [`Peer::in_space`]
@@ -125,7 +125,7 @@ use crate::domain::Domain;
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
-use crate::log::{Cursor, Durable, Entry, EntryId, Logged, Origin, Part, Range, Record, Rows, Seq, Span};
+use crate::log::{Cursor, Entry, EntryId, Logged, Origin, Part, Range, Record, Rows, Seq, Span};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Log, Store, LOG};
 use crate::Refusal;
@@ -313,7 +313,8 @@ pub enum Input {
         /// The span it is authored under, frozen in the entry.
         cause: Option<Span>,
     },
-    Open(Durable),
+    /// What it made durable, in order ([`Record`]).
+    Open(Vec<Record>),
     Connected,
 }
 
@@ -1179,14 +1180,21 @@ impl Peer {
     /// first that does not — the store is then made durable whole again,
     /// without it. A fill under way begins again from nothing. The pending
     /// intents' changes are put back on top when the log stands where they
-    /// were made ([`Durable::at`]) and apply; from the first that does not,
-    /// they run again.
-    fn open(&mut self, d: Durable, o: &mut Out) {
+    /// were made and apply; from the first that does not, they run again.
+    fn open(&mut self, records: Vec<Record>, o: &mut Out) {
+        let (mut rows, mut logged, mut pending, mut at, mut local) = (vec![], vec![], vec![], None, 0);
+        for r in records {
+            match r {
+                Record::Rows(r) => (rows, logged) = (r, vec![]),
+                Record::Logged(l) => logged.push(l),
+                Record::Pending { pending: p, at: a, local: n } => (pending, at, local) = (p, a, n),
+            }
+        }
         self.undo_pending(o);
         self.pending.clear();
         let filling = self.fill.take().is_some();
         self.more = None;
-        let (log, rows): (Rows, Rows) = d.rows.into_iter().partition(|(t, _)| t == LOG);
+        let (log, rows): (Rows, Rows) = rows.into_iter().partition(|(t, _)| t == LOG);
         let log = log.into_iter().flat_map(|(_, rs)| rs);
         let opened = match filling {
             true => Ok(self.blank()),
@@ -1196,9 +1204,9 @@ impl Peer {
             // Every entry read once: those the rows hold, from their rows,
             // and those appended, as their records were read.
             let mut entries = store.log().entries();
-            let (n, held) = (d.logged.len(), entries.len());
+            let (n, held) = (logged.len(), entries.len());
             let schema = store.schema_arc().clone();
-            for l in d.logged.into_iter().filter(|_| !filling) {
+            for l in logged.into_iter().filter(|_| !filling) {
                 if store.append(&l, &l.facts).is_err() && store.append(&l, &fit(&schema, &l.facts)).is_err() {
                     break;
                 }
@@ -1215,9 +1223,9 @@ impl Peer {
                 }
             }
         }
-        self.local = self.local.max(d.local);
-        let mut kept = d.at.is_some() && d.at == Some(self.log().head());
-        for p in d.pending {
+        self.local = self.local.max(local);
+        let mut kept = at.is_some() && at == Some(self.log().head());
+        for p in pending {
             kept = kept && self.store.apply_all(&p.facts).is_ok();
             let changes = match kept {
                 true => {

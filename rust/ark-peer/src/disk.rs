@@ -38,7 +38,7 @@ use ark::format::Encode;
 use std::sync::Arc;
 
 use ark::dynamic::Tables;
-use ark::log::{Durable, Record};
+use ark::log::Record;
 use ark::schema::{compat, Schema, Space};
 
 /// The blob a disk's schema is in, beside its log: what its rows are, to
@@ -113,7 +113,7 @@ pub trait Disk: Send {
     /// What the store made durable is opened from: its rows as last written
     /// whole (none written, a log standing on the empty chain) and the log's
     /// rows appended since, read; a torn tail of `log` cut.
-    fn load(&mut self) -> io::Result<Durable> {
+    fn load(&mut self) -> io::Result<Vec<Record>> {
         let kv = self.get("kv")?;
         let (log, had) = self.get("log")?.map_or((vec![], false), |l| (l, true));
         let rows = match kv.map(|b| Record::dec(&b)) {
@@ -121,15 +121,8 @@ pub trait Disk: Send {
             _ => ark::log::standing(vec![], 0, Default::default()),
         };
         let (records, at) = framed::<Record>(&log);
-        let logged = records.into_iter().map_while(|r| match r {
-            Record::Logged(l) => Some(l),
-            Record::Rows(_) => None,
-        });
-        let s = Durable {
-            rows,
-            logged: logged.collect(),
-            ..Durable::default()
-        };
+        let mut s = vec![Record::Rows(rows)];
+        s.extend(records.into_iter().take_while(|r| matches!(r, Record::Logged(_))));
         if at < log.len() || !had {
             self.put("log", &log[..at])?;
         }

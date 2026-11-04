@@ -218,11 +218,11 @@ impl Net {
             Op::LosePending(i) => {
                 self.partition(i);
                 let c = self.client(i);
-                let lost = ark::log::Durable {
-                    rows: c.log.confirmed_rows(),
-                    local: c.log.local,
-                    ..Default::default()
-                };
+                let (pending, local) = (vec![], c.log.local);
+                let lost = vec![
+                    ark::log::Record::Rows(c.log.confirmed_rows()),
+                    ark::log::Record::Pending { pending, at: None, local },
+                ];
                 c.step(Space::Durable, ark::peer::Input::Open(lost));
                 self.heal(i);
             }

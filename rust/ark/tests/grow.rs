@@ -12,7 +12,7 @@ mod support {
 use std::sync::Arc;
 
 use ark::frames::Frame;
-use ark::log::{Durable, EntryId, Origin};
+use ark::log::{EntryId, Origin, Record};
 use ark::peer::{Ctx, Input, Journal, Peer, Role};
 use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
@@ -47,14 +47,11 @@ fn tag_it(store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refus
 
 const TAG: &str = "grow.tag";
 
-fn durable(p: &Peer) -> Durable {
-    Durable {
-        rows: p.confirmed_rows(),
-        ..Durable::default()
-    }
+fn durable(p: &Peer) -> Vec<Record> {
+    vec![Record::Rows(p.confirmed_rows())]
 }
 
-fn wide_authority(d: Durable) -> Peer {
+fn wide_authority(d: Vec<Record>) -> Peer {
     let cas = ark::Domain {
         schema: wider(),
         ..demo::demo().run(TAG, Arc::new(tag_it))
@@ -145,11 +142,8 @@ fn a_log_reopened_under_its_own_schema_is_its_own() {
     }
     let mut whole = authority(demo::cas());
     whole.step(Input::Open(durable(&server)));
-    let base = Durable {
-        rows: authority(demo::cas()).confirmed_rows(),
-        logged: server.log().entries(),
-        ..Durable::default()
-    };
+    let mut base = durable(&authority(demo::cas()));
+    base.extend(server.log().entries().into_iter().map(Record::Logged));
     let mut appended = authority(demo::cas());
     appended.step(Input::Open(base));
     for p in [&whole, &appended] {

@@ -4,7 +4,6 @@
 //! the log not a table, every write journaled, or a peer's own state in
 //! blobs of its own — is refused.
 
-use ark::log::Durable;
 use ark::log::{Entry, Logged, Record};
 use ark_peer::{Disk, Files, Memory};
 
@@ -14,6 +13,17 @@ fn row(k: i64) -> Logged {
     let mut l = Logged::intent(Entry::default(), vec![]);
     l.seq = k;
     l
+}
+
+/// The entries a disk's records hold.
+fn logged(records: Vec<Record>) -> Vec<Logged> {
+    records
+        .into_iter()
+        .filter_map(|r| match r {
+            Record::Logged(l) => Some(l),
+            _ => None,
+        })
+        .collect()
 }
 
 fn persist(d: &mut dyn Disk, ks: std::ops::Range<i64>) {
@@ -33,16 +43,16 @@ fn a_torn_tail_is_cut() {
     let mut f = Files::new(dir.path()).unwrap();
     persist(&mut f, 1..3);
     let two: Vec<Logged> = (1..3).map(row).collect();
-    assert_eq!(f.load().unwrap().logged, two);
+    assert_eq!(logged(f.load().unwrap()), two);
     let path = dir.path().join("log");
     let mut bytes = std::fs::read(&path).unwrap();
     bytes.extend_from_slice(&[0, 0, 0, 200, 1, 2, 3]);
     std::fs::write(&path, &bytes).unwrap();
     let mut f = Files::new(dir.path()).unwrap();
-    assert_eq!(f.load().unwrap().logged, two, "the torn record is not read");
+    assert_eq!(logged(f.load().unwrap()), two, "the torn record is not read");
     persist(&mut f, 3..4);
     assert_eq!(
-        Files::new(dir.path()).unwrap().load().unwrap().logged,
+        logged(Files::new(dir.path()).unwrap().load().unwrap()),
         (1..4).map(row).collect::<Vec<_>>(),
         "and what follows it is read"
     );
@@ -62,11 +72,8 @@ fn the_rows_fold_every_write_before() {
         let rows = vec![("t".to_string(), vec![br#"{"k":1}"#.to_vec()])];
         d.record(&Record::Rows(rows.clone()).enc()).unwrap();
         persist(d, 3..5);
-        let want = Durable {
-            rows,
-            logged: (3..5).map(row).collect(),
-            ..Durable::default()
-        };
+        let mut want = vec![Record::Rows(rows)];
+        want.extend((3..5).map(row).map(Record::Logged));
         assert_eq!(d.load().unwrap(), want);
         d.put("blob", b"\x00\x01").unwrap();
         assert_eq!(d.get("blob").unwrap().as_deref(), Some(&b"\x00\x01"[..]));

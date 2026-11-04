@@ -16,7 +16,7 @@
 //! them, and the rows appended to the log's table since ([`Record`]): an
 //! entry's facts are in its row, so the rows they write to the schema's
 //! tables are not journaled beside it but written again as a peer opens
-//! ([`Durable`]): one format, each fact on disk once.
+//! from its records: one format, each fact on disk once.
 //!
 //! **The chain is the log's identity.** Two peers at one sequence with one
 //! [`EntryHash`] hold one history; a peer that says `(cursor, hash)` is
@@ -329,12 +329,23 @@ impl Part {
 /// What a peer makes durable, one record per `Persist` (§1.7): a logged
 /// entry, appended, as its row of the log's table — its facts are in it —
 /// or the store's rows whole, which every entry before them is folded
-/// into.
+/// into. A peer opens from its records in order (`Input::Open`): the
+/// store's rows as last written whole, the rows appended to the log's
+/// table since, whose facts write the rest again, and what a device's
+/// driver keeps of it beside them (`Pending`, never a `Persist`): its own
+/// intents still pending, each with its preview's changes as its facts,
+/// the head of the log those were made at (none: they are run again), and
+/// the last `local` it drew.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Record {
     Logged(Logged),
     Rows(#[serde(with = "crate::format::raw_tables")] Rows),
+    Pending {
+        pending: Vec<Logged>,
+        at: Option<(Seq, EntryHash)>,
+        local: i64,
+    },
 }
 
 impl Record {
@@ -357,20 +368,4 @@ impl Record {
     pub fn dec(b: &[u8]) -> Result<Record, Refusal> {
         Record::from_bytes(b)
     }
-}
-
-/// What a peer is opened from: its store's rows as they were last written
-/// whole — the log's table's among them — and the rows appended to the
-/// log's table since, in order, whose facts write the rest again; its own
-/// intents still pending, each with its preview's changes, and the head of
-/// the log those were made at (none: they are run again); and the last
-/// `local` it drew.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Durable {
-    #[serde(with = "crate::format::raw_tables")]
-    pub rows: Rows,
-    pub logged: Vec<Logged>,
-    pub pending: Vec<Logged>,
-    pub at: Option<(Seq, EntryHash)>,
-    pub local: i64,
 }

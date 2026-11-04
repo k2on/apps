@@ -15,7 +15,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
-use ark::log::{Durable, EntryId, Logged, Origin, Record};
+use ark::log::{EntryId, Logged, Origin, Record};
 use ark::peer::{Ctx, Input, Output, Peer, To};
 use ark::store::{Change, LOG};
 use demo::{create_input, pair_input, pos_of, rename_input, ADD, CREATE, REMOVE, RENAME};
@@ -376,19 +376,17 @@ fn a_peer_opens_from_what_it_persisted() {
         }
         other => panic!("{other:?}"),
     });
-    let mut d = Durable {
-        rows: replica("alice", demo::cas()).confirmed_rows(),
-        logged: rows.collect(),
-        ..Durable::default()
-    };
+    let mut d = vec![Record::Rows(replica("alice", demo::cas()).confirmed_rows())];
+    d.extend(rows.map(Record::Logged));
     let pending = s.alice.clone().step(mutate(ADD, pair_input(&pid(), "t5"), 9));
-    d.pending = sends(&pending)
+    let pending = sends(&pending)
         .into_iter()
         .map(|f| match f {
             Frame::Page { mut logged, .. } => ark::log::Logged::intent(logged.remove(0).entry, vec![]),
             _ => unreachable!(),
         })
         .collect();
+    d.push(Record::Pending { pending, at: None, local: 0 });
     let mut opened = replica("alice", demo::cas());
     let out = opened.step(Input::Open(d));
     let folded: Vec<Record> = out
