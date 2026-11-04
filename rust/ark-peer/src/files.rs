@@ -237,9 +237,7 @@ pub(crate) struct Files {
     pub arrived: u64,
     /// Why the server would not give one, by file, until it does.
     pub absent: BTreeMap<String, String>,
-    /// A server's: each file arriving and its size, and the connections
-    /// that wanted one before it arrived.
-    uploads: BTreeMap<String, u64>,
+    /// A server's: the connections that wanted a file before it arrived.
     waiting: BTreeMap<String, BTreeSet<ConnId>>,
     /// The files each connection was let read, so a file is judged once per
     /// connection, not once a chunk.
@@ -254,7 +252,6 @@ impl Files {
             asked: BTreeSet::new(),
             arrived: 0,
             absent: BTreeMap::new(),
-            uploads: BTreeMap::new(),
             waiting: BTreeMap::new(),
             let_read: BTreeMap::new(),
         }
@@ -277,6 +274,21 @@ fn chunk(store: &dyn Store, hash: &str, at: u64) -> Option<Frame> {
         size,
         bytes,
     })
+}
+
+/// A chunk of a file arriving, appended where what is here of it ends: where
+/// the next is wanted from — after it, or, out of step (a chunk again after
+/// a reconnect), from where the file stops — or none, the file whole; or why
+/// its bytes are not its name's.
+fn arriving(store: &mut dyn Store, hash: &str, at: u64, size: u64, bytes: &[u8]) -> Result<Option<u64>, String> {
+    let end = at + bytes.len() as u64;
+    if store.append(hash, at, bytes).is_err() || bytes.is_empty() && end < size {
+        return Ok(Some(store.partial(hash)));
+    }
+    match end < size {
+        true => Ok(Some(end)),
+        false => store.finish(hash).map(|_| None).map_err(|e| e.to_string()),
+    }
 }
 
 impl Peer {
@@ -308,14 +320,11 @@ impl Peer {
 
     /// [`Peer::file`], wanted from the server when it is not here.
     pub fn open_file(&mut self, f: &FileRef) -> Option<Vec<u8>> {
-        if let Some(b) = self.file(f) {
-            return Some(b);
-        }
-        if is_hash(&f.hash) && self.files.wanted.insert(f.hash.clone()) {
-            self.want(&f.hash);
+        if !self.have_files(std::slice::from_ref(&f.hash)) {
             self.flush();
+            return None;
         }
-        None
+        self.file(f)
     }
 
     /// Where a whole file is on the disk, for what reads it there.
@@ -377,32 +386,17 @@ impl Peer {
                     }
                 }
             }
-            Frame::Chunk { hash, at, size, bytes } => {
-                if !self.files.wanted.contains(&hash) {
-                    return;
-                }
-                let end = at + bytes.len() as u64;
-                if self.files.store.append(&hash, at, &bytes).is_err() || bytes.is_empty() && end < size {
-                    // Out of step (a chunk again after a reconnect): from
-                    // where the file stops.
-                    self.files.asked.remove(&hash);
-                    return self.want(&hash);
-                }
-                if end < size {
-                    self.frames.push(Frame::Want { hash, at: end }.enc());
-                    return;
-                }
-                self.files.asked.remove(&hash);
-                match self.files.store.finish(&hash) {
-                    Ok(()) => {
+            Frame::Chunk { hash, at, size, bytes } if self.files.wanted.contains(&hash) => {
+                match arriving(&mut *self.files.store, &hash, at, size, &bytes) {
+                    Ok(Some(at)) => return self.frames.push(Frame::Want { hash, at }.enc()),
+                    Ok(None) => {
                         self.files.wanted.remove(&hash);
                         self.files.absent.remove(&hash);
                         self.files.arrived += 1;
                     }
-                    Err(e) => {
-                        self.files.absent.insert(hash, e.to_string());
-                    }
+                    Err(why) => drop(self.files.absent.insert(hash.clone(), why)),
                 }
+                self.files.asked.remove(&hash);
             }
             Frame::Have { hash } => {
                 let _ = self.files.store.mark(&hash, false);
@@ -425,35 +419,25 @@ impl Peer {
         let absent = |hash: String, why: &str| to(Frame::Absent { hash, why: why.into() });
         let files = &mut self.files;
         match f {
-            Frame::Offer { hash, size } => {
+            Frame::Offer { hash, .. } => {
                 if !is_hash(&hash) {
                     return absent(hash, "not a file's name");
                 }
                 if files.store.len(&hash).is_some() {
                     return to(Frame::Have { hash });
                 }
-                files.uploads.insert(hash.clone(), size);
                 let at = files.store.partial(&hash);
                 to(Frame::Want { hash, at })
             }
-            Frame::Chunk { hash, at, bytes, .. } => {
-                let Some(&size) = files.uploads.get(&hash) else { return vec![] };
-                let end = at + bytes.len() as u64;
-                if files.store.append(&hash, at, &bytes).is_err() || bytes.is_empty() && end < size {
-                    let at = files.store.partial(&hash);
-                    return to(Frame::Want { hash, at });
+            Frame::Chunk { hash, at, size, bytes } => match arriving(&mut *files.store, &hash, at, size, &bytes) {
+                Ok(Some(at)) => to(Frame::Want { hash, at }),
+                Ok(None) => {
+                    let waiting = files.waiting.remove(&hash).unwrap_or_default();
+                    let have = Frame::Have { hash }.enc();
+                    std::iter::once(c).chain(waiting).map(|w| (w, have.clone())).collect()
                 }
-                if end < size {
-                    return to(Frame::Want { hash, at: end });
-                }
-                files.uploads.remove(&hash);
-                if let Err(e) = files.store.finish(&hash) {
-                    return absent(hash, &e.to_string());
-                }
-                let waiting = files.waiting.remove(&hash).unwrap_or_default();
-                let have = Frame::Have { hash }.enc();
-                std::iter::once(c).chain(waiting).map(|w| (w, have.clone())).collect()
-            }
+                Err(why) => absent(hash, &why),
+            },
             Frame::Want { hash, at } => {
                 if !self.may_read(c, &hash) {
                     return absent(hash, "no row this connection reads names it");
