@@ -1,15 +1,13 @@
-//! Handlers and reconcilers (`ark_peer::jobs`), over a server and devices
-//! whose frames are carried by hand: a claim and a cancel decided by the
-//! order the server takes them in; a handler run once across a restart; a
-//! handler run only where it is registered; a reconciler told every
-//! change.
+//! Handlers (`ark_peer::jobs`), over a server and devices whose frames are
+//! carried by hand: a claim and a cancel decided by the order the server
+//! takes them in; a handler run once across a restart; a handler run only
+//! where it is registered.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ark::effect::{Cancel, Job};
 use ark::prelude::*;
-use ark::schema::Space;
 use ark_peer::{dev, now_ms, Config, ConnId, Memory, Peer};
 
 /// Something to fetch for its owner: the job, its outcome the body.
@@ -220,27 +218,4 @@ fn a_handler_runs_only_where_it_is_registered() {
         net.carry();
     }
     assert_eq!((n.load(Ordering::Relaxed), net.state()), (1, Job::Done("body of u".into())));
-}
-
-/// A reconciler is told the view's rows at the start and on each change:
-/// the ask, the claim, the finish, each as the server confirmed it.
-/// Falsified by telling it only at the start: it saw no rows, once.
-#[test]
-fn a_reconciler_is_told_every_change() {
-    let mut net = Net::new(2);
-    let seen: Arc<Mutex<Vec<Vec<Job<String>>>>> = Arc::default();
-    let s = seen.clone();
-    let tell = move |rows: Vec<Fetch>| s.lock().unwrap().push(rows.into_iter().map(|f| f.state).collect());
-    net.d(1).reconcile::<Fetch>(Space::Durable, "fetch.all", &().to_bytes(), tell).unwrap();
-    net.d(0).handle::<Fetch>(|_: &mut Peer, f: &Fetch| Ok(f.url.clone()));
-    asked(&mut net, 0);
-    for _ in 0..2 {
-        net.d(0).jobs(now_ms());
-        net.carry();
-    }
-    let seen = seen.lock().unwrap();
-    assert_eq!(seen.first(), Some(&vec![]));
-    assert!(matches!(seen[1][..], [Job::Pending { .. }]), "{seen:?}");
-    assert!(matches!(seen[2][..], [Job::Claimed { .. }]), "{seen:?}");
-    assert_eq!(seen.last(), Some(&vec![Job::Done("u".into())]));
 }

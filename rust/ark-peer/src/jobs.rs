@@ -1,5 +1,5 @@
-//! Handlers and reconcilers: native code acting on the world outside,
-//! answering with mutations (effects as rows, `ark::effect`).
+//! Handlers: native code acting on the world outside, answering with
+//! mutations (effects as rows, `ark::effect`).
 //!
 //! A **handler** ([`Peer::handle`]) is registered for a job row `R` on the
 //! one process that runs it. It keeps the rows of `R` that are not over,
@@ -15,17 +15,12 @@
 //! lease runs out. The handler is a plain function on the driver's
 //! thread: ark-peer has no executor (it is pumped, natively and in a
 //! browser), so a handler that waits blocks only its own peer's thread.
-//!
-//! A **reconciler** ([`Peer::reconcile`]) is told a view's rows, typed,
-//! every time they change, and once at the start: no claim, latest wins.
 
 use std::collections::BTreeMap;
 
 use ark::effect::{Claim, Effect, Finish};
 use ark::log::{EntryId, Span, TraceId};
 use ark::peer::Told;
-use ark::row::Value;
-use ark::schema::Space;
 use ark::store::Change;
 
 use crate::app::Outcome;
@@ -129,9 +124,6 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
     }
 }
 
-/// A view's rows, told on each change.
-pub(crate) type Reconciler = Box<dyn FnMut(&[Vec<u8>]) + Send>;
-
 impl Peer {
     /// `f` handles the jobs of `R`: each due row claimed, `f` run with this
     /// peer and the row once the claim is confirmed, its answer the row's
@@ -180,22 +172,5 @@ impl Peer {
     pub(crate) fn due(&self) -> Option<u64> {
         let next = self.runners.iter().filter_map(|r| r.next()).min()?;
         Some(monotonic_ms() + (next - now_ms()).max(0) as u64)
-    }
-
-    /// `f` is told the rows of the domain's view `name` on `input` over
-    /// `space`, typed, now and on every change.
-    pub fn reconcile<T: Value>(
-        &mut self,
-        space: Space,
-        name: &str,
-        input: &[u8],
-        mut f: impl FnMut(Vec<T>) + Send + 'static,
-    ) -> Result<usize, String> {
-        let b = self.function(name)?.name.clone();
-        let v = self.watch(space, &b, input, self.ctx()).map_err(|r| r.0)?;
-        let mut tell: Reconciler = Box::new(move |rows| f(rows.iter().filter_map(|b| T::decode(b).ok()).collect()));
-        tell(&self.rows(v).unwrap_or_default());
-        self.reconcilers.insert(v, tell);
-        Ok(v)
     }
 }

@@ -51,9 +51,9 @@
 //! them on the same disk (`local`): a server's journal and volatile space,
 //! a device's replica and pending intents.
 //!
-//! **Handlers and reconcilers** (`jobs`) act on the world outside: a
-//! handler claims, runs and finishes the jobs of a kind (`ark::effect`) on
-//! the peer that registered it; a reconciler is told a view's rows.
+//! **Handlers** (`jobs`) act on the world outside: a handler claims, runs
+//! and finishes the jobs of a kind (`ark::effect`) on the peer that
+//! registered it.
 //!
 //! Every input either machine of a device is given is recorded, when asked
 //! (`record`), as an [`Act`]: a device is a pure function of these, which
@@ -207,8 +207,8 @@ pub struct Peer {
     relayed: Option<i64>,
     /// The span it authors under: the one opened ([`Peer::begin`],
     /// [`Peer::under`]), or else, in each space, the span of the entry whose
-    /// change it was last told, so that what it does in answer (a
-    /// reconciler, a view's reader) is a child of what it answered. A server
+    /// change it was last told, so that what it does in answer (a job, a
+    /// view's reader) is a child of what it answered. A server
     /// authors under the opened one only.
     span: Option<Span>,
     woke: [Option<Span>; 2],
@@ -225,8 +225,6 @@ pub struct Peer {
     missed: Option<Vec<Told>>,
     /// The files rows name, and where each transfer is (`files`).
     pub(crate) files: files::Files,
-    /// The reconcilers, by their view.
-    reconcilers: BTreeMap<usize, jobs::Reconciler>,
 }
 
 /// What a device last wrote of its pending intents ([`local::Kept`]): its
@@ -347,7 +345,6 @@ impl Peer {
             saved: Saved::default(),
             runners: vec![],
             missed: None,
-            reconcilers: BTreeMap::new(),
             files: files::Files::default(),
         }
     }
@@ -565,19 +562,11 @@ impl Peer {
             let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
             let pushed = w.view.as_mut().map(|v| v.pushed(&p));
             match pushed {
-                Some(Ok(patches)) => {
-                    if let (false, Some(f), Some(v)) = (patches.is_empty(), self.reconcilers.get_mut(&i), &w.view) {
-                        f(&v.rows());
-                    }
-                    self.told.patched(i, patches)
-                }
+                Some(Ok(patches)) => self.told.patched(i, patches),
                 _ => {
                     let old = w.view.as_ref().map_or(0, |v| v.rows().len());
                     w.view = domain.as_ref().and_then(|d| d.watch(store, &w.ctx, &w.name, &w.input).ok());
                     let rows = w.view.as_ref().map(|v| v.rows()).unwrap_or_default();
-                    if let (Some(f), Some(_)) = (self.reconcilers.get_mut(&i), &w.view) {
-                        f(&rows);
-                    }
                     self.told.patched(i, watched::again(old, rows));
                 }
             }
