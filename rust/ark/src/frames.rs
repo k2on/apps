@@ -74,7 +74,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
 use crate::hash::{EntryHash, SchemaHash};
-use crate::log::{Cursor, Entry, EntryId, Logged, Rows, Seq};
+use crate::log::{Ctx, Cursor, EntryId, Logged, Rows, Seq};
 use crate::schema::Space;
 use crate::Refusal;
 
@@ -209,7 +209,7 @@ impl Frame {
 
     /// A peer's intents, not yet sequenced, as a page: its pending
     /// beginning after `from`.
-    pub fn push(space: Space, from: i64, entries: impl IntoIterator<Item = Entry>) -> Frame {
+    pub fn push(space: Space, from: i64, entries: impl IntoIterator<Item = Ctx>) -> Frame {
         let logged = entries.into_iter().map(|e| Logged::intent(e, vec![])).collect();
         Frame::Page { space, from, logged }
     }

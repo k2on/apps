@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::log::{Entry, Origin};
+use ark::log::Origin;
 use ark::peer::Ctx;
 use ark::schema::Space;
 use ark_peer::link::{bell, wait, Dial, Pumped};
@@ -28,7 +28,7 @@ pub fn named(name: &str) -> Vec<u8> {
 /// `who`'s `local`-th intent calling `func` on `input`, its origin named
 /// by its session, pushed: the frame's bytes.
 pub fn push(who: &Ctx, local: i64, func: &str, input: Vec<u8>) -> Vec<u8> {
-    let entry = Entry::new(who, Origin::named(&who.session), local, func, input, local);
+    let entry = Ctx::new(who, Origin::named(&who.session), local, func, input, local);
     Frame::push(Space::Durable, 0, [entry]).enc()
 }
 

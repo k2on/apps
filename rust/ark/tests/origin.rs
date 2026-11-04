@@ -22,7 +22,7 @@ use support::wire::*;
 /// playlist by the row id its create drew — stamped as alice's; a push
 /// again is acknowledged where it was; bob pushing from alice's origin is
 /// refused. Falsified by the authority deriving ids from the session again
-/// (`Entry::id_checks` over `(session, local)`): both were refused as ids
+/// (`Ctx::id_checks` over `(session, local)`): both were refused as ids
 /// not their own; and by not binding an origin to an actor: bob's push was
 /// sequenced at 3.
 #[test]

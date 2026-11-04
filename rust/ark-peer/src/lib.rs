@@ -86,7 +86,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::log::{Entry, EntryId, Logged, Origin, Record, Span};
+use ark::log::{EntryId, Logged, Origin, Record, Span};
 use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To, Told};
 use ark::plan::Maintained;
 use ark::schema::Space;
@@ -609,7 +609,7 @@ impl Peer {
 
     /// An intent of its own just authored on the log: pending, or — an
     /// authority's, decided as it was made — at the head.
-    pub fn authored(&self, id: &EntryId) -> Option<Entry> {
+    pub fn authored(&self, id: &EntryId) -> Option<Ctx> {
         let pending = self.log.pending.iter().map(|p| &p.entry).find(|e| e.id == *id).cloned();
         let head = self.log.log().head().0;
         pending.or_else(|| {
@@ -767,7 +767,7 @@ impl Peer {
             self.replica(|r| r.origin = o);
         }
         let origin = self.log.origin;
-        let mut pending: Vec<Entry> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
+        let mut pending: Vec<Ctx> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
         for (n, e) in pending.iter_mut().enumerate() {
             if other {
                 (e.origin, e.local) = (origin, n as i64 + 1);

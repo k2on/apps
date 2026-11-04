@@ -6,12 +6,12 @@ mod demo;
 use ark::format::Encode;
 use ark::frames::{Frame, Reply, Verdict};
 use ark::hash::{EntryHash, SchemaHash};
-use ark::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Span, TraceId};
+use ark::log::{Ctx, Cursor, EntryId, Logged, Origin, Record, Span, TraceId};
 use ark::schema::Space;
 use ark::store::Change;
 
 fn every_frame() -> Vec<Frame> {
-    let entry = Entry {
+    let entry = Ctx {
         id: EntryId::of(Origin::named("s"), 1),
         actor: "a\0b".into(),
         session: "s".into(),
@@ -26,6 +26,7 @@ fn every_frame() -> Vec<Frame> {
             id: [2; 16],
             began: -9,
         }),
+        ..Ctx::default()
     };
     let facts = vec![
         Change::Add {

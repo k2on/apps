@@ -4,13 +4,13 @@
 //! the log not a table, every write journaled, or a peer's own state in
 //! blobs of its own — is refused.
 
-use ark::log::{Entry, Logged, Record};
+use ark::log::{Ctx, Logged, Record};
 use ark_peer::{Disk, Files, Memory};
 
 /// The `k`-th entry of the log (the disk does not link them: opening is
 /// the peer's).
 fn row(k: i64) -> Logged {
-    let mut l = Logged::intent(Entry::default(), vec![]);
+    let mut l = Logged::intent(Ctx::default(), vec![]);
     l.seq = k;
     l
 }

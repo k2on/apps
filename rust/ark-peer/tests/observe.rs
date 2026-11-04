@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use ark::effect::Job;
-use ark::log::{Entry, Span};
+use ark::log::Span;
 use ark::prelude::*;
 use ark::schema::Space;
 use ark_peer::{dev, now_ms, Config, ConnId, Memory, Peer};
@@ -88,7 +88,7 @@ impl Net {
     }
 
     /// The server's logged entries naming `func`, in order.
-    fn logged(&self, func: &str) -> Vec<Entry> {
+    fn logged(&self, func: &str) -> Vec<Ctx> {
         let f = self.hub.function(func).map_or_else(|_| func.to_string(), |f| f.name.clone());
         self.hub
             .log

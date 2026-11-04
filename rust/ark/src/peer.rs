@@ -127,7 +127,8 @@ use crate::domain::Domain;
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
-use crate::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Span};
+pub use crate::log::Ctx;
+use crate::log::{Cursor, EntryId, Logged, Origin, Record, Rows, Seq, Span};
 use crate::schema::Space;
 use crate::store::{Change, Log, Store, LOG};
 use crate::Refusal;
@@ -139,106 +140,13 @@ use crate::Refusal;
 /// names the peer and the space.
 macro_rules! said {
     ($level:ident, $what:expr, $e:expr $(, $k:ident = $v:expr)*) => {{
-        let e: &Entry = $e;
+        let e: &Ctx = $e;
         let s = e.span();
         let parent = e.cause.map(|c| crate::hash::hex(&c.id)).unwrap_or_default();
         tracing::$level!(target: "ark", entry = %crate::hash::hex(&e.id.0), trace = %crate::hash::hex(&s.trace.0),
             span = %crate::hash::hex(&s.id), parent = %parent, func = %e.func, actor = %e.actor,
             session = %e.session, local = e.local $(, $k = $v)*, "{}", $what)
     }};
-}
-
-/// What a function knows of the intent it runs for: all frozen in the
-/// entry, so every run of it, anywhere, is the same. In no entry, who
-/// someone is ([`Ctx::who`]): who a peer authors as, who a connection was
-/// verified to be.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Ctx {
-    pub id: EntryId,
-    pub actor: String,
-    pub session: String,
-    pub roles: Vec<String>,
-    pub now: i64,
-    /// The entry's own span (none outside an entry): what a function, a job
-    /// or a view may say it acted under.
-    pub span: Option<Span>,
-    /// How many row ids this run has drawn ([`Ctx::new_id`]).
-    pub draws: Draws,
-}
-
-/// A count a shared context moves: a `Cell`'s, but one a context held
-/// across threads (who a connection is) may carry.
-#[derive(Debug, Default)]
-pub struct Draws(std::sync::atomic::AtomicI64);
-
-impl Draws {
-    pub fn get(&self) -> i64 {
-        self.0.load(std::sync::atomic::Ordering::Relaxed)
-    }
-    pub fn set(&self, n: i64) {
-        self.0.store(n, std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
-impl Clone for Draws {
-    fn clone(&self) -> Draws {
-        Draws(self.get().into())
-    }
-}
-
-impl PartialEq for Draws {
-    fn eq(&self, other: &Draws) -> bool {
-        self.get() == other.get()
-    }
-}
-impl Eq for Draws {}
-
-impl Ctx {
-    pub fn of(e: &Entry) -> Ctx {
-        Ctx {
-            id: e.id,
-            actor: e.actor.clone(),
-            session: e.session.clone(),
-            roles: e.roles.clone(),
-            now: e.now,
-            span: Some(e.span()),
-            ..Ctx::default()
-        }
-    }
-
-    /// Who someone is, in no entry; at a `now`, a query's or a view's
-    /// context.
-    pub fn who(actor: impl Into<String>, session: impl Into<String>, roles: Vec<String>) -> Ctx {
-        Ctx {
-            actor: actor.into(),
-            session: session.into(),
-            roles,
-            ..Ctx::default()
-        }
-    }
-
-    /// The next row id this run draws: the entry's `n`-th, from 0 (§1.6).
-    /// With `now`, a function's only non-determinism, frozen in the entry.
-    pub fn new_id<R>(&self) -> crate::row::Id<R> {
-        let n = self.draws.get();
-        self.draws.set(n + 1);
-        crate::row::Id::new(self.id.draw(n))
-    }
-
-    /// Who the intent is from.
-    pub fn user(&self) -> &str {
-        &self.actor
-    }
-
-    /// The device the intent came from: its session.
-    pub fn device(&self) -> &str {
-        &self.session
-    }
-
-    /// Whether the intent was judged under `role`.
-    pub fn has_role(&self, role: &str) -> bool {
-        self.roles.iter().any(|r| r == role)
-    }
 }
 
 /// What an authority keeps beside its log: each origin's last `local` and
@@ -586,7 +494,7 @@ impl Peer {
     // * Running
 
     /// Runs an intent over the store and applies what it did, all or none.
-    fn attempt(&mut self, e: &Entry, o: &mut Out) -> Result<Vec<Change>, Refusal> {
+    fn attempt(&mut self, e: &Ctx, o: &mut Out) -> Result<Vec<Change>, Refusal> {
         let f = self.domain.fns.get(&e.func);
         let p = match f.and_then(|f| f.proc.clone()) {
             Some(p) => p,
@@ -602,7 +510,7 @@ impl Peer {
         };
         let s = e.span();
         let run = tracing::debug_span!(target: "ark", "run", func = %e.func, trace = %crate::hash::hex(&s.trace.0), span = %crate::hash::hex(&s.id));
-        let changes = run.in_scope(|| p(&mut self.store, &Ctx::of(e), &e.input))?;
+        let changes = run.in_scope(|| p(&mut self.store, e, &e.input))?;
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
             self.store.undo(&changes).expect("an inverse applies");
@@ -642,12 +550,12 @@ impl Peer {
     }
 
     /// The next intent of this peer's own.
-    fn entry(&self, func: String, input: Vec<u8>, now: i64) -> Entry {
-        Entry::new(&self.me, self.origin, self.local + 1, func, input, now)
+    fn entry(&self, func: String, input: Vec<u8>, now: i64) -> Ctx {
+        Ctx::new(&self.me, self.origin, self.local + 1, func, input, now)
     }
 
     fn mutate(&mut self, func: String, input: Vec<u8>, now: i64, cause: Option<Span>, o: &mut Out) {
-        let mut entry = Entry {
+        let mut entry = Ctx {
             cause,
             ..self.entry(func, input, now)
         };
@@ -680,7 +588,7 @@ impl Peer {
     /// An authority's own intent judged by what its run did — a function's
     /// or its driver's facts — and the verdict told: logged, its `local`
     /// drawn, or refused, drawing none.
-    fn decide(&mut self, entry: Entry, run: Result<Vec<Change>, Refusal>, o: &mut Out) {
+    fn decide(&mut self, entry: Ctx, run: Result<Vec<Change>, Refusal>, o: &mut Out) {
         let (id, local) = (entry.id, entry.local);
         match self.judged(entry, run, o) {
             Ok(_) => {
@@ -693,7 +601,7 @@ impl Peer {
 
     /// An intent judged: logged with its facts and told everyone, or
     /// refused; the verdict kept.
-    fn judged(&mut self, entry: Entry, r: Result<Vec<Change>, Refusal>, o: &mut Out) -> Result<Seq, String> {
+    fn judged(&mut self, entry: Ctx, r: Result<Vec<Change>, Refusal>, o: &mut Out) -> Result<Seq, String> {
         let (id, origin, local, actor) = (entry.id, entry.origin, entry.local, entry.actor.clone());
         let v = match r {
             Err(why) => Err(why.0),
@@ -908,7 +816,7 @@ impl Peer {
 
     /// A pushed intent judged, its device's pending beginning past `from`,
     /// and the verdict sent back: every push is answered.
-    fn push(&mut self, who: &Ctx, from: i64, entry: Entry, o: &mut Out) {
+    fn push(&mut self, who: &Ctx, from: i64, entry: Ctx, o: &mut Out) {
         let id = entry.id;
         let verdict = self.verdict_on(who, from, entry, o);
         o.send(Frame::Verdict {
@@ -918,7 +826,7 @@ impl Peer {
         });
     }
 
-    fn verdict_on(&mut self, who: &Ctx, from: i64, mut entry: Entry, o: &mut Out) -> Verdict {
+    fn verdict_on(&mut self, who: &Ctx, from: i64, mut entry: Ctx, o: &mut Out) -> Verdict {
         let head = self.log().head().0;
         let j = self.journal();
         if let Some(why) = j.refused.get(&entry.id) {

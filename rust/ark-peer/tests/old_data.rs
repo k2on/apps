@@ -8,7 +8,7 @@
 //! directory as it is, or comes with a migration that does, or writes a
 //! new fixture beside it with a note of what moved; this one stays.
 //!
-//! Written again when entries took their cause (`Entry::cause`,
+//! Written again when entries took their cause (`Ctx::cause`,
 //! docs/plan-observe.md), and when they stopped carrying a state hash:
 //! each change started every log afresh, by decision, rather than
 //! migrating one.

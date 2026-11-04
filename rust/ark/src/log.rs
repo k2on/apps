@@ -2,7 +2,7 @@
 //! had and the hash of the chain to it.
 //!
 //! ```text
-//! Entry  { id, actor, session, origin, local, roles, func, input, now }
+//! Ctx    { id, actor, session, origin, local, roles, func, input, now, cause }
 //! Logged { seq, entry, facts, hash }
 //! hash = sha256(prev.hash ‖ enc([seq, entry, facts]))
 //! ```
@@ -140,12 +140,16 @@ impl EntryId {
     }
 }
 
-/// An intent, as recorded. `actor` and `roles` are what the authority
-/// judged it under: it stamps them before sequencing (§1.7), and a replay
-/// anywhere reads what the log says. The default is no intent, what the
-/// first row of a log standing on a snapshot carries.
+/// An entry: an intent, as recorded, and all a function knows of the one
+/// it runs for — all frozen in it, so every run of it, anywhere, is the
+/// same. `actor` and `roles` are what the authority judged it under: it
+/// stamps them before sequencing (§1.7), and a replay anywhere reads what
+/// the log says. The default is no intent, what the first row of a log
+/// standing on a snapshot carries. With no intent in it, who someone is
+/// ([`Ctx::who`]): who a peer authors as, who a connection was verified to
+/// be; at a `now`, a query's or a view's context.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Entry {
+pub struct Ctx {
     pub id: EntryId,
     pub actor: String,
     pub session: String,
@@ -160,11 +164,43 @@ pub struct Entry {
     /// The span it was authored under: a tap, a job's run, the entry whose
     /// change woke what authored it. None begins a trace of its own.
     pub cause: Option<Span>,
+    /// How many row ids a run of it has drawn ([`Ctx::new_id`]): no part of
+    /// the entry.
+    #[serde(skip)]
+    pub draws: Draws,
 }
 
-impl Default for Entry {
-    fn default() -> Entry {
-        Entry {
+/// A count a run moves through a shared reference: a `Cell`'s, but one a
+/// context held across threads (who a connection is) may carry. Not what
+/// an entry is: any two are equal.
+#[derive(Debug, Default)]
+pub struct Draws(std::sync::atomic::AtomicI64);
+
+impl Draws {
+    pub fn get(&self) -> i64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    pub fn set(&self, n: i64) {
+        self.0.store(n, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Clone for Draws {
+    fn clone(&self) -> Draws {
+        Draws(self.get().into())
+    }
+}
+
+impl PartialEq for Draws {
+    fn eq(&self, _: &Draws) -> bool {
+        true
+    }
+}
+impl Eq for Draws {}
+
+impl Default for Ctx {
+    fn default() -> Ctx {
+        Ctx {
             id: EntryId::default(),
             actor: String::new(),
             session: String::new(),
@@ -175,27 +211,59 @@ impl Default for Entry {
             input: ().to_bytes(),
             now: 0,
             cause: None,
+            draws: Draws::default(),
         }
     }
 }
 
-impl Entry {
+impl Ctx {
     /// The `local`-th intent from `origin`, as `who` makes it: calling
     /// `func` on `input` (an input is its encoding; no bytes are `()`'s) at
     /// `now`.
-    pub fn new(who: &crate::peer::Ctx, origin: Origin, local: i64, func: impl Into<String>, input: Vec<u8>, now: i64) -> Entry {
-        Entry {
+    pub fn new(who: &Ctx, origin: Origin, local: i64, func: impl Into<String>, input: Vec<u8>, now: i64) -> Ctx {
+        Ctx {
             id: EntryId::of(origin, local),
-            actor: who.actor.clone(),
-            session: who.session.clone(),
             origin,
             local,
-            roles: who.roles.clone(),
             func: func.into(),
             input: if input.is_empty() { ().to_bytes() } else { input },
             now,
             cause: None,
+            ..who.clone()
         }
+    }
+
+    /// Who someone is, in no entry.
+    pub fn who(actor: impl Into<String>, session: impl Into<String>, roles: Vec<String>) -> Ctx {
+        Ctx {
+            actor: actor.into(),
+            session: session.into(),
+            roles,
+            ..Ctx::default()
+        }
+    }
+
+    /// The next row id this run draws: the entry's `n`-th, from 0 (§1.6).
+    /// With `now`, a function's only non-determinism, frozen in the entry.
+    pub fn new_id<R>(&self) -> crate::row::Id<R> {
+        let n = self.draws.get();
+        self.draws.set(n + 1);
+        crate::row::Id::new(self.id.draw(n))
+    }
+
+    /// Who the intent is from.
+    pub fn user(&self) -> &str {
+        &self.actor
+    }
+
+    /// The device the intent came from: its session.
+    pub fn device(&self) -> &str {
+        &self.session
+    }
+
+    /// Whether the intent was judged under `role`.
+    pub fn has_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r == role)
     }
 
     /// Whether the id is the one `(origin, local)` names: an id is never
@@ -218,14 +286,14 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Logged {
     pub seq: Seq,
-    pub entry: Entry,
+    pub entry: Ctx,
     pub facts: Vec<Change>,
     pub hash: EntryHash,
 }
 
 impl Logged {
     /// The hash of the chain to an entry, from the one before it.
-    pub fn chain(prev: &EntryHash, seq: Seq, entry: &Entry, facts: &[Change]) -> EntryHash {
+    pub fn chain(prev: &EntryHash, seq: Seq, entry: &Ctx, facts: &[Change]) -> EntryHash {
         let b = crate::format::encode(&(seq, entry, facts)).expect("an entry serializes");
         EntryHash(sha256(&[&prev.0, &b]))
     }
@@ -233,7 +301,7 @@ impl Logged {
     /// An intent not yet sequenced: at sequence 0 and a zero hash, with
     /// what its run changed as its facts — a peer's own pending, or, with
     /// none, as a peer pages it (§1.11).
-    pub fn intent(entry: Entry, facts: Vec<Change>) -> Logged {
+    pub fn intent(entry: Ctx, facts: Vec<Change>) -> Logged {
         Logged {
             facts,
             ..Logged::base(0, EntryHash::default()).with(entry)
@@ -244,13 +312,13 @@ impl Logged {
     pub fn base(seq: Seq, hash: EntryHash) -> Logged {
         Logged {
             seq,
-            entry: Entry::default(),
+            entry: Ctx::default(),
             facts: vec![],
             hash,
         }
     }
 
-    fn with(self, entry: Entry) -> Logged {
+    fn with(self, entry: Ctx) -> Logged {
         Logged { entry, ..self }
     }
 

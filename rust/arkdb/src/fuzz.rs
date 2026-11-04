@@ -213,7 +213,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
             .get(&l.entry.func)
             .and_then(|f| f.proc.clone())
             .ok_or("an entry of no function")?;
-        let ran = p(&mut s, &Ctx::of(&l.entry), &l.entry.input).map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
+        let ran = p(&mut s, &l.entry, &l.entry.input).map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
         if ran != l.facts {
             return Err(format!("entry {} runs again to other facts", l.seq));
         }

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ark::frames::Frame;
-use ark::log::{Entry, EntryId, Logged, Origin, Seq};
+use ark::log::{EntryId, Logged, Origin, Seq};
 use ark::peer::{Ctx, Output, Peer, Role};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
@@ -78,7 +78,7 @@ fn log(playlists: u64, n: u64) -> Peer {
     let mut local = 0;
     let mut push = |a: &mut Peer, name: &str, input: Vec<u8>| {
         local += 1;
-        let entry = Entry::new(&me, Origin::named(&me.session), local, name.to_string(), input, local);
+        let entry = Ctx::new(&me, Origin::named(&me.session), local, name.to_string(), input, local);
         a.step(up(&me, &Frame::push(Space::Durable, 0, [entry])));
     };
     for j in 0..playlists {

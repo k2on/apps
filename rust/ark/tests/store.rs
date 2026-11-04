@@ -297,16 +297,16 @@ fn compat_is_a_prefix_extension() {
 fn the_log_is_a_table_whose_rows_are_a_chain() {
     use ark::format::Encode;
     use ark::hash::EntryHash;
-    use ark::log::{Entry, Logged};
+    use ark::log::{Ctx, Logged};
     use ark::store::LOG;
     let mut s = Store::new(demo::shared(), ark::schema::Space::Durable);
     let (hash, rows) = (s.state_hash(), s.snapshot_rows());
     let mut chain = vec![];
     let mut prev = EntryHash::default();
     for seq in 0..4 {
-        let entry = Entry {
+        let entry = Ctx {
             local: seq,
-            ..Entry::default()
+            ..Ctx::default()
         };
         let hash = Logged::chain(&prev, seq, &entry, &[]);
         prev = hash;

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
 use crate::hash::{EntryHash, StateHash};
-use crate::log::{Entry, EntryId, Logged, Origin, Span, TraceId};
+use crate::log::{Ctx, EntryId, Logged, Origin, Span, TraceId};
 use crate::schema::{Column, Table};
 use crate::store::Change;
 use crate::Refusal;
@@ -167,7 +167,7 @@ macro_rules! fields {
     ($($f:ident: $t:expr),*) => { vec![$((stringify!($f).to_string(), $t)),*] };
 }
 
-impl Describe for Entry {
+impl Describe for Ctx {
     fn describe() -> Type {
         use Type::{Bytes as B, Int, Text};
         let (id, origin, roles) = (EntryId::describe(), Origin::describe(), Vec::<String>::describe());
@@ -196,7 +196,7 @@ impl Describe for Change {
 
 impl Describe for Logged {
     fn describe() -> Type {
-        let (entry, facts, b) = (Entry::describe(), Vec::<Change>::describe(), Type::Bytes);
+        let (entry, facts, b) = (Ctx::describe(), Vec::<Change>::describe(), Type::Bytes);
         Type::Record("Logged".into(), fields! { seq: Type::Int, entry: entry, facts: facts, hash: b })
     }
 }
